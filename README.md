@@ -527,4 +527,4 @@ You are free to use, modify, distribute, and build upon OnePane in accordance wi
 
 See [`LICENSE`](LICENSE) for the full license text.
 
-Copyright © DigiLogicTech.
+Copyright 2026 John Spencer Jr trading as DigiLogic

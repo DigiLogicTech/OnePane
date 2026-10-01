@@ -519,8 +519,6 @@ Contribution guidelines and public development documentation will be added as th
 
 ## License
 
-## License
-
 OnePane is open-source software developed by **DigiLogicTech**.
 
 OnePane is licensed under the **Apache License 2.0**.

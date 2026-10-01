@@ -509,7 +509,7 @@ One pane of glass for your AI infrastructure.
 
 ## Development
 
-OnePane is currently developed by **DigiLogicTech**.
+OnePane is currently developed by **DigiLogic**.
 
 The repository is presently in private development while the architecture, runtime, installation process, and initial user experience are stabilised.
 
@@ -519,7 +519,7 @@ Contribution guidelines and public development documentation will be added as th
 
 ## License
 
-OnePane is open-source software developed by **DigiLogicTech**.
+OnePane is open-source software developed by **DigiLogic**.
 
 OnePane is licensed under the **Apache License 2.0**.
 

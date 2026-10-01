@@ -1,5 +1,4 @@
 # OnePane
-# OnePane
 
 **Local-first AI orchestration, agents, projects, tools, and automation — from one pane of glass.**
 

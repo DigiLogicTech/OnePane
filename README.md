@@ -528,3 +528,5 @@ You are free to use, modify, distribute, and build upon OnePane in accordance wi
 See [`LICENSE`](LICENSE) for the full license text.
 
 Copyright 2026 John Spencer Jr trading as DigiLogic
+
+<!-- ChatGPT GitHub write access verified 2026-10-03. -->

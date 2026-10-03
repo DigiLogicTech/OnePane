@@ -1,0 +1,337 @@
+ojectID}/runtime", s.createRuntime)
+ 	s.mux.HandleFunc("GET /v1/projects/{projectID}/runtime", s.getRuntimeByProject)
+ 	s.mux.HandleFunc("POST /v1/project-runtimes/{runtimeID}/desired-state", s.setRuntimeDesired)
+@@ -408,6 +444,37 @@ func (s *Server) routes() {
+ 	s.mux.HandleFunc("GET /", s.serveWebUI)
+ }
+ 
++func (s *Server) listRuntimeQueue(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
++	if workspaceID == "" {
++		writeError(w, http.StatusBadRequest, "workspace_id is required")
++		return
++	}
++	if !s.authorize(w, r, i, workspaceID, "models.read") {
++		return
++	}
++	if s.runtimeCoord == nil {
++		writeError(w, http.StatusServiceUnavailable, "runtime coordinator unavailable")
++		return
++	}
++	rows, err := s.runtimeCoord.Snapshot(r.Context(), 200)
++	if err != nil {
++		writeError(w, http.StatusInternalServerError, err.Error())
++		return
++	}
++	filtered := rows[:0]
++	for _, row := range rows {
++		if row.WorkspaceID == workspaceID {
++			filtered = append(filtered, row)
++		}
++	}
++	writeJSON(w, http.StatusOK, filtered)
++}
++
+ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
+ 	i, ok := s.authenticate(w, r)
+ 	if !ok {
+@@ -562,6 +629,23 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, i Identity, w
+ 	return true
+ }
+ 
++func (s *Server) listGlobalResourceLeases(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
++	if workspaceID == "" || !s.authorize(w, r, i, workspaceID, "projects.read") {
++		return
++	}
++	if s.resourceCoord == nil {
++		writeJSON(w, http.StatusOK, map[string]any{"leases": []any{}})
++		return
++	}
++	rows, err := s.resourceCoord.Snapshot(r.Context(), 200)
++	respondDomain(w, map[string]any{"leases": rows}, err, http.StatusOK)
++}
++
+ func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
+ 	i, ok := s.authenticate(w, r)
+ 	if !ok {
+@@ -639,6 +723,196 @@ func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
+ 	}
+ 	writeJSON(w, http.StatusOK, p)
+ }
++func (s *Server) projectForWorkspaceView(ctx context.Context, workspaceID string) (projectworkspace.WorkspaceView, projectworkspace.Project, error) {
++	view, err := s.projects.WorkspaceView(ctx, workspaceID)
++	if err != nil {
++		return view, projectworkspace.Project{}, err
++	}
++	p, err := s.projects.Project(ctx, view.ProjectID)
++	return view, p, err
++}
++
++func (s *Server) listProjectWorkspaces(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	p, err := s.projects.Project(r.Context(), strings.TrimSpace(r.PathValue("projectID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.read") {
++		return
++	}
++	xs, err := s.projects.WorkspaceViews(r.Context(), p.ID)
++	respondDomain(w, map[string]any{"workspaces": xs}, err, http.StatusOK)
++}
++func (s *Server) createProjectWorkspace(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	p, err := s.projects.Project(r.Context(), strings.TrimSpace(r.PathValue("projectID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.write") {
++		return
++	}
++	var in struct {
++		Name          string          `json:"name"`
++		Description   *string         `json:"description"`
++		Layout        json.RawMessage `json:"layout"`
++		AISettings    json.RawMessage `json:"ai_settings"`
++		ResourceScope json.RawMessage `json:"resource_scope"`
++		State         json.RawMessage `json:"state"`
++		StorageRoot   *string         `json:"storage_root"`
++	}
++	if !decodeJSON(w, r, &in) {
++		return
++	}
++	x, err := s.projects.CreateWorkspaceView(r.Context(), projectworkspace.CreateWorkspaceViewCommand{ProjectID: p.ID, Name: in.Name, Description: in.Description, LayoutJSON: in.Layout, AISettingsJSON: in.AISettings, ResourceScopeJSON: in.ResourceScope, StateJSON: in.State, StorageRoot: in.StorageRoot, ActorPrincipalID: i.PrincipalID})
++	respondDomain(w, x, err, http.StatusCreated)
++}
++func (s *Server) getProjectWorkspace(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	x, p, err := s.projectForWorkspaceView(r.Context(), strings.TrimSpace(r.PathValue("workspaceID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.read") {
++		return
++	}
++	writeJSON(w, http.StatusOK, x)
++}
++func (s *Server) updateProjectWorkspace(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	x, p, err := s.projectForWorkspaceView(r.Context(), strings.TrimSpace(r.PathValue("workspaceID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.write") {
++		return
++	}
++	var in struct {
++		ExpectedRevision int64           `json:"expected_revision"`
++		Name             string          `json:"name"`
++		Description      *string         `json:"description"`
++		Layout           json.RawMessage `json:"layout"`
++		AISettings       json.RawMessage `json:"ai_settings"`
++		ResourceScope    json.RawMessage `json:"resource_scope"`
++		State            json.RawMessage `json:"state"`
++		StorageRoot      *string         `json:"storage_root"`
++	}
++	if !decodeJSON(w, r, &in) {
++		return
++	}
++	if strings.TrimSpace(in.Name) == "" {
++		in.Name = x.Name
++	}
++	out, err := s.projects.UpdateWorkspaceView(r.Context(), projectworkspace.UpdateWorkspaceViewCommand{WorkspaceID: x.ID, ExpectedRevision: in.ExpectedRevision, Name: in.Name, Description: in.Description, LayoutJSON: in.Layout, AISettingsJSON: in.AISettings, ResourceScopeJSON: in.ResourceScope, StateJSON: in.State, StorageRoot: in.StorageRoot, ActorPrincipalID: i.PrincipalID})
++	respondDomain(w, out, err, http.StatusOK)
++}
++func (s *Server) archiveProjectWorkspace(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	x, p, err := s.projectForWorkspaceView(r.Context(), strings.TrimSpace(r.PathValue("workspaceID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.write") {
++		return
++	}
++	var in struct {
++		ExpectedRevision int64 `json:"expected_revision"`
++	}
++	if !decodeJSON(w, r, &in) {
++		return
++	}
++	err = s.projects.ArchiveWorkspaceView(r.Context(), x.ID, in.ExpectedRevision)
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	writeJSON(w, http.StatusOK, map[string]any{"archived": true})
++}
++func (s *Server) moveProjectWorkspaceStorage(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	x, p, err := s.projectForWorkspaceView(r.Context(), strings.TrimSpace(r.PathValue("workspaceID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.write") {
++		return
++	}
++	var in struct {
++		ExpectedRevision int64  `json:"expected_revision"`
++		StorageRoot      string `json:"storage_root"`
++	}
++	if !decodeJSON(w, r, &in) {
++		return
++	}
++	out, err := s.projects.MoveWorkspaceStoragePointer(r.Context(), x.ID, in.ExpectedRevision, in.StorageRoot)
++	respondDomain(w, out, err, http.StatusOK)
++}
++
++func (s *Server) getProjectStorage(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	p, err := s.projects.Project(r.Context(), strings.TrimSpace(r.PathValue("projectID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.read") {
++		return
++	}
++	x, err := s.projects.ProjectStorage(r.Context(), p.ID)
++	respondDomain(w, x, err, http.StatusOK)
++}
++
++func (s *Server) moveProjectStorage(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	p, err := s.projects.Project(r.Context(), strings.TrimSpace(r.PathValue("projectID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.write") {
++		return
++	}
++	var in struct {
++		StorageRoot string `json:"storage_root"`
++	}
++	if !decodeJSON(w, r, &in) {
++		return
++	}
++	x, err := s.projects.MoveProjectStorage(r.Context(), p.ID, in.StorageRoot, i.PrincipalID)
++	respondDomain(w, x, err, http.StatusOK)
++}
++
+ func (s *Server) createRuntime(w http.ResponseWriter, r *http.Request) {
+ 	i, ok := s.authenticate(w, r)
+ 	if !ok {
+@@ -2512,6 +2786,49 @@ func (s *Server) setNodeModelManagement(w http.ResponseWriter, r *http.Request)
+ 	writeJSON(w, 200, g)
+ }
+ 
++func (s *Server) getNodeComputePolicy(w http.ResponseWriter, r *http.Request) {
++	if _, ok := s.requireNodeOperator(w, r); !ok {
++		return
++	}
++	nodeID := strings.TrimSpace(r.PathValue("nodeID"))
++	p, err := s.federation.ComputePolicy(r.Context(), nodeID)
++	if errors.Is(err, sql.ErrNoRows) {
++		writeJSON(w, http.StatusOK, map[string]any{"node_id": nodeID, "enabled": true, "idle_only": false, "allow_model_downloads": true, "runtime_installation": "confirm", "project_scope": "all", "availability": map[string]any{}, "limits": map[string]any{}, "allowed_projects": []string{}})
++		return
++	}
++	if err != nil {
++		writeError(w, http.StatusInternalServerError, err.Error())
++		return
++	}
++	writeJSON(w, http.StatusOK, p)
++}
++
++func (s *Server) setNodeComputePolicy(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.requireNodeOperator(w, r)
++	if !ok {
++		return
++	}
++	var in struct {
++		Enabled             bool            `json:"enabled"`
++		IdleOnly            bool            `json:"idle_only"`
++		Availability        json.RawMessage `json:"availability"`
++		Limits              json.RawMessage `json:"limits"`
++		AllowModelDownloads bool            `json:"allow_model_downloads"`
++		RuntimeInstallation string          `json:"runtime_installation"`
++		ProjectScope        string          `json:"project_scope"`
++		AllowedProjects     json.RawMessage `json:"allowed_projects"`
++	}
++	if !decodeJSON(w, r, &in) {
++		return
++	}
++	p, err := s.federation.SetComputePolicy(r.Context(), nodefederation.SetComputePolicyCommand{NodeID: strings.TrimSpace(r.PathValue("nodeID")), Enabled: in.Enabled, IdleOnly: in.IdleOnly, AvailabilityJSON: in.Availability, LimitsJSON: in.Limits, AllowModelDownloads: in.AllowModelDownloads, RuntimeInstallation: in.RuntimeInstallation, ProjectScope: in.ProjectScope, AllowedProjectsJSON: in.AllowedProjects, Actor: i.PrincipalID})
++	if err != nil {
++		writeError(w, http.StatusConflict, err.Error())
++		return
++	}
++	writeJSON(w, http.StatusOK, p)
++}
++
+ func (s *Server) remoteNodeModelRecommendations(w http.ResponseWriter, r *http.Request) {
+ 	if _, ok := s.requireNodeOperator(w, r); !ok {
+ 		return
+diff --git a/internal/bootstrap/bootstrap.go b/internal/bootstrap/bootstrap.go
+index 6b9bf70..799a4dd 100644
+--- a/internal/bootstrap/bootstrap.go
++++ b/internal/bootstrap/bootstrap.go
+@@ -34,8 +34,10 @@ import (
+ 	"github.com/DigiLogicTech/OnePane/internal/projectruntime"
+ 	"github.com/DigiLogicTech/OnePane/internal/projectworkspace"
+ 	"github.com/DigiLogicTech/OnePane/internal/provideronboarding"
++	"github.com/DigiLogicTech/OnePane/internal/resourcecoord"
+ 	"github.com/DigiLogicTech/OnePane/internal/routine"
+ 	"github.com/DigiLogicTech/OnePane/internal/routineworker"
++	"github.com/DigiLogicTech/OnePane/internal/runtimecoord"
+ 	"github.com/DigiLogicTech/OnePane/internal/sandboxrunner"
+ 	"github.com/DigiLogicTech/OnePane/internal/scheduler"
+ 	"github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
+@@ -52,40 +54,42 @@ import (
+ )
+ 
+ type Runtime struct {
+-	DB                 *sqlite.DB
+-	System             *system.Service
+-	Nodes              *node.Service
+-	Tasks              *task.Service
+-	Authority          *authority.Service
+-	Budgets            *budget

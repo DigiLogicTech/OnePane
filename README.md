@@ -86,17 +86,16 @@ Hot Swap is runtime-agnostic and remains available whether Colibri or OmniRoute 
 
 ### Colibri
 
-OnePane Alpha 2 integrates **Colibri** as a managed inference runtime for larger or resource-constrained models.
+OnePane Alpha 2 integrates **Colibri** as a managed inference runtime for larger or resource-constrained **self-hosted models**.
 
-The intended runtime targets include:
+Colibri is scoped to OnePane-managed local inference, either on the current machine or on enrolled OnePane nodes:
 
 ```text
-local/native
 local/colibri
-node/native
 node/colibri
-cloud/provider
 ```
+
+Colibri does not represent cloud-provider routing. Cloud and hosted-provider execution belongs to OnePane's broader routing layer and OmniRoute integration.
 
 Colibri can use local compute or qualified OnePane nodes. Remote nodes are expected to be explicitly enrolled, authenticated, capability-advertised, health-checked, and policy-qualified before receiving workloads.
 

@@ -33,7 +33,7 @@ Alpha 2 currently targets:
 | Ubuntu | arm64 | Headless `.deb` |
 | macOS | Universal | Native application + DMG |
 
-Ubuntu Alpha 2 packages are already being produced through CI. Windows and macOS packaging use the same commit-bound build pipeline and are being validated as part of the Alpha 2 release process.
+Windows x64, Ubuntu amd64/arm64, and macOS Universal Alpha 2 packages are all produced through the same commit-bound CI build and validation model.
 
 Broader platform support — including Windows ARM64, RPM-based Linux distributions, generic Linux tarballs, OCI/container releases, mobile clients, and other operating systems — is intentionally deferred until the **Beta** phase.
 
@@ -296,38 +296,56 @@ A project can contain:
 - runtime configuration
 - sandbox policy
 
-Workspaces provide user-facing project surfaces while execution remains governed by project and sandbox policy.
+Workspaces provide user-facing project surfaces with their own durable execution policy.
 
-Alpha 2 includes configurable workspace layouts and project-scoped runtime controls.
+Alpha 2 workspaces use a composable component model. Chat, Follow, Activity, Logs, Agents, Terminal, Verification, Checkpoints, Notes, Tasks, Model Routing, and Workspace Settings can be placed on the workspace canvas or in the collapsible Inspector. Workspace components can be moved, resized, minimised through layout choices, maximised, hidden, tiled, or restored according to the user's preferred layout.
+
+Workspace Settings are themselves a movable component. They own the workspace's orchestration defaults, model routing, role assignments, fallbacks, sandbox permissions, remote-execution policy, and related runtime choices.
 
 ---
 
 ## Sandboxed Execution
 
-OnePane separates configuration and execution policy by scope:
+OnePane separates application defaults from workspace-owned policy:
 
 ```text
-Global application settings
-          ↓
-Project settings
-          ↓
-Workspace settings
-          ↓
-Sandbox policy
+Defaults
+   │
+   └── copied when a new Workspace is created
+                    ↓
+             Workspace Settings
+             ├── orchestration / chat default
+             ├── model routing and fallbacks
+             ├── sandbox and tool boundaries
+             ├── remote execution policy
+             └── component / Inspector layout
 ```
 
-Global settings provide defaults. They are not intended to silently override project, workspace, or sandbox policy.
+Changing **Defaults** does not rewrite existing workspaces. Once created, each workspace owns its settings independently.
 
-Sandbox controls cover concepts such as:
+Workspace sandbox controls cover concepts such as:
 
-- isolated vs external networking
-- Internet / LAN policy
+- Internet and LAN policy
 - browser and computer capabilities
+- filesystem boundaries
+- secrets access
 - tool access
-- project runtime policy
+- brokered remote-model access
 - privilege boundaries
 
-Unsafe host-level privilege escalation remains outside the normal project execution path.
+Unsafe host-level privilege escalation remains outside the normal workspace execution path. Remote models and enrolled nodes do not receive an unrestricted host filesystem mount: workspace access is brokered through OnePane capabilities and evaluated against the originating workspace policy.
+
+---
+
+## Live Follow and Workspace Components
+
+OnePane can expose the work being performed as it happens rather than reducing agent activity to a text log.
+
+The **Follow** component tracks authoritative task and operation events, including the active resource, tool activity, task state, and selected execution target. Because Follow observes OnePane's event and operation layers rather than model narration, it can follow work performed by local models, Colibri runtimes, enrolled nodes, or hosted providers whenever OnePane can observe the operation.
+
+Chat remains a first-class workspace component and continues to support OnePane's existing `/commands`. The Chat component also exposes the execution mode for the request, including Direct, Supervisor, Workers, Team, and Council modes where configured.
+
+Workspace-level **Model Routing** can be disabled. When disabled, OnePane keeps tasks on a single reasoning path, suppresses delegated child work and automatic escalation, and does not fan work out to alternate workers automatically.
 
 ---
 
@@ -353,7 +371,7 @@ Observation
 Verification
 ```
 
-Capabilities can be constrained by task, project, agent, action, resource, and policy.
+Capabilities can be constrained by task, project, workspace, agent, action, resource, and policy. Delegated child tasks inherit the parent workspace's routing and access envelope so delegation cannot silently widen permissions.
 
 ---
 
@@ -458,7 +476,7 @@ OnePane-managed components are deliberately separate from the operating-system i
 The package installs OnePane. OnePane owns component lifecycle.
 
 ```text
-Settings
+Defaults
 └── Local AI
     └── Components
         ├── Colibri

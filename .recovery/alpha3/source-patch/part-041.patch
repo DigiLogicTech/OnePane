@@ -1,0 +1,100 @@
++		if strings.TrimSpace(modelPoolArg) != "" && modelPool != existingModelPool {
++			if err := updateConfigFilePath(configPath, "model_pool_path", "local_ai", modelPool); err != nil {
++				return err
++			}
+ 		}
+ 	}
+ 
+ 	if err := installWebView2(); err != nil {
+ 		return err
+ 	}
+-	logf("optional runtimes are managed by the OnePane harness after installation")
++	if freshConfig && !repair {
++		if err := offerOllamaInstall(); err != nil {
++			logf("optional Ollama installation skipped/failed: %v", err)
++		}
++	}
++	logf("optional runtimes are managed by the OnePane harness after installation and can be installed later from Models")
+ 
+ 	_ = runHidden("sc.exe", "delete", serviceName)
+ 	time.Sleep(500 * time.Millisecond)
+@@ -209,6 +276,7 @@ func installProduct() error {
+ 	desktopExe := filepath.Join(installDir, "OnePane.Desktop.exe")
+ 	_ = runHidden("reg.exe", "add", `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "/v", "OnePane", "/t", "REG_SZ", "/d", `"`+desktopExe+`"`, "/f")
+ 	uninstallCmd := `"` + filepath.Join(installDir, "OnePane.Setup.exe") + `" --uninstall`
++	repairCmd := `"` + filepath.Join(installDir, "OnePane.Setup.exe") + `" --repair`
+ 	uninstallKey := `HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\OnePane`
+ 	_ = runHidden("reg.exe", "add", uninstallKey, "/v", "DisplayName", "/t", "REG_SZ", "/d", "OnePane", "/f")
+ 	_ = runHidden("reg.exe", "add", uninstallKey, "/v", "DisplayVersion", "/t", "REG_SZ", "/d", version, "/f")
+@@ -216,8 +284,9 @@ func installProduct() error {
+ 	_ = runHidden("reg.exe", "add", uninstallKey, "/v", "InstallLocation", "/t", "REG_SZ", "/d", installDir, "/f")
+ 	_ = runHidden("reg.exe", "add", uninstallKey, "/v", "DisplayIcon", "/t", "REG_SZ", "/d", filepath.Join(installDir, "OnePane.ico"), "/f")
+ 	_ = runHidden("reg.exe", "add", uninstallKey, "/v", "UninstallString", "/t", "REG_SZ", "/d", uninstallCmd, "/f")
+-	_ = runHidden("reg.exe", "add", uninstallKey, "/v", "NoModify", "/t", "REG_DWORD", "/d", "1", "/f")
+-	_ = runHidden("reg.exe", "add", uninstallKey, "/v", "NoRepair", "/t", "REG_DWORD", "/d", "1", "/f")
++	_ = runHidden("reg.exe", "add", uninstallKey, "/v", "ModifyPath", "/t", "REG_SZ", "/d", repairCmd, "/f")
++	_ = runHidden("reg.exe", "add", uninstallKey, "/v", "NoModify", "/t", "REG_DWORD", "/d", "0", "/f")
++	_ = runHidden("reg.exe", "add", uninstallKey, "/v", "NoRepair", "/t", "REG_DWORD", "/d", "0", "/f")
+ 
+ 	if err := runHidden("sc.exe", "start", serviceName); err != nil {
+ 		return fmt.Errorf("start OnePane service: %w", err)
+@@ -239,12 +308,18 @@ func installWebView2() error {
+ 	if err := os.MkdirAll(tempDir, 0o755); err != nil {
+ 		return err
+ 	}
+-	installer := filepath.Join(tempDir, "MicrosoftEdgeWebView2RuntimeInstallerX64.exe")
+-	if err := extractVerified("MicrosoftEdgeWebView2RuntimeInstallerX64.exe", installer, "f6df8e4bc857786ff641cd01da1449169eaf8236c936ced485ea61685ba4da40"); err != nil {
+-		return err
++	// Microsoft recommends the tiny Evergreen bootstrapper for online clients.
++	// It downloads only the matching architecture and keeps the OnePane setup
++	// package small. Offline packaging can still embed the standalone runtime.
++	installer := filepath.Join(tempDir, "MicrosoftEdgeWebview2Setup.exe")
++	if err := downloadFile("https://go.microsoft.com/fwlink/p/?LinkId=2124703", installer); err != nil {
++		return fmt.Errorf("download WebView2 bootstrapper: %w", err)
+ 	}
+ 	defer os.Remove(installer)
+-	logf("installing Microsoft Edge WebView2 Runtime")
++	if err := verifyAuthenticode(installer); err != nil {
++		return fmt.Errorf("verify WebView2 bootstrapper: %w", err)
++	}
++	logf("installing Microsoft Edge WebView2 Runtime using Evergreen bootstrapper")
+ 	cmd := exec.Command(installer, "/silent", "/install")
+ 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+ 	err := cmd.Run()
+@@ -264,6 +339,120 @@ func installWebView2() error {
+ 	return nil
+ }
+ 
++func downloadFile(rawURL, dst string) error {
++	client := &http.Client{Timeout: 10 * time.Minute}
++	resp, err := client.Get(rawURL)
++	if err != nil {
++		return err
++	}
++	defer resp.Body.Close()
++	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
++		return fmt.Errorf("download returned HTTP %d", resp.StatusCode)
++	}
++	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
++		return err
++	}
++	tmp := dst + ".part"
++	out, err := os.Create(tmp)
++	if err != nil {
++		return err
++	}
++	_, copyErr := io.Copy(out, resp.Body)
++	closeErr := out.Close()
++	if copyErr != nil {
++		_ = os.Remove(tmp)
++		return copyErr
++	}
++	if closeErr != nil {
++		_ = os.Remove(tmp)
++		return closeErr
++	}
++	_ = os.Remove(dst)
++	return os.Rename(tmp, dst)
++}
++
++func verifyAuthenticode(path string) error {

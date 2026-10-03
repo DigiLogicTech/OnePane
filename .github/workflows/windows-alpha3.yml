@@ -6,6 +6,7 @@ on:
       - alpha3-integration
     paths:
       - '.recovery/alpha3/source-patch/**'
+      - '.recovery/alpha3/fixes/**'
       - '.github/workflows/windows-alpha3.yml'
   workflow_dispatch:
 
@@ -45,6 +46,13 @@ jobs:
           echo "PATCH_CHECK_OK"
           git apply --verbose --directory=buildsrc alpha3-source.patch
           echo "PATCH_APPLY_OK"
+          if compgen -G '.recovery/alpha3/fixes/*.patch' > /dev/null; then
+            for fix in .recovery/alpha3/fixes/*.patch; do
+              git apply --check --directory=buildsrc "$fix"
+              git apply --directory=buildsrc "$fix"
+              echo "APPLIED_FIX $fix"
+            done
+          fi
           test -f buildsrc/go.mod && echo "GO_MOD_OK"
           test -f buildsrc/cmd/harnessd/main.go && echo "HARNESS_MAIN_OK"
           test -f buildsrc/packaging/windows/setup/main.go && echo "WINDOWS_SETUP_OK"

@@ -1,0 +1,100 @@
++	defaultProjectRoot := filepath.Join(dataDir, "Projects")
+ 	defaultModelPool := filepath.Join(dataDir, "models")
+-	modelPool := defaultModelPool
+-	needsModelPoolPrompt := true
+-	if raw, err := os.ReadFile(configPath); err == nil {
+-		text := string(raw)
+-		if strings.Contains(text, "model_pool_path:") {
+-			needsModelPoolPrompt = false
++	projectRoot := strings.TrimSpace(projectRootArg)
++	modelPool := strings.TrimSpace(modelPoolArg)
++	existingProjectRoot, existingModelPool := readConfiguredStorage(configPath)
++	_, statErr := os.Stat(configPath)
++	freshConfig := os.IsNotExist(statErr)
++	if statErr != nil && !os.IsNotExist(statErr) {
++		return statErr
++	}
++	if projectRoot == "" {
++		projectRoot = existingProjectRoot
++	}
++	if modelPool == "" {
++		modelPool = existingModelPool
++	}
++	if projectRoot == "" {
++		projectRoot = defaultProjectRoot
++	}
++	if modelPool == "" {
++		modelPool = defaultModelPool
++	}
++	if freshConfig && !repair && strings.TrimSpace(projectRootArg) == "" {
++		message("OnePane Setup", "Choose the default location for Project and Workspace data.\n\nLibraries and generated artifacts can become large. Cancel keeps:\n"+defaultProjectRoot, 0x40)
++		if chosen, err := chooseFolder("Choose the OnePane Project data location", defaultProjectRoot); err == nil && strings.TrimSpace(chosen) != "" {
++			projectRoot = chosen
+ 		}
+ 	}
+-	if needsModelPoolPrompt {
+-		message("OnePane Setup", "Choose where OnePane should store local LLM models.\n\nModel files can be large, so a fast drive with plenty of free space is recommended.\n\nCancel keeps the default location:\n"+defaultModelPool, 0x40)
+-		if chosen, err := chooseModelPool(defaultModelPool); err == nil && strings.TrimSpace(chosen) != "" {
++	if freshConfig && !repair && strings.TrimSpace(modelPoolArg) == "" {
++		message("OnePane Setup", "Choose where OnePane should store local AI models.\n\nModel files can be large. Cancel keeps:\n"+defaultModelPool, 0x40)
++		if chosen, err := chooseFolder("Choose the OnePane local model pool", defaultModelPool); err == nil && strings.TrimSpace(chosen) != "" {
+ 			modelPool = chosen
+-		} else if err != nil {
+-			logf("model pool chooser warning: %v", err)
+ 		}
+ 	}
++	if !filepath.IsAbs(projectRoot) || !filepath.IsAbs(modelPool) {
++		return fmt.Errorf("Project and model storage paths must be absolute")
++	}
++	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
++		return fmt.Errorf("create Project root: %w", err)
++	}
+ 	if err := os.MkdirAll(modelPool, 0o755); err != nil {
+ 		return fmt.Errorf("create model pool: %w", err)
+ 	}
++	logf("project storage root: %s", projectRoot)
+ 	logf("model pool path: %s", modelPool)
+ 
+-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
++	if freshConfig {
+ 		dataPath := filepath.ToSlash(filepath.Join(dataDir, "data"))
++		projectPath := filepath.ToSlash(projectRoot)
+ 		modelPath := filepath.ToSlash(modelPool)
+ 		cfg := "server:\n" +
+ 			"  listen: 127.0.0.1:18181\n" +
+ 			"  preview_listen: 127.0.0.1:18182\n" +
+ 			"storage:\n" +
+-			"  data_dir: \"" + strings.ReplaceAll(dataPath, "\"", "\\\"") + "\"\n" +
++			"  data_dir: \"" + yamlEscape(dataPath) + "\"\n" +
++			"  project_root: \"" + yamlEscape(projectPath) + "\"\n" +
+ 			"logging:\n" +
+ 			"  level: info\n" +
+ 			"local_ai:\n" +
+-			"  model_pool_path: \"" + strings.ReplaceAll(modelPath, "\"", "\\\"") + "\"\n" +
++			"  model_pool_path: \"" + yamlEscape(modelPath) + "\"\n" +
+ 			"  idle_unload_minutes: 15\n" +
+ 			"  residency_headroom_pct: 10\n" +
+ 			"node_federation:\n" +
+@@ -163,27 +229,28 @@ func installProduct() error {
+ 		if err := os.WriteFile(configPath, []byte(cfg), 0o644); err != nil {
+ 			return err
+ 		}
+-	} else if needsModelPoolPrompt {
+-		raw, err := os.ReadFile(configPath)
+-		if err != nil {
+-			return err
+-		}
+-		text := string(raw)
+-		line := "  model_pool_path: \"" + strings.ReplaceAll(filepath.ToSlash(modelPool), "\"", "\\\"") + "\"\n"
+-		if strings.Contains(text, "local_ai:\n") {
+-			text = strings.Replace(text, "local_ai:\n", "local_ai:\n"+line, 1)
+-		} else {
+-			text += "\nlocal_ai:\n" + line
++	} else {
++		if strings.TrimSpace(projectRootArg) != "" && projectRoot != existingProjectRoot {
++			if err := updateConfigFilePath(configPath, "project_root", "storage", projectRoot); err != nil {
++				return err
++			}
+ 		}
+-		if err := os.WriteFile(configPath, []byte(text), 0o644); err != nil {
+-			return err

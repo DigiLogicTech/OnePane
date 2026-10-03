@@ -44,8 +44,34 @@ jobs:
         run: python3 scripts/validate_windows_qa5_source.py
 
       - name: Run Go tests
+        id: gotests
+        continue-on-error: true
         working-directory: src
-        run: go test ./...
+        shell: bash
+        run: |
+          set +e
+          go test -json ./... > gotest.json 2>&1
+          code=$?
+          echo "$code" > gotest.exit
+          tail -n 120 gotest.json || true
+          exit "$code"
+
+      - name: Upload Go test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnePane-alpha2-gotest-diagnostics
+          path: |
+            src/gotest.json
+            src/gotest.exit
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Require Go tests passed
+        working-directory: src
+        shell: bash
+        run: |
+          test "$(cat gotest.exit)" = "0"
 
       - name: Build Windows x64 backend
         working-directory: src

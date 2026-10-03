@@ -37,6 +37,7 @@ jobs:
         run: |
           set -euo pipefail
           node --check internal/webui/static/app.js
+          python scripts/validate_live_follow_workspace.py
           python scripts/validate_m23_webgui.py
           python scripts/validate_m24_install.py
           python scripts/validate_m25_local_ai_install.py

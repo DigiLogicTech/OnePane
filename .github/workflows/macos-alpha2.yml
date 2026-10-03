@@ -38,6 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           node --check internal/webui/static/app.js
+          python scripts/validate_live_follow_workspace.py
           go mod download
           go mod verify
           go test ./...

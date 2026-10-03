@@ -1,0 +1,100 @@
++					cand.Schedulable = false
++				}
++			} else if err != sql.ErrNoRows {
++				return nil, err
++			}
++		}
+ 		out = append(out, cand)
+ 	}
+ 	return out, rows.Err()
+ }
+ 
++func firstNonBlank(values ...string) string {
++	for _, value := range values {
++		if strings.TrimSpace(value) != "" {
++			return strings.TrimSpace(value)
++		}
++	}
++	return ""
++}
++
+ type profile struct {
+ 	q              Qualification
+ 	protocol, role string
+diff --git a/internal/scheduler/types.go b/internal/scheduler/types.go
+index ecd4ce7..5b00477 100644
+--- a/internal/scheduler/types.go
++++ b/internal/scheduler/types.go
+@@ -59,6 +59,13 @@ type Candidate struct {
+ 	Schedulable             bool
+ 	ToolCallback            bool
+ 	Metadata                map[string]any
++	NodeID                  string
++	ComputeMode             string // cpu | gpu | hybrid | cloud | remote
++	RuntimeBackend          string
++	Resident                bool
++	Cached                  bool
++	NodeStatus              string
++	NodeLoadPct             float64
+ }
+ 
+ type RouteRequest struct {
+@@ -93,6 +100,9 @@ type RouteRequest struct {
+ 	// selecting a deployment/runtime that already failed or explicitly asked to
+ 	// escalate. Exclusion is deterministic and recorded in the route request.
+ 	ExcludeCandidateIDs []string
++	// ComputePreference lets a workspace prefer or constrain CPU/GPU placement
++	// without changing model identity. Empty is equivalent to auto.
++	ComputePreference string // auto | prefer_gpu | prefer_cpu | gpu_only | cpu_only
+ }
+ 
+ type Rejection struct {
+@@ -328,6 +338,18 @@ func Route(req RouteRequest, candidates []Candidate) (Decision, error) {
+ 			reject("context exceeds candidate limit")
+ 			continue
+ 		}
++		switch strings.ToLower(strings.TrimSpace(req.ComputePreference)) {
++		case "gpu_only":
++			if c.ComputeMode != "gpu" && c.ComputeMode != "hybrid" {
++				reject("workspace requires GPU placement")
++				continue
++			}
++		case "cpu_only":
++			if c.ComputeMode != "cpu" {
++				reject("workspace requires CPU placement")
++				continue
++			}
++		}
+ 		switch c.Qualification {
+ 		case QualIncompatible:
+ 			reject("candidate is incompatible")
+@@ -365,6 +387,27 @@ func Route(req RouteRequest, candidates []Candidate) (Decision, error) {
+ 		if c.Local {
+ 			score += 60
+ 		}
++		if c.Resident {
++			score += 45
++		} else if c.Cached {
++			score += 20
++		}
++		if strings.EqualFold(c.NodeStatus, "busy") {
++			score -= 25
++		}
++		if c.NodeLoadPct > 0 {
++			score -= int(c.NodeLoadPct / 5)
++		}
++		switch strings.ToLower(strings.TrimSpace(req.ComputePreference)) {
++		case "prefer_gpu":
++			if c.ComputeMode == "gpu" || c.ComputeMode == "hybrid" {
++				score += 35
++			}
++		case "prefer_cpu":
++			if c.ComputeMode == "cpu" {
++				score += 35
++			}
++		}
+ 		if !strings.EqualFold(c.Status, "degraded") {
+ 			score += 20
+ 		}
+diff --git a/internal/webui/static/app.js b/internal/webui/static/app.js
+index 05d8f89..4db78b4 100644

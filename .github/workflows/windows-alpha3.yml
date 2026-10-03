@@ -41,13 +41,10 @@ jobs:
           echo "44e31c4bc6df048acec092629a61feaa86c5bde6d31346ead653cf65b9a3f17d  alpha3-source.patch" | sha256sum -c -
           sha256sum buildsrc/README.md buildsrc/cmd/harnessd/main.go buildsrc/internal/api/server.go
           git hash-object buildsrc/README.md buildsrc/cmd/harnessd/main.go buildsrc/internal/api/server.go
-          (
-            cd buildsrc
-            git apply --check --verbose ../alpha3-source.patch
-            echo "PATCH_CHECK_OK"
-            git apply --verbose ../alpha3-source.patch
-            echo "PATCH_APPLY_OK"
-          )
+          git apply --check --verbose --directory=buildsrc alpha3-source.patch
+          echo "PATCH_CHECK_OK"
+          git apply --verbose --directory=buildsrc alpha3-source.patch
+          echo "PATCH_APPLY_OK"
           test -f buildsrc/go.mod && echo "GO_MOD_OK"
           test -f buildsrc/cmd/harnessd/main.go && echo "HARNESS_MAIN_OK"
           test -f buildsrc/packaging/windows/setup/main.go && echo "WINDOWS_SETUP_OK"

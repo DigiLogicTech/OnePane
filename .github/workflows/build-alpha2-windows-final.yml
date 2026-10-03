@@ -1,0 +1,64 @@
+name: Build OnePane Windows alpha.2 final
+
+on:
+  push:
+    branches:
+      - build/alpha2-windows
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-final:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore validated alpha.2 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src
+          base64 -d .build/onepane-alpha2-source.tar.gz.b64 > /tmp/onepane-alpha2-source.tar.gz
+          tar -xzf /tmp/onepane-alpha2-source.tar.gz -C src
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache-dependency-path: src/go.sum
+      - name: Normalize pinned Go module metadata
+        working-directory: src
+        run: go mod tidy
+      - name: Validate QA1
+        working-directory: src
+        run: python3 scripts/validate_windows_qa_source.py
+      - name: Validate QA4 Projects and Workspaces
+        working-directory: src
+        run: python3 scripts/validate_windows_qa4_source.py
+      - name: Validate QA5 alpha.2 and Colibri
+        working-directory: src
+        run: python3 scripts/validate_windows_qa5_source.py
+      - name: Run full Go test suite
+        working-directory: src
+        run: go test ./...
+      - name: Build Windows x64 backend
+        working-directory: src
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          go build -trimpath -ldflags="-s -w" -o dist/OnePane.Backend.exe ./cmd/harnessd
+          sha256sum dist/OnePane.Backend.exe > dist/OnePane.Backend.exe.sha256
+          go version -m dist/OnePane.Backend.exe > dist/OnePane.Backend.exe.modules.txt
+          cp go.mod dist/go.mod
+          cp go.sum dist/go.sum
+      - name: Upload final backend
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnePane-alpha2-windows-backend-final
+          path: src/dist/
+          if-no-files-found: error
+          retention-days: 7

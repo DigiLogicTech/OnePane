@@ -1,0 +1,135 @@
+diff --git a/cmd/harnessd/main.go b/cmd/harnessd/main.go
+index 9507c8f1fb395fddd122206817c4504043b2f74d..44003d8b99f2d78b599552b03d93de5d93db77f0 100644
+--- a/cmd/harnessd/main.go
++++ b/cmd/harnessd/main.go
+@@ -62,6 +62,8 @@ func main() {
+ 	apiServer.SetVault(runtime.Vault)
+ 	apiServer.SetProviderOnboarding(runtime.ProviderOnboarding)
+ 	apiServer.SetScheduler(runtime.Scheduler)
++	apiServer.SetRuntimeCoordinator(runtime.RuntimeCoordinator)
++	apiServer.SetResourceCoordinator(runtime.ResourceCoordinator)
+ 	apiServer.SetAgentRuntimes(runtime.AgentRuntimes)
+ 	apiServer.SetGateway(runtime.Gateway)
+ 	apiServer.SetTeam(runtime.Team)
+diff --git a/internal/api/server.go b/internal/api/server.go
+index 7e4add73f71e15be06dd59da220a4c27b769bb0d..4ca4f53f7b5179481f6cddcf216b0d2995d37ecc 100644
+--- a/internal/api/server.go
++++ b/internal/api/server.go
+@@ -26,7 +26,9 @@ import (
+ 	"github.com/DigiLogicTech/OnePane/internal/nodefederation"
+ 	"github.com/DigiLogicTech/OnePane/internal/projectworkspace"
+ 	"github.com/DigiLogicTech/OnePane/internal/provideronboarding"
++	"github.com/DigiLogicTech/OnePane/internal/resourcecoord"
+ 	"github.com/DigiLogicTech/OnePane/internal/routine"
++	"github.com/DigiLogicTech/OnePane/internal/runtimecoord"
+ 	"github.com/DigiLogicTech/OnePane/internal/scheduler"
+ 	"github.com/DigiLogicTech/OnePane/internal/task"
+ 	"github.com/DigiLogicTech/OnePane/internal/team"
+@@ -52,6 +54,14 @@ type chatCommandService interface {
+ type projectService interface {
+ 	Project(context.Context, string) (projectworkspace.Project, error)
+ 	Projects(context.Context, string) ([]projectworkspace.Project, error)
++	WorkspaceView(context.Context, string) (projectworkspace.WorkspaceView, error)
++	WorkspaceViews(context.Context, string) ([]projectworkspace.WorkspaceView, error)
++	CreateWorkspaceView(context.Context, projectworkspace.CreateWorkspaceViewCommand) (projectworkspace.WorkspaceView, error)
++	UpdateWorkspaceView(context.Context, projectworkspace.UpdateWorkspaceViewCommand) (projectworkspace.WorkspaceView, error)
++	ArchiveWorkspaceView(context.Context, string, int64) error
++	MoveWorkspaceStoragePointer(context.Context, string, int64, string) (projectworkspace.WorkspaceView, error)
++	ProjectStorage(context.Context, string) (projectworkspace.ProjectStorageLocation, error)
++	MoveProjectStorage(context.Context, string, string, string) (projectworkspace.ProjectStorageLocation, error)
+ 	Runtime(context.Context, string) (projectworkspace.ProjectRuntime, error)
+ 	RuntimeByProject(context.Context, string) (projectworkspace.ProjectRuntime, error)
+ 	Change(context.Context, string) (projectworkspace.ChangeProposal, error)
+@@ -110,6 +120,8 @@ type nodeFederationService interface {
+ 	CanOperate(context.Context, string) error
+ 	ModelManagementGrant(context.Context, string) (nodefederation.ModelManagementGrant, error)
+ 	SetModelManagementGrant(context.Context, string, string, bool) (nodefederation.ModelManagementGrant, error)
++	ComputePolicy(context.Context, string) (nodefederation.ComputePolicy, error)
++	SetComputePolicy(context.Context, nodefederation.SetComputePolicyCommand) (nodefederation.ComputePolicy, error)
+ 	RemoteModelManagementStatus(context.Context, string) (nodefederation.ModelManagementGrant, error)
+ 	RemoteModelRecommendations(context.Context, string, nodefederation.RemoteModelRecommendRequest) (localai.HardwareProfile, []localai.Recommendation, error)
+ 	RemoteInstallModel(context.Context, string, nodefederation.RemoteModelInstallRequest) (localai.InstallJob, error)
+@@ -123,6 +135,14 @@ type nodeFederationService interface {
+ 	RemoteAdmitModel(context.Context, string, string, localai.AdmissionCommand) (localai.ModelSpecSheet, error)
+ }
+ 
++type runtimeCoordinatorService interface {
++	Snapshot(context.Context, int) ([]runtimecoord.QueueEntry, error)
++}
++
++type resourceCoordinatorService interface {
++	Snapshot(context.Context, int) ([]resourcecoord.Lease, error)
++}
++
+ type schedulerCandidateService interface {
+ 	Candidates(context.Context, string, string, string) ([]scheduler.Candidate, error)
+ }
+@@ -226,6 +246,8 @@ type Server struct {
+ 	localNodeID     string
+ 	providers       providerOnboardingService
+ 	scheduler       schedulerCandidateService
++	runtimeCoord    runtimeCoordinatorService
++	resourceCoord   resourceCoordinatorService
+ 	assurance       assuranceService
+ 	agentRuntimes   agentRuntimeService
+ 	gateway         gatewayService
+@@ -258,17 +280,19 @@ func (s *Server) SetLocalAI(v localAIService, localNodeID string) {
+ 	s.localAI = v
+ 	s.localNodeID = localNodeID
+ }
+-func (s *Server) SetProviderOnboarding(v providerOnboardingService) { s.providers = v }
+-func (s *Server) SetScheduler(v schedulerCandidateService)          { s.scheduler = v }
+-func (s *Server) SetAssurance(v assuranceService)                   { s.assurance = v }
+-func (s *Server) SetAgentRuntimes(v agentRuntimeService)            { s.agentRuntimes = v }
+-func (s *Server) SetGateway(v gatewayService)                       { s.gateway = v }
+-func (s *Server) SetTeam(v teamService)                             { s.team = v }
+-func (s *Server) SetBots(v botRuntimeService)                       { s.bots = v }
+-func (s *Server) SetFederation(v nodeFederationService)             { s.federation = v }
+-func (s *Server) SetTasks(v taskService)                            { s.tasks = v }
+-func (s *Server) SetRoutines(v routineService)                      { s.routines = v }
+-func (s *Server) SetChatCommands(v chatCommandService)              { s.chatCommands = v }
++func (s *Server) SetProviderOnboarding(v providerOnboardingService)   { s.providers = v }
++func (s *Server) SetScheduler(v schedulerCandidateService)            { s.scheduler = v }
++func (s *Server) SetAssurance(v assuranceService)                     { s.assurance = v }
++func (s *Server) SetAgentRuntimes(v agentRuntimeService)              { s.agentRuntimes = v }
++func (s *Server) SetGateway(v gatewayService)                         { s.gateway = v }
++func (s *Server) SetTeam(v teamService)                               { s.team = v }
++func (s *Server) SetBots(v botRuntimeService)                         { s.bots = v }
++func (s *Server) SetRuntimeCoordinator(v runtimeCoordinatorService)   { s.runtimeCoord = v }
++func (s *Server) SetResourceCoordinator(v resourceCoordinatorService) { s.resourceCoord = v }
++func (s *Server) SetFederation(v nodeFederationService)               { s.federation = v }
++func (s *Server) SetTasks(v taskService)                              { s.tasks = v }
++func (s *Server) SetRoutines(v routineService)                        { s.routines = v }
++func (s *Server) SetChatCommands(v chatCommandService)                { s.chatCommands = v }
+ func (s *Server) SetRuntimeConfig(path, modelPoolPath string) {
+ 	s.configPath = strings.TrimSpace(path)
+ 	s.modelPoolPath = strings.TrimSpace(modelPoolPath)
+@@ -301,6 +325,8 @@ func (s *Server) routes() {
+ 	s.mux.HandleFunc("POST /v1/vault/provider-credentials", s.createProviderCredential)
+ 	s.mux.HandleFunc("GET /v1/provider-presets", s.providerPresets)
+ 	s.mux.HandleFunc("GET /v1/scheduler/candidates", s.listSchedulerCandidates)
++	s.mux.HandleFunc("GET /v1/runtime-queue", s.listRuntimeQueue)
++	s.mux.HandleFunc("GET /v1/resource-leases", s.listGlobalResourceLeases)
+ 	s.mux.HandleFunc("GET /v1/providers", s.listProviders)
+ 	s.mux.HandleFunc("POST /v1/providers/probe", s.probeProvider)
+ 	s.mux.HandleFunc("POST /v1/providers", s.addProvider)
+@@ -361,6 +387,8 @@ func (s *Server) routes() {
+ 	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/capabilities", s.nodeCapabilities)
+ 	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/model-management", s.getNodeModelManagement)
+ 	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/model-management", s.setNodeModelManagement)
++	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/compute-policy", s.getNodeComputePolicy)
++	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/compute-policy", s.setNodeComputePolicy)
+ 	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/remote-model-management", s.getRemoteNodeModelManagement)
+ 	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/models/recommendations", s.remoteNodeModelRecommendations)
+ 	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/models/install", s.remoteNodeModelInstall)
+@@ -388,6 +416,14 @@ func (s *Server) routes() {
+ 	s.mux.HandleFunc("POST /v1/projects", s.createProject)
+ 	s.mux.HandleFunc("GET /v1/projects/{projectID}", s.getProject)
+ 	s.mux.HandleFunc("PATCH /v1/projects/{projectID}", s.updateProjectPolicy)
++	s.mux.HandleFunc("GET /v1/projects/{projectID}/storage", s.getProjectStorage)
++	s.mux.HandleFunc("POST /v1/projects/{projectID}/storage", s.moveProjectStorage)
++	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces", s.listProjectWorkspaces)
++	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces", s.createProjectWorkspace)
++	s.mux.HandleFunc("GET /v1/project-workspaces/{workspaceID}", s.getProjectWorkspace)
++	s.mux.HandleFunc("PATCH /v1/project-workspaces/{workspaceID}", s.updateProjectWorkspace)
++	s.mux.HandleFunc("POST /v1

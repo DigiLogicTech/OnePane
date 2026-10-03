@@ -1,0 +1,100 @@
+@@ -299,6 +310,14 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
+ 		return nil, fmt.Errorf("recover managed local runtimes: %w", err)
+ 	}
+ 	projectWorkspaceService := projectworkspace.NewService(db.SQL(), db, clk)
++	projectRoot := strings.TrimSpace(cfg.Storage.ProjectRoot)
++	if projectRoot == "" {
++		projectRoot = filepath.Join(cfg.Storage.DataDir, "projects")
++	}
++	if err := projectWorkspaceService.ConfigureProjectStorageRoot(projectRoot); err != nil {
++		_ = db.Close()
++		return nil, fmt.Errorf("configure Project storage root: %w", err)
++	}
+ 	projectRuntimeReconciler := projectruntime.New(projectWorkspaceService, operationCoordinator, toolGateway, observationService, verificationService)
+ 	projectRoutineExecutor := projectroutine.New(projectWorkspaceService, toolGateway)
+ 	routineService := routine.NewService(db.SQL(), db, clk, taskService)
+@@ -341,7 +360,7 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
+ 		DB: db, System: systemService, Nodes: nodeService, Tasks: taskService,
+ 		Authority: authorityService, Budgets: budgetService, Approvals: approvalService, Policy: policyEngine, Artifacts: artifactService, Observations: observationService,
+ 		ToolGateway: toolGateway, Verification: verificationService, Watchdog: watchdogService, Vault: vaultService, Inference: inferenceService, LocalAI: localAIService, AgentRuntimes: agentRuntimeService, AgentWorker: agentWorkerService, Assurance: assuranceService,
+-		Scheduler: schedulerService, ProviderOnboarding: providerOnboardingService, ProjectWorkspaces: projectWorkspaceService,
++		Scheduler: schedulerService, RuntimeCoordinator: runtimeCoordinator, ResourceCoordinator: resourceCoordinator, ProviderOnboarding: providerOnboardingService, ProjectWorkspaces: projectWorkspaceService,
+ 		ProjectRuntime: projectRuntimeReconciler, ProjectRoutine: projectRoutineExecutor, Routines: routineService, RoutineWorker: routineWorkerService, Operations: operationCoordinator, ReadOnlySlice: readOnlySlice, WebAuth: webAuthService, Gateway: gatewayService, Team: teamService, TeamWorker: teamWorkerService, Bots: botRuntimeService, Federation: federationService,
+ 	}, nil
+ }
+diff --git a/internal/config/config.go b/internal/config/config.go
+index 36f7fed..0493b13 100644
+--- a/internal/config/config.go
++++ b/internal/config/config.go
+@@ -28,7 +28,8 @@ type ServerConfig struct {
+ }
+ 
+ type StorageConfig struct {
+-	DataDir string `yaml:"data_dir"`
++	DataDir     string `yaml:"data_dir"`
++	ProjectRoot string `yaml:"project_root,omitempty"`
+ }
+ type LoggingConfig struct {
+ 	Level string `yaml:"level"`
+@@ -87,6 +88,9 @@ func Validate(cfg Config) error {
+ 	if strings.TrimSpace(cfg.Storage.DataDir) == "" {
+ 		return fmt.Errorf("storage.data_dir must not be empty")
+ 	}
++	if v := strings.TrimSpace(cfg.Storage.ProjectRoot); v != "" && !filepath.IsAbs(v) {
++		return fmt.Errorf("storage.project_root must be an absolute path")
++	}
+ 	host, _, err := net.SplitHostPort(cfg.Server.Listen)
+ 	if err != nil {
+ 		return fmt.Errorf("server.listen must be host:port: %w", err)
+diff --git a/internal/inference/execute.go b/internal/inference/execute.go
+index aed1a0f..e5a0d6f 100644
+--- a/internal/inference/execute.go
++++ b/internal/inference/execute.go
+@@ -22,6 +22,25 @@ func (s *Service) Request(ctx context.Context, id string) (InferenceRequest, err
+ 	return s.requests.Get(ctx, id)
+ }
+ 
++func runtimePriority(metadata json.RawMessage) string {
++	var v map[string]any
++	if json.Unmarshal(metadata, &v) == nil {
++		for _, key := range []string{"runtime_priority", "scheduling_class", "priority"} {
++			if raw, ok := v[key].(string); ok {
++				switch strings.ToLower(strings.TrimSpace(raw)) {
++				case "interactive", "user_interactive":
++					return "interactive"
++				case "high":
++					return "high"
++				case "background", "batch":
++					return "background"
++				}
++			}
++		}
++	}
++	return "normal"
++}
++
+ func canonicalObject(raw json.RawMessage, fallback string) (json.RawMessage, error) {
+ 	b, err := normalizeJSON(raw, fallback)
+ 	if err != nil {
+@@ -125,6 +144,21 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
+ 	if err != nil {
+ 		return s.finishPreDispatchError(ctx, q.ID, err, cmd)
+ 	}
++	var runtimeLease RuntimeScheduleLease
++	if s.runtimeCoordinator != nil {
++		runtimeLease, err = s.runtimeCoordinator.Acquire(ctx, RuntimeScheduleRequest{
++			WorkspaceID: cmd.WorkspaceID, TaskID: cmd.TaskID, InferenceRequestID: q.ID,
++			Deployment: d, Priority: runtimePriority(metadata),
++		})
++		if err != nil {
++			return s.finishPreDispatchError(ctx, q.ID, fmt.Errorf("runtime scheduling: %w", err), cmd)
++		}
++		_ = runtimeLease.ReportBoundary(ctx, "unsafe")
++		defer func() {
++			_ = runtimeLease.ReportBoundary(context.Background(), "complete")
++			runtimeLease.Release(context.Background(), nil)
++		}()
++	}
+ 	requiresBudget := inferenceRouteRequiresBudget(d, p)
+ 	if requiresBudget && cmd.BudgetReservationID == nil {
+ 		return s.finishPreDispatchError(ctx, q.ID, ErrBudgetRequired, cmd)

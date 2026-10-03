@@ -1,0 +1,100 @@
++		writeError(w, http.StatusInternalServerError, err.Error())
++		return
++	}
++	filtered := rows[:0]
++	for _, row := range rows {
++		if row.WorkspaceID == workspaceID {
++			filtered = append(filtered, row)
++		}
++	}
++	writeJSON(w, http.StatusOK, filtered)
++}
++
+ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
+ 	i, ok := s.authenticate(w, r)
+ 	if !ok {
+@@ -562,6 +629,23 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, i Identity, w
+ 	return true
+ }
+ 
++func (s *Server) listGlobalResourceLeases(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
++	if workspaceID == "" || !s.authorize(w, r, i, workspaceID, "projects.read") {
++		return
++	}
++	if s.resourceCoord == nil {
++		writeJSON(w, http.StatusOK, map[string]any{"leases": []any{}})
++		return
++	}
++	rows, err := s.resourceCoord.Snapshot(r.Context(), 200)
++	respondDomain(w, map[string]any{"leases": rows}, err, http.StatusOK)
++}
++
+ func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
+ 	i, ok := s.authenticate(w, r)
+ 	if !ok {
+@@ -639,6 +723,196 @@ func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
+ 	}
+ 	writeJSON(w, http.StatusOK, p)
+ }
++func (s *Server) projectForWorkspaceView(ctx context.Context, workspaceID string) (projectworkspace.WorkspaceView, projectworkspace.Project, error) {
++	view, err := s.projects.WorkspaceView(ctx, workspaceID)
++	if err != nil {
++		return view, projectworkspace.Project{}, err
++	}
++	p, err := s.projects.Project(ctx, view.ProjectID)
++	return view, p, err
++}
++
++func (s *Server) listProjectWorkspaces(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	p, err := s.projects.Project(r.Context(), strings.TrimSpace(r.PathValue("projectID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.read") {
++		return
++	}
++	xs, err := s.projects.WorkspaceViews(r.Context(), p.ID)
++	respondDomain(w, map[string]any{"workspaces": xs}, err, http.StatusOK)
++}
++func (s *Server) createProjectWorkspace(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	p, err := s.projects.Project(r.Context(), strings.TrimSpace(r.PathValue("projectID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.write") {
++		return
++	}
++	var in struct {
++		Name          string          `json:"name"`
++		Description   *string         `json:"description"`
++		Layout        json.RawMessage `json:"layout"`
++		AISettings    json.RawMessage `json:"ai_settings"`
++		ResourceScope json.RawMessage `json:"resource_scope"`
++		State         json.RawMessage `json:"state"`
++		StorageRoot   *string         `json:"storage_root"`
++	}
++	if !decodeJSON(w, r, &in) {
++		return
++	}
++	x, err := s.projects.CreateWorkspaceView(r.Context(), projectworkspace.CreateWorkspaceViewCommand{ProjectID: p.ID, Name: in.Name, Description: in.Description, LayoutJSON: in.Layout, AISettingsJSON: in.AISettings, ResourceScopeJSON: in.ResourceScope, StateJSON: in.State, StorageRoot: in.StorageRoot, ActorPrincipalID: i.PrincipalID})
++	respondDomain(w, x, err, http.StatusCreated)
++}
++func (s *Server) getProjectWorkspace(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return

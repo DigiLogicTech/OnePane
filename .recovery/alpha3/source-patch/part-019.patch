@@ -1,0 +1,100 @@
++		}
++	}
++	return nil
++}
++
++func ensureProjectMarker(root, projectID string) error {
++	if strings.TrimSpace(root) == "" || strings.TrimSpace(projectID) == "" {
++		return errors.New("invalid Project storage marker")
++	}
++	path := filepath.Join(root, ".onepane-project-storage")
++	if b, err := os.ReadFile(path); err == nil {
++		if strings.TrimSpace(string(b)) != projectID {
++			return errors.New("storage directory belongs to a different OnePane Project")
++		}
++		return nil
++	} else if !errors.Is(err, os.ErrNotExist) {
++		return err
++	}
++	return os.WriteFile(path, []byte(projectID+"\n"), 0o600)
++}
++
++func projectMarkerMatches(root, projectID string) bool {
++	b, err := os.ReadFile(filepath.Join(root, ".onepane-project-storage"))
++	return err == nil && strings.TrimSpace(string(b)) == strings.TrimSpace(projectID)
++}
++
++func samePath(a, b string) bool {
++	aa, _ := filepath.Abs(a)
++	bb, _ := filepath.Abs(b)
++	return strings.EqualFold(filepath.Clean(aa), filepath.Clean(bb))
++}
++
++func isPathWithin(candidate, root string) bool {
++	c, err1 := filepath.Abs(candidate)
++	r, err2 := filepath.Abs(root)
++	if err1 != nil || err2 != nil {
++		return false
++	}
++	rel, err := filepath.Rel(r, c)
++	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
++}
+diff --git a/internal/projectworkspace/views.go b/internal/projectworkspace/views.go
+new file mode 100644
+index 0000000..db249a7
+--- /dev/null
++++ b/internal/projectworkspace/views.go
+@@ -0,0 +1,298 @@
++package projectworkspace
++
++import (
++	"context"
++	"database/sql"
++	"encoding/json"
++	"strings"
++
++	"github.com/DigiLogicTech/OnePane/internal/event"
++	"github.com/DigiLogicTech/OnePane/internal/storage"
++)
++
++// WorkspaceView is the Alpha 3 composable UI/execution context owned by a
++// Project. It is intentionally distinct from the legacy top-level workspace,
++// which remains the tenancy/security boundary for backward compatibility.
++type WorkspaceView struct {
++	ID                string          `json:"id"`
++	ProjectID         string          `json:"project_id"`
++	Name              string          `json:"name"`
++	Description       *string         `json:"description,omitempty"`
++	Status            string          `json:"status"`
++	LayoutJSON        json.RawMessage `json:"layout"`
++	AISettingsJSON    json.RawMessage `json:"ai_settings"`
++	ResourceScopeJSON json.RawMessage `json:"resource_scope"`
++	StateJSON         json.RawMessage `json:"state"`
++	StorageRoot       *string         `json:"storage_root,omitempty"`
++	Revision          int64           `json:"revision"`
++	CreatedAt         int64           `json:"created_at"`
++	UpdatedAt         int64           `json:"updated_at"`
++}
++
++type CreateWorkspaceViewCommand struct {
++	ProjectID         string
++	Name              string
++	Description       *string
++	LayoutJSON        json.RawMessage
++	AISettingsJSON    json.RawMessage
++	ResourceScopeJSON json.RawMessage
++	StateJSON         json.RawMessage
++	StorageRoot       *string
++	ActorPrincipalID  string
++}
++
++type UpdateWorkspaceViewCommand struct {
++	WorkspaceID       string
++	ExpectedRevision  int64
++	Name              string
++	Description       *string
++	LayoutJSON        json.RawMessage
++	AISettingsJSON    json.RawMessage
++	ResourceScopeJSON json.RawMessage
++	StateJSON         json.RawMessage
++	StorageRoot       *string

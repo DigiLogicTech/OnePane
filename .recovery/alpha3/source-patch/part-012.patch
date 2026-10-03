@@ -1,0 +1,100 @@
++	Qualification      string            `json:"qualification"`
++	ProtocolLevel      string            `json:"protocol_level"`
++	Capabilities       []string          `json:"capabilities"`
++	Roles              []string          `json:"roles"`
++	ToolUseAllowed     bool              `json:"tool_use_allowed"`
++	Compute            DeploymentCompute `json:"compute,omitempty"`
+ }
+ 
+ type CapabilityManifest struct {
+@@ -68,6 +98,7 @@ type CapabilityManifest struct {
+ 	Generated  int64             `json:"generated_at"`
+ 	Models     []ModelCapability `json:"models"`
+ 	AgentCount int               `json:"agent_runtime_count"`
++	Compute    NodeComputeState  `json:"compute"`
+ }
+ 
+ type PairRequest struct {
+@@ -146,3 +177,32 @@ type RemoteModelInstallRequest struct {
+ 	PreferGPU           bool   `json:"prefer_gpu"`
+ 	PlacementPreference string `json:"placement_preference,omitempty"`
+ }
++
++type ComputePolicy struct {
++	NodeID              string          `json:"node_id"`
++	Enabled             bool            `json:"enabled"`
++	IdleOnly            bool            `json:"idle_only"`
++	AvailabilityJSON    json.RawMessage `json:"availability"`
++	LimitsJSON          json.RawMessage `json:"limits"`
++	AllowModelDownloads bool            `json:"allow_model_downloads"`
++	RuntimeInstallation string          `json:"runtime_installation"`
++	ProjectScope        string          `json:"project_scope"`
++	AllowedProjectsJSON json.RawMessage `json:"allowed_projects"`
++	UpdatedBy           *string         `json:"updated_by,omitempty"`
++	Revision            int64           `json:"revision"`
++	CreatedAt           int64           `json:"created_at"`
++	UpdatedAt           int64           `json:"updated_at"`
++}
++
++type SetComputePolicyCommand struct {
++	NodeID              string
++	Enabled             bool
++	IdleOnly            bool
++	AvailabilityJSON    json.RawMessage
++	LimitsJSON          json.RawMessage
++	AllowModelDownloads bool
++	RuntimeInstallation string
++	ProjectScope        string
++	AllowedProjectsJSON json.RawMessage
++	Actor               string
++}
+diff --git a/internal/operation/coordinator.go b/internal/operation/coordinator.go
+index 5af9bf2..f047732 100644
+--- a/internal/operation/coordinator.go
++++ b/internal/operation/coordinator.go
+@@ -11,12 +11,14 @@ import (
+ 	"fmt"
+ 	"io"
+ 	"strings"
++	"time"
+ 
+ 	"github.com/DigiLogicTech/OnePane/internal/authority"
+ 	"github.com/DigiLogicTech/OnePane/internal/clock"
+ 	"github.com/DigiLogicTech/OnePane/internal/event"
+ 	"github.com/DigiLogicTech/OnePane/internal/id"
+ 	"github.com/DigiLogicTech/OnePane/internal/policy"
++	"github.com/DigiLogicTech/OnePane/internal/resourcecoord"
+ 	"github.com/DigiLogicTech/OnePane/internal/storage"
+ 	"github.com/DigiLogicTech/OnePane/internal/tool"
+ 	"github.com/DigiLogicTech/OnePane/internal/verification"
+@@ -37,21 +39,23 @@ type approvalConsumer interface {
+ }
+ 
+ type Coordinator struct {
+-	tx        storage.Transactor
+-	repo      repository
+-	events    eventAppender
+-	policy    policyEvaluator
+-	tools     mutationToolGateway
+-	gate      *MutationGate
+-	ids       id.Generator
+-	clock     clock.Clock
+-	approvals approvalConsumer
++	tx              storage.Transactor
++	repo            repository
++	events          eventAppender
++	policy          policyEvaluator
++	tools           mutationToolGateway
++	gate            *MutationGate
++	ids             id.Generator
++	clock           clock.Clock
++	approvals       approvalConsumer
++	globalResources *resourcecoord.Service
+ }
+ 
+ func NewCoordinator(db *sql.DB, tx storage.Transactor, p policyEvaluator, tools mutationToolGateway, gate *MutationGate, clk clock.Clock) *Coordinator {
+ 	return &Coordinator{tx: tx, repo: newSQLRepository(db), events: event.Store{}, policy: p, tools: tools, gate: gate, ids: id.Generator{}, clock: clk}
+ }
+-func (c *Coordinator) SetApprovalConsumer(a approvalConsumer) { c.approvals = a }
++func (c *Coordinator) SetApprovalConsumer(a approvalConsumer)                { c.approvals = a }
++func (c *Coordinator) SetGlobalResourceCoordinator(v *resourcecoord.Service) { c.globalResources = v }

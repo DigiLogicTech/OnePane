@@ -39,15 +39,19 @@ jobs:
           cat .recovery/alpha3/source-patch/part-*.patch > alpha3-source.patch
           test "$(wc -l < alpha3-source.patch)" -eq 4599
           echo "44e31c4bc6df048acec092629a61feaa86c5bde6d31346ead653cf65b9a3f17d  alpha3-source.patch" | sha256sum -c -
+          sha256sum buildsrc/README.md buildsrc/cmd/harnessd/main.go buildsrc/internal/api/server.go
+          git hash-object buildsrc/README.md buildsrc/cmd/harnessd/main.go buildsrc/internal/api/server.go
           (
             cd buildsrc
-            git apply --check ../alpha3-source.patch
-            git apply ../alpha3-source.patch
+            git apply --check --verbose ../alpha3-source.patch
+            echo "PATCH_CHECK_OK"
+            git apply --verbose ../alpha3-source.patch
+            echo "PATCH_APPLY_OK"
           )
-          test -f buildsrc/go.mod
-          test -f buildsrc/cmd/harnessd/main.go
-          test -f buildsrc/packaging/windows/setup/main.go
-          grep -q '0.1.0-alpha.3' buildsrc/packaging/windows/setup/main.go
+          test -f buildsrc/go.mod && echo "GO_MOD_OK"
+          test -f buildsrc/cmd/harnessd/main.go && echo "HARNESS_MAIN_OK"
+          test -f buildsrc/packaging/windows/setup/main.go && echo "WINDOWS_SETUP_OK"
+          grep -q '0.1.0-alpha.3' buildsrc/packaging/windows/setup/main.go && echo "ALPHA3_VERSION_OK"
           echo "source files: $(find buildsrc -type f | wc -l)"
 
       - name: Validate Alpha 3 source contracts

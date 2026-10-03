@@ -1,0 +1,100 @@
+-		if setModelPool != "" {
+-			args = append(args, "--set-model-pool", setModelPool)
++		if repair {
++			args = append(args, "--repair")
++		}
++		for _, item := range [][2]string{{"--set-model-pool", setModelPool}, {"--set-project-root", setProjectRoot}, {"--install-dir", installDirArg}, {"--project-root", projectRootArg}, {"--model-pool", modelPoolArg}} {
++			if item[1] != "" {
++				args = append(args, item[0], item[1])
++			}
+ 		}
+ 		if err := elevateArgs(args...); err != nil {
+ 			message("OnePane Setup", "Administrator approval is required to modify OnePane.\n\n"+err.Error(), 0x10)
+@@ -53,30 +63,41 @@ func main() {
+ 		return
+ 	}
+ 	if setModelPool != "" {
+-		if err := updateModelPoolPath(setModelPool); err != nil {
++		if err := updateConfigPath("model_pool_path", "local_ai", setModelPool); err != nil {
+ 			message("OnePane Settings", "Could not update the model pool:\n\n"+err.Error(), 0x10)
+ 			return
+ 		}
+ 		message("OnePane Settings", "The local model pool is now:\n\n"+setModelPool+"\n\nThe OnePane service has been restarted with the new setting.", 0x40)
+ 		return
+ 	}
++	if setProjectRoot != "" {
++		if err := updateConfigPath("project_root", "storage", setProjectRoot); err != nil {
++			message("OnePane Settings", "Could not update the default Project storage root:\n\n"+err.Error(), 0x10)
++			return
++		}
++		message("OnePane Settings", "The default Project storage root is now:\n\n"+setProjectRoot+"\n\nExisting Projects are not moved automatically.", 0x40)
++		return
++	}
+ 	if uninstall {
+ 		if err := uninstallProduct(); err != nil {
+ 			message("OnePane Uninstall", "Uninstall encountered an error:\n\n"+err.Error(), 0x10)
+ 			return
+ 		}
+-		message("OnePane Uninstall", "OnePane has been uninstalled.\n\nYour data under C:\\ProgramData\\OnePane was preserved.", 0x40)
++		message("OnePane Uninstall", "OnePane has been uninstalled.\n\nProjects, models and application data were preserved.", 0x40)
+ 		return
+ 	}
+-	if err := installProduct(); err != nil {
++	if err := installProduct(installDirArg, projectRootArg, modelPoolArg, repair); err != nil {
+ 		message("OnePane Setup", "Installation failed:\n\n"+err.Error()+"\n\nSee %TEMP%\\OnePaneSetup.log for details.", 0x10)
+ 		return
+ 	}
+-	message("OnePane Setup", "OnePane v"+version+" is installed.\n\nThe Windows service is running and the desktop application will open now.", 0x40)
++	verb := "installed"
++	if repair {
++		verb = "repaired"
++	}
++	message("OnePane Setup", "OnePane v"+version+" is "+verb+".\n\nThe Windows service is running and the desktop application will open now.", 0x40)
+ 	launchDesktop()
+ }
+-
+-func installProduct() error {
++func installProduct(installDirArg, projectRootArg, modelPoolArg string, repair bool) error {
+ 	logf("starting OnePane %s installation", version)
+ 	programFiles := os.Getenv("ProgramFiles")
+ 	if programFiles == "" {
+@@ -86,8 +107,24 @@ func installProduct() error {
+ 	if programData == "" {
+ 		programData = `C:\ProgramData`
+ 	}
+-	installDir := filepath.Join(programFiles, "OnePane")
++	defaultInstallDir := filepath.Join(programFiles, "OnePane")
+ 	dataDir := filepath.Join(programData, "OnePane")
++	installDir := strings.TrimSpace(installDirArg)
++	if installDir == "" {
++		installDir = readInstallPath(dataDir)
++	}
++	if installDir == "" {
++		installDir = defaultInstallDir
++	}
++	if !repair && strings.TrimSpace(installDirArg) == "" && readInstallPath(dataDir) == "" {
++		message("OnePane Setup", "Choose where the OnePane application should be installed.\n\nCancel keeps the default location:\n"+defaultInstallDir, 0x40)
++		if chosen, err := chooseFolder("Choose the OnePane application install folder", defaultInstallDir); err == nil && strings.TrimSpace(chosen) != "" {
++			installDir = chosen
++		}
++	}
++	if !filepath.IsAbs(installDir) {
++		return fmt.Errorf("installation location must be absolute")
++	}
+ 	logDir := filepath.Join(dataDir, "logs")
+ 	if err := os.MkdirAll(installDir, 0o755); err != nil {
+ 		return err
+@@ -95,6 +132,9 @@ func installProduct() error {
+ 	if err := os.MkdirAll(logDir, 0o755); err != nil {
+ 		return err
+ 	}
++	if err := os.WriteFile(filepath.Join(dataDir, "install-path.txt"), []byte(installDir), 0o644); err != nil {
++		return err
++	}
+ 
+ 	// Stop an earlier alpha cleanly before replacing binaries.
+ 	_ = runHidden("sc.exe", "stop", serviceName)
+@@ -117,40 +157,66 @@ func installProduct() error {
+ 	}
+ 
+ 	configPath := filepath.Join(dataDir, "config.yaml")

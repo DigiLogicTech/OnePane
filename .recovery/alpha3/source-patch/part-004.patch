@@ -1,0 +1,100 @@
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.read") {
++		return
++	}
++	x, err := s.projects.ProjectStorage(r.Context(), p.ID)
++	respondDomain(w, x, err, http.StatusOK)
++}
++
++func (s *Server) moveProjectStorage(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	p, err := s.projects.Project(r.Context(), strings.TrimSpace(r.PathValue("projectID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.write") {
++		return
++	}
++	var in struct {
++		StorageRoot string `json:"storage_root"`
++	}
++	if !decodeJSON(w, r, &in) {
++		return
++	}
++	x, err := s.projects.MoveProjectStorage(r.Context(), p.ID, in.StorageRoot, i.PrincipalID)
++	respondDomain(w, x, err, http.StatusOK)
++}
++
+ func (s *Server) createRuntime(w http.ResponseWriter, r *http.Request) {
+ 	i, ok := s.authenticate(w, r)
+ 	if !ok {
+@@ -2512,6 +2786,49 @@ func (s *Server) setNodeModelManagement(w http.ResponseWriter, r *http.Request)
+ 	writeJSON(w, 200, g)
+ }
+ 
++func (s *Server) getNodeComputePolicy(w http.ResponseWriter, r *http.Request) {
++	if _, ok := s.requireNodeOperator(w, r); !ok {
++		return
++	}
++	nodeID := strings.TrimSpace(r.PathValue("nodeID"))
++	p, err := s.federation.ComputePolicy(r.Context(), nodeID)
++	if errors.Is(err, sql.ErrNoRows) {
++		writeJSON(w, http.StatusOK, map[string]any{"node_id": nodeID, "enabled": true, "idle_only": false, "allow_model_downloads": true, "runtime_installation": "confirm", "project_scope": "all", "availability": map[string]any{}, "limits": map[string]any{}, "allowed_projects": []string{}})
++		return
++	}
++	if err != nil {
++		writeError(w, http.StatusInternalServerError, err.Error())
++		return
++	}
++	writeJSON(w, http.StatusOK, p)
++}
++
++func (s *Server) setNodeComputePolicy(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.requireNodeOperator(w, r)
++	if !ok {
++		return
++	}
++	var in struct {
++		Enabled             bool            `json:"enabled"`
++		IdleOnly            bool            `json:"idle_only"`
++		Availability        json.RawMessage `json:"availability"`
++		Limits              json.RawMessage `json:"limits"`
++		AllowModelDownloads bool            `json:"allow_model_downloads"`
++		RuntimeInstallation string          `json:"runtime_installation"`
++		ProjectScope        string          `json:"project_scope"`
++		AllowedProjects     json.RawMessage `json:"allowed_projects"`
++	}
++	if !decodeJSON(w, r, &in) {
++		return
++	}
++	p, err := s.federation.SetComputePolicy(r.Context(), nodefederation.SetComputePolicyCommand{NodeID: strings.TrimSpace(r.PathValue("nodeID")), Enabled: in.Enabled, IdleOnly: in.IdleOnly, AvailabilityJSON: in.Availability, LimitsJSON: in.Limits, AllowModelDownloads: in.AllowModelDownloads, RuntimeInstallation: in.RuntimeInstallation, ProjectScope: in.ProjectScope, AllowedProjectsJSON: in.AllowedProjects, Actor: i.PrincipalID})
++	if err != nil {
++		writeError(w, http.StatusConflict, err.Error())
++		return
++	}
++	writeJSON(w, http.StatusOK, p)
++}
++
+ func (s *Server) remoteNodeModelRecommendations(w http.ResponseWriter, r *http.Request) {
+ 	if _, ok := s.requireNodeOperator(w, r); !ok {
+ 		return
+diff --git a/internal/bootstrap/bootstrap.go b/internal/bootstrap/bootstrap.go
+index 6b9bf70..799a4dd 100644
+--- a/internal/bootstrap/bootstrap.go
++++ b/internal/bootstrap/bootstrap.go
+@@ -34,8 +34,10 @@ import (
+ 	"github.com/DigiLogicTech/OnePane/internal/projectruntime"
+ 	"github.com/DigiLogicTech/OnePane/internal/projectworkspace"
+ 	"github.com/DigiLogicTech/OnePane/internal/provideronboarding"
++	"github.com/DigiLogicTech/OnePane/internal/resourcecoord"
+ 	"github.com/DigiLogicTech/OnePane/internal/routine"
+ 	"github.com/DigiLogicTech/OnePane/internal/routineworker"
++	"github.com/DigiLogicTech/OnePane/internal/runtimecoord"
+ 	"github.com/DigiLogicTech/OnePane/internal/sandboxrunner"
+ 	"github.com/DigiLogicTech/OnePane/internal/scheduler"

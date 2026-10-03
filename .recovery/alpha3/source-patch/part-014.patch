@@ -1,0 +1,100 @@
+ 		}
++		oGlobalLeaseID = o.GlobalResourceLeaseID
+ 		if o.Revision != cmd.ExpectedRevision {
+ 			return ErrRevisionConflict
+ 		}
+@@ -451,6 +499,7 @@ func (c *Coordinator) CommitVerified(ctx context.Context, cmd CommitCommand) (Op
+ 	if err != nil {
+ 		return Operation{}, err
+ 	}
++	c.releaseGlobalResourceLease(ctx, Operation{GlobalResourceLeaseID: oGlobalLeaseID})
+ 	return c.repo.Get(ctx, cmd.OperationID)
+ }
+ 
+@@ -461,11 +510,13 @@ func (c *Coordinator) Abort(ctx context.Context, cmd AbortCommand) (Operation, e
+ 	now := c.clock.UnixMilli()
+ 	evtID, _ := c.ids.New("evt")
+ 	leaseEvt, _ := c.ids.New("evt")
++	var oGlobalLeaseID *string
+ 	err := c.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+ 		o, e := c.repo.GetTx(ctx, tx, cmd.OperationID)
+ 		if e != nil {
+ 			return e
+ 		}
++		oGlobalLeaseID = o.GlobalResourceLeaseID
+ 		if o.Revision != cmd.ExpectedRevision {
+ 			return ErrRevisionConflict
+ 		}
+@@ -499,18 +550,27 @@ func (c *Coordinator) Abort(ctx context.Context, cmd AbortCommand) (Operation, e
+ 	if err != nil {
+ 		return Operation{}, err
+ 	}
++	c.releaseGlobalResourceLease(ctx, Operation{GlobalResourceLeaseID: oGlobalLeaseID})
+ 	return c.repo.Get(ctx, cmd.OperationID)
+ }
+ 
++func (c *Coordinator) releaseGlobalResourceLease(ctx context.Context, o Operation) {
++	if c.globalResources != nil && o.GlobalResourceLeaseID != nil {
++		_ = c.globalResources.Release(ctx, *o.GlobalResourceLeaseID)
++	}
++}
++
+ func (c *Coordinator) finishKnownFailure(ctx context.Context, o Operation, reason string, actor, requestID, traceID *string) error {
+ 	now := c.clock.UnixMilli()
+ 	evtID, _ := c.ids.New("evt")
+ 	leaseEvt, _ := c.ids.New("evt")
+-	return c.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
++	var globalLeaseID *string
++	err := c.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+ 		cur, e := c.repo.GetTx(ctx, tx, o.ID)
+ 		if e != nil {
+ 			return e
+ 		}
++		globalLeaseID = cur.GlobalResourceLeaseID
+ 		if cur.State != StateExecuting {
+ 			return ErrInvalidTransition
+ 		}
+@@ -536,8 +596,11 @@ func (c *Coordinator) finishKnownFailure(ctx context.Context, o Operation, reaso
+ 		}
+ 		return nil
+ 	})
++	if err == nil {
++		c.releaseGlobalResourceLease(ctx, Operation{GlobalResourceLeaseID: globalLeaseID})
++	}
++	return err
+ }
+-
+ func (c *Coordinator) transitionWithDetails(ctx context.Context, id string, revision int64, from, to State, actor, requestID, traceID *string, details map[string]any) error {
+ 	if !CanTransition(from, to) {
+ 		return ErrInvalidTransition
+diff --git a/internal/operation/repository.go b/internal/operation/repository.go
+index 343c178..695f864 100644
+--- a/internal/operation/repository.go
++++ b/internal/operation/repository.go
+@@ -14,7 +14,7 @@ type repository interface {
+ 	Insert(context.Context, storage.Tx, Operation) error
+ 	Transition(context.Context, storage.Tx, string, int64, State, State, int64) error
+ 	SetAuthorization(context.Context, storage.Tx, string, int64, int64, string, int64, string, string, int64) error
+-	SetResourceLease(context.Context, storage.Tx, string, int64, string, int64) error
++	SetResourceLease(context.Context, storage.Tx, string, int64, string, *string, int64) error
+ 
+ 	AcquireResourceLease(context.Context, storage.Tx, ResourceLease) error
+ 	ResourceLeaseTx(context.Context, storage.Tx, string) (ResourceLease, error)
+diff --git a/internal/operation/repository_sql.go b/internal/operation/repository_sql.go
+index c9caca7..f512d66 100644
+--- a/internal/operation/repository_sql.go
++++ b/internal/operation/repository_sql.go
+@@ -20,13 +20,13 @@ SELECT id, workspace_id, task_id, attempt_id, principal_id, compensates_operatio
+        idempotency_key, state, capability_id, resource_ref, tool_id, tool_version,
+        adapter_id, adapter_version, desired_state_json, precondition_json,
+        reconciliation_json, compensation_json, policy_revision, input_hash,
+-       capability_lease_id, capability_lease_revision, resource_lease_id,
++       capability_lease_id, capability_lease_revision, resource_lease_id, global_resource_lease_id,
+        required_verification, required_approval, revision, created_at, updated_at
+ FROM operations`
+ 
+ func scanOperation(row interface{ Scan(...any) error }) (Operation, error) {
+ 	var o Operation
+-	var taskID, attemptID, compensates, leaseID, resourceLeaseID sql.NullString
++	var taskID, attemptID, compensates, leaseID, resourceLeaseID, globalResourceLeaseID sql.NullString
+ 	var compensation sql.NullString

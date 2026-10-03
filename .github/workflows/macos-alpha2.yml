@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p buildsrc
-          base64 -D .recovery/alpha2-buildsrc-current.b64 > alpha2-source.tar.xz
+          base64 -D -i .recovery/alpha2-buildsrc-current.b64 -o alpha2-source.tar.xz
           tar -xJf alpha2-source.tar.xz -C buildsrc
           test -f buildsrc/go.mod
           test -f buildsrc/packaging/macos/OnePaneApp.swift

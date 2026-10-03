@@ -66,6 +66,8 @@ jobs:
           mkdir -p buildsrc
           base64 -d .recovery/alpha2-buildsrc-current.b64 > alpha2-source.tar.xz
           tar -xJf alpha2-source.tar.xz -C buildsrc
+          cp LICENSE buildsrc/LICENSE
+          if [ -f NOTICE ]; then cp NOTICE buildsrc/NOTICE; fi
       - name: Build Debian package
         shell: bash
         env:

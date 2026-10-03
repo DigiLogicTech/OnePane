@@ -1,0 +1,45 @@
+name: Diagnose OnePane alpha.2 Go tests
+
+on:
+  push:
+    branches:
+      - build/alpha2-windows
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore alpha.2 source
+        shell: bash
+        run: |
+          mkdir -p src
+          base64 -d .build/onepane-alpha2-source.tar.gz.b64 > /tmp/onepane-alpha2-source.tar.gz
+          tar -xzf /tmp/onepane-alpha2-source.tar.gz -C src
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache-dependency-path: src/go.sum
+      - name: Normalize modules
+        working-directory: src
+        run: go mod tidy
+      - name: Capture full Go test output
+        working-directory: src
+        shell: bash
+        run: |
+          set +e
+          go test -json ./... > gotest.json 2>&1
+          code=$?
+          echo "$code" > gotest.exit
+          exit 0
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnePane-alpha2-real-gotest-diagnostics
+          path: |
+            src/gotest.json
+            src/gotest.exit
+          retention-days: 3

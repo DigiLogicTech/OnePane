@@ -32,7 +32,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p buildsrc
-          base64 -d .recovery/alpha2-buildsrc-current.b64 > alpha2-source.tar.xz
+          git fetch origin alpha2-integration --depth=1\n          git show FETCH_HEAD:.recovery/alpha2-buildsrc-current.b64 > alpha2-buildsrc-current.b64\n          base64 -d alpha2-buildsrc-current.b64 > alpha2-source.tar.xz
           tar -xJf alpha2-source.tar.xz -C buildsrc
           cat .recovery/alpha3/source-patch/part-*.patch > alpha3-source.patch
           test "$(wc -l < alpha3-source.patch)" -eq 4599

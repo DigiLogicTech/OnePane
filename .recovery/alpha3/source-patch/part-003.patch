@@ -1,0 +1,100 @@
++	}
++	x, p, err := s.projectForWorkspaceView(r.Context(), strings.TrimSpace(r.PathValue("workspaceID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.read") {
++		return
++	}
++	writeJSON(w, http.StatusOK, x)
++}
++func (s *Server) updateProjectWorkspace(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	x, p, err := s.projectForWorkspaceView(r.Context(), strings.TrimSpace(r.PathValue("workspaceID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.write") {
++		return
++	}
++	var in struct {
++		ExpectedRevision int64           `json:"expected_revision"`
++		Name             string          `json:"name"`
++		Description      *string         `json:"description"`
++		Layout           json.RawMessage `json:"layout"`
++		AISettings       json.RawMessage `json:"ai_settings"`
++		ResourceScope    json.RawMessage `json:"resource_scope"`
++		State            json.RawMessage `json:"state"`
++		StorageRoot      *string         `json:"storage_root"`
++	}
++	if !decodeJSON(w, r, &in) {
++		return
++	}
++	if strings.TrimSpace(in.Name) == "" {
++		in.Name = x.Name
++	}
++	out, err := s.projects.UpdateWorkspaceView(r.Context(), projectworkspace.UpdateWorkspaceViewCommand{WorkspaceID: x.ID, ExpectedRevision: in.ExpectedRevision, Name: in.Name, Description: in.Description, LayoutJSON: in.Layout, AISettingsJSON: in.AISettings, ResourceScopeJSON: in.ResourceScope, StateJSON: in.State, StorageRoot: in.StorageRoot, ActorPrincipalID: i.PrincipalID})
++	respondDomain(w, out, err, http.StatusOK)
++}
++func (s *Server) archiveProjectWorkspace(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	x, p, err := s.projectForWorkspaceView(r.Context(), strings.TrimSpace(r.PathValue("workspaceID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.write") {
++		return
++	}
++	var in struct {
++		ExpectedRevision int64 `json:"expected_revision"`
++	}
++	if !decodeJSON(w, r, &in) {
++		return
++	}
++	err = s.projects.ArchiveWorkspaceView(r.Context(), x.ID, in.ExpectedRevision)
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	writeJSON(w, http.StatusOK, map[string]any{"archived": true})
++}
++func (s *Server) moveProjectWorkspaceStorage(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	x, p, err := s.projectForWorkspaceView(r.Context(), strings.TrimSpace(r.PathValue("workspaceID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.write") {
++		return
++	}
++	var in struct {
++		ExpectedRevision int64  `json:"expected_revision"`
++		StorageRoot      string `json:"storage_root"`
++	}
++	if !decodeJSON(w, r, &in) {
++		return
++	}
++	out, err := s.projects.MoveWorkspaceStoragePointer(r.Context(), x.ID, in.ExpectedRevision, in.StorageRoot)
++	respondDomain(w, out, err, http.StatusOK)
++}
++
++func (s *Server) getProjectStorage(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	p, err := s.projects.Project(r.Context(), strings.TrimSpace(r.PathValue("projectID")))
++	if err != nil {

@@ -1,0 +1,100 @@
++		if len(devices) == 0 {
++			devices = []string{"gpu-0"}
++		}
++		for _, d := range devices {
++			out = append(out, "node:"+node+":gpu:"+d)
++		}
++	}
++	return out
++}
++
++func firstNonEmpty(vs ...string) string {
++	for _, v := range vs {
++		if strings.TrimSpace(v) != "" {
++			return strings.TrimSpace(v)
++		}
++	}
++	return ""
++}
++
++func (s *Service) persistQueued(ctx context.Context, w *waiter) error {
++	raw, _ := json.Marshal(w.claim)
++	id := strings.TrimSpace(w.req.InferenceRequestID)
++	if id == "" {
++		id = fmt.Sprintf("runtime-%d", w.queuedAt)
++	}
++	_, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO runtime_execution_queue(id,workspace_id,task_id,inference_request_id,deployment_id,node_id,priority,state,safe_boundary,resource_claim_json,queued_at,revision) VALUES(?,?,?,?,?,?,?,'queued','safe_pause',?,?,1)`, id, w.req.WorkspaceID, w.req.TaskID, nullable(w.req.InferenceRequestID), w.req.Deployment.ID, nullable(w.claim.NodeID), w.req.Priority, string(raw), w.queuedAt)
++	return err
++}
++
++func (s *Service) persistRunning(ctx context.Context, id string, at int64) error {
++	_, err := s.db.ExecContext(ctx, `UPDATE runtime_execution_queue SET state='running',started_at=?,safe_boundary='unsafe',revision=revision+1 WHERE id=?`, at, id)
++	return err
++}
++
++func (s *Service) persistTerminal(ctx context.Context, id, state, reason string) error {
++	now := s.clock.UnixMilli()
++	_, err := s.db.ExecContext(ctx, `UPDATE runtime_execution_queue SET state=?,completed_at=?,safe_boundary='complete',failure_reason=?,revision=revision+1 WHERE id=?`, state, now, nullable(reason), id)
++	return err
++}
++
++func nullable(v string) any {
++	if strings.TrimSpace(v) == "" {
++		return nil
++	}
++	return strings.TrimSpace(v)
++}
++
++func (s *Service) Snapshot(ctx context.Context, limit int) ([]QueueEntry, error) {
++	if limit <= 0 || limit > 500 {
++		limit = 100
++	}
++	rows, err := s.db.QueryContext(ctx, `SELECT id,COALESCE(workspace_id,''),task_id,inference_request_id,deployment_id,COALESCE(node_id,''),priority,state,safe_boundary,resource_claim_json,queued_at,started_at,completed_at,failure_reason FROM runtime_execution_queue ORDER BY queued_at DESC LIMIT ?`, limit)
++	if err != nil {
++		return nil, err
++	}
++	defer rows.Close()
++	out := []QueueEntry{}
++	for rows.Next() {
++		var x QueueEntry
++		var task, inf, failure sql.NullString
++		var started, completed sql.NullInt64
++		var raw string
++		if err := rows.Scan(&x.ID, &x.WorkspaceID, &task, &inf, &x.DeploymentID, &x.NodeID, &x.Priority, &x.State, &x.SafeBoundary, &raw, &x.QueuedAt, &started, &completed, &failure); err != nil {
++			return nil, err
++		}
++		if task.Valid {
++			v := task.String
++			x.TaskID = &v
++		}
++		if inf.Valid {
++			x.InferenceRequestID = inf.String
++		}
++		if failure.Valid {
++			v := failure.String
++			x.FailureReason = &v
++		}
++		if started.Valid {
++			v := started.Int64
++			x.StartedAt = &v
++		}
++		if completed.Valid {
++			v := completed.Int64
++			x.CompletedAt = &v
++		}
++		x.ResourceClaim = json.RawMessage(raw)
++		out = append(out, x)
++	}
++	return out, rows.Err()
++}
+diff --git a/internal/scheduler/catalog.go b/internal/scheduler/catalog.go
+index 48294c5..6f9519d 100644
+--- a/internal/scheduler/catalog.go
++++ b/internal/scheduler/catalog.go
+@@ -159,6 +159,9 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
+ 			return nil, err
+ 		}
+ 		cand := Candidate{ID: id, Kind: CandidateModel, DisplayName: modelRef, Status: status, TrustState: trust, Local: local == 1, Qualification: QualUntested, ProtocolLevel: "L0", CostClass: CostUnknown, Schedulable: (status == "ready" || status == "degraded") && (trust == "trusted" || trust == "user_trusted"), CapabilityIDs: []string{}, RoleNames: []string{}, ToolCallback: true}
++		if node.Valid {
++			cand.NodeID = node.String
++		}

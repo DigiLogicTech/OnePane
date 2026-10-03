@@ -2,7 +2,7 @@
 
 **A local-first AI control plane for persistent agents, models, tools, projects, automation, and verified execution.**
 
-OnePane is an open-source, self-hosted AI harness developed by **DigiLogic** and hosted under **DigiLogicTech**.
+OnePane is an open-source, self-hosted AI harness developed by **DigiLogic**, with its repository hosted under **DigiLogicTech**.
 
 Its central design principle is:
 
@@ -16,7 +16,7 @@ That distinction shapes the entire product. OnePane is designed so a task can su
 
 > **OnePane is Alpha software and is not yet recommended for production use.**
 
-Current development is focused on the **Alpha 2** line.
+Current development is focused on **Alpha 2**.
 
 The active integration branch is:
 
@@ -37,7 +37,7 @@ Ubuntu Alpha 2 packages are already being produced through CI. Windows and macOS
 
 Broader platform support — including Windows ARM64, RPM-based Linux distributions, generic Linux tarballs, OCI/container releases, mobile clients, and other operating systems — is intentionally deferred until the **Beta** phase.
 
-The current priority is to make OnePane a dependable product on a small number of platforms before increasing the support surface.
+The current priority is to make OnePane dependable on a small number of platforms before expanding platform support.
 
 ---
 
@@ -65,7 +65,7 @@ NEXT · RETRY · REPLAN · ESCALATE · HUMAN · DONE
 
 The harness remains authoritative throughout the lifecycle.
 
-A model can reason, propose actions, call approved capabilities, or produce candidate results. OnePane owns the durable task, permissions, execution state, observations, checkpoints, routing, verification, and final lifecycle decision.
+A model can reason, propose actions, invoke approved capabilities, or produce candidate results. OnePane owns the durable task, permissions, execution state, observations, checkpoints, routing, verification, and final lifecycle decisions.
 
 ---
 
@@ -133,7 +133,7 @@ The model does not own the routing decision.
 
 ### Local-first does not mean local-only
 
-OnePane is designed to prefer self-hosted execution where appropriate while still supporting larger local models, enrolled remote nodes, and approved hosted providers.
+OnePane is designed to prefer self-hosted execution where appropriate while still supporting larger self-hosted models, enrolled remote nodes, and approved hosted providers.
 
 The same durable task can move between execution targets without changing task ownership.
 
@@ -157,7 +157,7 @@ An optional component becoming unhealthy must not make the core OnePane harness 
 
 ## Persistent Tasks and Agents
 
-OnePane stores task and agent state independently of whichever model is serving them.
+OnePane stores task and agent state independently of whichever model is currently serving the workload.
 
 Durable state includes concepts such as:
 
@@ -200,7 +200,7 @@ Hot Swap is runtime-agnostic.
 
 It is not a choice between native inference and Colibri. OnePane can use Hot Swap **across** compatible inference paths.
 
-A slow runtime transition should leave the task alive and visible as switching rather than silently losing the job.
+A slow runtime transition should keep the task alive and visibly marked as switching rather than silently losing the job.
 
 If a target runtime becomes unhealthy, OnePane can quarantine it and select another qualified execution path when one exists.
 
@@ -261,7 +261,7 @@ Provider credentials remain brokered by OnePane rather than being broadly expose
 
 ## Distributed Inference and Nodes
 
-OnePane's node architecture allows inference capacity to exist somewhere other than the control-plane host.
+OnePane's node architecture allows inference workloads to run on machines other than the control-plane host.
 
 A node can advertise capabilities such as:
 
@@ -275,7 +275,7 @@ A node can advertise capabilities such as:
 
 The scheduler can use this information when selecting an execution target.
 
-A remote node does not become trusted merely because it is reachable. Enrollment, authentication, health qualification, capabilities, and project policy remain separate concerns.
+A remote node does not become trusted merely because it is reachable. Enrollment, authentication, health qualification, advertised capabilities, and project policy remain separate concerns.
 
 ---
 
@@ -327,7 +327,7 @@ Sandbox controls cover concepts such as:
 - project runtime policy
 - privilege boundaries
 
-Unsafe host-level privilege escape remains outside the normal project execution path.
+Unsafe host-level privilege escalation remains outside the normal project execution path.
 
 ---
 
@@ -377,7 +377,7 @@ This makes verification independent from the model that performed the work.
 
 ## Scheduling and Automation
 
-Alpha 2 includes task and routine concepts for both interactive and scheduled work.
+Alpha 2 supports both interactive tasks and scheduled routines.
 
 The same control-plane rules apply to autonomous work:
 
@@ -396,7 +396,7 @@ Scheduled work is not treated as a separate automation system bolted onto the si
 
 ## Operations and Inspector
 
-The Operations interface is designed around inspectable system state rather than isolated dashboard widgets.
+The Operations interface is designed around inspectable system state rather than a collection of isolated dashboard widgets.
 
 Operational objects such as tasks, nodes, providers, routines, and events can be opened in the Inspector.
 
@@ -409,7 +409,7 @@ Inspector workflows include:
 - task inspection
 - node and provider inspection
 
-This gives operators a common way to move from high-level status into the underlying object.
+This gives operators a consistent way to move from high-level status into the underlying object.
 
 ---
 
@@ -432,7 +432,7 @@ OmniRoute remains visually and logically distinct from direct provider configura
 
 ## UI and Product Configuration
 
-Alpha 2 includes product-level settings and UI work such as:
+Alpha 2 includes product-level settings and UI capabilities such as:
 
 - dark and softened light themes
 - two-tone and gradient themes
@@ -446,7 +446,6 @@ Alpha 2 includes product-level settings and UI work such as:
 - Operations Inspector
 - project/workspace layouts
 - responsive phone-oriented layouts
-- DigiLogic product branding
 
 Themes and languages are designed as extensible packages rather than permanently hard-coded choices.
 
@@ -472,7 +471,7 @@ Settings
             └── Remove / Reinstall
 ```
 
-The OS installer does not require separate Colibri or OmniRoute confirmation screens.
+The operating-system installer does not require separate Colibri or OmniRoute confirmation screens.
 
 This also avoids relying on global host-level package installation for managed inference/routing components.
 
@@ -523,7 +522,7 @@ The packages use systemd-managed service execution and persistent OnePane data/m
 
 macOS Alpha 2 targets a Universal application bundle and DMG covering Intel and Apple Silicon.
 
-The current Alpha packaging path is intended for development/testing and does not yet represent the final Apple signing/notarization process.
+The current Alpha packaging path is intended for development and testing and does not yet represent the final Apple signing and notarization process.
 
 ---
 
@@ -573,7 +572,7 @@ flowchart TB
 
 The architecture deliberately begins as a modular monolith.
 
-The objective is strong boundaries, deterministic behaviour, recovery, and observability before introducing distributed-system complexity merely for architectural fashion.
+The objective is to establish strong boundaries, deterministic behaviour, recovery, and observability before introducing unnecessary distributed-system complexity.
 
 ---
 
@@ -640,11 +639,11 @@ This keeps release artifacts tied to an immutable source revision and avoids loc
 
 # Development Priorities
 
-Alpha 2 is focused on making the product dependable rather than expanding its platform count.
+Alpha 2 is focused on making the product dependable rather than expanding the number of supported platforms.
 
 Current priorities include:
 
-1. Windows clean-install and broken-Alpha repair validation
+1. Windows clean-install and previous-Alpha repair validation
 2. macOS package validation
 3. managed component provisioning and supervision
 4. runtime-agnostic Hot Swap

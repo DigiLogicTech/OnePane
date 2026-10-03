@@ -35,7 +35,8 @@ jobs:
           cat .recovery/alpha3/source-patch/part-*.patch > alpha3-source.patch
           test "$(wc -l < alpha3-source.patch)" -eq 4599
           echo "44e31c4bc6df048acec092629a61feaa86c5bde6d31346ead653cf65b9a3f17d  alpha3-source.patch" | sha256sum -c -
-          (cd buildsrc && git apply --check ../alpha3-source.patch && git apply ../alpha3-source.patch)
+          git apply --check --directory=buildsrc alpha3-source.patch
+          git apply --directory=buildsrc alpha3-source.patch
           test -f buildsrc/go.mod
       - name: Validate source and tests
         working-directory: buildsrc
@@ -83,7 +84,8 @@ jobs:
           cat .recovery/alpha3/source-patch/part-*.patch > alpha3-source.patch
           test "$(wc -l < alpha3-source.patch)" -eq 4599
           echo "44e31c4bc6df048acec092629a61feaa86c5bde6d31346ead653cf65b9a3f17d  alpha3-source.patch" | sha256sum -c -
-          (cd buildsrc && git apply --check ../alpha3-source.patch && git apply ../alpha3-source.patch)
+          git apply --check --directory=buildsrc alpha3-source.patch
+          git apply --directory=buildsrc alpha3-source.patch
           cp LICENSE buildsrc/LICENSE
           if [ -f NOTICE ]; then cp NOTICE buildsrc/NOTICE; fi
       - name: Build Debian package

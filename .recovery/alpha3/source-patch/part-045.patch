@@ -1,0 +1,99 @@
++ROOT = Path(__file__).resolve().parents[1]
++read = lambda p: (ROOT / p).read_text(encoding='utf-8')
++ui = read('internal/webui/static/app.js')
++setup = read('packaging/windows/setup/main.go')
++runtime = read('internal/runtimecoord/service.go')
++resources = read('internal/resourcecoord/service.go')
++workspace = read('internal/projectworkspace/views.go') + read('internal/projectworkspace/storage.go')
++node = read('internal/nodefederation/types.go') + read('internal/nodefederation/service.go')
++models = read('internal/localai/managed_deployments.go')
++migration = read('migrations/0022_alpha3_control_plane.sql')
++api = read('internal/api/server.go')
++
++checks = []
++def ck(name, cond): checks.append((name, bool(cond)))
++
++ck('release is Alpha 3', "const QA8_RELEASE='0.1.0-alpha.3'" in ui and '0.1.0-alpha.3' in setup)
++ck('visible chat modes are Direct Team Council', "const qa8VisibleModes=['direct','team','council']" in ui and "modeOptions=[['default',`Default (${titleCase(defaultMode)})`],['direct','Direct'],['team','Team'],['council','Council']]" in ui)
++ck('legacy Supervisor maps to Direct', "function qa8Mode(v){v=String(v||'').toLowerCase();return v==='team'||v==='council'?v:'direct';}" in ui)
++ck('Model Stack is first-class workspace component', "QA6_COMPONENTS.modelstack={title:'Model Stack'" in ui and 'qa8ModelStackContent' in ui)
++ck('Model Stack supports compute preference', all(x in ui for x in ['prefer-gpu','prefer-cpu','gpu-only','cpu-only']))
++ck('qualified models hide Agent Check', "d.qualified" in ui and "[data-agent-check]" in ui and ".remove()" in ui)
++ck('models page is unified', "pages.models.title='Models'" in ui and "heading.textContent='Models'" in ui)
++ck('durable top navigation only', "['operations','projects','tasks','models','agents'].includes(route)" in ui)
++ck('global runtime coordinator exists', 'type Service struct' in runtime and 'Acquire' in runtime and 'runtime_execution_queue' in runtime)
++ck('CPU GPU hybrid scheduling exists', all(x in runtime for x in ['cpu','gpu','hybrid']))
++ck('global resource coordinator exists', 'global_resource_identities' in resources and 'global_resource_leases' in resources)
++ck('first-class project workspaces exist', 'project_workspaces' in workspace)
++ck('project storage move verifies hashes', all(x in workspace for x in ['sha256','project_storage_locations']))
++ck('model deployment exposes compute metadata', all(x in models for x in ['ComputeMode','ComputeBackend','ComputeDeviceIDs','RAMBytes','VRAMBytes']))
++ck('remote node compute policy exists', 'type ComputePolicy struct' in node and 'idle_only' in node)
++ck('runtime and resource visibility APIs exist', '/v1/runtime-queue' in api and '/v1/resource-leases' in api)
++ck('migration contains Alpha 3 persistence', all(x in migration for x in ['project_workspaces','runtime_compute_profiles','runtime_execution_queue','remote_node_compute_policies','global_resource_identities','global_resource_leases','project_storage_locations']))
++ck('Windows setup separates storage roots', all(x in setup for x in ['project-root','model-pool','install-dir']))
++ck('Windows setup can defer Ollama', 'OllamaSetup.exe' in setup and 'Skip' in setup or 'skip' in setup.lower())
++ck('WebView2 is downloaded on demand', 'LinkId=2124703' in setup and 'MicrosoftEdgeWebView2RuntimeInstallerX64.exe' not in setup)
++
++failed = [name for name, ok in checks if not ok]
++for name, ok in checks:
++    print(f"[{'PASS' if ok else 'FAIL'}] {name}")
++print(f"\nALPHA 3 SOURCE: {len(checks)-len(failed)}/{len(checks)} CHECKS PASSED")
++if failed:
++    for name in failed:
++        print(' - ' + name, file=sys.stderr)
++    sys.exit(1)
+diff --git a/scripts/validate_windows_qa5_source.py b/scripts/validate_windows_qa5_source.py
+index 911bb20..48f6dfe 100755
+--- a/scripts/validate_windows_qa5_source.py
++++ b/scripts/validate_windows_qa5_source.py
+@@ -14,10 +14,10 @@ files={
+  'boot':(root/'internal/bootstrap/bootstrap.go').read_text(),
+ }
+ checks=[
+- ('alpha.2 installer version','0.1.0-alpha.2' in files['setup']),
++ ('alpha.3 installer version','0.1.0-alpha.3' in files['setup']),
+  ('DigiLogic publisher','"Publisher"' in files['setup'] and '"DigiLogic"' in files['setup']),
+- ('Model Pool Location retained','Choose where OnePane should store local LLM models.' in files['setup'] and 'chooseModelPool(defaultModelPool)' in files['setup'] and 'model_pool_path:' in files['setup']),
+- ('desktop alpha.2 singleton','OnePaneDesktop-v0.1.0-alpha.2' in files['desktop']),
++ ('independent Project and Model Pool locations','Choose the default location for Project and Workspace data.' in files['setup'] and 'Choose the OnePane local model pool' in files['setup'] and 'project_root' in files['setup'] and 'model_pool_path' in files['setup']),
++ ('desktop alpha.3 singleton','OnePaneDesktop-v0.1.0-alpha.3' in files['desktop']),
+  ('OmniRoute removed from OS installer','Install optional OmniRoute now?' not in files['setup'] and 'optional runtimes are managed by the OnePane harness' in files['setup']),
+  ('OmniRoute harness lifecycle','"omniroute"' in files['components'] and 'case "enable"' in files['components'] and 'case "disable"' in files['components']),
+  ('Colibri removed from OS installer','Install the optional Colibri Large Model runtime now?' not in files['setup']),
+diff --git a/scripts/validate_windows_qa_source.py b/scripts/validate_windows_qa_source.py
+index 76e7739..a759ed6 100755
+--- a/scripts/validate_windows_qa_source.py
++++ b/scripts/validate_windows_qa_source.py
+@@ -55,7 +55,7 @@ check('OmniRoute URL persisted and failure isolated', 'onepane:omniroute-url' in
+ # Models / model pool.
+ check('model catalogue is real and scrollable', '/v1/local-ai/catalog' in ui and 'model-catalogue-scroll' in css)
+ check('model pool GUI setting', 'modelPoolPath' in ui and '/v1/settings/local-ai' in ui)
+-check('installer model pool chooser', 'Choose the OnePane local LLM model pool' in setup and 'model_pool_path' in setup)
++check('installer model pool chooser', 'Choose the OnePane local model pool' in setup and 'model_pool_path' in setup and 'project_root' in setup)
+ 
+ # Real list/read APIs used by dashboards.
+ for route, handler in [('tasks','listTasks'),('projects','listProjects'),('events','listEvents')]:
+diff --git a/scripts/validate_workspace_components_v2.py b/scripts/validate_workspace_components_v2.py
+index f387006..11489b7 100755
+--- a/scripts/validate_workspace_components_v2.py
++++ b/scripts/validate_workspace_components_v2.py
+@@ -12,15 +12,15 @@ scheduler=read('internal/scheduler/types.go')
+ checks=[]
+ def ck(name, cond): checks.append((name,bool(cond)))
+ 
+-ck('Defaults replace Global Settings for inheritance', "pages.settings.title='Defaults'" in ui and 'Defaults for new Workspaces' in ui and 'existing workspaces keep their own settings' in ui)
++ck('Settings retains Defaults inheritance semantics', "pages.settings.title='Settings'" in ui and 'workspace_defaults' in ui and 'existing workspaces keep their own settings' in ui)
+ ck('workspace defaults migrate legacy project defaults', 'legacy=stored.project_defaults||{}' in ui and 'workspace_defaults' in ui and 'delete next.project_defaults' in ui)
+ ck('workspace Settings is a reusable component', "QA6_COMPONENTS.settings={title:'Workspace settings'" in ui and "QA6_INSPECTOR_COMPONENTS.push('settings')" in ui)
+ ck('workspace Settings can be seeded into new layouts', "type:'settings',title:'Workspace settings'" in ui)
+ ck('workspace Settings persist per workspace', 'qa7SaveWorkspaceSettings' in ui and 'Saved for this workspace only.' in ui and 'qa4SaveProjectWorkspaces' in ui)
+-ck('chat mode selector lives inside Chat component', 'data-qa7-chat-mode' in ui and "['default',`Default (" in ui and all(x in ui for x in ["['direct','Direct']","['supervisor','Supervisor']","['workers','Workers']","['team','Team']","['council','Council']"]))
++ck('chat mode selector lives inside Chat component', 'data-qa7-chat-mode' in ui and "['default',`Default (" in ui and all(x in ui for x in ["['direct','Direct']","['team','Team']","['council','Council']"]) and "const qa8VisibleModes=['direct','team','council']" in ui)
+ ck('chat continues using slash commands', "api.chatCommand" in ui and 'qa7DrawSlashSuggestions' in ui)
+-ck('model routing toggle is workspace scoped', 'data-qa7-routing' in ui and 'Enable model routing, delegation and automatic fallback' in ui and "workspace.routing={enabled:" in ui)
+-ck('routing off collapses multi-worker chat modes', "workspace.routing?.enabled===false&&['workers','team','council'].includes(mode)" in ui)
++ck('model routing toggle is workspace scoped', 'data-qa7-routing' in ui and 'Enable model routing and automatic fallback' in ui and 'workspace.routing={' in ui)
++ck('routing off collapses multi-agent chat modes', "workspace.routing?.enabled===false&&mode!=='direct'" in ui)
+ ck('team roles carry primary and fallback selections', all(x in ui for x in ['fallback_model','fallback_agent','fallback_candidate_ids','fallback_agent_profiles']))
+ ck('workspace sandbox is stored on workspace', 'workspace.sandbox=' in ui and 'qa7WorkspaceSandbox' in ui and 'Workspace sandbox' in ui)
+ ck('remote reasoning toggle is workspace scoped', 'data-qa7-remote' in ui and 'Allow qualified enrolled-node / cloud reasoning workers' in ui)

@@ -1,0 +1,100 @@
+ 
+ func (c *Coordinator) Get(ctx context.Context, id string) (Operation, error) {
+ 	if c == nil || strings.TrimSpace(id) == "" {
+@@ -188,6 +192,20 @@ func (c *Coordinator) Prepare(ctx context.Context, cmd PrepareCommand) (Operatio
+ 	leaseEvt, _ := c.ids.New("evt")
+ 	now = c.clock.UnixMilli()
+ 	rl := ResourceLease{ID: leaseID, WorkspaceID: o.WorkspaceID, TaskID: o.TaskID, ResourceRef: o.ResourceRef, LeaseMode: "exclusive_mutation", Status: "active", AcquiredAt: now, ExpiresAt: now + ttl, Revision: 1}
++	var globalLease *resourcecoord.Lease
++	if c.globalResources != nil {
++		gl, e := c.globalResources.AcquireWrite(ctx, o.ResourceRef, resourcecoord.Owner{WorkspaceID: o.WorkspaceID, TaskID: o.TaskID}, time.Duration(ttl)*time.Millisecond)
++		if e != nil {
++			return o, e
++		}
++		globalLease = &gl
++	}
++	releaseGlobalOnError := true
++	defer func() {
++		if releaseGlobalOnError && globalLease != nil {
++			_ = c.globalResources.Release(context.Background(), globalLease.ID)
++		}
++	}()
+ 	err = c.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+ 		if active, e := c.repo.ActiveResourceLeaseForResource(ctx, tx, o.WorkspaceID, o.ResourceRef); e != nil {
+ 			return e
+@@ -197,7 +215,11 @@ func (c *Coordinator) Prepare(ctx context.Context, cmd PrepareCommand) (Operatio
+ 		if err := c.repo.AcquireResourceLease(ctx, tx, rl); err != nil {
+ 			return err
+ 		}
+-		if err := c.repo.SetResourceLease(ctx, tx, o.ID, o.Revision, rl.ID, now); err != nil {
++		var globalLeaseID *string
++		if globalLease != nil {
++			globalLeaseID = &globalLease.ID
++		}
++		if err := c.repo.SetResourceLease(ctx, tx, o.ID, o.Revision, rl.ID, globalLeaseID, now); err != nil {
+ 			return err
+ 		}
+ 		lp, _ := json.Marshal(map[string]any{"resource_lease_id": rl.ID, "resource_ref": rl.ResourceRef, "expires_at": rl.ExpiresAt, "operation_id": o.ID})
+@@ -210,6 +232,7 @@ func (c *Coordinator) Prepare(ctx context.Context, cmd PrepareCommand) (Operatio
+ 	if err != nil {
+ 		return o, err
+ 	}
++	releaseGlobalOnError = false
+ 	return c.repo.Get(ctx, o.ID)
+ }
+ 
+@@ -267,6 +290,24 @@ func (c *Coordinator) ContinueApproved(ctx context.Context, cmd ContinueApproved
+ 	prepEvt, _ := c.ids.New("evt")
+ 	leaseEvt, _ := c.ids.New("evt")
+ 	now := c.clock.UnixMilli()
++	preOp, preErr := c.repo.Get(ctx, cmd.OperationID)
++	if preErr != nil {
++		return Operation{}, preErr
++	}
++	var globalLease *resourcecoord.Lease
++	if c.globalResources != nil {
++		gl, e := c.globalResources.AcquireWrite(ctx, preOp.ResourceRef, resourcecoord.Owner{WorkspaceID: preOp.WorkspaceID, TaskID: preOp.TaskID}, time.Duration(ttl)*time.Millisecond)
++		if e != nil {
++			return Operation{}, e
++		}
++		globalLease = &gl
++	}
++	releaseGlobalOnError := true
++	defer func() {
++		if releaseGlobalOnError && globalLease != nil {
++			_ = c.globalResources.Release(context.Background(), globalLease.ID)
++		}
++	}()
+ 	err = c.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+ 		o, e := c.repo.GetTx(ctx, tx, cmd.OperationID)
+ 		if e != nil {
+@@ -290,7 +331,11 @@ func (c *Coordinator) ContinueApproved(ctx context.Context, cmd ContinueApproved
+ 		if e := c.repo.AcquireResourceLease(ctx, tx, rl); e != nil {
+ 			return e
+ 		}
+-		if e := c.repo.SetResourceLease(ctx, tx, o.ID, o.Revision, rl.ID, now); e != nil {
++		var globalLeaseID *string
++		if globalLease != nil {
++			globalLeaseID = &globalLease.ID
++		}
++		if e := c.repo.SetResourceLease(ctx, tx, o.ID, o.Revision, rl.ID, globalLeaseID, now); e != nil {
+ 			return e
+ 		}
+ 		lp, _ := json.Marshal(map[string]any{"resource_lease_id": rl.ID, "resource_ref": rl.ResourceRef, "expires_at": rl.ExpiresAt, "operation_id": o.ID, "approval_id": cmd.ApprovalID})
+@@ -303,6 +348,7 @@ func (c *Coordinator) ContinueApproved(ctx context.Context, cmd ContinueApproved
+ 	if err != nil {
+ 		return Operation{}, err
+ 	}
++	releaseGlobalOnError = false
+ 	return c.repo.Get(ctx, cmd.OperationID)
+ }
+ 
+@@ -391,11 +437,13 @@ func (c *Coordinator) CommitVerified(ctx context.Context, cmd CommitCommand) (Op
+ 	verifiedEvt, _ := c.ids.New("evt")
+ 	committedEvt, _ := c.ids.New("evt")
+ 	leaseEvt, _ := c.ids.New("evt")
++	var oGlobalLeaseID *string
+ 	err := c.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+ 		o, e := c.repo.GetTx(ctx, tx, cmd.OperationID)
+ 		if e != nil {
+ 			return e

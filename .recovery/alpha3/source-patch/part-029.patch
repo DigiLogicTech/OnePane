@@ -1,0 +1,100 @@
+ 		if verified.Valid {
+ 			cand.ContextMax = verified.Int64
+ 		} else if reported.Valid {
+@@ -169,11 +172,13 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
+ 			cand.WorkspaceID = &v
+ 		}
+ 		if local == 1 {
++			cand.ComputeMode = "cpu"
+ 			cand.CostClass = CostLocal
+ 			cand.HardZeroIncrementalCost = true
+ 			cand.AllowedResidency = []string{"any", "trusted_nodes", "origin_node"}
+ 			cand.Destination = destination("origin_node", ws, node.String, "secret")
+ 		} else if provider.Valid {
++			cand.ComputeMode = "cloud"
+ 			cand.Provider = provider.String
+ 			if pstatus.String != "connected" && pstatus.String != "degraded" {
+ 				cand.Schedulable = false
+@@ -191,6 +196,7 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
+ 				cand.Destination = destination(pc.DataPolicy.DestinationKind, ws, node.String, pc.DataPolicy.MaxConfidentiality)
+ 			}
+ 		} else if node.Valid {
++			cand.ComputeMode = "remote"
+ 			cand.CostClass = CostLocal
+ 			cand.HardZeroIncrementalCost = true
+ 			cand.AllowedResidency = []string{"any", "trusted_nodes"}
+@@ -206,6 +212,24 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
+ 		var dc struct {
+ 			Scheduling   schedulingMeta `json:"scheduling"`
+ 			ToolCallback *bool          `json:"tool_callback,omitempty"`
++			Compute      struct {
++				Mode     string `json:"mode"`
++				Backend  string `json:"backend"`
++				Cached   bool   `json:"cached"`
++				Resident bool   `json:"resident"`
++			} `json:"compute"`
++			NodeCompute struct {
++				Status      string  `json:"status"`
++				CPUUsagePct float64 `json:"cpu_usage_pct"`
++			} `json:"node_compute"`
++			RuntimeBackend string `json:"runtime_backend"`
++			Placement      struct {
++				Mode    string `json:"mode"`
++				Backend string `json:"backend"`
++				Devices []struct {
++					Kind string `json:"kind"`
++				} `json:"devices"`
++			} `json:"placement"`
+ 		}
+ 		if json.Unmarshal([]byte(runtimeCfg), &dc) == nil {
+ 			if dc.Scheduling.CostClass != "" {
+@@ -215,6 +239,37 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
+ 			if dc.ToolCallback != nil {
+ 				cand.ToolCallback = *dc.ToolCallback
+ 			}
++			if dc.Compute.Mode != "" {
++				cand.ComputeMode = dc.Compute.Mode
++			}
++			if dc.Compute.Backend != "" {
++				cand.RuntimeBackend = dc.Compute.Backend
++			}
++			cand.Cached, cand.Resident = dc.Compute.Cached, dc.Compute.Resident
++			cand.NodeStatus, cand.NodeLoadPct = dc.NodeCompute.Status, dc.NodeCompute.CPUUsagePct
++			if cand.RuntimeBackend == "" {
++				cand.RuntimeBackend = firstNonBlank(dc.Placement.Backend, dc.RuntimeBackend)
++			}
++			if dc.Compute.Mode == "" && dc.Placement.Mode != "" {
++				hasCPU, hasGPU := false, false
++				for _, dev := range dc.Placement.Devices {
++					if dev.Kind == "cpu" {
++						hasCPU = true
++					}
++					if dev.Kind == "accelerator" {
++						hasGPU = true
++					}
++				}
++				if hasGPU {
++					cand.ComputeMode = "gpu"
++				}
++				if hasCPU && hasGPU || dc.Placement.Mode == "cpu_offload" {
++					cand.ComputeMode = "hybrid"
++				}
++				if hasCPU && !hasGPU {
++					cand.ComputeMode = "cpu"
++				}
++			}
+ 		}
+ 		prof, ok, err := c.bestProfile(ctx, id, capability, role)
+ 		if err != nil {
+@@ -234,11 +289,34 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
+ 		if err := c.applyManagedAdmission(ctx, id, capability, role, &cand); err != nil {
+ 			return nil, err
+ 		}
++		if node.Valid && local == 0 && !provider.Valid {
++			var enabled, idleOnly int
++			err := c.db.QueryRowContext(ctx, `SELECT enabled,idle_only FROM remote_node_compute_policies WHERE node_id=?`, node.String).Scan(&enabled, &idleOnly)
++			if err == nil {
++				if enabled == 0 {
++					cand.Schedulable = false
++				}
++				if idleOnly != 0 && strings.EqualFold(cand.NodeStatus, "busy") {

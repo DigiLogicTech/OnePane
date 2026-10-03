@@ -1,0 +1,100 @@
++	}
++	var gpus []struct {
++		Name          string   `json:"name"`
++		DeviceID      string   `json:"device_id"`
++		DeviceIndex   int      `json:"device_index"`
++		Backend       string   `json:"backend"`
++		Backends      []string `json:"backends"`
++		VRAMBytes     int64    `json:"vram_bytes"`
++		FreeVRAMBytes int64    `json:"free_vram_bytes"`
++	}
++	_ = json.Unmarshal([]byte(cpuJSON), &cpu)
++	_ = json.Unmarshal([]byte(memoryJSON), &mem)
++	_ = json.Unmarshal([]byte(storageJSON), &storage)
++	_ = json.Unmarshal([]byte(acceleratorsJSON), &gpus)
++	out.MemoryTotalBytes, out.MemoryAvailableBytes, out.StorageAvailableBytes = mem.TotalBytes, mem.AvailableBytes, storage.AvailableBytes
++	out.Pools = append(out.Pools, ComputePool{ID: "cpu", Kind: "cpu", Name: cpu.Name, CapacityBytes: mem.TotalBytes, AvailableBytes: mem.AvailableBytes})
++	for _, g := range gpus {
++		id := strings.TrimSpace(g.DeviceID)
++		if id == "" {
++			id = fmt.Sprintf("gpu-%d", g.DeviceIndex)
++		}
++		backend := g.Backend
++		if backend == "" && len(g.Backends) > 0 {
++			backend = g.Backends[0]
++		}
++		out.Pools = append(out.Pools, ComputePool{ID: id, Kind: "gpu", Name: g.Name, Backend: backend, CapacityBytes: g.VRAMBytes, AvailableBytes: g.FreeVRAMBytes})
++	}
++	var busy int
++	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM local_runtime_instances WHERE node_id=? AND status='busy'`, s.local.ID).Scan(&busy)
++	if busy > 0 {
++		out.Status = "busy"
++	}
++	return out
++}
++
+ func appendUnique(xs []string, v string) []string {
+ 	for _, x := range xs {
+ 		if x == v {
+@@ -246,7 +348,7 @@ func (s *Service) importManifestTx(ctx context.Context, tx storage.Tx, peerID st
+ 
+ 		deploymentID := stableID("feddeploy", peerID, c.RemoteDeploymentID)
+ 		seen[deploymentID] = true
+-		cfg, _ := json.Marshal(map[string]any{"federation": map[string]any{"remote_deployment_id": c.RemoteDeploymentID, "peer_node_id": peerID}, "scheduling": map[string]any{"cost_class": "local", "hard_zero_incremental_cost": true}, "tool_callback": c.ToolUseAllowed})
++		cfg, _ := json.Marshal(map[string]any{"federation": map[string]any{"remote_deployment_id": c.RemoteDeploymentID, "peer_node_id": peerID}, "scheduling": map[string]any{"cost_class": "local", "hard_zero_incremental_cost": true}, "tool_callback": c.ToolUseAllowed, "compute": c.Compute, "node_compute": m.Compute})
+ 		runtime := "remote-node"
+ 		fp := stableID("fp", peerID, c.RemoteDeploymentID, c.ModelRef)
+ 		ctxmax := c.ContextMax
+diff --git a/internal/nodefederation/service.go b/internal/nodefederation/service.go
+index a475409..74fabc1 100644
+--- a/internal/nodefederation/service.go
++++ b/internal/nodefederation/service.go
+@@ -601,3 +601,83 @@ func (s *Service) ActivateLocalCapabilities(ctx context.Context) error {
+ 	}
+ 	return err
+ }
++
++func (s *Service) ComputePolicy(ctx context.Context, peer string) (ComputePolicy, error) {
++	var out ComputePolicy
++	var availability, limits, projects string
++	var enabled, idle, downloads int
++	var updatedBy sql.NullString
++	err := s.db.QueryRowContext(ctx, `SELECT node_id,enabled,idle_only,availability_json,limits_json,allow_model_downloads,runtime_installation,project_scope,allowed_projects_json,updated_by,revision,created_at,updated_at FROM remote_node_compute_policies WHERE node_id=?`, strings.TrimSpace(peer)).Scan(&out.NodeID, &enabled, &idle, &availability, &limits, &downloads, &out.RuntimeInstallation, &out.ProjectScope, &projects, &updatedBy, &out.Revision, &out.CreatedAt, &out.UpdatedAt)
++	if err != nil {
++		return out, err
++	}
++	out.Enabled, out.IdleOnly, out.AllowModelDownloads = enabled != 0, idle != 0, downloads != 0
++	out.AvailabilityJSON, out.LimitsJSON, out.AllowedProjectsJSON = json.RawMessage(availability), json.RawMessage(limits), json.RawMessage(projects)
++	if updatedBy.Valid {
++		v := updatedBy.String
++		out.UpdatedBy = &v
++	}
++	return out, nil
++}
++
++func canonicalPolicyJSON(raw json.RawMessage, fallback string) (string, error) {
++	if len(raw) == 0 {
++		raw = json.RawMessage(fallback)
++	}
++	var v any
++	if err := json.Unmarshal(raw, &v); err != nil {
++		return "", err
++	}
++	b, err := json.Marshal(v)
++	if err != nil {
++		return "", err
++	}
++	return string(b), nil
++}
++
++func (s *Service) SetComputePolicy(ctx context.Context, cmd SetComputePolicyCommand) (ComputePolicy, error) {
++	cmd.NodeID, cmd.Actor = strings.TrimSpace(cmd.NodeID), strings.TrimSpace(cmd.Actor)
++	if cmd.NodeID == "" || cmd.Actor == "" {
++		return ComputePolicy{}, errors.New("node and actor are required")
++	}
++	if err := s.CanOperate(ctx, cmd.Actor); err != nil {
++		return ComputePolicy{}, err
++	}
++	if cmd.RuntimeInstallation == "" {
++		cmd.RuntimeInstallation = "confirm"
++	}

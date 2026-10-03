@@ -5,7 +5,7 @@ on:
     branches:
       - alpha2-integration
     paths:
-      - '.recovery/alpha2-buildsrc-current.b64'
+      - 'bootstrap/current/**'
       - '.github/workflows/ubuntu-alpha2.yml'
   workflow_dispatch:
 
@@ -28,7 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p buildsrc
-          base64 -d .recovery/alpha2-buildsrc-current.b64 > alpha2-source.tar.xz
+          cat bootstrap/current/alpha2-current.b64.part-* > alpha2-source.b64
+          base64 -d alpha2-source.b64 > alpha2-source.tar.xz
+          echo "55c5cdc688129f3038ff5ce71da7e70b41040a11bbb6c62db0c4040a2c1fc13c  alpha2-source.tar.xz" | sha256sum -c -
           tar -xJf alpha2-source.tar.xz -C buildsrc
           test -f buildsrc/go.mod
       - name: Validate source and tests
@@ -66,7 +68,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p buildsrc
-          base64 -d .recovery/alpha2-buildsrc-current.b64 > alpha2-source.tar.xz
+          cat bootstrap/current/alpha2-current.b64.part-* > alpha2-source.b64
+          base64 -d alpha2-source.b64 > alpha2-source.tar.xz
+          echo "55c5cdc688129f3038ff5ce71da7e70b41040a11bbb6c62db0c4040a2c1fc13c  alpha2-source.tar.xz" | sha256sum -c -
           tar -xJf alpha2-source.tar.xz -C buildsrc
           cp LICENSE buildsrc/LICENSE
           if [ -f NOTICE ]; then cp NOTICE buildsrc/NOTICE; fi

@@ -1,0 +1,36 @@
+name: Alpha 3 Source Inspect
+
+on:
+  push:
+    branches:
+      - alpha3-integration
+    paths:
+      - '.github/workflows/alpha3-source-inspect.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore authoritative source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p buildsrc
+          base64 -d .recovery/alpha2-buildsrc-current.b64 > alpha2-source.tar.xz
+          tar -xJf alpha2-source.tar.xz -C buildsrc
+          test -f buildsrc/go.mod
+          find buildsrc -maxdepth 3 -type f | sort > buildsrc/SOURCE_INVENTORY.txt
+          echo "files=$(find buildsrc -type f | wc -l)"
+      - name: Upload restored source
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpha3-restored-source
+          path: buildsrc
+          if-no-files-found: error
+          retention-days: 1

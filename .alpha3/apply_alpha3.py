@@ -98,4 +98,13 @@ replace("internal/projectworkspace/service.go",
 'return &Service{repo: newSQLRepository(db), tx: tx, events: event.Store{}, outbox: outbox.Store{}, ids: id.Generator{}, clock: clk}',
 'return &Service{db: db, repo: newSQLRepository(db), tx: tx, events: event.Store{}, outbox: outbox.Store{}, ids: id.Generator{}, clock: clk}')
 
+# The singleton inference service owns the application-wide compute scheduler.
+replace("internal/inference/service.go",
+'''func NewService(db *sql.DB, tx storage.Transactor, clk clock.Clock) *Service {
+	return &Service{repo: newSQLRepository(db), requests: newSQLRequestRepository(db), tx: tx, events: event.Store{}, ids: id.Generator{}, clock: clk}
+}''',
+'''func NewService(db *sql.DB, tx storage.Transactor, clk clock.Clock) *Service {
+	return &Service{repo: newSQLRepository(db), requests: newSQLRequestRepository(db), tx: tx, events: event.Store{}, ids: id.Generator{}, clock: clk, runtimeCoordinator: newGlobalRuntimeCoordinator(db, clk)}
+}''')
+
 print("Alpha 3 deterministic transforms applied")

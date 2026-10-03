@@ -1,0 +1,50 @@
+name: Diagnose OnePane alpha.2 Windows build
+
+on:
+  push:
+    branches:
+      - build/alpha2-windows
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore alpha.2 source
+        shell: bash
+        run: |
+          mkdir -p src
+          base64 -d .build/onepane-alpha2-source.tar.gz.b64 > /tmp/onepane-alpha2-source.tar.gz
+          tar -xzf /tmp/onepane-alpha2-source.tar.gz -C src
+          patch -d src -p1 < .build/patches/alpha2-localai-fmt.patch
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache-dependency-path: src/go.sum
+      - name: Normalize modules
+        working-directory: src
+        run: go mod tidy
+      - name: Capture Windows cross-build output
+        working-directory: src
+        shell: bash
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: |
+          set +e
+          go build -trimpath -ldflags="-s -w" -o OnePane.Backend.exe ./cmd/harnessd > winbuild.txt 2>&1
+          code=$?
+          echo "$code" > winbuild.exit
+          exit 0
+      - name: Upload Windows build diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnePane-alpha2-windows-build-diagnostics
+          path: |
+            src/winbuild.txt
+            src/winbuild.exit
+          retention-days: 3

@@ -1,0 +1,100 @@
++	if cmd.RuntimeInstallation != "allow" && cmd.RuntimeInstallation != "confirm" && cmd.RuntimeInstallation != "deny" {
++		return ComputePolicy{}, errors.New("runtime_installation must be allow, confirm or deny")
++	}
++	if cmd.ProjectScope == "" {
++		cmd.ProjectScope = "all"
++	}
++	if cmd.ProjectScope != "all" && cmd.ProjectScope != "selected" {
++		return ComputePolicy{}, errors.New("project_scope must be all or selected")
++	}
++	availability, err := canonicalPolicyJSON(cmd.AvailabilityJSON, `{}`)
++	if err != nil {
++		return ComputePolicy{}, err
++	}
++	limits, err := canonicalPolicyJSON(cmd.LimitsJSON, `{}`)
++	if err != nil {
++		return ComputePolicy{}, err
++	}
++	projects, err := canonicalPolicyJSON(cmd.AllowedProjectsJSON, `[]`)
++	if err != nil {
++		return ComputePolicy{}, err
++	}
++	now := s.clock.UnixMilli()
++	_, err = s.db.ExecContext(ctx, `INSERT INTO remote_node_compute_policies(node_id,enabled,idle_only,availability_json,limits_json,allow_model_downloads,runtime_installation,project_scope,allowed_projects_json,updated_by,revision,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,1,?,?) ON CONFLICT(node_id) DO UPDATE SET enabled=excluded.enabled,idle_only=excluded.idle_only,availability_json=excluded.availability_json,limits_json=excluded.limits_json,allow_model_downloads=excluded.allow_model_downloads,runtime_installation=excluded.runtime_installation,project_scope=excluded.project_scope,allowed_projects_json=excluded.allowed_projects_json,updated_by=excluded.updated_by,revision=remote_node_compute_policies.revision+1,updated_at=excluded.updated_at`, cmd.NodeID, boolInt(cmd.Enabled), boolInt(cmd.IdleOnly), availability, limits, boolInt(cmd.AllowModelDownloads), cmd.RuntimeInstallation, cmd.ProjectScope, projects, cmd.Actor, now, now)
++	if err != nil {
++		return ComputePolicy{}, err
++	}
++	return s.ComputePolicy(ctx, cmd.NodeID)
++}
++
++func boolInt(v bool) int {
++	if v {
++		return 1
++	}
++	return 0
++}
+diff --git a/internal/nodefederation/types.go b/internal/nodefederation/types.go
+index cc6019f..f940ee8 100644
+--- a/internal/nodefederation/types.go
++++ b/internal/nodefederation/types.go
+@@ -42,23 +42,53 @@ type NodeView struct {
+ 	Revision            int64           `json:"revision"`
+ }
+ 
++type ComputePool struct {
++	ID             string  `json:"id"`
++	Kind           string  `json:"kind"` // cpu | gpu
++	Name           string  `json:"name"`
++	Backend        string  `json:"backend,omitempty"`
++	CapacityBytes  int64   `json:"capacity_bytes,omitempty"`
++	AvailableBytes int64   `json:"available_bytes,omitempty"`
++	UtilizationPct float64 `json:"utilization_pct,omitempty"`
++}
++
++type NodeComputeState struct {
++	Status                string        `json:"status"` // available | busy | draining | maintenance
++	CPUUsagePct           float64       `json:"cpu_usage_pct,omitempty"`
++	MemoryTotalBytes      int64         `json:"memory_total_bytes,omitempty"`
++	MemoryAvailableBytes  int64         `json:"memory_available_bytes,omitempty"`
++	StorageAvailableBytes int64         `json:"storage_available_bytes,omitempty"`
++	Pools                 []ComputePool `json:"pools,omitempty"`
++}
++
++type DeploymentCompute struct {
++	Mode      string   `json:"mode,omitempty"` // cpu | gpu | hybrid
++	Backend   string   `json:"backend,omitempty"`
++	DeviceIDs []string `json:"device_ids,omitempty"`
++	RAMBytes  int64    `json:"ram_bytes,omitempty"`
++	VRAMBytes int64    `json:"vram_bytes,omitempty"`
++	Cached    bool     `json:"cached,omitempty"`
++	Resident  bool     `json:"resident,omitempty"`
++}
++
+ type ModelCapability struct {
+-	RemoteDeploymentID string          `json:"deployment_id"`
+-	ModelRef           string          `json:"model_ref"`
+-	ProviderName       *string         `json:"provider_name,omitempty"`
+-	Architecture       *string         `json:"architecture,omitempty"`
+-	RevisionRef        *string         `json:"revision_ref,omitempty"`
+-	WeightsHash        *string         `json:"weights_hash,omitempty"`
+-	Quantization       *string         `json:"quantization,omitempty"`
+-	ModalitiesJSON     json.RawMessage `json:"modalities_json"`
+-	RuntimeName        *string         `json:"runtime_name,omitempty"`
+-	RuntimeVersion     *string         `json:"runtime_version,omitempty"`
+-	ContextMax         int64           `json:"context_max"`
+-	Qualification      string          `json:"qualification"`
+-	ProtocolLevel      string          `json:"protocol_level"`
+-	Capabilities       []string        `json:"capabilities"`
+-	Roles              []string        `json:"roles"`
+-	ToolUseAllowed     bool            `json:"tool_use_allowed"`
++	RemoteDeploymentID string            `json:"deployment_id"`
++	ModelRef           string            `json:"model_ref"`
++	ProviderName       *string           `json:"provider_name,omitempty"`
++	Architecture       *string           `json:"architecture,omitempty"`
++	RevisionRef        *string           `json:"revision_ref,omitempty"`
++	WeightsHash        *string           `json:"weights_hash,omitempty"`
++	Quantization       *string           `json:"quantization,omitempty"`
++	ModalitiesJSON     json.RawMessage   `json:"modalities_json"`
++	RuntimeName        *string           `json:"runtime_name,omitempty"`
++	RuntimeVersion     *string           `json:"runtime_version,omitempty"`
++	ContextMax         int64             `json:"context_max"`

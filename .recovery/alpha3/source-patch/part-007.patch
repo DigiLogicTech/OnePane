@@ -1,0 +1,100 @@
+diff --git a/internal/inference/service.go b/internal/inference/service.go
+index 79ce15d..0e93b23 100644
+--- a/internal/inference/service.go
++++ b/internal/inference/service.go
+@@ -15,18 +15,36 @@ import (
+ 	"github.com/DigiLogicTech/OnePane/internal/storage"
+ )
+ 
++type RuntimeScheduleRequest struct {
++	WorkspaceID        string
++	TaskID             *string
++	InferenceRequestID string
++	Deployment         ModelDeployment
++	Priority           string
++}
++
++type RuntimeScheduleLease interface {
++	ReportBoundary(context.Context, string) error
++	Release(context.Context, error)
++}
++
++type RuntimeCoordinator interface {
++	Acquire(context.Context, RuntimeScheduleRequest) (RuntimeScheduleLease, error)
++}
++
+ type Service struct {
+-	repo        repository
+-	requests    requestRepository
+-	tx          storage.Transactor
+-	events      event.Store
+-	ids         id.Generator
+-	clock       clock.Clock
+-	artifacts   *artifact.Service
+-	budgets     *budget.Service
+-	transports  *TransportRegistry
+-	secrets     SecretResolver
+-	localNodeID string
++	repo               repository
++	requests           requestRepository
++	tx                 storage.Transactor
++	events             event.Store
++	ids                id.Generator
++	clock              clock.Clock
++	artifacts          *artifact.Service
++	budgets            *budget.Service
++	transports         *TransportRegistry
++	secrets            SecretResolver
++	localNodeID        string
++	runtimeCoordinator RuntimeCoordinator
+ }
+ 
+ func NewService(db *sql.DB, tx storage.Transactor, clk clock.Clock) *Service {
+@@ -44,6 +62,14 @@ func (s *Service) ConfigureExecution(artifacts *artifact.Service, transports *Tr
+ 	return nil
+ }
+ 
++func (s *Service) ConfigureRuntimeCoordinator(c RuntimeCoordinator) error {
++	if c == nil {
++		return fmt.Errorf("%w: runtime coordinator is required", ErrExecutionUnavailable)
++	}
++	s.runtimeCoordinator = c
++	return nil
++}
++
+ func (s *Service) ConfigureBudget(b *budget.Service) error {
+ 	if b == nil {
+ 		return fmt.Errorf("%w: budget service is required", ErrExecutionUnavailable)
+diff --git a/internal/localai/managed_deployments.go b/internal/localai/managed_deployments.go
+index 06a3836..3859345 100644
+--- a/internal/localai/managed_deployments.go
++++ b/internal/localai/managed_deployments.go
+@@ -22,25 +22,32 @@ const (
+ )
+ 
+ type ManagedDeploymentSummary struct {
+-	DeploymentID       string `json:"deployment_id"`
+-	ModelID            string `json:"model_id"`
+-	ModelRef           string `json:"model_ref"`
+-	DisplayName        string `json:"display_name,omitempty"`
+-	RuntimeName        string `json:"runtime_name"`
+-	RuntimeVersion     string `json:"runtime_version,omitempty"`
+-	RuntimeBackend     string `json:"runtime_backend,omitempty"`
+-	LocalPath          string `json:"local_path"`
+-	Quantization       string `json:"quantization,omitempty"`
+-	Status             string `json:"status"`
+-	AdmissionStatus    string `json:"admission_status,omitempty"`
+-	ContextMaxReported *int64 `json:"context_max_reported,omitempty"`
+-	ContextMaxVerified *int64 `json:"context_max_verified,omitempty"`
+-	UpdatedAt          int64  `json:"updated_at"`
++	DeploymentID       string   `json:"deployment_id"`
++	ModelID            string   `json:"model_id"`
++	ModelRef           string   `json:"model_ref"`
++	DisplayName        string   `json:"display_name,omitempty"`
++	RuntimeName        string   `json:"runtime_name"`
++	RuntimeVersion     string   `json:"runtime_version,omitempty"`
++	RuntimeBackend     string   `json:"runtime_backend,omitempty"`
++	LocalPath          string   `json:"local_path"`
++	Quantization       string   `json:"quantization,omitempty"`
++	Status             string   `json:"status"`
++	AdmissionStatus    string   `json:"admission_status,omitempty"`

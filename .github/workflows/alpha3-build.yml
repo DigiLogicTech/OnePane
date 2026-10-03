@@ -47,11 +47,8 @@ jobs:
           xz -dc alpha3.patch.xz > alpha3.patch
           echo "${ALPHA3_PATCH_SHA256}  alpha3.patch" | sha256sum -c -
 
-          (
-            cd buildsrc
-            git apply --check ../alpha3.patch
-            git apply ../alpha3.patch
-          )
+          patch --dry-run -p1 -d buildsrc < alpha3.patch
+          patch -p1 -d buildsrc < alpha3.patch
 
           grep -q 'OnePane v0.1.0-alpha.3' buildsrc/README.md
           test -f buildsrc/migrations/0022_alpha3_control_plane.sql

@@ -1,0 +1,100 @@
+--- a/internal/nodefederation/manifest.go
++++ b/internal/nodefederation/manifest.go
+@@ -19,7 +19,8 @@ func stableID(prefix string, parts ...string) string {
+ 
+ func (s *Service) BuildManifest(ctx context.Context) (CapabilityManifest, error) {
+ 	m := CapabilityManifest{Protocol: ProtocolVersion, NodeID: s.local.ID, Sequence: s.clock.UnixMilli(), Generated: s.clock.UnixMilli()}
+-	rows, err := s.db.QueryContext(ctx, `SELECT d.id,m.model_ref,m.provider_name,m.architecture,m.revision_ref,m.weights_hash,m.quantization,m.modalities_json,d.runtime_name,d.runtime_version,COALESCE(d.context_max_verified,d.context_max_reported,0),COALESCE(ms.admission_status,''),COALESCE(ms.restrictions_json,'{}')
++	m.Compute = s.localComputeState(ctx)
++	rows, err := s.db.QueryContext(ctx, `SELECT d.id,m.model_ref,m.provider_name,m.architecture,m.revision_ref,m.weights_hash,m.quantization,m.modalities_json,d.runtime_name,d.runtime_version,COALESCE(d.context_max_verified,d.context_max_reported,0),COALESCE(ms.admission_status,''),COALESCE(ms.restrictions_json,'{}'),d.runtime_config_json,COALESCE(d.residency_state,'')
+ FROM model_deployments d JOIN models m ON m.id=d.model_id
+ LEFT JOIN model_spec_sheets ms ON ms.deployment_id=d.id
+ WHERE d.node_id=? AND d.provider_connection_id IS NULL AND d.status IN ('ready','degraded') AND m.trust_state IN ('trusted','user_trusted') AND (NOT EXISTS (SELECT 1 FROM managed_local_models mm WHERE mm.deployment_id=d.id) OR ms.admission_status IN ('accepted','restricted'))`, s.local.ID)
+@@ -30,8 +31,8 @@ WHERE d.node_id=? AND d.provider_connection_id IS NULL AND d.status IN ('ready',
+ 	for rows.Next() {
+ 		var c ModelCapability
+ 		var provider, arch, rev, hash, quant, runtime, rv sql.NullString
+-		var modalities, admission, restrictionsJSON string
+-		if err := rows.Scan(&c.RemoteDeploymentID, &c.ModelRef, &provider, &arch, &rev, &hash, &quant, &modalities, &runtime, &rv, &c.ContextMax, &admission, &restrictionsJSON); err != nil {
++		var modalities, admission, restrictionsJSON, runtimeConfig, residency string
++		if err := rows.Scan(&c.RemoteDeploymentID, &c.ModelRef, &provider, &arch, &rev, &hash, &quant, &modalities, &runtime, &rv, &c.ContextMax, &admission, &restrictionsJSON, &runtimeConfig, &residency); err != nil {
+ 			return m, err
+ 		}
+ 		if provider.Valid {
+@@ -66,6 +67,7 @@ WHERE d.node_id=? AND d.provider_connection_id IS NULL AND d.status IN ('ready',
+ 		c.ProtocolLevel = "L0"
+ 		c.Qualification = "untested"
+ 		c.ToolUseAllowed = true
++		c.Compute = deploymentCompute(runtimeConfig, residency)
+ 		var restrictions struct {
+ 			MaxContextTokens int64    `json:"max_context_tokens,omitempty"`
+ 			DenyCapabilities []string `json:"deny_capabilities,omitempty"`
+@@ -156,6 +158,106 @@ FROM compatibility_profiles WHERE deployment_id=? AND stale_at IS NULL AND quali
+ 	return m, rows.Err()
+ }
+ 
++func deploymentCompute(runtimeConfig, residency string) DeploymentCompute {
++	var cfg struct {
++		RuntimeBackend string            `json:"runtime_backend"`
++		Compute        DeploymentCompute `json:"compute"`
++		Placement      struct {
++			Mode    string `json:"mode"`
++			Backend string `json:"backend"`
++			Devices []struct {
++				Kind           string `json:"kind"`
++				DeviceID       string `json:"device_id"`
++				DeviceIndex    int    `json:"device_index"`
++				AllocatedBytes int64  `json:"allocated_bytes"`
++			} `json:"devices"`
++		} `json:"placement"`
++	}
++	_ = json.Unmarshal([]byte(runtimeConfig), &cfg)
++	if cfg.Compute.Mode != "" {
++		cfg.Compute.Resident = cfg.Compute.Resident || residency == "resident" || residency == "busy"
++		return cfg.Compute
++	}
++	out := DeploymentCompute{Mode: "cpu", Backend: cfg.Placement.Backend, Cached: true, Resident: residency == "resident" || residency == "busy"}
++	if out.Backend == "" {
++		out.Backend = cfg.RuntimeBackend
++	}
++	hasCPU, hasGPU := false, false
++	for _, d := range cfg.Placement.Devices {
++		if d.Kind == "accelerator" {
++			hasGPU = true
++			id := strings.TrimSpace(d.DeviceID)
++			if id == "" {
++				id = fmt.Sprintf("gpu-%d", d.DeviceIndex)
++			}
++			out.DeviceIDs = append(out.DeviceIDs, id)
++			out.VRAMBytes += d.AllocatedBytes
++		}
++		if d.Kind == "cpu" {
++			hasCPU = true
++			out.RAMBytes += d.AllocatedBytes
++		}
++	}
++	if hasGPU {
++		out.Mode = "gpu"
++	}
++	if hasCPU && hasGPU || cfg.Placement.Mode == "cpu_offload" {
++		out.Mode = "hybrid"
++	}
++	return out
++}
++
++func (s *Service) localComputeState(ctx context.Context) NodeComputeState {
++	out := NodeComputeState{Status: "available"}
++	var cpuJSON, memoryJSON, acceleratorsJSON, storageJSON string
++	if err := s.db.QueryRowContext(ctx, `SELECT cpu_json,memory_json,accelerators_json,storage_json FROM local_hardware_profiles WHERE node_id=? ORDER BY detected_at DESC LIMIT 1`, s.local.ID).Scan(&cpuJSON, &memoryJSON, &acceleratorsJSON, &storageJSON); err != nil {
++		return out
++	}
++	var cpu struct {
++		Name         string `json:"name"`
++		LogicalCores int    `json:"logical_cores"`
++	}
++	var mem struct {
++		TotalBytes     int64 `json:"total_bytes"`
++		AvailableBytes int64 `json:"available_bytes"`
++	}
++	var storage struct {
++		AvailableBytes int64 `json:"available_bytes"`

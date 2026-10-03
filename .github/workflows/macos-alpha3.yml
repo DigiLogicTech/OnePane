@@ -1,0 +1,71 @@
+name: Alpha 3 macOS Build
+
+on:
+  push:
+    branches:
+      - alpha3-integration
+    paths:
+      - '.recovery/alpha3/source-patch/**'
+      - '.github/workflows/macos-alpha3.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    name: Build and validate macOS Alpha 3
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Restore and verify authoritative Alpha 3 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p buildsrc
+          base64 -D -i .recovery/alpha2-buildsrc-current.b64 -o alpha2-source.tar.xz
+          tar -xJf alpha2-source.tar.xz -C buildsrc
+          cat .recovery/alpha3/source-patch/part-*.patch > alpha3-source.patch
+          test "$(wc -l < alpha3-source.patch)" -eq 4599
+          echo "44e31c4bc6df048acec092629a61feaa86c5bde6d31346ead653cf65b9a3f17d  alpha3-source.patch" | shasum -a 256 -c -
+          (cd buildsrc && git apply --check ../alpha3-source.patch && git apply ../alpha3-source.patch)
+          test -f buildsrc/go.mod
+          test -f buildsrc/packaging/macos/OnePaneApp.swift
+      - name: Validate source
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check internal/webui/static/app.js
+          python scripts/validate_alpha3_source.py
+          python scripts/validate_live_follow_workspace.py
+          python scripts/validate_workspace_components_v2.py
+          python scripts/validate_m33_node_federation.py
+          python scripts/validate_m34_remote_models.py
+          python scripts/validate_m35_hardware_testbed.py
+          go mod download
+          go mod verify
+          go test ./...
+          plutil -lint packaging/macos/Info.plist
+      - name: Build universal macOS app and DMG
+        shell: bash
+        env:
+          ONEPANE_VERSION: 0.1.0-alpha.3
+        run: |
+          set -euo pipefail
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 3' buildsrc/packaging/macos/Info.plist
+          bash buildsrc/scripts/build-macos.sh
+      - name: Upload macOS package
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnePane-v0.1.0-alpha.3-macos-universal
+          path: |
+            buildsrc/dist/macos/*.dmg
+            buildsrc/dist/macos/*.dmg.sha256
+          if-no-files-found: error
+          retention-days: 14

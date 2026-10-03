@@ -1,0 +1,100 @@
++// Models, Operations and Settings rather than competing with workspace components.
++navItems.splice(0,navItems.length,...navItems.filter(([route])=>['operations','projects','tasks','models','agents'].includes(route)));
++pages.projects.title='Projects';
++pages.models.title='Models';
++pages.agents.title='Agents';
++pages.settings.title='Settings';
++
++function qa8Mode(v){v=String(v||'').toLowerCase();return v==='team'||v==='council'?v:'direct';}
++const qa8NormalizeBase=qa7NormalizeWorkspace;
++qa7NormalizeWorkspace=function(project,workspace){
++  const w=qa8NormalizeBase(project,workspace);
++  w.orchestration=w.orchestration||{};
++  w.orchestration.mode=qa8Mode(w.orchestration.mode);
++  // Alpha 2 stored the Direct/default assignment as "supervisor". Preserve the
++  // underlying record for compatibility while presenting it only as Direct.
++  w.orchestration.supervisor=qa7NormalizeRole(w.orchestration.supervisor,'agent.md');
++  w.orchestration.team=qa7NormalizeRole(w.orchestration.team,'onepane-default');
++  w.orchestration.council=qa7NormalizeRole(w.orchestration.council,'onepane-default');
++  w.compute=w.compute||{preference:'auto'};
++  return w;
++};
++
++function qa8ComputeBadge(mode){const v=String(mode||'auto').toLowerCase();const label=v==='cpu_gpu'||v==='hybrid'?'HYBRID':v==='gpu'?'GPU':v==='cpu'?'CPU':'AUTO';return `<span class="pill qa8-compute ${label.toLowerCase()}">${label}</span>`;}
++function qa8ModelAssignment(workspace,mode){const o=workspace.orchestration||{};return mode==='direct'?(o.supervisor||{}):(o[mode]||{});}
++function qa8ModelStackRole(mode,label,workspace){
++  const x=qa8ModelAssignment(workspace,mode),models=qa4ModelOptions(),agents=qa4AgentOptions();
++  const fallback=x.fallback_model||'auto',compute=x.compute_preference||workspace.compute?.preference||'auto';
++  return `<div class="qa8-stack-pane" data-qa8-stack-pane="${mode}"><div class="qa8-stack-head"><div><strong>${label}</strong><div class="list-meta">Workspace-owned assignment · changes apply only here</div></div><button class="btn tiny" type="button" data-qa8-recommend="${mode}">Recommend</button></div><label>Primary model<select data-qa8-model="${mode}">${qa4OptionRows(models,x.model||'auto')}</select></label><label>Agent<select data-qa8-agent="${mode}">${qa4OptionRows(agents,x.agent||(mode==='direct'?'agent.md':'onepane-default'))}</select></label><label>Compute preference<select data-qa8-compute="${mode}"><option value="auto" ${compute==='auto'?'selected':''}>Auto</option><option value="prefer-gpu" ${compute==='prefer-gpu'?'selected':''}>Prefer GPU</option><option value="prefer-cpu" ${compute==='prefer-cpu'?'selected':''}>Prefer CPU</option><option value="gpu-only" ${compute==='gpu-only'?'selected':''}>GPU only</option><option value="cpu-only" ${compute==='cpu-only'?'selected':''}>CPU only</option></select></label><label>Fallback model<select data-qa8-fallback="${mode}">${qa4OptionRows(models,fallback)}</select></label>${mode!=='direct'?`<div class="list-meta">Active model-powered seats are capped at 8, including a model-powered coordinator/synthesiser.</div>`:''}</div>`;
++}
++function qa8ModelStackContent(w,project,workspace){
++  qa7NormalizeWorkspace(project,workspace);const active=w.config?.tab||'direct';
++  return `<div class="qa8-model-stack" data-qa8-stack-root="${escapeHtml(w.id)}"><div class="qa8-stack-tabs">${qa8VisibleModes.map(m=>`<button type="button" class="subtab ${active===m?'active':''}" data-qa8-stack-tab="${m}" data-qa8-stack-id="${escapeHtml(w.id)}">${titleCase(m)}</button>`).join('')}</div>${qa8ModelStackRole(active,titleCase(active),workspace)}<div class="qa8-stack-footer"><span class="pill ${workspace.routing?.enabled!==false?'good':''}">${workspace.routing?.enabled!==false?'Routing enabled':'Routing disabled'}</span><span class="list-meta">Deployment fallback (same model on another CPU/GPU/node) is attempted before model fallback.</span></div></div>`;
++}
++
++QA6_COMPONENTS.modelstack={title:'Model Stack',description:'Direct, Team and Council model assignments, fallbacks and compute preference.',multiple:false,size:'large'};
++QA6_COMPONENTS.library={title:'Library',description:'Project-owned files, datasets, artifacts and packages granted to this workspace.',multiple:false,size:'large'};
++QA6_COMPONENTS.integrations={title:'Integrations',description:'Workspace grants for connected application-level integrations.',multiple:false,size:'medium'};
++QA6_COMPONENTS.approvals={title:'Approvals',description:'Pending confirm-class actions for this workspace.',multiple:false,size:'medium'};
++
++const qa8DefaultWorkspaceBase=qa4DefaultWorkspace;
++qa4DefaultWorkspace=function(project,name='Main workspace'){
++  const w=qa7NormalizeWorkspace(project,qa8DefaultWorkspaceBase(project,name));
++  w.orchestration.mode='direct';
++  const now=Date.now();
++  const keep=(w.widgets||[]).filter(x=>!['models'].includes(x.type));
++  if(!keep.some(x=>x.type==='chat'))keep.unshift({id:`pw-chat-${now}`,type:'chat',title:'Chat',col:6,row:5});
++  if(!keep.some(x=>x.type==='modelstack'))keep.splice(1,0,{id:`pw-modelstack-${now+1}`,type:'modelstack',title:'Model Stack',col:6,row:5,config:{tab:'direct'}});
++  w.widgets=keep;
++  return w;
++};
++
++const qa8ComponentBase=qa6ComponentContent;
++qa6ComponentContent=function(w,project,workspace){
++  if(w.type==='modelstack')return qa8ModelStackContent(w,project,workspace);
++  if(w.type==='library')return `<div class="empty-state compact">Project Library is enabled for this workspace. Upload and access grants are enforced by the control plane.</div>`;
++  if(w.type==='integrations')return `<div class="empty-state compact">Integration connections are application-level; this workspace controls its own capability grants.</div>`;
++  if(w.type==='approvals')return `<div class="empty-state compact">Confirm-class actions appear here and in Follow before execution continues.</div>`;
++  return qa8ComponentBase(w,project,workspace);
++};
++
++qa7EffectiveChatMode=function(workspace,requested='default'){
++  let mode=requested==='default'?qa8Mode(workspace.orchestration?.mode):qa8Mode(requested);
++  if(workspace.routing?.enabled===false&&mode!=='direct')mode='direct';
++  return mode;
++};
++qa7RoutingEnvelope=function(workspace,requested='default'){
++  const enabled=workspace.routing?.enabled!==false,mode=qa7EffectiveChatMode(workspace,requested),role=mode==='direct'?'supervisor':mode,selected=qa4RouteSelection(workspace,role),fallback=qa7RouteFallback(workspace,role);
++  return {enabled,mode,role,candidate_id:selected.candidate_id,agent_profile:selected.agent_profile,fallback_candidate_ids:enabled?fallback.candidate_ids:[],fallback_agent_profiles:enabled?fallback.agent_profiles:[],project_workspace_id:workspace.id,workspace_access:qa7WorkspaceAccess(workspace),compute_preference:qa8ModelAssignment(workspace,mode).compute_preference||workspace.compute?.preference||'auto'};
++};
++
++qa7WorkspaceSettingsContent=function(w,project,workspace){
++  qa7NormalizeWorkspace(project,workspace);const s=workspace.sandbox,o=workspace.orchestration||{},routing=workspace.routing?.enabled!==false,remote=workspace.remote?.enabled!==false;
++  const direct=qa8ModelAssignment(workspace,'direct'),team=qa8ModelAssignment(workspace,'team'),council=qa8ModelAssignment(workspace,'council');
++  const role=(key,label,x)=>{const models=qa4ModelOptions(),agents=qa4AgentOptions();return `<fieldset class="inspector-fieldset"><legend>${label}</legend><label>Primary model<select data-qa7-role-model="${key}">${qa4OptionRows(models,x.model||'auto')}</select></label><label>Agent<select data-qa7-role-agent="${key}">${qa4OptionRows(agents,x.agent||(key==='supervisor'?'agent.md':'onepane-default'))}</select></label><label>Fallback model<select data-qa7-role-fallback-model="${key}">${qa4OptionRows(models,x.fallback_model||'auto')}</select></label><label>Compute<select data-qa8-settings-compute="${key}"><option value="auto">Auto</option><option value="prefer-gpu" ${x.compute_preference==='prefer-gpu'?'selected':''}>Prefer GPU</option><option value="prefer-cpu" ${x.compute_preference==='prefer-cpu'?'selected':''}>Prefer CPU</option><option value="gpu-only" ${x.compute_preference==='gpu-only'?'selected':''}>GPU only</option><option value="cpu-only" ${x.compute_preference==='cpu-only'?'selected':''}>CPU only</option></select></label></fieldset>`;};
++  return `<form class="qa7-workspace-settings settings-stack" data-qa7-settings-root="${escapeHtml(w.id)}"><div class="qa7-settings-heading"><div><strong>Workspace-owned settings</strong><div class="list-meta">Defaults are copied on creation; existing workspaces are not changed by later Default changes.</div></div><span class="pill ${routing?'good':''}">${routing?'Routing enabled':'Routing disabled'}</span></div><label>Workspace name<input data-qa7-workspace-name value="${escapeHtml(workspace.name||'Workspace')}"></label><label>Default chat mode<select data-qa7-default-mode>${qa8VisibleModes.map(x=>`<option value="${x}" ${qa8Mode(o.mode)===x?'selected':''}>${titleCase(x)}</option>`).join('')}</select></label><label class="inline-check"><input type="checkbox" data-qa7-routing ${routing?'checked':''}> Enable model routing and automatic fallback</label><div class="page-subtitle">Direct remains normal chat. Routing may select a different primary model; fallbacks recover from incompatibility or failure. Disabling routing does not remove your assignments.</div>${role('supervisor','Direct',direct)}${role('team','Team',team)}${role('council','Council',council)}<fieldset class="inspector-fieldset"><legend>Workspace sandbox</legend><label class="inline-check"><input type="checkbox" data-qa7-sandbox="internet" ${s.internet?'checked':''}> Internet access</label><label class="inline-check"><input type="checkbox" data-qa7-sandbox="lan" ${s.lan?'checked':''}> LAN access</label><label class="inline-check"><input type="checkbox" data-qa7-sandbox="browser" ${s.browser?'checked':''}> Browser capability</label><label class="inline-check"><input type="checkbox" data-qa7-sandbox="computer" ${s.computer?'checked':''}> Computer capability</label><label>Host files<select data-qa7-host-files><option value="workspace-only" ${s.host_files!=='none'?'selected':''}>This workspace only</option><option value="none" ${s.host_files==='none'?'selected':''}>No filesystem access</option></select></label><label>Secrets<select data-qa7-secrets><option value="selected" ${s.secrets!=='none'?'selected':''}>Selected Vault handles</option><option value="none" ${s.secrets==='none'?'selected':''}>None</option></select></label></fieldset><fieldset class="inspector-fieldset"><legend>Remote execution</legend><label class="inline-check"><input type="checkbox" data-qa7-remote ${remote?'checked':''}> Allow qualified enrolled nodes and cloud deployments</label><div class="page-subtitle">Remote models receive compiled context and brokered capabilities only. Resource and integration permissions remain enforced by OnePane.</div></fieldset><button class="btn primary" type="submit">Save workspace settings</button><div class="page-subtitle" data-qa7-settings-status></div></form>`;
++};
++
++qa7ChatContent=function(w,project,workspace){
++  const cfg=w.config=w.config||{},routing=workspace.routing?.enabled!==false,requested=qa8Mode(cfg.chat_mode||'default'),rows=qa7ChatHistory(project,workspace,w),defaultMode=qa8Mode(workspace.orchestration?.mode),modeOptions=[['default',`Default (${titleCase(defaultMode)})`],['direct','Direct'],['team','Team'],['council','Council']];
++  return `<div class="qa7-chat" data-qa7-chat-root="${escapeHtml(w.id)}"><div class="qa7-chat-toolbar"><label>Mode<select data-qa7-chat-mode="${escapeHtml(w.id)}">${modeOptions.map(([v,l])=>`<option value="${v}" ${(cfg.chat_mode||'default')===v?'selected':''} ${!routing&&['team','council'].includes(v)?'disabled':''}>${escapeHtml(l)}</option>`).join('')}</select></label><span class="pill ${routing?'good':''}">${routing?'Routing on':'Routing off'}</span></div><div class="qa7-chat-history" data-qa7-chat-history="${escapeHtml(w.id)}">${rows.length?rows.map(x=>`<div class="workspace-chat-message ${x.role==='user'?'user':'system'}"><strong>${x.role==='user'?'You':'OnePane'}</strong><span>${escapeHtml(x.text)}</span></div>`).join(''):'<div class="empty-state compact">Chat creates governed tasks. Type / for deterministic workspace commands.</div>'}</div><form class="qa7-chat-form" data-qa7-chat-form="${escapeHtml(w.id)}"><textarea rows="2" data-qa7-chat-input="${escapeHtml(w.id)}" placeholder="Ask OnePane… Type / for commands"></textarea><button class="btn primary">Send</button><div class="slash-suggestions qa7-slash" hidden></div></form></div>`;
++};
++
++qa7SaveWorkspaceSettings=async function(project,workspace,root){
++  workspace.name=$('[data-qa7-workspace-name]',root)?.value.trim()||workspace.name;
++  workspace.routing={...(workspace.routing||{}),enabled:!!$('[data-qa7-routing]',root)?.checked};
++  workspace.remote={...(workspace.remote||{}),enabled:!!$('[data-qa7-remote]',root)?.checked,access_mode:'brokered'};
++  workspace.sandbox=workspace.sandbox||qa7WorkspaceDefaults().sandbox;
++  $$('[data-qa7-sandbox]',root).forEach(x=>workspace.sandbox[x.dataset.qa7Sandbox]=x.checked);
++  workspace.sandbox.network=workspace.sandbox.internet||workspace.sandbox.lan;
++  workspace.sandbox.host_files=$('[data-qa7-host-files]',root)?.value||'workspace-only';
++  workspace.sandbox.secrets=$('[data-qa7-secrets]',root)?.value||'selected';
++  workspace.orchestration=workspace.orchestration||{};
++  workspace.orchestration.mode=qa8Mode($('[data-qa7-default-mode]',root)?.value||workspace.orchestration.mode);
++  // Workers remain a reusable execution role, but are no longer a visible chat mode.
++  // Preserve their Alpha 2 assignment when saving the Direct/Team/Council surface.
++  for(const key of ['supervisor','team','council']){
++    const role=workspace.orchestration[key]=workspace.orchestration[key]||{};
++    const model=$(`[data-qa7-role-model="${key}"]`,root),agent=$(`[data-qa7-role-agent="${key}"]`,root),fallback=$(`[data-qa7-role-fallback-model="${key}"]`,root),compute=$(`[data-qa8-settings-compute="${key}"]`,root);
++    if(model)role.model=model.value||'auto';
++    if(agent)role.agent=agent.value||(key==='supervisor'?'agent.md':'onepane-default');

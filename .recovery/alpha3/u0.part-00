@@ -1,0 +1,236 @@
+diff --git a/README.md b/README.md
+index db37ab5..c5bea04 100644
+--- a/README.md
++++ b/README.md
+@@ -1 +1 @@
+-# OnePane v0.1
++# OnePane v0.1.0-alpha.3
+@@ -15,0 +16 @@ This repository is the first executable scaffold for the local-first autonomous
++- Additive `0022_alpha3_control_plane.sql` for first-class Project Workspaces, Library grants, immutable model specifications, global resource/runtime coordination, compute placement, fleet policy, and movable Project storage.
+@@ -37 +37,0 @@ This repository is the first executable scaffold for the local-first autonomous
+-the richer Project editor/browser-workspace surfaces,
+@@ -40 +40 @@ privileged-helper operations, memory/knowledge compilation,
+-Council Mode, and browser-driven OAuth/refresh-token onboarding for SaaS plugins are later milestones. M29 connectors are functional with Vault-backed API keys/access tokens today; the polished OAuth UX belongs in the final WebUI phase.
++and browser-driven OAuth/refresh-token onboarding for SaaS plugins remain later milestones. Alpha 3 now adds first-class Project Workspaces, Direct/Team/Council model-stack configuration, global resource coordination, CPU/GPU/hybrid runtime scheduling, project storage relocation, and remote compute-fleet policy on top of the Alpha 2 control plane. M29 connectors are functional with Vault-backed API keys/access tokens today; the polished OAuth UX belongs in the final WebUI phase.
+@@ -89,0 +90 @@ python3 scripts/validate_m35_hardware_testbed.py
++python3 scripts/validate_alpha3_source.py
+diff --git a/cmd/harnessd/main.go b/cmd/harnessd/main.go
+index 9507c8f..44003d8 100644
+--- a/cmd/harnessd/main.go
++++ b/cmd/harnessd/main.go
+@@ -64,0 +65,2 @@ func main() {
++	apiServer.SetRuntimeCoordinator(runtime.RuntimeCoordinator)
++	apiServer.SetResourceCoordinator(runtime.ResourceCoordinator)
+diff --git a/internal/api/server.go b/internal/api/server.go
+index 7e4add7..4ca4f53 100644
+--- a/internal/api/server.go
++++ b/internal/api/server.go
+@@ -28,0 +29 @@ import (
++	"github.com/DigiLogicTech/OnePane/internal/resourcecoord"
+@@ -29,0 +31 @@ import (
++	"github.com/DigiLogicTech/OnePane/internal/runtimecoord"
+@@ -54,0 +57,8 @@ type projectService interface {
++	WorkspaceView(context.Context, string) (projectworkspace.WorkspaceView, error)
++	WorkspaceViews(context.Context, string) ([]projectworkspace.WorkspaceView, error)
++	CreateWorkspaceView(context.Context, projectworkspace.CreateWorkspaceViewCommand) (projectworkspace.WorkspaceView, error)
++	UpdateWorkspaceView(context.Context, projectworkspace.UpdateWorkspaceViewCommand) (projectworkspace.WorkspaceView, error)
++	ArchiveWorkspaceView(context.Context, string, int64) error
++	MoveWorkspaceStoragePointer(context.Context, string, int64, string) (projectworkspace.WorkspaceView, error)
++	ProjectStorage(context.Context, string) (projectworkspace.ProjectStorageLocation, error)
++	MoveProjectStorage(context.Context, string, string, string) (projectworkspace.ProjectStorageLocation, error)
+@@ -112,0 +123,2 @@ type nodeFederationService interface {
++	ComputePolicy(context.Context, string) (nodefederation.ComputePolicy, error)
++	SetComputePolicy(context.Context, nodefederation.SetComputePolicyCommand) (nodefederation.ComputePolicy, error)
+@@ -125,0 +138,8 @@ type nodeFederationService interface {
++type runtimeCoordinatorService interface {
++	Snapshot(context.Context, int) ([]runtimecoord.QueueEntry, error)
++}
++
++type resourceCoordinatorService interface {
++	Snapshot(context.Context, int) ([]resourcecoord.Lease, error)
++}
++
+@@ -228,0 +249,2 @@ type Server struct {
++	runtimeCoord    runtimeCoordinatorService
++	resourceCoord   resourceCoordinatorService
+@@ -261,11 +283,13 @@ func (s *Server) SetLocalAI(v localAIService, localNodeID string) {
+-func (s *Server) SetProviderOnboarding(v providerOnboardingService) { s.providers = v }
+-func (s *Server) SetScheduler(v schedulerCandidateService)          { s.scheduler = v }
+-func (s *Server) SetAssurance(v assuranceService)                   { s.assurance = v }
+-func (s *Server) SetAgentRuntimes(v agentRuntimeService)            { s.agentRuntimes = v }
+-func (s *Server) SetGateway(v gatewayService)                       { s.gateway = v }
+-func (s *Server) SetTeam(v teamService)                             { s.team = v }
+-func (s *Server) SetBots(v botRuntimeService)                       { s.bots = v }
+-func (s *Server) SetFederation(v nodeFederationService)             { s.federation = v }
+-func (s *Server) SetTasks(v taskService)                            { s.tasks = v }
+-func (s *Server) SetRoutines(v routineService)                      { s.routines = v }
+-func (s *Server) SetChatCommands(v chatCommandService)              { s.chatCommands = v }
++func (s *Server) SetProviderOnboarding(v providerOnboardingService)   { s.providers = v }
++func (s *Server) SetScheduler(v schedulerCandidateService)            { s.scheduler = v }
++func (s *Server) SetAssurance(v assuranceService)                     { s.assurance = v }
++func (s *Server) SetAgentRuntimes(v agentRuntimeService)              { s.agentRuntimes = v }
++func (s *Server) SetGateway(v gatewayService)                         { s.gateway = v }
++func (s *Server) SetTeam(v teamService)                               { s.team = v }
++func (s *Server) SetBots(v botRuntimeService)                         { s.bots = v }
++func (s *Server) SetRuntimeCoordinator(v runtimeCoordinatorService)   { s.runtimeCoord = v }
++func (s *Server) SetResourceCoordinator(v resourceCoordinatorService) { s.resourceCoord = v }
++func (s *Server) SetFederation(v nodeFederationService)               { s.federation = v }
++func (s *Server) SetTasks(v taskService)                              { s.tasks = v }
++func (s *Server) SetRoutines(v routineService)                        { s.routines = v }
++func (s *Server) SetChatCommands(v chatCommandService)                { s.chatCommands = v }
+@@ -303,0 +328,2 @@ func (s *Server) routes() {
++	s.mux.HandleFunc("GET /v1/runtime-queue", s.listRuntimeQueue)
++	s.mux.HandleFunc("GET /v1/resource-leases", s.listGlobalResourceLeases)
+@@ -363,0 +390,2 @@ func (s *Server) routes() {
++	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/compute-policy", s.getNodeComputePolicy)
++	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/compute-policy", s.setNodeComputePolicy)
+@@ -390,0 +419,8 @@ func (s *Server) routes() {
++	s.mux.HandleFunc("GET /v1/projects/{projectID}/storage", s.getProjectStorage)
++	s.mux.HandleFunc("POST /v1/projects/{projectID}/storage", s.moveProjectStorage)
++	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces", s.listProjectWorkspaces)
++	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces", s.createProjectWorkspace)
++	s.mux.HandleFunc("GET /v1/project-workspaces/{workspaceID}", s.getProjectWorkspace)
++	s.mux.HandleFunc("PATCH /v1/project-workspaces/{workspaceID}", s.updateProjectWorkspace)
++	s.mux.HandleFunc("POST /v1/project-workspaces/{workspaceID}/archive", s.archiveProjectWorkspace)
++	s.mux.HandleFunc("POST /v1/project-workspaces/{workspaceID}/storage", s.moveProjectWorkspaceStorage)
+@@ -410,0 +447,31 @@ func (s *Server) routes() {
++func (s *Server) listRuntimeQueue(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
++	if workspaceID == "" {
++		writeError(w, http.StatusBadRequest, "workspace_id is required")
++		return
++	}
++	if !s.authorize(w, r, i, workspaceID, "models.read") {
++		return
++	}
++	if s.runtimeCoord == nil {
++		writeError(w, http.StatusServiceUnavailable, "runtime coordinator unavailable")
++		return
++	}
++	rows, err := s.runtimeCoord.Snapshot(r.Context(), 200)
++	if err != nil {
++		writeError(w, http.StatusInternalServerError, err.Error())
++		return
++	}
++	filtered := rows[:0]
++	for _, row := range rows {
++		if row.WorkspaceID == workspaceID {
++			filtered = append(filtered, row)
++		}
++	}
++	writeJSON(w, http.StatusOK, filtered)
++}
++
+@@ -564,0 +632,17 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, i Identity, w
++func (s *Server) listGlobalResourceLeases(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
++	if workspaceID == "" || !s.authorize(w, r, i, workspaceID, "projects.read") {
++		return
++	}
++	if s.resourceCoord == nil {
++		writeJSON(w, http.StatusOK, map[string]any{"leases": []any{}})
++		return
++	}
++	rows, err := s.resourceCoord.Snapshot(r.Context(), 200)
++	respondDomain(w, map[string]any{"leases": rows}, err, http.StatusOK)
++}
++
+@@ -641,0 +726,190 @@ func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
++func (s *Server) projectForWorkspaceView(ctx context.Context, workspaceID string) (projectworkspace.WorkspaceView, projectworkspace.Project, error) {
++	view, err := s.projects.WorkspaceView(ctx, workspaceID)
++	if err != nil {
++		return view, projectworkspace.Project{}, err
++	}
++	p, err := s.projects.Project(ctx, view.ProjectID)
++	return view, p, err
++}
++
++func (s *Server) listProjectWorkspaces(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	p, err := s.projects.Project(r.Context(), strings.TrimSpace(r.PathValue("projectID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.read") {
++		return
++	}
++	xs, err := s.projects.WorkspaceViews(r.Context(), p.ID)
++	respondDomain(w, map[string]any{"workspaces": xs}, err, http.StatusOK)
++}
++func (s *Server) createProjectWorkspace(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	p, err := s.projects.Project(r.Context(), strings.TrimSpace(r.PathValue("projectID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.write") {
++		return
++	}
++	var in struct {
++		Name          string          `json:"name"`
++		Description   *string         `json:"description"`
++		Layout        json.RawMessage `json:"layout"`
++		AISettings    json.RawMessage `json:"ai_settings"`
++		ResourceScope json.RawMessage `json:"resource_scope"`
++		State         json.RawMessage `json:"state"`
++		StorageRoot   *string         `json:"storage_root"`
++	}
++	if !decodeJSON(w, r, &in) {
++		return
++	}
++	x, err := s.projects.CreateWorkspaceView(r.Context(), projectworkspace.CreateWorkspaceViewCommand{ProjectID: p.ID, Name: in.Name, Description: in.Description, LayoutJSON: in.Layout, AISettingsJSON: in.AISettings, ResourceScopeJSON: in.ResourceScope, StateJSON: in.State, StorageRoot: in.StorageRoot, ActorPrincipalID: i.PrincipalID})
++	respondDomain(w, x, err, http.StatusCreated)
++}
++func (s *Server) getProjectWorkspace(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	x, p, err := s.projectForWorkspaceView(r.Context(), strings.TrimSpace(r.PathValue("workspaceID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.read") {
++		return
++	}
++	writeJSON(w, http.StatusOK, x)
++}
++func (s *Server) updateProjectWorkspace(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	x, p, err := s.projectForWorkspaceView(r.Context(), strings.TrimSpace(r.PathValue("workspaceID")))
++	if err != nil {
++		respondDomain(w, nil, err, 0)
++		return
++	}
++	if !s.authorize(w, r, i, p.WorkspaceID, "projects.write") {
++		return
++	}
++	var in struct {
++		ExpectedRevision int64           `json:"expected_revision"`
++		Name             string          `json:"name"`
++		Description      *string         `json:"description"`
++		Layout           json.RawMessage `json:"layout"`
++		AISettings       json.RawMessage `json:"ai_settings"`
++		ResourceScope    json.RawMessage `json:"resource_scope"`
++		State            json.RawMessage `json:"state"`
++		StorageRoot      *string         `json:"storage_

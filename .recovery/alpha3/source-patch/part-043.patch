@@ -1,0 +1,100 @@
+ 	}
+-	installDir := filepath.Join(programFiles, "OnePane")
++	dataDir := filepath.Join(programData, "OnePane")
++	installDir := readInstallPath(dataDir)
++	if installDir == "" {
++		installDir = filepath.Join(programFiles, "OnePane")
++	}
+ 	_ = runHidden("taskkill.exe", "/IM", "OnePane.Desktop.exe", "/F")
+ 	_ = runHidden("sc.exe", "stop", serviceName)
+ 	time.Sleep(900 * time.Millisecond)
+@@ -346,7 +539,15 @@ func launchDesktop() {
+ 	if programFiles == "" {
+ 		programFiles = `C:\Program Files`
+ 	}
+-	exe := filepath.Join(programFiles, "OnePane", "OnePane.Desktop.exe")
++	programData := os.Getenv("ProgramData")
++	if programData == "" {
++		programData = `C:\ProgramData`
++	}
++	installDir := readInstallPath(filepath.Join(programData, "OnePane"))
++	if installDir == "" {
++		installDir = filepath.Join(programFiles, "OnePane")
++	}
++	exe := filepath.Join(installDir, "OnePane.Desktop.exe")
+ 	cmd := exec.Command(exe)
+ 	cmd.Dir = filepath.Dir(exe)
+ 	_ = cmd.Start()
+@@ -434,33 +635,18 @@ func elevateArgs(args ...string) error {
+ 	return nil
+ }
+ 
+-func updateModelPoolPath(modelPool string) error {
+-	modelPool = strings.TrimSpace(modelPool)
+-	if modelPool == "" {
+-		return fmt.Errorf("model pool path is empty")
+-	}
+-	if !filepath.IsAbs(modelPool) {
+-		return fmt.Errorf("model pool path must be absolute")
+-	}
+-	if err := os.MkdirAll(modelPool, 0o755); err != nil {
+-		return fmt.Errorf("create model pool: %w", err)
+-	}
+-	programData := os.Getenv("ProgramData")
+-	if programData == "" {
+-		programData = `C:\ProgramData`
+-	}
+-	configPath := filepath.Join(programData, "OnePane", "config.yaml")
+-	raw, err := os.ReadFile(configPath)
++func updateConfigFilePath(configPath, key, section, value string) error {
++	linesBytes, err := os.ReadFile(configPath)
+ 	if err != nil {
+ 		return err
+ 	}
+-	lines := strings.Split(string(raw), "\n")
+-	value := `"` + strings.ReplaceAll(filepath.ToSlash(modelPool), `"`, `\"`) + `"`
++	lines := strings.Split(string(linesBytes), "\n")
++	quoted := `"` + yamlEscape(filepath.ToSlash(value)) + `"`
+ 	replaced := false
+ 	for i, line := range lines {
+-		if strings.HasPrefix(strings.TrimSpace(line), "model_pool_path:") {
++		if strings.HasPrefix(strings.TrimSpace(line), key+":") {
+ 			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+-			lines[i] = indent + "model_pool_path: " + value
++			lines[i] = indent + key + ": " + quoted
+ 			replaced = true
+ 			break
+ 		}
+@@ -468,14 +654,14 @@ func updateModelPoolPath(modelPool string) error {
+ 	if !replaced {
+ 		inserted := false
+ 		for i, line := range lines {
+-			if strings.TrimSpace(line) == "local_ai:" {
+-				lines = append(lines[:i+1], append([]string{"  model_pool_path: " + value}, lines[i+1:]...)...)
++			if strings.TrimSpace(line) == section+":" {
++				lines = append(lines[:i+1], append([]string{"  " + key + ": " + quoted}, lines[i+1:]...)...)
+ 				inserted = true
+ 				break
+ 			}
+ 		}
+ 		if !inserted {
+-			lines = append(lines, "", "local_ai:", "  model_pool_path: "+value)
++			lines = append(lines, "", section+":", "  "+key+": "+quoted)
+ 		}
+ 	}
+ 	tmp := configPath + ".tmp"
+@@ -486,18 +672,67 @@ func updateModelPoolPath(modelPool string) error {
+ 		_ = os.Remove(tmp)
+ 		return err
+ 	}
+-	logf("model pool updated from GUI: %s", modelPool)
++	return nil
++}
++
++func updateConfigPath(key, section, value string) error {
++	value = strings.TrimSpace(value)
++	if value == "" {
++		return fmt.Errorf("path is empty")
++	}
++	if !filepath.IsAbs(value) {
++		return fmt.Errorf("path must be absolute")

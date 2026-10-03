@@ -1,0 +1,100 @@
++
+ type schedulerCandidateService interface {
+ 	Candidates(context.Context, string, string, string) ([]scheduler.Candidate, error)
+ }
+@@ -226,6 +246,8 @@ type Server struct {
+ 	localNodeID     string
+ 	providers       providerOnboardingService
+ 	scheduler       schedulerCandidateService
++	runtimeCoord    runtimeCoordinatorService
++	resourceCoord   resourceCoordinatorService
+ 	assurance       assuranceService
+ 	agentRuntimes   agentRuntimeService
+ 	gateway         gatewayService
+@@ -258,17 +280,19 @@ func (s *Server) SetLocalAI(v localAIService, localNodeID string) {
+ 	s.localAI = v
+ 	s.localNodeID = localNodeID
+ }
+-func (s *Server) SetProviderOnboarding(v providerOnboardingService) { s.providers = v }
+-func (s *Server) SetScheduler(v schedulerCandidateService)          { s.scheduler = v }
+-func (s *Server) SetAssurance(v assuranceService)                   { s.assurance = v }
+-func (s *Server) SetAgentRuntimes(v agentRuntimeService)            { s.agentRuntimes = v }
+-func (s *Server) SetGateway(v gatewayService)                       { s.gateway = v }
+-func (s *Server) SetTeam(v teamService)                             { s.team = v }
+-func (s *Server) SetBots(v botRuntimeService)                       { s.bots = v }
+-func (s *Server) SetFederation(v nodeFederationService)             { s.federation = v }
+-func (s *Server) SetTasks(v taskService)                            { s.tasks = v }
+-func (s *Server) SetRoutines(v routineService)                      { s.routines = v }
+-func (s *Server) SetChatCommands(v chatCommandService)              { s.chatCommands = v }
++func (s *Server) SetProviderOnboarding(v providerOnboardingService)   { s.providers = v }
++func (s *Server) SetScheduler(v schedulerCandidateService)            { s.scheduler = v }
++func (s *Server) SetAssurance(v assuranceService)                     { s.assurance = v }
++func (s *Server) SetAgentRuntimes(v agentRuntimeService)              { s.agentRuntimes = v }
++func (s *Server) SetGateway(v gatewayService)                         { s.gateway = v }
++func (s *Server) SetTeam(v teamService)                               { s.team = v }
++func (s *Server) SetBots(v botRuntimeService)                         { s.bots = v }
++func (s *Server) SetRuntimeCoordinator(v runtimeCoordinatorService)   { s.runtimeCoord = v }
++func (s *Server) SetResourceCoordinator(v resourceCoordinatorService) { s.resourceCoord = v }
++func (s *Server) SetFederation(v nodeFederationService)               { s.federation = v }
++func (s *Server) SetTasks(v taskService)                              { s.tasks = v }
++func (s *Server) SetRoutines(v routineService)                        { s.routines = v }
++func (s *Server) SetChatCommands(v chatCommandService)                { s.chatCommands = v }
+ func (s *Server) SetRuntimeConfig(path, modelPoolPath string) {
+ 	s.configPath = strings.TrimSpace(path)
+ 	s.modelPoolPath = strings.TrimSpace(modelPoolPath)
+@@ -301,6 +325,8 @@ func (s *Server) routes() {
+ 	s.mux.HandleFunc("POST /v1/vault/provider-credentials", s.createProviderCredential)
+ 	s.mux.HandleFunc("GET /v1/provider-presets", s.providerPresets)
+ 	s.mux.HandleFunc("GET /v1/scheduler/candidates", s.listSchedulerCandidates)
++	s.mux.HandleFunc("GET /v1/runtime-queue", s.listRuntimeQueue)
++	s.mux.HandleFunc("GET /v1/resource-leases", s.listGlobalResourceLeases)
+ 	s.mux.HandleFunc("GET /v1/providers", s.listProviders)
+ 	s.mux.HandleFunc("POST /v1/providers/probe", s.probeProvider)
+ 	s.mux.HandleFunc("POST /v1/providers", s.addProvider)
+@@ -361,6 +387,8 @@ func (s *Server) routes() {
+ 	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/capabilities", s.nodeCapabilities)
+ 	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/model-management", s.getNodeModelManagement)
+ 	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/model-management", s.setNodeModelManagement)
++	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/compute-policy", s.getNodeComputePolicy)
++	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/compute-policy", s.setNodeComputePolicy)
+ 	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/remote-model-management", s.getRemoteNodeModelManagement)
+ 	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/models/recommendations", s.remoteNodeModelRecommendations)
+ 	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/models/install", s.remoteNodeModelInstall)
+@@ -388,6 +416,14 @@ func (s *Server) routes() {
+ 	s.mux.HandleFunc("POST /v1/projects", s.createProject)
+ 	s.mux.HandleFunc("GET /v1/projects/{projectID}", s.getProject)
+ 	s.mux.HandleFunc("PATCH /v1/projects/{projectID}", s.updateProjectPolicy)
++	s.mux.HandleFunc("GET /v1/projects/{projectID}/storage", s.getProjectStorage)
++	s.mux.HandleFunc("POST /v1/projects/{projectID}/storage", s.moveProjectStorage)
++	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces", s.listProjectWorkspaces)
++	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces", s.createProjectWorkspace)
++	s.mux.HandleFunc("GET /v1/project-workspaces/{workspaceID}", s.getProjectWorkspace)
++	s.mux.HandleFunc("PATCH /v1/project-workspaces/{workspaceID}", s.updateProjectWorkspace)
++	s.mux.HandleFunc("POST /v1/project-workspaces/{workspaceID}/archive", s.archiveProjectWorkspace)
++	s.mux.HandleFunc("POST /v1/project-workspaces/{workspaceID}/storage", s.moveProjectWorkspaceStorage)
+ 	s.mux.HandleFunc("POST /v1/projects/{projectID}/runtime", s.createRuntime)
+ 	s.mux.HandleFunc("GET /v1/projects/{projectID}/runtime", s.getRuntimeByProject)
+ 	s.mux.HandleFunc("POST /v1/project-runtimes/{runtimeID}/desired-state", s.setRuntimeDesired)
+@@ -408,6 +444,37 @@ func (s *Server) routes() {
+ 	s.mux.HandleFunc("GET /", s.serveWebUI)
+ }
+ 
++func (s *Server) listRuntimeQueue(w http.ResponseWriter, r *http.Request) {
++	i, ok := s.authenticate(w, r)
++	if !ok {
++		return
++	}
++	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
++	if workspaceID == "" {
++		writeError(w, http.StatusBadRequest, "workspace_id is required")
++		return
++	}
++	if !s.authorize(w, r, i, workspaceID, "models.read") {
++		return
++	}
++	if s.runtimeCoord == nil {
++		writeError(w, http.StatusServiceUnavailable, "runtime coordinator unavailable")
++		return
++	}
++	rows, err := s.runtimeCoord.Snapshot(r.Context(), 200)
++	if err != nil {

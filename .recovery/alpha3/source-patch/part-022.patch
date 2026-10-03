@@ -1,0 +1,100 @@
++	}
++	n, _ := res.RowsAffected()
++	if n != 1 {
++		return WorkspaceView{}, ErrRevisionConflict
++	}
++	return s.WorkspaceView(ctx, cmd.WorkspaceID)
++}
++
++func (s *Service) ArchiveWorkspaceView(ctx context.Context, id string, expected int64) error {
++	if strings.TrimSpace(id) == "" || expected < 1 {
++		return ErrInvalidCommand
++	}
++	res, err := s.db.ExecContext(ctx, `UPDATE project_workspaces SET status='archived',revision=revision+1,updated_at=? WHERE id=? AND revision=? AND status='active'`, s.clock.UnixMilli(), strings.TrimSpace(id), expected)
++	if err != nil {
++		return err
++	}
++	n, _ := res.RowsAffected()
++	if n != 1 {
++		return ErrRevisionConflict
++	}
++	return nil
++}
++
++func (s *Service) MoveWorkspaceStoragePointer(ctx context.Context, id string, expected int64, newRoot string) (WorkspaceView, error) {
++	newRoot = strings.TrimSpace(newRoot)
++	if newRoot == "" {
++		return WorkspaceView{}, ErrInvalidCommand
++	}
++	current, err := s.WorkspaceView(ctx, id)
++	if err != nil {
++		return WorkspaceView{}, err
++	}
++	if current.Revision != expected {
++		return WorkspaceView{}, ErrRevisionConflict
++	}
++	res, err := s.db.ExecContext(ctx, `UPDATE project_workspaces SET storage_root=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?`, newRoot, s.clock.UnixMilli(), id, expected)
++	if err != nil {
++		return WorkspaceView{}, err
++	}
++	n, _ := res.RowsAffected()
++	if n != 1 {
++		return WorkspaceView{}, ErrRevisionConflict
++	}
++	return s.WorkspaceView(ctx, id)
++}
+diff --git a/internal/resourcecoord/service.go b/internal/resourcecoord/service.go
+new file mode 100644
+index 0000000..ca0ad7d
+--- /dev/null
++++ b/internal/resourcecoord/service.go
+@@ -0,0 +1,235 @@
++package resourcecoord
++
++import (
++	"context"
++	"crypto/sha256"
++	"database/sql"
++	"encoding/hex"
++	"encoding/json"
++	"errors"
++	"fmt"
++	"net/url"
++	"os"
++	"path/filepath"
++	"runtime"
++	"strings"
++	"time"
++
++	"github.com/DigiLogicTech/OnePane/internal/clock"
++	"github.com/DigiLogicTech/OnePane/internal/id"
++	"github.com/DigiLogicTech/OnePane/internal/storage"
++)
++
++type Owner struct {
++	WorkspaceID string  `json:"workspace_id,omitempty"`
++	ProjectID   *string `json:"project_id,omitempty"`
++	TaskID      *string `json:"task_id,omitempty"`
++	ExecutionID *string `json:"execution_id,omitempty"`
++	AgentID     *string `json:"agent_id,omitempty"`
++	NodeID      *string `json:"node_id,omitempty"`
++}
++
++type Lease struct {
++	ID                string `json:"id"`
++	ResourceUID       string `json:"resource_uid"`
++	CanonicalIdentity string `json:"canonical_identity"`
++	Mode              string `json:"mode"`
++	Status            string `json:"status"`
++	ExpiresAt         int64  `json:"expires_at"`
++}
++
++type Service struct {
++	db    *sql.DB
++	tx    storage.Transactor
++	clock clock.Clock
++	ids   id.Generator
++}
++
++func NewService(db *sql.DB, tx storage.Transactor, clk clock.Clock) *Service {
++	return &Service{db: db, tx: tx, clock: clk, ids: id.Generator{}}

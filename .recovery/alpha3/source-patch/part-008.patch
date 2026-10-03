@@ -1,0 +1,100 @@
++	ContextMaxReported *int64   `json:"context_max_reported,omitempty"`
++	ContextMaxVerified *int64   `json:"context_max_verified,omitempty"`
++	UpdatedAt          int64    `json:"updated_at"`
++	ComputeMode        string   `json:"compute_mode,omitempty"`
++	ComputeBackend     string   `json:"compute_backend,omitempty"`
++	ComputeDeviceIDs   []string `json:"compute_device_ids,omitempty"`
++	RAMBytes           int64    `json:"ram_bytes,omitempty"`
++	VRAMBytes          int64    `json:"vram_bytes,omitempty"`
++	Qualified          bool     `json:"qualified"`
++	InvestigationState string   `json:"investigation_state,omitempty"`
+ }
+ 
+ func (s *Service) ManagedDeployments(ctx context.Context, workspaceID string) ([]ManagedDeploymentSummary, error) {
+-	q := `SELECT d.id,d.model_id,mm.model_ref,COALESCE(json_extract(m.static_metadata_json,'$.display_name'),mm.model_ref),COALESCE(d.runtime_name,''),COALESCE(d.runtime_version,''),COALESCE(json_extract(d.runtime_config_json,'$.runtime_backend'),''),mm.local_path,COALESCE(m.quantization,''),d.status,COALESCE(ms.admission_status,''),d.context_max_reported,d.context_max_verified,d.updated_at
+-          FROM managed_local_models mm JOIN model_deployments d ON d.id=mm.deployment_id JOIN models m ON m.id=d.model_id JOIN local_model_install_plans p ON p.id=mm.plan_id LEFT JOIN model_spec_sheets ms ON ms.deployment_id=d.id
++	q := `SELECT d.id,d.model_id,mm.model_ref,COALESCE(json_extract(m.static_metadata_json,'$.display_name'),mm.model_ref),COALESCE(d.runtime_name,''),COALESCE(d.runtime_version,''),COALESCE(json_extract(d.runtime_config_json,'$.runtime_backend'),''),mm.local_path,COALESCE(m.quantization,''),d.status,COALESCE(ms.admission_status,''),COALESCE(mis.investigation_state,'uninvestigated'),d.context_max_reported,d.context_max_verified,d.updated_at,p.plan_json
++          FROM managed_local_models mm JOIN model_deployments d ON d.id=mm.deployment_id JOIN models m ON m.id=d.model_id JOIN local_model_install_plans p ON p.id=mm.plan_id LEFT JOIN model_spec_sheets ms ON ms.deployment_id=d.id LEFT JOIN model_identity_specs mis ON mis.model_uid=d.model_id
+           WHERE mm.status<>'removed'`
+ 	args := []any{}
+ 	if strings.TrimSpace(workspaceID) != "" {
+@@ -57,7 +64,8 @@ func (s *Service) ManagedDeployments(ctx context.Context, workspaceID string) ([
+ 	for rows.Next() {
+ 		var x ManagedDeploymentSummary
+ 		var rep, ver sql.NullInt64
+-		if err := rows.Scan(&x.DeploymentID, &x.ModelID, &x.ModelRef, &x.DisplayName, &x.RuntimeName, &x.RuntimeVersion, &x.RuntimeBackend, &x.LocalPath, &x.Quantization, &x.Status, &x.AdmissionStatus, &rep, &ver, &x.UpdatedAt); err != nil {
++		var planJSON string
++		if err := rows.Scan(&x.DeploymentID, &x.ModelID, &x.ModelRef, &x.DisplayName, &x.RuntimeName, &x.RuntimeVersion, &x.RuntimeBackend, &x.LocalPath, &x.Quantization, &x.Status, &x.AdmissionStatus, &x.InvestigationState, &rep, &ver, &x.UpdatedAt, &planJSON); err != nil {
+ 			return nil, err
+ 		}
+ 		if rep.Valid {
+@@ -66,6 +74,37 @@ func (s *Service) ManagedDeployments(ctx context.Context, workspaceID string) ([
+ 		if ver.Valid {
+ 			x.ContextMaxVerified = &ver.Int64
+ 		}
++		x.Qualified = x.InvestigationState == "qualified" || x.AdmissionStatus == "accepted" || x.AdmissionStatus == "restricted"
++		var rec Recommendation
++		if json.Unmarshal([]byte(planJSON), &rec) == nil {
++			x.ComputeBackend = rec.Placement.Backend
++			hasCPU, hasGPU := false, false
++			for _, dev := range rec.Placement.Devices {
++				if dev.Kind == "accelerator" {
++					hasGPU = true
++					x.VRAMBytes += dev.AllocatedBytes
++					id := strings.TrimSpace(dev.DeviceID)
++					if id == "" {
++						id = fmt.Sprintf("gpu-%d", dev.DeviceIndex)
++					}
++					x.ComputeDeviceIDs = append(x.ComputeDeviceIDs, id)
++				}
++				if dev.Kind == "cpu" {
++					hasCPU = true
++					x.RAMBytes += dev.AllocatedBytes
++				}
++			}
++			x.ComputeMode = "cpu"
++			if hasGPU {
++				x.ComputeMode = "gpu"
++			}
++			if hasCPU && hasGPU || rec.Placement.Mode == PlacementCPUOffload {
++				x.ComputeMode = "hybrid"
++			}
++		}
++		if x.ComputeBackend == "" {
++			x.ComputeBackend = x.RuntimeBackend
++		}
+ 		out = append(out, x)
+ 	}
+ 	return out, rows.Err()
+diff --git a/internal/localai/testbed.go b/internal/localai/testbed.go
+index caec16b..000ed93 100644
+--- a/internal/localai/testbed.go
++++ b/internal/localai/testbed.go
+@@ -405,6 +405,25 @@ func (s *Service) AdmitModel(ctx context.Context, deploymentID string, cmd Admis
+ 		if n != 1 {
+ 			return errors.New("model admission revision conflict")
+ 		}
++		// Alpha 3 separates immutable model-function investigation from mutable
++		// deployment performance. Once an exact model UID has passed admission,
++		// preserve that fact across deployment removal/recreation and hardware swaps.
++		if cmd.Status == AdmissionAccepted || cmd.Status == AdmissionRestricted {
++			specSnapshot, _ := json.Marshal(map[string]any{
++				"model": sheet.Model, "quantization": sheet.Quantization,
++				"catalog_claims": json.RawMessage(sheet.CatalogClaims),
++			})
++			qualificationSnapshot, _ := json.Marshal(map[string]any{
++				"completed": true, "profile_version": "onepane.agent-check/v1",
++				"deployment_id": deploymentID, "hardware_profile_id": sheet.HardwareProfileID,
++				"qualification": json.RawMessage(sheet.Qualification), "restrictions": cmd.Restrictions,
++				"qualified_at": now,
++			})
++			if _, err := tx.ExecContext(ctx, `INSERT INTO model_identity_specs(model_uid,investigation_state,spec_json,qualification_json,archived,created_at,updated_at) VALUES(?,'qualified',?,?,0,?,?)
++				ON CONFLICT(model_uid) DO UPDATE SET investigation_state='qualified',spec_json=excluded.spec_json,qualification_json=excluded.qualification_json,archived=0,updated_at=excluded.updated_at`, sheet.ModelID, string(specSnapshot), string(qualificationSnapshot), now, now); err != nil {
++				return err
++			}
++		}
+ 		eid, _ := s.ids.New("evt")
+ 		payload, _ := json.Marshal(map[string]any{"deployment_id": deploymentID, "admission_status": cmd.Status, "restrictions": cmd.Restrictions, "hardware_profile_id": sheet.HardwareProfileID, "placement": sheet.Placement})
+ 		return s.events.Append(ctx, tx, event.Event{ID: eid, Type: "local_ai.model_admission_changed", AggregateType: "model_deployment", AggregateID: deploymentID, ActorPrincipalID: &cmd.ActorPrincipalID, Payload: payload, OccurredAt: now})
+diff --git a/internal/nodefederation/manifest.go b/internal/nodefederation/manifest.go
+index 956ebca..9370c79 100644

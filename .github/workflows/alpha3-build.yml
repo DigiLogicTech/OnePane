@@ -1,0 +1,332 @@
+name: Alpha 3 Build and Package
+
+on:
+  push:
+    branches:
+      - alpha3-integration
+    paths:
+      - '.recovery/alpha3/source.patch.xz.b64'
+      - '.github/workflows/alpha3-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  ONEPANE_VERSION: 0.1.0-alpha.3
+  ALPHA3_PATCH_XZ_SHA256: 40469f2c2fb8181cb5fc58be315339ec06b481b164b8bf570387cff92b191adf
+  ALPHA3_PATCH_SHA256: 44e31c4bc6df048acec092629a61feaa86c5bde6d31346ead653cf65b9a3f17d
+
+jobs:
+  validate:
+    name: Validate Alpha 3 source
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+
+      - name: Restore Alpha 2 source and apply Alpha 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf buildsrc alpha2-source.tar.xz alpha3.patch.xz alpha3.patch
+          mkdir -p buildsrc
+
+          base64 -d .recovery/alpha2-buildsrc-current.b64 > alpha2-source.tar.xz
+          tar -xJf alpha2-source.tar.xz -C buildsrc
+          test -f buildsrc/go.mod
+          test -f buildsrc/cmd/harnessd/main.go
+
+          base64 -d .recovery/alpha3/source.patch.xz.b64 > alpha3.patch.xz
+          echo "${ALPHA3_PATCH_XZ_SHA256}  alpha3.patch.xz" | sha256sum -c -
+          xz -dc alpha3.patch.xz > alpha3.patch
+          echo "${ALPHA3_PATCH_SHA256}  alpha3.patch" | sha256sum -c -
+
+          (
+            cd buildsrc
+            git apply --check ../alpha3.patch
+            git apply ../alpha3.patch
+          )
+
+          grep -q 'OnePane v0.1.0-alpha.3' buildsrc/README.md
+          test -f buildsrc/migrations/0022_alpha3_control_plane.sql
+          test -f buildsrc/internal/runtimecoord/service.go
+          test -f buildsrc/internal/resourcecoord/service.go
+
+      - name: Validate source contracts
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check internal/webui/static/app.js
+          node --check packaging/windows/desktop/static/app.js
+
+          python scripts/validate_schema.py
+          python scripts/validate_task_lifecycle.py
+          python scripts/validate_live_follow_workspace.py
+          python scripts/validate_workspace_components_v2.py
+          python scripts/validate_m23_webgui.py
+          python scripts/validate_m24_install.py
+          python scripts/validate_m25_local_ai_install.py
+          python scripts/validate_m26_agent_worker.py
+          python scripts/validate_m27_budgets.py
+          python scripts/validate_m28_assurance.py
+          python scripts/validate_m29_integrations.py
+          python scripts/validate_m30_gateway.py
+          python scripts/validate_m31_team_mode.py
+          python scripts/validate_m32_bot_runtime.py
+          python scripts/validate_m33_node_federation.py
+          python scripts/validate_m34_remote_models.py
+          python scripts/validate_m35_hardware_testbed.py
+          python scripts/validate_windows_qa_source.py
+          python scripts/validate_windows_qa4_source.py
+          python scripts/validate_windows_qa5_source.py
+          python scripts/validate_alpha3_source.py
+          python scripts/validate_release_candidate.py
+
+      - name: Resolve and verify Go modules
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod download
+          go mod verify
+
+      - name: Run Go test suite
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./...
+
+      - name: Verify Windows setup cross-compiles
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p packaging/windows/setup/payload dist/validation
+          export CGO_ENABLED=0 GOOS=windows GOARCH=amd64
+          go build -trimpath -ldflags "-s -w" -o packaging/windows/setup/payload/OnePane.Backend.exe ./cmd/harnessd
+          go build -trimpath -ldflags "-s -w -H windowsgui" -o packaging/windows/setup/payload/OnePane.Desktop.exe ./packaging/windows/desktop
+          go build -trimpath -ldflags "-s -w" -o packaging/windows/setup/payload/OnePane.Service.exe ./packaging/windows/service
+          cp packaging/windows/assets/OnePane.ico packaging/windows/setup/payload/OnePane.ico
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, re
+          setup = Path("packaging/windows/setup/main.go")
+          text = setup.read_text()
+          payload = Path("packaging/windows/setup/payload")
+          for name in ["OnePane.Backend.exe", "OnePane.Service.exe", "OnePane.Desktop.exe", "OnePane.ico"]:
+              digest = hashlib.sha256((payload / name).read_bytes()).hexdigest()
+              pattern = rf'("{re.escape(name)}"\s*:\s*")[0-9a-f]{{64}}(")'
+              text, n = re.subn(pattern, rf'\g<1>{digest}\2', text, count=1)
+              if n != 1:
+                  raise SystemExit(f"could not patch hash for {name}")
+          setup.write_text(text)
+          PY
+          go build -trimpath -ldflags "-s -w -H windowsgui" -o dist/validation/OnePane-Setup.exe ./packaging/windows/setup
+
+      - name: Upload patched Alpha 3 source
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnePane-alpha3-buildsrc
+          path: buildsrc
+          if-no-files-found: error
+          retention-days: 2
+
+  windows:
+    name: Windows x64 package
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: OnePane-alpha3-buildsrc
+          path: buildsrc
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+
+      - name: Build Windows application payload
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/windows packaging/windows/setup/payload
+          export CGO_ENABLED=0 GOOS=windows GOARCH=amd64
+          go build -trimpath -ldflags "-s -w" -o dist/windows/OnePane.Backend.exe ./cmd/harnessd
+          go build -trimpath -ldflags "-s -w -H windowsgui" -o dist/windows/OnePane.Desktop.exe ./packaging/windows/desktop
+          go build -trimpath -ldflags "-s -w" -o dist/windows/OnePane.Service.exe ./packaging/windows/service
+
+          cp dist/windows/OnePane.Backend.exe packaging/windows/setup/payload/
+          cp dist/windows/OnePane.Desktop.exe packaging/windows/setup/payload/
+          cp dist/windows/OnePane.Service.exe packaging/windows/setup/payload/
+          cp packaging/windows/assets/OnePane.ico packaging/windows/setup/payload/OnePane.ico
+
+      - name: Refresh embedded payload hashes
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, re
+          setup = Path("packaging/windows/setup/main.go")
+          text = setup.read_text()
+          payload = Path("packaging/windows/setup/payload")
+          for name in ["OnePane.Backend.exe", "OnePane.Service.exe", "OnePane.Desktop.exe", "OnePane.ico"]:
+              digest = hashlib.sha256((payload / name).read_bytes()).hexdigest()
+              pattern = rf'("{re.escape(name)}"\s*:\s*")[0-9a-f]{{64}}(")'
+              text, n = re.subn(pattern, rf'\g<1>{digest}\2', text, count=1)
+              if n != 1:
+                  raise SystemExit(f"could not patch hash for {name}")
+          setup.write_text(text)
+          PY
+
+      - name: Build conventional Windows installer
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CGO_ENABLED=0 GOOS=windows GOARCH=amd64
+          go build -trimpath -ldflags "-s -w -H windowsgui"             -o dist/windows/OnePane-v${ONEPANE_VERSION}-windows-x64-setup.exe             ./packaging/windows/setup
+
+          sha256sum dist/windows/OnePane-v${ONEPANE_VERSION}-windows-x64-setup.exe             > dist/windows/OnePane-v${ONEPANE_VERSION}-windows-x64-setup.exe.sha256
+
+          file dist/windows/OnePane-v${ONEPANE_VERSION}-windows-x64-setup.exe
+          cat dist/windows/OnePane-v${ONEPANE_VERSION}-windows-x64-setup.exe.sha256
+
+      - name: Upload Windows Alpha 3 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnePane-v0.1.0-alpha.3-windows-x64
+          path: |
+            buildsrc/dist/windows/OnePane-v0.1.0-alpha.3-windows-x64-setup.exe
+            buildsrc/dist/windows/OnePane-v0.1.0-alpha.3-windows-x64-setup.exe.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  ubuntu:
+    name: Ubuntu ${{ matrix.arch }} package
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: OnePane-alpha3-buildsrc
+          path: buildsrc
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+
+      - name: Copy repository notices
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The recovery source already carries the application files.
+          # Packaging scripts tolerate absent notice files in this artifact.
+
+      - name: Build Debian package
+        shell: bash
+        env:
+          ONEPANE_VERSION: 0.1.0-alpha.3
+          ONEPANE_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          bash buildsrc/scripts/build-ubuntu-deb.sh
+          dpkg-deb --info buildsrc/dist/ubuntu/*.deb
+          dpkg-deb --contents buildsrc/dist/ubuntu/*.deb | head -100
+
+      - name: Upload Ubuntu Alpha 3 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnePane-v0.1.0-alpha.3-ubuntu-${{ matrix.arch }}
+          path: |
+            buildsrc/dist/ubuntu/*.deb
+            buildsrc/dist/ubuntu/*.deb.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  macos:
+    name: macOS Universal package
+    needs: validate
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: OnePane-alpha3-buildsrc
+          path: buildsrc
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+
+      - name: Validate macOS packaging inputs
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f packaging/macos/OnePaneApp.swift
+          plutil -lint packaging/macos/Info.plist
+
+      - name: Build universal macOS app and DMG
+        shell: bash
+        env:
+          ONEPANE_VERSION: 0.1.0-alpha.3
+        run: |
+          set -euo pipefail
+          bash buildsrc/scripts/build-macos.sh
+
+      - name: Upload macOS Alpha 3 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnePane-v0.1.0-alpha.3-macos-universal
+          path: |
+            buildsrc/dist/macos/*.dmg
+            buildsrc/dist/macos/*.dmg.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish Alpha 3 prerelease
+    needs: [windows, ubuntu, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: OnePane-v0.1.0-alpha.3-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="v${ONEPANE_VERSION}"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            gh release create "$TAG" release-assets/*               --target "${GITHUB_SHA}"               --title "OnePane v${ONEPANE_VERSION}"               --prerelease               --notes "Alpha 3 package: Project Workspaces, Direct/Team/Council Model Stack, global resource and runtime coordination, CPU/GPU/hybrid compute placement, remote compute fleet policy, movable Project storage, and the smaller Windows bootstrap installer with deferred local-runtime installation."
+          fi

@@ -1,0 +1,100 @@
++
++qa7EffectiveChatMode=function(workspace,requested='default'){
++  let mode=requested==='default'?qa8Mode(workspace.orchestration?.mode):qa8Mode(requested);
++  if(workspace.routing?.enabled===false&&mode!=='direct')mode='direct';
++  return mode;
++};
++qa7RoutingEnvelope=function(workspace,requested='default'){
++  const enabled=workspace.routing?.enabled!==false,mode=qa7EffectiveChatMode(workspace,requested),role=mode==='direct'?'supervisor':mode,selected=qa4RouteSelection(workspace,role),fallback=qa7RouteFallback(workspace,role);
++  return {enabled,mode,role,candidate_id:selected.candidate_id,agent_profile:selected.agent_profile,fallback_candidate_ids:enabled?fallback.candidate_ids:[],fallback_agent_profiles:enabled?fallback.agent_profiles:[],project_workspace_id:workspace.id,workspace_access:qa7WorkspaceAccess(workspace),compute_preference:qa8ModelAssignment(workspace,mode).compute_preference||workspace.compute?.preference||'auto'};
++};
++
++qa7WorkspaceSettingsContent=function(w,project,workspace){
++  qa7NormalizeWorkspace(project,workspace);const s=workspace.sandbox,o=workspace.orchestration||{},routing=workspace.routing?.enabled!==false,remote=workspace.remote?.enabled!==false;
++  const direct=qa8ModelAssignment(workspace,'direct'),team=qa8ModelAssignment(workspace,'team'),council=qa8ModelAssignment(workspace,'council');
++  const role=(key,label,x)=>{const models=qa4ModelOptions(),agents=qa4AgentOptions();return `<fieldset class="inspector-fieldset"><legend>${label}</legend><label>Primary model<select data-qa7-role-model="${key}">${qa4OptionRows(models,x.model||'auto')}</select></label><label>Agent<select data-qa7-role-agent="${key}">${qa4OptionRows(agents,x.agent||(key==='supervisor'?'agent.md':'onepane-default'))}</select></label><label>Fallback model<select data-qa7-role-fallback-model="${key}">${qa4OptionRows(models,x.fallback_model||'auto')}</select></label><label>Compute<select data-qa8-settings-compute="${key}"><option value="auto">Auto</option><option value="prefer-gpu" ${x.compute_preference==='prefer-gpu'?'selected':''}>Prefer GPU</option><option value="prefer-cpu" ${x.compute_preference==='prefer-cpu'?'selected':''}>Prefer CPU</option><option value="gpu-only" ${x.compute_preference==='gpu-only'?'selected':''}>GPU only</option><option value="cpu-only" ${x.compute_preference==='cpu-only'?'selected':''}>CPU only</option></select></label></fieldset>`;};
++  return `<form class="qa7-workspace-settings settings-stack" data-qa7-settings-root="${escapeHtml(w.id)}"><div class="qa7-settings-heading"><div><strong>Workspace-owned settings</strong><div class="list-meta">Defaults are copied on creation; existing workspaces are not changed by later Default changes.</div></div><span class="pill ${routing?'good':''}">${routing?'Routing enabled':'Routing disabled'}</span></div><label>Workspace name<input data-qa7-workspace-name value="${escapeHtml(workspace.name||'Workspace')}"></label><label>Default chat mode<select data-qa7-default-mode>${qa8VisibleModes.map(x=>`<option value="${x}" ${qa8Mode(o.mode)===x?'selected':''}>${titleCase(x)}</option>`).join('')}</select></label><label class="inline-check"><input type="checkbox" data-qa7-routing ${routing?'checked':''}> Enable model routing and automatic fallback</label><div class="page-subtitle">Direct remains normal chat. Routing may select a different primary model; fallbacks recover from incompatibility or failure. Disabling routing does not remove your assignments.</div>${role('supervisor','Direct',direct)}${role('team','Team',team)}${role('council','Council',council)}<fieldset class="inspector-fieldset"><legend>Workspace sandbox</legend><label class="inline-check"><input type="checkbox" data-qa7-sandbox="internet" ${s.internet?'checked':''}> Internet access</label><label class="inline-check"><input type="checkbox" data-qa7-sandbox="lan" ${s.lan?'checked':''}> LAN access</label><label class="inline-check"><input type="checkbox" data-qa7-sandbox="browser" ${s.browser?'checked':''}> Browser capability</label><label class="inline-check"><input type="checkbox" data-qa7-sandbox="computer" ${s.computer?'checked':''}> Computer capability</label><label>Host files<select data-qa7-host-files><option value="workspace-only" ${s.host_files!=='none'?'selected':''}>This workspace only</option><option value="none" ${s.host_files==='none'?'selected':''}>No filesystem access</option></select></label><label>Secrets<select data-qa7-secrets><option value="selected" ${s.secrets!=='none'?'selected':''}>Selected Vault handles</option><option value="none" ${s.secrets==='none'?'selected':''}>None</option></select></label></fieldset><fieldset class="inspector-fieldset"><legend>Remote execution</legend><label class="inline-check"><input type="checkbox" data-qa7-remote ${remote?'checked':''}> Allow qualified enrolled nodes and cloud deployments</label><div class="page-subtitle">Remote models receive compiled context and brokered capabilities only. Resource and integration permissions remain enforced by OnePane.</div></fieldset><button class="btn primary" type="submit">Save workspace settings</button><div class="page-subtitle" data-qa7-settings-status></div></form>`;
++};
++
++qa7ChatContent=function(w,project,workspace){
++  const cfg=w.config=w.config||{},routing=workspace.routing?.enabled!==false,requested=qa8Mode(cfg.chat_mode||'default'),rows=qa7ChatHistory(project,workspace,w),defaultMode=qa8Mode(workspace.orchestration?.mode),modeOptions=[['default',`Default (${titleCase(defaultMode)})`],['direct','Direct'],['team','Team'],['council','Council']];
++  return `<div class="qa7-chat" data-qa7-chat-root="${escapeHtml(w.id)}"><div class="qa7-chat-toolbar"><label>Mode<select data-qa7-chat-mode="${escapeHtml(w.id)}">${modeOptions.map(([v,l])=>`<option value="${v}" ${(cfg.chat_mode||'default')===v?'selected':''} ${!routing&&['team','council'].includes(v)?'disabled':''}>${escapeHtml(l)}</option>`).join('')}</select></label><span class="pill ${routing?'good':''}">${routing?'Routing on':'Routing off'}</span></div><div class="qa7-chat-history" data-qa7-chat-history="${escapeHtml(w.id)}">${rows.length?rows.map(x=>`<div class="workspace-chat-message ${x.role==='user'?'user':'system'}"><strong>${x.role==='user'?'You':'OnePane'}</strong><span>${escapeHtml(x.text)}</span></div>`).join(''):'<div class="empty-state compact">Chat creates governed tasks. Type / for deterministic workspace commands.</div>'}</div><form class="qa7-chat-form" data-qa7-chat-form="${escapeHtml(w.id)}"><textarea rows="2" data-qa7-chat-input="${escapeHtml(w.id)}" placeholder="Ask OnePane… Type / for commands"></textarea><button class="btn primary">Send</button><div class="slash-suggestions qa7-slash" hidden></div></form></div>`;
++};
++
++qa7SaveWorkspaceSettings=async function(project,workspace,root){
++  workspace.name=$('[data-qa7-workspace-name]',root)?.value.trim()||workspace.name;
++  workspace.routing={...(workspace.routing||{}),enabled:!!$('[data-qa7-routing]',root)?.checked};
++  workspace.remote={...(workspace.remote||{}),enabled:!!$('[data-qa7-remote]',root)?.checked,access_mode:'brokered'};
++  workspace.sandbox=workspace.sandbox||qa7WorkspaceDefaults().sandbox;
++  $$('[data-qa7-sandbox]',root).forEach(x=>workspace.sandbox[x.dataset.qa7Sandbox]=x.checked);
++  workspace.sandbox.network=workspace.sandbox.internet||workspace.sandbox.lan;
++  workspace.sandbox.host_files=$('[data-qa7-host-files]',root)?.value||'workspace-only';
++  workspace.sandbox.secrets=$('[data-qa7-secrets]',root)?.value||'selected';
++  workspace.orchestration=workspace.orchestration||{};
++  workspace.orchestration.mode=qa8Mode($('[data-qa7-default-mode]',root)?.value||workspace.orchestration.mode);
++  // Workers remain a reusable execution role, but are no longer a visible chat mode.
++  // Preserve their Alpha 2 assignment when saving the Direct/Team/Council surface.
++  for(const key of ['supervisor','team','council']){
++    const role=workspace.orchestration[key]=workspace.orchestration[key]||{};
++    const model=$(`[data-qa7-role-model="${key}"]`,root),agent=$(`[data-qa7-role-agent="${key}"]`,root),fallback=$(`[data-qa7-role-fallback-model="${key}"]`,root),compute=$(`[data-qa8-settings-compute="${key}"]`,root);
++    if(model)role.model=model.value||'auto';
++    if(agent)role.agent=agent.value||(key==='supervisor'?'agent.md':'onepane-default');
++    if(fallback)role.fallback_model=fallback.value||'auto';
++    if(compute)role.compute_preference=compute.value||'auto';
++  }
++  const status=$('[data-qa7-settings-status]',root);
++  try{const updated=await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));qa4Inspector.data.project=updated;if(status)status.innerHTML='<span class="good">Saved for this workspace only.</span>';notice('Workspace settings saved.');}
++  catch(ex){if(status)status.innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`;}
++};
++
++function qa8Recommend(workspace,mode){const role=qa8ModelAssignment(workspace,mode);if(!role.model)role.model='auto';if(!role.agent)role.agent=mode==='direct'?'agent.md':'onepane-default';if(!role.fallback_model)role.fallback_model='auto';if(!role.compute_preference)role.compute_preference='auto';}
++function qa8BindModelStack(project,workspace,root=document){
++  $$('[data-qa8-stack-tab]',root).forEach(b=>b.onclick=async()=>{const w=qa7FindComponent(workspace,b.dataset.qa8StackId);if(!w)return;w.config=w.config||{};w.config.tab=b.dataset.qa8StackTab;await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));renderProjects();});
++  $$('[data-qa8-recommend]',root).forEach(b=>b.onclick=async()=>{qa8Recommend(workspace,b.dataset.qa8Recommend);await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));notice(`${titleCase(b.dataset.qa8Recommend)} recommendation applied without replacing pinned choices.`);renderProjects();});
++  $$('[data-qa8-model]',root).forEach(x=>x.onchange=async()=>{const r=qa8ModelAssignment(workspace,x.dataset.qa8Model);r.model=x.value;await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));});
++  $$('[data-qa8-agent]',root).forEach(x=>x.onchange=async()=>{const r=qa8ModelAssignment(workspace,x.dataset.qa8Agent);r.agent=x.value;await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));});
++  $$('[data-qa8-compute]',root).forEach(x=>x.onchange=async()=>{const r=qa8ModelAssignment(workspace,x.dataset.qa8Compute);r.compute_preference=x.value;await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));});
++  $$('[data-qa8-fallback]',root).forEach(x=>x.onchange=async()=>{const r=qa8ModelAssignment(workspace,x.dataset.qa8Fallback);r.fallback_model=x.value;await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));});
++}
++const qa8BindWorkspaceBase=qa7BindWorkspaceControls;
++qa7BindWorkspaceControls=function(project,workspace,root=document){qa8BindWorkspaceBase(project,workspace,root);qa8BindModelStack(project,workspace,root);};
++
++
++
++function qa8ComputeModeForDeployment(d){
++  const raw=String(d?.compute_mode||d?.run_mode||d?.placement?.mode||'').toLowerCase();
++  if(raw.includes('hybrid')||raw.includes('offload')||raw.includes('cpu_gpu'))return 'hybrid';
++  if(raw.includes('gpu')||['cuda','rocm','hip','vulkan','metal','directml','sycl'].includes(String(d?.compute_backend||d?.runtime_backend||'').toLowerCase()))return 'gpu';
++  if(raw.includes('cpu'))return 'cpu';
++  return 'auto';
++}
++function qa8DecorateModels(){
++  const heading=$('#viewHost .page-heading h1');if(heading)heading.textContent='Models';
++  const rows=$$('#qa5ManagedModels .model-tile');
++  rows.forEach((el,i)=>{const d=qa5ManagedDeployments[i];if(!d)return;const meta=el.querySelector('.list-meta');if(meta&&!el.querySelector('.qa8-model-compute'))meta.insertAdjacentHTML('beforebegin',`<div class="toolbar qa8-model-compute">${qa8ComputeBadge(qa8ComputeModeForDeployment(d))}<span class="list-meta">${escapeHtml(d.compute_backend||d.runtime_backend||'')} ${d.compute_device_ids?.length?`· ${escapeHtml(d.compute_device_ids.join(', '))}`:''}</span></div>`);if(d.qualified||String(d.investigation_state||'').toLowerCase()==='qualified')el.querySelector('[data-agent-check]')?.remove();});
++  const inspected=qa4Inspector?.kind==='model'?qa4Inspector.data:null;
++  if(inspected&&(inspected.qualified||String(inspected.investigation_state||'').toLowerCase()==='qualified'))$('#qa5InspectorAgentCheck')?.remove();
++}
++const qa8RenderModelsBase=renderModels;
++renderModels=async function(){await qa8RenderModelsBase();qa8ManagedDeployments=qa5ManagedDeployments;queueMicrotask(qa8DecorateModels);};
++let qa8ManagedDeployments=[];
++
++function qa8SettingsEnhance(){
++  const heading=$('#viewHost .page-heading h1');if(heading)heading.textContent='Settings';
++  const about=$('.about-block strong');if(about)about.textContent=`OnePane v${QA8_RELEASE}`;
++  const mode=$('#qa5DefaultMode');if(mode){const current=qa8Mode(mode.value);mode.innerHTML=qa8VisibleModes.map(v=>`<option value="${v}" ${current===v?'selected':''}>${titleCase(v)}</option>`).join('');}
++  const localCard=$('#modelPoolPath')?.closest('.panel-card');
++  if(localCard&&!$('#qa8ProjectRoot')){const body=localCard.querySelector('.settings-stack');body?.insertAdjacentHTML('afterbegin',`<label>Default Project / Workspace data root<input id="qa8ProjectRoot" placeholder="D:\\OnePane\\Projects"></label><div class="page-subtitle">Libraries, artifacts and workspace data can live on a larger drive independently of the application and model pool.</div>`);}
++}
++const qa8RenderSettingsBase=renderSettings;
++renderSettings=async function(){await qa8RenderSettingsBase();qa8SettingsEnhance();try{const s=await apiRequest('/desktop/settings');if($('#qa8ProjectRoot'))$('#qa8ProjectRoot').value=s.project_root||'';}catch{}const save=$('#saveModelPool');if(save){const base=save.onclick;save.onclick=async()=>{const projectRoot=$('#qa8ProjectRoot')?.value.trim()||'';if(projectRoot){try{await apiRequest('/desktop/settings/project-root',{method:'POST',body:JSON.stringify({project_root:projectRoot})});}catch(ex){notice(`Project storage update failed: ${ex.message}`,'bad');return;}}await base?.();};}};
++
++async function qa8FleetSnapshot(){
++  const [queue,leases,nodes]=await Promise.all([
++    apiRequest('/v1/runtime-queue?limit=40').catch(()=>[]),
++    apiRequest('/v1/resource-leases?limit=40').catch(()=>[]),
++    apiRequest('/v1/nodes').catch(()=>liveOps.nodes||[])
++  ]);
++  return {queue:Array.isArray(queue)?queue:(queue.entries||[]),leases:Array.isArray(leases)?leases:(leases.entries||[]),nodes:Array.isArray(nodes)?nodes:(nodes.nodes||[])};
++}
++function qa8FleetCard(data){

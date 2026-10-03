@@ -1,0 +1,100 @@
+ 	var leaseRevision sql.NullInt64
+ 	var requiredVerification, requiredApproval sql.NullString
+@@ -35,7 +35,7 @@ func scanOperation(row interface{ Scan(...any) error }) (Operation, error) {
+ 		&o.IdempotencyKey, &state, &o.CapabilityID, &o.ResourceRef, &o.ToolID, &o.ToolVersion,
+ 		&o.AdapterID, &o.AdapterVersion, &o.DesiredState, &o.Precondition,
+ 		&o.Reconciliation, &compensation, &o.PolicyRevision, &o.InputHash,
+-		&leaseID, &leaseRevision, &resourceLeaseID, &requiredVerification, &requiredApproval,
++		&leaseID, &leaseRevision, &resourceLeaseID, &globalResourceLeaseID, &requiredVerification, &requiredApproval,
+ 		&o.Revision, &o.CreatedAt, &o.UpdatedAt)
+ 	if err != nil {
+ 		return Operation{}, err
+@@ -68,6 +68,10 @@ func scanOperation(row interface{ Scan(...any) error }) (Operation, error) {
+ 		x := resourceLeaseID.String
+ 		o.ResourceLeaseID = &x
+ 	}
++	if globalResourceLeaseID.Valid {
++		x := globalResourceLeaseID.String
++		o.GlobalResourceLeaseID = &x
++	}
+ 	if requiredVerification.Valid {
+ 		x := policy.VerificationLevel(requiredVerification.String)
+ 		o.RequiredVerification = &x
+@@ -175,8 +179,8 @@ WHERE id=? AND revision=? AND state='proposed'`, leaseID, leaseRevision, policyR
+ 	}
+ 	return nil
+ }
+-func (r *sqlRepository) SetResourceLease(ctx context.Context, tx storage.Tx, id string, expectedRevision int64, resourceLeaseID string, at int64) error {
+-	res, err := tx.ExecContext(ctx, `UPDATE operations SET resource_lease_id=?, state='prepared', revision=revision+1, updated_at=? WHERE id=? AND revision=? AND state='authorized'`, resourceLeaseID, at, id, expectedRevision)
++func (r *sqlRepository) SetResourceLease(ctx context.Context, tx storage.Tx, id string, expectedRevision int64, resourceLeaseID string, globalResourceLeaseID *string, at int64) error {
++	res, err := tx.ExecContext(ctx, `UPDATE operations SET resource_lease_id=?,global_resource_lease_id=?, state='prepared', revision=revision+1, updated_at=? WHERE id=? AND revision=? AND state='authorized'`, resourceLeaseID, globalResourceLeaseID, at, id, expectedRevision)
+ 	if err != nil {
+ 		return fmt.Errorf("prepare operation: %w", err)
+ 	}
+diff --git a/internal/operation/types.go b/internal/operation/types.go
+index fe0d121..3fcca71 100644
+--- a/internal/operation/types.go
++++ b/internal/operation/types.go
+@@ -51,6 +51,7 @@ type Operation struct {
+ 	CapabilityLeaseID       *string
+ 	CapabilityLeaseRevision *int64
+ 	ResourceLeaseID         *string
++	GlobalResourceLeaseID   *string
+ 	RequiredVerification    *policy.VerificationLevel
+ 	RequiredApproval        *policy.ApprovalLevel
+ 	Revision                int64
+diff --git a/internal/projectworkspace/service.go b/internal/projectworkspace/service.go
+index c918e04..ebc2677 100644
+--- a/internal/projectworkspace/service.go
++++ b/internal/projectworkspace/service.go
+@@ -6,6 +6,7 @@ import (
+ 	"encoding/json"
+ 	"fmt"
+ 	"strings"
++	"sync"
+ 
+ 	"github.com/DigiLogicTech/OnePane/internal/clock"
+ 	"github.com/DigiLogicTech/OnePane/internal/event"
+@@ -15,16 +16,19 @@ import (
+ )
+ 
+ type Service struct {
+-	repo   repository
+-	tx     storage.Transactor
+-	events event.Store
+-	outbox outbox.Store
+-	ids    id.Generator
+-	clock  clock.Clock
++	db          *sql.DB
++	repo        repository
++	tx          storage.Transactor
++	events      event.Store
++	outbox      outbox.Store
++	ids         id.Generator
++	clock       clock.Clock
++	projectRoot string
++	storageMu   sync.Mutex
+ }
+ 
+ func NewService(db *sql.DB, tx storage.Transactor, clk clock.Clock) *Service {
+-	return &Service{repo: newSQLRepository(db), tx: tx, events: event.Store{}, outbox: outbox.Store{}, ids: id.Generator{}, clock: clk}
++	return &Service{db: db, repo: newSQLRepository(db), tx: tx, events: event.Store{}, outbox: outbox.Store{}, ids: id.Generator{}, clock: clk}
+ }
+ 
+ func (s *Service) Project(ctx context.Context, id string) (Project, error) {
+diff --git a/internal/projectworkspace/storage.go b/internal/projectworkspace/storage.go
+new file mode 100644
+index 0000000..ac75dab
+--- /dev/null
++++ b/internal/projectworkspace/storage.go
+@@ -0,0 +1,351 @@
++package projectworkspace
++
++import (
++	"context"
++	"crypto/sha256"
++	"database/sql"
++	"encoding/hex"
++	"encoding/json"
++	"errors"
++	"fmt"

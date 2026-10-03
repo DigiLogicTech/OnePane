@@ -1,0 +1,100 @@
++  const running=data.queue.filter(x=>x.state==='running'),queued=data.queue.filter(x=>String(x.state||'').startsWith('queued')||String(x.state||'').startsWith('waiting'));
++  const compute={cpu:0,gpu:0,hybrid:0};for(const x of running){let c={};try{c=typeof x.resource_claim==='string'?JSON.parse(x.resource_claim):x.resource_claim||{};}catch{}const m=String(c.compute_mode||'').toLowerCase();if(m==='cpu')compute.cpu++;else if(m==='hybrid'||m==='cpu_gpu')compute.hybrid++;else if(m==='gpu')compute.gpu++;}
++  return `<section class="panel-card qa8-fleet-card"><div class="card-header"><div><div class="card-title">Compute fleet</div><div class="list-meta">Application-wide CPU/GPU scheduling across local and enrolled nodes</div></div><span class="pill ${queued.length?'warn':'good'}">${queued.length} queued</span></div><div class="widget-body"><div class="metric-grid">${metric('CPU models',String(compute.cpu),'Running now')}${metric('GPU models',String(compute.gpu),'Running now')}${metric('Hybrid models',String(compute.hybrid),'CPU + GPU claims')}${metric('Resource leases',String(data.leases.length),'Global active/queued')}</div><div class="list-meta">${data.nodes.length} node(s) visible. CPU and each GPU are independently schedulable while shared RAM/device constraints remain enforced.</div></div></section>`;
++}
++const qa8RenderOperationsBase=renderOperations;
++renderOperations=function(){qa8RenderOperationsBase();qa8FleetSnapshot().then(data=>{$('#operationsLayout')?.insertAdjacentHTML('afterend',qa8FleetCard(data));}).catch(()=>{});};
++
++// Upgrade persisted Alpha 2 default mode without removing the compatible backing assignment.
++try{const p=qa5Prefs();if(['supervisor','workers'].includes(p.workspace_defaults?.orchestration)){p.workspace_defaults.orchestration='direct';localStorage.setItem(QA5_PREFS_KEY,JSON.stringify(p));}}catch{}
++
+ 
+ bootOnePane();
+diff --git a/migrations/0022_alpha3_control_plane.sql b/migrations/0022_alpha3_control_plane.sql
+new file mode 100644
+index 0000000..3c7eb58
+--- /dev/null
++++ b/migrations/0022_alpha3_control_plane.sql
+@@ -0,0 +1,204 @@
++-- OnePane Alpha 3: first-class project workspaces, immutable model identity,
++-- compute placement, global runtime scheduling, library grants and fleet policy.
++
++CREATE TABLE project_workspaces (
++    id                  TEXT PRIMARY KEY,
++    project_id          TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
++    name                TEXT NOT NULL,
++    description         TEXT,
++    status              TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
++    layout_json         TEXT NOT NULL DEFAULT '{"schema_version":1,"components":[]}' CHECK (json_valid(layout_json)),
++    ai_settings_json    TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(ai_settings_json)),
++    resource_scope_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(resource_scope_json)),
++    state_json          TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(state_json)),
++    storage_root        TEXT,
++    revision            INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
++    created_at          INTEGER NOT NULL,
++    updated_at          INTEGER NOT NULL
++) STRICT;
++CREATE INDEX idx_project_workspaces_project ON project_workspaces(project_id,status,updated_at DESC);
++
++CREATE TABLE workspace_app_instances (
++    id                  TEXT PRIMARY KEY,
++    project_workspace_id TEXT NOT NULL REFERENCES project_workspaces(id) ON DELETE CASCADE,
++    app_id              TEXT NOT NULL,
++    app_version         TEXT,
++    enabled             INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
++    configuration_json  TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(configuration_json)),
++    state_json          TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(state_json)),
++    permissions_json    TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(permissions_json)),
++    created_at          INTEGER NOT NULL,
++    updated_at          INTEGER NOT NULL,
++    UNIQUE(project_workspace_id,app_id,id)
++) STRICT;
++CREATE INDEX idx_workspace_apps_workspace ON workspace_app_instances(project_workspace_id,enabled);
++
++CREATE TABLE workspace_integration_grants (
++    id                  TEXT PRIMARY KEY,
++    project_workspace_id TEXT NOT NULL REFERENCES project_workspaces(id) ON DELETE CASCADE,
++    connection_id       TEXT NOT NULL,
++    enabled             INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
++    permissions_json    TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(permissions_json)),
++    agent_overrides_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(agent_overrides_json)),
++    revision            INTEGER NOT NULL DEFAULT 1,
++    created_at          INTEGER NOT NULL,
++    updated_at          INTEGER NOT NULL,
++    UNIQUE(project_workspace_id,connection_id)
++) STRICT;
++
++CREATE TABLE project_library_assets (
++    id                  TEXT PRIMARY KEY,
++    project_id          TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
++    name                TEXT NOT NULL,
++    asset_type          TEXT NOT NULL,
++    current_version     INTEGER NOT NULL DEFAULT 1 CHECK (current_version >= 1),
++    archived            INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0,1)),
++    security_json       TEXT NOT NULL DEFAULT '{"executable":false,"trusted":false}' CHECK (json_valid(security_json)),
++    created_at          INTEGER NOT NULL,
++    updated_at          INTEGER NOT NULL
++) STRICT;
++CREATE INDEX idx_project_library_assets_project ON project_library_assets(project_id,archived,updated_at DESC);
++
++CREATE TABLE project_library_asset_versions (
++    asset_id            TEXT NOT NULL REFERENCES project_library_assets(id) ON DELETE CASCADE,
++    version             INTEGER NOT NULL CHECK (version >= 1),
++    content_hash        TEXT NOT NULL,
++    size_bytes          INTEGER,
++    mime_type           TEXT,
++    storage_uri         TEXT NOT NULL,
++    provenance_json     TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(provenance_json)),
++    created_at          INTEGER NOT NULL,
++    PRIMARY KEY(asset_id,version)
++) STRICT;
++
++CREATE TABLE workspace_library_grants (
++    id                  TEXT PRIMARY KEY,
++    project_workspace_id TEXT NOT NULL REFERENCES project_workspaces(id) ON DELETE CASCADE,
++    asset_id            TEXT NOT NULL REFERENCES project_library_assets(id) ON DELETE CASCADE,
++    enabled             INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
++    version_policy      TEXT NOT NULL DEFAULT 'latest' CHECK (version_policy IN ('latest','pinned')),
++    pinned_version      INTEGER,
++    permissions_json    TEXT NOT NULL DEFAULT '{"read":true,"modify":false,"create_derivative":true,"execute":false,"delete":false}' CHECK (json_valid(permissions_json)),
++    created_at          INTEGER NOT NULL,

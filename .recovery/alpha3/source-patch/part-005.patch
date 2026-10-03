@@ -1,0 +1,100 @@
+ 	"github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
+@@ -52,40 +54,42 @@ import (
+ )
+ 
+ type Runtime struct {
+-	DB                 *sqlite.DB
+-	System             *system.Service
+-	Nodes              *node.Service
+-	Tasks              *task.Service
+-	Authority          *authority.Service
+-	Budgets            *budget.Service
+-	Approvals          *approval.Service
+-	Policy             *policy.Engine
+-	Artifacts          *artifact.Service
+-	Observations       *observation.Service
+-	ToolGateway        *tool.Gateway
+-	Verification       *verification.Service
+-	Watchdog           *watchdog.Service
+-	Vault              *vault.Service
+-	Inference          *inference.Service
+-	LocalAI            *localai.Service
+-	AgentRuntimes      *agentruntime.Service
+-	AgentWorker        *agentworker.Service
+-	Assurance          *assurance.Service
+-	Scheduler          *scheduler.Service
+-	ProviderOnboarding *provideronboarding.Service
+-	ProjectWorkspaces  *projectworkspace.Service
+-	ProjectRuntime     *projectruntime.Reconciler
+-	ProjectRoutine     *projectroutine.Executor
+-	Routines           *routine.Service
+-	RoutineWorker      *routineworker.Service
+-	Operations         *operation.Coordinator
+-	ReadOnlySlice      *verticalslice.ReadOnlyRunner
+-	WebAuth            *webauth.Service
+-	Gateway            *gateway.Service
+-	Team               *team.Service
+-	TeamWorker         *teamworker.Service
+-	Bots               *botruntime.Service
+-	Federation         *nodefederation.Service
++	DB                  *sqlite.DB
++	System              *system.Service
++	Nodes               *node.Service
++	Tasks               *task.Service
++	Authority           *authority.Service
++	Budgets             *budget.Service
++	Approvals           *approval.Service
++	Policy              *policy.Engine
++	Artifacts           *artifact.Service
++	Observations        *observation.Service
++	ToolGateway         *tool.Gateway
++	Verification        *verification.Service
++	Watchdog            *watchdog.Service
++	Vault               *vault.Service
++	Inference           *inference.Service
++	LocalAI             *localai.Service
++	AgentRuntimes       *agentruntime.Service
++	AgentWorker         *agentworker.Service
++	Assurance           *assurance.Service
++	Scheduler           *scheduler.Service
++	RuntimeCoordinator  *runtimecoord.Service
++	ResourceCoordinator *resourcecoord.Service
++	ProviderOnboarding  *provideronboarding.Service
++	ProjectWorkspaces   *projectworkspace.Service
++	ProjectRuntime      *projectruntime.Reconciler
++	ProjectRoutine      *projectroutine.Executor
++	Routines            *routine.Service
++	RoutineWorker       *routineworker.Service
++	Operations          *operation.Coordinator
++	ReadOnlySlice       *verticalslice.ReadOnlyRunner
++	WebAuth             *webauth.Service
++	Gateway             *gateway.Service
++	Team                *team.Service
++	TeamWorker          *teamworker.Service
++	Bots                *botruntime.Service
++	Federation          *nodefederation.Service
+ }
+ 
+ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
+@@ -179,7 +183,9 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
+ 	toolGateway.EnableSandboxAdapter(sandboxrunner.AdapterID, sandboxrunner.AdapterVersion)
+ 	mutationGate := operation.NewMutationGate(db.SQL())
+ 	toolGateway.SetMutationPermitValidator(mutationGate)
++	resourceCoordinator := resourcecoord.NewService(db.SQL(), db, clk)
+ 	operationCoordinator := operation.NewCoordinator(db.SQL(), db, policyEngine, toolGateway, mutationGate, clk)
++	operationCoordinator.SetGlobalResourceCoordinator(resourceCoordinator)
+ 	approvalService := approval.NewService(db.SQL(), db, clk)
+ 	operationCoordinator.SetApprovalConsumer(approvalService)
+ 	if _, err := operationCoordinator.RecoverInterrupted(ctx, nil, nil, nil); err != nil {
+@@ -259,6 +265,11 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
+ 		return nil, fmt.Errorf("configure agent runtime execution: %w", err)
+ 	}
+ 	botRuntimeService := botruntime.NewService(db.SQL(), db, clk, vaultService)
++	runtimeCoordinator := runtimecoord.NewService(db.SQL(), clk)
++	if err := inferenceService.ConfigureRuntimeCoordinator(runtimeCoordinator); err != nil {
++		_ = db.Close()
++		return nil, fmt.Errorf("configure global model runtime coordinator: %w", err)
++	}
+ 	schedulerService := scheduler.NewService(db.SQL(), db, clk)
+ 	providerOnboardingService := provideronboarding.New(inferenceService, secretResolver)
+ 	catalogTrust := localai.NewCatalogTrustStore()

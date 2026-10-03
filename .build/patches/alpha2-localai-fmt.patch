@@ -1,0 +1,10 @@
+diff --git a/internal/localai/testbed.go b/internal/localai/testbed.go
+--- a/internal/localai/testbed.go
++++ b/internal/localai/testbed.go
+@@ -5,6 +5,7 @@ import (
+ 	"database/sql"
+ 	"encoding/json"
+ 	"errors"
++	"fmt"
+ 	"strings"
+ 	"time"

@@ -1,0 +1,100 @@
++	}
++	if err := os.MkdirAll(value, 0o755); err != nil {
++		return fmt.Errorf("create path: %w", err)
++	}
++	programData := os.Getenv("ProgramData")
++	if programData == "" {
++		programData = `C:\ProgramData`
++	}
++	configPath := filepath.Join(programData, "OnePane", "config.yaml")
++	if err := updateConfigFilePath(configPath, key, section, value); err != nil {
++		return err
++	}
++	logf("%s updated from GUI: %s", key, value)
+ 	_ = runHidden("sc.exe", "stop", serviceName)
+ 	time.Sleep(900 * time.Millisecond)
+ 	if err := runHidden("sc.exe", "start", serviceName); err != nil {
+ 		return fmt.Errorf("restart OnePane service: %w", err)
+ 	}
+ 	if !waitForHealth(45 * time.Second) {
+-		return fmt.Errorf("OnePane did not become healthy after applying the model pool")
++		return fmt.Errorf("OnePane did not become healthy after applying %s", key)
+ 	}
+ 	return nil
+ }
+ 
++func readConfiguredStorage(configPath string) (projectRoot, modelPool string) {
++	raw, err := os.ReadFile(configPath)
++	if err != nil {
++		return "", ""
++	}
++	for _, line := range strings.Split(string(raw), "\n") {
++		trim := strings.TrimSpace(line)
++		if strings.HasPrefix(trim, "project_root:") {
++			projectRoot = strings.Trim(strings.TrimSpace(strings.TrimPrefix(trim, "project_root:")), `"'`)
++		}
++		if strings.HasPrefix(trim, "model_pool_path:") {
++			modelPool = strings.Trim(strings.TrimSpace(strings.TrimPrefix(trim, "model_pool_path:")), `"'`)
++		}
++	}
++	return
++}
++
++func readInstallPath(dataDir string) string {
++	b, err := os.ReadFile(filepath.Join(dataDir, "install-path.txt"))
++	if err != nil {
++		return ""
++	}
++	return strings.TrimSpace(string(b))
++}
++
++func yamlEscape(s string) string { return strings.ReplaceAll(s, `"`, `\\"`) }
++
+ func argValue(name string) string {
+ 	for i, a := range os.Args[1:] {
+ 		if strings.EqualFold(a, name) && i+2 <= len(os.Args[1:]) {
+diff --git a/scripts/build-macos.sh b/scripts/build-macos.sh
+index cacec00..1187e9f 100755
+--- a/scripts/build-macos.sh
++++ b/scripts/build-macos.sh
+@@ -2,7 +2,7 @@
+ set -euo pipefail
+ 
+ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+-VERSION="${ONEPANE_VERSION:-0.1.0-alpha.2}"
++VERSION="${ONEPANE_VERSION:-0.1.0-alpha.3}"
+ OUT="${ONEPANE_OUT:-$ROOT/dist/macos}"
+ WORK="$(mktemp -d)"
+ trap 'rm -rf "$WORK"' EXIT
+@@ -75,7 +75,7 @@ cp -R "$APP" "$STAGE/OnePane.app"
+ ln -s /Applications "$STAGE/Applications"
+ 
+ DMG="$OUT/OnePane-v${VERSION#v}-macos-universal.dmg"
+-hdiutil create -volname "OnePane Alpha 2" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
++hdiutil create -volname "OnePane Alpha 3" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+ shasum -a 256 "$DMG" > "$DMG.sha256"
+ 
+ lipo -info "$APP/Contents/MacOS/OnePane"
+diff --git a/scripts/build-ubuntu-deb.sh b/scripts/build-ubuntu-deb.sh
+index 67b84c5..b094ebe 100755
+--- a/scripts/build-ubuntu-deb.sh
++++ b/scripts/build-ubuntu-deb.sh
+@@ -2,7 +2,7 @@
+ set -euo pipefail
+ 
+ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+-VERSION="${ONEPANE_VERSION:-0.1.0-alpha.2}"
++VERSION="${ONEPANE_VERSION:-0.1.0-alpha.3}"
+ ARCH="${ONEPANE_ARCH:-amd64}"
+ OUT="${ONEPANE_OUT:-$ROOT/dist/ubuntu}"
+ 
+diff --git a/scripts/validate_alpha3_source.py b/scripts/validate_alpha3_source.py
+new file mode 100755
+index 0000000..2c904ea
+--- /dev/null
++++ b/scripts/validate_alpha3_source.py
+@@ -0,0 +1,48 @@
++#!/usr/bin/env python3
++from pathlib import Path
++import sys
++

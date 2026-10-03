@@ -1,0 +1,100 @@
++	s.scheduleLocked()
++	s.mu.Unlock()
++
++	select {
++	case lease := <-w.ready:
++		return lease, nil
++	case <-ctx.Done():
++		s.mu.Lock()
++		for i, x := range s.waiters {
++			if x == w {
++				s.waiters = append(s.waiters[:i], s.waiters[i+1:]...)
++				break
++			}
++		}
++		s.scheduleLocked()
++		s.mu.Unlock()
++		_ = s.persistTerminal(context.Background(), req.InferenceRequestID, "cancelled", ctx.Err().Error())
++		return nil, ctx.Err()
++	}
++}
++
++func (l *Lease) ReportBoundary(ctx context.Context, boundary string) error {
++	if l == nil || l.service == nil || l.id == "" {
++		return nil
++	}
++	switch boundary {
++	case "unsafe", "safe_turn", "safe_pause", "complete":
++	default:
++		return fmt.Errorf("invalid execution boundary %q", boundary)
++	}
++	_, err := l.service.db.ExecContext(ctx, `UPDATE runtime_execution_queue SET safe_boundary=?,revision=revision+1 WHERE id=?`, boundary, l.id)
++	return err
++}
++
++func (l *Lease) Release(ctx context.Context, failure error) {
++	if l == nil || l.service == nil || l.id == "" {
++		return
++	}
++	l.once.Do(func() { l.service.release(ctx, l.id, failure) })
++}
++
++func (s *Service) release(ctx context.Context, id string, failure error) {
++	s.mu.Lock()
++	delete(s.active, id)
++	s.scheduleLocked()
++	s.mu.Unlock()
++	state, reason := "completed", ""
++	if failure != nil {
++		state, reason = "failed", failure.Error()
++	}
++	_ = s.persistTerminal(ctx, id, state, reason)
++}
++
++func (s *Service) scheduleLocked() {
++	if len(s.waiters) == 0 {
++		return
++	}
++	now := s.clock.UnixMilli()
++	sort.SliceStable(s.waiters, func(i, j int) bool {
++		a, b := s.waiters[i], s.waiters[j]
++		pa, pb := priorityScore(a.req.Priority), priorityScore(b.req.Priority)
++		// Aging prevents lower-priority background work from starving forever.
++		pa += int((now - a.queuedAt) / int64(30*time.Second/time.Millisecond))
++		pb += int((now - b.queuedAt) / int64(30*time.Second/time.Millisecond))
++		if a.claim.Resident {
++			pa += 1
++		}
++		if b.claim.Resident {
++			pb += 1
++		}
++		if pa != pb {
++			return pa > pb
++		}
++		return a.queuedAt < b.queuedAt
++	})
++
++	for i := 0; i < len(s.waiters); {
++		w := s.waiters[i]
++		if !s.resourcesFreeLocked(w.claim.ResourceIDs) {
++			i++
++			continue
++		}
++		id := strings.TrimSpace(w.req.InferenceRequestID)
++		if id == "" {
++			id = fmt.Sprintf("runtime-%d", w.queuedAt)
++		}
++		st := &leaseState{ID: id, Request: w.req, Claim: w.claim, Acquired: now}
++		s.active[id] = st
++		s.waiters = append(s.waiters[:i], s.waiters[i+1:]...)
++		_ = s.persistRunning(context.Background(), id, now)
++		w.ready <- &Lease{service: s, id: id}
++	}
++}
++
++func (s *Service) resourcesFreeLocked(resources []string) bool {
++	for _, active := range s.active {
++		for _, a := range active.Claim.ResourceIDs {
++			for _, wanted := range resources {
++				if a == wanted {
++					return false

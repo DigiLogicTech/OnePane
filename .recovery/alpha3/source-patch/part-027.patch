@@ -1,0 +1,100 @@
++				}
++			}
++		}
++	}
++	return true
++}
++
++func priorityScore(v string) int {
++	switch strings.ToLower(strings.TrimSpace(v)) {
++	case "interactive":
++		return 400
++	case "high":
++		return 300
++	case "normal":
++		return 200
++	case "background":
++		return 100
++	default:
++		return 200
++	}
++}
++
++func (s *Service) claimForDeployment(ctx context.Context, d inference.ModelDeployment) (Claim, error) {
++	claim := Claim{ComputeMode: "cloud"}
++	if d.ProviderConnectionID != nil {
++		return claim, nil
++	}
++	if d.NodeID != nil {
++		claim.NodeID = *d.NodeID
++	}
++	var mode, backend, gpuJSON string
++	var ram, vram sql.NullInt64
++	var cached, resident int
++	err := s.db.QueryRowContext(ctx, `SELECT compute_mode,COALESCE(backend,''),COALESCE(ram_bytes,0),gpu_device_ids_json,COALESCE(vram_bytes,0),cached,resident FROM runtime_compute_profiles WHERE deployment_id=?`, d.ID).Scan(&mode, &backend, &ram, &gpuJSON, &vram, &cached, &resident)
++	if err == nil {
++		claim.ComputeMode, claim.Backend, claim.RAMBytes, claim.VRAMBytes = mode, backend, ram.Int64, vram.Int64
++		claim.Cached, claim.Resident = cached != 0, resident != 0
++		var devices []string
++		_ = json.Unmarshal([]byte(gpuJSON), &devices)
++		claim.ResourceIDs = resourceIDs(claim.NodeID, mode, devices)
++		return claim, nil
++	}
++	if err != sql.ErrNoRows {
++		return claim, err
++	}
++
++	// Alpha 2 managed deployments already carry an authoritative placement plan
++	// in runtime_config_json. Derive a profile lazily so existing installations
++	// immediately participate in Alpha 3 scheduling without reinstalling models.
++	var cfg struct {
++		RuntimeBackend string `json:"runtime_backend"`
++		Placement      struct {
++			Mode    string `json:"mode"`
++			Backend string `json:"backend"`
++			Devices []struct {
++				Kind           string `json:"kind"`
++				DeviceID       string `json:"device_id"`
++				DeviceIndex    int    `json:"device_index"`
++				AllocatedBytes int64  `json:"allocated_bytes"`
++			} `json:"devices"`
++		} `json:"placement"`
++	}
++	_ = json.Unmarshal(d.RuntimeConfigJSON, &cfg)
++	backend = firstNonEmpty(cfg.Placement.Backend, cfg.RuntimeBackend)
++	devices := []string{}
++	mode = "cpu"
++	for _, dev := range cfg.Placement.Devices {
++		if dev.Kind == "accelerator" {
++			mode = "gpu"
++			id := strings.TrimSpace(dev.DeviceID)
++			if id == "" {
++				id = fmt.Sprintf("gpu-%d", dev.DeviceIndex)
++			}
++			devices = append(devices, id)
++			claim.VRAMBytes += dev.AllocatedBytes
++		}
++		if dev.Kind == "cpu" && mode == "gpu" {
++			mode = "hybrid"
++		}
++		if dev.Kind == "cpu" {
++			claim.RAMBytes += dev.AllocatedBytes
++		}
++	}
++	if cfg.Placement.Mode == "cpu_offload" {
++		mode = "hybrid"
++	}
++	claim.ComputeMode, claim.Backend = mode, backend
++	claim.ResourceIDs = resourceIDs(claim.NodeID, mode, devices)
++	return claim, nil
++}
++
++func resourceIDs(node, mode string, devices []string) []string {
++	if node == "" {
++		node = "local"
++	}
++	out := []string{}
++	if mode == "cpu" || mode == "hybrid" {
++		out = append(out, "node:"+node+":cpu")
++	}
++	if mode == "gpu" || mode == "hybrid" {

@@ -190,6 +190,8 @@ revision INTEGER NOT NULL DEFAULT 1
 ) STRICT`,
 		`CREATE INDEX IF NOT EXISTS idx_global_resource_lease_queue ON global_resource_leases(resource_uid,status,requested_at)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_global_resource_one_active_writer ON global_resource_leases(resource_uid) WHERE status='active' AND lease_mode='write'`,
+		`DROP INDEX IF EXISTS idx_resource_one_active_writer`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_resource_one_active_writer ON resource_leases(resource_ref) WHERE status='active' AND lease_mode='exclusive_mutation'`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {

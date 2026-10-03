@@ -1,0 +1,141 @@
+name: Alpha 3 Windows Build
+
+on:
+  push:
+    branches:
+      - alpha3-integration
+    paths:
+      - '.recovery/alpha3/source-patch/**'
+      - '.github/workflows/windows-alpha3.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Build and validate Windows Alpha 3
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Alpha 3 integration branch
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+
+      - name: Restore and verify authoritative Alpha 3 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p buildsrc
+          base64 -d .recovery/alpha2-buildsrc-current.b64 > alpha2-source.tar.xz
+          tar -xJf alpha2-source.tar.xz -C buildsrc
+          cat .recovery/alpha3/source-patch/part-*.patch > alpha3-source.patch
+          test "$(wc -l < alpha3-source.patch)" -eq 4599
+          echo "44e31c4bc6df048acec092629a61feaa86c5bde6d31346ead653cf65b9a3f17d  alpha3-source.patch" | sha256sum -c -
+          (
+            cd buildsrc
+            git apply --check ../alpha3-source.patch
+            git apply ../alpha3-source.patch
+          )
+          test -f buildsrc/go.mod
+          test -f buildsrc/cmd/harnessd/main.go
+          test -f buildsrc/packaging/windows/setup/main.go
+          grep -q '0.1.0-alpha.3' buildsrc/packaging/windows/setup/main.go
+          echo "source files: $(find buildsrc -type f | wc -l)"
+
+      - name: Validate Alpha 3 source contracts
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check internal/webui/static/app.js
+          python scripts/validate_alpha3_source.py
+          python scripts/validate_live_follow_workspace.py
+          python scripts/validate_workspace_components_v2.py
+          python scripts/validate_windows_qa5_source.py
+          python scripts/validate_windows_qa4_source.py
+          python scripts/validate_windows_qa_source.py
+          python scripts/validate_m23_webgui.py
+          python scripts/validate_m24_install.py
+          python scripts/validate_m25_local_ai_install.py
+          python scripts/validate_m33_node_federation.py
+          python scripts/validate_m34_remote_models.py
+          python scripts/validate_m35_hardware_testbed.py
+
+      - name: Resolve and verify Go modules
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod download
+          go mod verify
+
+      - name: Run Go test suite
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./...
+
+      - name: Build Windows payloads
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf packaging/windows/setup/payload
+          mkdir -p dist/windows packaging/windows/setup/payload
+          export CGO_ENABLED=0 GOOS=windows GOARCH=amd64
+          go build -trimpath -ldflags "-s -w" -o dist/windows/OnePane.Backend.exe ./cmd/harnessd
+          go build -trimpath -ldflags "-s -w -H windowsgui" -o dist/windows/OnePane.Desktop.exe ./packaging/windows/desktop
+          go build -trimpath -ldflags "-s -w" -o dist/windows/OnePane.Service.exe ./packaging/windows/service
+          cp dist/windows/OnePane.Backend.exe packaging/windows/setup/payload/
+          cp dist/windows/OnePane.Desktop.exe packaging/windows/setup/payload/
+          cp dist/windows/OnePane.Service.exe packaging/windows/setup/payload/
+          cp packaging/windows/assets/OnePane.ico packaging/windows/setup/payload/OnePane.ico
+
+      - name: Refresh embedded payload integrity hashes
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, re
+          setup = Path("packaging/windows/setup/main.go")
+          text = setup.read_text()
+          payload = Path("packaging/windows/setup/payload")
+          for name in ["OnePane.Backend.exe", "OnePane.Service.exe", "OnePane.Desktop.exe", "OnePane.ico"]:
+              digest = hashlib.sha256((payload / name).read_bytes()).hexdigest()
+              pattern = rf'("{re.escape(name)}"\s*:\s*")[0-9a-f]{{64}}(")'
+              text, n = re.subn(pattern, rf'\g<1>{digest}\2', text, count=1)
+              if n != 1:
+                  raise SystemExit(f"could not patch hash for {name}")
+              print(f"{digest}  {name}")
+          setup.write_text(text)
+          PY
+
+      - name: Build final Windows installer
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CGO_ENABLED=0 GOOS=windows GOARCH=amd64
+          go build -trimpath -ldflags "-s -w -H windowsgui"             -o dist/windows/OnePane-v0.1.0-alpha.3-windows-x64-setup.exe             ./packaging/windows/setup
+          sha256sum dist/windows/OnePane-v0.1.0-alpha.3-windows-x64-setup.exe             > dist/windows/OnePane-v0.1.0-alpha.3-windows-x64-setup.exe.sha256
+          file dist/windows/OnePane-v0.1.0-alpha.3-windows-x64-setup.exe
+          cat dist/windows/OnePane-v0.1.0-alpha.3-windows-x64-setup.exe.sha256
+
+      - name: Upload Windows Alpha 3 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnePane-v0.1.0-alpha.3-windows-x64
+          path: |
+            buildsrc/dist/windows/OnePane-v0.1.0-alpha.3-windows-x64-setup.exe
+            buildsrc/dist/windows/OnePane-v0.1.0-alpha.3-windows-x64-setup.exe.sha256
+          if-no-files-found: error
+          retention-days: 14

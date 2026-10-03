@@ -1,0 +1,100 @@
++	s.storageMu.Lock()
++	defer s.storageMu.Unlock()
++
++	p, err := s.repo.Project(ctx, projectID)
++	if err != nil {
++		return ProjectStorageLocation{}, err
++	}
++	current, err := s.ensureProjectStorage(ctx, projectID)
++	if err != nil {
++		return ProjectStorageLocation{}, err
++	}
++	if samePath(current.StorageRoot, newRoot) {
++		return current, nil
++	}
++	if isPathWithin(newRoot, current.StorageRoot) || isPathWithin(current.StorageRoot, newRoot) {
++		return ProjectStorageLocation{}, errors.New("new Project storage must not be inside the current storage tree (or vice versa)")
++	}
++
++	now := s.clock.UnixMilli()
++	detail, _ := json.Marshal(map[string]any{"from": current.StorageRoot, "to": newRoot, "phase": "preparing"})
++	res, err := s.db.ExecContext(ctx, `UPDATE project_storage_locations SET move_state='preparing',previous_root=storage_root,move_detail_json=?,revision=revision+1,updated_at=? WHERE project_id=? AND revision=? AND move_state IN ('ready','failed')`, string(detail), now, projectID, current.Revision)
++	if err != nil {
++		return ProjectStorageLocation{}, err
++	}
++	if n, _ := res.RowsAffected(); n != 1 {
++		return ProjectStorageLocation{}, errors.New("Project storage is already being moved")
++	}
++
++	staging := newRoot + ".onepane-moving"
++	_ = os.RemoveAll(staging)
++	if err := os.MkdirAll(filepath.Dir(newRoot), 0o750); err != nil {
++		_ = s.failProjectStorageMove(ctx, projectID, current.StorageRoot, newRoot, err)
++		return ProjectStorageLocation{}, err
++	}
++	if entries, e := os.ReadDir(newRoot); e == nil && len(entries) > 0 {
++		err = errors.New("destination Project storage directory is not empty")
++		_ = s.failProjectStorageMove(ctx, projectID, current.StorageRoot, newRoot, err)
++		return ProjectStorageLocation{}, err
++	} else if e != nil && !errors.Is(e, os.ErrNotExist) {
++		_ = s.failProjectStorageMove(ctx, projectID, current.StorageRoot, newRoot, e)
++		return ProjectStorageLocation{}, e
++	}
++	_ = os.RemoveAll(newRoot)
++
++	_, _ = s.db.ExecContext(ctx, `UPDATE project_storage_locations SET move_state='copying',move_detail_json=?,updated_at=? WHERE project_id=?`, string(detail), s.clock.UnixMilli(), projectID)
++	manifest, err := copyTreeWithManifest(ctx, current.StorageRoot, staging)
++	if err != nil {
++		_ = os.RemoveAll(staging)
++		_ = s.failProjectStorageMove(ctx, projectID, current.StorageRoot, newRoot, err)
++		return ProjectStorageLocation{}, err
++	}
++	_, _ = s.db.ExecContext(ctx, `UPDATE project_storage_locations SET move_state='verifying',updated_at=? WHERE project_id=?`, s.clock.UnixMilli(), projectID)
++	if err := ensureProjectMarker(staging, projectID); err != nil {
++		_ = os.RemoveAll(staging)
++		_ = s.failProjectStorageMove(ctx, projectID, current.StorageRoot, newRoot, err)
++		return ProjectStorageLocation{}, err
++	}
++	if err := verifyTreeManifest(ctx, staging, manifest); err != nil {
++		_ = os.RemoveAll(staging)
++		_ = s.failProjectStorageMove(ctx, projectID, current.StorageRoot, newRoot, err)
++		return ProjectStorageLocation{}, err
++	}
++	if err := os.Rename(staging, newRoot); err != nil {
++		_ = os.RemoveAll(staging)
++		_ = s.failProjectStorageMove(ctx, projectID, current.StorageRoot, newRoot, err)
++		return ProjectStorageLocation{}, err
++	}
++
++	// Pointer switch is the commit point. Until this succeeds the original path
++	// remains the source of truth.
++	detail, _ = json.Marshal(map[string]any{"from": current.StorageRoot, "to": newRoot, "phase": "verified", "files": len(manifest)})
++	now = s.clock.UnixMilli()
++	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
++		res, err := tx.ExecContext(ctx, `UPDATE project_storage_locations SET storage_root=?,previous_root=?,move_state='ready',move_detail_json=?,revision=revision+1,updated_at=? WHERE project_id=? AND storage_root=?`, newRoot, current.StorageRoot, string(detail), now, projectID, current.StorageRoot)
++		if err != nil {
++			return err
++		}
++		if n, _ := res.RowsAffected(); n != 1 {
++			return ErrRevisionConflict
++		}
++		eid, _ := s.ids.New("evt")
++		payload, _ := json.Marshal(map[string]any{"project_id": projectID, "from": current.StorageRoot, "to": newRoot, "verified_files": len(manifest)})
++		return s.events.Append(ctx, tx, event.Event{ID: eid, WorkspaceID: &p.WorkspaceID, Type: "project.storage_moved", AggregateType: "project", AggregateID: projectID, ActorPrincipalID: &actor, Payload: payload, OccurredAt: now})
++	})
++	if err != nil {
++		_ = os.RemoveAll(newRoot)
++		_ = s.failProjectStorageMove(ctx, projectID, current.StorageRoot, newRoot, err)
++		return ProjectStorageLocation{}, err
++	}
++
++	// Cleanup happens only after the new location is authoritative. A cleanup
++	// failure is deliberately non-fatal; preserving an extra verified copy is
++	// safer than risking data loss.
++	if projectMarkerMatches(current.StorageRoot, projectID) {
++		_ = os.RemoveAll(current.StorageRoot)
++	}
++	return s.ensureProjectStorage(ctx, projectID)
++}
++
++func (s *Service) failProjectStorageMove(ctx context.Context, projectID, oldRoot, newRoot string, cause error) error {

@@ -1,0 +1,10 @@
+diff --git a/README.md b/README.md
+index db37ab5..c5bea04 100644
+--- a/README.md
++++ b/README.md
+@@ -1,4 +1,4 @@
+-# OnePane v0.1
++# OnePane v0.1.0-alpha.3
+ 
+ This repository is the first executable scaffold for the local-first autonomous AI harness design.
+ 

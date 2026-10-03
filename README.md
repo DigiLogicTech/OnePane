@@ -1,22 +1,22 @@
 # OnePane
 
-**Local-first AI control plane for persistent agents, models, tools, projects, automation, and verified execution.**
+**A local-first AI control plane for persistent agents, models, tools, projects, automation, and verified execution.**
 
-OnePane is an open-source, self-hosted AI harness developed by **DigiLogic**. The GitHub organization is **DigiLogicTech**.
+OnePane is an open-source, self-hosted AI harness developed by **DigiLogic** and hosted under **DigiLogicTech**.
 
-The core design principle is simple:
+Its central design principle is:
 
 > **The harness owns state, policy, execution, verification, and continuity. Models are bounded, replaceable reasoning workers.**
 
-OnePane is intended to let long-running work survive model swaps, runtime changes, provider changes, worker failures, process restarts, and local-to-remote escalation without losing the task itself.
+That distinction shapes the entire product. OnePane is designed so a task can survive model swaps, runtime changes, provider changes, node failures, process restarts, and local-to-remote escalation without making the model itself the source of truth.
 
 ---
 
 ## Status
 
-> **OnePane is alpha software and is not yet recommended for production use.**
+> **OnePane is Alpha software and is not yet recommended for production use.**
 
-Current development is focused on the **Alpha 2** line, including the Windows native application/installer, Ubuntu headless reference deployment, managed local-AI runtimes, distributed inference, project sandboxes, and the updated control-plane UI.
+Current development is focused on the **Alpha 2** line.
 
 The active integration branch is:
 
@@ -24,13 +24,26 @@ The active integration branch is:
 alpha2-integration
 ```
 
-Old alpha installers should be treated as test builds only. Alpha 2 packaging is being rebuilt with explicit repair/upgrade handling before a new Windows installer is published.
+Alpha 2 currently targets:
+
+| Platform | Target | Package model |
+|---|---|---|
+| Windows | x64 | Native desktop application + installer |
+| Ubuntu | amd64 | Headless `.deb` |
+| Ubuntu | arm64 | Headless `.deb` |
+| macOS | Universal | Native application + DMG |
+
+Ubuntu Alpha 2 packages are already being produced through CI. Windows and macOS packaging use the same commit-bound build pipeline and are being validated as part of the Alpha 2 release process.
+
+Broader platform support — including Windows ARM64, RPM-based Linux distributions, generic Linux tarballs, OCI/container releases, mobile clients, and other operating systems — is intentionally deferred until the **Beta** phase.
+
+The current priority is to make OnePane a dependable product on a small number of platforms before increasing the support surface.
 
 ---
 
 ## What OnePane Is
 
-OnePane is not designed as a model process with tools bolted onto it.
+OnePane is not a model process with a tool loop wrapped around it.
 
 It is a durable control plane around models.
 
@@ -41,7 +54,7 @@ User / Automation / API
           ↓
 Classifier / Router
           ↓
-Swarm / Task Orchestrator
+Task / Swarm Orchestrator
           ↓
 Agents + Tools + Sandboxes
           ↓
@@ -52,82 +65,36 @@ NEXT · RETRY · REPLAN · ESCALATE · HUMAN · DONE
 
 The harness remains authoritative throughout the lifecycle.
 
-A model can propose work. OnePane decides whether that work is permitted, executes it through controlled interfaces, records the result, verifies the outcome, checkpoints state, and decides what happens next.
+A model can reason, propose actions, call approved capabilities, or produce candidate results. OnePane owns the durable task, permissions, execution state, observations, checkpoints, routing, verification, and final lifecycle decision.
 
 ---
 
-## Core Capabilities
+## Why OnePane Is Different
 
-### Persistent tasks and agents
+Many agent frameworks are primarily organised around a model session: the model receives context, chooses tools, emits actions, and is expected to keep enough state in its context window to continue the job.
 
-Tasks and agents are independent of the model process serving them.
+OnePane takes the opposite approach.
 
-OnePane is designed to preserve:
+### The task survives the model
 
-- task state
-- conversation and working context
-- tool state
-- artifacts
-- remaining plan
-- routing metadata
-- execution state
-- checkpoints
-- budgets and policy state
+An agent or task is not the model process serving it.
 
-This makes model and runtime replacement a control-plane operation rather than a task-ending event.
+Models can be replaced without replacing the task. OnePane keeps durable state outside the model so work can continue across:
 
-### Managed Hot Swap
+- model changes
+- runtime changes
+- local-to-remote movement
+- cloud escalation
+- worker failure
+- process restart
+- context reconstruction
+- node loss
 
-Managed Hot Swap is a built-in OnePane capability.
+### The harness, not the model, is authoritative
 
-It can checkpoint a task, drain the current inference path, move execution to another compatible model/runtime/node/provider, restore task context, and continue.
+Models do not decide whether an operation truly succeeded.
 
-Hot Swap is runtime-agnostic and remains available whether Colibri or OmniRoute are enabled or disabled.
-
-### Colibri
-
-OnePane Alpha 2 integrates **Colibri** as a managed inference runtime for larger or resource-constrained **self-hosted models**.
-
-Colibri is scoped to OnePane-managed local inference, either on the current machine or on enrolled OnePane nodes:
-
-```text
-local/colibri
-node/colibri
-```
-
-Colibri does not represent cloud-provider routing. Cloud and hosted-provider execution belongs to OnePane's broader routing layer and OmniRoute integration.
-
-Colibri can use local compute or qualified OnePane nodes. Remote nodes are expected to be explicitly enrolled, authenticated, capability-advertised, health-checked, and policy-qualified before receiving workloads.
-
-### OmniRoute
-
-OnePane Alpha 2 integrates **OmniRoute** as a managed routing component for advanced model/provider routing.
-
-Provider credentials remain brokered by OnePane rather than being exposed broadly to project sandboxes or model workers.
-
-### Sandboxed projects
-
-Projects are isolated working environments, not just folders of chat history.
-
-A project can contain:
-
-- source code
-- repositories
-- databases
-- dependencies
-- generated artifacts
-- task history
-- agent state
-- project configuration
-- sandbox policy
-
-Project sandbox policy is intentionally separate from OnePane's own managed-component runtime policy.
-
-### Verification-first execution
-
-A model saying that work succeeded is not enough.
-
-OnePane's execution model separates intent, execution, observation, and verification:
+OnePane separates:
 
 ```text
 Intent
@@ -143,33 +110,353 @@ Verification
 Commit
 ```
 
-Tasks should reach a completed state only when their required outcome has been verified.
+A model claiming that something completed does not automatically move the task to `DONE`.
 
-### Hardware-aware local AI
+### Routing is part of the control plane
 
-OnePane is being built to understand the machine it is running on, including:
+OnePane treats inference as a schedulable resource.
 
-- CPU
-- system memory
-- GPU
-- VRAM
-- drivers
-- storage
+The control plane can reason about:
+
 - model compatibility
+- local vs remote execution
+- available RAM / VRAM
+- runtime support
 - context requirements
+- node health
 - current load
+- provider availability
+- cost
+- privacy and project policy
 
-That information can be used for model recommendations, runtime qualification, routing, and distributed-node scheduling.
+The model does not own the routing decision.
+
+### Local-first does not mean local-only
+
+OnePane is designed to prefer self-hosted execution where appropriate while still supporting larger local models, enrolled remote nodes, and approved hosted providers.
+
+The same durable task can move between execution targets without changing task ownership.
+
+### Sandboxes are policy boundaries
+
+Project sandboxes are separate from OnePane's own managed-component environment.
+
+This prevents local AI runtimes and provider-routing components from implicitly inheriting project permissions, while also preventing project workloads from receiving broad host access.
+
+### Components are managed by OnePane
+
+Colibri and OmniRoute are managed as OnePane components rather than global host installations.
+
+That gives OnePane control over component lifecycle, health, permissions, data paths, enable/disable state, recovery, and future upgrades.
+
+An optional component becoming unhealthy must not make the core OnePane harness unhealthy.
 
 ---
 
-## Managed Components
+# Alpha 2 Feature Set
 
-OnePane's Alpha 2 packaging model treats local-AI dependencies as **OnePane-managed components**, not global host installations.
+## Persistent Tasks and Agents
 
-The Windows installer is being built to provision the required component payloads without separate Colibri or OmniRoute confirmation screens.
+OnePane stores task and agent state independently of whichever model is serving them.
 
-Runtime control belongs inside OnePane:
+Durable state includes concepts such as:
+
+- task state
+- attempts
+- working context
+- tool state
+- observations
+- artifacts
+- checkpoints
+- routing metadata
+- execution state
+- policy
+- budgets
+- task history
+
+This is the basis for recovery, runtime switching, and long-running work.
+
+---
+
+## Managed Hot Swap
+
+**Managed Hot Swap** is a built-in OnePane capability.
+
+The intended lifecycle is:
+
+```text
+Checkpoint task
+     ↓
+Drain current inference
+     ↓
+Unload / switch runtime or model
+     ↓
+Restore task context
+     ↓
+Continue execution
+```
+
+Hot Swap is runtime-agnostic.
+
+It is not a choice between native inference and Colibri. OnePane can use Hot Swap **across** compatible inference paths.
+
+A slow runtime transition should leave the task alive and visible as switching rather than silently losing the job.
+
+If a target runtime becomes unhealthy, OnePane can quarantine it and select another qualified execution path when one exists.
+
+---
+
+## Local AI and Model Management
+
+Alpha 2 includes a Local AI layer for model and runtime management.
+
+The UI includes:
+
+- local model inventory
+- model specification views
+- runtime strategy selection
+- hardware/resource awareness
+- model download workflows
+- runtime health
+- model qualification
+- Agent Check / Testbed workflows
+- managed component controls
+
+OnePane is designed to understand the hardware available to it, including CPU, system memory, GPU, VRAM, storage, runtime compatibility, context requirements, and current load.
+
+---
+
+## Colibri
+
+OnePane Alpha 2 integrates **Colibri** as a managed inference runtime for larger or resource-constrained **self-hosted models**.
+
+Colibri is scoped to OnePane-managed local inference:
+
+```text
+local/colibri
+node/colibri
+```
+
+It does **not** represent hosted cloud-provider routing.
+
+Colibri can operate on the local machine or on enrolled OnePane nodes. Remote nodes are expected to be explicitly enrolled, authenticated, capability-advertised, health-checked, and policy-qualified before receiving workloads.
+
+This allows OnePane to use larger models elsewhere while the originating harness retains ownership of the task.
+
+---
+
+## OmniRoute
+
+OnePane Alpha 2 integrates **OmniRoute** as a managed routing component for advanced model/provider routing.
+
+OmniRoute is separate from Colibri:
+
+- **Colibri** → self-hosted model inference
+- **OmniRoute** → advanced model/provider routing
+- **Managed Hot Swap** → task-preserving transition between qualified execution paths
+
+Provider credentials remain brokered by OnePane rather than being broadly exposed to agents, model workers, or project sandboxes.
+
+---
+
+## Distributed Inference and Nodes
+
+OnePane's node architecture allows inference capacity to exist somewhere other than the control-plane host.
+
+A node can advertise capabilities such as:
+
+- available models
+- CPU / RAM
+- GPU / VRAM
+- supported runtimes
+- context limits
+- health
+- current load
+
+The scheduler can use this information when selecting an execution target.
+
+A remote node does not become trusted merely because it is reachable. Enrollment, authentication, health qualification, capabilities, and project policy remain separate concerns.
+
+---
+
+## Projects and Workspaces
+
+Projects are intended to be active working environments rather than folders of conversations.
+
+A project can contain:
+
+- source code
+- repositories
+- databases
+- dependencies
+- generated artifacts
+- task history
+- agent state
+- workspace layouts
+- runtime configuration
+- sandbox policy
+
+Workspaces provide user-facing project surfaces while execution remains governed by project and sandbox policy.
+
+Alpha 2 includes configurable workspace layouts and project-scoped runtime controls.
+
+---
+
+## Sandboxed Execution
+
+OnePane separates configuration and execution policy by scope:
+
+```text
+Global application settings
+          ↓
+Project settings
+          ↓
+Workspace settings
+          ↓
+Sandbox policy
+```
+
+Global settings provide defaults. They are not intended to silently override project, workspace, or sandbox policy.
+
+Sandbox controls cover concepts such as:
+
+- isolated vs external networking
+- Internet / LAN policy
+- browser and computer capabilities
+- tool access
+- project runtime policy
+- privilege boundaries
+
+Unsafe host-level privilege escape remains outside the normal project execution path.
+
+---
+
+## Controlled Tool Execution
+
+Tools are mediated through the harness rather than trusted simply because a model emitted a tool-shaped request.
+
+The execution model is:
+
+```text
+Agent
+  ↓
+Tool intent
+  ↓
+Policy evaluation
+  ↓
+Capability authorization
+  ↓
+Tool execution
+  ↓
+Observation
+  ↓
+Verification
+```
+
+Capabilities can be constrained by task, project, agent, action, resource, and policy.
+
+---
+
+## Verification and Assurance
+
+OnePane treats completion as a system decision.
+
+The assurance layer is responsible for concepts such as:
+
+- observations
+- verification
+- checkpoints
+- validation
+- failure detection
+- audit history
+- human approval boundaries
+
+This makes verification independent from the model that performed the work.
+
+---
+
+## Scheduling and Automation
+
+Alpha 2 includes task and routine concepts for both interactive and scheduled work.
+
+The same control-plane rules apply to autonomous work:
+
+- permissions
+- routing
+- tool access
+- sandboxing
+- observations
+- verification
+- durable state
+- auditability
+
+Scheduled work is not treated as a separate automation system bolted onto the side of the agent runtime.
+
+---
+
+## Operations and Inspector
+
+The Operations interface is designed around inspectable system state rather than isolated dashboard widgets.
+
+Operational objects such as tasks, nodes, providers, routines, and events can be opened in the Inspector.
+
+Inspector workflows include:
+
+- operational details
+- notes
+- governed model chat
+- optional/reorderable tabs
+- task inspection
+- node and provider inspection
+
+This gives operators a common way to move from high-level status into the underlying object.
+
+---
+
+## Models and Cloud
+
+The Models experience separates:
+
+```text
+Local
+Cloud
+```
+
+Local models can be downloaded and managed through OnePane.
+
+Cloud providers are represented as real provider records with connection state and revocation controls rather than being mixed into the local runtime inventory.
+
+OmniRoute remains visually and logically distinct from direct provider configuration.
+
+---
+
+## UI and Product Configuration
+
+Alpha 2 includes product-level settings and UI work such as:
+
+- dark and softened light themes
+- two-tone and gradient themes
+- installable theme packs
+- language support
+- installable language packs
+- core skills
+- Local AI settings
+- model specification sheets
+- Agent Check / Testbed
+- Operations Inspector
+- project/workspace layouts
+- responsive phone-oriented layouts
+- DigiLogic product branding
+
+Themes and languages are designed as extensible packages rather than permanently hard-coded choices.
+
+---
+
+# Managed Components
+
+OnePane-managed components are deliberately separate from the operating-system installer.
+
+The package installs OnePane. OnePane owns component lifecycle.
 
 ```text
 Settings
@@ -185,44 +472,83 @@ Settings
             └── Remove / Reinstall
 ```
 
-Optional component failure must not make the core `harnessd` service unhealthy.
+The OS installer does not require separate Colibri or OmniRoute confirmation screens.
+
+This also avoids relying on global host-level package installation for managed inference/routing components.
 
 ---
 
-## Settings and Policy Scope
+# Platform Packaging
 
-OnePane separates configuration by scope:
+## Windows
+
+Windows Alpha 2 uses a native desktop shell backed by the OnePane service.
+
+The installer flow is designed around:
 
 ```text
-Global application settings
-          ↓
-Project settings
-          ↓
-Workspace settings
-          ↓
-Sandbox policy
+Preflight
+   ↓
+Installation / Data Location
+   ↓
+Model Pool Location
+   ↓
+Install / Repair OnePane
+   ↓
+Start + Health Check
+   ↓
+Launch OnePane
+   ↓
+First-run Tour
 ```
 
-Global settings provide application-wide defaults and preferences. They are not intended to silently override project, workspace, or sandbox policy.
+The **Model Pool Location** remains an explicit installer choice because model storage can be large and expensive to relocate.
 
-Alpha 2 UI work also includes:
+The Windows installer is also being qualified against broken/previous Alpha installations so repair and upgrade behaviour becomes part of the release contract.
 
-- improved light/dark themes
-- two-tone and gradient themes
-- installable theme packs
-- language support and language packs
-- core skills
-- Local AI controls
-- model specification views
-- Agent Check / Testbed workflows
-- Operations Inspector flows
-- phone-native responsive layouts
+## Ubuntu
+
+Ubuntu is the headless reference deployment for servers and inference/control-plane nodes.
+
+Alpha 2 CI currently produces:
+
+```text
+amd64 .deb
+arm64 .deb
+```
+
+The packages use systemd-managed service execution and persistent OnePane data/model locations.
+
+## macOS
+
+macOS Alpha 2 targets a Universal application bundle and DMG covering Intel and Apple Silicon.
+
+The current Alpha packaging path is intended for development/testing and does not yet represent the final Apple signing/notarization process.
 
 ---
 
-## Architecture
+# Beta Platform Expansion
 
-OnePane currently centres on a Go service named `harnessd` with SQLite-backed durable state.
+Alpha development is intentionally limited to Windows x64, Ubuntu amd64/arm64, and macOS Universal.
+
+After OnePane moves into **Beta**, additional platform work can expand to areas such as:
+
+- Windows ARM64
+- Debian qualification beyond the Ubuntu reference target
+- Fedora / RHEL-family RPM packages
+- generic Linux tarballs
+- OCI/container images
+- NAS/homelab deployment targets
+- iOS and Android client applications
+- other operating systems where the runtime and sandbox model can be supported properly
+
+Those targets are deliberately deferred until the core product, installer, upgrade path, task lifecycle, managed runtimes, routing, and recovery behaviour are stable.
+
+---
+
+# Architecture
+
+OnePane currently centres on a Go service named `harnessd` with SQLite-backed durable state and an event-ledger model.
 
 ```mermaid
 flowchart TB
@@ -245,69 +571,13 @@ flowchart TB
     ASSURANCE --> STATE
 ```
 
-The architecture deliberately starts as a modular monolith. Strong internal boundaries and deterministic behaviour take priority over introducing distributed-system complexity prematurely.
+The architecture deliberately begins as a modular monolith.
+
+The objective is strong boundaries, deterministic behaviour, recovery, and observability before introducing distributed-system complexity merely for architectural fashion.
 
 ---
 
-## Platform Direction
-
-### Windows
-
-Windows is intended to provide a native desktop application backed by the OnePane service.
-
-The Alpha 2 installer is being rebuilt around:
-
-```text
-Preflight
-   ↓
-Installation / Data Location
-   ↓
-Model Pool Location
-   ↓
-Install / Repair OnePane
-   ↓
-Start + Health Check
-   ↓
-Launch OnePane
-   ↓
-First-run Tour
-```
-
-The **Model Pool Location** remains an explicit choice because model storage can be large and expensive to relocate.
-
-### Linux / Ubuntu
-
-Ubuntu is the headless reference deployment for server and node workloads.
-
-### macOS
-
-macOS packaging is planned after the Alpha 2 Windows and Ubuntu paths are stabilised.
-
----
-
-## Distributed Inference
-
-OnePane's node model is intended to allow larger models to run elsewhere without transferring task ownership away from the harness.
-
-A node may advertise capabilities such as:
-
-- available models
-- CPU / RAM
-- GPU / VRAM
-- runtime support
-- context limits
-- health
-- current load
-
-OnePane can then choose a qualified execution target based on compatibility, availability, latency, resource requirements, cost, privacy policy, and project routing restrictions.
-
-A remote-node failure should trigger quarantine/fallback logic rather than automatically destroying the task.
-
----
-
-## Technology
-
-Current implementation direction includes:
+# Technology Direction
 
 ```text
 Go
@@ -322,50 +592,72 @@ Go
 ├── tool gateway
 ├── verification engine
 ├── scheduler
-└── project runtime
+├── project runtime
+└── node / inference coordination
 
 SQLite
 └── durable state + event ledger
 
-Windows
-├── native desktop shell
-├── service wrapper
-└── installer / repair path
+Desktop
+├── Windows native shell
+└── macOS native shell
+
+Linux
+└── headless systemd deployment
 
 Sandbox runtimes
-└── isolated project and managed-component execution
+├── project execution
+└── managed-component execution
 ```
 
 ---
 
-## Installation
+# Build and Release Model
 
-A stable public Alpha 2 installer will be published only after the current clean-install, repair/upgrade, service-health, component-isolation, and packaging checks pass.
+OnePane packages are built from commit-bound CI workflows.
 
-Until then, builds in this repository should be treated as development artifacts.
+The intended release chain is:
+
+```text
+Source commit
+     ↓
+Static validation
+     ↓
+Tests
+     ↓
+Platform build
+     ↓
+Package assembly
+     ↓
+Integrity hashes
+     ↓
+CI artifact
+```
+
+This keeps release artifacts tied to an immutable source revision and avoids local one-off builds drifting away from the repository.
 
 ---
 
-## Development Priorities
+# Development Priorities
+
+Alpha 2 is focused on making the product dependable rather than expanding its platform count.
 
 Current priorities include:
 
-1. Authoritative Alpha 2 source promotion and CI
-2. Windows clean-install and broken-alpha repair validation
-3. Managed component provisioning and supervision
-4. Runtime-agnostic Hot Swap
-5. Distributed Colibri node scheduling
-6. Model routing and provider integration
-7. Project sandbox isolation
-8. Durable task/checkpoint semantics
-9. Verification and assurance
-10. Windows and Ubuntu packaging parity
-11. macOS packaging
-12. Release, migration, backup, and recovery workflows
+1. Windows clean-install and broken-Alpha repair validation
+2. macOS package validation
+3. managed component provisioning and supervision
+4. runtime-agnostic Hot Swap
+5. distributed Colibri node scheduling
+6. model routing and provider integration
+7. project sandbox isolation
+8. durable task/checkpoint semantics
+9. verification and assurance
+10. release, migration, backup, and recovery workflows
 
 ---
 
-## Project Goals
+# Project Goal
 
 OnePane is intended to provide one self-hosted environment for:
 
@@ -375,17 +667,17 @@ One pane of glass for AI infrastructure.
 
 ---
 
-## Development
+# Development
 
 OnePane is developed by **DigiLogic**.
 
 Repository and project infrastructure are hosted under the **DigiLogicTech** GitHub account.
 
-The project is under active development. APIs, data formats, installation behaviour, and runtime interfaces may change between alpha builds.
+The project is under active development. APIs, data formats, installation behaviour, and runtime interfaces may change between Alpha builds.
 
 ---
 
-## License
+# License
 
 OnePane is licensed under the **Apache License 2.0**.
 

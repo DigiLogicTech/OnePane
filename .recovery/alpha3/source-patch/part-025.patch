@@ -1,0 +1,100 @@
++	"sort"
++	"strings"
++	"sync"
++	"time"
++
++	"github.com/DigiLogicTech/OnePane/internal/clock"
++	"github.com/DigiLogicTech/OnePane/internal/inference"
++)
++
++// Service is the application-wide model compute scheduler. It deliberately
++// schedules compute pools (CPU / individual GPU devices / hybrid claims), not
++// Projects or Workspaces. This lets otherwise independent work share hardware
++// safely while preserving OnePane's existing per-runtime residency supervisor.
++type Service struct {
++	db    *sql.DB
++	clock clock.Clock
++
++	mu      sync.Mutex
++	waiters []*waiter
++	active  map[string]*leaseState
++}
++
++type waiter struct {
++	req      inference.RuntimeScheduleRequest
++	claim    Claim
++	queuedAt int64
++	ready    chan *Lease
++	cancel   chan struct{}
++}
++
++type leaseState struct {
++	ID       string
++	Request  inference.RuntimeScheduleRequest
++	Claim    Claim
++	Acquired int64
++}
++
++type Claim struct {
++	ComputeMode string   `json:"compute_mode"`
++	Backend     string   `json:"backend,omitempty"`
++	NodeID      string   `json:"node_id,omitempty"`
++	ResourceIDs []string `json:"resource_ids,omitempty"`
++	RAMBytes    int64    `json:"ram_bytes,omitempty"`
++	VRAMBytes   int64    `json:"vram_bytes,omitempty"`
++	Resident    bool     `json:"resident,omitempty"`
++	Cached      bool     `json:"cached,omitempty"`
++}
++
++type QueueEntry struct {
++	ID                 string          `json:"id"`
++	WorkspaceID        string          `json:"workspace_id,omitempty"`
++	TaskID             *string         `json:"task_id,omitempty"`
++	InferenceRequestID string          `json:"inference_request_id,omitempty"`
++	DeploymentID       string          `json:"deployment_id"`
++	NodeID             string          `json:"node_id,omitempty"`
++	Priority           string          `json:"priority"`
++	State              string          `json:"state"`
++	SafeBoundary       string          `json:"safe_boundary"`
++	ResourceClaim      json.RawMessage `json:"resource_claim"`
++	QueuedAt           int64           `json:"queued_at"`
++	StartedAt          *int64          `json:"started_at,omitempty"`
++	CompletedAt        *int64          `json:"completed_at,omitempty"`
++	FailureReason      *string         `json:"failure_reason,omitempty"`
++}
++
++// Lease implements inference.RuntimeScheduleLease.
++type Lease struct {
++	service *Service
++	id      string
++	once    sync.Once
++}
++
++func NewService(db *sql.DB, clk clock.Clock) *Service {
++	return &Service{db: db, clock: clk, active: map[string]*leaseState{}}
++}
++
++func (s *Service) Acquire(ctx context.Context, req inference.RuntimeScheduleRequest) (inference.RuntimeScheduleLease, error) {
++	if s == nil || s.db == nil || strings.TrimSpace(req.Deployment.ID) == "" {
++		return nil, errors.New("runtime coordinator unavailable or deployment missing")
++	}
++	claim, err := s.claimForDeployment(ctx, req.Deployment)
++	if err != nil {
++		return nil, err
++	}
++	// Hosted provider calls have no model residency on a OnePane node. Their
++	// rate/concurrency limits remain provider concerns and do not block local
++	// CPU/GPU pools.
++	if claim.ComputeMode == "cloud" || len(claim.ResourceIDs) == 0 {
++		return &Lease{}, nil
++	}
++	if strings.TrimSpace(req.Priority) == "" {
++		req.Priority = "normal"
++	}
++	w := &waiter{req: req, claim: claim, queuedAt: s.clock.UnixMilli(), ready: make(chan *Lease, 1), cancel: make(chan struct{})}
++	if err := s.persistQueued(ctx, w); err != nil {
++		return nil, err
++	}
++
++	s.mu.Lock()
++	s.waiters = append(s.waiters, w)

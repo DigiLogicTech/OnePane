@@ -28,6 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           patch -d src -p1 < .build/patches/alpha2-localai-fmt.patch
+          cp .build/overlays/internal/localai/detect_windows.go src/internal/localai/detect_windows.go
+          cp .build/overlays/internal/localai/detect_windows_gpu.go src/internal/localai/detect_windows_gpu.go
+          gofmt -w src/internal/localai/detect_windows.go src/internal/localai/detect_windows_gpu.go
 
       - uses: actions/setup-go@v5
         with:

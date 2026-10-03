@@ -1,78 +1,134 @@
 # OnePane
 
-**Local-first AI orchestration, agents, projects, tools, and automation — from one pane of glass.**
+**Local-first AI control plane for persistent agents, models, tools, projects, automation, and verified execution.**
 
-OnePane is a self-hosted AI harness for building, running, and supervising persistent AI agents and autonomous workloads.
+OnePane is an open-source, self-hosted AI harness developed by **DigiLogic**. The GitHub organization is **DigiLogicTech**.
 
-It brings models, agents, tools, memory, sandboxed projects, scheduled tasks, verification, and human oversight into a single platform — without requiring users to assemble and maintain a collection of disconnected AI services.
+The core design principle is simple:
 
-> **The harness owns state, memory, policy, budgets, authority, and the execution loop. Models perform bounded reasoning jobs.**
+> **The harness owns state, policy, execution, verification, and continuity. Models are bounded, replaceable reasoning workers.**
 
----
-
-## Why OnePane?
-
-Most AI agent systems place too much responsibility inside the model.
-
-The model is expected to remember state, decide what it is allowed to do, manage tools, recover from failures, determine whether work actually succeeded, and somehow maintain continuity between sessions.
-
-OnePane takes a different approach.
-
-Models are treated as interchangeable reasoning engines. The harness remains authoritative.
-
-This means an agent can survive:
-
-- model changes
-- provider changes
-- context resets
-- process restarts
-- worker failures
-- UI sessions ending
-- local-to-cloud escalation
-
-The goal is durable AI infrastructure rather than another chat interface.
+OnePane is intended to let long-running work survive model swaps, runtime changes, provider changes, worker failures, process restarts, and local-to-remote escalation without losing the task itself.
 
 ---
 
-## Core Principles
+## Status
 
-### Local-first, not local-only
+> **OnePane is alpha software and is not yet recommended for production use.**
 
-OnePane is designed to run on your own hardware first.
+Current development is focused on the **Alpha 2** line, including the Windows native application/installer, Ubuntu headless reference deployment, managed local-AI runtimes, distributed inference, project sandboxes, and the updated control-plane UI.
 
-Local models can handle routing, classification, lightweight reasoning, embeddings, background tasks, and other workloads without requiring a cloud provider.
+The active integration branch is:
 
-When a task requires additional capability, OnePane can route work to larger local models or approved cloud providers.
+```text
+alpha2-integration
+```
 
----
-
-### Agents are persistent. Models are replaceable.
-
-An agent is not a model process.
-
-Agents have durable identity, state, permissions, memory, task history, tools, policies, and working context.
-
-Models are compute resources that agents can use.
-
-Changing from one model to another should not mean losing the agent.
+Old alpha installers should be treated as test builds only. Alpha 2 packaging is being rebuilt with explicit repair/upgrade handling before a new Windows installer is published.
 
 ---
 
-### The harness is authoritative
+## What OnePane Is
 
-Models propose actions.
+OnePane is not designed as a model process with tools bolted onto it.
 
-OnePane decides whether those actions are permitted, executes them through controlled interfaces, records the resulting observations, verifies outcomes, and determines what happens next.
+It is a durable control plane around models.
 
-A model claiming that something succeeded does not make it true.
+```text
+User / Automation / API
+          ↓
+      OnePane
+          ↓
+Classifier / Router
+          ↓
+Swarm / Task Orchestrator
+          ↓
+Agents + Tools + Sandboxes
+          ↓
+Observation / Verification
+          ↓
+NEXT · RETRY · REPLAN · ESCALATE · HUMAN · DONE
+```
+
+The harness remains authoritative throughout the lifecycle.
+
+A model can propose work. OnePane decides whether that work is permitted, executes it through controlled interfaces, records the result, verifies the outcome, checkpoints state, and decides what happens next.
 
 ---
 
-### Verified completion
+## Core Capabilities
 
-OnePane distinguishes between a model finishing its response and work actually being complete.
+### Persistent tasks and agents
 
-The execution lifecycle is designed around:
+Tasks and agents are independent of the model process serving them.
+
+OnePane is designed to preserve:
+
+- task state
+- conversation and working context
+- tool state
+- artifacts
+- remaining plan
+- routing metadata
+- execution state
+- checkpoints
+- budgets and policy state
+
+This makes model and runtime replacement a control-plane operation rather than a task-ending event.
+
+### Managed Hot Swap
+
+Managed Hot Swap is a built-in OnePane capability.
+
+It can checkpoint a task, drain the current inference path, move execution to another compatible model/runtime/node/provider, restore task context, and continue.
+
+Hot Swap is runtime-agnostic and remains available whether Colibri or OmniRoute are enabled or disabled.
+
+### Colibri
+
+OnePane Alpha 2 integrates **Colibri** as a managed inference runtime for larger or resource-constrained models.
+
+The intended runtime targets include:
+
+```text
+local/native
+local/colibri
+node/native
+node/colibri
+cloud/provider
+```
+
+Colibri can use local compute or qualified OnePane nodes. Remote nodes are expected to be explicitly enrolled, authenticated, capability-advertised, health-checked, and policy-qualified before receiving workloads.
+
+### OmniRoute
+
+OnePane Alpha 2 integrates **OmniRoute** as a managed routing component for advanced model/provider routing.
+
+Provider credentials remain brokered by OnePane rather than being exposed broadly to project sandboxes or model workers.
+
+### Sandboxed projects
+
+Projects are isolated working environments, not just folders of chat history.
+
+A project can contain:
+
+- source code
+- repositories
+- databases
+- dependencies
+- generated artifacts
+- task history
+- agent state
+- project configuration
+- sandbox policy
+
+Project sandbox policy is intentionally separate from OnePane's own managed-component runtime policy.
+
+### Verification-first execution
+
+A model saying that work succeeded is not enough.
+
+OnePane's execution model separates intent, execution, observation, and verification:
 
 ```text
 Intent
@@ -88,43 +144,11 @@ Verification
 Commit
 ```
 
-Tasks should only reach a completed state once their required outcome has been independently verified.
+Tasks should reach a completed state only when their required outcome has been verified.
 
----
+### Hardware-aware local AI
 
-### Sandboxed by default
-
-Projects and autonomous workloads should not receive unrestricted access to the host system.
-
-OnePane is being designed around isolated project environments, capability-based tool access, explicit permissions, and narrowly scoped privileged operations.
-
----
-
-## What OnePane Will Provide
-
-### Persistent AI Agents
-
-Create agents that maintain identity and state independently of whichever model happens to be serving them.
-
-Agents can be given:
-
-- roles
-- instructions
-- permissions
-- tools
-- memory
-- model preferences
-- budgets
-- project access
-- scheduled responsibilities
-
----
-
-### Hardware-Aware Model Setup
-
-OnePane aims to remove the usual friction involved in setting up local AI.
-
-During setup, OnePane will be able to inspect available hardware such as:
+OnePane is being built to understand the machine it is running on, including:
 
 - CPU
 - system memory
@@ -132,401 +156,240 @@ During setup, OnePane will be able to inspect available hardware such as:
 - VRAM
 - drivers
 - storage
+- model compatibility
+- context requirements
+- current load
 
-It can then recommend models suited to the machine, download them, configure an appropriate inference runtime, and register them with OnePane.
-
-The goal is:
-
-```text
-Install OnePane
-      ↓
-Detect Hardware
-      ↓
-Recommend Models
-      ↓
-Download & Configure
-      ↓
-Start Using AI
-```
-
-No separate model-management stack should be required just to get started.
+That information can be used for model recommendations, runtime qualification, routing, and distributed-node scheduling.
 
 ---
 
-## Sandboxed Project Workspaces
+## Managed Components
 
-OnePane projects are intended to be more than folders containing AI conversations.
+OnePane's Alpha 2 packaging model treats local-AI dependencies as **OnePane-managed components**, not global host installations.
 
-Each project can have its own isolated execution environment where humans and agents work on the same project.
+The Windows installer is being built to provision the required component payloads without separate Colibri or OmniRoute confirmation screens.
 
-A project workspace may contain:
-
-- source code
-- repositories
-- databases
-- dependencies
-- installed applications
-- development tools
-- generated artifacts
-- task history
-- agent state
-- runtime configuration
-
-Agents can build and modify applications inside the project sandbox while changes are visible to the user through the OnePane interface.
-
-The longer-term goal is to allow software to move naturally from:
+Runtime control belongs inside OnePane:
 
 ```text
-Idea
-  ↓
-Agent + Human Development
-  ↓
-Sandboxed Runtime
-  ↓
-Review
-  ↓
-Deployment
-  ↓
-Scheduled / Autonomous Operation
+Settings
+└── Local AI
+    └── Components
+        ├── Colibri
+        │   ├── Enable
+        │   ├── Disable
+        │   └── Remove / Reinstall
+        └── OmniRoute
+            ├── Enable
+            ├── Disable
+            └── Remove / Reinstall
 ```
 
-without leaving OnePane.
+Optional component failure must not make the core `harnessd` service unhealthy.
 
 ---
 
-## Automation and Scheduled Work
+## Settings and Policy Scope
 
-OnePane is intended to support both interactive and autonomous workloads.
-
-Projects and agents will be able to run recurring or scheduled tasks such as:
-
-- reports
-- monitoring
-- data processing
-- repository maintenance
-- infrastructure checks
-- research
-- backups
-- application workflows
-- agent routines
-
-Scheduled work uses the same permission, sandboxing, verification, logging, and model-routing systems as interactive work.
-
----
-
-## Controlled Tool Execution
-
-Tools are not called directly because a model emitted a tool-shaped response.
-
-OnePane mediates access through a controlled Tool Gateway.
-
-The intended execution pattern is:
+OnePane separates configuration by scope:
 
 ```text
-Agent
-  ↓
-Tool Intent
-  ↓
-Policy Evaluation
-  ↓
-Capability Authorization
-  ↓
-Tool Gateway
-  ↓
-Execution
-  ↓
-Observation
-  ↓
-Verification
+Global application settings
+          ↓
+Project settings
+          ↓
+Workspace settings
+          ↓
+Sandbox policy
 ```
 
-Sensitive capabilities can be constrained by scope, duration, project, agent, action, and resource.
+Global settings provide application-wide defaults and preferences. They are not intended to silently override project, workspace, or sandbox policy.
 
----
+Alpha 2 UI work also includes:
 
-## Model Routing
-
-Different jobs require different levels of intelligence.
-
-OnePane is designed to use small and efficient models where possible and reserve expensive models for work that actually requires them.
-
-For example:
-
-```text
-Fast Local Classifier
-        ↓
-Deterministic Orchestrator
-        ↓
-Selected Worker Model
-        ↓
-Tool / Environment
-        ↓
-Observation
-        ↓
-Verifier / Judge
-        ↓
-NEXT
-RETRY
-REPLAN
-ESCALATE
-HUMAN
-DONE
-FAIL
-```
-
-Models may be local or remote, but routing decisions remain part of the harness.
+- improved light/dark themes
+- two-tone and gradient themes
+- installable theme packs
+- language support and language packs
+- core skills
+- Local AI controls
+- model specification views
+- Agent Check / Testbed workflows
+- Operations Inspector flows
+- phone-native responsive layouts
 
 ---
 
 ## Architecture
 
-OnePane is being designed around several cooperating planes with clearly separated responsibilities.
+OnePane currently centres on a Go service named `harnessd` with SQLite-backed durable state.
 
 ```mermaid
 flowchart TB
-
-    UI["Access Layer<br/>Web UI • API • Integrations"]
-
+    UI["Access Layer<br/>Desktop UI • Web UI • API • Integrations"]
     CONTROL["Control Plane<br/>Agents • Tasks • Policy • Scheduling • Orchestration"]
-
     CONTEXT["Context Plane<br/>Memory • Context Compiler • Artifacts • Retrieval"]
-
     INFERENCE["Inference Plane<br/>Models • Providers • Routing • Runtime Management"]
-
     EXECUTION["Execution Plane<br/>Workers • Tools • Project Sandboxes"]
-
     ASSURANCE["Assurance Plane<br/>Verification • Checkpoints • Audit"]
-
-    STATE["State Plane<br/>Durable State • Event Ledger • Task History"]
+    STATE["State Plane<br/>SQLite • Durable State • Event Ledger • Task History"]
 
     UI --> CONTROL
-
     CONTROL --> CONTEXT
     CONTROL --> INFERENCE
     CONTROL --> EXECUTION
     CONTROL --> ASSURANCE
-
     CONTROL <--> STATE
     CONTEXT <--> STATE
-
     EXECUTION --> ASSURANCE
     ASSURANCE --> STATE
 ```
 
-### Control Plane
-
-Owns orchestration and decision-making around:
-
-- agents
-- tasks
-- attempts
-- scheduling
-- permissions
-- budgets
-- policy
-- worker lifecycle
-
-### State Plane
-
-Stores durable system truth including:
-
-- agent state
-- task state
-- attempts
-- observations
-- events
-- checkpoints
-- artifacts
-- configuration
-
-### Context Plane
-
-Determines what information a model receives.
-
-Rather than simply replaying conversation history, OnePane can construct bounded context based on the current task, agent, project, memory, artifacts, and available token budget.
-
-### Inference Plane
-
-Provides a common abstraction over model execution.
-
-This includes:
-
-- local models
-- remote providers
-- model discovery
-- model capabilities
-- runtime configuration
-- routing
-- health
-- context limits
-- cost and resource awareness
-
-### Execution Plane
-
-Runs actual work.
-
-This includes:
-
-- ephemeral workers
-- project environments
-- containers
-- tools
-- commands
-- application runtimes
-
-### Assurance Plane
-
-Determines whether work actually achieved its intended outcome.
-
-It provides:
-
-- verification
-- checkpoints
-- validation
-- auditability
-- failure detection
-- human approval boundaries
+The architecture deliberately starts as a modular monolith. Strong internal boundaries and deterministic behaviour take priority over introducing distributed-system complexity prematurely.
 
 ---
 
-## Technology Direction
+## Platform Direction
 
-The current backend architecture is centred around a Go service called `harnessd`.
+### Windows
 
-The initial platform direction includes:
+Windows is intended to provide a native desktop application backed by the OnePane service.
+
+The Alpha 2 installer is being rebuilt around:
+
+```text
+Preflight
+   ↓
+Installation / Data Location
+   ↓
+Model Pool Location
+   ↓
+Install / Repair OnePane
+   ↓
+Start + Health Check
+   ↓
+Launch OnePane
+   ↓
+First-run Tour
+```
+
+The **Model Pool Location** remains an explicit choice because model storage can be large and expensive to relocate.
+
+### Linux / Ubuntu
+
+Ubuntu is the headless reference deployment for server and node workloads.
+
+### macOS
+
+macOS packaging is planned after the Alpha 2 Windows and Ubuntu paths are stabilised.
+
+---
+
+## Distributed Inference
+
+OnePane's node model is intended to allow larger models to run elsewhere without transferring task ownership away from the harness.
+
+A node may advertise capabilities such as:
+
+- available models
+- CPU / RAM
+- GPU / VRAM
+- runtime support
+- context limits
+- health
+- current load
+
+OnePane can then choose a qualified execution target based on compatibility, availability, latency, resource requirements, cost, privacy policy, and project routing restrictions.
+
+A remote-node failure should trigger quarantine/fallback logic rather than automatically destroying the task.
+
+---
+
+## Technology
+
+Current implementation direction includes:
 
 ```text
 Go
-├── REST / SSE API
-├── Durable task engine
-├── Agent runtime
-├── Policy engine
-├── Context compiler
-├── Model registry
-├── Provider connections
-├── Tool gateway
-├── Verification engine
-├── Scheduler
-└── Project runtime
+├── harnessd
+├── REST / streaming APIs
+├── durable task engine
+├── agent runtime
+├── policy engine
+├── context compiler
+├── model registry
+├── provider connections
+├── tool gateway
+├── verification engine
+├── scheduler
+└── project runtime
 
 SQLite
-└── Durable state + event ledger
+└── durable state + event ledger
 
-Containers
-└── Rootless Podman / Docker project isolation
+Windows
+├── native desktop shell
+├── service wrapper
+└── installer / repair path
+
+Sandbox runtimes
+└── isolated project and managed-component execution
 ```
-
-The architecture is intentionally starting as a modular monolith.
-
-The priority is strong internal boundaries and reliable behaviour before introducing unnecessary distributed-system complexity.
-
----
-
-## Current Status
-
-> **OnePane is under active development and is not yet ready for production use.**
-
-The current work is focused on the core harness and durable execution model.
-
-Major foundations include:
-
-- durable task and attempt state
-- event-based execution history
-- deterministic orchestration
-- policy and capability boundaries
-- tools and observations
-- artifacts
-- verification and checkpoint semantics
-- inference/model abstractions
-- sandboxed execution architecture
-
-Work is continuing toward an installable self-hosted alpha.
-
----
-
-## Roadmap
-
-Near-term development is focused on:
-
-1. Model and inference runtime management
-2. Hardware discovery and model recommendations
-3. Local model installation and lifecycle management
-4. Agent runtime and orchestration
-5. Context compilation and memory
-6. Sandboxed project workspaces
-7. Human + agent collaborative project UI
-8. Scheduled and autonomous workloads
-9. Tool and capability management
-10. Verification and approval workflows
-11. Observability and audit interfaces
-12. Single-command installation
-13. Backup, recovery, and migration
-14. Multi-node execution
 
 ---
 
 ## Installation
 
-Installation documentation will be published once the initial installer and runtime configuration are stable.
+A stable public Alpha 2 installer will be published only after the current clean-install, repair/upgrade, service-health, component-isolation, and packaging checks pass.
 
-The intended experience is eventually:
+Until then, builds in this repository should be treated as development artifacts.
 
-```bash
-curl -fsSL <installer> | sh
-```
+---
 
-followed by browser-based setup for:
+## Development Priorities
 
-```text
-Host Detection
-      ↓
-Storage
-      ↓
-Sandbox Runtime
-      ↓
-Inference
-      ↓
-Models
-      ↓
-First Agent
-      ↓
-Ready
-```
+Current priorities include:
 
-OnePane should be useful immediately after installation without requiring users to manually assemble a separate AI software stack.
+1. Authoritative Alpha 2 source promotion and CI
+2. Windows clean-install and broken-alpha repair validation
+3. Managed component provisioning and supervision
+4. Runtime-agnostic Hot Swap
+5. Distributed Colibri node scheduling
+6. Model routing and provider integration
+7. Project sandbox isolation
+8. Durable task/checkpoint semantics
+9. Verification and assurance
+10. Windows and Ubuntu packaging parity
+11. macOS packaging
+12. Release, migration, backup, and recovery workflows
 
 ---
 
 ## Project Goals
 
-OnePane is ultimately intended to provide one self-hosted environment for:
+OnePane is intended to provide one self-hosted environment for:
 
 **Agents · Models · Projects · Tools · Memory · Automation · Applications · Verification**
 
-One pane of glass for your AI infrastructure.
+One pane of glass for AI infrastructure.
 
 ---
 
 ## Development
 
-OnePane is currently developed by **DigiLogic**.
+OnePane is developed by **DigiLogic**.
 
-The repository is presently in private development while the architecture, runtime, installation process, and initial user experience are stabilised.
+Repository and project infrastructure are hosted under the **DigiLogicTech** GitHub account.
 
-Contribution guidelines and public development documentation will be added as the project approaches its first public release.
+The project is under active development. APIs, data formats, installation behaviour, and runtime interfaces may change between alpha builds.
 
 ---
 
 ## License
 
-OnePane is open-source software developed by **DigiLogic**.
-
 OnePane is licensed under the **Apache License 2.0**.
 
-You are free to use, modify, distribute, and build upon OnePane in accordance with the terms of the license.
+See [`LICENSE`](LICENSE) for the license terms and [`NOTICE`](NOTICE) for project attribution.
 
-See [`LICENSE`](LICENSE) for the full license text.
-
-Copyright 2026 John Spencer Jr trading as DigiLogic
-
-<!-- ChatGPT GitHub write access verified 2026-10-03. -->
+Copyright 2026 John Spencer Jr trading as DigiLogic.

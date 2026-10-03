@@ -1,0 +1,100 @@
++	"io"
++	"os"
++	"path/filepath"
++	"strings"
++
++	"github.com/DigiLogicTech/OnePane/internal/event"
++	"github.com/DigiLogicTech/OnePane/internal/storage"
++)
++
++// ProjectStorageLocation records where durable Project-owned data lives.  The
++// application install directory and model pool are deliberately unrelated.
++type ProjectStorageLocation struct {
++	ProjectID    string          `json:"project_id"`
++	StorageRoot  string          `json:"storage_root"`
++	PreviousRoot *string         `json:"previous_root,omitempty"`
++	MoveState    string          `json:"move_state"`
++	MoveDetail   json.RawMessage `json:"move_detail"`
++	Revision     int64           `json:"revision"`
++	UpdatedAt    int64           `json:"updated_at"`
++}
++
++// ConfigureProjectStorageRoot sets the location inherited by Projects that do
++// not yet have an explicit storage location. Existing Projects are not moved.
++func (s *Service) ConfigureProjectStorageRoot(root string) error {
++	root = strings.TrimSpace(root)
++	if root == "" {
++		return errors.New("project storage root required")
++	}
++	abs, err := filepath.Abs(root)
++	if err != nil {
++		return err
++	}
++	s.projectRoot = filepath.Clean(abs)
++	return nil
++}
++
++func (s *Service) defaultProjectStorage(projectID string) string {
++	root := strings.TrimSpace(s.projectRoot)
++	if root == "" {
++		root = filepath.Join(os.TempDir(), "OnePane", "Projects")
++	}
++	return filepath.Join(root, projectID)
++}
++
++func (s *Service) ensureProjectStorage(ctx context.Context, projectID string) (ProjectStorageLocation, error) {
++	var x ProjectStorageLocation
++	var previous sql.NullString
++	var detail string
++	err := s.db.QueryRowContext(ctx, `SELECT project_id,storage_root,previous_root,move_state,move_detail_json,revision,updated_at FROM project_storage_locations WHERE project_id=?`, projectID).
++		Scan(&x.ProjectID, &x.StorageRoot, &previous, &x.MoveState, &detail, &x.Revision, &x.UpdatedAt)
++	if err == nil {
++		if previous.Valid {
++			v := previous.String
++			x.PreviousRoot = &v
++		}
++		x.MoveDetail = json.RawMessage(detail)
++		return x, nil
++	}
++	if !errors.Is(err, sql.ErrNoRows) {
++		return x, err
++	}
++	if _, err := s.repo.Project(ctx, projectID); err != nil {
++		return x, err
++	}
++	root := s.defaultProjectStorage(projectID)
++	if err := os.MkdirAll(root, 0o750); err != nil {
++		return x, err
++	}
++	if err := ensureProjectMarker(root, projectID); err != nil {
++		return x, err
++	}
++	now := s.clock.UnixMilli()
++	if _, err := s.db.ExecContext(ctx, `INSERT INTO project_storage_locations(project_id,storage_root,move_state,move_detail_json,revision,updated_at) VALUES(?,?,'ready','{}',1,?) ON CONFLICT(project_id) DO NOTHING`, projectID, root, now); err != nil {
++		return x, err
++	}
++	return s.ensureProjectStorage(ctx, projectID)
++}
++
++func (s *Service) ProjectStorage(ctx context.Context, projectID string) (ProjectStorageLocation, error) {
++	projectID = strings.TrimSpace(projectID)
++	if s == nil || s.db == nil || projectID == "" {
++		return ProjectStorageLocation{}, ErrInvalidCommand
++	}
++	return s.ensureProjectStorage(ctx, projectID)
++}
++
++// MoveProjectStorage moves durable Project-owned storage without making the
++// destination authoritative until a byte-for-byte verification has completed.
++// A failure before the pointer switch leaves the original location untouched.
++func (s *Service) MoveProjectStorage(ctx context.Context, projectID, newRoot, actor string) (ProjectStorageLocation, error) {
++	projectID, newRoot, actor = strings.TrimSpace(projectID), strings.TrimSpace(newRoot), strings.TrimSpace(actor)
++	if projectID == "" || newRoot == "" || actor == "" {
++		return ProjectStorageLocation{}, ErrInvalidCommand
++	}
++	abs, err := filepath.Abs(newRoot)
++	if err != nil {
++		return ProjectStorageLocation{}, err
++	}
++	newRoot = filepath.Clean(abs)
++

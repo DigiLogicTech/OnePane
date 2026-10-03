@@ -31,15 +31,21 @@ jobs:
           go-version: '1.23.x'
           cache-dependency-path: src/go.sum
 
-      - name: Validate source
+      - name: Validate Windows QA source
         working-directory: src
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 scripts/validate_windows_qa_source.py
-          python3 scripts/validate_windows_qa4_source.py
-          python3 scripts/validate_windows_qa5_source.py
-          go test ./...
+        run: python3 scripts/validate_windows_qa_source.py
+
+      - name: Validate Projects and Workspaces QA4
+        working-directory: src
+        run: python3 scripts/validate_windows_qa4_source.py
+
+      - name: Validate alpha.2 and Colibri QA5
+        working-directory: src
+        run: python3 scripts/validate_windows_qa5_source.py
+
+      - name: Run Go tests
+        working-directory: src
+        run: go test ./...
 
       - name: Build Windows x64 backend
         working-directory: src

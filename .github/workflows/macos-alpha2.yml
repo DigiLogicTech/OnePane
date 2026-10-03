@@ -1,0 +1,60 @@
+name: Alpha 2 macOS Build
+
+on:
+  push:
+    branches:
+      - alpha2-integration
+    paths:
+      - '.recovery/alpha2-buildsrc-current.b64'
+      - '.github/workflows/macos-alpha2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    name: Build and validate macOS Alpha 2
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Restore authoritative Alpha 2 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p buildsrc
+          base64 -D .recovery/alpha2-buildsrc-current.b64 > alpha2-source.tar.xz
+          tar -xJf alpha2-source.tar.xz -C buildsrc
+          test -f buildsrc/go.mod
+          test -f buildsrc/packaging/macos/OnePaneApp.swift
+      - name: Validate source
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check internal/webui/static/app.js
+          go mod download
+          go mod verify
+          go test ./...
+          plutil -lint packaging/macos/Info.plist
+      - name: Build universal macOS app and DMG
+        shell: bash
+        env:
+          ONEPANE_VERSION: 0.1.0-alpha.2
+        run: |
+          set -euo pipefail
+          bash buildsrc/scripts/build-macos.sh
+      - name: Upload macOS package
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnePane-v0.1.0-alpha.2-macos-universal
+          path: |
+            buildsrc/dist/macos/*.dmg
+            buildsrc/dist/macos/*.dmg.sha256
+          if-no-files-found: error
+          retention-days: 14

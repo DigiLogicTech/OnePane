@@ -1,0 +1,87 @@
+name: Alpha 2 Ubuntu Build
+
+on:
+  push:
+    branches:
+      - alpha2-integration
+    paths:
+      - '.recovery/alpha2-buildsrc-current.b64'
+      - '.github/workflows/ubuntu-alpha2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Alpha 2 source
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Restore authoritative Alpha 2 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p buildsrc
+          base64 -d .recovery/alpha2-buildsrc-current.b64 > alpha2-source.tar.xz
+          tar -xJf alpha2-source.tar.xz -C buildsrc
+          test -f buildsrc/go.mod
+      - name: Validate source and tests
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check internal/webui/static/app.js
+          python scripts/validate_m23_webgui.py
+          python scripts/validate_m24_install.py
+          python scripts/validate_m25_local_ai_install.py
+          go mod download
+          go mod verify
+          go test ./...
+
+  package:
+    name: Ubuntu ${{ matrix.arch }} package
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Restore authoritative Alpha 2 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p buildsrc
+          base64 -d .recovery/alpha2-buildsrc-current.b64 > alpha2-source.tar.xz
+          tar -xJf alpha2-source.tar.xz -C buildsrc
+      - name: Build Debian package
+        shell: bash
+        env:
+          ONEPANE_VERSION: 0.1.0-alpha.2
+          ONEPANE_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          bash buildsrc/scripts/build-ubuntu-deb.sh
+          dpkg-deb --info buildsrc/dist/ubuntu/*.deb
+          dpkg-deb --contents buildsrc/dist/ubuntu/*.deb | head -100
+      - name: Upload Ubuntu package
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnePane-v0.1.0-alpha.2-ubuntu-${{ matrix.arch }}
+          path: |
+            buildsrc/dist/ubuntu/*.deb
+            buildsrc/dist/ubuntu/*.deb.sha256
+          if-no-files-found: error
+          retention-days: 14

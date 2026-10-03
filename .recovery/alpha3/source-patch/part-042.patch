@@ -1,0 +1,100 @@
++	// Runtime bootstrap URLs are intentionally evergreen. Rather than pin a
++	// hash that changes underneath us, require Windows to validate the signed
++	// executable before OnePane ever launches it.
++	script := `$s=Get-AuthenticodeSignature -LiteralPath '` + psQuote(path) + `'; if($s.Status -ne 'Valid'){Write-Error ('Invalid Authenticode status: '+$s.Status); exit 23}`
++	if err := runHidden("powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script); err != nil {
++		return err
++	}
++	return nil
++}
++
++func ollamaInstalled() bool {
++	if _, err := exec.LookPath("ollama.exe"); err == nil {
++		return true
++	}
++	for _, root := range []string{os.Getenv("LOCALAPPDATA"), os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)")} {
++		if strings.TrimSpace(root) == "" {
++			continue
++		}
++		for _, rel := range []string{filepath.Join("Programs", "Ollama", "ollama.exe"), filepath.Join("Ollama", "ollama.exe")} {
++			if st, err := os.Stat(filepath.Join(root, rel)); err == nil && !st.IsDir() {
++				return true
++			}
++		}
++	}
++	return false
++}
++
++func hardwareSummary() string {
++	script := `$gpu=(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name); $ram=[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1GB); [Console]::Out.Write((($gpu -join ', ')+'|'+$ram))`
++	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script)
++	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
++	out, err := cmd.Output()
++	if err != nil || strings.TrimSpace(string(out)) == "" {
++		return "Hardware scan unavailable; OnePane can still install local runtimes later from Models."
++	}
++	parts := strings.SplitN(strings.TrimSpace(string(out)), "|", 2)
++	gpu := strings.TrimSpace(parts[0])
++	ram := ""
++	if len(parts) > 1 {
++		ram = strings.TrimSpace(parts[1])
++	}
++	if gpu == "" {
++		gpu = "No dedicated GPU reported"
++	}
++	if ram != "" {
++		return fmt.Sprintf("Detected graphics: %s\nSystem memory: %s GB", gpu, ram)
++	}
++	return "Detected graphics: " + gpu
++}
++
++func offerOllamaInstall() error {
++	if ollamaInstalled() {
++		logf("existing Ollama installation detected; OnePane will reuse it")
++		return nil
++	}
++	summary := hardwareSummary()
++	if !confirm("OnePane Setup - Local AI", summary+"\n\nInstall Ollama now?\n\nThis is optional. If you skip it, OnePane can install a compatible Ollama/runtime later when you download a model.") {
++		logf("user deferred Ollama installation")
++		return nil
++	}
++	tempDir := filepath.Join(os.TempDir(), "OnePaneSetup")
++	if err := os.MkdirAll(tempDir, 0o755); err != nil {
++		return err
++	}
++	installer := filepath.Join(tempDir, "OllamaSetup.exe")
++	if err := downloadFile("https://ollama.com/download/OllamaSetup.exe", installer); err != nil {
++		return fmt.Errorf("download Ollama: %w", err)
++	}
++	defer os.Remove(installer)
++	if err := verifyAuthenticode(installer); err != nil {
++		return fmt.Errorf("verify Ollama installer: %w", err)
++	}
++	logf("installing optional Ollama runtime")
++	cmd := exec.Command(installer, "/VERYSILENT", "/NORESTART", "/SUPPRESSMSGBOXES")
++	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
++	if err := cmd.Run(); err != nil {
++		return fmt.Errorf("Ollama installer: %w", err)
++	}
++	return nil
++}
++
+ func webView2RuntimePresent() bool {
+ 	for _, root := range []string{os.Getenv("ProgramFiles(x86)"), os.Getenv("ProgramFiles")} {
+ 		if strings.TrimSpace(root) == "" {
+@@ -277,10 +466,10 @@ func webView2RuntimePresent() bool {
+ 	return false
+ }
+ 
+-func chooseModelPool(defaultPath string) (string, error) {
++func chooseFolder(description, defaultPath string) (string, error) {
+ 	script := `Add-Type -AssemblyName System.Windows.Forms; ` +
+ 		`$d=New-Object System.Windows.Forms.FolderBrowserDialog; ` +
+-		`$d.Description='Choose the OnePane local LLM model pool'; ` +
++		`$d.Description='` + psQuote(description) + `'; ` +
+ 		`$d.ShowNewFolderButton=$true; ` +
+ 		`$d.SelectedPath='` + psQuote(defaultPath) + `'; ` +
+ 		`if($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){[Console]::Out.Write($d.SelectedPath)}`
+@@ -302,7 +491,11 @@ func uninstallProduct() error {
+ 	if programData == "" {
+ 		programData = `C:\ProgramData`

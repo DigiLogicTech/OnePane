@@ -93,6 +93,12 @@ jobs:
           echo "44e31c4bc6df048acec092629a61feaa86c5bde6d31346ead653cf65b9a3f17d  alpha3-source.patch" | sha256sum -c -
           git apply --check --directory=buildsrc alpha3-source.patch
           git apply --directory=buildsrc alpha3-source.patch
+          if compgen -G '.recovery/alpha3/fixes/*.patch' > /dev/null; then
+            for fix in .recovery/alpha3/fixes/*.patch; do
+              git apply --check --directory=buildsrc "$fix"
+              git apply --directory=buildsrc "$fix"
+            done
+          fi
           cp LICENSE buildsrc/LICENSE
           if [ -f NOTICE ]; then cp NOTICE buildsrc/NOTICE; fi
       - name: Build Debian package

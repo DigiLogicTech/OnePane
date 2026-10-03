@@ -1,0 +1,100 @@
++    if(fallback)role.fallback_model=fallback.value||'auto';
++    if(compute)role.compute_preference=compute.value||'auto';
++  }
++  const status=$('[data-qa7-settings-status]',root);
++  try{const updated=await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));qa4Inspector.data.project=updated;if(status)status.innerHTML='<span class="good">Saved for this workspace only.</span>';notice('Workspace settings saved.');}
++  catch(ex){if(status)status.innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`;}
++};
++
++function qa8Recommend(workspace,mode){const role=qa8ModelAssignment(workspace,mode);if(!role.model)role.model='auto';if(!role.agent)role.agent=mode==='direct'?'agent.md':'onepane-default';if(!role.fallback_model)role.fallback_model='auto';if(!role.compute_preference)role.compute_preference='auto';}
++function qa8BindModelStack(project,workspace,root=document){
++  $$('[data-qa8-stack-tab]',root).forEach(b=>b.onclick=async()=>{const w=qa7FindComponent(workspace,b.dataset.qa8StackId);if(!w)return;w.config=w.config||{};w.config.tab=b.dataset.qa8StackTab;await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));renderProjects();});
++  $$('[data-qa8-recommend]',root).forEach(b=>b.onclick=async()=>{qa8Recommend(workspace,b.dataset.qa8Recommend);await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));notice(`${titleCase(b.dataset.qa8Recommend)} recommendation applied without replacing pinned choices.`);renderProjects();});
++  $$('[data-qa8-model]',root).forEach(x=>x.onchange=async()=>{const r=qa8ModelAssignment(workspace,x.dataset.qa8Model);r.model=x.value;await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));});
++  $$('[data-qa8-agent]',root).forEach(x=>x.onchange=async()=>{const r=qa8ModelAssignment(workspace,x.dataset.qa8Agent);r.agent=x.value;await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));});
++  $$('[data-qa8-compute]',root).forEach(x=>x.onchange=async()=>{const r=qa8ModelAssignment(workspace,x.dataset.qa8Compute);r.compute_preference=x.value;await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));});
++  $$('[data-qa8-fallback]',root).forEach(x=>x.onchange=async()=>{const r=qa8ModelAssignment(workspace,x.dataset.qa8Fallback);r.fallback_model=x.value;await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));});
++}
++const qa8BindWorkspaceBase=qa7BindWorkspaceControls;
++qa7BindWorkspaceControls=function(project,workspace,root=document){qa8BindWorkspaceBase(project,workspace,root);qa8BindModelStack(project,workspace,root);};
++
++
++
++function qa8ComputeModeForDeployment(d){
++  const raw=String(d?.compute_mode||d?.run_mode||d?.placement?.mode||'').toLowerCase();
++  if(raw.includes('hybrid')||raw.includes('offload')||raw.includes('cpu_gpu'))return 'hybrid';
++  if(raw.includes('gpu')||['cuda','rocm','hip','vulkan','metal','directml','sycl'].includes(String(d?.compute_backend||d?.runtime_backend||'').toLowerCase()))return 'gpu';
++  if(raw.includes('cpu'))return 'cpu';
++  return 'auto';
++}
++function qa8DecorateModels(){
++  const heading=$('#viewHost .page-heading h1');if(heading)heading.textContent='Models';
++  const rows=$$('#qa5ManagedModels .model-tile');
++  rows.forEach((el,i)=>{const d=qa5ManagedDeployments[i];if(!d)return;const meta=el.querySelector('.list-meta');if(meta&&!el.querySelector('.qa8-model-compute'))meta.insertAdjacentHTML('beforebegin',`<div class="toolbar qa8-model-compute">${qa8ComputeBadge(qa8ComputeModeForDeployment(d))}<span class="list-meta">${escapeHtml(d.compute_backend||d.runtime_backend||'')} ${d.compute_device_ids?.length?`· ${escapeHtml(d.compute_device_ids.join(', '))}`:''}</span></div>`);if(d.qualified||String(d.investigation_state||'').toLowerCase()==='qualified')el.querySelector('[data-agent-check]')?.remove();});
++  const inspected=qa4Inspector?.kind==='model'?qa4Inspector.data:null;
++  if(inspected&&(inspected.qualified||String(inspected.investigation_state||'').toLowerCase()==='qualified'))$('#qa5InspectorAgentCheck')?.remove();
++}
++const qa8RenderModelsBase=renderModels;
++renderModels=async function(){await qa8RenderModelsBase();qa8ManagedDeployments=qa5ManagedDeployments;queueMicrotask(qa8DecorateModels);};
++let qa8ManagedDeployments=[];
++
++function qa8SettingsEnhance(){
++  const heading=$('#viewHost .page-heading h1');if(heading)heading.textContent='Settings';
++  const about=$('.about-block strong');if(about)about.textContent=`OnePane v${QA8_RELEASE}`;
++  const mode=$('#qa5DefaultMode');if(mode){const current=qa8Mode(mode.value);mode.innerHTML=qa8VisibleModes.map(v=>`<option value="${v}" ${current===v?'selected':''}>${titleCase(v)}</option>`).join('');}
++  const localCard=$('#modelPoolPath')?.closest('.panel-card');
++  if(localCard&&!$('#qa8ProjectRoot')){const body=localCard.querySelector('.settings-stack');body?.insertAdjacentHTML('afterbegin',`<label>Default Project / Workspace data root<input id="qa8ProjectRoot" placeholder="D:\\OnePane\\Projects"></label><div class="page-subtitle">Libraries, artifacts and workspace data can live on a larger drive independently of the application and model pool.</div>`);}
++}
++const qa8RenderSettingsBase=renderSettings;
++renderSettings=async function(){await qa8RenderSettingsBase();qa8SettingsEnhance();try{const s=await apiRequest('/desktop/settings');if($('#qa8ProjectRoot'))$('#qa8ProjectRoot').value=s.project_root||'';}catch{}const save=$('#saveModelPool');if(save){const base=save.onclick;save.onclick=async()=>{const projectRoot=$('#qa8ProjectRoot')?.value.trim()||'';if(projectRoot){try{await apiRequest('/desktop/settings/project-root',{method:'POST',body:JSON.stringify({project_root:projectRoot})});}catch(ex){notice(`Project storage update failed: ${ex.message}`,'bad');return;}}await base?.();};}};
++
++async function qa8FleetSnapshot(){
++  const [queue,leases,nodes]=await Promise.all([
++    apiRequest('/v1/runtime-queue?limit=40').catch(()=>[]),
++    apiRequest('/v1/resource-leases?limit=40').catch(()=>[]),
++    apiRequest('/v1/nodes').catch(()=>liveOps.nodes||[])
++  ]);
++  return {queue:Array.isArray(queue)?queue:(queue.entries||[]),leases:Array.isArray(leases)?leases:(leases.entries||[]),nodes:Array.isArray(nodes)?nodes:(nodes.nodes||[])};
++}
++function qa8FleetCard(data){
++  const running=data.queue.filter(x=>x.state==='running'),queued=data.queue.filter(x=>String(x.state||'').startsWith('queued')||String(x.state||'').startsWith('waiting'));
++  const compute={cpu:0,gpu:0,hybrid:0};for(const x of running){let c={};try{c=typeof x.resource_claim==='string'?JSON.parse(x.resource_claim):x.resource_claim||{};}catch{}const m=String(c.compute_mode||'').toLowerCase();if(m==='cpu')compute.cpu++;else if(m==='hybrid'||m==='cpu_gpu')compute.hybrid++;else if(m==='gpu')compute.gpu++;}
++  return `<section class="panel-card qa8-fleet-card"><div class="card-header"><div><div class="card-title">Compute fleet</div><div class="list-meta">Application-wide CPU/GPU scheduling across local and enrolled nodes</div></div><span class="pill ${queued.length?'warn':'good'}">${queued.length} queued</span></div><div class="widget-body"><div class="metric-grid">${metric('CPU models',String(compute.cpu),'Running now')}${metric('GPU models',String(compute.gpu),'Running now')}${metric('Hybrid models',String(compute.hybrid),'CPU + GPU claims')}${metric('Resource leases',String(data.leases.length),'Global active/queued')}</div><div class="list-meta">${data.nodes.length} node(s) visible. CPU and each GPU are independently schedulable while shared RAM/device constraints remain enforced.</div></div></section>`;
++}
++const qa8RenderOperationsBase=renderOperations;
++renderOperations=function(){qa8RenderOperationsBase();qa8FleetSnapshot().then(data=>{$('#operationsLayout')?.insertAdjacentHTML('afterend',qa8FleetCard(data));}).catch(()=>{});};
++
++// Upgrade persisted Alpha 2 default mode without removing the compatible backing assignment.
++try{const p=qa5Prefs();if(['supervisor','workers'].includes(p.workspace_defaults?.orchestration)){p.workspace_defaults.orchestration='direct';localStorage.setItem(QA5_PREFS_KEY,JSON.stringify(p));}}catch{}
++
+ 
+ bootOnePane();
+diff --git a/packaging/windows/setup/main.go b/packaging/windows/setup/main.go
+index 7d03d61..4fbda9c 100644
+--- a/packaging/windows/setup/main.go
++++ b/packaging/windows/setup/main.go
+@@ -20,7 +20,7 @@ import (
+ 
+ const (
+ 	productName = "OnePane"
+-	version     = "0.1.0-alpha.2"
++	version     = "0.1.0-alpha.3"
+ 	serviceName = "OnePane"
+ 	controlURL  = "http://127.0.0.1:18181"
+ )
+@@ -37,15 +37,25 @@ var (
+ 
+ func main() {
+ 	uninstall := hasArg("--uninstall")
++	repair := hasArg("--repair")
+ 	elevated := hasArg("--elevated")
+ 	setModelPool := argValue("--set-model-pool")
++	setProjectRoot := argValue("--set-project-root")
++	installDirArg := argValue("--install-dir")
++	projectRootArg := argValue("--project-root")
++	modelPoolArg := argValue("--model-pool")
+ 	if !elevated {
+ 		args := []string{}
+ 		if uninstall {
+ 			args = append(args, "--uninstall")
+ 		}

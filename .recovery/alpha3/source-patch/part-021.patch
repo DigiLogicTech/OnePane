@@ -1,0 +1,100 @@
++			legacyID, _ := m["id"].(string)
++			idv, _ := s.ids.New("pws")
++			if i == 0 && strings.TrimSpace(legacyID) != "" { /* keep old id in state, not PK, to avoid collisions */
++			}
++			state, _ := json.Marshal(map[string]any{"legacy_workspace": m, "legacy_workspace_id": legacyID})
++			layout := json.RawMessage(`{"schema_version":1,"components":[]}`)
++			if widgets, ok := m["widgets"]; ok {
++				b, _ := json.Marshal(map[string]any{"schema_version": 1, "components": widgets})
++				layout = b
++			}
++			ai := json.RawMessage(`{"version":1,"routing":{"enabled":true,"strategy":"hybrid"},"direct":{},"team":{},"council":{}}`)
++			if orch, ok := m["orchestration"]; ok {
++				b, _ := json.Marshal(map[string]any{"version": 1, "legacy_orchestration": orch, "routing": m["routing"]})
++				ai = b
++			}
++			_, err := tx.ExecContext(ctx, `INSERT INTO project_workspaces(id,project_id,name,status,layout_json,ai_settings_json,resource_scope_json,state_json,revision,created_at,updated_at) VALUES(?,?,?,'active',?,?, '{}',?,1,?,?)`, idv, projectID, name, string(layout), string(ai), string(state), now, now)
++			if err != nil {
++				return err
++			}
++		}
++		return nil
++	})
++}
++
++func (s *Service) CreateWorkspaceView(ctx context.Context, cmd CreateWorkspaceViewCommand) (WorkspaceView, error) {
++	cmd.ProjectID, cmd.Name, cmd.ActorPrincipalID = strings.TrimSpace(cmd.ProjectID), strings.TrimSpace(cmd.Name), strings.TrimSpace(cmd.ActorPrincipalID)
++	if cmd.ProjectID == "" || cmd.Name == "" || cmd.ActorPrincipalID == "" {
++		return WorkspaceView{}, ErrInvalidCommand
++	}
++	p, err := s.repo.Project(ctx, cmd.ProjectID)
++	if err != nil {
++		return WorkspaceView{}, err
++	}
++	if p.Status != "active" {
++		return WorkspaceView{}, ErrProjectInactive
++	}
++	layout, err := canonicalObjectOr(cmd.LayoutJSON, `{"schema_version":1,"components":[]}`)
++	if err != nil {
++		return WorkspaceView{}, ErrInvalidCommand
++	}
++	ai, err := canonicalObjectOr(cmd.AISettingsJSON, `{"version":1,"routing":{"enabled":true,"strategy":"hybrid"},"direct":{},"team":{},"council":{}}`)
++	if err != nil {
++		return WorkspaceView{}, ErrInvalidCommand
++	}
++	scope, err := canonicalObjectOr(cmd.ResourceScopeJSON, `{}`)
++	if err != nil {
++		return WorkspaceView{}, ErrInvalidCommand
++	}
++	state, err := canonicalObjectOr(cmd.StateJSON, `{}`)
++	if err != nil {
++		return WorkspaceView{}, ErrInvalidCommand
++	}
++	idv, _ := s.ids.New("pws")
++	now := s.clock.UnixMilli()
++	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
++		if _, err := tx.ExecContext(ctx, `INSERT INTO project_workspaces(id,project_id,name,description,status,layout_json,ai_settings_json,resource_scope_json,state_json,storage_root,revision,created_at,updated_at) VALUES(?,?,?,?,'active',?,?,?,?,?,1,?,?)`, idv, cmd.ProjectID, cmd.Name, cmd.Description, string(layout), string(ai), string(scope), string(state), cmd.StorageRoot, now, now); err != nil {
++			return err
++		}
++		eid, _ := s.ids.New("evt")
++		payload, _ := json.Marshal(map[string]any{"project_id": cmd.ProjectID, "project_workspace_id": idv, "name": cmd.Name})
++		return s.events.Append(ctx, tx, event.Event{ID: eid, WorkspaceID: &p.WorkspaceID, Type: "project_workspace.created", AggregateType: "project_workspace", AggregateID: idv, ActorPrincipalID: &cmd.ActorPrincipalID, Payload: payload, OccurredAt: now})
++	})
++	if err != nil {
++		return WorkspaceView{}, err
++	}
++	return s.WorkspaceView(ctx, idv)
++}
++
++func (s *Service) UpdateWorkspaceView(ctx context.Context, cmd UpdateWorkspaceViewCommand) (WorkspaceView, error) {
++	cmd.WorkspaceID, cmd.Name, cmd.ActorPrincipalID = strings.TrimSpace(cmd.WorkspaceID), strings.TrimSpace(cmd.Name), strings.TrimSpace(cmd.ActorPrincipalID)
++	if cmd.WorkspaceID == "" || cmd.Name == "" || cmd.ExpectedRevision < 1 || cmd.ActorPrincipalID == "" {
++		return WorkspaceView{}, ErrInvalidCommand
++	}
++	current, err := s.WorkspaceView(ctx, cmd.WorkspaceID)
++	if err != nil {
++		return WorkspaceView{}, err
++	}
++	if current.Revision != cmd.ExpectedRevision {
++		return WorkspaceView{}, ErrRevisionConflict
++	}
++	layout, err := canonicalObjectOr(cmd.LayoutJSON, string(current.LayoutJSON))
++	if err != nil {
++		return WorkspaceView{}, ErrInvalidCommand
++	}
++	ai, err := canonicalObjectOr(cmd.AISettingsJSON, string(current.AISettingsJSON))
++	if err != nil {
++		return WorkspaceView{}, ErrInvalidCommand
++	}
++	scope, err := canonicalObjectOr(cmd.ResourceScopeJSON, string(current.ResourceScopeJSON))
++	if err != nil {
++		return WorkspaceView{}, ErrInvalidCommand
++	}
++	state, err := canonicalObjectOr(cmd.StateJSON, string(current.StateJSON))
++	if err != nil {
++		return WorkspaceView{}, ErrInvalidCommand
++	}
++	now := s.clock.UnixMilli()
++	res, err := s.db.ExecContext(ctx, `UPDATE project_workspaces SET name=?,description=?,layout_json=?,ai_settings_json=?,resource_scope_json=?,state_json=?,storage_root=?,revision=revision+1,updated_at=? WHERE id=? AND revision=? AND status='active'`, cmd.Name, cmd.Description, string(layout), string(ai), string(scope), string(state), cmd.StorageRoot, now, cmd.WorkspaceID, cmd.ExpectedRevision)
++	if err != nil {
++		return WorkspaceView{}, err

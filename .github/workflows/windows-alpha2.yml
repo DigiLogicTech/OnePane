@@ -1,0 +1,147 @@
+name: Alpha 2 Windows Build
+
+on:
+  push:
+    branches:
+      - alpha2-integration
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Build and validate Windows Alpha 2
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout integration branch
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+
+      - name: Restore authoritative Alpha 2 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p buildsrc
+          base64 -d .recovery/alpha2-buildsrc-current.b64 > alpha2-source.tar.xz
+          tar -xJf alpha2-source.tar.xz -C buildsrc
+          test -f buildsrc/go.mod
+          test -f buildsrc/cmd/harnessd/main.go
+          test -f buildsrc/packaging/windows/setup/main.go
+          echo "source files: $(find buildsrc -type f | wc -l)"
+
+      - name: Validate source contracts
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check internal/webui/static/app.js
+          python scripts/validate_windows_qa5_source.py
+          python scripts/validate_windows_qa4_source.py
+          python scripts/validate_windows_qa_source.py
+          python scripts/validate_m23_webgui.py
+
+      - name: Resolve and verify Go modules
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod download
+          go mod verify
+
+      - name: Run Go test suite
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./...
+
+      - name: Build Windows payloads
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/windows packaging/windows/setup/payload
+          export CGO_ENABLED=0 GOOS=windows GOARCH=amd64
+          go build -trimpath -ldflags "-s -w" -o dist/windows/OnePane.Backend.exe ./cmd/harnessd
+          go build -trimpath -ldflags "-s -w -H windowsgui" -o dist/windows/OnePane.Desktop.exe ./packaging/windows/desktop
+          go build -trimpath -ldflags "-s -w" -o dist/windows/OnePane.Service.exe ./packaging/windows/service
+          cp dist/windows/OnePane.Backend.exe packaging/windows/setup/payload/
+          cp dist/windows/OnePane.Desktop.exe packaging/windows/setup/payload/
+          cp dist/windows/OnePane.Service.exe packaging/windows/setup/payload/
+          cp packaging/windows/assets/OnePane.ico packaging/windows/setup/payload/OnePane.ico
+
+      - name: Add WebView2 offline runtime
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 5 --retry-delay 3             "https://go.microsoft.com/fwlink/p/?LinkId=2124703"             --output packaging/windows/setup/payload/MicrosoftEdgeWebView2RuntimeInstallerX64.exe
+          test -s packaging/windows/setup/payload/MicrosoftEdgeWebView2RuntimeInstallerX64.exe
+
+      - name: Refresh embedded payload integrity hashes
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, re
+
+          setup = Path("packaging/windows/setup/main.go")
+          text = setup.read_text()
+          payload = Path("packaging/windows/setup/payload")
+
+          hashes = {}
+          for name in [
+              "OnePane.Backend.exe",
+              "OnePane.Service.exe",
+              "OnePane.Desktop.exe",
+              "OnePane.ico",
+              "MicrosoftEdgeWebView2RuntimeInstallerX64.exe",
+          ]:
+              hashes[name] = hashlib.sha256((payload / name).read_bytes()).hexdigest()
+
+          for name in ["OnePane.Backend.exe", "OnePane.Service.exe", "OnePane.Desktop.exe", "OnePane.ico"]:
+              pattern = rf'("{re.escape(name)}"\s*:\s*")[0-9a-f]{{64}}(")'
+              text, n = re.subn(pattern, rf'\g<1>{hashes[name]}\2', text, count=1)
+              if n != 1:
+                  raise SystemExit(f"could not patch hash for {name}")
+
+          pattern = r'(extractVerified\("MicrosoftEdgeWebView2RuntimeInstallerX64\.exe", installer, ")[0-9a-f]{64}("\))'
+          text, n = re.subn(pattern, rf'\g<1>{hashes["MicrosoftEdgeWebView2RuntimeInstallerX64.exe"]}\2', text, count=1)
+          if n != 1:
+              raise SystemExit("could not patch WebView2 hash")
+
+          setup.write_text(text)
+          for name, digest in hashes.items():
+              print(f"{digest}  {name}")
+          PY
+
+      - name: Build final Windows installer
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CGO_ENABLED=0 GOOS=windows GOARCH=amd64
+          go build -trimpath -ldflags "-s -w -H windowsgui"             -o dist/windows/OnePane-v0.1.0-alpha.2-windows-x64-setup.exe             ./packaging/windows/setup
+          sha256sum dist/windows/OnePane-v0.1.0-alpha.2-windows-x64-setup.exe             > dist/windows/OnePane-v0.1.0-alpha.2-windows-x64-setup.exe.sha256
+          file dist/windows/OnePane-v0.1.0-alpha.2-windows-x64-setup.exe
+          cat dist/windows/OnePane-v0.1.0-alpha.2-windows-x64-setup.exe.sha256
+
+      - name: Upload Windows Alpha 2 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnePane-v0.1.0-alpha.2-windows-x64
+          path: |
+            buildsrc/dist/windows/OnePane-v0.1.0-alpha.2-windows-x64-setup.exe
+            buildsrc/dist/windows/OnePane-v0.1.0-alpha.2-windows-x64-setup.exe.sha256
+          if-no-files-found: error
+          retention-days: 14

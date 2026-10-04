@@ -8,19 +8,15 @@
  	dataDir := filepath.Join(programData, "OnePane")
  	installDir := readInstallPath(dataDir)
  	if installDir == "" {
-@@ -498,10 +499,30 @@ func uninstallProduct() error {
- 	}
+@@ -499,7 +500,27 @@ func uninstallProduct() error {
  	_ = runHidden("taskkill.exe", "/IM", "OnePane.Desktop.exe", "/F")
 +	_ = runHidden("taskkill.exe", "/IM", "OnePane.Backend.exe", "/F")
  	_ = runHidden("sc.exe", "stop", serviceName)
--	time.Sleep(900 * time.Millisecond)
 +	// A broken/already-stopped service (1060/1062) is an idempotent uninstall
 +	// condition. Continue teardown instead of making service health a prerequisite.
 +	time.Sleep(1200 * time.Millisecond)
 +	_ = runHidden("taskkill.exe", "/IM", "OnePane.Service.exe", "/F")
  	_ = runHidden("sc.exe", "delete", serviceName)
- 	_ = runHidden("reg.exe", "delete", `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run`, "/v", "OnePane", "/f")
- 	_ = runHidden("reg.exe", "delete", `HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\OnePane`, "/f")
 +	// Never recursively remove ProgramData, configured Project storage, or the
 +	// model pool here. They are durable user state and survive normal uninstall.
 +	// The setup executable is running from installDir, so let a detached process

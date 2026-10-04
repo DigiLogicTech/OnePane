@@ -33,7 +33,7 @@ ck('central build identity exists', 'var (' in buildinfo and 'Version   = "dev"'
 ck('backend exposes build identity', 'GET /v1/about' in api and 'buildinfo.Version' in api)
 ck('Windows setup consumes build identity', 'var version = buildinfo.Version' in setup)
 ck('Windows desktop singleton is version-neutral', 'Local\\OnePaneDesktop' in desktop and 'OnePaneDesktop-v0.1.0-alpha.3' not in desktop)
-ck('Ubuntu requires authoritative version', 'ONEPANE_VERSION is required' in deb and '0.1.0-alpha.3}"' not in deb)
+ck('Ubuntu requires authoritative exact version', 'ONEPANE_VERSION is required' in deb and 'DEB_VERSION="${VERSION#v}"' in deb and '~alpha.' not in deb)
 
 # Assistant / Project Orchestrator
 ck('Assistant service and durable tables exist', 'type Service struct' in assistant and 'assistant_threads' in m23 and 'assistant_project_handoffs' in m23)

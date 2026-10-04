@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/DigiLogicTech/OnePane/internal/buildinfo"
 )
 
 const (
@@ -210,6 +212,7 @@ func runBackend() error {
 		return err
 	}
 	defer logFile.Close()
+	fmt.Fprintf(logFile, "OnePane Service %s starting\n", buildinfo.Version)
 
 	backend := filepath.Join(installDir, "OnePane.Backend.exe")
 	config := filepath.Join(dataDir, "config.yaml")

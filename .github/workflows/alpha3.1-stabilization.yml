@@ -2,7 +2,7 @@ name: Alpha 3.1 Stabilization
 
 on:
   push:
-    branches: [alpha3.1-stabilization]
+    branches: [alpha3.1-stabilization, alpha3.1-orchestration]
     paths:
       - '.recovery/alpha3/source.patch.xz.b64'
       - '.recovery/alpha3.1/**'

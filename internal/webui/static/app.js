@@ -1832,7 +1832,7 @@ renderProjects=async function(){
   const html=await qa31ProjectOrchestratorStrip(project,workspace);
   toolbar.insertAdjacentHTML('afterend',html);
   $('#qa31AskProject')?.addEventListener('click',()=>qa31AskProject(project,workspace));
-  $('#qa31OrchestratorActivity')?.addEventListener('click',()=>{setDrawerOpen(true);state.drawerTab='events';renderDrawer();});
+  $('#qa31OrchestratorActivity')?.addEventListener('click',()=>{setDrawerOpen(true);activeDrawerTab='events';persist();renderDrawer();});
   $('#qa31FollowProject')?.addEventListener('click',()=>{
     const task=(liveOps.tasks||[]).find(t=>t.project_id===project.id&&!['complete','failed','cancelled'].includes(String(t.state||'').toLowerCase()));
     if(task)qa4Inspect('task',task.id,task.objective||task.id,task);
@@ -1907,7 +1907,7 @@ function qa31BindOperationCardActions(){
     }
     action.onclick=()=>{
       const target=action.dataset.qa31OperationAction;
-      if(target==='events'){setDrawerOpen(true);state.drawerTab='events';persist();renderDrawer();return}
+      if(target==='events'){setDrawerOpen(true);activeDrawerTab='events';persist();renderDrawer();return}
       openRoute(target);
     };
   });

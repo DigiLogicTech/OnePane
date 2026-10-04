@@ -214,6 +214,50 @@ func (s *Service) Archive(ctx context.Context, idv, workspaceID, actor string) (
 	return s.Get(ctx, idv)
 }
 
+
+type Session struct {
+	TaskID          string  `json:"id"`
+	WorkspaceID     string  `json:"workspace_id"`
+	ProjectID       *string `json:"project_id,omitempty"`
+	Objective       string  `json:"objective"`
+	State           string  `json:"state"`
+	ExecutionMode   string  `json:"mode"`
+	TeamID          *string `json:"team_id,omitempty"`
+	TeamSessionID   *string `json:"team_session_id,omitempty"`
+	ProfileID       string  `json:"profile_id"`
+	CreatedAt       int64   `json:"created_at"`
+	UpdatedAt       int64   `json:"updated_at"`
+}
+
+func (s *Service) ListSessions(ctx context.Context, workspaceID string, limit int) ([]Session, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" { return nil, ErrInvalid }
+	if limit <= 0 || limit > 200 { limit = 100 }
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT t.id,t.workspace_id,t.project_id,t.objective,t.state,
+		       COALESCE(ep.execution_mode,'direct'),ep.team_id,ep.team_session_id,
+		       COALESCE(json_extract(ep.config_json,'$.agent_profile_id'),json_extract(ep.config_json,'$.agent_profile'),'agent.md'),
+		       t.created_at,t.updated_at
+		FROM tasks t
+		LEFT JOIN task_execution_profiles ep ON ep.task_id=t.id
+		WHERE t.workspace_id=?
+		ORDER BY t.updated_at DESC,t.id DESC LIMIT ?`, workspaceID, limit)
+	if err != nil { return nil, err }
+	defer rows.Close()
+	out := []Session{}
+	for rows.Next() {
+		var x Session
+		var projectID, teamID, teamSessionID sql.NullString
+		if err := rows.Scan(&x.TaskID,&x.WorkspaceID,&projectID,&x.Objective,&x.State,&x.ExecutionMode,&teamID,&teamSessionID,&x.ProfileID,&x.CreatedAt,&x.UpdatedAt); err != nil { return nil, err }
+		if projectID.Valid { x.ProjectID=&projectID.String }
+		if teamID.Valid { x.TeamID=&teamID.String }
+		if teamSessionID.Valid { x.TeamSessionID=&teamSessionID.String }
+		if strings.EqualFold(x.ProfileID,"onepane-default") || strings.TrimSpace(x.ProfileID)=="" { x.ProfileID="agent.md" }
+		out=append(out,x)
+	}
+	return out,rows.Err()
+}
+
 func (p Profile) PromptBlock() string {
 	return fmt.Sprintf("Agent Profile: %s\nRole: %s\nInstructions:\n%s\n\nProfile instructions affect reasoning only. They do not grant tools, secrets, filesystem, network, node, approval, or other authority.", p.Name, p.DefaultRole, p.InstructionsMD)
 }

@@ -1,0 +1,380 @@
+diff --git a/internal/featurepolicy/policy.go b/internal/featurepolicy/policy.go
+new file mode 100644
+--- /dev/null
++++ b/internal/featurepolicy/policy.go
+@@ -0,0 +1,159 @@
++package featurepolicy
++
++import "strings"
++
++type State string
++
++const (
++	Inherited   State = "inherited"
++	Enabled     State = "enabled"
++	Disabled    State = "disabled"
++	Unavailable State = "unavailable"
++)
++
++type Authority string
++
++const (
++	AuthorityNever    Authority = "never"
++	AuthorityRead     Authority = "read"
++	AuthorityPropose  Authority = "propose"
++	AuthorityAuto     Authority = "auto"
++)
++
++type Policy struct {
++	Assistant          State
++	ProjectAI          State
++	ProjectMemory      State
++	TelemetryAccess    State
++	TelemetryAutonomy  State
++	ModelRouting       State
++	AutomaticFallback State
++	CapabilityRouting State
++	CloudRouting       State
++	Images             State
++	Files              State
++	AudioInput         State
++	AudioOutput        State
++	Camera             State
++	Video              State
++	Team               State
++	Council            State
++	CrossProjectShare  State
++	AutonomousRoutines State
++	ConfigAuthority    Authority
++}
++
++func AssistedDefaults() Policy {
++	return Policy{
++		Assistant: Enabled, ProjectAI: Enabled, ProjectMemory: Enabled,
++		TelemetryAccess: Enabled, TelemetryAutonomy: Disabled,
++		ModelRouting: Enabled, AutomaticFallback: Enabled, CapabilityRouting: Enabled,
++		CloudRouting: Inherited, Images: Enabled, Files: Enabled,
++		AudioInput: Disabled, AudioOutput: Disabled, Camera: Disabled, Video: Disabled,
++		Team: Enabled, Council: Enabled, CrossProjectShare: Disabled,
++		AutonomousRoutines: Disabled, ConfigAuthority: AuthorityPropose,
++	}
++}
++
++func MinimalDefaults() Policy {
++	p := AssistedDefaults()
++	p.Assistant = Disabled
++	p.ProjectAI = Disabled
++	p.ProjectMemory = Disabled
++	p.TelemetryAutonomy = Disabled
++	p.ModelRouting = Disabled
++	p.AutomaticFallback = Disabled
++	p.CapabilityRouting = Disabled
++	p.CloudRouting = Disabled
++	p.Team = Disabled
++	p.Council = Disabled
++	p.AutonomousRoutines = Disabled
++	p.ConfigAuthority = AuthorityRead
++	return p
++}
++
++// Resolve applies a child override without permitting a child to escape a
++// restrictive parent. Inherited preserves the parent's value.
++func Resolve(parent, child State) State {
++	if parent == Unavailable || parent == Disabled {
++		return parent
++	}
++	if child == Inherited || strings.TrimSpace(string(child)) == "" {
++		return parent
++	}
++	if child == Unavailable || child == Disabled {
++		return child
++	}
++	return Enabled
++}
++
++func ResolveAuthority(parent, child Authority) Authority {
++	if child == "" {
++		return parent
++	}
++	rank := map[Authority]int{AuthorityNever: 0, AuthorityRead: 1, AuthorityPropose: 2, AuthorityAuto: 3}
++	if rank[child] < rank[parent] {
++		return child
++	}
++	return parent
++}
++
++func (p Policy) ProjectAIActive() bool {
++	return p.ProjectAI == Enabled
++}
++
++func (p Policy) PersistentMemoryActive() bool {
++	return p.ProjectAIActive() && p.ProjectMemory == Enabled
++}
++
++func (p Policy) AutomaticRoutingActive() bool {
++	return p.ModelRouting == Enabled && p.CapabilityRouting == Enabled
++}
+diff --git a/internal/featurepolicy/policy_test.go b/internal/featurepolicy/policy_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/featurepolicy/policy_test.go
+@@ -0,0 +1,47 @@
++package featurepolicy
++
++import "testing"
++
++func TestRestrictiveParentWins(t *testing.T) {
++	if got := Resolve(Disabled, Enabled); got != Disabled {
++		t.Fatalf("disabled parent escaped: %q", got)
++	}
++	if got := Resolve(Unavailable, Enabled); got != Unavailable {
++		t.Fatalf("unavailable parent escaped: %q", got)
++	}
++}
++
++func TestInheritedUsesParent(t *testing.T) {
++	if got := Resolve(Enabled, Inherited); got != Enabled {
++		t.Fatalf("inheritance mismatch: %q", got)
++	}
++}
++
++func TestMinimalDoesNotActivateIntelligence(t *testing.T) {
++	p := MinimalDefaults()
++	if p.ProjectAIActive() || p.PersistentMemoryActive() || p.AutomaticRoutingActive() {
++		t.Fatal("minimal policy activated intelligence")
++	}
++}
++
++func TestAuthorityCannotExpand(t *testing.T) {
++	if got := ResolveAuthority(AuthorityPropose, AuthorityAuto); got != AuthorityPropose {
++		t.Fatalf("child expanded authority: %q", got)
++	}
++	if got := ResolveAuthority(AuthorityPropose, AuthorityRead); got != AuthorityRead {
++		t.Fatalf("child restriction ignored: %q", got)
++	}
++}
+diff --git a/internal/agentrole/types.go b/internal/agentrole/types.go
+new file mode 100644
+--- /dev/null
++++ b/internal/agentrole/types.go
+@@ -0,0 +1,135 @@
++package agentrole
++
++import "time"
++
++type ScopeType string
++type ModelStrategy string
++type RuntimeState string
++
++const (
++	ScopeGlobal    ScopeType = "global"
++	ScopeProject   ScopeType = "project"
++	ScopeWorkspace ScopeType = "workspace"
++
++	ModelFixed     ModelStrategy = "fixed"
++	ModelPreferred ModelStrategy = "preferred"
++	ModelAuto      ModelStrategy = "auto"
++
++	RuntimeReady      RuntimeState = "ready"
++	RuntimeRunning    RuntimeState = "running"
++	RuntimeSwapping   RuntimeState = "swapping"
++	RuntimeRecovering RuntimeState = "recovering"
++	RuntimeDegraded   RuntimeState = "degraded"
++	RuntimeBlocked    RuntimeState = "blocked"
++	RuntimePaused     RuntimeState = "paused"
++	RuntimeDisabled   RuntimeState = "disabled"
++)
++
++type Definition struct {
++	ID              string
++	SchemaVersion   int
++	Name            string
++	Builtin         bool
++	CurrentRevision int
++}
++
++type DefinitionRevision struct {
++	DefinitionID string
++	Revision     int
++	AgentMD      string
++	CreatedAt    time.Time
++}
++
++type Scope struct {
++	Type ScopeType
++	ID   string
++}
++
++type ModelPolicy struct {
++	Strategy  ModelStrategy
++	Primary   string
++	Fallbacks []string
++}
++
++type Assignment struct {
++	ID                 string
++	DefinitionID       string
++	DefinitionRevision int
++	Scope              Scope
++	ModelPolicy        ModelPolicy
++	PermissionPolicyID string
++	MemoryNamespace    string
++	Enabled            bool
++	CreatedAt          time.Time
++	UpdatedAt          time.Time
++}
++
++// RuntimeSession is disposable. Durable identity belongs to Assignment.
++type RuntimeSession struct {
++	ID             string
++	AssignmentID   string
++	DeploymentID   string
++	NodeID         string
++	State          RuntimeState
++	DefinitionRev  int
++	StartedAt      time.Time
++	LastActivityAt time.Time
++}
+diff --git a/internal/agentrole/types_test.go b/internal/agentrole/types_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/agentrole/types_test.go
+@@ -0,0 +1,24 @@
++package agentrole
++
++import "testing"
++
++func TestAssignmentIdentityIsIndependentFromRuntime(t *testing.T) {
++	a := Assignment{ID: "aa-1", DefinitionID: "direct", Enabled: true}
++	r1 := RuntimeSession{ID: "rs-1", AssignmentID: a.ID, DeploymentID: "model-a"}
++	r2 := RuntimeSession{ID: "rs-2", AssignmentID: a.ID, DeploymentID: "model-b"}
++	if r1.AssignmentID != r2.AssignmentID || r1.AssignmentID != a.ID {
++		t.Fatal("runtime swap changed durable agent identity")
++	}
++}
+diff --git a/internal/deploymentcap/capabilities.go b/internal/deploymentcap/capabilities.go
+new file mode 100644
+--- /dev/null
++++ b/internal/deploymentcap/capabilities.go
+@@ -0,0 +1,125 @@
++package deploymentcap
++
++type Support string
++type Source string
++
++const (
++	Supported   Support = "supported"
++	Unsupported Support = "unsupported"
++	Unknown     Support = "unknown"
++
++	Declared   Source = "declared"
++	Discovered Source = "discovered"
++	Verified   Source = "verified"
++)
++
++type Capability struct {
++	State  Support
++	Source Source
++}
++
++type Set struct {
++	TextInput        Capability
++	ImageInput       Capability
++	AudioInput       Capability
++	VideoInput       Capability
++	TextOutput       Capability
++	ImageOutput      Capability
++	AudioOutput      Capability
++	VideoOutput      Capability
++	ToolCalling      Capability
++	StructuredOutput Capability
++	Reasoning        Capability
++	Streaming        Capability
++	Embeddings       Capability
++}
++
++type ContextLimits struct {
++	Advertised int
++	Configured int
++	Tested     int
++}
++
++func (c ContextLimits) Effective() int {
++	values := []int{c.Advertised, c.Configured, c.Tested}
++	result := 0
++	for _, v := range values {
++		if v <= 0 {
++			continue
++		}
++		if result == 0 || v < result {
++			result = v
++		}
++	}
++	return result
++}
++
++type Requirements struct {
++	TextInput      bool
++	ImageInput     bool
++	AudioInput     bool
++	VideoInput     bool
++	ToolCalling    bool
++	Structured     bool
++	MinimumContext int
++	CloudAllowed   bool
++}
++
++func Eligible(c Set, limits ContextLimits, r Requirements) bool {
++	required := []struct {
++		needed bool
++		cap    Capability
++	}{
++		{r.TextInput, c.TextInput},
++		{r.ImageInput, c.ImageInput},
++		{r.AudioInput, c.AudioInput},
++		{r.VideoInput, c.VideoInput},
++		{r.ToolCalling, c.ToolCalling},
++		{r.Structured, c.StructuredOutput},
++	}
++	for _, item := range required {
++		if item.needed && item.cap.State != Supported {
++			return false
++		}
++	}
++	return r.MinimumContext <= 0 || limits.Effective() >= r.MinimumContext
++}
+diff --git a/internal/deploymentcap/capabilities_test.go b/internal/deploymentcap/capabilities_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/deploymentcap/capabilities_test.go
+@@ -0,0 +1,43 @@
++package deploymentcap
++
++import "testing"
++
++func TestEffectiveContextUsesSmallestRuntimeLimit(t *testing.T) {
++	c := ContextLimits{Advertised: 131072, Configured: 65536, Tested: 98304}
++	if got := c.Effective(); got != 65536 {
++		t.Fatalf("effective context = %d", got)
++	}
++}
++
++func TestUnknownDoesNotSatisfyHardRequirement(t *testing.T) {
++	caps := Set{
++		TextInput:  Capability{State: Supported, Source: Verified},
++		ImageInput: Capability{State: Unknown, Source: Discovered},
++	}
++	if Eligible(caps, ContextLimits{Configured: 65536}, Requirements{TextInput: true, ImageInput: true}) {
++		t.Fatal("unknown image capability passed hard filter")
++	}
++}
++
++func TestSupportedRequirementsPass(t *testing.T) {
++	caps := Set{
++		TextInput:   Capability{State: Supported, Source: Verified},
++		ToolCalling: Capability{State: Supported, Source: Declared},
++	}
++	if !Eligible(caps, ContextLimits{Configured: 65536}, Requirements{TextInput: true, ToolCalling: true, MinimumContext: 32768}) {
++		t.Fatal("eligible deployment rejected")
++	}
++}

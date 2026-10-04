@@ -136,9 +136,17 @@ func installProduct(installDirArg, projectRootArg, modelPoolArg string, repair b
 		return err
 	}
 
-	// Stop an earlier alpha cleanly before replacing binaries.
+	// A previous uninstall may still be draining the SCM entry or holding an
+	// executable open. Make the fresh-install path deterministic before we
+	// replace payloads.
+	_ = runHidden("taskkill.exe", "/IM", "OnePane.Desktop.exe", "/F")
 	_ = runHidden("sc.exe", "stop", serviceName)
-	time.Sleep(700 * time.Millisecond)
+	_ = runHidden("taskkill.exe", "/IM", "OnePane.Backend.exe", "/F")
+	_ = runHidden("taskkill.exe", "/IM", "OnePane.Service.exe", "/F")
+	_ = runHidden("sc.exe", "delete", serviceName)
+	if !waitForServiceDeletion(20 * time.Second) {
+		return fmt.Errorf("previous OnePane service is still pending deletion; reboot Windows or wait a moment and run Setup again")
+	}
 
 	payloads := map[string]string{
 		"OnePane.Backend.exe": "b6f6bebfa65677c620e68a5ca15d6c3d1aab4ad58bcdae138217007195196b66",
@@ -253,7 +261,9 @@ func installProduct(installDirArg, projectRootArg, modelPoolArg string, repair b
 	logf("optional runtimes are managed by the OnePane harness after installation and can be installed later from Models")
 
 	_ = runHidden("sc.exe", "delete", serviceName)
-	time.Sleep(500 * time.Millisecond)
+	if !waitForServiceDeletion(20 * time.Second) {
+		return fmt.Errorf("previous OnePane service is still pending deletion before registration")
+	}
 	serviceExe := filepath.Join(installDir, "OnePane.Service.exe")
 	var createErr error
 	for attempt := 0; attempt < 12; attempt++ {
@@ -496,10 +506,13 @@ func uninstallProduct() error {
 	if installDir == "" {
 		installDir = filepath.Join(programFiles, "OnePane")
 	}
+	logf("starting resilient uninstall; durable ProgramData content will be preserved")
 	_ = runHidden("taskkill.exe", "/IM", "OnePane.Desktop.exe", "/F")
 	_ = runHidden("sc.exe", "stop", serviceName)
-	time.Sleep(900 * time.Millisecond)
+	_ = runHidden("taskkill.exe", "/IM", "OnePane.Backend.exe", "/F")
+	_ = runHidden("taskkill.exe", "/IM", "OnePane.Service.exe", "/F")
 	_ = runHidden("sc.exe", "delete", serviceName)
+	_ = waitForServiceDeletion(20 * time.Second)
 	_ = runHidden("reg.exe", "delete", `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "/v", "OnePane", "/f")
 	_ = runHidden("reg.exe", "delete", `HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\OnePane`, "/f")
 	_ = os.Remove(filepath.Join(programData, "Microsoft", "Windows", "Start Menu", "Programs", "OnePane.lnk"))
@@ -508,6 +521,19 @@ func uninstallProduct() error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	_ = cmd.Start()
 	return nil
+}
+
+func waitForServiceDeletion(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		// sc.exe query returns non-zero once the service no longer exists.
+		// ERROR_SERVICE_DOES_NOT_EXIST (1060) is the desired state.
+		if err := runHidden("sc.exe", "query", serviceName); err != nil {
+			return true
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return false
 }
 
 func createStartMenuShortcut(installDir, programData string) error {

@@ -1644,4 +1644,83 @@ renderOperations=function(){qa8RenderOperationsBase();qa8FleetSnapshot().then(da
 try{const p=qa5Prefs();if(['supervisor','workers'].includes(p.workspace_defaults?.orchestration)){p.workspace_defaults.orchestration='direct';localStorage.setItem(QA5_PREFS_KEY,JSON.stringify(p));}}catch{}
 
 
+
+/* === Alpha 3.1 authoritative OnePane Assistant surface === */
+let qa31AssistantThread=null;
+
+async function qa31Projects(){
+  try{
+    const rows=await apiRequest('/v1/projects?workspace_id='+encodeURIComponent(onepaneWorkspace));
+    return Array.isArray(rows)?rows:[];
+  }catch{return []}
+}
+async function qa31EnsureAssistantThread(){
+  if(qa31AssistantThread){
+    try{
+      await apiRequest('/v1/assistant/threads/'+encodeURIComponent(qa31AssistantThread.id)+'/turns?limit=1');
+      return qa31AssistantThread;
+    }catch{qa31AssistantThread=null}
+  }
+  const rows=await apiRequest('/v1/assistant/threads?workspace_id='+encodeURIComponent(onepaneWorkspace)+'&limit=20').catch(()=>[]);
+  if(Array.isArray(rows)&&rows.length){qa31AssistantThread=rows[0];return qa31AssistantThread}
+  qa31AssistantThread=await apiRequest('/v1/assistant/threads',{method:'POST',body:JSON.stringify({workspace_id:onepaneWorkspace,title:'OnePane Assistant'})});
+  return qa31AssistantThread;
+}
+async function qa31SetAssistantScope(projectID){
+  const thread=await qa31EnsureAssistantThread();
+  qa31AssistantThread=await apiRequest('/v1/assistant/threads/'+encodeURIComponent(thread.id)+'/scope',{method:'POST',body:JSON.stringify({project_id:projectID||null})});
+  return qa31AssistantThread;
+}
+function qa31AssistantTurnRow(t){
+  const project=t.project_id?'<span class="pill">Project</span>':'<span class="pill">Global</span>';
+  return `<div class="assistant-turn ${escapeHtml(t.role||'assistant')}"><div class="assistant-turn-meta">${t.role==='user'?'You':'OnePane'} ${project}</div><div class="assistant-turn-body">${escapeHtml(t.content||'')}</div></div>`;
+}
+async function qa31OpenAssistant(){
+  const root=$('#overlayRoot');
+  root.innerHTML='<div class="overlay"><section class="command-palette assistant-palette qa31-assistant"><div class="widget-body">Loading OnePane Assistant…</div></section></div>';
+  root.firstElementChild.onclick=e=>{if(e.target===root.firstElementChild)root.innerHTML='';};
+  try{
+    const [thread,projects]=await Promise.all([qa31EnsureAssistantThread(),qa31Projects()]);
+    qa31AssistantThread=thread;
+    const turns=await apiRequest('/v1/assistant/threads/'+encodeURIComponent(thread.id)+'/turns?limit=80').catch(()=>[]);
+    const active=thread.active_project_id?projects.find(p=>p.id===thread.active_project_id):null;
+    const card=$('.qa31-assistant',root);if(!card)return;
+    card.innerHTML=`<div class="assistant-head"><div><div class="eyebrow">ONEPANE ASSISTANT</div><h2>${active?'Project context':'Global context'}</h2><div class="list-meta">${active?`Project · ${escapeHtml(active.name||active.id)} · Project Orchestrator delegated when needed`:'Global · navigation, system state and explicit Project handoff'}</div></div><button class="icon-button" id="qa31AssistantClose" aria-label="Close">×</button></div>
+      <div class="assistant-scope-row"><label>Context<select id="qa31AssistantScope"><option value="">Global</option>${projects.map(p=>`<option value="${escapeHtml(p.id)}" ${active&&p.id===active.id?'selected':''}>Project · ${escapeHtml(p.name||p.id)}</option>`).join('')}</select></label>${active?'<button class="btn" id="qa31ReturnGlobal">Return to Global</button>':''}</div>
+      <div class="assistant-history" id="qa31AssistantHistory">${Array.isArray(turns)&&turns.length?turns.map(qa31AssistantTurnRow).join(''):'<div class="empty-state compact">Ask OnePane about system state, navigation, or select a Project for Project-specific context.</div>'}</div>
+      <form id="qa31AssistantForm" class="assistant-compose"><textarea id="qa31AssistantInput" rows="3" placeholder="Ask OnePane or run a command…"></textarea><div class="assistant-compose-actions"><span class="list-meta">Ask is read-only. Run permits creation of governed Tasks when needed.</span><button class="btn" type="button" id="qa31AssistantAsk">Ask</button><button class="btn primary" type="button" id="qa31AssistantRun">Run</button></div></form>
+      <div class="palette-divider"></div><div class="palette-section-title">Navigation</div><div class="palette-quick">${navItems.map(([route,icon,label])=>`<button class="palette-row" data-qa31-nav="${route}"><span>${icon}</span><strong>${escapeHtml(label)}</strong></button>`).join('')}<button class="palette-row" data-qa31-nav="settings"><span>⚙</span><strong>Settings</strong></button></div>`;
+    $('#qa31AssistantClose',card).onclick=()=>root.innerHTML='';
+    $('#qa31ReturnGlobal',card)?.addEventListener('click',async()=>{await qa31SetAssistantScope(null);qa31OpenAssistant();});
+    $('#qa31AssistantScope',card).onchange=async e=>{await qa31SetAssistantScope(e.target.value||null);qa31OpenAssistant();};
+    $('[data-qa31-nav]',card).forEach(b=>b.onclick=()=>{root.innerHTML='';openRoute(b.dataset.qa31Nav);});
+    const submit=async allow=>{
+      const input=$('#qa31AssistantInput',card),content=input?.value.trim();if(!content)return;
+      input.disabled=true;$('#qa31AssistantAsk',card).disabled=true;$('#qa31AssistantRun',card).disabled=true;
+      try{
+        const scoped=$('#qa31AssistantScope',card)?.value||null;
+        await apiRequest('/v1/assistant/threads/'+encodeURIComponent(thread.id)+'/turns',{method:'POST',body:JSON.stringify({content,project_id:scoped,allow_task_creation:allow,force_task:false})});
+        input.value='';await qa31OpenAssistant();
+      }catch(ex){
+        notice(ex.message,'bad');input.disabled=false;$('#qa31AssistantAsk',card).disabled=false;$('#qa31AssistantRun',card).disabled=false;
+      }
+    };
+    $('#qa31AssistantAsk',card).onclick=()=>submit(false);
+    $('#qa31AssistantRun',card).onclick=()=>submit(true);
+    $('#qa31AssistantInput',card).onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();submit(false)}};
+    requestAnimationFrame(()=>{const h=$('#qa31AssistantHistory',card);if(h)h.scrollTop=h.scrollHeight;$('#qa31AssistantInput',card)?.focus();});
+  }catch(ex){
+    const card=$('.qa31-assistant',root);if(card)card.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;
+  }
+}
+openCommandPalette=qa31OpenAssistant;
+function qa31WireAssistantButton(){
+  const b=$('#commandButton');if(!b)return;
+  b.onclick=qa31OpenAssistant;
+  b.setAttribute('aria-label',qa5T('ask_onepane','Ask OnePane or run a command…'));
+  if(b.childNodes.length)b.childNodes[0].textContent=qa5T('ask_onepane','Ask OnePane or run a command…')+' ';
+}
+const qa31AssistantInitBase=init;
+init=function(){qa31AssistantInitBase();qa31WireAssistantButton();};
+
 bootOnePane();

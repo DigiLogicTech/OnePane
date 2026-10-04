@@ -2,7 +2,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${ONEPANE_VERSION:-0.1.0-alpha.3}"
+: "${ONEPANE_VERSION:?ONEPANE_VERSION is required}"
+VERSION="$ONEPANE_VERSION"
+REVISION="${ONEPANE_REVISION:-${GITHUB_SHA:-unknown}}"
+BUILD_TIME="${ONEPANE_BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 ARCH="${ONEPANE_ARCH:-amd64}"
 OUT="${ONEPANE_OUT:-$ROOT/dist/ubuntu}"
 
@@ -27,7 +30,7 @@ printf 'Resolving Go module graph\n'
 
 printf 'Building OnePane Linux %s\n' "$ARCH"
 (cd "$ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" \
-  go build -trimpath -ldflags "-s -w" \
+  go build -trimpath -ldflags "-s -w -X github.com/DigiLogicTech/OnePane/internal/buildinfo.Version=$VERSION -X github.com/DigiLogicTech/OnePane/internal/buildinfo.Revision=$REVISION -X github.com/DigiLogicTech/OnePane/internal/buildinfo.BuildTime=$BUILD_TIME" \
   -o "$PKGROOT/usr/bin/onepane" ./cmd/harnessd)
 
 install -m 0644 "$ROOT/packaging/debian/onepane.service" "$PKGROOT/lib/systemd/system/onepane.service"

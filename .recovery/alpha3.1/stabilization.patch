@@ -1,0 +1,39 @@
+--- a/internal/webui/static/app.js
++++ b/internal/webui/static/app.js
+@@ -500,8 +500,23 @@
+   const draw=()=>{const q=input.value.toLowerCase(); const filtered=commands.filter(c=>c.label.toLowerCase().includes(q)); results.innerHTML=filtered.map((c,i)=>`<button class="palette-item ${i===0?'selected':''}" data-command="${commands.indexOf(c)}"><span>›</span><strong>${c.label}</strong><span>${c.meta}</span></button>`).join(''); $$('.palette-item',results).forEach(b=>b.onclick=()=>{commands[+b.dataset.command].run();root.innerHTML='';});};
+   input.oninput=draw; draw(); input.focus(); root.firstElementChild.onclick=e=>{if(e.target===root.firstElementChild)root.innerHTML='';};
+ }
++let activePopoverCleanup=null;
++function closePopover(){
++  if(activePopoverCleanup){const cleanup=activePopoverCleanup;activePopoverCleanup=null;cleanup();}
++}
+ function popoverFor(anchor,html){
+-  const root=$('#overlayRoot');root.innerHTML=html;const p=root.firstElementChild,r=anchor.getBoundingClientRect();if(isPhoneLayout()){p.classList.add('mobile-popover');}else{p.style.top=`${r.bottom+8}px`;p.style.right=`${Math.max(8,innerWidth-r.right)}px`;} setTimeout(()=>document.addEventListener('click',function closer(e){if(!p.contains(e.target)&&e.target!==anchor){root.innerHTML='';document.removeEventListener('click',closer);}}, {capture:true}),0);
++  closePopover();
++  const root=$('#overlayRoot');
++  root.innerHTML=html;
++  const p=root.firstElementChild,r=anchor.getBoundingClientRect();
++  if(isPhoneLayout())p.classList.add('mobile-popover');
++  else{p.style.top=`${r.bottom+8}px`;p.style.right=`${Math.max(8,innerWidth-r.right)}px`;}
++  const closer=e=>{
++    if(!p.isConnected){closePopover();return;}
++    if(!p.contains(e.target)&&e.target!==anchor){root.innerHTML='';closePopover();}
++  };
++  const timer=setTimeout(()=>document.addEventListener('click',closer,{capture:true}),0);
++  activePopoverCleanup=()=>{clearTimeout(timer);document.removeEventListener('click',closer,{capture:true});};
+ }
+ function openThemePopover(anchor){popoverFor(anchor,`<div class="popover"><h3>Theme</h3><div class="theme-grid">${['system','light','dark','graphite','midnight','forest'].map(t=>`<button class="theme-choice ${state.theme===t?'active':''}" data-theme-choice="${t}">${titleCase(t)}</button>`).join('')}</div></div>`);$$('[data-theme-choice]').forEach(b=>b.onclick=()=>{state.theme=b.dataset.themeChoice;document.documentElement.dataset.theme=state.theme;persist();$('#overlayRoot').innerHTML='';});}
+ function openAttentionPopover(anchor){popoverFor(anchor,`<div class="popover"><h3>Attention</h3><div class="popover-row"><strong>Approval required</strong><div class="list-meta">T-1833 · External mutation</div></div><div class="popover-row"><strong>Node unavailable</strong><div class="list-meta">AI-Lab-02 · Wake failed</div></div><div class="popover-row"><strong>Routine failed</strong><div class="list-meta">Nightly Research</div></div></div>`);}
+@@ -874,11 +889,12 @@
+ }
+ 
+ function openModal(title,body,footer=''){
++  closePopover();
+   const root=$('#overlayRoot');
+   root.innerHTML=`<div class="overlay modal-backdrop"><section class="qa-modal" role="dialog" aria-modal="true"><div class="component-picker-header"><div><h2>${escapeHtml(title)}</h2></div><button class="icon-button" data-close-modal>×</button></div><div class="qa-modal-body">${body}</div>${footer?`<div class="qa-modal-footer">${footer}</div>`:''}</section></div>`;
+   $('[data-close-modal]',root).onclick=closeModal;root.firstElementChild.onclick=e=>{if(e.target===root.firstElementChild)closeModal();};
+ }
+-function closeModal(){const r=$('#overlayRoot');if(r)r.innerHTML='';}
++function closeModal(){closePopover();const r=$('#overlayRoot');if(r)r.innerHTML='';}
+ function notice(text,kind='good'){const r=$('#overlayRoot');r.innerHTML=`<div class="toast ${kind}">${escapeHtml(text)}</div>`;setTimeout(()=>{if(r.textContent.includes(text))r.innerHTML='';},2600);}

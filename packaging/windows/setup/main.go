@@ -16,14 +16,17 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/DigiLogicTech/OnePane/internal/buildinfo"
 )
 
 const (
 	productName = "OnePane"
-	version     = "0.1.0-alpha.3.1"
 	serviceName = "OnePane"
 	controlURL  = "http://127.0.0.1:18181"
 )
+
+var version = buildinfo.Version
 
 //go:embed payload/*
 var payloadFS embed.FS

@@ -1,11 +1,6 @@
 name: Alpha 3 Source Inspect
 
 on:
-  push:
-    branches:
-      - alpha3-integration
-    paths:
-      - '.github/workflows/alpha3-source-inspect.yml'
   workflow_dispatch:
 
 permissions:

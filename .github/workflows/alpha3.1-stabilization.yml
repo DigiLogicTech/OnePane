@@ -36,12 +36,41 @@ jobs:
           node --check internal/webui/static/app.js
       - name: Go tests
         run: go test ./...
-      - name: Cross-compile Windows x64
+      - name: Build Windows x64 installer
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist/windows-x64
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$ONEPANE_VERSION" -o dist/windows-x64/onepane.exe ./cmd/harnessd
+          rm -rf packaging/windows/setup/payload
+          mkdir -p dist/windows-x64 packaging/windows/setup/payload
+          export GOOS=windows GOARCH=amd64 CGO_ENABLED=0
+          go build -trimpath -ldflags "-s -w -X main.version=$ONEPANE_VERSION" -o packaging/windows/setup/payload/OnePane.Backend.exe ./cmd/harnessd
+          go build -trimpath -ldflags "-s -w" -o packaging/windows/setup/payload/OnePane.Service.exe ./packaging/windows/service
+          go build -trimpath -ldflags "-s -w -H windowsgui" -o packaging/windows/setup/payload/OnePane.Desktop.exe ./packaging/windows/desktop
+          cp packaging/windows/assets/OnePane.ico packaging/windows/setup/payload/OnePane.ico
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, re
+          setup = Path("packaging/windows/setup/main.go")
+          text = setup.read_text()
+          payload = Path("packaging/windows/setup/payload")
+          for name in ["OnePane.Backend.exe", "OnePane.Service.exe", "OnePane.Desktop.exe", "OnePane.ico"]:
+              digest = hashlib.sha256((payload / name).read_bytes()).hexdigest()
+              pattern = rf'("{re.escape(name)}"\s*:\s*")[0-9a-f]{{64}}(")'
+              text, n = re.subn(pattern, rf'\g<1>{digest}\2', text, count=1)
+              if n != 1:
+                  raise SystemExit(f"could not refresh payload hash for {name}")
+          setup.write_text(text)
+          PY
+          go build -trimpath -ldflags "-s -w -H windowsgui" -o dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe ./packaging/windows/setup
+          sha256sum dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe > dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe.sha256
+          test -s dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe
+          python3 - <<'PY'
+          from pathlib import Path
+          p=next(Path("dist/windows-x64").glob("*-setup.exe"))
+          if p.read_bytes()[:2] != b"MZ":
+              raise SystemExit("Windows installer is not a PE executable")
+          print(f"validated installer {p} ({p.stat().st_size} bytes)")
+          PY
       - name: Build Ubuntu amd64 package
         shell: bash
         run: |

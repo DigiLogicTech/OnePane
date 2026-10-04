@@ -1840,4 +1840,82 @@ renderProjects=async function(){
   });
 };
 
+
+/* === Alpha 3.1 Models lifecycle and Operations actions === */
+function qa31ColibriActionButtons(c){
+  const state=String(c?.state||'not_installed');
+  const buttons=[];
+  if(['not_installed','removed'].includes(state))buttons.push(['install','Install runtime','primary']);
+  else if(state==='failed')buttons.push(['retry','Retry','primary'],['repair','Repair','']);
+  else if(state==='interrupted')buttons.push(['resume','Resume','primary'],['repair','Repair','']);
+  else if(['queued','downloading','verifying','installing','enabling','disabling','updating','repairing','removing'].includes(state)){
+    return `<span class="pill warn">${escapeHtml(titleCase(state))}</span>`;
+  }else{
+    if(c?.enabled||state==='running'||state==='degraded')buttons.push(['disable','Disable','']);
+    else buttons.push(['enable','Enable','primary']);
+    buttons.push(['update','Update',''],['repair','Repair',''],['remove','Remove runtime','danger']);
+  }
+  return buttons.map(([action,label,cls])=>`<button class="btn ${cls}" data-qa31-colibri-action="${action}">${label}</button>`).join('');
+}
+const qa31RenderModelsBase=renderModels;
+renderModels=async function(){
+  await qa31RenderModelsBase();
+  let components={};
+  try{components=await qa5ComponentStatus()}catch{}
+  const colibri=components?.colibri||{};
+  const card=$('.colibri-separate');
+  if(card){
+    const pill=$('.card-header .pill',card);
+    if(pill){
+      const state=String(colibri.state||'not_installed');
+      pill.textContent=titleCase(state.replaceAll('_',' '));
+      pill.className='pill '+(['running','installed_disabled'].includes(state)?'good':(['failed','degraded','interrupted'].includes(state)?'warn':''));
+    }
+    const toolbar=$('.widget-body .toolbar',card);
+    if(toolbar){
+      toolbar.innerHTML=qa31ColibriActionButtons(colibri)+(colibri.installed?'<button class="btn" id="qa5ColibriRegister">Register model folder</button>':'');
+      $('[data-qa31-colibri-action]',toolbar).forEach(b=>b.onclick=()=>qa5ComponentAction('colibri',b.dataset.qa31ColibriAction,'#qa5ColibriInlineStatus'));
+      $('#qa5ColibriRegister',toolbar)?.addEventListener('click',qa5RegisterColibri);
+    }
+    const status=$('#qa5ColibriInlineStatus',card);
+    if(status){
+      const version=colibri.installed_version||colibri.available_version||'1.12.1';
+      status.innerHTML=`Version ${escapeHtml(version)} · ${escapeHtml(String(colibri.state||'not installed').replaceAll('_',' '))}${colibri.last_error?`<br><span class="warn">${escapeHtml(colibri.last_error)}</span>`:''}`;
+    }
+  }
+  const omni=$('.omniroute-separate');
+  if(omni){
+    const firstToolbar=$('.widget-body > .toolbar',omni);
+    if(firstToolbar)firstToolbar.innerHTML='<span class="list-meta">Provider connection lifecycle · no local runtime installation</span>';
+  }
+};
+
+function qa31BindOperationCardActions(){
+  $('.operations-layout-grid .panel-card').forEach(card=>{
+    const action=$('.card-action',card);if(!action)return;
+    const title=$('.card-title',card)?.textContent.trim()||'';
+    if(title==='Active Tasks'||title==='Scheduled Tasks'||title==='Scheduled tasks'){
+      action.dataset.qa31OperationAction='tasks';
+    }else if(title==='Nodes'){
+      action.dataset.qa31OperationAction='nodes';
+    }else if(title==='Provider Health'){
+      action.dataset.qa31OperationAction='models';
+    }else if(title==='Recent Activity'){
+      action.dataset.qa31OperationAction='events';
+    }else{
+      action.remove();return;
+    }
+    action.onclick=()=>{
+      const target=action.dataset.qa31OperationAction;
+      if(target==='events'){setDrawerOpen(true);state.drawerTab='events';persist();renderDrawer();return}
+      openRoute(target);
+    };
+  });
+}
+const qa31RenderOperationsBase=renderOperations;
+renderOperations=function(){
+  qa31RenderOperationsBase();
+  queueMicrotask(qa31BindOperationCardActions);
+};
+
 bootOnePane();

@@ -14,8 +14,8 @@ permissions:
 
 env:
   ONEPANE_VERSION: 0.1.0-alpha.3
-  ALPHA3_PATCH_XZ_SHA256: 40469f2c2fb8181cb5fc58be315339ec06b481b164b8bf570387cff92b191adf
-  ALPHA3_PATCH_SHA256: 44e31c4bc6df048acec092629a61feaa86c5bde6d31346ead653cf65b9a3f17d
+  ALPHA3_PATCH_XZ_SHA256: bd17c771261cdb6099d789d87ae2706fa8dbfb56eea1fa6e49ceb844a3358781
+  ALPHA3_PATCH_B64_SHA256: 0986d1bac3c0b85c21b7a71c6b529dd173b701a87aa01c8d5639b80bdf0bf808
 
 jobs:
   validate:
@@ -42,10 +42,10 @@ jobs:
           test -f buildsrc/go.mod
           test -f buildsrc/cmd/harnessd/main.go
 
+          echo "${ALPHA3_PATCH_B64_SHA256}  .recovery/alpha3/source.patch.xz.b64" | sha256sum -c -
           base64 -d .recovery/alpha3/source.patch.xz.b64 > alpha3.patch.xz
           echo "${ALPHA3_PATCH_XZ_SHA256}  alpha3.patch.xz" | sha256sum -c -
           xz -dc alpha3.patch.xz > alpha3.patch
-          echo "${ALPHA3_PATCH_SHA256}  alpha3.patch" | sha256sum -c -
 
           patch --dry-run -p1 -d buildsrc < alpha3.patch
           patch -p1 -d buildsrc < alpha3.patch

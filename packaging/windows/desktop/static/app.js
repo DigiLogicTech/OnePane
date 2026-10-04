@@ -19,7 +19,7 @@ const pages = {
   operations: { title:'Operations', icon:'▣' }, workspaces:{title:'Workspaces',icon:'▱'}, tasks:{title:'Tasks',icon:'☑'}, projects:{title:'Projects',icon:'▢'},
   models:{title:'Models',icon:'◇'}, nodes:{title:'Nodes',icon:'⬡'}, agents:{title:'Agents & Bots',icon:'♙'}, sandboxes:{title:'Sandboxes',icon:'⬢'},
   routines:{title:'Routines',icon:'⟳'}, providers:{title:'Providers',icon:'⌁'}, integrations:{title:'Integrations',icon:'⊞'}, secrets:{title:'Secrets',icon:'▣'},
-  evidence:{title:'Evidence / Audit',icon:'◎'}, settings:{title:'Defaults',icon:'⚙'}
+  evidence:{title:'Evidence / Audit',icon:'◎'}, settings:{title:'Settings',icon:'⚙'}
 };
 
 const state = loadState();
@@ -443,21 +443,9 @@ function renderSettings(){
 }
 function renderPlaceholder(title,copy){$('#viewHost').innerHTML=`<section class="page">${pageHeader(title,copy,'<button class="btn">Configure</button>')}<div class="empty-state"><div><div style="font-size:36px;opacity:.5">${pages[currentTab().route]?.icon||'◫'}</div><h2>${title}</h2><p>${copy}</p><p>This canonical management surface is scaffolded into the new shell.</p></div></div></section>`;}
 
-function renderInspector(node='AI-Workstation'){
-  $('#inspector').innerHTML=`<div class="inspector-header">Node <button class="inspector-close" id="closeInspector">×</button></div><div class="inspector-section"><div class="inspector-title">⬡ ${node}<span class="pill good" style="margin-left:auto">Online</span></div></div><div class="inspector-tabs"><button class="active">Overview</button><button>Models</button><button>Tasks</button><button data-drawer-tab="logs">Logs</button></div><div class="inspector-section"><strong>General</strong><dl class="definition-grid"><dt>Type</dt><dd>Remote (${node.includes('Mac')?'macOS':'Windows'})</dd><dt>Status</dt><dd class="good">Online</dd><dt>Wakeable</dt><dd class="good">Yes</dd><dt>Last seen</dt><dd>12 seconds ago</dd><dt>Address</dt><dd>192.168.1.42</dd></dl></div><div class="inspector-section"><strong>Hardware</strong><dl class="definition-grid"><dt>CPU</dt><dd>AMD Ryzen 9 7950X</dd><dt>RAM</dt><dd>64 GB</dd><dt>GPU</dt><dd>NVIDIA RTX 5090</dd><dt>VRAM</dt><dd>24 GB · 68% used</dd><dt>Storage</dt><dd>2 TB · 58% used</dd></dl></div><div class="inspector-section"><strong>Configuration</strong><dl class="definition-grid"><dt>Model pool</dt><dd>D:\\OnePane\\Models</dd><dt>Auto sleep</dt><dd class="good">Enabled</dd><dt>Wake on demand</dt><dd class="good">Enabled</dd><dt>Battery policy</dt><dd>Avoid wake on battery</dd></dl></div><div class="inspector-section"><button class="btn primary">Wake</button> <button class="btn">Sleep</button> <button class="btn">Restart</button></div>`;
-  $('#closeInspector')?.addEventListener('click',()=>{state.inspector='closed';$('#app').dataset.inspector='closed';persist();});
-  bindViewActions($('#inspector'));
-}
 
-function renderDrawer(){
-  const tabs=['logs','events','terminal','watchdog','metrics','evidence'];
-  $('#drawerTabs').innerHTML=tabs.map(x=>`<button class="${x===activeDrawerTab?'active':''}" data-drawer-tab="${x}">${titleCase(x)}</button>`).join('');
-  const c=$('#drawerContent');
-  if(activeDrawerTab==='logs') c.innerHTML=`<table class="log-table"><tbody>${mock.logs.map(l=>`<tr><td class="log-time">${l[0]}</td><td class="log-level"><span class="pill ${l[1]==='ERROR'?'bad':l[1]==='WARN'?'warn':''}">${l[1]}</span></td><td class="log-component">${l[2]}</td><td>${l[3]}</td></tr>`).join('')}</tbody></table>`;
-  else if(activeDrawerTab==='watchdog') c.innerHTML=`<div class="widget-body"><strong class="good">Watchdog healthy</strong><br><br>Last control-plane heartbeat: 2 sec ago<br>Scheduler: healthy<br>Outbox: healthy<br>Recovery coordinator: healthy<br>Federation: 5 online / 2 dormant / 1 offline</div>`;
-  else c.innerHTML=`<div class="widget-body">${titleCase(activeDrawerTab)} view. This drawer can be independently filtered and suspended when its parent tab is inactive.</div>`;
-  bindViewActions($('#bottomDrawer'));
-}
+
+
 
 function bindShell(){
   $('#sidebarToggle').onclick=()=>{state.sidebar=state.sidebar==='expanded'?'collapsed':'expanded';$('#app').dataset.sidebar=state.sidebar;persist();};
@@ -476,14 +464,7 @@ function bindShell(){
   document.addEventListener('click',e=>{const command=e.target.closest('[data-action="command-palette"]');if(command)openCommandPalette(); const tour=e.target.closest('[data-action="product-tour"]');if(tour)startProductTour({replay:true}); const mobileMore=e.target.closest('[data-action="mobile-more"]');if(mobileMore)openMobileMore(); const route=e.target.closest('.mobile-header [data-route]');if(route)openRoute(route.dataset.route);});
   bindDrawerResize();
 }
-function bindViewActions(root=document){
-  $$('[data-route]',root).forEach(b=>b.onclick=()=>openRoute(b.dataset.route));
-  $$('[data-drawer-tab]',root).forEach(b=>b.onclick=()=>{activeDrawerTab=b.dataset.drawerTab; if(state.drawer==='closed'){state.drawer='open';$('#bottomDrawer').dataset.state='open';document.documentElement.style.setProperty('--drawer',`${state.drawerHeight}px`);} if(isPhoneLayout()){state.inspector='closed';$('#app').dataset.inspector='closed';} renderDrawer();persist();});
-  $$('[data-inspect-node]',root).forEach(r=>r.onclick=()=>{state.inspector='open';$('#app').dataset.inspector='open';if(isPhoneLayout()){state.drawer='closed';$('#bottomDrawer').dataset.state='closed';}renderInspector(r.dataset.inspectNode);persist();});
-  $$('[data-inspect="task"]',root).forEach(r=>r.onclick=()=>{state.inspector='open';$('#app').dataset.inspector='open';if(isPhoneLayout()){state.drawer='closed';$('#bottomDrawer').dataset.state='closed';}renderTaskInspector();persist();});
-  $$('[data-attention-item]',root).forEach(b=>b.onclick=()=>{const n=ATTENTION_ITEMS[+b.dataset.attentionItem];if(!n)return;if(n.route)openRoute(n.route);if(n.drawer){setDrawerOpen(true);activeDrawerTab=n.drawer;renderDrawer();}});
-  $$('[data-approval-default]',root).forEach(b=>b.onclick=()=>{state.approvalLevel=b.dataset.approvalDefault;persist();renderSettings();bindViewActions($('#viewHost'));});
-}
+
 function renderTaskInspector(){
   $('#inspector').innerHTML=`<div class="inspector-header">Task <button class="inspector-close" id="closeInspector">×</button></div><div class="inspector-section"><div class="inspector-title">☑ T-1832 <span class="pill good" style="margin-left:auto">Running</span></div><div class="page-subtitle">Model qualification: Qwen 32B</div></div><div class="inspector-tabs"><button class="active">Overview</button><button>Attempts</button><button>Evidence</button><button data-drawer-tab="logs">Logs</button></div><div class="inspector-section"><dl class="definition-grid"><dt>Workspace</dt><dd>AI Lab</dd><dt>Agent</dt><dd>Local model worker</dd><dt>Model</dt><dd>Qwen 32B Q4_K_M</dd><dt>Node</dt><dd>AI-Workstation</dd><dt>Progress</dt><dd>68%</dd><dt>Verification</dt><dd>Pending</dd></dl></div>`;
   $('#closeInspector').onclick=()=>{state.inspector='closed';$('#app').dataset.inspector='closed';persist();}; bindViewActions($('#inspector'));
@@ -515,8 +496,23 @@ function openCommandPalette(){
   const draw=()=>{const q=input.value.toLowerCase(); const filtered=commands.filter(c=>c.label.toLowerCase().includes(q)); results.innerHTML=filtered.map((c,i)=>`<button class="palette-item ${i===0?'selected':''}" data-command="${commands.indexOf(c)}"><span>›</span><strong>${c.label}</strong><span>${c.meta}</span></button>`).join(''); $$('.palette-item',results).forEach(b=>b.onclick=()=>{commands[+b.dataset.command].run();root.innerHTML='';});};
   input.oninput=draw; draw(); input.focus(); root.firstElementChild.onclick=e=>{if(e.target===root.firstElementChild)root.innerHTML='';};
 }
+let activePopoverCleanup=null;
+function closePopover(){
+  if(activePopoverCleanup){const cleanup=activePopoverCleanup;activePopoverCleanup=null;cleanup();}
+}
 function popoverFor(anchor,html){
-  const root=$('#overlayRoot');root.innerHTML=html;const p=root.firstElementChild,r=anchor.getBoundingClientRect();if(isPhoneLayout()){p.classList.add('mobile-popover');}else{p.style.top=`${r.bottom+8}px`;p.style.right=`${Math.max(8,innerWidth-r.right)}px`;} setTimeout(()=>document.addEventListener('click',function closer(e){if(!p.contains(e.target)&&e.target!==anchor){root.innerHTML='';document.removeEventListener('click',closer);}}, {capture:true}),0);
+  closePopover();
+  const root=$('#overlayRoot');
+  root.innerHTML=html;
+  const p=root.firstElementChild,r=anchor.getBoundingClientRect();
+  if(isPhoneLayout())p.classList.add('mobile-popover');
+  else{p.style.top=`${r.bottom+8}px`;p.style.right=`${Math.max(8,innerWidth-r.right)}px`;}
+  const closer=e=>{
+    if(!p.isConnected){closePopover();return;}
+    if(!p.contains(e.target)&&e.target!==anchor){root.innerHTML='';closePopover();}
+  };
+  const timer=setTimeout(()=>document.addEventListener('click',closer,{capture:true}),0);
+  activePopoverCleanup=()=>{clearTimeout(timer);document.removeEventListener('click',closer,{capture:true});};
 }
 function openThemePopover(anchor){popoverFor(anchor,`<div class="popover"><h3>Theme</h3><div class="theme-grid">${['system','light','dark','graphite','midnight','forest'].map(t=>`<button class="theme-choice ${state.theme===t?'active':''}" data-theme-choice="${t}">${titleCase(t)}</button>`).join('')}</div></div>`);$$('[data-theme-choice]').forEach(b=>b.onclick=()=>{state.theme=b.dataset.themeChoice;document.documentElement.dataset.theme=state.theme;persist();$('#overlayRoot').innerHTML='';});}
 function openAttentionPopover(anchor){popoverFor(anchor,`<div class="popover"><h3>Attention</h3><div class="popover-row"><strong>Approval required</strong><div class="list-meta">T-1833 · External mutation</div></div><div class="popover-row"><strong>Node unavailable</strong><div class="list-meta">AI-Lab-02 · Wake failed</div></div><div class="popover-row"><strong>Routine failed</strong><div class="list-meta">Nightly Research</div></div></div>`);}
@@ -889,11 +885,12 @@ function openWorkspaceComponentPicker(){
 }
 
 function openModal(title,body,footer=''){
+  closePopover();
   const root=$('#overlayRoot');
   root.innerHTML=`<div class="overlay modal-backdrop"><section class="qa-modal" role="dialog" aria-modal="true"><div class="component-picker-header"><div><h2>${escapeHtml(title)}</h2></div><button class="icon-button" data-close-modal>×</button></div><div class="qa-modal-body">${body}</div>${footer?`<div class="qa-modal-footer">${footer}</div>`:''}</section></div>`;
   $('[data-close-modal]',root).onclick=closeModal;root.firstElementChild.onclick=e=>{if(e.target===root.firstElementChild)closeModal();};
 }
-function closeModal(){const r=$('#overlayRoot');if(r)r.innerHTML='';}
+function closeModal(){closePopover();const r=$('#overlayRoot');if(r)r.innerHTML='';}
 function notice(text,kind='good'){const r=$('#overlayRoot');r.innerHTML=`<div class="toast ${kind}">${escapeHtml(text)}</div>`;setTimeout(()=>{if(r.textContent.includes(text))r.innerHTML='';},2600);}
 
 async function renderTasks(){
@@ -1050,10 +1047,7 @@ async function openAttentionPopover(anchor){
   $$('[data-notification-id]').forEach(b=>b.onclick=()=>{const n=NOTIFICATIONS.find(x=>x.id===b.dataset.notificationId);if(!n)return;markNotificationRead(n.id);$('#overlayRoot').innerHTML='';if(n.route)openRoute(n.route);if(n.drawer){setDrawerOpen(true);activeDrawerTab=n.drawer;renderDrawer();}});
 }
 
-function renderInspector(node='Local node'){
-  $('#inspector').innerHTML=`<div class="inspector-header">Inspector <button class="inspector-close" id="closeInspector">×</button></div><div class="inspector-section"><div class="inspector-title">⬡ ${escapeHtml(node)}</div></div><div class="inspector-section"><strong>Selection</strong><p class="page-subtitle">Select a Task, Model or Node to inspect its live control-plane details.</p></div>`;
-  $('#closeInspector').onclick=()=>setInspectorOpen(false);syncPanelRestoreButtons();
-}
+
 
 function renderDrawer(){
   const tabs=['logs','events','terminal','watchdog','metrics','evidence'];
@@ -1452,8 +1446,26 @@ function qa6ProjectTasks(project){return liveOps.tasks.filter(t=>!t.project_id||
 function qa6ActiveTask(project,w={}){const rows=qa6ProjectTasks(project),wanted=w?.config?.task_id;if(wanted&&wanted!=='auto'){const found=rows.find(t=>t.id===wanted);if(found)return found;}return rows.find(t=>!['complete','completed','cancelled','failed'].includes(String(t.state||'').toLowerCase()))||rows[0]||null;}
 function qa6EventMatchesTask(e,taskID){if(!taskID)return false;const p=qa6Payload(e);return (e.aggregate_type==='task'&&e.aggregate_id===taskID)||String(p.task_id||'')===String(taskID);}
 function qa6ProjectEvents(project){const ids=new Set(qa6ProjectTasks(project).map(t=>String(t.id)));return liveOps.events.filter(e=>{const p=qa6Payload(e);return (e.aggregate_type==='task'&&ids.has(String(e.aggregate_id)))||ids.has(String(p.task_id||''))||String(p.project_id||'')===String(project.id);});}
-function qa6SurfaceForEvent(e){const p=qa6Payload(e),tool=String(p.tool_id||''),resource=String(p.resource_ref||p.path||p.url||p.file||'');const hay=`${tool} ${resource}`.toLowerCase();if(/browser|web|http/.test(hay))return ['Browser','◎'];if(/terminal|shell|exec|command|powershell|bash|cmd/.test(hay))return ['Terminal','>_'];if(resource)return ['Resource','▤'];if(String(e?.event_type||'').startsWith('verification.'))return ['Verification','✓'];if(String(e?.event_type||'').startsWith('checkpoint.'))return ['Checkpoint','◆'];return ['Control plane','◉'];}
-function qa6FollowContent(w,project){const task=qa6ActiveTask(project,w),events=task?[...liveOps.events].filter(e=>qa6EventMatchesTask(e,task.id)):qa6ProjectEvents(project),latest=events.at(-1),p=qa6Payload(latest),[surface,icon]=qa6SurfaceForEvent(latest),resource=p.resource_ref||p.path||p.url||p.tool_id||latest?.aggregate_id||'Waiting for the next authoritative operation';const tasks=qa6ProjectTasks(project);return `<div class="qa6-follow"><div class="qa6-follow-toolbar"><span class="qa6-live-dot"></span><strong>Live</strong><select data-qa6-follow-task="${escapeHtml(w.id)}"><option value="auto">Follow active task</option>${tasks.map(t=>`<option value="${escapeHtml(t.id)}" ${(w.config?.task_id===t.id)?'selected':''}>${escapeHtml((t.objective||t.id).slice(0,58))}</option>`).join('')}</select></div>${task?`<div class="qa6-follow-task"><strong>${escapeHtml(task.objective||task.id)}</strong><span class="pill">${escapeHtml(task.state||'created')}</span></div>`:'<div class="empty-state compact">No project task is active yet. Start work from Chat and Follow will bind automatically.</div>'}<div class="qa6-follow-surface"><div class="qa6-follow-icon">${icon}</div><div><div class="list-meta">${escapeHtml(surface)} · ${escapeHtml(latest?eventLabel(latest):'Waiting')}</div><strong class="qa6-follow-resource">${escapeHtml(resource)}</strong>${p.tool_id?`<div class="list-meta">Tool: ${escapeHtml(p.tool_id)}</div>`:''}</div></div><div class="qa6-follow-events">${events.length?[...events].slice(-5).reverse().map(e=>`<div><span>${escapeHtml(eventTime(e))}</span><strong>${escapeHtml(eventLabel(e))}</strong></div>`).join(''):'<div class="list-meta">Follow is driven by harness events, not model narration.</div>'}</div></div>`;}
+const qa31FollowSurfaceMeta={browser:['Browser','◎'],editor:['Editor','✎'],computer:['Computer','▣'],terminal:['Terminal','>_'],resource:['Resource','▤'],verification:['Verification','✓'],control:['Control plane','◉']};
+function qa31SnapshotForEvent(e){
+  const p=qa6Payload(e),raw=p.follow_snapshot||p.snapshot;
+  if(!raw||typeof raw!=='object')return null;
+  const surface=String(raw.surface_type||raw.surface||'control').toLowerCase();
+  if(!qa31FollowSurfaceMeta[surface])return null;
+  return {...raw,surface_type:surface,sequence:Number(raw.sequence||0),node_id:String(raw.node_id||p.node_id||''),member_id:String(raw.member_id||raw.execution_member_id||p.member_id||''),resource_ref:String(raw.resource_ref||p.resource_ref||p.path||p.url||''),artifact_ref:String(raw.artifact_ref||'')};
+}
+function qa31LatestSnapshot(events){
+  const rows=events.map((e,index)=>({e,index,s:qa31SnapshotForEvent(e)})).filter(x=>x.s);
+  rows.sort((a,b)=>(a.s.sequence-b.s.sequence)||(a.index-b.index));
+  return rows.at(-1)||null;
+}
+function qa6SurfaceForEvent(e){const snap=qa31SnapshotForEvent(e);if(snap)return qa31FollowSurfaceMeta[snap.surface_type];const p=qa6Payload(e),tool=String(p.tool_id||''),resource=String(p.resource_ref||p.path||p.url||p.file||'');const hay=`${tool} ${resource}`.toLowerCase();if(/browser|web|http/.test(hay))return ['Browser','◎'];if(/terminal|shell|exec|command|powershell|bash|cmd/.test(hay))return ['Terminal','>_'];if(resource)return ['Resource','▤'];if(String(e?.event_type||'').startsWith('verification.'))return ['Verification','✓'];if(String(e?.event_type||'').startsWith('checkpoint.'))return ['Checkpoint','◆'];return ['Control plane','◉'];}
+function qa6FollowContent(w,project){
+  const task=qa6ActiveTask(project,w),events=task?[...liveOps.events].filter(e=>qa6EventMatchesTask(e,task.id)):qa6ProjectEvents(project),typed=qa31LatestSnapshot(events),latest=typed?.e||events.at(-1),p=qa6Payload(latest),snap=typed?.s,[surface,icon]=qa6SurfaceForEvent(latest),resource=snap?.resource_ref||p.resource_ref||p.path||p.url||p.tool_id||latest?.aggregate_id||'Waiting for the next authoritative operation',tasks=qa6ProjectTasks(project);
+  const origin=snap?[snap.node_id&&`Node ${snap.node_id}`,snap.member_id&&`Member ${snap.member_id}`].filter(Boolean).join(' · '):'';
+  const preview=snap?.artifact_ref?`<div class="list-meta">Snapshot artifact: ${escapeHtml(snap.artifact_ref)}</div>`:'';
+  return `<div class="qa6-follow"><div class="qa6-follow-toolbar"><span class="qa6-live-dot"></span><strong>Live</strong><select data-qa6-follow-task="${escapeHtml(w.id)}"><option value="auto">Follow active task</option>${tasks.map(t=>`<option value="${escapeHtml(t.id)}" ${(w.config?.task_id===t.id)?'selected':''}>${escapeHtml((t.objective||t.id).slice(0,58))}</option>`).join('')}</select></div>${task?`<div class="qa6-follow-task"><strong>${escapeHtml(task.objective||task.id)}</strong><span class="pill">${escapeHtml(task.state||'created')}</span></div>`:'<div class="empty-state compact">No project task is active yet. Start work from Chat and Follow will bind automatically.</div>'}<div class="qa6-follow-surface"><div class="qa6-follow-icon">${icon}</div><div><div class="list-meta">${escapeHtml(surface)} · ${escapeHtml(latest?eventLabel(latest):'Waiting')}</div><strong class="qa6-follow-resource">${escapeHtml(resource)}</strong>${origin?`<div class="list-meta">${escapeHtml(origin)}</div>`:''}${preview}${p.tool_id?`<div class="list-meta">Tool: ${escapeHtml(p.tool_id)}</div>`:''}</div></div><div class="qa6-follow-events">${events.length?[...events].slice(-5).reverse().map(e=>`<div><span>${escapeHtml(eventTime(e))}</span><strong>${escapeHtml(eventLabel(e))}</strong></div>`).join(''):'<div class="list-meta">Follow is driven by harness events, not model narration.</div>'}</div></div>`;
+}
 function qa6LogsContent(project){const rows=qa6ProjectEvents(project).slice(-30).reverse();return rows.length?`<div class="qa6-log-list">${rows.map(e=>{const p=qa6Payload(e);return `<div class="qa6-log-row"><span>${escapeHtml(eventTime(e))}</span><strong>${escapeHtml(eventLabel(e))}</strong><small>${escapeHtml(p.resource_ref||p.tool_id||e.aggregate_id||'')}</small></div>`}).join('')}</div>`:'<div class="empty-state compact">No project events yet.</div>';}
 function qa6AgentsContent(project,workspace){const o=workspace.orchestration||{},task=qa6ActiveTask(project);const displayMode=qa8Mode?qa8Mode(o.mode):(['supervisor','workers'].includes(o.mode)?'direct':(o.mode||'direct'));const role=(name,x,count='')=>`<div class="qa6-agent-row"><span class="qa6-agent-state ${task?'live':''}"></span><div><strong>${escapeHtml(name)}${count?` × ${count}`:''}</strong><div class="list-meta">${escapeHtml(x?.agent||'onepane-default')} · ${escapeHtml(x?.model||'auto')}</div></div></div>`;return `<div class="qa6-agent-stack"><div class="list-meta">Mode: ${escapeHtml(titleCase(displayMode))}${task?` · task ${escapeHtml(task.state||'running')}`:''}</div>${role('Direct',o.supervisor)}${role('Workers',o.workers,Number(o.workers?.count||0)||'')}${displayMode==='team'?role('Team',o.team):''}${displayMode==='council'?role('Council',o.council):''}</div>`;}
 function qa6TerminalContent(project){const rows=qa6ProjectEvents(project).filter(e=>{const p=qa6Payload(e);return /terminal|shell|exec|command|powershell|bash|cmd/i.test(`${p.tool_id||''} ${p.capability_id||''}`)}).slice(-20);return `<div class="qa6-terminal"><div class="qa6-terminal-head">Governed execution stream</div>${rows.length?rows.map(e=>{const p=qa6Payload(e);return `<div class="qa6-terminal-line"><span>${escapeHtml(eventTime(e))}</span> <strong>${escapeHtml(p.tool_id||p.capability_id||'tool')}</strong> ${escapeHtml(p.resource_ref||eventLabel(e))}</div>`}).join(''):'<div class="qa6-terminal-line muted">No terminal/command operation has been emitted for this project.</div>'}</div>`;}
@@ -1619,7 +1631,7 @@ qa6FollowContent=function(w,project){const html=qa7FollowContentBase(w,project),
 pages.settings.title='Settings';
 
 /* === Alpha 3 workspace/model/runtime consolidation === */
-const QA8_RELEASE='0.1.0-alpha.3';
+const QA8_RELEASE='0.1.0-alpha.3.1';
 const qa8VisibleModes=['direct','team','council'];
 
 // Durable top-level navigation only. Contextual capabilities remain inside Projects,

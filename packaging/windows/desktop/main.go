@@ -22,6 +22,8 @@ import (
 	"time"
 	"unicode/utf16"
 	"unsafe"
+
+	"github.com/DigiLogicTech/OnePane/internal/buildinfo"
 )
 
 const (
@@ -193,7 +195,8 @@ func init() {
 }
 
 func main() {
-	mutexName, _ := syscall.UTF16PtrFromString(`Local\OnePaneDesktop-v0.1.0-alpha.3`)
+	desktopLogf("OnePane Desktop %s starting", buildinfo.Version)
+	mutexName, _ := syscall.UTF16PtrFromString(`Local\OnePaneDesktop`)
 	mutex, _, _ := pCreateMutex.Call(0, 0, uintptr(unsafe.Pointer(mutexName)))
 	if mutex != 0 {
 		defer pCloseHandle.Call(mutex)

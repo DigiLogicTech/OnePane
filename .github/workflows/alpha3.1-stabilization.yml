@@ -45,6 +45,8 @@ jobs:
           echo "${ALPHA31_PATCH_SHA256}  .recovery/alpha3.1/stabilization.patch" | sha256sum -c -
           patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/stabilization.patch
           patch -p1 -d buildsrc < .recovery/alpha3.1/stabilization.patch
+          patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/council-runtime.patch
+          patch -p1 -d buildsrc < .recovery/alpha3.1/council-runtime.patch
       - name: Validate source
         working-directory: buildsrc
         shell: bash

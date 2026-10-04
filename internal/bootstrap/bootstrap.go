@@ -315,6 +315,10 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("recover managed local runtimes: %w", err)
 	}
+	if err := localAIService.RecoverManagedComponents(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("recover managed local components: %w", err)
+	}
 	projectWorkspaceService := projectworkspace.NewService(db.SQL(), db, clk)
 	projectRoot := strings.TrimSpace(cfg.Storage.ProjectRoot)
 	if projectRoot == "" {

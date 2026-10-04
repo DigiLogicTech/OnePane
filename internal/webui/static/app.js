@@ -19,7 +19,7 @@ const pages = {
   operations: { title:'Operations', icon:'▣' }, workspaces:{title:'Workspaces',icon:'▱'}, tasks:{title:'Tasks',icon:'☑'}, projects:{title:'Projects',icon:'▢'},
   models:{title:'Models',icon:'◇'}, nodes:{title:'Nodes',icon:'⬡'}, agents:{title:'Agents & Bots',icon:'♙'}, sandboxes:{title:'Sandboxes',icon:'⬢'},
   routines:{title:'Routines',icon:'⟳'}, providers:{title:'Providers',icon:'⌁'}, integrations:{title:'Integrations',icon:'⊞'}, secrets:{title:'Secrets',icon:'▣'},
-  evidence:{title:'Evidence / Audit',icon:'◎'}, settings:{title:'Defaults',icon:'⚙'}
+  evidence:{title:'Evidence / Audit',icon:'◎'}, settings:{title:'Settings',icon:'⚙'}
 };
 
 const state = loadState();
@@ -1631,7 +1631,7 @@ qa6FollowContent=function(w,project){const html=qa7FollowContentBase(w,project),
 pages.settings.title='Settings';
 
 /* === Alpha 3 workspace/model/runtime consolidation === */
-const QA8_RELEASE='0.1.0-alpha.3';
+const QA8_RELEASE='0.1.0-alpha.3.1';
 const qa8VisibleModes=['direct','team','council'];
 
 // Durable top-level navigation only. Contextual capabilities remain inside Projects,

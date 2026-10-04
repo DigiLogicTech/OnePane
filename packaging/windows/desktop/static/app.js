@@ -1644,4 +1644,278 @@ renderOperations=function(){qa8RenderOperationsBase();qa8FleetSnapshot().then(da
 try{const p=qa5Prefs();if(['supervisor','workers'].includes(p.workspace_defaults?.orchestration)){p.workspace_defaults.orchestration='direct';localStorage.setItem(QA5_PREFS_KEY,JSON.stringify(p));}}catch{}
 
 
+
+/* === Alpha 3.1 authoritative OnePane Assistant surface === */
+let qa31AssistantThread=null;
+
+async function qa31Projects(){
+  try{
+    const rows=await apiRequest('/v1/projects?workspace_id='+encodeURIComponent(onepaneWorkspace));
+    return Array.isArray(rows)?rows:[];
+  }catch{return []}
+}
+async function qa31EnsureAssistantThread(){
+  if(qa31AssistantThread){
+    try{
+      await apiRequest('/v1/assistant/threads/'+encodeURIComponent(qa31AssistantThread.id)+'/turns?limit=1');
+      return qa31AssistantThread;
+    }catch{qa31AssistantThread=null}
+  }
+  const rows=await apiRequest('/v1/assistant/threads?workspace_id='+encodeURIComponent(onepaneWorkspace)+'&limit=20').catch(()=>[]);
+  if(Array.isArray(rows)&&rows.length){qa31AssistantThread=rows[0];return qa31AssistantThread}
+  qa31AssistantThread=await apiRequest('/v1/assistant/threads',{method:'POST',body:JSON.stringify({workspace_id:onepaneWorkspace,title:'OnePane Assistant'})});
+  return qa31AssistantThread;
+}
+async function qa31SetAssistantScope(projectID){
+  const thread=await qa31EnsureAssistantThread();
+  qa31AssistantThread=await apiRequest('/v1/assistant/threads/'+encodeURIComponent(thread.id)+'/scope',{method:'POST',body:JSON.stringify({project_id:projectID||null})});
+  return qa31AssistantThread;
+}
+function qa31AssistantTurnRow(t){
+  const project=t.project_id?'<span class="pill">Project</span>':'<span class="pill">Global</span>';
+  return `<div class="assistant-turn ${escapeHtml(t.role||'assistant')}"><div class="assistant-turn-meta">${t.role==='user'?'You':'OnePane'} ${project}</div><div class="assistant-turn-body">${escapeHtml(t.content||'')}</div></div>`;
+}
+async function qa31OpenAssistant(){
+  const root=$('#overlayRoot');
+  root.innerHTML='<div class="overlay"><section class="command-palette assistant-palette qa31-assistant"><div class="widget-body">Loading OnePane Assistant…</div></section></div>';
+  root.firstElementChild.onclick=e=>{if(e.target===root.firstElementChild)root.innerHTML='';};
+  try{
+    const [thread,projects]=await Promise.all([qa31EnsureAssistantThread(),qa31Projects()]);
+    qa31AssistantThread=thread;
+    const turns=await apiRequest('/v1/assistant/threads/'+encodeURIComponent(thread.id)+'/turns?limit=80').catch(()=>[]);
+    const active=thread.active_project_id?projects.find(p=>p.id===thread.active_project_id):null;
+    const card=$('.qa31-assistant',root);if(!card)return;
+    card.innerHTML=`<div class="assistant-head"><div><div class="eyebrow">ONEPANE ASSISTANT</div><h2>${active?'Project context':'Global context'}</h2><div class="list-meta">${active?`Project · ${escapeHtml(active.name||active.id)} · Project Orchestrator delegated when needed`:'Global · navigation, system state and explicit Project handoff'}</div></div><button class="icon-button" id="qa31AssistantClose" aria-label="Close">×</button></div>
+      <div class="assistant-scope-row"><label>Context<select id="qa31AssistantScope"><option value="">Global</option>${projects.map(p=>`<option value="${escapeHtml(p.id)}" ${active&&p.id===active.id?'selected':''}>Project · ${escapeHtml(p.name||p.id)}</option>`).join('')}</select></label>${active?'<button class="btn" id="qa31ReturnGlobal">Return to Global</button>':''}</div>
+      <div class="assistant-history" id="qa31AssistantHistory">${Array.isArray(turns)&&turns.length?turns.map(qa31AssistantTurnRow).join(''):'<div class="empty-state compact">Ask OnePane about system state, navigation, or select a Project for Project-specific context.</div>'}</div>
+      <form id="qa31AssistantForm" class="assistant-compose"><textarea id="qa31AssistantInput" rows="3" placeholder="Ask OnePane or run a command…"></textarea><div class="assistant-compose-actions"><span class="list-meta">Ask is read-only. Run permits creation of governed Tasks when needed.</span><button class="btn" type="button" id="qa31AssistantAsk">Ask</button><button class="btn primary" type="button" id="qa31AssistantRun">Run</button></div></form>
+      <div class="palette-divider"></div><div class="palette-section-title">Navigation</div><div class="palette-quick">${navItems.map(([route,icon,label])=>`<button class="palette-row" data-qa31-nav="${route}"><span>${icon}</span><strong>${escapeHtml(label)}</strong></button>`).join('')}<button class="palette-row" data-qa31-nav="settings"><span>⚙</span><strong>Settings</strong></button></div>`;
+    $('#qa31AssistantClose',card).onclick=()=>root.innerHTML='';
+    $('#qa31ReturnGlobal',card)?.addEventListener('click',async()=>{await qa31SetAssistantScope(null);qa31OpenAssistant();});
+    $('#qa31AssistantScope',card).onchange=async e=>{await qa31SetAssistantScope(e.target.value||null);qa31OpenAssistant();};
+    $('[data-qa31-nav]',card).forEach(b=>b.onclick=()=>{root.innerHTML='';openRoute(b.dataset.qa31Nav);});
+    const submit=async allow=>{
+      const input=$('#qa31AssistantInput',card),content=input?.value.trim();if(!content)return;
+      input.disabled=true;$('#qa31AssistantAsk',card).disabled=true;$('#qa31AssistantRun',card).disabled=true;
+      try{
+        const scoped=$('#qa31AssistantScope',card)?.value||null;
+        await apiRequest('/v1/assistant/threads/'+encodeURIComponent(thread.id)+'/turns',{method:'POST',body:JSON.stringify({content,project_id:scoped,allow_task_creation:allow,force_task:false})});
+        input.value='';await qa31OpenAssistant();
+      }catch(ex){
+        notice(ex.message,'bad');input.disabled=false;$('#qa31AssistantAsk',card).disabled=false;$('#qa31AssistantRun',card).disabled=false;
+      }
+    };
+    $('#qa31AssistantAsk',card).onclick=()=>submit(false);
+    $('#qa31AssistantRun',card).onclick=()=>submit(true);
+    $('#qa31AssistantInput',card).onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();submit(false)}};
+    requestAnimationFrame(()=>{const h=$('#qa31AssistantHistory',card);if(h)h.scrollTop=h.scrollHeight;$('#qa31AssistantInput',card)?.focus();});
+  }catch(ex){
+    const card=$('.qa31-assistant',root);if(card)card.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;
+  }
+}
+openCommandPalette=qa31OpenAssistant;
+function qa31WireAssistantButton(){
+  const b=$('#commandButton');if(!b)return;
+  b.onclick=qa31OpenAssistant;
+  b.setAttribute('aria-label',qa5T('ask_onepane','Ask OnePane or run a command…'));
+  if(b.childNodes.length)b.childNodes[0].textContent=qa5T('ask_onepane','Ask OnePane or run a command…')+' ';
+}
+const qa31AssistantInitBase=init;
+init=function(){qa31AssistantInitBase();qa31WireAssistantButton();};
+
+
+/* === Alpha 3.1 authoritative Agents surface === */
+let qa31AgentTab='profiles';
+
+function qa31ProfileCard(p){
+  const builtin=p.source_kind==='builtin';
+  return `<article class="panel-card agent-profile-card" data-profile-id="${escapeHtml(p.id)}"><div class="card-header"><div><div class="card-title">${escapeHtml(p.name||p.id)}</div><div class="list-meta">${escapeHtml(p.id)} · ${builtin?'Built-in':'Custom'} · revision ${Number(p.revision||1)}</div></div><span class="pill ${builtin?'good':''}">${escapeHtml(p.protocol_level||'L1')}</span></div><div class="widget-body"><p>${escapeHtml(p.description||'')}</p><dl class="definition-grid"><dt>Role</dt><dd>${escapeHtml(p.default_role||'general')}</dd><dt>Capability</dt><dd>${escapeHtml(p.capability_id||'inference.general')}</dd></dl><details><summary>Instructions</summary><pre class="profile-instructions">${escapeHtml(p.instructions_md||'')}</pre></details><div class="list-meta">Profile instructions shape reasoning only; OnePane policy still governs tools, secrets, files, network, nodes and approvals.</div>${builtin?'':`<div class="toolbar" style="margin-top:10px"><button class="btn" data-profile-edit="${escapeHtml(p.id)}">Edit</button><button class="btn danger" data-profile-archive="${escapeHtml(p.id)}">Archive</button></div>`}</div></article>`;
+}
+function qa31ProfileDialog(profile=null){
+  const p=profile||{};
+  openModal(profile?'Edit Agent Profile':'New Agent Profile',`<form id="qa31ProfileForm" class="settings-stack"><label>Name<input id="qa31ProfileName" value="${escapeHtml(p.name||'')}"></label><label>Description<input id="qa31ProfileDescription" value="${escapeHtml(p.description||'')}"></label><label>Role<input id="qa31ProfileRole" value="${escapeHtml(p.default_role||'general')}"></label><label>Capability<input id="qa31ProfileCapability" value="${escapeHtml(p.capability_id||'inference.general')}"></label><label>Protocol<select id="qa31ProfileProtocol">${['L0','L1','L2','L3'].map(x=>`<option ${p.protocol_level===x?'selected':''}>${x}</option>`).join('')}</select></label><label>agent.md instructions<textarea id="qa31ProfileInstructions" rows="10">${escapeHtml(p.instructions_md||'')}</textarea></label><div class="modal-actions"><button class="btn" type="button" id="qa31ProfileCancel">Cancel</button><button class="btn primary" type="submit">${profile?'Save':'Create'}</button></div></form>`);
+  $('#qa31ProfileCancel').onclick=closeModal;
+  $('#qa31ProfileForm').onsubmit=async e=>{
+    e.preventDefault();
+    const body={
+      workspace_id:onepaneWorkspace,
+      name:$('#qa31ProfileName').value.trim(),
+      description:$('#qa31ProfileDescription').value.trim(),
+      default_role:$('#qa31ProfileRole').value.trim()||'general',
+      capability_id:$('#qa31ProfileCapability').value.trim()||'inference.general',
+      protocol_level:$('#qa31ProfileProtocol').value,
+      instructions_md:$('#qa31ProfileInstructions').value,
+      metadata:{}
+    };
+    try{
+      if(profile){
+        body.expected_revision=profile.revision;
+        await apiRequest('/v1/agent-profiles/'+encodeURIComponent(profile.id),{method:'PATCH',body:JSON.stringify(body)});
+      }else{
+        await apiRequest('/v1/agent-profiles',{method:'POST',body:JSON.stringify(body)});
+      }
+      closeModal();notice(profile?'Profile updated.':'Profile created.');renderAgents();
+    }catch(ex){notice(ex.message,'bad')}
+  };
+}
+renderAgents=async function(){
+  $('#viewHost').innerHTML=`<section class="page">${pageHeader('Agents','Reusable Agent Profiles and real execution sessions. Assistant and Project Orchestrator remain control-plane layers, not ordinary Agents.','<button class="btn primary" id="qa31NewProfile">New Profile</button>')}<div class="subtabs">${[['profiles','Profiles'],['sessions','Sessions'],['teams','Teams'],['councils','Councils']].map(([id,label])=>`<button class="subtab ${qa31AgentTab===id?'active':''}" data-qa31-agent-tab="${id}">${label}</button>`).join('')}</div><div id="qa31AgentsBody" class="widget-body">Loading…</div></section>`;
+  $('[data-qa31-agent-tab]').forEach(b=>b.onclick=()=>{qa31AgentTab=b.dataset.qa31AgentTab;renderAgents();});
+  $('#qa31NewProfile').onclick=()=>qa31ProfileDialog();
+  const qs=encodeURIComponent(onepaneWorkspace),body=$('#qa31AgentsBody');
+  try{
+    if(qa31AgentTab==='profiles'){
+      const profiles=await apiRequest('/v1/agent-profiles?workspace_id='+qs);
+      body.innerHTML=`<div class="cards-grid">${(profiles||[]).map(qa31ProfileCard).join('')}</div>`;
+      $('[data-profile-edit]',body).forEach(b=>b.onclick=()=>{const p=(profiles||[]).find(x=>x.id===b.dataset.profileEdit);if(p)qa31ProfileDialog(p)});
+      $('[data-profile-archive]',body).forEach(b=>b.onclick=async()=>{
+        try{
+          await apiRequest('/v1/agent-profiles/'+encodeURIComponent(b.dataset.profileArchive)+'/archive',{method:'POST',body:JSON.stringify({workspace_id:onepaneWorkspace})});
+          notice('Profile archived.');renderAgents();
+        }catch(ex){notice(ex.message,'bad')}
+      });
+    }else if(qa31AgentTab==='sessions'){
+      const sessions=await apiRequest('/v1/agent-sessions?workspace_id='+qs+'&limit=100');
+      body.innerHTML=(sessions||[]).length?`<div class="table-shell"><table class="data-table"><thead><tr><th>Task</th><th>Mode</th><th>Profile</th><th>State</th><th>Project</th></tr></thead><tbody>${sessions.map(s=>`<tr><td>${escapeHtml(s.objective||s.id)}</td><td><span class="pill">${escapeHtml(titleCase(s.mode||'direct'))}</span></td><td>${escapeHtml(s.profile_id||'agent.md')}</td><td>${escapeHtml(s.state||'')}</td><td>${escapeHtml(s.project_id||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state compact">No real Agent sessions yet. Direct, Team and Council execution will appear here as Tasks run.</div>';
+    }else if(qa31AgentTab==='teams'){
+      const teams=await apiRequest('/v1/teams?workspace_id='+qs);
+      body.innerHTML=(teams||[]).length?`<div class="cards-grid">${teams.map(t=>`<article class="panel-card"><div class="card-header"><div><div class="card-title">${escapeHtml(t.name||t.id)}</div><div class="list-meta">${escapeHtml(t.purpose||'Reusable Team composition')}</div></div><span class="pill">${escapeHtml(t.status||'active')}</span></div><div class="widget-body">Reusable by Team or Council execution. Active model-powered seats are capped at 8.</div></article>`).join('')}</div>`:'<div class="empty-state compact">No Teams configured. Workspace Team/Council settings can reference reusable Teams.</div>';
+    }else{
+      const sessions=await apiRequest('/v1/agent-sessions?workspace_id='+qs+'&limit=100');
+      const councils=(sessions||[]).filter(x=>String(x.mode).toLowerCase()==='council');
+      body.innerHTML=councils.length?`<div class="table-shell"><table class="data-table"><thead><tr><th>Council task</th><th>Team</th><th>State</th><th>Session</th></tr></thead><tbody>${councils.map(s=>`<tr><td>${escapeHtml(s.objective||s.id)}</td><td>${escapeHtml(s.team_id||'—')}</td><td>${escapeHtml(s.state||'')}</td><td>${escapeHtml(s.team_session_id||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state compact">No Council executions yet. Councils reuse governed Team compositions and independent deliberation.</div>';
+    }
+  }catch(ex){
+    body.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;
+  }
+  bindViewActions($('#viewHost'));
+};
+
+
+/* === Alpha 3.1 Project Orchestrator Project-level surface === */
+async function qa31ProjectOrchestratorStrip(project,workspace){
+  try{
+    const [o,handoffs]=await Promise.all([
+      apiRequest('/v1/projects/'+encodeURIComponent(project.id)+'/orchestrator'),
+      apiRequest('/v1/projects/'+encodeURIComponent(project.id)+'/orchestrator/handoffs?limit=20').catch(()=>[])
+    ]);
+    const tasks=(liveOps.tasks||[]).filter(t=>t.project_id===project.id);
+    const waiting=tasks.filter(t=>['waiting_approval','blocked','waiting'].includes(String(t.state||'').toLowerCase())).length;
+    const activeCount=tasks.filter(t=>!['complete','failed','cancelled'].includes(String(t.state||'').toLowerCase())).length;
+    return `<section class="project-orchestrator-strip" id="qa31ProjectOrchestrator"><div class="orchestrator-main"><div><div class="eyebrow">PROJECT ORCHESTRATOR</div><strong>${escapeHtml(project.name||project.id)}</strong><div class="list-meta">Coordinates this Project across all Workspaces while preserving Workspace routing, approvals and sandbox policy.</div></div><span class="pill ${o.status==='ready'?'good':o.status==='degraded'?'warn':''}">${escapeHtml(titleCase(o.status||'ready'))}</span></div><div class="orchestrator-metrics"><span>Active work <strong>${activeCount}</strong></span><span>Waiting <strong>${waiting}</strong></span><span>Workspace <strong>${escapeHtml(workspace?.name||'—')}</strong></span><span>Handoffs <strong>${Array.isArray(handoffs)?handoffs.length:0}</strong></span></div><div class="toolbar"><button class="btn primary" id="qa31AskProject">Ask Project…</button><button class="btn" id="qa31OrchestratorActivity">Activity</button><button class="btn" id="qa31FollowProject">Follow current work</button></div></section>`;
+  }catch(ex){
+    return `<section class="project-orchestrator-strip"><div class="error">Project Orchestrator unavailable: ${escapeHtml(ex.message)}</div></section>`;
+  }
+}
+function qa31AskProject(project,workspace){
+  openModal(`Project Orchestrator · ${project.name||project.id}`,`<div class="widget-body"><div class="list-meta">Project context · ${escapeHtml(workspace?.name||'current Workspace')}</div><textarea id="qa31ProjectPrompt" rows="6" placeholder="Ask about this Project or request work…"></textarea><div id="qa31ProjectAnswer" class="assistant-project-answer"></div><div class="modal-actions"><button class="btn" id="qa31ProjectAsk">Ask</button><button class="btn primary" id="qa31ProjectRun">Run</button></div></div>`);
+  const submit=async allow=>{
+    const prompt=$('#qa31ProjectPrompt')?.value.trim();if(!prompt)return;
+    const status=$('#qa31ProjectAnswer');status.textContent='Project Orchestrator working…';
+    try{
+      const out=await apiRequest('/v1/projects/'+encodeURIComponent(project.id)+'/orchestrator/turns',{method:'POST',body:JSON.stringify({objective:prompt,project_workspace_id:workspace?.id||'',allow_task_creation:allow,force_task:false})});
+      status.innerHTML=`<div class="assistant-turn-body">${escapeHtml(out?.turn?.content||'Project context reviewed.')}</div>${out?.task_id?`<div class="list-meta">Task ${escapeHtml(out.task_id)} · ${escapeHtml(out.disposition||'created')}</div>`:''}`;
+    }catch(ex){
+      status.innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`;
+    }
+  };
+  $('#qa31ProjectAsk').onclick=()=>submit(false);
+  $('#qa31ProjectRun').onclick=()=>submit(true);
+}
+const qa31RenderProjectsBase=renderProjects;
+renderProjects=async function(){
+  await qa31RenderProjectsBase();
+  const project=qa4ActiveProject?.(),workspace=project?qa4ActiveWorkspace?.():null;
+  if(!project)return;
+  const main=$('.project-main'),toolbar=main?$('.project-toolbar',main):null;
+  if(!main||!toolbar)return;
+  const html=await qa31ProjectOrchestratorStrip(project,workspace);
+  toolbar.insertAdjacentHTML('afterend',html);
+  $('#qa31AskProject')?.addEventListener('click',()=>qa31AskProject(project,workspace));
+  $('#qa31OrchestratorActivity')?.addEventListener('click',()=>{setDrawerOpen(true);state.drawerTab='events';renderDrawer();});
+  $('#qa31FollowProject')?.addEventListener('click',()=>{
+    const task=(liveOps.tasks||[]).find(t=>t.project_id===project.id&&!['complete','failed','cancelled'].includes(String(t.state||'').toLowerCase()));
+    if(task)qa4Inspect('task',task.id,task.objective||task.id,task);
+    else notice('No active Project task to follow.');
+  });
+};
+
+
+/* === Alpha 3.1 Models lifecycle and Operations actions === */
+function qa31ColibriActionButtons(c){
+  const state=String(c?.state||'not_installed');
+  const buttons=[];
+  if(['not_installed','removed'].includes(state))buttons.push(['install','Install runtime','primary']);
+  else if(state==='failed')buttons.push(['retry','Retry','primary'],['repair','Repair','']);
+  else if(state==='interrupted')buttons.push(['resume','Resume','primary'],['repair','Repair','']);
+  else if(['queued','downloading','verifying','installing','enabling','disabling','updating','repairing','removing'].includes(state)){
+    return `<span class="pill warn">${escapeHtml(titleCase(state))}</span>`;
+  }else{
+    if(c?.enabled||state==='running'||state==='degraded')buttons.push(['disable','Disable','']);
+    else buttons.push(['enable','Enable','primary']);
+    buttons.push(['update','Update',''],['repair','Repair',''],['remove','Remove runtime','danger']);
+  }
+  return buttons.map(([action,label,cls])=>`<button class="btn ${cls}" data-qa31-colibri-action="${action}">${label}</button>`).join('');
+}
+const qa31RenderModelsBase=renderModels;
+renderModels=async function(){
+  await qa31RenderModelsBase();
+  let components={};
+  try{components=await qa5ComponentStatus()}catch{}
+  const colibri=components?.colibri||{};
+  const card=$('.colibri-separate');
+  if(card){
+    const pill=$('.card-header .pill',card);
+    if(pill){
+      const state=String(colibri.state||'not_installed');
+      pill.textContent=titleCase(state.replaceAll('_',' '));
+      pill.className='pill '+(['running','installed_disabled'].includes(state)?'good':(['failed','degraded','interrupted'].includes(state)?'warn':''));
+    }
+    const toolbar=$('.widget-body .toolbar',card);
+    if(toolbar){
+      toolbar.innerHTML=qa31ColibriActionButtons(colibri)+(colibri.installed?'<button class="btn" id="qa5ColibriRegister">Register model folder</button>':'');
+      $('[data-qa31-colibri-action]',toolbar).forEach(b=>b.onclick=()=>qa5ComponentAction('colibri',b.dataset.qa31ColibriAction,'#qa5ColibriInlineStatus'));
+      $('#qa5ColibriRegister',toolbar)?.addEventListener('click',qa5RegisterColibri);
+    }
+    const status=$('#qa5ColibriInlineStatus',card);
+    if(status){
+      const version=colibri.installed_version||colibri.available_version||'1.12.1';
+      status.innerHTML=`Version ${escapeHtml(version)} · ${escapeHtml(String(colibri.state||'not installed').replaceAll('_',' '))}${colibri.last_error?`<br><span class="warn">${escapeHtml(colibri.last_error)}</span>`:''}`;
+    }
+  }
+  const omni=$('.omniroute-separate');
+  if(omni){
+    const firstToolbar=$('.widget-body > .toolbar',omni);
+    if(firstToolbar)firstToolbar.innerHTML='<span class="list-meta">Provider connection lifecycle · no local runtime installation</span>';
+  }
+};
+
+function qa31BindOperationCardActions(){
+  $('.operations-layout-grid .panel-card').forEach(card=>{
+    const action=$('.card-action',card);if(!action)return;
+    const title=$('.card-title',card)?.textContent.trim()||'';
+    if(title==='Active Tasks'||title==='Scheduled Tasks'||title==='Scheduled tasks'){
+      action.dataset.qa31OperationAction='tasks';
+    }else if(title==='Nodes'){
+      action.dataset.qa31OperationAction='nodes';
+    }else if(title==='Provider Health'){
+      action.dataset.qa31OperationAction='models';
+    }else if(title==='Recent Activity'){
+      action.dataset.qa31OperationAction='events';
+    }else{
+      action.remove();return;
+    }
+    action.onclick=()=>{
+      const target=action.dataset.qa31OperationAction;
+      if(target==='events'){setDrawerOpen(true);state.drawerTab='events';persist();renderDrawer();return}
+      openRoute(target);
+    };
+  });
+}
+const qa31RenderOperationsBase=renderOperations;
+renderOperations=function(){
+  qa31RenderOperationsBase();
+  queueMicrotask(qa31BindOperationCardActions);
+};
+
 bootOnePane();

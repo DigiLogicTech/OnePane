@@ -1,0 +1,93 @@
+name: Alpha 3.1 Stabilization
+
+on:
+  push:
+    branches: [alpha3.1-stabilization]
+    paths:
+      - '.recovery/alpha3/source.patch.xz.b64'
+      - '.recovery/alpha3.1/**'
+      - '.github/workflows/alpha3.1-stabilization.yml'
+  pull_request:
+    branches: [alpha3-integration]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ONEPANE_VERSION: 0.1.0-alpha.3.1
+  ALPHA3_PATCH_XZ_SHA256: bd17c771261cdb6099d789d87ae2706fa8dbfb56eea1fa6e49ceb844a3358781
+  ALPHA3_PATCH_B64_SHA256: 0986d1bac3c0b85c21b7a71c6b529dd173b701a87aa01c8d5639b80bdf0bf808
+  ALPHA31_PATCH_SHA256: 569fe6b9b6840f62ce9d3b28e8a606065887bfddc50eb4f0d655143b76380304
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Restore Alpha 3 and apply Alpha 3.1 stabilization
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir buildsrc
+          base64 -d .recovery/alpha2-buildsrc-current.b64 > alpha2-source.tar.xz
+          tar -xJf alpha2-source.tar.xz -C buildsrc
+          echo "${ALPHA3_PATCH_B64_SHA256}  .recovery/alpha3/source.patch.xz.b64" | sha256sum -c -
+          base64 -d .recovery/alpha3/source.patch.xz.b64 > alpha3.patch.xz
+          echo "${ALPHA3_PATCH_XZ_SHA256}  alpha3.patch.xz" | sha256sum -c -
+          xz -dc alpha3.patch.xz > alpha3.patch
+          patch -p1 -d buildsrc < alpha3.patch
+          echo "${ALPHA31_PATCH_SHA256}  .recovery/alpha3.1/stabilization.patch" | sha256sum -c -
+          patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/stabilization.patch
+          patch -p1 -d buildsrc < .recovery/alpha3.1/stabilization.patch
+          patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/council-runtime.patch
+          patch -p1 -d buildsrc < .recovery/alpha3.1/council-runtime.patch
+          patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/follow-snapshots.patch
+          patch -p1 -d buildsrc < .recovery/alpha3.1/follow-snapshots.patch
+          patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/uninstall-lifecycle.patch
+          patch -p1 -d buildsrc < .recovery/alpha3.1/uninstall-lifecycle.patch
+      - name: Validate source
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check internal/webui/static/app.js
+          node --check packaging/windows/desktop/static/app.js
+          python scripts/validate_alpha3_source.py
+          python ../.recovery/alpha3.1/validate_shell.py
+          python ../.recovery/alpha3.1/validate_runtime_binding.py
+          python ../.recovery/alpha3.1/validate_follow_snapshots.py
+          python ../.recovery/alpha3.1/validate_package_lifecycle.py
+          python scripts/validate_live_follow_workspace.py
+          python scripts/validate_workspace_components_v2.py
+          go mod download
+          go mod verify
+          go test ./...
+      - name: Cross-compile Windows x64
+        working-directory: buildsrc
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CGO_ENABLED=0 GOOS=windows GOARCH=amd64
+          go build ./cmd/harnessd
+          go build ./packaging/windows/desktop
+          go build ./packaging/windows/service
+          go build ./packaging/windows/setup
+      - name: Build Ubuntu amd64 package
+        shell: bash
+        env:
+          ONEPANE_ARCH: amd64
+        run: |
+          set -euo pipefail
+          bash buildsrc/scripts/build-ubuntu-deb.sh
+          dpkg-deb --info buildsrc/dist/ubuntu/*.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OnePane-alpha3.1-buildsrc
+          path: buildsrc
+          retention-days: 2

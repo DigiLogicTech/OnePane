@@ -15,11 +15,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/storage"
 )
 
-const (
-	ColibriRuntimeVersion = "1.12.1"
-	ColibriRuntimeSHA256  = "1d0cc6760a6e53fcafe77376ca20ec254c6ff8995e55fba1bcd883278787f794"
-	ColibriRuntimeSource  = "https://github.com/JustVugg/colibri/releases/download/v1.12.1/colibri-v1.12.1-windows-x86_64.zip"
-)
+const ColibriRuntimeVersion = "1.12.1"
 
 type ManagedDeploymentSummary struct {
 	DeploymentID       string   `json:"deployment_id"`
@@ -152,11 +148,15 @@ func (s *Service) RegisterColibriFolder(ctx context.Context, cmd RegisterColibri
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return out, fmt.Errorf("Colibri model folder must be inside the configured OnePane model pool %s", s.modelRoot)
 	}
+	artifact, err := colibriArtifact()
+	if err != nil {
+		return out, err
+	}
 	runtimeRoot := filepath.Join(s.dataDir, "runtimes", "colibri", ColibriRuntimeVersion)
-	serverPath := filepath.Join(runtimeRoot, "openai_server.py")
-	enginePath := filepath.Join(runtimeRoot, "colibri.exe")
+	serverPath := filepath.Join(runtimeRoot, artifact.Manifest.ExecutableRel)
+	enginePath := filepath.Join(runtimeRoot, artifact.EngineRel)
 	if _, err := os.Stat(serverPath); err != nil {
-		return out, errors.New("Colibri runtime is not installed; install it from Models & Cloud first")
+		return out, errors.New("Colibri runtime is not installed; install it from Models first")
 	}
 	if _, err := os.Stat(enginePath); err != nil {
 		return out, errors.New("Colibri engine is not installed")
@@ -210,7 +210,7 @@ func (s *Service) RegisterColibriFolder(ctx context.Context, cmd RegisterColibri
 	planID, _ := s.ids.New("lmp")
 	rec := Recommendation{Model: ModelSpec{ModelRef: cmd.ModelRef, DisplayName: cmd.DisplayName, Provider: "Local", Architecture: "moe", ContextLength: cmd.ContextTokens, UseCases: []UseCase{UseGeneral, UseChat, UseReasoning, UseCoding}, SourceRef: "local://" + filepath.ToSlash(cmd.ModelPath), Runtime: "colibri"}, Quantization: quant, ContextTokens: cmd.ContextTokens, FitLevel: FitMarginal, RunMode: RunMoE, MemoryRequired: 1, MemoryAvailable: 1, DiskRequired: 1, Placement: placement, Notes: []string{"Imported local Colibri container; qualification is authoritative."}}
 	planJSON, _ := json.Marshal(rec)
-	runtimeID, err := s.ensureManagedRuntime(ctx, nodeID, RuntimeManifest{Name: "colibri", Version: ColibriRuntimeVersion, Backend: "colibri", OS: "windows", Architecture: "amd64", SourceURL: ColibriRuntimeSource, SHA256: ColibriRuntimeSHA256, ArchiveFormat: "zip", ExecutableRel: "openai_server.py"}, runtimeRoot, serverPath)
+	runtimeID, err := s.ensureManagedRuntime(ctx, nodeID, artifact.Manifest, runtimeRoot, serverPath)
 	if err != nil {
 		return out, err
 	}

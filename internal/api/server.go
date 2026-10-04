@@ -236,6 +236,9 @@ type Server struct {
 	tasks           taskService
 	routines        routineService
 	chatCommands    chatCommandService
+	assistant       assistantService
+	projectOrchestrator projectOrchestratorService
+	agentProfiles   agentProfileService
 	configPath      string
 	modelPoolPath   string
 }
@@ -270,6 +273,9 @@ func (s *Server) SetFederation(v nodeFederationService)             { s.federati
 func (s *Server) SetTasks(v taskService)                            { s.tasks = v }
 func (s *Server) SetRoutines(v routineService)                      { s.routines = v }
 func (s *Server) SetChatCommands(v chatCommandService)              { s.chatCommands = v }
+func (s *Server) SetAssistant(v assistantService)                    { s.assistant = v }
+func (s *Server) SetProjectOrchestrator(v projectOrchestratorService) { s.projectOrchestrator = v }
+func (s *Server) SetAgentProfiles(v agentProfileService)             { s.agentProfiles = v }
 func (s *Server) SetRuntimeConfig(path, modelPoolPath string) {
 	s.configPath = strings.TrimSpace(path)
 	s.modelPoolPath = strings.TrimSpace(modelPoolPath)
@@ -288,6 +294,17 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/auth/login", s.login)
 	s.mux.HandleFunc("POST /v1/auth/logout", s.logout)
 	s.mux.HandleFunc("GET /v1/auth/me", s.me)
+	s.mux.HandleFunc("GET /v1/assistant", s.assistantOverview)
+	s.mux.HandleFunc("GET /v1/assistant/threads", s.listAssistantThreads)
+	s.mux.HandleFunc("POST /v1/assistant/threads", s.createAssistantThread)
+	s.mux.HandleFunc("GET /v1/assistant/threads/{threadID}/turns", s.listAssistantTurns)
+	s.mux.HandleFunc("POST /v1/assistant/threads/{threadID}/turns", s.submitAssistantTurn)
+	s.mux.HandleFunc("GET /v1/agent-profiles", s.listAgentProfiles)
+	s.mux.HandleFunc("POST /v1/agent-profiles", s.createAgentProfile)
+	s.mux.HandleFunc("GET /v1/agent-profiles/{profileID}", s.getAgentProfile)
+	s.mux.HandleFunc("PATCH /v1/agent-profiles/{profileID}", s.updateAgentProfile)
+	s.mux.HandleFunc("POST /v1/agent-profiles/{profileID}/archive", s.archiveAgentProfile)
+	s.mux.HandleFunc("GET /v1/agent-sessions", s.listAgentSessions)
 	s.mux.HandleFunc("GET /v1/tasks", s.listTasks)
 	s.mux.HandleFunc("POST /v1/tasks", s.createTask)
 	s.mux.HandleFunc("GET /v1/routines", s.listRoutines)
@@ -391,6 +408,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/projects", s.listProjects)
 	s.mux.HandleFunc("POST /v1/projects", s.createProject)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}", s.getProject)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/orchestrator", s.getProjectOrchestrator)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/orchestrator/turns", s.listProjectOrchestratorTurns)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/orchestrator/turns", s.submitProjectOrchestratorTurn)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/orchestrator/handoffs", s.listProjectHandoffs)
 	s.mux.HandleFunc("PATCH /v1/projects/{projectID}", s.updateProjectPolicy)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/runtime", s.createRuntime)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/runtime", s.getRuntimeByProject)

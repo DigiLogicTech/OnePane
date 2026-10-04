@@ -41,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/windows-x64
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o dist/windows-x64/onepane.exe ./cmd/onepane
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$ONEPANE_VERSION" -o dist/windows-x64/onepane.exe ./cmd/harnessd
       - name: Build Ubuntu amd64 package
         shell: bash
         run: |

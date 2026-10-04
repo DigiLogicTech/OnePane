@@ -23,8 +23,8 @@ ck('legacy Sandboxes route aliases into Projects', "sandboxes:'projects'" in ui)
 ck('legacy Providers route aliases into Models', "providers:'models'" in ui)
 ck('legacy Routines route aliases into Tasks', "routines:'tasks'" in ui)
 ck('legacy top-level destinations removed from nav', "navItems.filter(([route])=>!Object.prototype.hasOwnProperty.call(QA4_ROUTE_ALIASES,route))" in ui)
-ck('Projects product title includes Workspaces', "pages.projects.title='Projects & Workspaces'" in ui)
-ck('Models product title includes Cloud', "pages.models.title='Models & Cloud'" in ui)
+ck('Projects product title is current', "pages.projects.title='Projects'" in ui and 'Projects & Workspaces' not in ui)
+ck('Models product title is current', "pages.models.title='Models'" in ui and 'Models & Cloud' not in ui)
 
 # Tasks and schedules.
 ck('Tasks page includes current and scheduled tabs', 'Recurring / Scheduled' in ui and 'data-task-tab="scheduled"' in ui)
@@ -46,7 +46,7 @@ ck('workspace layout uses bounded snap presets', all(x in ui for x in ["'small'"
 # Context configuration / routing.
 ck('workspace settings is a movable inspector/workspace component', "QA6_COMPONENTS.settings={title:'Workspace settings'" in ui and "QA6_INSPECTOR_COMPONENTS.push('settings')" in ui)
 ck('workspace sandbox controls include internet/LAN/computer/browser', all(x in ui for x in ['Internet access','LAN access','Browser capability','Computer capability']))
-ck('chat modes include direct supervisor workers team council', all(x in ui for x in ["['direct','Direct']","['supervisor','Supervisor']","['workers','Workers']","['team','Team']","['council','Council']"]) and 'data-qa7-chat-mode' in ui)
+ck('visible chat modes are Direct Team Council', "const qa8VisibleModes=['direct','team','council']" in ui and "function qa8Mode(v)" in ui and 'data-qa7-chat-mode' in ui)
 ck('role model selectors exist', 'data-qa7-role-model' in ui)
 ck('role agent selectors exist', 'data-qa7-role-agent' in ui)
 ck('worker count is configurable', 'data-qa7-worker-count' in ui)
@@ -73,7 +73,7 @@ ck('cloud providers use real provider records', '/v1/providers?workspace_id=' in
 ck('cloud provider tiles expose connection status', 'OAuth connected' in ui and "'Connected'" in ui)
 ck('cloud providers expose revoke', 'data-revoke-cloud' in ui and '/revoke' in ui and 'POST /v1/providers/{providerID}/revoke' in api)
 ck('OmniRoute is visually and logically separate', 'omniroute-separate' in ui and 'This is separate from OmniRoute.' in ui and "p.id!=='omniroute'" in ui)
-ck('Integrations cross-links Models & Cloud', 'Cloud models & providers' in ui and 'Open Models & Cloud' in ui)
+ck('Integrations cross-links Models', 'Cloud models & providers' in ui and 'Open Models' in ui and 'Open Models & Cloud' not in ui)
 ck('OAuth is not falsely represented as complete', 'dedicated browser OAuth start/callback broker is not yet exposed' in ui)
 
 # Operations contextual Inspector.

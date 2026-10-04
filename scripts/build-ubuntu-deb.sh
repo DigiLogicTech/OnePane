@@ -15,7 +15,6 @@ case "$ARCH" in
 esac
 
 DEB_VERSION="${VERSION#v}"
-DEB_VERSION="${DEB_VERSION/-alpha./~alpha.}"
 PKGROOT="$(mktemp -d)"
 trap 'rm -rf "$PKGROOT"' EXIT
 

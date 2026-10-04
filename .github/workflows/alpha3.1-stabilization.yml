@@ -55,8 +55,9 @@ jobs:
           name: OnePane-alpha3.1-canonical-source
           path: buildsrc
           retention-days: 7
+          if-no-files-found: error
       - name: Promote reconstructed tree to canonical source
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/alpha3.1-orchestration'
+        if: github.event_name == 'push' && github.ref_name == 'alpha3.1-orchestration'
         shell: bash
         run: |
           set -euo pipefail

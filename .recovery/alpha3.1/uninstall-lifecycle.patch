@@ -8,7 +8,7 @@
  	dataDir := filepath.Join(programData, "OnePane")
  	installDir := readInstallPath(dataDir)
  	if installDir == "" {
-@@ -499,7 +500,27 @@ func uninstallProduct() error {
+@@ -499,6 +500,27 @@ func uninstallProduct() error {
  	_ = runHidden("taskkill.exe", "/IM", "OnePane.Desktop.exe", "/F")
 +	_ = runHidden("taskkill.exe", "/IM", "OnePane.Backend.exe", "/F")
  	_ = runHidden("sc.exe", "stop", serviceName)

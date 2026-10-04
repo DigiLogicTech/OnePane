@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DigiLogicTech/OnePane/internal/assistant"
+	"github.com/DigiLogicTech/OnePane/internal/agentprofile"
 	"github.com/DigiLogicTech/OnePane/internal/agentruntime"
 	"github.com/DigiLogicTech/OnePane/internal/agentworker"
 	"github.com/DigiLogicTech/OnePane/internal/approval"
@@ -30,6 +32,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/observation"
 	"github.com/DigiLogicTech/OnePane/internal/operation"
 	"github.com/DigiLogicTech/OnePane/internal/policy"
+	"github.com/DigiLogicTech/OnePane/internal/projectorchestrator"
 	"github.com/DigiLogicTech/OnePane/internal/projectroutine"
 	"github.com/DigiLogicTech/OnePane/internal/projectruntime"
 	"github.com/DigiLogicTech/OnePane/internal/projectworkspace"
@@ -70,6 +73,7 @@ type Runtime struct {
 	Vault               *vault.Service
 	Inference           *inference.Service
 	LocalAI             *localai.Service
+	AgentProfiles       *agentprofile.Service
 	AgentRuntimes       *agentruntime.Service
 	AgentWorker         *agentworker.Service
 	Assurance           *assurance.Service
@@ -77,6 +81,8 @@ type Runtime struct {
 	RuntimeCoordinator  *runtimecoord.Service
 	ResourceCoordinator *resourcecoord.Service
 	ProviderOnboarding  *provideronboarding.Service
+	Assistant           *assistant.Service
+	ProjectOrchestrator *projectorchestrator.Service
 	ProjectWorkspaces   *projectworkspace.Service
 	ProjectRuntime      *projectruntime.Reconciler
 	ProjectRoutine      *projectroutine.Executor
@@ -318,6 +324,9 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("configure Project storage root: %w", err)
 	}
+	agentProfileService := agentprofile.NewService(db.SQL(), db, clk)
+	projectOrchestratorService := projectorchestrator.NewService(db.SQL(), db, clk, schedulerService, inferenceService, artifactService, taskService, teamService)
+	assistantService := assistant.NewService(db.SQL(), clk, schedulerService, inferenceService, artifactService, projectOrchestratorService)
 	projectRuntimeReconciler := projectruntime.New(projectWorkspaceService, operationCoordinator, toolGateway, observationService, verificationService)
 	projectRoutineExecutor := projectroutine.New(projectWorkspaceService, toolGateway)
 	routineService := routine.NewService(db.SQL(), db, clk, taskService)
@@ -359,8 +368,8 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 	return &Runtime{
 		DB: db, System: systemService, Nodes: nodeService, Tasks: taskService,
 		Authority: authorityService, Budgets: budgetService, Approvals: approvalService, Policy: policyEngine, Artifacts: artifactService, Observations: observationService,
-		ToolGateway: toolGateway, Verification: verificationService, Watchdog: watchdogService, Vault: vaultService, Inference: inferenceService, LocalAI: localAIService, AgentRuntimes: agentRuntimeService, AgentWorker: agentWorkerService, Assurance: assuranceService,
-		Scheduler: schedulerService, RuntimeCoordinator: runtimeCoordinator, ResourceCoordinator: resourceCoordinator, ProviderOnboarding: providerOnboardingService, ProjectWorkspaces: projectWorkspaceService,
+		ToolGateway: toolGateway, Verification: verificationService, Watchdog: watchdogService, Vault: vaultService, Inference: inferenceService, LocalAI: localAIService, AgentProfiles: agentProfileService, AgentRuntimes: agentRuntimeService, AgentWorker: agentWorkerService, Assurance: assuranceService,
+		Scheduler: schedulerService, RuntimeCoordinator: runtimeCoordinator, ResourceCoordinator: resourceCoordinator, ProviderOnboarding: providerOnboardingService, Assistant: assistantService, ProjectOrchestrator: projectOrchestratorService, ProjectWorkspaces: projectWorkspaceService,
 		ProjectRuntime: projectRuntimeReconciler, ProjectRoutine: projectRoutineExecutor, Routines: routineService, RoutineWorker: routineWorkerService, Operations: operationCoordinator, ReadOnlySlice: readOnlySlice, WebAuth: webAuthService, Gateway: gatewayService, Team: teamService, TeamWorker: teamWorkerService, Bots: botRuntimeService, Federation: federationService,
 	}, nil
 }

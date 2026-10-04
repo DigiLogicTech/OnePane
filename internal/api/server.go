@@ -98,6 +98,8 @@ type localAIService interface {
 	RegisterColibriFolder(context.Context, localai.RegisterColibriCommand) (inference.ModelDeployment, error)
 	ConfigureModelPool(string) error
 	ManagedComponents(context.Context) (map[string]localai.ManagedComponent, error)
+	RequestComponentAction(context.Context, string, string, *string) (localai.ComponentJob, error)
+	ComponentJob(context.Context, string) (localai.ComponentJob, error)
 	ManageComponent(context.Context, string, string) (localai.ManagedComponent, error)
 }
 
@@ -316,6 +318,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/local-ai/catalog", s.listLocalAICatalog)
 	s.mux.HandleFunc("GET /v1/local-ai/components", s.listManagedComponents)
 	s.mux.HandleFunc("POST /v1/local-ai/components/{componentID}/{action}", s.manageComponent)
+	s.mux.HandleFunc("GET /v1/local-ai/component-jobs/{jobID}", s.getComponentJob)
 	s.mux.HandleFunc("GET /v1/local-ai/deployments", s.listManagedLocalDeployments)
 	s.mux.HandleFunc("POST /v1/local-ai/colibri/register", s.registerColibriFolder)
 	s.mux.HandleFunc("GET /v1/vault/provider-credentials", s.listProviderCredentials)

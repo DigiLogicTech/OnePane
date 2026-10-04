@@ -17,7 +17,7 @@ migration = read('migrations/0022_alpha3_control_plane.sql')
 checks = []
 def ck(name, cond): checks.append((name, bool(cond)))
 
-ck('release identity is centralized for Alpha 3.1', "const QA8_RELEASE='0.1.0-alpha.3.1'" in ui and 'var version = buildinfo.Version' in setup and 'Version   = "dev"' in buildinfo)
+ck('release identity is centralized for Alpha 3.1', 'QA8_RELEASE' not in ui and "apiRequest('/v1/about')" in ui and 'var version = buildinfo.Version' in setup and 'Version   = "dev"' in buildinfo)
 ck('visible chat modes are Direct Team Council', "const qa8VisibleModes=['direct','team','council']" in ui and "modeOptions=[['default',`Default (${titleCase(defaultMode)})`],['direct','Direct'],['team','Team'],['council','Council']]" in ui)
 ck('legacy Supervisor maps to Direct', "function qa8Mode(v){v=String(v||'').toLowerCase();return v==='team'||v==='council'?v:'direct';}" in ui)
 ck('Model Stack is first-class workspace component', "QA6_COMPONENTS.modelstack={title:'Model Stack'" in ui and 'qa8ModelStackContent' in ui)

@@ -16,6 +16,7 @@ type assistantService interface {
 	Thread(context.Context,string) (assistant.Thread,error)
 	Threads(context.Context,string,int) ([]assistant.Thread,error)
 	CreateThread(context.Context,string,string,string) (assistant.Thread,error)
+	SetScope(context.Context,string,*string) (assistant.Thread,error)
 	Turns(context.Context,string,int) ([]assistant.Turn,error)
 	Submit(context.Context,assistant.SubmitCommand) (assistant.SubmitResult,error)
 	ProjectHandoffs(context.Context,string,int) ([]assistant.Handoff,error)
@@ -66,6 +67,15 @@ func (s *Server) createAssistantThread(w http.ResponseWriter,r *http.Request){
 	if !decodeJSON(w,r,&in){return};if !s.authorize(w,r,i,in.WorkspaceID,"project.read"){return}
 	x,err:=s.assistant.CreateThread(r.Context(),in.WorkspaceID,in.Title,i.PrincipalID);respondDomain(w,x,err,http.StatusCreated)
 }
+func (s *Server) setAssistantScope(w http.ResponseWriter,r *http.Request){
+	i,ok:=s.authenticate(w,r);if !ok{return}
+	if s.assistant==nil{writeError(w,http.StatusServiceUnavailable,"assistant unavailable");return}
+	t,err:=s.assistant.Thread(r.Context(),r.PathValue("threadID"));if err!=nil{respondDomain(w,nil,err,0);return}
+	if !s.authorize(w,r,i,t.WorkspaceID,"project.read"){return}
+	var in struct{ProjectID *string `json:"project_id"`}
+	if !decodeJSON(w,r,&in){return}
+	out,err:=s.assistant.SetScope(r.Context(),t.ID,in.ProjectID);respondDomain(w,out,err,http.StatusOK)
+}
 func (s *Server) listAssistantTurns(w http.ResponseWriter,r *http.Request){
 	i,ok:=s.authenticate(w,r);if !ok{return};t,err:=s.assistant.Thread(r.Context(),r.PathValue("threadID"));if err!=nil{respondDomain(w,nil,err,0);return}
 	if !s.authorize(w,r,i,t.WorkspaceID,"project.read"){return}
@@ -76,7 +86,7 @@ func (s *Server) submitAssistantTurn(w http.ResponseWriter,r *http.Request){
 	if !s.authorize(w,r,i,t.WorkspaceID,"project.read"){return}
 	var in struct{Content string `json:"content"`;ProjectID *string `json:"project_id"`;AllowTaskCreation *bool `json:"allow_task_creation"`;ForceTask bool `json:"force_task"`}
 	if !decodeJSON(w,r,&in){return}
-	allow:=true;if in.AllowTaskCreation!=nil{allow=*in.AllowTaskCreation}
+	allow:=false;if in.AllowTaskCreation!=nil{allow=*in.AllowTaskCreation}
 	if allow||in.ForceTask{if !s.authorize(w,r,i,t.WorkspaceID,"task.write"){return}}
 	out,err:=s.assistant.Submit(r.Context(),assistant.SubmitCommand{ThreadID:t.ID,Content:in.Content,ActorPrincipalID:i.PrincipalID,ProjectID:in.ProjectID,ForceTask:in.ForceTask,AllowTaskCreation:allow})
 	respondDomain(w,out,err,http.StatusOK)
@@ -94,7 +104,7 @@ func (s *Server) submitProjectOrchestratorTurn(w http.ResponseWriter,r *http.Req
 	i,ok:=s.authenticate(w,r);if !ok{return};p,err:=s.projects.Project(r.Context(),r.PathValue("projectID"));if err!=nil{respondDomain(w,nil,err,0);return}
 	if !s.authorize(w,r,i,p.WorkspaceID,"project.read"){return}
 	var in struct{Objective string `json:"objective"`;ProjectWorkspaceID string `json:"project_workspace_id"`;AllowTaskCreation *bool `json:"allow_task_creation"`;ForceTask bool `json:"force_task"`}
-	if !decodeJSON(w,r,&in){return};allow:=true;if in.AllowTaskCreation!=nil{allow=*in.AllowTaskCreation}
+	if !decodeJSON(w,r,&in){return};allow:=false;if in.AllowTaskCreation!=nil{allow=*in.AllowTaskCreation}
 	if allow||in.ForceTask{if !s.authorize(w,r,i,p.WorkspaceID,"task.write"){return}}
 	out,err:=s.projectOrchestrator.Turn(r.Context(),projectorchestrator.TurnCommand{ProjectID:p.ID,Objective:in.Objective,ActorPrincipalID:i.PrincipalID,ProjectWorkspaceID:in.ProjectWorkspaceID,ForceTask:in.ForceTask,AllowTaskCreation:allow})
 	respondDomain(w,out,err,http.StatusOK)
@@ -114,13 +124,32 @@ func (s *Server) getAgentProfile(w http.ResponseWriter,r *http.Request){
 }
 func (s *Server) createAgentProfile(w http.ResponseWriter,r *http.Request){
 	i,ok:=s.authenticate(w,r);if !ok{return}
-	var in struct{WorkspaceID,Name,Description,InstructionsMD,DefaultRole,CapabilityID,ProtocolLevel string;Metadata json.RawMessage `json:"metadata"`}
+	var in struct{
+		WorkspaceID string `json:"workspace_id"`
+		Name string `json:"name"`
+		Description string `json:"description"`
+		InstructionsMD string `json:"instructions_md"`
+		DefaultRole string `json:"default_role"`
+		CapabilityID string `json:"capability_id"`
+		ProtocolLevel string `json:"protocol_level"`
+		Metadata json.RawMessage `json:"metadata"`
+	}
 	if !decodeJSON(w,r,&in){return};if !s.authorize(w,r,i,in.WorkspaceID,"project.write"){return}
 	x,err:=s.agentProfiles.Create(r.Context(),agentprofile.CreateCommand{WorkspaceID:in.WorkspaceID,Name:in.Name,Description:in.Description,InstructionsMD:in.InstructionsMD,DefaultRole:in.DefaultRole,CapabilityID:in.CapabilityID,ProtocolLevel:in.ProtocolLevel,Metadata:in.Metadata,CreatedBy:i.PrincipalID});respondDomain(w,x,err,http.StatusCreated)
 }
 func (s *Server) updateAgentProfile(w http.ResponseWriter,r *http.Request){
 	i,ok:=s.authenticate(w,r);if !ok{return}
-	var in struct{WorkspaceID string `json:"workspace_id"`;ExpectedRevision int64 `json:"expected_revision"`;Name,Description,InstructionsMD,DefaultRole,CapabilityID,ProtocolLevel string;Metadata json.RawMessage `json:"metadata"`}
+	var in struct{
+		WorkspaceID string `json:"workspace_id"`
+		ExpectedRevision int64 `json:"expected_revision"`
+		Name string `json:"name"`
+		Description string `json:"description"`
+		InstructionsMD string `json:"instructions_md"`
+		DefaultRole string `json:"default_role"`
+		CapabilityID string `json:"capability_id"`
+		ProtocolLevel string `json:"protocol_level"`
+		Metadata json.RawMessage `json:"metadata"`
+	}
 	if !decodeJSON(w,r,&in){return};if !s.authorize(w,r,i,in.WorkspaceID,"project.write"){return}
 	x,err:=s.agentProfiles.Update(r.Context(),agentprofile.UpdateCommand{ID:r.PathValue("profileID"),WorkspaceID:in.WorkspaceID,ExpectedRevision:in.ExpectedRevision,Name:in.Name,Description:in.Description,InstructionsMD:in.InstructionsMD,DefaultRole:in.DefaultRole,CapabilityID:in.CapabilityID,ProtocolLevel:in.ProtocolLevel,Metadata:in.Metadata,ActorPrincipalID:i.PrincipalID});respondDomain(w,x,err,http.StatusOK)
 }

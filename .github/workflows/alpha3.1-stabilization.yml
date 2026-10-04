@@ -51,8 +51,6 @@ jobs:
           patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/follow-snapshots.patch
           patch -p1 -d buildsrc < .recovery/alpha3.1/follow-snapshots.patch
           # Capture the exact pre-uninstall recovered source so stale recovery hunks can be rebased deterministically.
-          patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/orchestration-foundations.patch
-          patch -p1 -d buildsrc < .recovery/alpha3.1/orchestration-foundations.patch
       - name: Validate source
         working-directory: buildsrc
         shell: bash

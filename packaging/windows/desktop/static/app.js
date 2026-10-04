@@ -1,4 +1,3 @@
-import {CHAT_COMMANDS, suggestChatCommands, parseChatCommand} from './chat-commands.js';
 const $ = (s, root=document) => root.querySelector(s);
 const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 

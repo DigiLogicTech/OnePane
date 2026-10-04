@@ -50,7 +50,11 @@ jobs:
           patch -p1 -d buildsrc < .recovery/alpha3.1/council-runtime.patch
           patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/follow-snapshots.patch
           patch -p1 -d buildsrc < .recovery/alpha3.1/follow-snapshots.patch
-          # Capture the exact pre-uninstall recovered source so stale recovery hunks can be rebased deterministically.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OnePane-alpha3.1-canonical-source
+          path: buildsrc
+          retention-days: 7
       - name: Validate source
         working-directory: buildsrc
         shell: bash

@@ -187,6 +187,19 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		return s.fail(ctx, res, err)
 	}
 	sections := []agentprotocol.ContextSection{}
+	profileID := "agent.md"
+	var memberCfg map[string]any
+	if json.Unmarshal(member.Config,&memberCfg)==nil {
+		if v,ok:=memberCfg["agent_profile_id"].(string);ok&&strings.TrimSpace(v)!=""{profileID=strings.TrimSpace(v)}
+		if v,ok:=memberCfg["agent_profile"].(string);ok&&strings.TrimSpace(v)!=""{profileID=strings.TrimSpace(v)}
+	}
+	if strings.EqualFold(profileID,"onepane-default"){profileID="agent.md"}
+	var profileName,profileInstructions,profileRole string
+	var profileRevision int64
+	if err:=s.db.QueryRowContext(ctx,`SELECT name,instructions_md,default_role,revision FROM agent_profiles WHERE id=? AND status='active' AND (workspace_id=? OR workspace_id IS NULL) ORDER BY CASE WHEN workspace_id=? THEN 0 ELSE 1 END LIMIT 1`,profileID,ws,ws).Scan(&profileName,&profileInstructions,&profileRole,&profileRevision);err==nil{
+		raw,_:=json.Marshal(map[string]any{"profile_id":profileID,"name":profileName,"role":profileRole,"revision":profileRevision,"instructions":profileInstructions,"authority":false,"note":"Profile instructions affect reasoning only and grant no capabilities or permissions."})
+		sections=append(sections,agentprotocol.ContextSection{ID:"agent-profile",Kind:"agent_profile",Trust:"USER_INSTRUCTION",Authoritative:false,Content:raw})
+	}else if !errors.Is(err,sql.ErrNoRows){return s.fail(ctx,res,err)}
 	taskRaw, _ := json.Marshal(map[string]any{"task_id": ss.TaskID, "objective": taskObjective, "mode": executionMode + "_deliberation", "team_role": member.RoleName})
 	sections = append(sections, agentprotocol.ContextSection{ID: "task", Kind: "task", Trust: "USER_INSTRUCTION", Authoritative: true, Content: taskRaw})
 	used := len(taskRaw)

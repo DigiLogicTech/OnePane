@@ -443,21 +443,9 @@ function renderSettings(){
 }
 function renderPlaceholder(title,copy){$('#viewHost').innerHTML=`<section class="page">${pageHeader(title,copy,'<button class="btn">Configure</button>')}<div class="empty-state"><div><div style="font-size:36px;opacity:.5">${pages[currentTab().route]?.icon||'◫'}</div><h2>${title}</h2><p>${copy}</p><p>This canonical management surface is scaffolded into the new shell.</p></div></div></section>`;}
 
-function renderInspector(node='AI-Workstation'){
-  $('#inspector').innerHTML=`<div class="inspector-header">Node <button class="inspector-close" id="closeInspector">×</button></div><div class="inspector-section"><div class="inspector-title">⬡ ${node}<span class="pill good" style="margin-left:auto">Online</span></div></div><div class="inspector-tabs"><button class="active">Overview</button><button>Models</button><button>Tasks</button><button data-drawer-tab="logs">Logs</button></div><div class="inspector-section"><strong>General</strong><dl class="definition-grid"><dt>Type</dt><dd>Remote (${node.includes('Mac')?'macOS':'Windows'})</dd><dt>Status</dt><dd class="good">Online</dd><dt>Wakeable</dt><dd class="good">Yes</dd><dt>Last seen</dt><dd>12 seconds ago</dd><dt>Address</dt><dd>192.168.1.42</dd></dl></div><div class="inspector-section"><strong>Hardware</strong><dl class="definition-grid"><dt>CPU</dt><dd>AMD Ryzen 9 7950X</dd><dt>RAM</dt><dd>64 GB</dd><dt>GPU</dt><dd>NVIDIA RTX 5090</dd><dt>VRAM</dt><dd>24 GB · 68% used</dd><dt>Storage</dt><dd>2 TB · 58% used</dd></dl></div><div class="inspector-section"><strong>Configuration</strong><dl class="definition-grid"><dt>Model pool</dt><dd>D:\\OnePane\\Models</dd><dt>Auto sleep</dt><dd class="good">Enabled</dd><dt>Wake on demand</dt><dd class="good">Enabled</dd><dt>Battery policy</dt><dd>Avoid wake on battery</dd></dl></div><div class="inspector-section"><button class="btn primary">Wake</button> <button class="btn">Sleep</button> <button class="btn">Restart</button></div>`;
-  $('#closeInspector')?.addEventListener('click',()=>{state.inspector='closed';$('#app').dataset.inspector='closed';persist();});
-  bindViewActions($('#inspector'));
-}
 
-function renderDrawer(){
-  const tabs=['logs','events','terminal','watchdog','metrics','evidence'];
-  $('#drawerTabs').innerHTML=tabs.map(x=>`<button class="${x===activeDrawerTab?'active':''}" data-drawer-tab="${x}">${titleCase(x)}</button>`).join('');
-  const c=$('#drawerContent');
-  if(activeDrawerTab==='logs') c.innerHTML=`<table class="log-table"><tbody>${mock.logs.map(l=>`<tr><td class="log-time">${l[0]}</td><td class="log-level"><span class="pill ${l[1]==='ERROR'?'bad':l[1]==='WARN'?'warn':''}">${l[1]}</span></td><td class="log-component">${l[2]}</td><td>${l[3]}</td></tr>`).join('')}</tbody></table>`;
-  else if(activeDrawerTab==='watchdog') c.innerHTML=`<div class="widget-body"><strong class="good">Watchdog healthy</strong><br><br>Last control-plane heartbeat: 2 sec ago<br>Scheduler: healthy<br>Outbox: healthy<br>Recovery coordinator: healthy<br>Federation: 5 online / 2 dormant / 1 offline</div>`;
-  else c.innerHTML=`<div class="widget-body">${titleCase(activeDrawerTab)} view. This drawer can be independently filtered and suspended when its parent tab is inactive.</div>`;
-  bindViewActions($('#bottomDrawer'));
-}
+
+
 
 function bindShell(){
   $('#sidebarToggle').onclick=()=>{state.sidebar=state.sidebar==='expanded'?'collapsed':'expanded';$('#app').dataset.sidebar=state.sidebar;persist();};
@@ -476,14 +464,7 @@ function bindShell(){
   document.addEventListener('click',e=>{const command=e.target.closest('[data-action="command-palette"]');if(command)openCommandPalette(); const tour=e.target.closest('[data-action="product-tour"]');if(tour)startProductTour({replay:true}); const mobileMore=e.target.closest('[data-action="mobile-more"]');if(mobileMore)openMobileMore(); const route=e.target.closest('.mobile-header [data-route]');if(route)openRoute(route.dataset.route);});
   bindDrawerResize();
 }
-function bindViewActions(root=document){
-  $$('[data-route]',root).forEach(b=>b.onclick=()=>openRoute(b.dataset.route));
-  $$('[data-drawer-tab]',root).forEach(b=>b.onclick=()=>{activeDrawerTab=b.dataset.drawerTab; if(state.drawer==='closed'){state.drawer='open';$('#bottomDrawer').dataset.state='open';document.documentElement.style.setProperty('--drawer',`${state.drawerHeight}px`);} if(isPhoneLayout()){state.inspector='closed';$('#app').dataset.inspector='closed';} renderDrawer();persist();});
-  $$('[data-inspect-node]',root).forEach(r=>r.onclick=()=>{state.inspector='open';$('#app').dataset.inspector='open';if(isPhoneLayout()){state.drawer='closed';$('#bottomDrawer').dataset.state='closed';}renderInspector(r.dataset.inspectNode);persist();});
-  $$('[data-inspect="task"]',root).forEach(r=>r.onclick=()=>{state.inspector='open';$('#app').dataset.inspector='open';if(isPhoneLayout()){state.drawer='closed';$('#bottomDrawer').dataset.state='closed';}renderTaskInspector();persist();});
-  $$('[data-attention-item]',root).forEach(b=>b.onclick=()=>{const n=ATTENTION_ITEMS[+b.dataset.attentionItem];if(!n)return;if(n.route)openRoute(n.route);if(n.drawer){setDrawerOpen(true);activeDrawerTab=n.drawer;renderDrawer();}});
-  $$('[data-approval-default]',root).forEach(b=>b.onclick=()=>{state.approvalLevel=b.dataset.approvalDefault;persist();renderSettings();bindViewActions($('#viewHost'));});
-}
+
 function renderTaskInspector(){
   $('#inspector').innerHTML=`<div class="inspector-header">Task <button class="inspector-close" id="closeInspector">×</button></div><div class="inspector-section"><div class="inspector-title">☑ T-1832 <span class="pill good" style="margin-left:auto">Running</span></div><div class="page-subtitle">Model qualification: Qwen 32B</div></div><div class="inspector-tabs"><button class="active">Overview</button><button>Attempts</button><button>Evidence</button><button data-drawer-tab="logs">Logs</button></div><div class="inspector-section"><dl class="definition-grid"><dt>Workspace</dt><dd>AI Lab</dd><dt>Agent</dt><dd>Local model worker</dd><dt>Model</dt><dd>Qwen 32B Q4_K_M</dd><dt>Node</dt><dd>AI-Workstation</dd><dt>Progress</dt><dd>68%</dd><dt>Verification</dt><dd>Pending</dd></dl></div>`;
   $('#closeInspector').onclick=()=>{state.inspector='closed';$('#app').dataset.inspector='closed';persist();}; bindViewActions($('#inspector'));
@@ -1066,10 +1047,7 @@ async function openAttentionPopover(anchor){
   $$('[data-notification-id]').forEach(b=>b.onclick=()=>{const n=NOTIFICATIONS.find(x=>x.id===b.dataset.notificationId);if(!n)return;markNotificationRead(n.id);$('#overlayRoot').innerHTML='';if(n.route)openRoute(n.route);if(n.drawer){setDrawerOpen(true);activeDrawerTab=n.drawer;renderDrawer();}});
 }
 
-function renderInspector(node='Local node'){
-  $('#inspector').innerHTML=`<div class="inspector-header">Inspector <button class="inspector-close" id="closeInspector">×</button></div><div class="inspector-section"><div class="inspector-title">⬡ ${escapeHtml(node)}</div></div><div class="inspector-section"><strong>Selection</strong><p class="page-subtitle">Select a Task, Model or Node to inspect its live control-plane details.</p></div>`;
-  $('#closeInspector').onclick=()=>setInspectorOpen(false);syncPanelRestoreButtons();
-}
+
 
 function renderDrawer(){
   const tabs=['logs','events','terminal','watchdog','metrics','evidence'];

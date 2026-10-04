@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+
+# OnePane deliberately retains /var/lib/onepane on removal/purge so model
+# weights, project data, and recovery state are not destroyed by package
+# management. Administrators may remove that directory explicitly.
+exit 0

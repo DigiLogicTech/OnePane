@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d1721" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="color-scheme" content="dark light" />
+  <title>OnePane</title>
+  <link rel="icon" href="/onepane-icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <section id="authGate" class="auth-gate" aria-live="polite">
+    <div id="boot" class="auth-stage">
+      <div class="auth-card auth-loading"><img src="/onepane-icon.svg" class="auth-logo" alt=""><div><div class="auth-brand">OnePane</div><div class="page-subtitle">Loading control plane…</div></div></div>
+    </div>
+    <div id="setup" class="auth-stage hidden">
+      <div class="auth-card">
+        <div class="auth-heading"><img src="/onepane-icon.svg" class="auth-logo" alt=""><div><div class="auth-brand">OnePane</div><div class="page-subtitle">Local-first autonomous AI control plane</div></div></div>
+        <h1>Set up your control plane</h1>
+        <p class="page-subtitle">Create the first local administrator. Credentials remain on this OnePane installation.</p>
+        <form id="setup-form" class="auth-form">
+          <label>Username<input name="username" autocomplete="username" required></label>
+          <label>Display name<input name="display_name" autocomplete="name" required></label>
+          <label>Workspace name<input name="workspace_name" value="Default" required></label>
+          <label>Password<input name="password" type="password" autocomplete="new-password" minlength="12" required></label>
+          <button class="btn primary" type="submit">Create administrator</button>
+          <div class="error" id="setup-error"></div>
+        </form>
+      </div>
+    </div>
+    <div id="login" class="auth-stage hidden">
+      <div class="auth-card">
+        <div class="auth-heading"><img src="/onepane-icon.svg" class="auth-logo" alt=""><div><div class="auth-brand">OnePane</div><div class="page-subtitle">Local-first autonomous AI control plane</div></div></div>
+        <h1>Sign in</h1>
+        <form id="login-form" class="auth-form">
+          <label>Username<input name="username" autocomplete="username" required></label>
+          <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+          <button class="btn primary" type="submit">Sign in</button>
+          <div class="error" id="login-error"></div>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <div id="app" class="app-shell hidden" data-sidebar="expanded" data-inspector="open">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <div class="brand-row">
+        <button class="icon-button" id="sidebarToggle" aria-label="Collapse navigation" title="Collapse navigation">◫</button>
+        <img src="/onepane-icon.svg" class="brand-icon" alt=""><div class="brand">OnePane</div>
+      </div>
+      <nav id="primaryNav" class="primary-nav"></nav>
+      <div class="sidebar-spacer"></div>
+      <button class="sidebar-action" data-action="command-palette"><span class="shortcut-label">Ctrl+K</span> <span>Command</span></button>
+      <button class="sidebar-action" data-action="product-tour">? <span>Help / Tour</span></button>
+      <button class="sidebar-action" data-route="settings">⚙ <span>Settings</span></button>
+    </aside>
+
+    <section class="main-shell">
+      <header class="mobile-header" id="mobileHeader" aria-label="Mobile application header">
+        <button class="mobile-brand-button" data-route="operations" aria-label="Open Operations">OnePane</button>
+        <div class="mobile-title" id="mobileTitle">Operations</div>
+        <button class="mobile-health health-ok" id="mobileHealthButton" data-action="health-popover" aria-label="System health"><span class="status-dot"></span></button>
+        <button class="icon-button notification" id="mobileAttentionButton" data-action="attention" aria-label="Notifications"><span>◔</span><span class="badge hidden" data-notification-badge>0</span></button>
+        <button class="icon-button" id="mobileHeaderMore" data-action="mobile-more" aria-label="More">⋯</button>
+      </header>
+      <div id="mobileTabStrip" class="mobile-tab-strip" role="tablist" aria-label="Open tabs"></div>
+
+      <header class="topbar">
+        <div id="tabStrip" class="tab-strip" role="tablist"></div>
+        <button id="newTabButton" class="icon-button" title="Open a new tab">＋</button>
+        <div class="topbar-spacer"></div>
+        <button id="commandButton" class="command-button" data-action="command-palette">Search or run a command… <kbd>Ctrl+K</kbd></button>
+        <button id="healthButton" class="status-button health-ok" data-action="health-popover"><span class="status-dot"></span><span>Healthy</span></button>
+        <button id="attentionButton" class="icon-button notification" data-action="attention" aria-label="Notifications"><span>◔</span><span class="badge hidden" data-notification-badge>0</span></button>
+        <button id="themeButton" class="icon-button" data-action="theme" aria-label="Theme">◐</button>
+        <button id="userButton" class="avatar-button" aria-label="User menu">OP</button>
+      </header>
+
+      <main id="viewHost" class="view-host"></main>
+
+      <button id="drawerRestore" class="panel-restore drawer-restore hidden" aria-label="Restore observability drawer" title="Restore logs and observability">⌃ Logs</button>
+      <section id="bottomDrawer" class="bottom-drawer" data-state="open">
+        <div class="drawer-resizer" id="drawerResizer" role="separator" aria-orientation="horizontal"></div>
+        <div class="drawer-tabs" id="drawerTabs"></div>
+        <div class="drawer-actions">
+          <select id="logScope"><option>All components</option><option>Local node</option><option>Watchdog</option><option>Scheduler</option></select>
+          <select id="logLevel"><option>All levels</option><option>Info</option><option>Warn</option><option>Error</option></select>
+          <button class="icon-button" id="drawerToggle" title="Collapse drawer">⌄</button>
+        </div>
+        <div id="drawerContent" class="drawer-content"></div>
+      </section>
+    </section>
+
+    <button id="inspectorRestore" class="panel-restore inspector-restore hidden" aria-label="Restore inspector" title="Restore Inspector">Inspector ‹</button>
+    <aside id="inspector" class="inspector" data-state="open" aria-label="Inspector"></aside>
+  </div>
+
+  <nav id="mobileNav" class="mobile-nav hidden" aria-label="Mobile primary navigation">
+    <button data-mobile-route="operations"><span>▣</span><small>Ops</small></button>
+    <button data-mobile-route="tasks"><span>☑</span><small>Tasks</small></button>
+    <button data-mobile-route="agents"><span>♙</span><small>Chat</small></button>
+    <button data-mobile-more="true"><span>☰</span><small>More</small></button>
+  </nav>
+
+  <template id="legacyBotSurfaceMarker" data-view="bots" aria-hidden="true"></template>
+  <div id="overlayRoot"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -51,6 +51,7 @@ jobs:
           node --check internal/webui/static/app.js
           node --check packaging/windows/desktop/static/app.js
           python scripts/validate_alpha3_source.py
+          python ../.recovery/alpha3.1/validate_shell.py
           python scripts/validate_live_follow_workspace.py
           python scripts/validate_workspace_components_v2.py
           go mod download

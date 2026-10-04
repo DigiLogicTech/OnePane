@@ -1470,7 +1470,6 @@ qa6FollowContent=function(w,project){const html=qa7FollowContentBase(w,project),
 pages.settings.title='Settings';
 
 /* === Alpha 3 workspace/model/runtime consolidation === */
-const QA8_RELEASE='0.1.0-alpha.3.1';
 const qa8VisibleModes=['direct','team','council'];
 
 // Durable top-level navigation only. Contextual capabilities remain inside Projects,
@@ -1616,7 +1615,6 @@ let qa8ManagedDeployments=[];
 
 function qa8SettingsEnhance(){
   const heading=$('#viewHost .page-heading h1');if(heading)heading.textContent='Settings';
-  const about=$('.about-block strong');if(about)about.textContent=`OnePane v${QA8_RELEASE}`;
   const mode=$('#qa5DefaultMode');if(mode){const current=qa8Mode(mode.value);mode.innerHTML=qa8VisibleModes.map(v=>`<option value="${v}" ${current===v?'selected':''}>${titleCase(v)}</option>`).join('');}
   const localCard=$('#modelPoolPath')?.closest('.panel-card');
   if(localCard&&!$('#qa8ProjectRoot')){const body=localCard.querySelector('.settings-stack');body?.insertAdjacentHTML('afterbegin',`<label>Default Project / Workspace data root<input id="qa8ProjectRoot" placeholder="D:\\OnePane\\Projects"></label><div class="page-subtitle">Libraries, artifacts and workspace data can live on a larger drive independently of the application and model pool.</div>`);}

@@ -240,7 +240,11 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 	if v,ok:=plan["answer"].(string);ok&&strings.TrimSpace(v)!=""{answer=strings.TrimSpace(v)}
 	if v,ok:=plan["action"].(string);ok{action=strings.ToLower(strings.TrimSpace(v))}
 	if v,ok:=plan["objective"].(string);ok&&strings.TrimSpace(v)!=""{objective=strings.TrimSpace(v)}
-	if v,ok:=plan["project_workspace_id"].(string);ok&&strings.TrimSpace(v)!="" { for _,candidate:=range []string{pwsID,strings.TrimSpace(v)}{if candidate==strings.TrimSpace(v){pwsID=strings.TrimSpace(v);break}} }
+	if v,ok:=plan["project_workspace_id"].(string);ok&&strings.TrimSpace(v)!="" {
+		proposed:=strings.TrimSpace(v)
+		var exists int
+		if s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_workspaces WHERE id=? AND project_id=? AND status='active'`,proposed,c.ProjectID).Scan(&exists)==nil&&exists==1 { pwsID=proposed }
+	}
 	if v,ok:=plan["mode"].(string);ok {switch strings.ToLower(v){case "direct","team","council":mode=strings.ToLower(v)}}
 	if reasonErr!=nil { answer="Project Orchestrator is available, but no eligible reasoning model could complete this turn: "+reasonErr.Error(); action="answer" }
 	if c.ForceTask { action="task"; c.AllowTaskCreation=true }

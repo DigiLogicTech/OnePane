@@ -301,6 +301,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/assistant/threads", s.createAssistantThread)
 	s.mux.HandleFunc("GET /v1/assistant/threads/{threadID}/turns", s.listAssistantTurns)
 	s.mux.HandleFunc("POST /v1/assistant/threads/{threadID}/turns", s.submitAssistantTurn)
+	s.mux.HandleFunc("POST /v1/assistant/threads/{threadID}/scope", s.setAssistantScope)
 	s.mux.HandleFunc("GET /v1/agent-profiles", s.listAgentProfiles)
 	s.mux.HandleFunc("POST /v1/agent-profiles", s.createAgentProfile)
 	s.mux.HandleFunc("GET /v1/agent-profiles/{profileID}", s.getAgentProfile)

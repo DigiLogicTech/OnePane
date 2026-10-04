@@ -16,6 +16,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/agentruntime"
 	"github.com/DigiLogicTech/OnePane/internal/assurance"
 	"github.com/DigiLogicTech/OnePane/internal/botruntime"
+	"github.com/DigiLogicTech/OnePane/internal/buildinfo"
 	"github.com/DigiLogicTech/OnePane/internal/chatcommands"
 	"github.com/DigiLogicTech/OnePane/internal/config"
 	"github.com/DigiLogicTech/OnePane/internal/connectors"
@@ -278,6 +279,9 @@ func (s *Server) Handler() http.Handler { return s.securityHeaders(s.mux) }
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+	})
+	s.mux.HandleFunc("GET /v1/about", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"version": buildinfo.Version, "revision": buildinfo.Revision, "build_time": buildinfo.BuildTime})
 	})
 	s.mux.HandleFunc("GET /v1/setup/status", s.setupStatus)
 	s.mux.HandleFunc("POST /v1/setup/admin", s.bootstrapAdmin)

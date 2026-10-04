@@ -57,6 +57,7 @@ type TurnCommand struct {
 	ActorPrincipalID   string
 	ProjectWorkspaceID string
 	ForceTask          bool
+	AllowTaskCreation  bool
 }
 
 type TurnResult struct {
@@ -242,7 +243,8 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 	if v,ok:=plan["project_workspace_id"].(string);ok&&strings.TrimSpace(v)!="" { for _,candidate:=range []string{pwsID,strings.TrimSpace(v)}{if candidate==strings.TrimSpace(v){pwsID=strings.TrimSpace(v);break}} }
 	if v,ok:=plan["mode"].(string);ok {switch strings.ToLower(v){case "direct","team","council":mode=strings.ToLower(v)}}
 	if reasonErr!=nil { answer="Project Orchestrator is available, but no eligible reasoning model could complete this turn: "+reasonErr.Error(); action="answer" }
-	if c.ForceTask { action="task" }
+	if c.ForceTask { action="task"; c.AllowTaskCreation=true }
+	if action=="task" && !c.AllowTaskCreation { action="answer"; answer=answer+"\n\nThis turn was read-only; no Task was created." }
 	var taskID,sessionID *string
 	disposition:="answered"
 	if action=="task" {

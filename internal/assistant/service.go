@@ -54,6 +54,20 @@ type SubmitCommand struct {
 	ForceTask       bool
 }
 
+type Handoff struct {
+	ID                   string  `json:"id"`
+	AssistantThreadID    string  `json:"assistant_thread_id"`
+	AssistantTurnID      *string `json:"assistant_turn_id,omitempty"`
+	ProjectID            string  `json:"project_id"`
+	OrchestratorID       string  `json:"orchestrator_id"`
+	OrchestratorTurnID   *string `json:"orchestrator_turn_id,omitempty"`
+	TaskID               *string `json:"task_id,omitempty"`
+	Status               string  `json:"status"`
+	Objective            string  `json:"objective"`
+	CreatedAt            int64   `json:"created_at"`
+	UpdatedAt            int64   `json:"updated_at"`
+}
+
 type SubmitResult struct {
 	Turn       Turn                               `json:"turn"`
 	Delegated  bool                               `json:"delegated"`
@@ -140,6 +154,20 @@ func (s *Service) resolveProject(ctx context.Context,t Thread,content string,exp
 	if explicit!=nil&&strings.TrimSpace(*explicit)!=""{var idv string;err:=s.db.QueryRowContext(ctx,`SELECT id FROM projects WHERE id=? AND workspace_id=? AND status='active'`,strings.TrimSpace(*explicit),t.WorkspaceID).Scan(&idv);if err!=nil{return nil,err};return &idv,nil}
 	if t.ActiveProjectID!=nil{return t.ActiveProjectID,nil}
 	rows,err:=s.db.QueryContext(ctx,`SELECT id,name FROM projects WHERE workspace_id=? AND status='active' ORDER BY length(name) DESC`,t.WorkspaceID);if err!=nil{return nil,err};defer rows.Close();low:=strings.ToLower(content);for rows.Next(){var idv,name string;if rows.Scan(&idv,&name)==nil&&strings.Contains(low,strings.ToLower(name)){return &idv,nil}};return nil,nil
+}
+
+func (s *Service) ProjectHandoffs(ctx context.Context, projectID string, limit int) ([]Handoff,error) {
+	if limit<=0||limit>200{limit=100}
+	rows,err:=s.db.QueryContext(ctx,`SELECT id,assistant_thread_id,assistant_turn_id,project_id,orchestrator_id,orchestrator_turn_id,task_id,status,objective,created_at,updated_at FROM assistant_project_handoffs WHERE project_id=? ORDER BY updated_at DESC,id DESC LIMIT ?`,strings.TrimSpace(projectID),limit)
+	if err!=nil{return nil,err}
+	defer rows.Close()
+	out:=[]Handoff{}
+	for rows.Next(){
+		var h Handoff;var assistantTurn,orchestratorTurn,taskID sql.NullString
+		if err:=rows.Scan(&h.ID,&h.AssistantThreadID,&assistantTurn,&h.ProjectID,&h.OrchestratorID,&orchestratorTurn,&taskID,&h.Status,&h.Objective,&h.CreatedAt,&h.UpdatedAt);err!=nil{return nil,err}
+		if assistantTurn.Valid{h.AssistantTurnID=&assistantTurn.String};if orchestratorTurn.Valid{h.OrchestratorTurnID=&orchestratorTurn.String};if taskID.Valid{h.TaskID=&taskID.String};out=append(out,h)
+	}
+	return out,rows.Err()
 }
 
 func (s *Service) Submit(ctx context.Context,c SubmitCommand)(SubmitResult,error){

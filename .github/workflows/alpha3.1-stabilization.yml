@@ -56,9 +56,11 @@ jobs:
           rm -rf packaging/windows/setup/payload
           mkdir -p dist/windows-x64 packaging/windows/setup/payload
           export GOOS=windows GOARCH=amd64 CGO_ENABLED=0
-          go build -trimpath -ldflags "-s -w -X main.version=$ONEPANE_VERSION" -o packaging/windows/setup/payload/OnePane.Backend.exe ./cmd/harnessd
-          go build -trimpath -ldflags "-s -w" -o packaging/windows/setup/payload/OnePane.Service.exe ./packaging/windows/service
-          go build -trimpath -ldflags "-s -w -H windowsgui" -o packaging/windows/setup/payload/OnePane.Desktop.exe ./packaging/windows/desktop
+          BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          BUILD_LDFLAGS="-s -w -X github.com/DigiLogicTech/OnePane/internal/buildinfo.Version=$ONEPANE_VERSION -X github.com/DigiLogicTech/OnePane/internal/buildinfo.Revision=$GITHUB_SHA -X github.com/DigiLogicTech/OnePane/internal/buildinfo.BuildTime=$BUILD_TIME"
+          go build -trimpath -ldflags "$BUILD_LDFLAGS" -o packaging/windows/setup/payload/OnePane.Backend.exe ./cmd/harnessd
+          go build -trimpath -ldflags "$BUILD_LDFLAGS" -o packaging/windows/setup/payload/OnePane.Service.exe ./packaging/windows/service
+          go build -trimpath -ldflags "-H windowsgui $BUILD_LDFLAGS" -o packaging/windows/setup/payload/OnePane.Desktop.exe ./packaging/windows/desktop
           cp packaging/windows/assets/OnePane.ico packaging/windows/setup/payload/OnePane.ico
           python3 - <<'PY'
           from pathlib import Path
@@ -74,7 +76,7 @@ jobs:
                   raise SystemExit(f"could not refresh payload hash for {name}")
           setup.write_text(text)
           PY
-          go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=$ONEPANE_VERSION" -o dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe ./packaging/windows/setup
+          go build -trimpath -ldflags "-H windowsgui $BUILD_LDFLAGS" -o dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe ./packaging/windows/setup
           sha256sum dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe > dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe.sha256
           test -s dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe
           python3 - <<'PY'

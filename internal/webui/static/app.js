@@ -1918,4 +1918,87 @@ renderOperations=function(){
   queueMicrotask(qa31BindOperationCardActions);
 };
 
+
+/* === Alpha 3.1 product tour: Assistant → Orchestrator → governed execution === */
+function qa31TourAssistantPreview(){
+  const root=$('#overlayRoot');
+  root.innerHTML=`<div class="overlay qa31-assistant-tour-preview"><section class="command-palette assistant-palette qa31-assistant"><div class="assistant-head"><div><div class="eyebrow">ONEPANE ASSISTANT</div><h2>Global context</h2><div class="list-meta">Guided preview · no model call, Project, Task or session is created</div></div></div><div class="assistant-scope-row"><label>Context<select disabled><option>Global</option></select></label></div><div class="assistant-history"><div class="empty-state compact">Ask OnePane about system state, navigation, or explicitly hand work to a Project Orchestrator.</div></div><div class="assistant-compose"><textarea rows="3" disabled placeholder="Ask OnePane or run a command…"></textarea><div class="assistant-compose-actions"><button class="btn" disabled>Ask</button><button class="btn primary" disabled>Run</button></div></div></section></div>`;
+}
+function qa31CloseTourAssistantPreview(){
+  if($('.qa31-assistant-tour-preview'))$('#overlayRoot').innerHTML='';
+}
+function startProductTour({replay=false}={}){
+  document.querySelector('#qa31TourRoot')?.remove();
+  qa31CloseTourAssistantPreview();
+  if(replay)localStorage.removeItem(TOUR_KEY);
+  const snapshot={
+    tabs:JSON.parse(JSON.stringify(state.tabs||[])),
+    activeTab:state.activeTab,
+    sidebar:state.sidebar,
+    inspector:state.inspector,
+    inspectorWidth:state.inspectorWidth,
+    drawer:state.drawer,
+    drawerHeight:state.drawerHeight,
+    drawerTab:activeDrawerTab,
+    projectID:typeof qa4ProjectHub!=='undefined'?qa4ProjectHub.activeProjectID:'',
+    projectWorkspaceID:typeof qa4ProjectHub!=='undefined'?qa4ProjectHub.activeWorkspaceID:'',
+    scrollX:window.scrollX,scrollY:window.scrollY
+  };
+  const steps=[
+    {title:'Welcome to OnePane',text:'OnePane coordinates Projects, Workspaces, Tasks, models, Agent Profiles, tools and compute while keeping authority in the control plane.'},
+    {title:'OnePane Assistant',text:'The global Assistant is your OnePane-facing layer. Global context stays global; Project-specific work is explicitly handed to that Project’s Orchestrator.',target:'.qa31-assistant-tour-preview .qa31-assistant',prepare:async()=>qa31TourAssistantPreview()},
+    {title:'Projects',text:'Projects are durable scopes containing their own Workspaces, policy, runtime state and work.',target:'[data-route="projects"]',prepare:async()=>{qa31CloseTourAssistantPreview();openRoute('projects');await new Promise(r=>setTimeout(r,120));}},
+    {title:'Project Orchestrator',text:'Each Project has one logical Orchestrator coordinating all of its Workspaces and Tasks. It is not a permanently resident model and cannot bypass approvals, routing or sandbox policy.',target:'#qa31ProjectOrchestrator',prepare:async()=>{qa31CloseTourAssistantPreview();openRoute('projects');await new Promise(r=>setTimeout(r,180));}},
+    {title:'Workspace execution',text:'Workspaces remain authoritative for Direct, Team or Council execution, model routing, fallback, compute preference and remote-access policy.',target:'[data-qa7-chat-mode]',prepare:async()=>{openRoute('projects');await new Promise(r=>setTimeout(r,150));}},
+    {title:'Follow provenance',text:'Follow exposes the real chain: Assistant → Project Orchestrator → Task → Workspace → Direct/Team/Council → Agent Profile → Model → Node. It follows events and snapshots, not model narration.',target:'.qa6-follow',prepare:async()=>{openRoute('projects');await new Promise(r=>setTimeout(r,120));}},
+    {title:'Operations',text:'Operations shows active work, node/provider health, attention items and event activity. View-all actions open real destinations.',target:'[data-route="operations"]',prepare:async()=>{openRoute('operations');await new Promise(r=>setTimeout(r,100));}},
+    {title:'Models and Hot Swap',text:'Models owns runtime strategy, qualification and resource-aware placement. Managed Hot Swap changes model residency without changing durable Task identity.',target:'[data-route="models"]',prepare:async()=>{openRoute('models');await new Promise(r=>setTimeout(r,180));}},
+    {title:'Colibri Large Model',text:'Colibri is an optional locally managed large-model runtime. OnePane downloads the platform-specific signed release, verifies SHA-256, and keeps its lifecycle independent from OnePane health.',target:'.colibri-separate',prepare:async()=>{openRoute('models');await new Promise(r=>setTimeout(r,180));}},
+    {title:'OmniRoute',text:'OmniRoute is different: it is an optional external routing/provider connection, not a locally installed OnePane runtime.',target:'.omniroute-separate',prepare:async()=>{openRoute('models');await new Promise(r=>setTimeout(r,140));}},
+    {title:'Agents',text:'Agents is built around Profiles, real Sessions, Teams and Councils. Profiles influence reasoning but never grant tools, secrets, network or approval authority.',target:'[data-route="agents"]',prepare:async()=>{openRoute('agents');await new Promise(r=>setTimeout(r,120));}},
+    {title:'Attention and approvals',text:'Operations that need human authority surface as attention/approval work without silently changing policy.',target:'#attentionButton'},
+    {title:'Inspector',text:'The resizable right dock shows contextual details without floating over your work.',target:'#inspector',prepare:async()=>{setInspectorOpen(true);await new Promise(r=>setTimeout(r,80));}},
+    {title:'Logs and observability',text:'Logs, Events, Watchdog, Metrics, Evidence and Terminal live in the bottom dock. Collapsing it releases the page space immediately.',target:'#bottomDrawer',prepare:async()=>{setDrawerOpen(true);await new Promise(r=>setTimeout(r,80));}},
+    {title:'Resource-aware tabs',text:'Inactive UI tabs may suspend rendering, but durable backend Tasks continue unless their own policy or state says otherwise.',target:'#tabStrip'},
+    {title:'Ask OnePane or run a command',text:'Ctrl+K opens the same OnePane Assistant surface for natural-language help, navigation and explicit governed execution.',target:'#commandButton'},
+    {title:'You’re ready',text:'Assistant → Project Orchestrator → Workspace → Direct / Team / Council → Agents / Models / Tools / Nodes. Each layer has a distinct responsibility and authority boundary.'}
+  ];
+  let index=0,currentTarget=null,closing=false;
+  const host=document.createElement('div');host.id='qa31TourRoot';host.className='tour-overlay';host.innerHTML='<div class="tour-mask"></div><div class="tour-card" role="dialog" aria-modal="true"><div class="tour-kicker"></div><h2></h2><p></p><div class="tour-actions"><button class="btn" id="qa31TourSkip">Skip</button><span class="tour-spacer"></span><button class="btn" id="qa31TourBack">Back</button><button class="btn primary" id="qa31TourNext">Next</button></div></div>';document.body.appendChild(host);
+  const card=$('.tour-card',host),kicker=$('.tour-kicker',host),title=$('h2',card),copy=$('p',card),back=$('#qa31TourBack',host),next=$('#qa31TourNext',host),skip=$('#qa31TourSkip',host);
+  const clearTarget=()=>{if(currentTarget){currentTarget.classList.remove('tour-target');currentTarget=null}};
+  const restore=()=>{
+    state.tabs=JSON.parse(JSON.stringify(snapshot.tabs));state.activeTab=snapshot.activeTab;state.sidebar=snapshot.sidebar;state.inspector=snapshot.inspector;state.inspectorWidth=snapshot.inspectorWidth;state.drawer=snapshot.drawer;state.drawerHeight=snapshot.drawerHeight;activeDrawerTab=snapshot.drawerTab;
+    if(typeof qa4ProjectHub!=='undefined'){qa4ProjectHub.activeProjectID=snapshot.projectID;qa4ProjectHub.activeWorkspaceID=snapshot.projectWorkspaceID}
+    $('#app').dataset.sidebar=state.sidebar;$('#app').dataset.inspector=state.inspector;$('#bottomDrawer').dataset.state=state.drawer;applyInspectorWidth();document.documentElement.style.setProperty('--drawer',state.drawer==='open'?`${state.drawerHeight}px`:'0px');persist();renderTabs();renderActiveView();syncPanelRestoreButtons();window.scrollTo(snapshot.scrollX,snapshot.scrollY);
+  };
+  const finish=(completed=true)=>{if(closing)return;closing=true;clearTarget();qa31CloseTourAssistantPreview();host.classList.add('tour-transitioning');setTimeout(()=>{host.remove();restore();if(completed)localStorage.setItem(TOUR_KEY,'done');},120)};
+  const resolveTarget=step=>{try{return step.target?document.querySelector(step.target):null}catch{return null}};
+  const place=target=>{
+    const margin=14,w=Math.min(390,innerWidth-24),h=card.offsetHeight||270;
+    let left=(innerWidth-w)/2,top=Math.max(margin,(innerHeight-h)/2);
+    if(target){
+      const r=target.getBoundingClientRect();
+      const below=r.bottom+14,above=r.top-h-14;
+      top=below+h<innerHeight-margin?below:(above>margin?above:Math.max(margin,innerHeight-h-margin));
+      left=Math.max(margin,Math.min(innerWidth-w-margin,r.left+r.width/2-w/2));
+    }
+    card.style.width=`${w}px`;card.style.left=`${Math.round(left)}px`;card.style.top=`${Math.round(top)}px`;
+  };
+  const render=async()=>{
+    host.classList.add('tour-transitioning');clearTarget();
+    const step=steps[index];if(step.prepare)await step.prepare();
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    currentTarget=resolveTarget(step);if(currentTarget){currentTarget.classList.add('tour-target');currentTarget.scrollIntoView({block:'nearest',inline:'nearest'})}
+    kicker.textContent=`Tour · ${index+1} / ${steps.length}`;title.textContent=step.title;copy.textContent=step.text;back.disabled=index===0;next.textContent=index===steps.length-1?'Finish':'Next';place(currentTarget);
+    requestAnimationFrame(()=>host.classList.remove('tour-transitioning'));
+  };
+  back.onclick=()=>{if(index>0){index--;render()}};
+  next.onclick=()=>{if(index===steps.length-1)finish(true);else{index++;render()}};
+  skip.onclick=()=>finish(true);
+  const key=e=>{if(!document.body.contains(host)){document.removeEventListener('keydown',key,true);return}if(e.key==='Escape'){e.preventDefault();finish(false)}else if(e.key==='ArrowRight'){e.preventDefault();next.click()}else if(e.key==='ArrowLeft'){e.preventDefault();back.click()}};
+  document.addEventListener('keydown',key,true);
+  render();
+}
+
 bootOnePane();

@@ -7,6 +7,8 @@ on:
       - '.recovery/alpha3/source.patch.xz.b64'
       - '.recovery/alpha3.1/**'
       - '.github/workflows/alpha3.1-stabilization.yml'
+  pull_request:
+    branches: [alpha3-integration]
   workflow_dispatch:
 
 permissions:

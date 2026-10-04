@@ -1,4 +1,4 @@
-export const CHAT_COMMANDS = [
+const CHAT_COMMANDS = [
   ['queue','Flow','Queue a prompt after the current turn','/queue <prompt>'],
   ['steer','Flow','Guide the active turn at its next safe boundary','/steer <guidance>'],
   ['busy','Flow','Set busy-message behavior','/busy queue|steer|interrupt'],
@@ -47,14 +47,14 @@ export const CHAT_COMMANDS = [
   ['help','Session','List or explain chat commands','/help [command]']
 ].map(([name,category,description,usage])=>({name,category,description,usage}));
 
-export function suggestChatCommands(value){
+function suggestChatCommands(value){
   const v=String(value||'').trimStart();
   if(!v.startsWith('/')) return [];
   const needle=v.slice(1).split(/\s/,1)[0].toLowerCase();
   return CHAT_COMMANDS.filter(c=>c.name.startsWith(needle) || c.description.toLowerCase().includes(needle)).slice(0,10);
 }
 
-export function parseChatCommand(value){
+function parseChatCommand(value){
   const raw=String(value||'').trim();
   if(!raw.startsWith('/')) return null;
   const m=raw.match(/^\/(\S+)(?:\s+([\s\S]*))?$/);

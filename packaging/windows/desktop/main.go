@@ -438,9 +438,18 @@ func startDesktopUIServer() (string, error) {
 		return "", err
 	}
 	fileServer := http.FileServer(http.FS(staticFS))
+	index, err := fs.ReadFile(staticFS, "index.html")
+	if err != nil {
+		return "", err
+	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
-			r.URL.Path = "/index.html"
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			if r.Method != http.MethodHead {
+				_, _ = w.Write(index)
+			}
+			return
 		}
 		fileServer.ServeHTTP(w, r)
 	})

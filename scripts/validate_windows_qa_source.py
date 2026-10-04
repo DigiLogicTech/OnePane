@@ -63,6 +63,7 @@ for route, handler in [('tasks','listTasks'),('projects','listProjects'),('event
 
 # Windows app shell integration.
 check('desktop uses single authoritative backend WebUI', 'NewSingleHostReverseProxy' in desktop and '127.0.0.1:18181' in desktop)
+check('desktop root serves index directly without FileServer redirect loop', 'fs.ReadFile(staticFS, "index.html")' in desktop and 'r.URL.Path == "/" || r.URL.Path == "/index.html"' in desktop and 'w.Write(index)' in desktop and 'r.URL.Path = "/index.html"' not in desktop)
 check('desktop reserves native settings routes', '/desktop/settings' in desktop and '/desktop/settings/model-pool' in desktop)
 check('app icon integrated', 'OnePane.ico' in desktop and 'OnePane.ico' in setup)
 check('native title bar follows theme', 'DwmSetWindowAttribute' in desktop and 'onepane-theme|' in desktop)

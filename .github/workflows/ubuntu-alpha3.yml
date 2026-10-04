@@ -1,13 +1,6 @@
 name: Alpha 3 Ubuntu Build
 
 on:
-  push:
-    branches:
-      - alpha3-integration
-    paths:
-      - '.recovery/alpha3/source-patch/**'
-      - '.recovery/alpha3/fixes/**'
-      - '.github/workflows/ubuntu-alpha3.yml'
   workflow_dispatch:
 
 permissions:

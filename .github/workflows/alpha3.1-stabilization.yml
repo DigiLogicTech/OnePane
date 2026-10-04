@@ -34,6 +34,10 @@ jobs:
           python3 scripts/validate_live_follow_workspace.py
           python3 scripts/validate_workspace_components_v2.py
           node --check internal/webui/static/app.js
+          cmp internal/webui/static/app.js packaging/windows/desktop/static/app.js
+          cmp internal/webui/static/index.html packaging/windows/desktop/static/index.html
+          ! grep -F 'data-route="settings">⚙ <span>Defaults</span>' internal/webui/static/index.html
+          grep -F "const QA8_RELEASE='${ONEPANE_VERSION}';" internal/webui/static/app.js
       - name: Go tests
         run: go test ./...
       - name: Build Windows x64 installer
@@ -61,7 +65,7 @@ jobs:
                   raise SystemExit(f"could not refresh payload hash for {name}")
           setup.write_text(text)
           PY
-          go build -trimpath -ldflags "-s -w -H windowsgui" -o dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe ./packaging/windows/setup
+          go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=$ONEPANE_VERSION" -o dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe ./packaging/windows/setup
           sha256sum dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe > dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe.sha256
           test -s dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe
           python3 - <<'PY'

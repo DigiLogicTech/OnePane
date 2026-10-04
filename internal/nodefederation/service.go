@@ -675,9 +675,4 @@ func (s *Service) SetComputePolicy(ctx context.Context, cmd SetComputePolicyComm
 	return s.ComputePolicy(ctx, cmd.NodeID)
 }
 
-func boolInt(v bool) int {
-	if v {
-		return 1
-	}
-	return 0
-}
+

@@ -296,7 +296,11 @@ func (s *RuntimeSupervisor) resolve(ctx context.Context, deploymentID string) (r
 	}
 	if strings.EqualFold(cfg.RuntimeBackend, "colibri") {
 		if strings.TrimSpace(cfg.EnginePath) == "" {
-			cfg.EnginePath = filepath.Join(filepath.Dir(cfg.Executable), "colibri.exe")
+			engineName := "colibri"
+			if runtime.GOOS == "windows" {
+				engineName = "colibri.exe"
+			}
+			cfg.EnginePath = filepath.Join(filepath.Dir(cfg.Executable), engineName)
 		}
 		if st, err := os.Stat(cfg.EnginePath); err != nil || st.IsDir() {
 			return cfg, refs, "", errors.New("Colibri engine unavailable")
@@ -541,7 +545,7 @@ func findPythonExecutable() (string, error) {
 			return p, nil
 		}
 	}
-	return "", errors.New("Colibri serve mode requires Python 3.10+; install the Colibri component from Models & Cloud")
+	return "", errors.New("Colibri serve mode requires Python 3.10+; install the Colibri component from Models")
 }
 
 func (s *RuntimeSupervisor) Start(ctx context.Context, deploymentID string) (RuntimeInstance, error) {

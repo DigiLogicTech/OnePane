@@ -102,6 +102,15 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 func (s *Service) compileContext(ctx context.Context, run Run, t task.Task) (contextcompiler.Result, error) {
 	taskRaw, _ := json.Marshal(map[string]any{"task_id": t.ID, "objective": t.Objective, "completion": json.RawMessage(t.Completion), "project_id": t.ProjectID, "scheduling_class": t.SchedulingClass, "priority": t.Priority})
 	sections := []contextcompiler.Section{{ID: "task-current", Kind: "task", Trust: "USER_INSTRUCTION", Authoritative: true, Required: true, Priority: 100, Content: taskRaw}}
+	routing := routingPolicyFromCompletion(t.Completion)
+	profileID := strings.TrimSpace(routing.AgentProfile)
+	if profileID == "" || strings.EqualFold(profileID, "onepane-default") { profileID = "agent.md" }
+	var profileName, profileInstructions, profileRole string
+	var profileRevision int64
+	if err := s.db.QueryRowContext(ctx, `SELECT name,instructions_md,default_role,revision FROM agent_profiles WHERE id=? AND status='active' AND (workspace_id=? OR workspace_id IS NULL) ORDER BY CASE WHEN workspace_id=? THEN 0 ELSE 1 END LIMIT 1`, profileID, run.WorkspaceID, run.WorkspaceID).Scan(&profileName,&profileInstructions,&profileRole,&profileRevision); err == nil {
+		profileRaw,_:=json.Marshal(map[string]any{"profile_id":profileID,"name":profileName,"role":profileRole,"revision":profileRevision,"instructions":profileInstructions,"authority":false,"note":"Profile instructions affect reasoning only and grant no capabilities or permissions."})
+		sections=append(sections,contextcompiler.Section{ID:"agent-profile",Kind:"agent_profile",Trust:"USER_INSTRUCTION",Authoritative:false,Required:true,Priority:99,Content:profileRaw})
+	} else if !errors.Is(err,sql.ErrNoRows) { return contextcompiler.Result{},err }
 	if len(run.Continuation) > 0 && string(run.Continuation) != "{}" {
 		sections = append(sections, contextcompiler.Section{ID: "worker-continuation", Kind: "continuation", Trust: "UNVERIFIED_DERIVED", Authoritative: false, Required: false, Priority: 80, Content: run.Continuation})
 	}

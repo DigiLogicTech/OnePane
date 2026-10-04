@@ -31,7 +31,9 @@ printf 'Building OnePane Linux %s\n' "$ARCH"
   -o "$PKGROOT/usr/bin/onepane" ./cmd/harnessd)
 
 install -m 0644 "$ROOT/packaging/debian/onepane.service" "$PKGROOT/lib/systemd/system/onepane.service"
-install -m 0644 "$ROOT/LICENSE" "$PKGROOT/usr/share/doc/onepane/copyright"
+if [[ -f "$ROOT/LICENSE" ]]; then
+  install -m 0644 "$ROOT/LICENSE" "$PKGROOT/usr/share/doc/onepane/copyright"
+fi
 if [[ -f "$ROOT/NOTICE" ]]; then
   install -m 0644 "$ROOT/NOTICE" "$PKGROOT/usr/share/doc/onepane/NOTICE"
 fi

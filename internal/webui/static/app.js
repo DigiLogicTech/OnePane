@@ -1723,4 +1723,72 @@ function qa31WireAssistantButton(){
 const qa31AssistantInitBase=init;
 init=function(){qa31AssistantInitBase();qa31WireAssistantButton();};
 
+
+/* === Alpha 3.1 authoritative Agents surface === */
+let qa31AgentTab='profiles';
+
+function qa31ProfileCard(p){
+  const builtin=p.source_kind==='builtin';
+  return `<article class="panel-card agent-profile-card" data-profile-id="${escapeHtml(p.id)}"><div class="card-header"><div><div class="card-title">${escapeHtml(p.name||p.id)}</div><div class="list-meta">${escapeHtml(p.id)} · ${builtin?'Built-in':'Custom'} · revision ${Number(p.revision||1)}</div></div><span class="pill ${builtin?'good':''}">${escapeHtml(p.protocol_level||'L1')}</span></div><div class="widget-body"><p>${escapeHtml(p.description||'')}</p><dl class="definition-grid"><dt>Role</dt><dd>${escapeHtml(p.default_role||'general')}</dd><dt>Capability</dt><dd>${escapeHtml(p.capability_id||'inference.general')}</dd></dl><details><summary>Instructions</summary><pre class="profile-instructions">${escapeHtml(p.instructions_md||'')}</pre></details><div class="list-meta">Profile instructions shape reasoning only; OnePane policy still governs tools, secrets, files, network, nodes and approvals.</div>${builtin?'':`<div class="toolbar" style="margin-top:10px"><button class="btn" data-profile-edit="${escapeHtml(p.id)}">Edit</button><button class="btn danger" data-profile-archive="${escapeHtml(p.id)}">Archive</button></div>`}</div></article>`;
+}
+function qa31ProfileDialog(profile=null){
+  const p=profile||{};
+  openModal(profile?'Edit Agent Profile':'New Agent Profile',`<form id="qa31ProfileForm" class="settings-stack"><label>Name<input id="qa31ProfileName" value="${escapeHtml(p.name||'')}"></label><label>Description<input id="qa31ProfileDescription" value="${escapeHtml(p.description||'')}"></label><label>Role<input id="qa31ProfileRole" value="${escapeHtml(p.default_role||'general')}"></label><label>Capability<input id="qa31ProfileCapability" value="${escapeHtml(p.capability_id||'inference.general')}"></label><label>Protocol<select id="qa31ProfileProtocol">${['L0','L1','L2','L3'].map(x=>`<option ${p.protocol_level===x?'selected':''}>${x}</option>`).join('')}</select></label><label>agent.md instructions<textarea id="qa31ProfileInstructions" rows="10">${escapeHtml(p.instructions_md||'')}</textarea></label><div class="modal-actions"><button class="btn" type="button" id="qa31ProfileCancel">Cancel</button><button class="btn primary" type="submit">${profile?'Save':'Create'}</button></div></form>`);
+  $('#qa31ProfileCancel').onclick=closeModal;
+  $('#qa31ProfileForm').onsubmit=async e=>{
+    e.preventDefault();
+    const body={
+      workspace_id:onepaneWorkspace,
+      name:$('#qa31ProfileName').value.trim(),
+      description:$('#qa31ProfileDescription').value.trim(),
+      default_role:$('#qa31ProfileRole').value.trim()||'general',
+      capability_id:$('#qa31ProfileCapability').value.trim()||'inference.general',
+      protocol_level:$('#qa31ProfileProtocol').value,
+      instructions_md:$('#qa31ProfileInstructions').value,
+      metadata:{}
+    };
+    try{
+      if(profile){
+        body.expected_revision=profile.revision;
+        await apiRequest('/v1/agent-profiles/'+encodeURIComponent(profile.id),{method:'PATCH',body:JSON.stringify(body)});
+      }else{
+        await apiRequest('/v1/agent-profiles',{method:'POST',body:JSON.stringify(body)});
+      }
+      closeModal();notice(profile?'Profile updated.':'Profile created.');renderAgents();
+    }catch(ex){notice(ex.message,'bad')}
+  };
+}
+renderAgents=async function(){
+  $('#viewHost').innerHTML=`<section class="page">${pageHeader('Agents','Reusable Agent Profiles and real execution sessions. Assistant and Project Orchestrator remain control-plane layers, not ordinary Agents.','<button class="btn primary" id="qa31NewProfile">New Profile</button>')}<div class="subtabs">${[['profiles','Profiles'],['sessions','Sessions'],['teams','Teams'],['councils','Councils']].map(([id,label])=>`<button class="subtab ${qa31AgentTab===id?'active':''}" data-qa31-agent-tab="${id}">${label}</button>`).join('')}</div><div id="qa31AgentsBody" class="widget-body">Loading…</div></section>`;
+  $('[data-qa31-agent-tab]').forEach(b=>b.onclick=()=>{qa31AgentTab=b.dataset.qa31AgentTab;renderAgents();});
+  $('#qa31NewProfile').onclick=()=>qa31ProfileDialog();
+  const qs=encodeURIComponent(onepaneWorkspace),body=$('#qa31AgentsBody');
+  try{
+    if(qa31AgentTab==='profiles'){
+      const profiles=await apiRequest('/v1/agent-profiles?workspace_id='+qs);
+      body.innerHTML=`<div class="cards-grid">${(profiles||[]).map(qa31ProfileCard).join('')}</div>`;
+      $('[data-profile-edit]',body).forEach(b=>b.onclick=()=>{const p=(profiles||[]).find(x=>x.id===b.dataset.profileEdit);if(p)qa31ProfileDialog(p)});
+      $('[data-profile-archive]',body).forEach(b=>b.onclick=async()=>{
+        try{
+          await apiRequest('/v1/agent-profiles/'+encodeURIComponent(b.dataset.profileArchive)+'/archive',{method:'POST',body:JSON.stringify({workspace_id:onepaneWorkspace})});
+          notice('Profile archived.');renderAgents();
+        }catch(ex){notice(ex.message,'bad')}
+      });
+    }else if(qa31AgentTab==='sessions'){
+      const sessions=await apiRequest('/v1/agent-sessions?workspace_id='+qs+'&limit=100');
+      body.innerHTML=(sessions||[]).length?`<div class="table-shell"><table class="data-table"><thead><tr><th>Task</th><th>Mode</th><th>Profile</th><th>State</th><th>Project</th></tr></thead><tbody>${sessions.map(s=>`<tr><td>${escapeHtml(s.objective||s.id)}</td><td><span class="pill">${escapeHtml(titleCase(s.mode||'direct'))}</span></td><td>${escapeHtml(s.profile_id||'agent.md')}</td><td>${escapeHtml(s.state||'')}</td><td>${escapeHtml(s.project_id||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state compact">No real Agent sessions yet. Direct, Team and Council execution will appear here as Tasks run.</div>';
+    }else if(qa31AgentTab==='teams'){
+      const teams=await apiRequest('/v1/teams?workspace_id='+qs);
+      body.innerHTML=(teams||[]).length?`<div class="cards-grid">${teams.map(t=>`<article class="panel-card"><div class="card-header"><div><div class="card-title">${escapeHtml(t.name||t.id)}</div><div class="list-meta">${escapeHtml(t.purpose||'Reusable Team composition')}</div></div><span class="pill">${escapeHtml(t.status||'active')}</span></div><div class="widget-body">Reusable by Team or Council execution. Active model-powered seats are capped at 8.</div></article>`).join('')}</div>`:'<div class="empty-state compact">No Teams configured. Workspace Team/Council settings can reference reusable Teams.</div>';
+    }else{
+      const sessions=await apiRequest('/v1/agent-sessions?workspace_id='+qs+'&limit=100');
+      const councils=(sessions||[]).filter(x=>String(x.mode).toLowerCase()==='council');
+      body.innerHTML=councils.length?`<div class="table-shell"><table class="data-table"><thead><tr><th>Council task</th><th>Team</th><th>State</th><th>Session</th></tr></thead><tbody>${councils.map(s=>`<tr><td>${escapeHtml(s.objective||s.id)}</td><td>${escapeHtml(s.team_id||'—')}</td><td>${escapeHtml(s.state||'')}</td><td>${escapeHtml(s.team_session_id||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state compact">No Council executions yet. Councils reuse governed Team compositions and independent deliberation.</div>';
+    }
+  }catch(ex){
+    body.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;
+  }
+  bindViewActions($('#viewHost'));
+};
+
 bootOnePane();

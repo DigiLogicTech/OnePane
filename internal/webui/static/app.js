@@ -1791,4 +1791,53 @@ renderAgents=async function(){
   bindViewActions($('#viewHost'));
 };
 
+
+/* === Alpha 3.1 Project Orchestrator Project-level surface === */
+async function qa31ProjectOrchestratorStrip(project,workspace){
+  try{
+    const [o,handoffs]=await Promise.all([
+      apiRequest('/v1/projects/'+encodeURIComponent(project.id)+'/orchestrator'),
+      apiRequest('/v1/projects/'+encodeURIComponent(project.id)+'/orchestrator/handoffs?limit=20').catch(()=>[])
+    ]);
+    const tasks=(liveOps.tasks||[]).filter(t=>t.project_id===project.id);
+    const waiting=tasks.filter(t=>['waiting_approval','blocked','waiting'].includes(String(t.state||'').toLowerCase())).length;
+    const activeCount=tasks.filter(t=>!['complete','failed','cancelled'].includes(String(t.state||'').toLowerCase())).length;
+    return `<section class="project-orchestrator-strip" id="qa31ProjectOrchestrator"><div class="orchestrator-main"><div><div class="eyebrow">PROJECT ORCHESTRATOR</div><strong>${escapeHtml(project.name||project.id)}</strong><div class="list-meta">Coordinates this Project across all Workspaces while preserving Workspace routing, approvals and sandbox policy.</div></div><span class="pill ${o.status==='ready'?'good':o.status==='degraded'?'warn':''}">${escapeHtml(titleCase(o.status||'ready'))}</span></div><div class="orchestrator-metrics"><span>Active work <strong>${activeCount}</strong></span><span>Waiting <strong>${waiting}</strong></span><span>Workspace <strong>${escapeHtml(workspace?.name||'—')}</strong></span><span>Handoffs <strong>${Array.isArray(handoffs)?handoffs.length:0}</strong></span></div><div class="toolbar"><button class="btn primary" id="qa31AskProject">Ask Project…</button><button class="btn" id="qa31OrchestratorActivity">Activity</button><button class="btn" id="qa31FollowProject">Follow current work</button></div></section>`;
+  }catch(ex){
+    return `<section class="project-orchestrator-strip"><div class="error">Project Orchestrator unavailable: ${escapeHtml(ex.message)}</div></section>`;
+  }
+}
+function qa31AskProject(project,workspace){
+  openModal(`Project Orchestrator · ${project.name||project.id}`,`<div class="widget-body"><div class="list-meta">Project context · ${escapeHtml(workspace?.name||'current Workspace')}</div><textarea id="qa31ProjectPrompt" rows="6" placeholder="Ask about this Project or request work…"></textarea><div id="qa31ProjectAnswer" class="assistant-project-answer"></div><div class="modal-actions"><button class="btn" id="qa31ProjectAsk">Ask</button><button class="btn primary" id="qa31ProjectRun">Run</button></div></div>`);
+  const submit=async allow=>{
+    const prompt=$('#qa31ProjectPrompt')?.value.trim();if(!prompt)return;
+    const status=$('#qa31ProjectAnswer');status.textContent='Project Orchestrator working…';
+    try{
+      const out=await apiRequest('/v1/projects/'+encodeURIComponent(project.id)+'/orchestrator/turns',{method:'POST',body:JSON.stringify({objective:prompt,project_workspace_id:workspace?.id||'',allow_task_creation:allow,force_task:false})});
+      status.innerHTML=`<div class="assistant-turn-body">${escapeHtml(out?.turn?.content||'Project context reviewed.')}</div>${out?.task_id?`<div class="list-meta">Task ${escapeHtml(out.task_id)} · ${escapeHtml(out.disposition||'created')}</div>`:''}`;
+    }catch(ex){
+      status.innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`;
+    }
+  };
+  $('#qa31ProjectAsk').onclick=()=>submit(false);
+  $('#qa31ProjectRun').onclick=()=>submit(true);
+}
+const qa31RenderProjectsBase=renderProjects;
+renderProjects=async function(){
+  await qa31RenderProjectsBase();
+  const project=qa4ActiveProject?.(),workspace=project?qa4ActiveWorkspace?.():null;
+  if(!project)return;
+  const main=$('.project-main'),toolbar=main?$('.project-toolbar',main):null;
+  if(!main||!toolbar)return;
+  const html=await qa31ProjectOrchestratorStrip(project,workspace);
+  toolbar.insertAdjacentHTML('afterend',html);
+  $('#qa31AskProject')?.addEventListener('click',()=>qa31AskProject(project,workspace));
+  $('#qa31OrchestratorActivity')?.addEventListener('click',()=>{setDrawerOpen(true);state.drawerTab='events';renderDrawer();});
+  $('#qa31FollowProject')?.addEventListener('click',()=>{
+    const task=(liveOps.tasks||[]).find(t=>t.project_id===project.id&&!['complete','failed','cancelled'].includes(String(t.state||'').toLowerCase()));
+    if(task)qa4Inspect('task',task.id,task.objective||task.id,task);
+    else notice('No active Project task to follow.');
+  });
+};
+
 bootOnePane();

@@ -81,20 +81,21 @@
 
       <main id="viewHost" class="view-host"></main>
 
-      <button id="drawerRestore" class="panel-restore drawer-restore hidden" aria-label="Restore observability drawer" title="Restore logs and observability">⌃ Logs</button>
+      <button id="drawerRestore" class="panel-restore drawer-restore hidden" aria-label="Open Logs drawer" title="Open Logs drawer">⌃</button>
       <section id="bottomDrawer" class="bottom-drawer" data-state="open">
         <div class="drawer-resizer" id="drawerResizer" role="separator" aria-orientation="horizontal"></div>
         <div class="drawer-tabs" id="drawerTabs"></div>
         <div class="drawer-actions">
           <select id="logScope"><option>All components</option><option>Local node</option><option>Watchdog</option><option>Scheduler</option></select>
           <select id="logLevel"><option>All levels</option><option>Info</option><option>Warn</option><option>Error</option></select>
-          <button class="icon-button" id="drawerToggle" title="Collapse drawer">⌄</button>
+          <button class="drawer-edge-toggle" id="drawerToggle" aria-label="Collapse Logs drawer" title="Collapse Logs drawer">⌄</button>
         </div>
         <div id="drawerContent" class="drawer-content"></div>
       </section>
     </section>
 
-    <button id="inspectorRestore" class="panel-restore inspector-restore hidden" aria-label="Restore inspector" title="Restore Inspector">Inspector ‹</button>
+    <div id="inspectorResizer" class="inspector-resizer" role="separator" aria-orientation="vertical" aria-label="Resize Inspector" title="Drag to resize; double-click to reset"></div>
+    <button id="inspectorRestore" class="panel-restore inspector-restore" aria-label="Collapse Inspector" title="Collapse Inspector">&lt;|</button>
     <aside id="inspector" class="inspector" data-state="open" aria-label="Inspector"></aside>
   </div>
 

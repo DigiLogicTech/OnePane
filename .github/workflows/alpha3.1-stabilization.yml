@@ -47,6 +47,8 @@ jobs:
           patch -p1 -d buildsrc < .recovery/alpha3.1/stabilization.patch
           patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/council-runtime.patch
           patch -p1 -d buildsrc < .recovery/alpha3.1/council-runtime.patch
+          patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/follow-snapshots.patch
+          patch -p1 -d buildsrc < .recovery/alpha3.1/follow-snapshots.patch
       - name: Validate source
         working-directory: buildsrc
         shell: bash
@@ -56,6 +58,8 @@ jobs:
           node --check packaging/windows/desktop/static/app.js
           python scripts/validate_alpha3_source.py
           python ../.recovery/alpha3.1/validate_shell.py
+          python ../.recovery/alpha3.1/validate_runtime_binding.py
+          python ../.recovery/alpha3.1/validate_follow_snapshots.py
           python scripts/validate_live_follow_workspace.py
           python scripts/validate_workspace_components_v2.py
           go mod download

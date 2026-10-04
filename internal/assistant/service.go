@@ -114,10 +114,12 @@ func extractText(raw []byte) string {
 }
 
 func (s *Service) globalSnapshot(ctx context.Context,workspaceID string) json.RawMessage {
-	counts:=map[string]any{};_ = s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM projects WHERE workspace_id=? AND status='active'`,workspaceID).Scan(&counts["projects"])
-	_ = s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM tasks WHERE workspace_id=? AND state NOT IN ('complete','cancelled','failed')`,workspaceID).Scan(&counts["active_tasks"])
-	_ = s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM harness_nodes WHERE trust_state IN ('local','paired')`).Scan(&counts["nodes"])
-	_ = s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM provider_connections WHERE (workspace_id=? OR workspace_id IS NULL) AND status IN ('connected','degraded')`,workspaceID).Scan(&counts["providers"])
+	var projectsCount,tasksCount,nodesCount,providersCount int64
+	_ = s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM projects WHERE workspace_id=? AND status='active'`,workspaceID).Scan(&projectsCount)
+	_ = s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM tasks WHERE workspace_id=? AND state NOT IN ('complete','cancelled','failed')`,workspaceID).Scan(&tasksCount)
+	_ = s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM harness_nodes WHERE trust_state IN ('local','paired')`).Scan(&nodesCount)
+	_ = s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM provider_connections WHERE (workspace_id=? OR workspace_id IS NULL) AND status IN ('connected','degraded')`,workspaceID).Scan(&providersCount)
+	counts:=map[string]any{"projects":projectsCount,"active_tasks":tasksCount,"nodes":nodesCount,"providers":providersCount}
 	projects:=[]map[string]any{};rows,_:=s.db.QueryContext(ctx,`SELECT id,name,status,updated_at FROM projects WHERE workspace_id=? ORDER BY updated_at DESC LIMIT 20`,workspaceID);if rows!=nil{defer rows.Close();for rows.Next(){var idv,name,status string;var updated int64;if rows.Scan(&idv,&name,&status,&updated)==nil{projects=append(projects,map[string]any{"id":idv,"name":name,"status":status,"updated_at":updated})}}}
 	raw,_:=json.Marshal(map[string]any{"scope":"global","counts":counts,"projects":projects});return raw
 }

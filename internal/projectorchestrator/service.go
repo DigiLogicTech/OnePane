@@ -182,7 +182,11 @@ func (s *Service) contextSnapshot(ctx context.Context, projectID, requestedPWS s
 	er,_:=s.db.QueryContext(ctx, `SELECT sequence,event_type,aggregate_type,aggregate_id,occurred_at FROM events WHERE workspace_id=? AND (aggregate_id=? OR json_extract(payload_json,'$.project_id')=? OR aggregate_id IN (SELECT id FROM tasks WHERE project_id=?)) ORDER BY sequence DESC LIMIT 20`,workspaceID,projectID,projectID,projectID)
 	if er!=nil { defer er.Close(); for er.Next(){var seq,at int64;var et,ag,aid string;if er.Scan(&seq,&et,&ag,&aid,&at)==nil{events=append(events,map[string]any{"sequence":seq,"type":et,"aggregate_type":ag,"aggregate_id":aid,"occurred_at":at})}} }
 	runtime := map[string]any{}
-	_ = s.db.QueryRowContext(ctx, `SELECT id,status,desired_state,backend,updated_at FROM project_runtimes WHERE project_id=? ORDER BY updated_at DESC LIMIT 1`, projectID).Scan(&runtime["id"],&runtime["status"],&runtime["desired_state"],&runtime["backend"],&runtime["updated_at"])
+	var runtimeID,runtimeStatus,runtimeDesired,runtimeBackend string
+	var runtimeUpdated int64
+	if s.db.QueryRowContext(ctx, `SELECT id,status,desired_state,backend,updated_at FROM project_runtimes WHERE project_id=? ORDER BY updated_at DESC LIMIT 1`, projectID).Scan(&runtimeID,&runtimeStatus,&runtimeDesired,&runtimeBackend,&runtimeUpdated)==nil {
+		runtime=map[string]any{"id":runtimeID,"status":runtimeStatus,"desired_state":runtimeDesired,"backend":runtimeBackend,"updated_at":runtimeUpdated}
+	}
 	pwss:=[]map[string]any{};for _,x:=range pwsRows{pwss=append(pwss,map[string]any{"id":x.ID,"name":x.Name,"ai_settings":json.RawMessage(x.Settings)})}
 	snapshot:=map[string]any{"project":map[string]any{"id":projectID,"name":projectName,"policy":json.RawMessage(projectPolicy)},"project_workspaces":pwss,"selected_project_workspace_id":selected.ID,"execution_mode":mode,"tasks":tasks,"recent_events":events,"runtime":runtime}
 	raw,_:=json.Marshal(snapshot)

@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 read = lambda p: (ROOT / p).read_text(encoding='utf-8')
 ui = read('internal/webui/static/app.js')
 setup = read('packaging/windows/setup/main.go')
+buildinfo = read('internal/buildinfo/buildinfo.go')
 runtime = read('internal/runtimecoord/service.go')
 resources = read('internal/resourcecoord/service.go')
 workspace = read('internal/projectworkspace/views.go') + read('internal/projectworkspace/storage.go')
@@ -16,7 +17,7 @@ migration = read('migrations/0022_alpha3_control_plane.sql')
 checks = []
 def ck(name, cond): checks.append((name, bool(cond)))
 
-ck('release is Alpha 3', "const QA8_RELEASE='0.1.0-alpha.3.1'" in ui and '0.1.0-alpha.3' in setup)
+ck('release identity is centralized for Alpha 3.1', "const QA8_RELEASE='0.1.0-alpha.3.1'" in ui and 'var version = buildinfo.Version' in setup and 'Version   = "dev"' in buildinfo)
 ck('visible chat modes are Direct Team Council', "const qa8VisibleModes=['direct','team','council']" in ui and "modeOptions=[['default',`Default (${titleCase(defaultMode)})`],['direct','Direct'],['team','Team'],['council','Council']]" in ui)
 ck('legacy Supervisor maps to Direct', "function qa8Mode(v){v=String(v||'').toLowerCase();return v==='team'||v==='council'?v:'direct';}" in ui)
 ck('Model Stack is first-class workspace component', "QA6_COMPONENTS.modelstack={title:'Model Stack'" in ui and 'qa8ModelStackContent' in ui)
@@ -40,7 +41,7 @@ ck('WebView2 is downloaded on demand', 'LinkId=2124703' in setup and 'MicrosoftE
 failed = [name for name, ok in checks if not ok]
 for name, ok in checks:
     print(f"[{'PASS' if ok else 'FAIL'}] {name}")
-print(f"\nALPHA 3 SOURCE: {len(checks)-len(failed)}/{len(checks)} CHECKS PASSED")
+print(f"\nALPHA 3.1 SOURCE: {len(checks)-len(failed)}/{len(checks)} CHECKS PASSED")
 if failed:
     for name in failed:
         print(' - ' + name, file=sys.stderr)

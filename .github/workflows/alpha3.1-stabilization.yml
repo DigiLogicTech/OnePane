@@ -51,9 +51,6 @@ jobs:
           patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/follow-snapshots.patch
           patch -p1 -d buildsrc < .recovery/alpha3.1/follow-snapshots.patch
           # Capture the exact pre-uninstall recovered source so stale recovery hunks can be rebased deterministically.
-          sed -n '470,540p' buildsrc/packaging/windows/setup/main.go
-          patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/uninstall-lifecycle.patch
-          patch -p1 -d buildsrc < .recovery/alpha3.1/uninstall-lifecycle.patch
           patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/orchestration-foundations.patch
           patch -p1 -d buildsrc < .recovery/alpha3.1/orchestration-foundations.patch
       - name: Validate source

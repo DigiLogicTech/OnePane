@@ -29,11 +29,12 @@ jobs:
           set -euo pipefail
           python3 scripts/validate_alpha3_source.py
           python3 scripts/validate_windows_qa_source.py
-          python3 scripts/validate_windows_qa4_source.py
+          # QA4's literal Alpha 3 DOM contract is superseded by the Alpha 3.1 product contract.
           python3 scripts/validate_windows_qa5_source.py
           python3 scripts/validate_live_follow_workspace.py
           python3 scripts/validate_workspace_components_v2.py
           python3 scripts/validate_shell_polish.py
+          python3 scripts/validate_alpha31_product_contract.py
           node --check internal/webui/static/chat-commands.js
           node --check internal/webui/static/app.js
           ! grep -F "type=\"module\"" internal/webui/static/index.html

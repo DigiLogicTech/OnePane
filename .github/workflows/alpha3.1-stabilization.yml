@@ -56,7 +56,7 @@ jobs:
           path: buildsrc
           retention-days: 7
       - name: Promote reconstructed tree to canonical source
-        if: github.event_name == 'push' && github.ref == 'refs/heads/alpha3.1-orchestration'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/alpha3.1-orchestration'
         shell: bash
         run: |
           set -euo pipefail

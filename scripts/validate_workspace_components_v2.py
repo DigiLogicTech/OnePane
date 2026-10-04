@@ -12,7 +12,7 @@ scheduler=read('internal/scheduler/types.go')
 checks=[]
 def ck(name, cond): checks.append((name,bool(cond)))
 
-ck('Settings retains Defaults inheritance semantics', "pages.settings.title='Settings'" in ui and 'workspace_defaults' in ui and 'existing workspaces keep their own settings' in ui)
+ck('Settings retains Defaults inheritance semantics', "pages.settings.title='Settings'" in ui and 'workspace_defaults' in ui and 'Existing Projects and Workspaces retain their own policy' in ui)
 ck('workspace defaults migrate legacy project defaults', 'legacy=stored.project_defaults||{}' in ui and 'workspace_defaults' in ui and 'delete next.project_defaults' in ui)
 ck('workspace Settings is a reusable component', "QA6_COMPONENTS.settings={title:'Workspace settings'" in ui and "QA6_INSPECTOR_COMPONENTS.push('settings')" in ui)
 ck('workspace Settings can be seeded into new layouts', "type:'settings',title:'Workspace settings'" in ui)

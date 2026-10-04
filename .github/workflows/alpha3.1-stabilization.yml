@@ -1,24 +1,17 @@
-name: Alpha 3.1 Stabilization
+name: Alpha 3.1 Source Native CI
 
 on:
   push:
-    branches: [alpha3.1-stabilization, alpha3.1-orchestration]
-    paths:
-      - '.recovery/alpha3/source.patch.xz.b64'
-      - '.recovery/alpha3.1/**'
-      - '.github/workflows/alpha3.1-stabilization.yml'
+    branches: [alpha3.1-orchestration]
   pull_request:
     branches: [alpha3-integration]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   ONEPANE_VERSION: 0.1.0-alpha.3.1
-  ALPHA3_PATCH_XZ_SHA256: bd17c771261cdb6099d789d87ae2706fa8dbfb56eea1fa6e49ceb844a3358781
-  ALPHA3_PATCH_B64_SHA256: 0986d1bac3c0b85c21b7a71c6b529dd173b701a87aa01c8d5639b80bdf0bf808
-  ALPHA31_PATCH_GIT_BLOB_SHA: 142e40a6f26547b467977e7bc0b2fe79598edbe2
 
 jobs:
   validate:
@@ -30,85 +23,35 @@ jobs:
         with:
           go-version: '1.23.x'
           cache: false
-      - name: Restore Alpha 3 and apply Alpha 3.1 stabilization
+      - name: Validate source contracts
         shell: bash
         run: |
           set -euo pipefail
-          mkdir buildsrc
-          base64 -d .recovery/alpha2-buildsrc-current.b64 > alpha2-source.tar.xz
-          tar -xJf alpha2-source.tar.xz -C buildsrc
-          echo "${ALPHA3_PATCH_B64_SHA256}  .recovery/alpha3/source.patch.xz.b64" | sha256sum -c -
-          base64 -d .recovery/alpha3/source.patch.xz.b64 > alpha3.patch.xz
-          echo "${ALPHA3_PATCH_XZ_SHA256}  alpha3.patch.xz" | sha256sum -c -
-          xz -dc alpha3.patch.xz > alpha3.patch
-          patch -p1 -d buildsrc < alpha3.patch
-          ACTUAL_ALPHA31_BLOB_SHA="$(git hash-object .recovery/alpha3.1/stabilization.patch)"
-          test "${ACTUAL_ALPHA31_BLOB_SHA}" = "${ALPHA31_PATCH_GIT_BLOB_SHA}"
-          patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/stabilization.patch
-          patch -p1 -d buildsrc < .recovery/alpha3.1/stabilization.patch
-          patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/council-runtime.patch
-          patch -p1 -d buildsrc < .recovery/alpha3.1/council-runtime.patch
-          patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/follow-snapshots.patch
-          patch -p1 -d buildsrc < .recovery/alpha3.1/follow-snapshots.patch
-      - uses: actions/upload-artifact@v4
-        with:
-          name: OnePane-alpha3.1-canonical-source
-          path: buildsrc
-          retention-days: 7
-          if-no-files-found: error
-      - name: Promote reconstructed tree to canonical source
-        if: github.event_name == 'push' && github.ref_name == 'alpha3.1-orchestration'
-        shell: bash
-        run: |
-          set -euo pipefail
-          rsync -a --delete --exclude='.git/' --exclude='.github/' --exclude='.recovery/' --exclude='buildsrc/' buildsrc/ ./
-          rm -rf buildsrc alpha2-source.tar.xz alpha3.patch alpha3.patch.xz
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "Canonical source already materialized."
-            exit 0
-          fi
-          git commit -m "chore(alpha3.1): materialize canonical recovered source"
-          git push origin HEAD:alpha3.1-orchestration
-      - name: Validate source
-        working-directory: buildsrc
-        shell: bash
-        run: |
-          set -euo pipefail
+          python3 scripts/validate_alpha3_source.py
+          python3 scripts/validate_windows_qa_source.py
+          python3 scripts/validate_windows_qa4_source.py
+          python3 scripts/validate_windows_qa5_source.py
+          python3 scripts/validate_live_follow_workspace.py
+          python3 scripts/validate_workspace_components_v2.py
           node --check internal/webui/static/app.js
-          node --check packaging/windows/desktop/static/app.js
-          python scripts/validate_alpha3_source.py
-          python ../.recovery/alpha3.1/validate_shell.py
-          python ../.recovery/alpha3.1/validate_runtime_binding.py
-          python ../.recovery/alpha3.1/validate_follow_snapshots.py
-          python ../.recovery/alpha3.1/validate_package_lifecycle.py
-          python scripts/validate_live_follow_workspace.py
-          python scripts/validate_workspace_components_v2.py
-          go mod download
-          go mod verify
-          go test ./...
+      - name: Go tests
+        run: go test ./...
       - name: Cross-compile Windows x64
-        working-directory: buildsrc
         shell: bash
         run: |
           set -euo pipefail
-          export CGO_ENABLED=0 GOOS=windows GOARCH=amd64
-          go build ./cmd/harnessd
-          go build ./packaging/windows/desktop
-          go build ./packaging/windows/service
-          go build ./packaging/windows/setup
+          mkdir -p dist/windows-x64
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o dist/windows-x64/onepane.exe ./cmd/onepane
       - name: Build Ubuntu amd64 package
         shell: bash
-        env:
-          ONEPANE_ARCH: amd64
         run: |
           set -euo pipefail
-          bash buildsrc/scripts/build-ubuntu-deb.sh
-          dpkg-deb --info buildsrc/dist/ubuntu/*.deb
+          bash scripts/build-ubuntu-deb.sh
       - uses: actions/upload-artifact@v4
+        if: success()
         with:
-          name: OnePane-alpha3.1-buildsrc
-          path: buildsrc
-          retention-days: 2
+          name: OnePane-alpha3.1-source-native
+          path: |
+            dist/**
+          if-no-files-found: warn
+          retention-days: 7

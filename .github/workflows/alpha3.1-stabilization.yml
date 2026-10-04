@@ -51,6 +51,8 @@ jobs:
           patch -p1 -d buildsrc < .recovery/alpha3.1/follow-snapshots.patch
           patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/uninstall-lifecycle.patch
           patch -p1 -d buildsrc < .recovery/alpha3.1/uninstall-lifecycle.patch
+          patch --dry-run -p1 -d buildsrc < .recovery/alpha3.1/orchestration-foundations.patch
+          patch -p1 -d buildsrc < .recovery/alpha3.1/orchestration-foundations.patch
       - name: Validate source
         working-directory: buildsrc
         shell: bash

@@ -68,7 +68,7 @@ ck('active Settings has new Workspace Defaults only', 'Defaults for new Workspac
 ck('active Settings About reads /v1/about', "apiRequest('/v1/about')" in app)
 ck('unified Ask OnePane surface exists', 'openCommandPalette=qa31OpenAssistant' in app and 'Ask OnePane or run a command' in app)
 ck('Project Orchestrator Project strip exists', 'Project Orchestrator Project-level surface' in app and 'qa31ProjectOrchestratorStrip' in app)
-ck('Operations card actions are explicit', 'qa31BindOperationCardActions' in app and "data.qa31OperationAction" in app)
+ck('Operations card actions are explicit', 'qa31BindOperationCardActions' in app and "dataset.qa31OperationAction" in app)
 ck('Tour teaches Assistant and Orchestrator', 'Alpha 3.1 product tour' in app and "title:'OnePane Assistant'" in app and "title:'Project Orchestrator'" in app)
 ck('Tour distinguishes Colibri and OmniRoute', "title:'Colibri Large Model'" in app and "title:'OmniRoute'" in app and 'external routing/provider connection' in app)
 ck('Tour restores Project and panel context', all(x in app for x in ['projectID:typeof qa4ProjectHub','projectWorkspaceID:typeof qa4ProjectHub','inspectorWidth:state.inspectorWidth','drawerHeight:state.drawerHeight']))

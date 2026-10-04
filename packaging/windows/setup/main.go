@@ -20,7 +20,7 @@ import (
 
 const (
 	productName = "OnePane"
-	version     = "0.1.0-alpha.3"
+	version     = "0.1.0-alpha.3.1"
 	serviceName = "OnePane"
 	controlURL  = "http://127.0.0.1:18181"
 )

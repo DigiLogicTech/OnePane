@@ -112,6 +112,20 @@ func (s *Service) Thread(ctx context.Context,idv string)(Thread,error){
 func (s *Service) Threads(ctx context.Context,workspaceID string,limit int)([]Thread,error){
 	if limit<=0||limit>100{limit=50};rows,err:=s.db.QueryContext(ctx,`SELECT id,workspace_id,title,status,active_project_id,created_by,revision,created_at,updated_at FROM assistant_threads WHERE workspace_id=? ORDER BY updated_at DESC,id DESC LIMIT ?`,strings.TrimSpace(workspaceID),limit);if err!=nil{return nil,err};defer rows.Close();out:=[]Thread{};for rows.Next(){t,e:=scanThread(rows);if e!=nil{return nil,e};out=append(out,t)};return out,rows.Err()
 }
+func (s *Service) SetScope(ctx context.Context, threadID string, projectID *string) (Thread,error) {
+	t,err:=s.Thread(ctx,threadID);if err!=nil{return Thread{},err}
+	var value any=nil
+	if projectID!=nil&&strings.TrimSpace(*projectID)!="" {
+		var idv string
+		if err:=s.db.QueryRowContext(ctx,`SELECT id FROM projects WHERE id=? AND workspace_id=? AND status='active'`,strings.TrimSpace(*projectID),t.WorkspaceID).Scan(&idv);err!=nil{return Thread{},err}
+		value=idv
+	}
+	now:=s.clock.UnixMilli()
+	res,err:=s.db.ExecContext(ctx,`UPDATE assistant_threads SET active_project_id=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?`,value,now,t.ID,t.Revision)
+	if err!=nil{return Thread{},err};n,_:=res.RowsAffected();if n!=1{return Thread{},ErrInvalid}
+	return s.Thread(ctx,t.ID)
+}
+
 func (s *Service) CreateThread(ctx context.Context,workspaceID,title,actor string)(Thread,error){
 	workspaceID,title,actor=strings.TrimSpace(workspaceID),strings.TrimSpace(title),strings.TrimSpace(actor);if workspaceID==""||actor==""{return Thread{},ErrInvalid};if title==""{title="OnePane Assistant"}
 	idv,_:=s.ids.New("athread");now:=s.clock.UnixMilli();_,err:=s.db.ExecContext(ctx,`INSERT INTO assistant_threads(id,workspace_id,title,status,active_project_id,created_by,revision,created_at,updated_at) VALUES(?,?,?,'active',NULL,?,1,?,?)`,idv,workspaceID,title,actor,now,now);if err!=nil{return Thread{},err};return s.Thread(ctx,idv)

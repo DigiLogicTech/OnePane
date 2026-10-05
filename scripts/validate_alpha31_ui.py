@@ -14,6 +14,42 @@ wcss=read("packaging/windows/desktop/static/style.css")
 checks=[]
 def ck(name, cond): checks.append((name,bool(cond)))
 
+def single_selector_collection_calls(src):
+    out=[]
+    i=0
+    methods=("forEach","map","filter","some","every","find","reduce")
+    while i < len(src)-1:
+        if src[i]=="$" and src[i+1]=="(" and (i==0 or src[i-1]!="$"):
+            j=i+2
+            depth=1
+            quote=None
+            esc=False
+            while j < len(src) and depth:
+                ch=src[j]
+                if quote is not None:
+                    if esc:
+                        esc=False
+                    elif ch=="\\":
+                        esc=True
+                    elif ch==quote:
+                        quote=None
+                else:
+                    if ch in ("'", '"', "`"):
+                        quote=ch
+                    elif ch=="(":
+                        depth+=1
+                    elif ch==")":
+                        depth-=1
+                j+=1
+            if depth==0:
+                tail=src[j:]
+                for method in methods:
+                    if tail.startswith("."+method+"("):
+                        out.append((src.count("\n",0,i)+1,method))
+                        break
+        i+=1
+    return out
+
 ck("No runtime RC patch layer ships", "/rc3.js" not in html and "ONEPANE_APPLY_RC3" not in app and not (ROOT/"internal/webui/static/rc3.js").exists())
 ck("Canonical and Windows WebUI match", app==wapp and html==whtml and css==wcss)
 ck("Route rendering uses one canonical epoch guard", "let qa31ViewEpoch=0;" in app and "const epoch=++qa31ViewEpoch;" in app and "qa31ProjectRenderEpoch!==qa31ViewEpoch" in app)
@@ -31,6 +67,9 @@ ck("Models headers grow with wrapped copy", ".models-page .card-header.models-ca
 ck("Project Orchestrator remains authoritative", "function qa31ProjectOrchestratorStrip" in app and "qa31ProjectOrchestrator" in app)
 
 ck("Tour model-page switcher is defined", "function qa31SetModelView(view)" in app and "qa31SetModelView('local')" in app and "qa31SetModelView('cloud')" in app)
+ck("Single-element selector helper is never used as a collection", not single_selector_collection_calls(app))
+ck("Projects capture render epoch before async load", app.count("const qa31ProjectRenderEpoch=qa31ViewEpoch;") >= 2 and "qa31ProjectRenderEpoch!==qa31ViewEpoch" in app)
+ck("Project Orchestrator wrapper is route-safe", "if(epoch!==qa31ViewEpoch||currentTab()?.route!='projects')return;" in app.replace('"', "'"))
 failed=[n for n,o in checks if not o]
 for n,o in checks: print(f"[{'PASS' if o else 'FAIL'}] {n}")
 if failed:

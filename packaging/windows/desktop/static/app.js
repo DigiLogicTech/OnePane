@@ -1164,6 +1164,7 @@ function qa4WorkspaceWidgetContent(w,project,workspace){
 function qa4RenderWorkspaceWidget(w,project,workspace){const edit=!!state.projectWorkspaceEdit;const controls=edit?`<div class="dashboard-edit-bar"><span class="dashboard-drag">⋮⋮</span><strong>${escapeHtml(w.title)}</strong><span class="dashboard-edit-spacer"></span><button class="tiny" data-pw-move="up" data-pw-id="${w.id}">↑</button><button class="tiny" data-pw-move="down" data-pw-id="${w.id}">↓</button><select class="dashboard-size" data-pw-size data-pw-id="${w.id}">${['small','medium','large','wide','full'].map(n=>`<option value="${n}">${titleCase(n)}</option>`).join('')}</select><button class="tiny danger" data-pw-remove="${w.id}">×</button></div>`:'';return `<section class="workspace-widget dashboard-widget ${edit?'editable':''}" draggable="${edit}" data-pw-widget="${w.id}" style="grid-column:span ${Math.max(2,Math.min(12,w.col||4))};grid-row:span ${Math.max(2,Math.min(10,w.row||4))}">${controls}<div class="dashboard-widget-content"><div class="widget-handle"><strong>${escapeHtml(w.title)}</strong></div>${qa4WorkspaceWidgetContent(w,project,workspace)}</div></section>`;}
 
 async function renderProjects(){
+  const qa31ProjectRenderEpoch=qa31ViewEpoch;
   $('#viewHost').innerHTML=`<section class="page">${pageHeader('Projects','Projects contain one or more working surfaces, sandbox policy, routing policy and governed model chat','<button class="btn primary" id="qa4NewProject">New project</button>')}<div class="project-hub-loading widget-body">Loading projects…</div></section>`;
   $('#qa4NewProject').onclick=openProjectDialog;
   await qa4LoadProjectHub(true);if(qa31ProjectRenderEpoch!==qa31ViewEpoch||currentTab()?.route!=='projects')return;const host=$('.project-hub-loading');
@@ -1778,7 +1779,7 @@ async function qa31OpenAssistant(){
     $('#qa31AssistantClose',card).onclick=()=>root.innerHTML='';
     $('#qa31ReturnGlobal',card)?.addEventListener('click',async()=>{await qa31SetAssistantScope(null);qa31OpenAssistant();});
     $('#qa31AssistantScope',card).onchange=async e=>{await qa31SetAssistantScope(e.target.value||null);qa31OpenAssistant();};
-    $('[data-qa31-nav]',card).forEach(b=>b.onclick=()=>{root.innerHTML='';openRoute(b.dataset.qa31Nav);});
+    $$('[data-qa31-nav]',card).forEach(b=>b.onclick=()=>{root.innerHTML='';openRoute(b.dataset.qa31Nav);});
     const submit=async allow=>{
       const input=$('#qa31AssistantInput',card),content=input?.value.trim();if(!content)return;
       input.disabled=true;$('#qa31AssistantAsk',card).disabled=true;$('#qa31AssistantRun',card).disabled=true;
@@ -1851,15 +1852,15 @@ async function qa31AgentRequest(path,timeoutMs=12000){
 }
 renderAgents=async function(){
   $('#viewHost').innerHTML=`<section class="page">${pageHeader('Agents','Reusable Agent Profiles and real execution sessions. Assistant and Project Orchestrator remain control-plane layers, not ordinary Agents.','<button class="btn primary" id="qa31NewProfile">New Profile</button>')}<div class="subtabs">${[['profiles','Profiles'],['sessions','Sessions'],['teams','Teams'],['councils','Councils']].map(([id,label])=>`<button class="subtab ${qa31AgentTab===id?'active':''}" data-qa31-agent-tab="${id}">${label}</button>`).join('')}</div><div id="qa31AgentsBody" class="widget-body">Loading…</div></section>`;
-  $('[data-qa31-agent-tab]').forEach(b=>b.onclick=()=>{qa31AgentTab=b.dataset.qa31AgentTab;renderAgents();});
+  $$('[data-qa31-agent-tab]').forEach(b=>b.onclick=()=>{qa31AgentTab=b.dataset.qa31AgentTab;renderAgents();});
   $('#qa31NewProfile').onclick=()=>qa31ProfileDialog();
   const qs=encodeURIComponent(onepaneWorkspace),body=$('#qa31AgentsBody');
   try{
     if(qa31AgentTab==='profiles'){
       const profiles=await qa31AgentRequest('/v1/agent-profiles?workspace_id='+qs);
       body.innerHTML=(profiles||[]).length?`<div class="cards-grid">${(profiles||[]).map(qa31ProfileCard).join('')}</div>`:'<div class="empty-state compact">No Agent Profiles yet. Create a Profile to reuse instructions across Direct, Team and Council execution.</div>';
-      $('[data-profile-edit]',body).forEach(b=>b.onclick=()=>{const p=(profiles||[]).find(x=>x.id===b.dataset.profileEdit);if(p)qa31ProfileDialog(p)});
-      $('[data-profile-archive]',body).forEach(b=>b.onclick=async()=>{
+      $$('[data-profile-edit]',body).forEach(b=>b.onclick=()=>{const p=(profiles||[]).find(x=>x.id===b.dataset.profileEdit);if(p)qa31ProfileDialog(p)});
+      $$('[data-profile-archive]',body).forEach(b=>b.onclick=async()=>{
         try{
           await apiRequest('/v1/agent-profiles/'+encodeURIComponent(b.dataset.profileArchive)+'/archive',{method:'POST',body:JSON.stringify({workspace_id:onepaneWorkspace})});
           notice('Profile archived.');renderAgents();
@@ -1915,7 +1916,9 @@ function qa31AskProject(project,workspace){
 }
 const qa31RenderProjectsBase=renderProjects;
 renderProjects=async function(){
+  const epoch=qa31ViewEpoch;
   await qa31RenderProjectsBase();
+  if(epoch!==qa31ViewEpoch||currentTab()?.route!=='projects')return;
   qa31RenderProjectNavTree?.();
   const project=qa4ActiveProject?.(),workspace=project?qa4ActiveWorkspace?.():null;
   if(!project)return;
@@ -1966,7 +1969,7 @@ renderModels=async function(){
     const toolbar=$('.widget-body .toolbar',card);
     if(toolbar){
       toolbar.innerHTML=qa31ColibriActionButtons(colibri)+(colibri.installed?'<button class="btn" id="qa5ColibriRegister">Register model folder</button>':'');
-      $('[data-qa31-colibri-action]',toolbar).forEach(b=>b.onclick=()=>qa5ComponentAction('colibri',b.dataset.qa31ColibriAction,'#qa5ColibriInlineStatus'));
+      $$('[data-qa31-colibri-action]',toolbar).forEach(b=>b.onclick=()=>qa5ComponentAction('colibri',b.dataset.qa31ColibriAction,'#qa5ColibriInlineStatus'));
       $('#qa5ColibriRegister',toolbar)?.addEventListener('click',qa5RegisterColibri);
     }
     const status=$('#qa5ColibriInlineStatus',card);
@@ -1983,7 +1986,7 @@ renderModels=async function(){
 };
 
 function qa31BindOperationCardActions(){
-  $('.operations-layout-grid .panel-card').forEach(card=>{
+  $$('.operations-layout-grid .panel-card').forEach(card=>{
     const action=$('.card-action',card);if(!action)return;
     const title=$('.card-title',card)?.textContent.trim()||'';
     if(title==='Active Tasks'||title==='Scheduled Tasks'||title==='Scheduled tasks'){
@@ -2147,7 +2150,7 @@ renderSettings=async function(){
   <section class="panel-card"><div class="card-header"><div class="card-title">About</div></div><div class="widget-body"><div class="about-block"><strong>OnePane ${escapeHtml(about.version||'dev')}</strong><span>DigiLogic · GitHub: DigiLogicTech/OnePane</span><span class="list-meta">Revision ${escapeHtml((about.revision||'unknown').slice(0,12))} · ${escapeHtml(about.build_time||'unknown')}</span></div></div></section>
   </div></section>`;
   $('#qa5Landing').value=prefs.landing||'operations';$('#qa5Density').value=prefs.density||'comfortable';$('#qa5Update').value=prefs.update_channel||'alpha';$('#qa31AssistantCompute').value=prefs.assistant_defaults?.compute_preference||'auto';
-  $('[data-settings-theme]').forEach(b=>b.onclick=()=>{applyTheme(b.dataset.settingsTheme);renderSettings();});
+  $$('[data-settings-theme]').forEach(b=>b.onclick=()=>{applyTheme(b.dataset.settingsTheme);renderSettings();});
   $('#qa5ThemeFile').onchange=async e=>{try{await qa5InstallThemePack(e.target.files[0]);notice('Theme pack installed.');renderSettings();}catch(ex){notice(ex.message,'bad');}};
   $('#qa5LanguageFile').onchange=async e=>{try{await qa5InstallLanguagePack(e.target.files[0]);notice('Language pack installed.');renderSettings();}catch(ex){notice(ex.message,'bad');}};
   $('#qa5Language').onchange=e=>{qa5SavePrefs({language:e.target.value});qa5RefreshShellLanguage();renderSettings();};
@@ -2196,9 +2199,9 @@ function qa31ProjectNavTreeHTML(){
   }).join('')}</div>`;
 }
 function qa31BindProjectNavTree(root){
-  $('[data-project-nav-toggle]',root).forEach(b=>b.onclick=e=>{e.stopPropagation();const id=b.dataset.projectNavToggle;state.projectNavExpanded=state.projectNavExpanded||{};state.projectNavExpanded[id]=!qa31ProjectTreeExpanded(id);persist();qa31RenderProjectNavTree();});
-  $('[data-project-nav-project]',root).forEach(b=>b.onclick=()=>{const id=b.dataset.projectNavProject,project=qa4ProjectHub.projects.find(p=>p.id===id);if(!project)return;qa4ProjectHub.activeProjectID=id;const rows=qa4Workspaces(project);if(!rows.some(w=>w.id===qa4ProjectHub.activeWorkspaceID))qa4ProjectHub.activeWorkspaceID=rows[0]?.id||'';openRoute('projects');qa31RenderProjectNavTree();});
-  $('[data-project-nav-workspace]',root).forEach(b=>b.onclick=()=>{const project=qa4ProjectHub.projects.find(p=>p.id===b.dataset.projectNavParent);if(!project)return;qa4ProjectHub.activeProjectID=project.id;qa4ProjectHub.activeWorkspaceID=b.dataset.projectNavWorkspace;openRoute('projects');qa31RenderProjectNavTree();});
+  $$('[data-project-nav-toggle]',root).forEach(b=>b.onclick=e=>{e.stopPropagation();const id=b.dataset.projectNavToggle;state.projectNavExpanded=state.projectNavExpanded||{};state.projectNavExpanded[id]=!qa31ProjectTreeExpanded(id);persist();qa31RenderProjectNavTree();});
+  $$('[data-project-nav-project]',root).forEach(b=>b.onclick=()=>{const id=b.dataset.projectNavProject,project=qa4ProjectHub.projects.find(p=>p.id===id);if(!project)return;qa4ProjectHub.activeProjectID=id;const rows=qa4Workspaces(project);if(!rows.some(w=>w.id===qa4ProjectHub.activeWorkspaceID))qa4ProjectHub.activeWorkspaceID=rows[0]?.id||'';openRoute('projects');qa31RenderProjectNavTree();});
+  $$('[data-project-nav-workspace]',root).forEach(b=>b.onclick=()=>{const project=qa4ProjectHub.projects.find(p=>p.id===b.dataset.projectNavParent);if(!project)return;qa4ProjectHub.activeProjectID=project.id;qa4ProjectHub.activeWorkspaceID=b.dataset.projectNavWorkspace;openRoute('projects');qa31RenderProjectNavTree();});
 }
 function qa31RenderProjectNavTree(){
   const root=$('#primaryNav'),projectsButton=root?.querySelector('[data-route="projects"]');if(!root||!projectsButton)return;
@@ -2244,7 +2247,7 @@ let modelView=localStorage.getItem("onepane:models-view")||"local";
       if(!root||!modelsButton)return;
       root.querySelector(".model-nav-tree")?.remove();
       modelsButton.insertAdjacentHTML("afterend",modelNavTreeHTML());
-      $("[data-model-nav-view]",root).forEach(b=>b.onclick=e=>{e.stopPropagation();qa31SetModelView(b.dataset.modelNavView);});
+      $$("[data-model-nav-view]",root).forEach(b=>b.onclick=e=>{e.stopPropagation();qa31SetModelView(b.dataset.modelNavView);});
     }
 
     const navBase=renderNav;
@@ -2255,7 +2258,7 @@ let modelView=localStorage.getItem("onepane:models-view")||"local";
     };
 
     function bindModelPageTabs(){
-      $("[data-model-page]").forEach(b=>b.onclick=()=>qa31SetModelView(b.dataset.modelPage));
+      $$("[data-model-page]").forEach(b=>b.onclick=()=>qa31SetModelView(b.dataset.modelPage));
     }
     function cloudProviderCards(presets,connections){
       return presets.map(p=>{
@@ -2276,9 +2279,9 @@ let modelView=localStorage.getItem("onepane:models-view")||"local";
       }).join("");
     }
     function bindCloudCards(presets){
-      $("[data-revoke-cloud]").forEach(b=>b.onclick=()=>qa4RevokeProvider(b.dataset.revokeCloud));
-      $("[data-connect-cloud]").forEach(b=>b.onclick=()=>qa4ConnectCloudProvider(b.dataset.connectCloud));
-      $("[data-oauth-info]").forEach(b=>b.onclick=()=>{
+      $$("[data-revoke-cloud]").forEach(b=>b.onclick=()=>qa4RevokeProvider(b.dataset.revokeCloud));
+      $$("[data-connect-cloud]").forEach(b=>b.onclick=()=>qa4ConnectCloudProvider(b.dataset.connectCloud));
+      $$("[data-oauth-info]").forEach(b=>b.onclick=()=>{
         const preset=presets.find(p=>String(p.id)===b.dataset.oauthInfo);
         openModal("OAuth connection",'<div class="widget-body"><strong>'+escapeHtml(preset?.display_name||"OAuth provider")+'</strong><p>When an OAuth broker is available, OnePane records the connection here and exposes status and revoke controls. This alpha will not fake an OAuth consent flow.</p></div>');
       });
@@ -2325,7 +2328,7 @@ let modelView=localStorage.getItem("onepane:models-view")||"local";
 
       $("#detectLocal").onclick=detectLocalQA;
       $("#qa5RuntimeStrategy").onchange=e=>qa5SavePrefs({default_runtime:e.target.value});
-      $("[data-qa31-colibri-action]").forEach(b=>b.onclick=()=>qa5ComponentAction("colibri",b.dataset.qa31ColibriAction,"#qa5ColibriInlineStatus"));
+      $$("[data-qa31-colibri-action]").forEach(b=>b.onclick=()=>qa5ComponentAction("colibri",b.dataset.qa31ColibriAction,"#qa5ColibriInlineStatus"));
       $("#qa5ColibriRegister")?.addEventListener("click",qa5RegisterColibri);
 
       const drawManaged=()=>{
@@ -2336,9 +2339,9 @@ let modelView=localStorage.getItem("onepane:models-view")||"local";
             '<div class="list-meta">'+escapeHtml(d.quantization||"")+' · '+ctx+'</div></div>'+
             '<div class="toolbar"><button class="btn" data-model-spec="'+i+'">Spec sheet</button><button class="btn primary" data-agent-check="'+i+'">Agent Check</button></div></article>';
         }).join(""):'<div class="empty-state compact">No managed local models yet.</div>';
-        $("[data-model-spec]").forEach(b=>b.onclick=e=>{e.stopPropagation();qa5InspectModel(deployments[Number(b.dataset.modelSpec)]);});
-        $("[data-agent-check]").forEach(b=>b.onclick=e=>{e.stopPropagation();qa5AgentCheck(deployments[Number(b.dataset.agentCheck)]);});
-        $("[data-model-inspect]").forEach(el=>el.onclick=e=>{if(e.target.closest("button"))return;qa5InspectModel(deployments[Number(el.dataset.modelInspect)]);});
+        $$("[data-model-spec]").forEach(b=>b.onclick=e=>{e.stopPropagation();qa5InspectModel(deployments[Number(b.dataset.modelSpec)]);});
+        $$("[data-agent-check]").forEach(b=>b.onclick=e=>{e.stopPropagation();qa5AgentCheck(deployments[Number(b.dataset.agentCheck)]);});
+        $$("[data-model-inspect]").forEach(el=>el.onclick=e=>{if(e.target.closest("button"))return;qa5InspectModel(deployments[Number(el.dataset.modelInspect)]);});
       };
       drawManaged();
 
@@ -2351,7 +2354,7 @@ let modelView=localStorage.getItem("onepane:models-view")||"local";
             '<div class="list-meta">'+escapeHtml(String(m.parameter_count||m.parameter_scale||"—"))+' · '+formatContextQA(m.max_context_tokens||m.context_tokens)+' context</div>'+
             '<div class="list-meta">'+escapeHtml(quant)+'</div></div><button class="btn primary" data-download-model="'+i+'">Download</button></article>';
         }).join(""):'<div class="empty-state compact">No local models match this filter.</div>';
-        $("[data-download-model]").forEach(b=>b.onclick=()=>qa4InstallLocalModel(rows[Number(b.dataset.downloadModel)]));
+        $$("[data-download-model]").forEach(b=>b.onclick=()=>qa4InstallLocalModel(rows[Number(b.dataset.downloadModel)]));
       };
       $("#qa4LocalFilter").oninput=drawLocal;
       drawLocal();

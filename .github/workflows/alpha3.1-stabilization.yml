@@ -4,6 +4,12 @@ on:
   push:
     branches: [alpha3.1-orchestration]
   workflow_dispatch:
+    inputs:
+      run_hosted_smoke:
+        description: "Also run destructive/native installed-product smoke tests on GitHub-hosted runners"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: alpha31-source-native-${{ github.ref }}
@@ -17,14 +23,45 @@ env:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    name: Validate and build on OnePane Ubuntu runner
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 45
     steps:
+      - name: Runner preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "runner=$RUNNER_NAME"
+          echo "os=$RUNNER_OS"
+          echo "arch=$RUNNER_ARCH"
+          uname -a
+          command -v python3
+          python3 --version
+          command -v git
+          git --version
+          command -v dpkg-deb
+          dpkg-deb --version | head -n 1
+          df -h "$RUNNER_WORKSPACE"
       - uses: actions/checkout@v4
+        with:
+          clean: true
+          fetch-depth: 1
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
           cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: false
+      - name: Toolchain identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          go version
+          node --version
+          python3 --version
+          echo "commit=$GITHUB_SHA"
       - name: Validate source contracts
         shell: bash
         run: |
@@ -100,22 +137,27 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: OnePane-alpha3.1-source-native
+          name: OnePane-alpha3.1-source-native-${{ github.sha }}
           path: |
             dist/**
           if-no-files-found: warn
           retention-days: 7
-
+      - name: Clean self-hosted build workspace
+        if: always()
+        shell: bash
+        run: |
+          rm -rf dist packaging/windows/setup/payload
 
   windows-installed-smoke:
-    name: Windows installed-product smoke
+    name: Windows installed-product smoke (optional hosted)
     needs: validate
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_hosted_smoke == true }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.1-source-native
+          name: OnePane-alpha3.1-source-native-${{ github.sha }}
           path: artifact
       - name: Install launch uninstall reinstall
         shell: pwsh
@@ -206,14 +248,15 @@ jobs:
           }
 
   ubuntu-installed-smoke:
-    name: Ubuntu installed-package smoke
+    name: Ubuntu installed-package smoke (optional hosted)
     needs: validate
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_hosted_smoke == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.1-source-native
+          name: OnePane-alpha3.1-source-native-${{ github.sha }}
           path: artifact
       - name: Install verify and preserve data
         shell: bash

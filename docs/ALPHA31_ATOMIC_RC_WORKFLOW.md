@@ -25,3 +25,12 @@ The canonical WebUI lives in `internal/webui/static`. The Windows desktop embedd
 ## Promotion rule
 
 A branch move is promotion. Blobs, trees and commits can be created and inspected without changing the branch and without exposing partial repository states to CI. Only the validated complete commit is promoted.
+
+
+## Authoritative build runner
+
+Normal Alpha 3.1 candidate pushes use the repository self-hosted Linux x64 runner as the authoritative validation/build lane. That runner performs source validation, Go tests, Windows x64 cross-build/setup packaging, Ubuntu amd64 package generation and artifact upload.
+
+GitHub-hosted Windows and Ubuntu installed-product smoke lanes are retained as explicit manual diagnostics only. They run only when a manual workflow dispatch sets `run_hosted_smoke=true`. This prevents hosted-runner allocation incidents from blocking production of a candidate installer.
+
+The self-hosted build lane must not install or uninstall OnePane on the live Ubuntu host. Native Ubuntu package lifecycle testing belongs in an isolated disposable environment; native Windows install/launch testing belongs on a Windows runner or manual acceptance machine.

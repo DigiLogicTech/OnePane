@@ -127,8 +127,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path $root,$projects,$models | Out-Null
 
           function Invoke-OnePaneSetup([string[]]$SetupArgs) {
-            & $installer.FullName @SetupArgs
-            if ($LASTEXITCODE -ne 0) { throw "OnePane Setup failed with exit code $($LASTEXITCODE): $($SetupArgs -join ' ')" }
+            $proc = Start-Process -FilePath $installer.FullName -ArgumentList $SetupArgs -Wait -PassThru
+            if ($proc.ExitCode -ne 0) { throw "OnePane Setup failed with exit code $($proc.ExitCode): $($SetupArgs -join ' ')" }
           }
           function Wait-OnePaneHealth([int]$Seconds = 90) {
             $deadline = (Get-Date).AddSeconds($Seconds)
@@ -235,5 +235,5 @@ jobs:
           sudo systemctl is-active --quiet onepane.service
           echo preserve-alpha3.1 | sudo tee /var/lib/onepane/qa-preserve.txt >/dev/null
           sudo apt-get remove -y onepane
-          test -f /var/lib/onepane/qa-preserve.txt
+          sudo test -f /var/lib/onepane/qa-preserve.txt
           test "$(sudo cat /var/lib/onepane/qa-preserve.txt | tr -d '\n')" = "preserve-alpha3.1"

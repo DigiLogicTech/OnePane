@@ -128,7 +128,7 @@ jobs:
 
           function Invoke-OnePaneSetup([string[]]$SetupArgs) {
             & $installer.FullName @SetupArgs
-            if ($LASTEXITCODE -ne 0) { throw "OnePane Setup failed with exit code $LASTEXITCODE: $($SetupArgs -join ' ')" }
+            if ($LASTEXITCODE -ne 0) { throw "OnePane Setup failed with exit code $($LASTEXITCODE): $($SetupArgs -join ' ')" }
           }
           function Wait-OnePaneHealth([int]$Seconds = 90) {
             $deadline = (Get-Date).AddSeconds($Seconds)
@@ -215,7 +215,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          deb="$(find artifact -type f -name 'onepane_*_amd64.deb' -print -quit)"
+          deb="$(realpath "$(find artifact -type f -name 'onepane_*_amd64.deb' -print -quit)")"
           test -n "$deb"
           test "$(dpkg-deb -f "$deb" Version)" = "$ONEPANE_VERSION"
           sudo apt-get update

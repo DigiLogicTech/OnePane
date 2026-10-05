@@ -809,6 +809,7 @@ async function bootOnePane(){
   });
   try{
     const setup=await apiRequest('/v1/setup/status');
+    sendNativeReady();
     if(setup?.required){setAuthStage('setup');return;}
     try{await enterOnePane();}catch{setAuthStage('login');}
   }catch(ex){const boot=$('#boot .page-subtitle');if(boot)boot.textContent=`Control plane unavailable: ${ex.message}`;}
@@ -835,6 +836,12 @@ function sendNativeTheme(){
   const p=effectiveThemePalette();
   try{window.chrome?.webview?.postMessage(`onepane-theme|${p.mode}|${p.caption}|${p.text}|${p.border}`)}catch{}
   const meta=$('meta[name="theme-color"]'); if(meta) meta.content=p.caption;
+}
+async function sendNativeReady(){
+  try{
+    const about=await apiRequest('/v1/about');
+    window.chrome?.webview?.postMessage(`onepane-ui-ready|${about?.version||'unknown'}`);
+  }catch{}
 }
 function applyTheme(name){
   state.theme=name||'system';

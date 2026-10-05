@@ -1665,7 +1665,7 @@ qa7SaveWorkspaceSettings=async function(project,workspace,root){
   workspace.sandbox.secrets=$('[data-qa7-secrets]',root)?.value||'selected';
   workspace.orchestration=workspace.orchestration||{};
   workspace.orchestration.mode=qa8Mode($('[data-qa7-default-mode]',root)?.value||workspace.orchestration.mode);
-  // Workers remain a reusable execution role, but are no longer a visible chat mode.
+  // Legacy worker assignments remain reusable internally, but are not a visible chat mode.
   // Preserve their Alpha 2 assignment when saving the Direct/Team/Council surface.
   for(const key of ['supervisor','team','council']){
     const role=workspace.orchestration[key]=workspace.orchestration[key]||{};

@@ -37,12 +37,14 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/projectruntime"
 	"github.com/DigiLogicTech/OnePane/internal/projectworkspace"
 	"github.com/DigiLogicTech/OnePane/internal/provideronboarding"
+	"github.com/DigiLogicTech/OnePane/internal/provideroauth"
 	"github.com/DigiLogicTech/OnePane/internal/resourcecoord"
 	"github.com/DigiLogicTech/OnePane/internal/routine"
 	"github.com/DigiLogicTech/OnePane/internal/routineworker"
 	"github.com/DigiLogicTech/OnePane/internal/runtimecoord"
 	"github.com/DigiLogicTech/OnePane/internal/sandboxrunner"
 	"github.com/DigiLogicTech/OnePane/internal/scheduler"
+	"github.com/DigiLogicTech/OnePane/internal/skillcatalog"
 	"github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
 	"github.com/DigiLogicTech/OnePane/internal/system"
 	"github.com/DigiLogicTech/OnePane/internal/task"
@@ -74,6 +76,7 @@ type Runtime struct {
 	Inference           *inference.Service
 	LocalAI             *localai.Service
 	AgentProfiles       *agentprofile.Service
+	Skills              *skillcatalog.Service
 	AgentRuntimes       *agentruntime.Service
 	AgentWorker         *agentworker.Service
 	Assurance           *assurance.Service
@@ -81,6 +84,7 @@ type Runtime struct {
 	RuntimeCoordinator  *runtimecoord.Service
 	ResourceCoordinator *resourcecoord.Service
 	ProviderOnboarding  *provideronboarding.Service
+	ProviderOAuth       *provideroauth.Service
 	Assistant           *assistant.Service
 	ProjectOrchestrator *projectorchestrator.Service
 	ProjectWorkspaces   *projectworkspace.Service
@@ -278,6 +282,7 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 	}
 	schedulerService := scheduler.NewService(db.SQL(), db, clk)
 	providerOnboardingService := provideronboarding.New(inferenceService, secretResolver)
+	providerOAuthService := provideroauth.NewService(db.SQL(), db, clk, vaultService)
 	catalogTrust := localai.NewCatalogTrustStore()
 	for keyID, encoded := range cfg.LocalAI.CatalogTrustKeys {
 		raw, err := base64.StdEncoding.DecodeString(encoded)
@@ -302,6 +307,10 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 	if err := localAIService.ConfigureLLMFit(cfg.LocalAI.LLMFitURL); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("configure llmfit advisory source: %w", err)
+	}
+	if _, err := localAIService.Catalog().EnsureBundled(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("bootstrap trusted local AI catalog: %w", err)
 	}
 	if err := transportRegistry.Register("llamacpp", inference.LocalOpenAITransport{Resolver: localAIService}); err != nil {
 		_ = db.Close()
@@ -329,6 +338,7 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 		return nil, fmt.Errorf("configure Project storage root: %w", err)
 	}
 	agentProfileService := agentprofile.NewService(db.SQL(), db, clk)
+	skillCatalogService := skillcatalog.NewService(db.SQL(), db, clk, cfg.Storage.DataDir)
 	projectOrchestratorService := projectorchestrator.NewService(db.SQL(), db, clk, schedulerService, inferenceService, artifactService, taskService, teamService)
 	assistantService := assistant.NewService(db.SQL(), clk, schedulerService, inferenceService, artifactService, projectOrchestratorService)
 	projectRuntimeReconciler := projectruntime.New(projectWorkspaceService, operationCoordinator, toolGateway, observationService, verificationService)
@@ -372,8 +382,8 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 	return &Runtime{
 		DB: db, System: systemService, Nodes: nodeService, Tasks: taskService,
 		Authority: authorityService, Budgets: budgetService, Approvals: approvalService, Policy: policyEngine, Artifacts: artifactService, Observations: observationService,
-		ToolGateway: toolGateway, Verification: verificationService, Watchdog: watchdogService, Vault: vaultService, Inference: inferenceService, LocalAI: localAIService, AgentProfiles: agentProfileService, AgentRuntimes: agentRuntimeService, AgentWorker: agentWorkerService, Assurance: assuranceService,
-		Scheduler: schedulerService, RuntimeCoordinator: runtimeCoordinator, ResourceCoordinator: resourceCoordinator, ProviderOnboarding: providerOnboardingService, Assistant: assistantService, ProjectOrchestrator: projectOrchestratorService, ProjectWorkspaces: projectWorkspaceService,
+		ToolGateway: toolGateway, Verification: verificationService, Watchdog: watchdogService, Vault: vaultService, Inference: inferenceService, LocalAI: localAIService, AgentProfiles: agentProfileService, Skills: skillCatalogService, AgentRuntimes: agentRuntimeService, AgentWorker: agentWorkerService, Assurance: assuranceService,
+		Scheduler: schedulerService, RuntimeCoordinator: runtimeCoordinator, ResourceCoordinator: resourceCoordinator, ProviderOnboarding: providerOnboardingService, ProviderOAuth: providerOAuthService, Assistant: assistantService, ProjectOrchestrator: projectOrchestratorService, ProjectWorkspaces: projectWorkspaceService,
 		ProjectRuntime: projectRuntimeReconciler, ProjectRoutine: projectRoutineExecutor, Routines: routineService, RoutineWorker: routineWorkerService, Operations: operationCoordinator, ReadOnlySlice: readOnlySlice, WebAuth: webAuthService, Gateway: gatewayService, Team: teamService, TeamWorker: teamWorkerService, Bots: botRuntimeService, Federation: federationService,
 	}, nil
 }

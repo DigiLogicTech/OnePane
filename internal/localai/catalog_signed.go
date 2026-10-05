@@ -282,6 +282,11 @@ func (s *CatalogService) loadRecord(ctx context.Context, idv *string) (CatalogRe
 	if !strings.EqualFold(rec.PayloadSHA256, hex.EncodeToString(sum[:])) {
 		return rec, cat, errors.New("catalog payload integrity mismatch")
 	}
+	if rec.KeyID == BundledCatalogKeyID {
+		verified, err := verifyBundledCatalogPayload(payload, s.clock.UnixMilli())
+		if err != nil { return rec, cat, err }
+		return rec, verified, nil
+	}
 	pub, ok := s.trust.Keys[rec.KeyID]
 	if !ok || len(pub) != ed25519.PublicKeySize {
 		return rec, cat, errors.New("catalog signing key is no longer trusted")

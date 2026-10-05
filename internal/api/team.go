@@ -302,3 +302,17 @@ func (s *Server) reopenTeamDeliberation(w http.ResponseWriter, r *http.Request) 
 	out, err := s.team.ReopenDeliberation(r.Context(), team.ReopenCommand{SessionID: ss.ID, RequestedByPrincipalID: i.PrincipalID, Reason: in.Reason})
 	respondDomain(w, out, err, 200)
 }
+
+func (s *Server) updateTeamConfiguration(w http.ResponseWriter, r *http.Request) {
+	i, t, ok := s.teamFor(w, r, "team.write")
+	if !ok { return }
+	var in struct {
+		ExpectedRevision int64           `json:"expected_revision"`
+		Configuration    json.RawMessage `json:"configuration"`
+	}
+	if !decodeJSON(w, r, &in) { return }
+	out, err := s.team.UpdateConfiguration(r.Context(), team.UpdateConfigurationCommand{
+		TeamID: t.ID, ActorPrincipalID: i.PrincipalID, ExpectedRevision: in.ExpectedRevision, Configuration: in.Configuration,
+	})
+	respondDomain(w, out, err, http.StatusOK)
+}

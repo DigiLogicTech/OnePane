@@ -42,7 +42,7 @@ type ManagedDeploymentSummary struct {
 }
 
 func (s *Service) ManagedDeployments(ctx context.Context, workspaceID string) ([]ManagedDeploymentSummary, error) {
-	q := `SELECT d.id,d.model_id,mm.model_ref,COALESCE(json_extract(m.static_metadata_json,'$.display_name'),mm.model_ref),COALESCE(d.runtime_name,''),COALESCE(d.runtime_version,''),COALESCE(json_extract(d.runtime_config_json,'$.runtime_backend'),''),mm.local_path,COALESCE(m.quantization,''),d.status,COALESCE(ms.admission_status,''),COALESCE(mis.investigation_state,'uninvestigated'),d.context_max_reported,d.context_max_verified,d.updated_at,p.plan_json
+	q := `SELECT d.id,d.model_id,mm.model_ref,COALESCE(json_extract(m.static_metadata_json,'$.display_name'),mm.model_ref),COALESCE(d.runtime_name,''),COALESCE(d.runtime_version,''),COALESCE(json_extract(d.runtime_config_json,'$.runtime_backend'),''),mm.local_path,COALESCE(m.quantization,''),d.status,COALESCE(ms.admission_status,''),COALESCE(mis.investigation_state,'uninvestigated'),d.context_max_reported,d.context_max_verified,d.updated_at,p.plan_json,d.runtime_config_json
           FROM managed_local_models mm JOIN model_deployments d ON d.id=mm.deployment_id JOIN models m ON m.id=d.model_id JOIN local_model_install_plans p ON p.id=mm.plan_id LEFT JOIN model_spec_sheets ms ON ms.deployment_id=d.id LEFT JOIN model_identity_specs mis ON mis.model_uid=d.model_id
           WHERE mm.status<>'removed'`
 	args := []any{}
@@ -60,8 +60,8 @@ func (s *Service) ManagedDeployments(ctx context.Context, workspaceID string) ([
 	for rows.Next() {
 		var x ManagedDeploymentSummary
 		var rep, ver sql.NullInt64
-		var planJSON string
-		if err := rows.Scan(&x.DeploymentID, &x.ModelID, &x.ModelRef, &x.DisplayName, &x.RuntimeName, &x.RuntimeVersion, &x.RuntimeBackend, &x.LocalPath, &x.Quantization, &x.Status, &x.AdmissionStatus, &x.InvestigationState, &rep, &ver, &x.UpdatedAt, &planJSON); err != nil {
+		var planJSON, runtimeConfigJSON string
+		if err := rows.Scan(&x.DeploymentID, &x.ModelID, &x.ModelRef, &x.DisplayName, &x.RuntimeName, &x.RuntimeVersion, &x.RuntimeBackend, &x.LocalPath, &x.Quantization, &x.Status, &x.AdmissionStatus, &x.InvestigationState, &rep, &ver, &x.UpdatedAt, &planJSON, &runtimeConfigJSON); err != nil {
 			return nil, err
 		}
 		if rep.Valid {
@@ -72,7 +72,14 @@ func (s *Service) ManagedDeployments(ctx context.Context, workspaceID string) ([
 		}
 		x.Qualified = x.InvestigationState == "qualified" || x.AdmissionStatus == "accepted" || x.AdmissionStatus == "restricted"
 		var rec Recommendation
-		if json.Unmarshal([]byte(planJSON), &rec) == nil {
+		_ = json.Unmarshal([]byte(planJSON), &rec)
+		var runtimeCfg struct {
+			Placement PlacementPlan `json:"placement"`
+		}
+		if json.Unmarshal([]byte(runtimeConfigJSON), &runtimeCfg) == nil && runtimeCfg.Placement.Mode != "" {
+			rec.Placement = runtimeCfg.Placement
+		}
+		if rec.Placement.Mode != "" {
 			x.ComputeBackend = rec.Placement.Backend
 			hasCPU, hasGPU := false, false
 			for _, dev := range rec.Placement.Devices {

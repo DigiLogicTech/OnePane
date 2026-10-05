@@ -7,6 +7,7 @@ import (
 
 type Team struct {
 	ID, WorkspaceID, Name, Purpose, Status, CreatedBy string
+	Configuration                                     json.RawMessage `json:"configuration"`
 	Revision, CreatedAt, UpdatedAt                    int64
 }
 type Member struct {
@@ -57,6 +58,11 @@ type TurnRequest struct {
 }
 
 type CreateTeamCommand struct{ WorkspaceID, Name, Purpose, CreatedBy string }
+type UpdateConfigurationCommand struct {
+	TeamID, ActorPrincipalID string
+	ExpectedRevision         int64
+	Configuration            json.RawMessage
+}
 type AddMemberCommand struct {
 	TeamID, MemberKind, DisplayName, RoleName, CapabilityID, ProtocolLevel, CreatedBy string
 	PrincipalID                                                                       *string

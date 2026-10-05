@@ -53,6 +53,7 @@
       </div>
       <nav id="primaryNav" class="primary-nav"></nav>
       <div class="sidebar-spacer"></div>
+      <button class="sidebar-action control-chat-launcher" id="controlChatLauncher" type="button" aria-label="Open OnePane Chat"><span class="nav-icon">✦</span><span>OnePane Chat</span></button>
       <button class="sidebar-action" data-action="command-palette"><span class="shortcut-label">Ctrl+K</span> <span>Command</span></button>
       <button class="sidebar-action" data-action="product-tour">? <span>Help / Tour</span></button>
       <button class="sidebar-action" data-route="settings">⚙ <span>Settings</span></button>
@@ -93,6 +94,18 @@
         <div id="drawerContent" class="drawer-content"></div>
       </section>
     </section>
+
+    <aside id="controlChatPanel" class="control-chat-panel" data-state="closed" hidden aria-label="OnePane Control Chat">
+      <div class="control-chat-head">
+        <div><strong>OnePane Chat</strong><div class="list-meta">Control-plane conversation</div></div>
+        <button class="icon-button" id="controlChatClose" aria-label="Close OnePane Chat">×</button>
+      </div>
+      <div class="control-chat-tabs">
+        <button class="subtab active" id="controlChatAssistantTab" type="button">Assistant</button>
+        <button class="subtab" id="controlChatOrchestratorTab" type="button">Project Orchestrator</button>
+      </div>
+      <div id="controlChatBody" class="control-chat-body"></div>
+    </aside>
 
     <div id="inspectorResizer" class="inspector-resizer" role="separator" aria-orientation="vertical" aria-label="Resize Inspector" title="Drag to resize; double-click to reset"></div>
     <button id="inspectorRestore" class="shell-panel-toggle panel-restore inspector-restore" aria-label="Collapse Inspector" title="Collapse Inspector" aria-controls="inspector" aria-expanded="true"><svg class="panel-toggle-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6"/></svg></button>

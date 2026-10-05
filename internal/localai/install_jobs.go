@@ -55,6 +55,7 @@ type OneClickInstallRequest struct {
 	Quantization        string
 	PreferGPU           bool
 	PlacementPreference PlacementMode
+	ComputePreference   string
 	RequestedBy         string
 }
 
@@ -145,16 +146,45 @@ func (s *Service) QueueOneClickInstall(ctx context.Context, req OneClickInstallR
 	if err != nil {
 		return InstallJob{}, err
 	}
-	recs, err := s.Recommendations(ctx, req.HardwareProfileID, RecommendRequest{UseCase: req.UseCase, ContextTokens: req.ContextTokens, Limit: 50, MinimumFit: FitMarginal, StorageHeadroomPct: 20, PreferGPU: req.PreferGPU, PlacementPreference: req.PlacementPreference})
-	if err != nil {
-		return InstallJob{}, err
+	preference := normalizeComputePreference(req.ComputePreference)
+	preferGPU := req.PreferGPU
+	placement := req.PlacementPreference
+	switch preference {
+	case "require_cpu":
+		placement = PlacementCPUOnly
+	case "require_gpu":
+		placement = PlacementSingleDevice
+		preferGPU = true
+	case "hybrid":
+		placement = PlacementCPUOffload
+		preferGPU = true
+	case "prefer_gpu":
+		preferGPU = true
+	case "prefer_cpu":
+		placement = PlacementCPUOnly
 	}
-	var selected *Recommendation
-	for i := range recs {
-		if strings.EqualFold(recs[i].Model.ModelRef, req.ModelRef) && strings.EqualFold(recs[i].Quantization, req.Quantization) {
-			selected = &recs[i]
-			break
+	recommend := func(place PlacementMode, prefer bool) ([]Recommendation, error) {
+		return s.Recommendations(ctx, req.HardwareProfileID, RecommendRequest{
+			UseCase: req.UseCase, ContextTokens: req.ContextTokens, Limit: 50, MinimumFit: FitMarginal,
+			StorageHeadroomPct: 20, PreferGPU: prefer, PlacementPreference: place,
+		})
+	}
+	recs, err := recommend(placement, preferGPU)
+	if err != nil && preference == "prefer_cpu" {
+		recs, err = recommend("", false)
+	}
+	if err != nil { return InstallJob{}, err }
+	find := func(rows []Recommendation) *Recommendation {
+		for i := range rows {
+			if strings.EqualFold(rows[i].Model.ModelRef, req.ModelRef) && strings.EqualFold(rows[i].Quantization, req.Quantization) {
+				return &rows[i]
+			}
 		}
+		return nil
+	}
+	selected := find(recs)
+	if selected == nil && preference == "prefer_cpu" {
+		if fallback, e := recommend("", false); e == nil { selected = find(fallback) }
 	}
 	if selected == nil {
 		return InstallJob{}, errors.New("selected model/quantization is not currently recommended for this hardware")

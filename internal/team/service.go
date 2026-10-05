@@ -96,9 +96,9 @@ func (s *Service) CreateTeam(ctx context.Context, c CreateTeamCommand) (Team, er
 	}
 	tid, _ := s.ids.New("team")
 	now := s.clock.UnixMilli()
-	t := Team{ID: tid, WorkspaceID: c.WorkspaceID, Name: strings.TrimSpace(c.Name), Purpose: strings.TrimSpace(c.Purpose), Status: "active", CreatedBy: c.CreatedBy, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	t := Team{ID: tid, WorkspaceID: c.WorkspaceID, Name: strings.TrimSpace(c.Name), Purpose: strings.TrimSpace(c.Purpose), Status: "active", CreatedBy: c.CreatedBy, Configuration: json.RawMessage(`{}`), Revision: 1, CreatedAt: now, UpdatedAt: now}
 	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		if _, e := tx.ExecContext(ctx, `INSERT INTO teams(id,workspace_id,name,purpose,status,created_by,revision,created_at,updated_at) VALUES(?,?,?,?,?,?,1,?,?)`, t.ID, t.WorkspaceID, t.Name, t.Purpose, t.Status, t.CreatedBy, now, now); e != nil {
+		if _, e := tx.ExecContext(ctx, `INSERT INTO teams(id,workspace_id,name,purpose,status,created_by,configuration_json,revision,created_at,updated_at) VALUES(?,?,?,?,?,?,?,1,?,?)`, t.ID, t.WorkspaceID, t.Name, t.Purpose, t.Status, t.CreatedBy, string(t.Configuration), now, now); e != nil {
 			return e
 		}
 		actor := c.CreatedBy
@@ -108,11 +108,11 @@ func (s *Service) CreateTeam(ctx context.Context, c CreateTeamCommand) (Team, er
 }
 func (s *Service) Team(ctx context.Context, idv string) (Team, error) {
 	var t Team
-	err := s.db.QueryRowContext(ctx, `SELECT id,workspace_id,name,purpose,status,created_by,revision,created_at,updated_at FROM teams WHERE id=?`, idv).Scan(&t.ID, &t.WorkspaceID, &t.Name, &t.Purpose, &t.Status, &t.CreatedBy, &t.Revision, &t.CreatedAt, &t.UpdatedAt)
+	err := s.db.QueryRowContext(ctx, `SELECT id,workspace_id,name,purpose,status,created_by,configuration_json,revision,created_at,updated_at FROM teams WHERE id=?`, idv).Scan(&t.ID, &t.WorkspaceID, &t.Name, &t.Purpose, &t.Status, &t.CreatedBy, &t.Configuration, &t.Revision, &t.CreatedAt, &t.UpdatedAt)
 	return t, err
 }
 func (s *Service) ListTeams(ctx context.Context, ws string) ([]Team, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,workspace_id,name,purpose,status,created_by,revision,created_at,updated_at FROM teams WHERE workspace_id=? ORDER BY status,name,id`, ws)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,workspace_id,name,purpose,status,created_by,configuration_json,revision,created_at,updated_at FROM teams WHERE workspace_id=? ORDER BY status,name,id`, ws)
 	if err != nil {
 		return nil, err
 	}
@@ -120,12 +120,30 @@ func (s *Service) ListTeams(ctx context.Context, ws string) ([]Team, error) {
 	var out []Team
 	for rows.Next() {
 		var t Team
-		if err := rows.Scan(&t.ID, &t.WorkspaceID, &t.Name, &t.Purpose, &t.Status, &t.CreatedBy, &t.Revision, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.WorkspaceID, &t.Name, &t.Purpose, &t.Status, &t.CreatedBy, &t.Configuration, &t.Revision, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+func (s *Service) UpdateConfiguration(ctx context.Context, c UpdateConfigurationCommand) (Team, error) {
+	t, err := s.Team(ctx, c.TeamID)
+	if err != nil { return Team{}, err }
+	if c.ActorPrincipalID == "" || c.ExpectedRevision < 1 || !s.workspaceMember(ctx, t.WorkspaceID, c.ActorPrincipalID) { return Team{}, ErrInvalid }
+	cfg, err := canonical(c.Configuration)
+	if err != nil { return Team{}, err }
+	now := s.clock.UnixMilli()
+	res, err := s.db.ExecContext(ctx, `UPDATE teams SET configuration_json=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?`, string(cfg), now, t.ID, c.ExpectedRevision)
+	if err != nil { return Team{}, err }
+	n, _ := res.RowsAffected()
+	if n != 1 { return Team{}, ErrInvalid }
+	actor := c.ActorPrincipalID
+	_ = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		return s.emit(ctx, tx, t.WorkspaceID, "team.configuration_updated", "team", t.ID, &actor, map[string]any{"revision": c.ExpectedRevision + 1})
+	})
+	return s.Team(ctx, t.ID)
 }
 
 func (s *Service) AddMember(ctx context.Context, c AddMemberCommand) (Member, error) {

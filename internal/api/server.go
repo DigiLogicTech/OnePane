@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sort"
 	"strings"
 	"time"
 
@@ -95,6 +96,8 @@ type localAIService interface {
 	AdmitModel(context.Context, string, localai.AdmissionCommand) (localai.ModelSpecSheet, error)
 	ManagedDeploymentWorkspace(context.Context, string) (*string, error)
 	ManagedDeployments(context.Context, string) ([]localai.ManagedDeploymentSummary, error)
+	ComputePolicy(context.Context, string) (localai.ComputePolicy, error)
+	SetComputePolicy(context.Context, localai.ComputePolicyCommand) (localai.ComputePolicy, error)
 	RegisterColibriFolder(context.Context, localai.RegisterColibriCommand) (inference.ModelDeployment, error)
 	ConfigureModelPool(string) error
 	ManagedComponents(context.Context) (map[string]localai.ManagedComponent, error)
@@ -184,6 +187,7 @@ type teamService interface {
 	ListTeams(context.Context, string) ([]team.Team, error)
 	AddMember(context.Context, team.AddMemberCommand) (team.Member, error)
 	ListMembers(context.Context, string) ([]team.Member, error)
+	UpdateConfiguration(context.Context, team.UpdateConfigurationCommand) (team.Team, error)
 	StartSession(context.Context, team.StartSessionCommand) (team.Session, error)
 	Session(context.Context, string) (team.Session, error)
 	SessionByTask(context.Context, string) (team.Session, error)
@@ -241,6 +245,8 @@ type Server struct {
 	assistant       assistantService
 	projectOrchestrator projectOrchestratorService
 	agentProfiles   agentProfileService
+	skills          skillCatalogService
+	providerOAuth   providerOAuthService
 	configPath      string
 	modelPoolPath   string
 }
@@ -278,6 +284,8 @@ func (s *Server) SetChatCommands(v chatCommandService)              { s.chatComm
 func (s *Server) SetAssistant(v assistantService)                    { s.assistant = v }
 func (s *Server) SetProjectOrchestrator(v projectOrchestratorService) { s.projectOrchestrator = v }
 func (s *Server) SetAgentProfiles(v agentProfileService)             { s.agentProfiles = v }
+func (s *Server) SetSkills(v skillCatalogService)                     { s.skills = v }
+func (s *Server) SetProviderOAuth(v providerOAuthService)             { s.providerOAuth = v }
 func (s *Server) SetRuntimeConfig(path, modelPoolPath string) {
 	s.configPath = strings.TrimSpace(path)
 	s.modelPoolPath = strings.TrimSpace(modelPoolPath)
@@ -321,6 +329,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/local-ai/components/{componentID}/{action}", s.manageComponent)
 	s.mux.HandleFunc("GET /v1/local-ai/component-jobs/{jobID}", s.getComponentJob)
 	s.mux.HandleFunc("GET /v1/local-ai/deployments", s.listManagedLocalDeployments)
+	s.mux.HandleFunc("GET /v1/local-ai/deployments/{deploymentID}/compute-policy", s.getDeploymentComputePolicy)
+	s.mux.HandleFunc("PATCH /v1/local-ai/deployments/{deploymentID}/compute-policy", s.setDeploymentComputePolicy)
 	s.mux.HandleFunc("POST /v1/local-ai/colibri/register", s.registerColibriFolder)
 	s.mux.HandleFunc("GET /v1/vault/provider-credentials", s.listProviderCredentials)
 	s.mux.HandleFunc("POST /v1/vault/provider-credentials", s.createProviderCredential)
@@ -330,6 +340,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/providers/probe", s.probeProvider)
 	s.mux.HandleFunc("POST /v1/providers", s.addProvider)
 	s.mux.HandleFunc("POST /v1/providers/{providerID}/revoke", s.revokeProvider)
+	s.mux.HandleFunc("GET /v1/provider-oauth/configs", s.listOAuthConfigs)
+	s.mux.HandleFunc("PUT /v1/provider-oauth/configs/{presetID}", s.saveOAuthConfig)
+	s.mux.HandleFunc("POST /v1/provider-oauth/{presetID}/start", s.startProviderOAuth)
+	s.mux.HandleFunc("GET /v1/provider-oauth/callback", s.completeProviderOAuth)
+	s.mux.HandleFunc("GET /v1/provider-oauth/connections", s.listProviderOAuthConnections)
+	s.mux.HandleFunc("POST /v1/provider-oauth/connections/{connectionID}/revoke", s.revokeProviderOAuth)
 	s.mux.HandleFunc("POST /v1/providers/omniroute/probe", s.probeOmniRoute)
 	s.mux.HandleFunc("POST /v1/providers/omniroute", s.addOmniRoute)
 	s.mux.HandleFunc("GET /v1/agent-runtime-presets", s.agentRuntimePresets)
@@ -363,6 +379,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/teams", s.createTeam)
 	s.mux.HandleFunc("GET /v1/teams/{teamID}/members", s.listTeamMembers)
 	s.mux.HandleFunc("POST /v1/teams/{teamID}/members", s.addTeamMember)
+	s.mux.HandleFunc("PATCH /v1/teams/{teamID}/configuration", s.updateTeamConfiguration)
+	s.mux.HandleFunc("GET /v1/team-presets", s.listTeamPresets)
+	s.mux.HandleFunc("GET /v1/skills/packages", s.listSkillPackages)
+	s.mux.HandleFunc("POST /v1/skills/packages/upload", s.uploadSkillPackage)
+	s.mux.HandleFunc("POST /v1/skills/packages/{packageID}/install", s.installSkillPackage)
+	s.mux.HandleFunc("PATCH /v1/skills/packages/{packageID}", s.setSkillPackageStatus)
+	s.mux.HandleFunc("GET /v1/skills/tool-bundles", s.listToolBundles)
+	s.mux.HandleFunc("GET /v1/skills/assignments", s.listSkillAssignments)
+	s.mux.HandleFunc("POST /v1/skills/assignments", s.assignSkill)
 	s.mux.HandleFunc("POST /v1/tasks/{taskID}/team-session", s.startTeamSession)
 	s.mux.HandleFunc("GET /v1/tasks/{taskID}/team-session", s.getTaskTeamSession)
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}", s.getTeamSession)
@@ -1440,25 +1465,41 @@ func (s *Server) setLocalAISettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listLocalAICatalog(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authenticate(w, r); !ok {
-		return
-	}
+	if _, ok := s.authenticate(w, r); !ok { return }
 	models := localai.BuiltinCatalog()
+	catalogVersion := ""
+	installable := map[string]map[string]bool{}
 	if s.localAI != nil && s.localAI.Catalog() != nil {
+		if rec, _, err := s.localAI.Catalog().Active(r.Context()); err == nil { catalogVersion = rec.CatalogVersion }
+		if x, err := s.localAI.Catalog().Installability(r.Context()); err == nil { installable = x }
 		if signed, err := s.localAI.Catalog().ModelSpecifications(r.Context()); err == nil && len(signed) > 0 {
 			seen := map[string]bool{}
-			for _, m := range models {
-				seen[m.ModelRef] = true
-			}
+			for _, m := range models { seen[m.ModelRef] = true }
 			for _, m := range signed {
-				if !seen[m.ModelRef] {
-					models = append(models, m)
-					seen[m.ModelRef] = true
-				}
+				if !seen[m.ModelRef] { models = append(models, m); seen[m.ModelRef] = true }
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, models)
+	rows := make([]map[string]any, 0, len(models))
+	for _, m := range models {
+		raw, _ := json.Marshal(m)
+		row := map[string]any{}
+		_ = json.Unmarshal(raw, &row)
+		qs := []string{}
+		for q, ok := range installable[m.ModelRef] { if ok { qs = append(qs, q) } }
+		sort.Strings(qs)
+		row["installable"] = len(qs) > 0
+		row["installable_quantizations"] = qs
+		row["catalog_version"] = catalogVersion
+		if len(qs) > 0 {
+			row["source"] = "trusted"
+		} else {
+			row["source"] = "advisory"
+			row["install_reason"] = "No verified artifact is available in the active trusted catalogue."
+		}
+		rows = append(rows, row)
+	}
+	writeJSON(w, http.StatusOK, rows)
 }
 
 func (s *Server) listManagedLocalDeployments(w http.ResponseWriter, r *http.Request) {
@@ -1939,6 +1980,7 @@ func (s *Server) recommendLocalAI(w http.ResponseWriter, r *http.Request) {
 		StorageHeadroomPct  int                   `json:"storage_headroom_pct"`
 		PreferGPU           bool                  `json:"prefer_gpu"`
 		PlacementPreference localai.PlacementMode `json:"placement_preference,omitempty"`
+		ComputePreference   string                `json:"compute_preference,omitempty"`
 	}
 	if !decodeJSON(w, r, &in) {
 		return
@@ -2026,9 +2068,14 @@ func (s *Server) queueLocalAIInstall(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "local AI unavailable")
 		return
 	}
-	out, err := s.localAI.QueueOneClickInstall(r.Context(), localai.OneClickInstallRequest{WorkspaceID: in.WorkspaceID, HardwareProfileID: in.ProfileID, RoleName: in.RoleName, UseCase: in.UseCase, ContextTokens: in.ContextTokens, ModelRef: in.ModelRef, Quantization: in.Quantization, PreferGPU: in.PreferGPU, PlacementPreference: in.PlacementPreference, RequestedBy: i.PrincipalID})
+	out, err := s.localAI.QueueOneClickInstall(r.Context(), localai.OneClickInstallRequest{WorkspaceID: in.WorkspaceID, HardwareProfileID: in.ProfileID, RoleName: in.RoleName, UseCase: in.UseCase, ContextTokens: in.ContextTokens, ModelRef: in.ModelRef, Quantization: in.Quantization, PreferGPU: in.PreferGPU, PlacementPreference: in.PlacementPreference, ComputePreference: in.ComputePreference, RequestedBy: i.PrincipalID})
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		msg := err.Error()
+		low := strings.ToLower(msg)
+		if strings.Contains(low, "catalog") || strings.Contains(low, "no rows in result set") || strings.Contains(low, "verified artifact") {
+			msg = "Trusted Local AI catalogue is unavailable or does not contain a verified artifact for this model/quantization."
+		}
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, out)

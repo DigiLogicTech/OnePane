@@ -1557,891 +1557,400 @@ qa6FollowContent=function(w,project){const html=qa7FollowContentBase(w,project),
 
 pages.settings.title='Settings';
 
-/* === Alpha 3 workspace/model/runtime consolidation === */
-const qa8VisibleModes=['direct','team','council'];
 
-// Durable top-level navigation only. Contextual capabilities remain inside Projects,
-// Models, Operations and Settings rather than competing with workspace components.
-navItems.splice(0,navItems.length,...navItems.filter(([route])=>['operations','projects','tasks','models','agents'].includes(route)));
-pages.projects.title='Projects';
-pages.models.title='Models';
-pages.agents.title='Agents';
-pages.settings.title='Settings';
+/* === Alpha 3.1 canonical product layer === */
+const A31_LAYOUT_COLUMNS=12;
+const A31_LAYOUT_ROW_PX=44;
+let a31ModelView="local";
+let a31AgentView="profiles";
+let a31SkillsView="installed";
+let a31SettingsView="general";
+let a31OperationsView="overview";
+let a31ControlTab="assistant";
+let a31AssistantThreadID="";
+let a31InstallPoll=null;
 
-function qa8Mode(v){v=String(v||'').toLowerCase();return v==='team'||v==='council'?v:'direct';}
-const qa8NormalizeBase=qa7NormalizeWorkspace;
-qa7NormalizeWorkspace=function(project,workspace){
-  const w=qa8NormalizeBase(project,workspace);
-  w.orchestration=w.orchestration||{};
-  w.orchestration.mode=qa8Mode(w.orchestration.mode);
-  // Alpha 2 stored the Direct/default assignment as "supervisor". Preserve the
-  // underlying record for compatibility while presenting it only as Direct.
-  w.orchestration.supervisor=qa7NormalizeRole(w.orchestration.supervisor,'agent.md');
-  w.orchestration.team=qa7NormalizeRole(w.orchestration.team,'onepane-default');
-  w.orchestration.council=qa7NormalizeRole(w.orchestration.council,'onepane-default');
-  w.compute=w.compute||{preference:'auto'};
-  return w;
-};
+pages.skills={title:"Skills",icon:"✦"};
+pages.nodes={title:"Nodes",icon:"⬡"};
+navItems.splice(0,navItems.length,
+  ["operations","▣","Operations"],["tasks","☑","Tasks"],["projects","▢","Projects"],
+  ["models","◇","Models"],["nodes","⬡","Nodes"],["agents","♙","Agents"],["skills","✦","Skills"]
+);
 
-function qa8ComputeBadge(mode){const v=String(mode||'auto').toLowerCase();const label=v==='cpu_gpu'||v==='hybrid'?'HYBRID':v==='gpu'?'GPU':v==='cpu'?'CPU':'AUTO';return `<span class="pill qa8-compute ${label.toLowerCase()}">${label}</span>`;}
-function qa8ModelAssignment(workspace,mode){const o=workspace.orchestration||{};return mode==='direct'?(o.supervisor||{}):(o[mode]||{});}
-function qa8ModelStackRole(mode,label,workspace){
-  const x=qa8ModelAssignment(workspace,mode),models=qa4ModelOptions(),agents=qa4AgentOptions();
-  const fallback=x.fallback_model||'auto',compute=x.compute_preference||workspace.compute?.preference||'auto';
-  return `<div class="qa8-stack-pane" data-qa8-stack-pane="${mode}"><div class="qa8-stack-head"><div><strong>${label}</strong><div class="list-meta">Workspace-owned assignment · changes apply only here</div></div><button class="btn tiny" type="button" data-qa8-recommend="${mode}">Recommend</button></div><label>Primary model<select data-qa8-model="${mode}">${qa4OptionRows(models,x.model||'auto')}</select></label><label>Agent<select data-qa8-agent="${mode}">${qa4OptionRows(agents,x.agent||(mode==='direct'?'agent.md':'onepane-default'))}</select></label><label>Compute preference<select data-qa8-compute="${mode}"><option value="auto" ${compute==='auto'?'selected':''}>Auto</option><option value="prefer-gpu" ${compute==='prefer-gpu'?'selected':''}>Prefer GPU</option><option value="prefer-cpu" ${compute==='prefer-cpu'?'selected':''}>Prefer CPU</option><option value="gpu-only" ${compute==='gpu-only'?'selected':''}>GPU only</option><option value="cpu-only" ${compute==='cpu-only'?'selected':''}>CPU only</option></select></label><label>Fallback model<select data-qa8-fallback="${mode}">${qa4OptionRows(models,fallback)}</select></label>${mode!=='direct'?`<div class="list-meta">Active model-powered seats are capped at 8, including a model-powered coordinator/synthesiser.</div>`:''}</div>`;
+function a31Array(v){return Array.isArray(v)?v:[]}
+function a31Object(v){return v&&typeof v==="object"&&!Array.isArray(v)?v:{}}
+function a31JSON(v,fallback={}){if(v&&typeof v==="object")return v;try{return JSON.parse(v||"{}")}catch{return fallback}}
+function a31RouteIs(route){return currentTab()?.route===route}
+function a31SetModelView(view){a31ModelView=view==="cloud"?"cloud":"local";if(a31RouteIs("models"))renderModels();renderNav()}
+function a31SetAgentView(view){a31AgentView=view;if(a31RouteIs("agents"))renderAgents()}
+function a31SetSkillsView(view){a31SkillsView=view;if(a31RouteIs("skills"))renderSkills()}
+function a31SetOperationsView(view){a31OperationsView=view;if(a31RouteIs("operations"))renderOperations()}
+function a31SetSettingsView(view){a31SettingsView=view;if(a31RouteIs("settings"))renderSettings()}
+function a31CurrentProject(){return typeof qa4ActiveProject==="function"?qa4ActiveProject():null}
+function a31CurrentWorkspace(){return typeof qa4ActiveWorkspace==="function"?qa4ActiveWorkspace():null}
+
+function renderNav(){
+  const route=currentTab()?.route||"operations",projects=a31Array(qa4ProjectHub?.projects);
+  const projectTree=projects.length?`<div class="project-nav-tree">${projects.map(p=>{const active=p.id===qa4ProjectHub.activeProjectID,workspaces=typeof qa4Workspaces==="function"?qa4Workspaces(p):[];return `<div class="project-nav-node ${active?'active-project':''}"><button class="project-nav-project" data-a31-project-nav="${escapeHtml(p.id)}"><span>▢</span><span>${escapeHtml(p.name||"Project")}</span></button><div class="project-nav-workspaces">${workspaces.map(w=>`<button class="project-nav-workspace ${active&&w.id===qa4ProjectHub.activeWorkspaceID?'active':''}" data-a31-project-nav="${escapeHtml(p.id)}" data-a31-workspace-nav="${escapeHtml(w.id)}"><span class="project-nav-branch"></span><span>${escapeHtml(w.name||"Workspace")}</span></button>`).join("")}</div></div>`}).join("")}</div>`:"";
+  const modelTree=`<div class="model-nav-tree"><button class="model-nav-child ${route==="models"&&a31ModelView==="local"?'active':''}" data-a31-model-view="local"><span>◈</span><span>Local Models</span></button><button class="model-nav-child ${route==="models"&&a31ModelView==="cloud"?'active':''}" data-a31-model-view="cloud"><span>☁</span><span>Cloud Models</span></button></div>`;
+  const html=navItems.map(([r,icon,label])=>{const row=`<button class="nav-item ${route===r?'active':''}" data-route="${r}" title="${escapeHtml(label)}"><span class="nav-icon">${icon}</span><span class="nav-label">${escapeHtml(label)}</span></button>`;if(r==="projects")return row+projectTree;if(r==="models")return row+modelTree;return row}).join("");
+  $("#primaryNav").innerHTML=html;
+  $$("[data-a31-model-view]").forEach(b=>b.onclick=e=>{e.stopPropagation();openRoute("models");a31SetModelView(b.dataset.a31ModelView)});
+  $$("[data-a31-project-nav]").forEach(b=>b.onclick=e=>{e.stopPropagation();qa4ProjectHub.activeProjectID=b.dataset.a31ProjectNav;if(b.dataset.a31WorkspaceNav)qa4ProjectHub.activeWorkspaceID=b.dataset.a31WorkspaceNav;else qa4ProjectHub.activeWorkspaceID="";openRoute("projects");renderNav()});
 }
-function qa8ModelStackContent(w,project,workspace){
-  qa7NormalizeWorkspace(project,workspace);const active=w.config?.tab||'direct';
-  return `<div class="qa8-model-stack" data-qa8-stack-root="${escapeHtml(w.id)}"><div class="qa8-stack-tabs">${qa8VisibleModes.map(m=>`<button type="button" class="subtab ${active===m?'active':''}" data-qa8-stack-tab="${m}" data-qa8-stack-id="${escapeHtml(w.id)}">${titleCase(m)}</button>`).join('')}</div>${qa8ModelStackRole(active,titleCase(active),workspace)}<div class="qa8-stack-footer"><span class="pill ${workspace.routing?.enabled!==false?'good':''}">${workspace.routing?.enabled!==false?'Routing enabled':'Routing disabled'}</span><span class="list-meta">Deployment fallback (same model on another CPU/GPU/node) is attempted before model fallback.</span></div></div>`;
+
+/* Shared deterministic component layout. */
+function a31Constraints(item){
+  const type=String(item.type||"");
+  const minW=["chat","modelstack","settings"].includes(type)?4:3;
+  const minH=type==="chat"?4:3;
+  return {minW,minH,maxW:12,maxH:12};
 }
-
-QA6_COMPONENTS.modelstack={title:'Model Stack',description:'Direct, Team and Council model assignments, fallbacks and compute preference.',multiple:false,size:'large'};
-QA6_COMPONENTS.library={title:'Library',description:'Project-owned files, datasets, artifacts and packages granted to this workspace.',multiple:false,size:'large'};
-QA6_COMPONENTS.integrations={title:'Integrations',description:'Workspace grants for connected application-level integrations.',multiple:false,size:'medium'};
-QA6_COMPONENTS.approvals={title:'Approvals',description:'Pending confirm-class actions for this workspace.',multiple:false,size:'medium'};
-
-const qa8DefaultWorkspaceBase=qa4DefaultWorkspace;
-qa4DefaultWorkspace=function(project,name='Main workspace'){
-  const w=qa7NormalizeWorkspace(project,qa8DefaultWorkspaceBase(project,name));
-  w.orchestration.mode='direct';
-  const now=Date.now();
-  const keep=(w.widgets||[]).filter(x=>!['models'].includes(x.type));
-  if(!keep.some(x=>x.type==='chat'))keep.unshift({id:`pw-chat-${now}`,type:'chat',title:'Chat',col:6,row:5});
-  if(!keep.some(x=>x.type==='modelstack'))keep.splice(1,0,{id:`pw-modelstack-${now+1}`,type:'modelstack',title:'Model Stack',col:6,row:5,config:{tab:'direct'}});
-  w.widgets=keep;
-  return w;
-};
-
-const qa8ComponentBase=qa6ComponentContent;
-qa6ComponentContent=function(w,project,workspace){
-  if(w.type==='modelstack')return qa8ModelStackContent(w,project,workspace);
-  if(w.type==='library')return `<div class="empty-state compact">Project Library is enabled for this workspace. Upload and access grants are enforced by the control plane.</div>`;
-  if(w.type==='integrations')return `<div class="empty-state compact">Integration connections are application-level; this workspace controls its own capability grants.</div>`;
-  if(w.type==='approvals')return `<div class="empty-state compact">Confirm-class actions appear here and in Follow before execution continues.</div>`;
-  return qa8ComponentBase(w,project,workspace);
-};
-
-qa7EffectiveChatMode=function(workspace,requested='default'){
-  let mode=requested==='default'?qa8Mode(workspace.orchestration?.mode):qa8Mode(requested);
-  if(workspace.routing?.enabled===false&&mode!=='direct')mode='direct';
-  return mode;
-};
-qa7RoutingEnvelope=function(workspace,requested='default'){
-  const enabled=workspace.routing?.enabled!==false,mode=qa7EffectiveChatMode(workspace,requested),role=mode==='direct'?'supervisor':mode,selected=qa4RouteSelection(workspace,role),fallback=qa7RouteFallback(workspace,role);
-  return {enabled,mode,role,candidate_id:selected.candidate_id,agent_profile:selected.agent_profile,fallback_candidate_ids:enabled?fallback.candidate_ids:[],fallback_agent_profiles:enabled?fallback.agent_profiles:[],project_workspace_id:workspace.id,workspace_access:qa7WorkspaceAccess(workspace),compute_preference:qa8ModelAssignment(workspace,mode).compute_preference||workspace.compute?.preference||'auto'};
-};
-
-qa7WorkspaceSettingsContent=function(w,project,workspace){
-  qa7NormalizeWorkspace(project,workspace);const s=workspace.sandbox,o=workspace.orchestration||{},routing=workspace.routing?.enabled!==false,remote=workspace.remote?.enabled!==false;
-  const direct=qa8ModelAssignment(workspace,'direct'),team=qa8ModelAssignment(workspace,'team'),council=qa8ModelAssignment(workspace,'council');
-  const role=(key,label,x)=>{const models=qa4ModelOptions(),agents=qa4AgentOptions();return `<fieldset class="inspector-fieldset"><legend>${label}</legend><label>Primary model<select data-qa7-role-model="${key}">${qa4OptionRows(models,x.model||'auto')}</select></label><label>Agent<select data-qa7-role-agent="${key}">${qa4OptionRows(agents,x.agent||(key==='supervisor'?'agent.md':'onepane-default'))}</select></label><label>Fallback model<select data-qa7-role-fallback-model="${key}">${qa4OptionRows(models,x.fallback_model||'auto')}</select></label><label>Compute<select data-qa8-settings-compute="${key}"><option value="auto">Auto</option><option value="prefer-gpu" ${x.compute_preference==='prefer-gpu'?'selected':''}>Prefer GPU</option><option value="prefer-cpu" ${x.compute_preference==='prefer-cpu'?'selected':''}>Prefer CPU</option><option value="gpu-only" ${x.compute_preference==='gpu-only'?'selected':''}>GPU only</option><option value="cpu-only" ${x.compute_preference==='cpu-only'?'selected':''}>CPU only</option></select></label></fieldset>`;};
-  return `<form class="qa7-workspace-settings settings-stack" data-qa7-settings-root="${escapeHtml(w.id)}"><div class="qa7-settings-heading"><div><strong>Workspace-owned settings</strong><div class="list-meta">Defaults are copied on creation; existing workspaces are not changed by later Default changes.</div></div><span class="pill ${routing?'good':''}">${routing?'Routing enabled':'Routing disabled'}</span></div><label>Workspace name<input data-qa7-workspace-name value="${escapeHtml(workspace.name||'Workspace')}"></label><label>Default chat mode<select data-qa7-default-mode>${qa8VisibleModes.map(x=>`<option value="${x}" ${qa8Mode(o.mode)===x?'selected':''}>${titleCase(x)}</option>`).join('')}</select></label><label class="inline-check"><input type="checkbox" data-qa7-routing ${routing?'checked':''}> Enable model routing and automatic fallback</label><div class="page-subtitle">Direct remains normal chat. Routing may select a different primary model; fallbacks recover from incompatibility or failure. Disabling routing does not remove your assignments.</div>${role('supervisor','Direct',direct)}${role('team','Team',team)}${role('council','Council',council)}<fieldset class="inspector-fieldset"><legend>Workspace sandbox</legend><label class="inline-check"><input type="checkbox" data-qa7-sandbox="internet" ${s.internet?'checked':''}> Internet access</label><label class="inline-check"><input type="checkbox" data-qa7-sandbox="lan" ${s.lan?'checked':''}> LAN access</label><label class="inline-check"><input type="checkbox" data-qa7-sandbox="browser" ${s.browser?'checked':''}> Browser capability</label><label class="inline-check"><input type="checkbox" data-qa7-sandbox="computer" ${s.computer?'checked':''}> Computer capability</label><label>Host files<select data-qa7-host-files><option value="workspace-only" ${s.host_files!=='none'?'selected':''}>This workspace only</option><option value="none" ${s.host_files==='none'?'selected':''}>No filesystem access</option></select></label><label>Secrets<select data-qa7-secrets><option value="selected" ${s.secrets!=='none'?'selected':''}>Selected Vault handles</option><option value="none" ${s.secrets==='none'?'selected':''}>None</option></select></label></fieldset><fieldset class="inspector-fieldset"><legend>Remote execution</legend><label class="inline-check"><input type="checkbox" data-qa7-remote ${remote?'checked':''}> Allow qualified enrolled nodes and cloud deployments</label><div class="page-subtitle">Remote models receive compiled context and brokered capabilities only. Resource and integration permissions remain enforced by OnePane.</div></fieldset><button class="btn primary" type="submit">Save workspace settings</button><div class="page-subtitle" data-qa7-settings-status></div></form>`;
-};
-
-qa7ChatContent=function(w,project,workspace){
-  const cfg=w.config=w.config||{},routing=workspace.routing?.enabled!==false,requested=qa8Mode(cfg.chat_mode||'default'),rows=qa7ChatHistory(project,workspace,w),defaultMode=qa8Mode(workspace.orchestration?.mode),modeOptions=[['default',`Default (${titleCase(defaultMode)})`],['direct','Direct'],['team','Team'],['council','Council']];
-  return `<div class="qa7-chat" data-qa7-chat-root="${escapeHtml(w.id)}"><div class="qa7-chat-toolbar"><label>Mode<select data-qa7-chat-mode="${escapeHtml(w.id)}">${modeOptions.map(([v,l])=>`<option value="${v}" ${(cfg.chat_mode||'default')===v?'selected':''} ${!routing&&['team','council'].includes(v)?'disabled':''}>${escapeHtml(l)}</option>`).join('')}</select></label><span class="pill ${routing?'good':''}">${routing?'Routing on':'Routing off'}</span></div><div class="qa7-chat-history" data-qa7-chat-history="${escapeHtml(w.id)}">${rows.length?rows.map(x=>`<div class="workspace-chat-message ${x.role==='user'?'user':'system'}"><strong>${x.role==='user'?'You':'OnePane'}</strong><span>${escapeHtml(x.text)}</span></div>`).join(''):'<div class="empty-state compact">Chat creates governed tasks. Type / for deterministic workspace commands.</div>'}</div><form class="qa7-chat-form" data-qa7-chat-form="${escapeHtml(w.id)}"><textarea rows="2" data-qa7-chat-input="${escapeHtml(w.id)}" placeholder="Ask OnePane… Type / for commands"></textarea><button class="btn primary">Send</button><div class="slash-suggestions qa7-slash" hidden></div></form></div>`;
-};
-
-qa7SaveWorkspaceSettings=async function(project,workspace,root){
-  workspace.name=$('[data-qa7-workspace-name]',root)?.value.trim()||workspace.name;
-  workspace.routing={...(workspace.routing||{}),enabled:!!$('[data-qa7-routing]',root)?.checked};
-  workspace.remote={...(workspace.remote||{}),enabled:!!$('[data-qa7-remote]',root)?.checked,access_mode:'brokered'};
-  workspace.sandbox=workspace.sandbox||qa7WorkspaceDefaults().sandbox;
-  $$('[data-qa7-sandbox]',root).forEach(x=>workspace.sandbox[x.dataset.qa7Sandbox]=x.checked);
-  workspace.sandbox.network=workspace.sandbox.internet||workspace.sandbox.lan;
-  workspace.sandbox.host_files=$('[data-qa7-host-files]',root)?.value||'workspace-only';
-  workspace.sandbox.secrets=$('[data-qa7-secrets]',root)?.value||'selected';
-  workspace.orchestration=workspace.orchestration||{};
-  workspace.orchestration.mode=qa8Mode($('[data-qa7-default-mode]',root)?.value||workspace.orchestration.mode);
-  // Legacy worker assignments remain reusable internally, but are not a visible chat mode.
-  // Preserve their Alpha 2 assignment when saving the Direct/Team/Council surface.
-  for(const key of ['supervisor','team','council']){
-    const role=workspace.orchestration[key]=workspace.orchestration[key]||{};
-    const model=$(`[data-qa7-role-model="${key}"]`,root),agent=$(`[data-qa7-role-agent="${key}"]`,root),fallback=$(`[data-qa7-role-fallback-model="${key}"]`,root),compute=$(`[data-qa8-settings-compute="${key}"]`,root);
-    if(model)role.model=model.value||'auto';
-    if(agent)role.agent=agent.value||(key==='supervisor'?'agent.md':'onepane-default');
-    if(fallback)role.fallback_model=fallback.value||'auto';
-    if(compute)role.compute_preference=compute.value||'auto';
+function a31Overlap(a,b){return !(a.x+a.width<=b.x||b.x+b.width<=a.x||a.y+a.height<=b.y||b.y+b.height<=a.y)}
+function a31NormalizeLayout(items){
+  let cursorX=0,cursorY=0,rowH=0;
+  for(const item of items){
+    const c=a31Constraints(item);
+    item.width=Math.max(c.minW,Math.min(c.maxW,Number(item.width||item.col||4)));
+    item.height=Math.max(c.minH,Math.min(c.maxH,Number(item.height||item.row||4)));
+    if(!Number.isFinite(Number(item.x))||!Number.isFinite(Number(item.y))){
+      if(cursorX+item.width>A31_LAYOUT_COLUMNS){cursorX=0;cursorY+=Math.max(1,rowH);rowH=0}
+      item.x=cursorX;item.y=cursorY;cursorX+=item.width;rowH=Math.max(rowH,item.height);
+    }else{item.x=Math.max(0,Math.min(A31_LAYOUT_COLUMNS-item.width,Number(item.x)));item.y=Math.max(0,Number(item.y))}
+    item.col=item.width;item.row=item.height;
   }
-  const status=$('[data-qa7-settings-status]',root);
-  try{const updated=await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));qa4Inspector.data.project=updated;if(status)status.innerHTML='<span class="good">Saved for this workspace only.</span>';notice('Workspace settings saved.');}
-  catch(ex){if(status)status.innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`;}
-};
-
-function qa8Recommend(workspace,mode){const role=qa8ModelAssignment(workspace,mode);if(!role.model)role.model='auto';if(!role.agent)role.agent=mode==='direct'?'agent.md':'onepane-default';if(!role.fallback_model)role.fallback_model='auto';if(!role.compute_preference)role.compute_preference='auto';}
-function qa8BindModelStack(project,workspace,root=document){
-  $$('[data-qa8-stack-tab]',root).forEach(b=>b.onclick=async()=>{const w=qa7FindComponent(workspace,b.dataset.qa8StackId);if(!w)return;w.config=w.config||{};w.config.tab=b.dataset.qa8StackTab;await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));renderProjects();});
-  $$('[data-qa8-recommend]',root).forEach(b=>b.onclick=async()=>{qa8Recommend(workspace,b.dataset.qa8Recommend);await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));notice(`${titleCase(b.dataset.qa8Recommend)} recommendation applied without replacing pinned choices.`);renderProjects();});
-  $$('[data-qa8-model]',root).forEach(x=>x.onchange=async()=>{const r=qa8ModelAssignment(workspace,x.dataset.qa8Model);r.model=x.value;await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));});
-  $$('[data-qa8-agent]',root).forEach(x=>x.onchange=async()=>{const r=qa8ModelAssignment(workspace,x.dataset.qa8Agent);r.agent=x.value;await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));});
-  $$('[data-qa8-compute]',root).forEach(x=>x.onchange=async()=>{const r=qa8ModelAssignment(workspace,x.dataset.qa8Compute);r.compute_preference=x.value;await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));});
-  $$('[data-qa8-fallback]',root).forEach(x=>x.onchange=async()=>{const r=qa8ModelAssignment(workspace,x.dataset.qa8Fallback);r.fallback_model=x.value;await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));});
+  a31ResolveLayout(items,null);
+  return items;
 }
-const qa8BindWorkspaceBase=qa7BindWorkspaceControls;
-qa7BindWorkspaceControls=function(project,workspace,root=document){qa8BindWorkspaceBase(project,workspace,root);qa8BindModelStack(project,workspace,root);};
-
-
-
-function qa8ComputeModeForDeployment(d){
-  const raw=String(d?.compute_mode||d?.run_mode||d?.placement?.mode||'').toLowerCase();
-  if(raw.includes('hybrid')||raw.includes('offload')||raw.includes('cpu_gpu'))return 'hybrid';
-  if(raw.includes('gpu')||['cuda','rocm','hip','vulkan','metal','directml','sycl'].includes(String(d?.compute_backend||d?.runtime_backend||'').toLowerCase()))return 'gpu';
-  if(raw.includes('cpu'))return 'cpu';
-  return 'auto';
-}
-function qa8DecorateModels(){
-  const heading=$('#viewHost .page-heading h1');if(heading)heading.textContent='Models';
-  const rows=$$('#qa5ManagedModels .model-tile');
-  rows.forEach((el,i)=>{const d=qa5ManagedDeployments[i];if(!d)return;const meta=el.querySelector('.list-meta');if(meta&&!el.querySelector('.qa8-model-compute'))meta.insertAdjacentHTML('beforebegin',`<div class="toolbar qa8-model-compute">${qa8ComputeBadge(qa8ComputeModeForDeployment(d))}<span class="list-meta">${escapeHtml(d.compute_backend||d.runtime_backend||'')} ${d.compute_device_ids?.length?`· ${escapeHtml(d.compute_device_ids.join(', '))}`:''}</span></div>`);if(d.qualified||String(d.investigation_state||'').toLowerCase()==='qualified')el.querySelector('[data-agent-check]')?.remove();});
-  const inspected=qa4Inspector?.kind==='model'?qa4Inspector.data:null;
-  if(inspected&&(inspected.qualified||String(inspected.investigation_state||'').toLowerCase()==='qualified'))$('#qa5InspectorAgentCheck')?.remove();
-}
-const qa8RenderModelsBase=renderModels;
-renderModels=async function(){await qa8RenderModelsBase();qa8ManagedDeployments=qa5ManagedDeployments;queueMicrotask(qa8DecorateModels);};
-let qa8ManagedDeployments=[];
-
-function qa8SettingsEnhance(){
-  const heading=$('#viewHost .page-heading h1');if(heading)heading.textContent='Settings';
-  const mode=$('#qa5DefaultMode');if(mode){const current=qa8Mode(mode.value);mode.innerHTML=qa8VisibleModes.map(v=>`<option value="${v}" ${current===v?'selected':''}>${titleCase(v)}</option>`).join('');}
-  const localCard=$('#modelPoolPath')?.closest('.panel-card');
-  if(localCard&&!$('#qa8ProjectRoot')){const body=localCard.querySelector('.settings-stack');body?.insertAdjacentHTML('afterbegin',`<label>Default Project / Workspace data root<input id="qa8ProjectRoot" placeholder="D:\\OnePane\\Projects"></label><div class="page-subtitle">Libraries, artifacts and workspace data can live on a larger drive independently of the application and model pool.</div>`);}
-}
-const qa8RenderSettingsBase=renderSettings;
-renderSettings=async function(){await qa8RenderSettingsBase();qa8SettingsEnhance();try{const s=await apiRequest('/desktop/settings');if($('#qa8ProjectRoot'))$('#qa8ProjectRoot').value=s.project_root||'';}catch{}const save=$('#saveModelPool');if(save){const base=save.onclick;save.onclick=async()=>{const projectRoot=$('#qa8ProjectRoot')?.value.trim()||'';if(projectRoot){try{await apiRequest('/desktop/settings/project-root',{method:'POST',body:JSON.stringify({project_root:projectRoot})});}catch(ex){notice(`Project storage update failed: ${ex.message}`,'bad');return;}}await base?.();};}};
-
-async function qa8FleetSnapshot(){
-  const [queue,leases,nodes]=await Promise.all([
-    apiRequest('/v1/runtime-queue?limit=40').catch(()=>[]),
-    apiRequest('/v1/resource-leases?limit=40').catch(()=>[]),
-    apiRequest('/v1/nodes').catch(()=>liveOps.nodes||[])
-  ]);
-  return {queue:Array.isArray(queue)?queue:(queue.entries||[]),leases:Array.isArray(leases)?leases:(leases.entries||[]),nodes:Array.isArray(nodes)?nodes:(nodes.nodes||[])};
-}
-function qa8FleetCard(data){
-  const running=data.queue.filter(x=>x.state==='running'),queued=data.queue.filter(x=>String(x.state||'').startsWith('queued')||String(x.state||'').startsWith('waiting'));
-  const compute={cpu:0,gpu:0,hybrid:0};for(const x of running){let c={};try{c=typeof x.resource_claim==='string'?JSON.parse(x.resource_claim):x.resource_claim||{};}catch{}const m=String(c.compute_mode||'').toLowerCase();if(m==='cpu')compute.cpu++;else if(m==='hybrid'||m==='cpu_gpu')compute.hybrid++;else if(m==='gpu')compute.gpu++;}
-  return `<section class="panel-card qa8-fleet-card"><div class="card-header"><div><div class="card-title">Compute fleet</div><div class="list-meta">Application-wide CPU/GPU scheduling across local and enrolled nodes</div></div><span class="pill ${queued.length?'warn':'good'}">${queued.length} queued</span></div><div class="widget-body"><div class="metric-grid">${metric('CPU models',String(compute.cpu),'Running now')}${metric('GPU models',String(compute.gpu),'Running now')}${metric('Hybrid models',String(compute.hybrid),'CPU + GPU claims')}${metric('Resource leases',String(data.leases.length),'Global active/queued')}</div><div class="list-meta">${data.nodes.length} node(s) visible. CPU and each GPU are independently schedulable while shared RAM/device constraints remain enforced.</div></div></section>`;
-}
-const qa8RenderOperationsBase=renderOperations;
-renderOperations=function(){qa8RenderOperationsBase();qa8FleetSnapshot().then(data=>{$('#operationsLayout')?.insertAdjacentHTML('afterend',qa8FleetCard(data));}).catch(()=>{});};
-
-// Upgrade persisted Alpha 2 default mode without removing the compatible backing assignment.
-try{const p=qa5Prefs();if(['supervisor','workers'].includes(p.workspace_defaults?.orchestration)){p.workspace_defaults.orchestration='direct';localStorage.setItem(QA5_PREFS_KEY,JSON.stringify(p));}}catch{}
-
-
-
-/* === Alpha 3.1 authoritative OnePane Assistant surface === */
-let qa31AssistantThread=null;
-
-async function qa31Projects(){
-  try{
-    const rows=await apiRequest('/v1/projects?workspace_id='+encodeURIComponent(onepaneWorkspace));
-    return Array.isArray(rows)?rows:[];
-  }catch{return []}
-}
-async function qa31EnsureAssistantThread(){
-  if(qa31AssistantThread){
-    try{
-      await apiRequest('/v1/assistant/threads/'+encodeURIComponent(qa31AssistantThread.id)+'/turns?limit=1');
-      return qa31AssistantThread;
-    }catch{qa31AssistantThread=null}
+function a31FirstFree(items,item,ignore){
+  for(let y=0;y<120;y++)for(let x=0;x<=A31_LAYOUT_COLUMNS-item.width;x++){
+    const probe={x,y,width:item.width,height:item.height};
+    if(!items.some(o=>o!==item&&o.id!==ignore&&a31Overlap(probe,o)))return {x,y};
   }
-  const rows=await apiRequest('/v1/assistant/threads?workspace_id='+encodeURIComponent(onepaneWorkspace)+'&limit=20').catch(()=>[]);
-  if(Array.isArray(rows)&&rows.length){qa31AssistantThread=rows[0];return qa31AssistantThread}
-  qa31AssistantThread=await apiRequest('/v1/assistant/threads',{method:'POST',body:JSON.stringify({workspace_id:onepaneWorkspace,title:'OnePane Assistant'})});
-  return qa31AssistantThread;
+  return {x:0,y:Math.max(0,...items.filter(x=>x!==item).map(x=>x.y+x.height),0)};
 }
-async function qa31SetAssistantScope(projectID){
-  const thread=await qa31EnsureAssistantThread();
-  qa31AssistantThread=await apiRequest('/v1/assistant/threads/'+encodeURIComponent(thread.id)+'/scope',{method:'POST',body:JSON.stringify({project_id:projectID||null})});
-  return qa31AssistantThread;
+function a31ResolveLayout(items,anchorID){
+  const anchor=items.find(x=>x.id===anchorID);
+  const ordered=items.filter(x=>x!==anchor).sort((a,b)=>(a.y-b.y)||(a.x-b.x));
+  const placed=anchor?[anchor]:[];
+  for(const item of ordered){
+    if(placed.some(p=>a31Overlap(item,p))){const slot=a31FirstFree(placed,item,null);item.x=slot.x;item.y=slot.y}
+    placed.push(item);
+  }
 }
-function qa31AssistantTurnRow(t){
-  const project=t.project_id?'<span class="pill">Project</span>':'<span class="pill">Global</span>';
-  return `<div class="assistant-turn ${escapeHtml(t.role||'assistant')}"><div class="assistant-turn-meta">${t.role==='user'?'You':'OnePane'} ${project}</div><div class="assistant-turn-body">${escapeHtml(t.content||'')}</div></div>`;
+function a31GridStyle(item){return `grid-column:${Number(item.x)+1} / span ${item.width};grid-row:${Number(item.y)+1} / span ${item.height}`}
+function a31ApplyLayout(root,items,attr,animate=false){
+  const before=new Map();if(animate)$$(`[${attr}]`,root).forEach(el=>before.set(el.getAttribute(attr),el.getBoundingClientRect()));
+  for(const item of items){const el=$(`[${attr}="${CSS.escape(item.id)}"]`,root);if(!el)continue;el.style.gridColumn=`${item.x+1} / span ${item.width}`;el.style.gridRow=`${item.y+1} / span ${item.height}`}
+  if(animate&&Element.prototype.animate)requestAnimationFrame(()=>$$(`[${attr}]`,root).forEach(el=>{const old=before.get(el.getAttribute(attr));if(!old)return;const now=el.getBoundingClientRect(),dx=old.left-now.left,dy=old.top-now.top;if(Math.abs(dx)>1||Math.abs(dy)>1)el.animate([{transform:`translate(${dx}px,${dy}px)`},{transform:"translate(0,0)"}],{duration:170,easing:"ease-out"})}));
 }
-async function qa31OpenAssistant(){
-  const root=$('#overlayRoot');
-  root.innerHTML='<div class="overlay"><section class="command-palette assistant-palette qa31-assistant"><div class="widget-body">Loading OnePane Assistant…</div></section></div>';
-  root.firstElementChild.onclick=e=>{if(e.target===root.firstElementChild)root.innerHTML='';};
-  try{
-    const [thread,projects]=await Promise.all([qa31EnsureAssistantThread(),qa31Projects()]);
-    qa31AssistantThread=thread;
-    const turns=await apiRequest('/v1/assistant/threads/'+encodeURIComponent(thread.id)+'/turns?limit=80').catch(()=>[]);
-    const active=thread.active_project_id?projects.find(p=>p.id===thread.active_project_id):null;
-    const card=$('.qa31-assistant',root);if(!card)return;
-    card.innerHTML=`<div class="assistant-head"><div><div class="eyebrow">ONEPANE ASSISTANT</div><h2>${active?'Project context':'Global context'}</h2><div class="list-meta">${active?`Project · ${escapeHtml(active.name||active.id)} · Project Orchestrator delegated when needed`:'Global · navigation, system state and explicit Project handoff'}</div></div><button class="icon-button" id="qa31AssistantClose" aria-label="Close">×</button></div>
-      <div class="assistant-scope-row"><label>Context<select id="qa31AssistantScope"><option value="">Global</option>${projects.map(p=>`<option value="${escapeHtml(p.id)}" ${active&&p.id===active.id?'selected':''}>Project · ${escapeHtml(p.name||p.id)}</option>`).join('')}</select></label>${active?'<button class="btn" id="qa31ReturnGlobal">Return to Global</button>':''}</div>
-      <div class="assistant-history" id="qa31AssistantHistory">${Array.isArray(turns)&&turns.length?turns.map(qa31AssistantTurnRow).join(''):'<div class="empty-state compact">Ask OnePane about system state, navigation, or select a Project for Project-specific context.</div>'}</div>
-      <form id="qa31AssistantForm" class="assistant-compose"><textarea id="qa31AssistantInput" rows="3" placeholder="Ask OnePane or run a command…"></textarea><div class="assistant-compose-actions"><span class="list-meta">Ask is read-only. Run permits creation of governed Tasks when needed.</span><button class="btn" type="button" id="qa31AssistantAsk">Ask</button><button class="btn primary" type="button" id="qa31AssistantRun">Run</button></div></form>
-      <div class="palette-divider"></div><div class="palette-section-title">Navigation</div><div class="palette-quick">${navItems.map(([route,icon,label])=>`<button class="palette-row" data-qa31-nav="${route}"><span>${icon}</span><strong>${escapeHtml(label)}</strong></button>`).join('')}<button class="palette-row" data-qa31-nav="settings"><span>⚙</span><strong>Settings</strong></button></div>`;
-    $('#qa31AssistantClose',card).onclick=()=>root.innerHTML='';
-    $('#qa31ReturnGlobal',card)?.addEventListener('click',async()=>{await qa31SetAssistantScope(null);qa31OpenAssistant();});
-    $('#qa31AssistantScope',card).onchange=async e=>{await qa31SetAssistantScope(e.target.value||null);qa31OpenAssistant();};
-    $$('[data-qa31-nav]',card).forEach(b=>b.onclick=()=>{root.innerHTML='';openRoute(b.dataset.qa31Nav);});
-    const submit=async allow=>{
-      const input=$('#qa31AssistantInput',card),content=input?.value.trim();if(!content)return;
-      input.disabled=true;$('#qa31AssistantAsk',card).disabled=true;$('#qa31AssistantRun',card).disabled=true;
-      try{
-        const scoped=$('#qa31AssistantScope',card)?.value||null;
-        await apiRequest('/v1/assistant/threads/'+encodeURIComponent(thread.id)+'/turns',{method:'POST',body:JSON.stringify({content,project_id:scoped,allow_task_creation:allow,force_task:false})});
-        input.value='';await qa31OpenAssistant();
-      }catch(ex){
-        notice(ex.message,'bad');input.disabled=false;$('#qa31AssistantAsk',card).disabled=false;$('#qa31AssistantRun',card).disabled=false;
-      }
+function a31BindLayout(root,items,{attr,dragAttr,resizeAttr,persist:save}){
+  if(!root||isPhoneLayout())return;
+  const begin=(e,id,kind)=>{
+    if(e.button!==0)return;const item=items.find(x=>x.id===id);if(!item)return;
+    e.preventDefault();e.stopPropagation();const rect=root.getBoundingClientRect(),start={x:e.clientX,y:e.clientY,itemX:item.x,itemY:item.y,w:item.width,h:item.height};
+    const target=e.currentTarget;target.setPointerCapture?.(e.pointerId);root.classList.add("layout-interacting");
+    const move=ev=>{const colW=Math.max(1,rect.width/A31_LAYOUT_COLUMNS),dx=Math.round((ev.clientX-start.x)/colW),dy=Math.round((ev.clientY-start.y)/A31_LAYOUT_ROW_PX),c=a31Constraints(item);
+      if(kind==="drag"){item.x=Math.max(0,Math.min(A31_LAYOUT_COLUMNS-item.width,start.itemX+dx));item.y=Math.max(0,start.itemY+dy)}
+      else{item.width=Math.max(c.minW,Math.min(c.maxW,A31_LAYOUT_COLUMNS-item.x,start.w+dx));item.height=Math.max(c.minH,Math.min(c.maxH,start.h+dy));item.col=item.width;item.row=item.height}
+      a31ResolveLayout(items,item.id);a31ApplyLayout(root,items,attr,false);
     };
-    $('#qa31AssistantAsk',card).onclick=()=>submit(false);
-    $('#qa31AssistantRun',card).onclick=()=>submit(true);
-    $('#qa31AssistantInput',card).onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();submit(false)}};
-    requestAnimationFrame(()=>{const h=$('#qa31AssistantHistory',card);if(h)h.scrollTop=h.scrollHeight;$('#qa31AssistantInput',card)?.focus();});
-  }catch(ex){
-    const card=$('.qa31-assistant',root);if(card)card.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;
-  }
-}
-openCommandPalette=qa31OpenAssistant;
-function qa31WireAssistantButton(){
-  const b=$('#commandButton');if(!b)return;
-  b.onclick=qa31OpenAssistant;
-  b.setAttribute('aria-label',qa5T('ask_onepane','Ask OnePane or run a command…'));
-  if(b.childNodes.length)b.childNodes[0].textContent=qa5T('ask_onepane','Ask OnePane or run a command…')+' ';
-}
-const qa31AssistantInitBase=init;
-init=function(){qa31AssistantInitBase();qa31WireAssistantButton();};
-
-
-/* === Alpha 3.1 authoritative Agents surface === */
-let qa31AgentTab='profiles';
-
-function qa31ProfileCard(p){
-  const builtin=p.source_kind==='builtin';
-  return `<article class="panel-card agent-profile-card" data-profile-id="${escapeHtml(p.id)}"><div class="card-header"><div><div class="card-title">${escapeHtml(p.name||p.id)}</div><div class="list-meta">${escapeHtml(p.id)} · ${builtin?'Built-in':'Custom'} · revision ${Number(p.revision||1)}</div></div><span class="pill ${builtin?'good':''}">${escapeHtml(p.protocol_level||'L1')}</span></div><div class="widget-body"><p>${escapeHtml(p.description||'')}</p><dl class="definition-grid"><dt>Role</dt><dd>${escapeHtml(p.default_role||'general')}</dd><dt>Capability</dt><dd>${escapeHtml(p.capability_id||'inference.general')}</dd></dl><details><summary>Instructions</summary><pre class="profile-instructions">${escapeHtml(p.instructions_md||'')}</pre></details><div class="list-meta">Profile instructions shape reasoning only; OnePane policy still governs tools, secrets, files, network, nodes and approvals.</div>${builtin?'':`<div class="toolbar" style="margin-top:10px"><button class="btn" data-profile-edit="${escapeHtml(p.id)}">Edit</button><button class="btn danger" data-profile-archive="${escapeHtml(p.id)}">Archive</button></div>`}</div></article>`;
-}
-function qa31ProfileDialog(profile=null){
-  const p=profile||{};
-  openModal(profile?'Edit Agent Profile':'New Agent Profile',`<form id="qa31ProfileForm" class="settings-stack"><label>Name<input id="qa31ProfileName" value="${escapeHtml(p.name||'')}"></label><label>Description<input id="qa31ProfileDescription" value="${escapeHtml(p.description||'')}"></label><label>Role<input id="qa31ProfileRole" value="${escapeHtml(p.default_role||'general')}"></label><label>Capability<input id="qa31ProfileCapability" value="${escapeHtml(p.capability_id||'inference.general')}"></label><label>Protocol<select id="qa31ProfileProtocol">${['L0','L1','L2','L3'].map(x=>`<option ${p.protocol_level===x?'selected':''}>${x}</option>`).join('')}</select></label><label>agent.md instructions<textarea id="qa31ProfileInstructions" rows="10">${escapeHtml(p.instructions_md||'')}</textarea></label><div class="modal-actions"><button class="btn" type="button" id="qa31ProfileCancel">Cancel</button><button class="btn primary" type="submit">${profile?'Save':'Create'}</button></div></form>`);
-  $('#qa31ProfileCancel').onclick=closeModal;
-  $('#qa31ProfileForm').onsubmit=async e=>{
-    e.preventDefault();
-    const body={
-      workspace_id:onepaneWorkspace,
-      name:$('#qa31ProfileName').value.trim(),
-      description:$('#qa31ProfileDescription').value.trim(),
-      default_role:$('#qa31ProfileRole').value.trim()||'general',
-      capability_id:$('#qa31ProfileCapability').value.trim()||'inference.general',
-      protocol_level:$('#qa31ProfileProtocol').value,
-      instructions_md:$('#qa31ProfileInstructions').value,
-      metadata:{}
-    };
-    try{
-      if(profile){
-        body.expected_revision=profile.revision;
-        await apiRequest('/v1/agent-profiles/'+encodeURIComponent(profile.id),{method:'PATCH',body:JSON.stringify(body)});
-      }else{
-        await apiRequest('/v1/agent-profiles',{method:'POST',body:JSON.stringify(body)});
-      }
-      closeModal();notice(profile?'Profile updated.':'Profile created.');renderAgents();
-    }catch(ex){notice(ex.message,'bad')}
+    const end=async ev=>{target.releasePointerCapture?.(e.pointerId);target.removeEventListener("pointermove",move);target.removeEventListener("pointerup",end);target.removeEventListener("pointercancel",end);root.classList.remove("layout-interacting");a31ApplyLayout(root,items,attr,true);try{await save?.()}catch(ex){notice(ex.message,"bad")}};
+    target.addEventListener("pointermove",move);target.addEventListener("pointerup",end);target.addEventListener("pointercancel",end);
   };
+  $$(`[${dragAttr}]`,root).forEach(h=>h.onpointerdown=e=>begin(e,h.getAttribute(dragAttr),"drag"));
+  $$(`[${resizeAttr}]`,root).forEach(h=>h.onpointerdown=e=>begin(e,h.getAttribute(resizeAttr),"resize"));
 }
-async function qa31AgentRequest(path,timeoutMs=12000){
-  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);
-  try{return await apiRequest(path,{signal:controller.signal});}
-  catch(ex){if(ex?.name==='AbortError'||/abort/i.test(String(ex?.message||'')))throw new Error('Agent data did not respond within 12 seconds.');throw ex;}
-  finally{clearTimeout(timer);}
+
+/* Operations */
+function a31OperationsTabs(){
+  const tabs=[["overview","Overview"],["activity","Activity"],["logs","Logs"],["health","Health"],["nodes","Nodes"],["providers","Providers"],["recovery","Recovery"]];
+  return `<div class="subtabs operations-subtabs">${tabs.map(([v,l])=>`<button class="subtab ${a31OperationsView===v?'active':''}" data-a31-ops="${v}">${l}</button>`).join("")}</div>`;
+}
+function a31BindOperationsTabs(){
+  $$("[data-a31-ops]").forEach(b=>b.onclick=()=>{const v=b.dataset.a31Ops;if(v==="logs"){a31ToggleLogs();return}if(v==="nodes"){openRoute("nodes");return}if(v==="providers"){a31SetModelView("cloud");openRoute("models");return}a31SetOperationsView(v)});
+}
+function a31ToggleLogs(){
+  const drawer=$("#bottomDrawer");if(!drawer)return;
+  if(drawer.dataset.state==="open"&&activeDrawerTab==="logs"){setDrawerOpen(false);return}
+  activeDrawerTab="logs";setDrawerOpen(true);renderDrawer();if(a31RouteIs("operations"))renderOperations();
+}
+function a31OpsWidget(w){
+  return `<section class="dashboard-widget a31-layout-item ${state.operationsEdit?'editable':''}" data-op-widget="${escapeHtml(w.id)}" style="${a31GridStyle(w)}"><div class="dashboard-edit-bar ${state.operationsEdit?'':'hidden'}"><button class="dashboard-drag" data-op-drag="${escapeHtml(w.id)}" title="Drag component">⋮⋮</button><strong>${escapeHtml(w.title)}</strong><span class="dashboard-edit-spacer"></span><select class="dashboard-size" data-op-preset="${escapeHtml(w.id)}"><option value="">Size…</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="wide">Wide</option><option value="full">Full</option></select><button class="tiny danger" data-op-remove="${escapeHtml(w.id)}">×</button></div><div class="dashboard-widget-content">${operationsComponentContent(w.type)}</div>${state.operationsEdit?`<button class="layout-resize-handle" data-op-resize="${escapeHtml(w.id)}" title="Drag to resize" aria-label="Resize ${escapeHtml(w.title)}">◢</button>`:""}</section>`
+}
+function a31RenderOperationsGrid(){
+  const root=$("#operationsLayout");if(!root)return;a31NormalizeLayout(state.operationsWidgets);root.innerHTML=state.operationsWidgets.map(a31OpsWidget).join("");
+  if(state.operationsEdit){
+    a31BindLayout(root,state.operationsWidgets,{attr:"data-op-widget",dragAttr:"data-op-drag",resizeAttr:"data-op-resize",persist:async()=>persist()});
+    $$("[data-op-remove]",root).forEach(b=>b.onclick=async()=>{const el=b.closest("[data-op-widget]");if(el?.animate)await el.animate([{opacity:1,transform:"scale(1)"},{opacity:0,transform:"scale(.96)"}],{duration:130}).finished.catch(()=>{});state.operationsWidgets=state.operationsWidgets.filter(x=>x.id!==b.dataset.opRemove);a31NormalizeLayout(state.operationsWidgets);persist();a31RenderOperationsGrid()});
+    $$("[data-op-preset]",root).forEach(sel=>sel.onchange=()=>{if(!sel.value)return;const item=state.operationsWidgets.find(x=>x.id===sel.dataset.opPreset);if(!item)return;const p=operationsSizePreset(sel.value,item);item.width=p.col;item.height=p.row;item.col=p.col;item.row=p.row;a31ResolveLayout(state.operationsWidgets,item.id);a31ApplyLayout(root,state.operationsWidgets,"data-op-widget",true);persist()});
+  }
+  bindViewActions(root);
+}
+openOperationsComponentPicker=function(){
+  const catalogue=[["metrics","System metrics"],["tasks","Task list"],["scheduled","Scheduled tasks"],["nodes","Nodes"],["resources","Resource Utilisation"],["activity","Recent Activity"],["attention","Attention"],["providers","Cloud Provider Health"]],used=new Set(state.operationsWidgets.map(x=>x.type)),available=catalogue.filter(([t])=>!used.has(t));
+  openModal("Add Operations component",available.length?`<div class="component-picker-grid">${available.map(([type,title])=>`<button class="component-choice" data-a31-add-op="${type}"><strong>${escapeHtml(title)}</strong><span>Add ${escapeHtml(title.toLowerCase())} to Operations</span></button>`).join("")}</div>`:'<div class="empty-state compact">All Operations components are already present.</div>');
+  $$("[data-a31-add-op]").forEach(b=>b.onclick=()=>{const [type,title]=catalogue.find(x=>x[0]===b.dataset.a31AddOp),item={id:`op-${type}-${Date.now().toString(36)}`,title,type,width:type==="metrics"?12:4,height:type==="metrics"?3:5};a31NormalizeLayout(state.operationsWidgets);const slot=a31FirstFree(state.operationsWidgets,item,null);item.x=slot.x;item.y=slot.y;item.col=item.width;item.row=item.height;state.operationsWidgets.push(item);persist();closeModal();a31RenderOperationsGrid()});
+};
+function a31OperationsActivity(){const rows=a31Array(liveOps.events).slice(-100).reverse();return `<section class="panel-card"><div class="card-header"><div><div class="card-title">Activity</div><div class="list-meta">Recent control-plane, scheduler, model, node and provider events.</div></div></div><div class="activity-stream">${rows.length?rows.map(e=>`<div class="activity-row"><span class="mono-cell">${escapeHtml(String(e.sequence||""))}</span><div><strong>${escapeHtml(eventLabel(e))}</strong><div class="list-meta">${escapeHtml([e.aggregate_type,e.aggregate_id].filter(Boolean).join(" · "))}</div></div><span class="list-meta">${e.occurred_at?new Date(Number(e.occurred_at)).toLocaleTimeString():""}</span></div>`).join(""):'<div class="empty-state compact">No activity recorded yet.</div>'}</div></section>`}
+function a31OperationsHealth(){
+  const active=a31Array(liveOps.tasks).filter(t=>!["complete","cancelled","failed"].includes(String(t.state||"").toLowerCase()));
+  const nodes=a31Array(liveOps.nodes),providers=a31Array(liveOps.providers);
+  const badNodes=nodes.filter(n=>["offline","failed","unavailable","stale"].includes(String(n.status||n.state||"").toLowerCase()));
+  const badProviders=providers.filter(p=>!["connected","ready"].includes(String(p.status||"").toLowerCase()));
+  return `<div class="health-grid">${metric("Control plane",liveOps.health==="ok"?"Healthy":"Checking",liveOps.health==="ok"?"API responding":"Awaiting health","good")}${metric("Active tasks",String(active.length),"Scheduler workload")}${metric("Nodes",`${nodes.length-badNodes.length}/${nodes.length} healthy`,badNodes.length?"Review degraded nodes":"All observed nodes healthy",badNodes.length?"warn":"good")}${metric("Providers",`${providers.length-badProviders.length}/${providers.length} healthy`,badProviders.length?"Provider attention required":"Connections healthy",badProviders.length?"warn":"good")}</div><section class="panel-card"><div class="widget-body"><strong>Health boundaries</strong><p class="page-subtitle">Managed component failures, unavailable nodes and provider problems remain isolated from the OnePane control plane. Use Recovery for actionable degraded items.</p></div></section>`
+}
+async function a31RecoveryContent(){
+  let comps={};try{comps=await qa5ModelComponents()}catch{}
+  const failed=a31Array(liveOps.tasks).filter(t=>["failed","blocked"].includes(String(t.state||"").toLowerCase()));
+  const compRows=Object.values(a31Object(comps)).filter(x=>["failed","degraded","interrupted"].includes(String(x.state||"").toLowerCase()));
+  return `<section class="panel-card"><div class="card-header"><div><div class="card-title">Recovery</div><div class="list-meta">Actionable degraded state only; OnePane does not reset healthy components.</div></div><button class="btn" id="a31RecoveryRefresh">Refresh health</button></div><div class="widget-body"><div class="recovery-list">${compRows.map(c=>`<div class="recovery-row"><div><strong>${escapeHtml(c.display_name||c.id)}</strong><div class="list-meta">${escapeHtml(c.last_error||c.state||"degraded")}</div></div><button class="btn" data-a31-repair-component="${escapeHtml(c.id)}">Repair</button></div>`).join("")}${failed.map(t=>`<div class="recovery-row"><div><strong>Task ${escapeHtml(t.id||"")}</strong><div class="list-meta">${escapeHtml(t.objective||t.state||"")}</div></div><button class="btn" data-route="tasks">Open Tasks</button></div>`).join("")}${!compRows.length&&!failed.length?'<div class="empty-state compact">No degraded components or failed/blocked tasks require recovery.</div>':""}</div></div></section>`
+}
+renderOperations=async function(){
+  const actions=`<button class="btn ${state.operationsEdit?'primary':''}" id="editOperations">${state.operationsEdit?'Done':'Edit layout'}</button>${state.operationsEdit?'<button class="btn" id="addOperationsComponent">Add component</button><button class="btn" id="resetOperationsLayout">Reset layout</button>':""}`;
+  $("#viewHost").innerHTML=`<section class="page">${pageHeader("Operations","System overview, activity, health and recovery",actions)}${a31OperationsTabs()}<div id="a31OperationsBody"></div></section>`;
+  a31BindOperationsTabs();
+  const body=$("#a31OperationsBody");
+  if(a31OperationsView==="overview"){body.innerHTML=`<div class="operations-layout-grid ${state.operationsEdit?'editing':''}" id="operationsLayout"></div>`;a31RenderOperationsGrid()}
+  else if(a31OperationsView==="activity")body.innerHTML=a31OperationsActivity();
+  else if(a31OperationsView==="health")body.innerHTML=a31OperationsHealth();
+  else if(a31OperationsView==="recovery"){body.innerHTML=await a31RecoveryContent();$("#a31RecoveryRefresh")?.addEventListener("click",async()=>{await refreshOperationalDataQA(true);renderOperations()});$$("[data-a31-repair-component]").forEach(b=>b.onclick=()=>a31ComponentAction(b.dataset.a31RepairComponent,"repair"))}
+  $("#editOperations")?.addEventListener("click",()=>{state.operationsEdit=!state.operationsEdit;persist();renderOperations()});
+  $("#resetOperationsLayout")?.addEventListener("click",()=>{state.operationsWidgets=defaultState().operationsWidgets;a31NormalizeLayout(state.operationsWidgets);persist();renderOperations()});
+  $("#addOperationsComponent")?.addEventListener("click",openOperationsComponentPicker);
+  bindViewActions($("#viewHost"));
+}
+
+/* Projects: preserve durable project/workspace services, replace layout interaction. */
+qa4RenderWorkspaceWidget=function(w,project,workspace){
+  a31NormalizeLayout(workspace.widgets||[]);
+  const edit=!!state.projectWorkspaceEdit;
+  const controls=edit?`<div class="dashboard-edit-bar"><button class="dashboard-drag" data-pw-drag="${escapeHtml(w.id)}" title="Drag component">⋮⋮</button><strong>${escapeHtml(w.title||w.type)}</strong><span class="dashboard-edit-spacer"></span><select class="dashboard-size" data-pw-preset="${escapeHtml(w.id)}"><option value="">Size…</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="wide">Wide</option><option value="full">Full</option></select><button class="tiny danger" data-pw-remove="${escapeHtml(w.id)}">×</button></div>`:"";
+  return `<section class="workspace-widget dashboard-widget a31-layout-item ${edit?'editable':''}" data-pw-widget="${escapeHtml(w.id)}" style="${a31GridStyle(w)}">${controls}<div class="dashboard-widget-content"><div class="widget-handle"><strong>${escapeHtml(w.title||w.type)}</strong></div>${qa6ComponentContent(w,project,workspace)}</div>${edit?`<button class="layout-resize-handle" data-pw-resize="${escapeHtml(w.id)}" title="Drag to resize">◢</button>`:""}</section>`
+};
+async function a31RefreshProjectGrid(project,workspace,animate=true){
+  const root=$("#qa4WorkspaceGrid");if(!root)return;a31NormalizeLayout(workspace.widgets||[]);
+  const before=new Map();if(animate)$$("[data-pw-widget]",root).forEach(el=>before.set(el.dataset.pwWidget,el.getBoundingClientRect()));
+  root.innerHTML=(workspace.widgets||[]).map(w=>qa4RenderWorkspaceWidget(w,project,workspace)).join("");
+  if(animate&&Element.prototype.animate)requestAnimationFrame(()=>$$("[data-pw-widget]",root).forEach(el=>{const old=before.get(el.dataset.pwWidget);if(!old){el.animate([{opacity:0,transform:"scale(.97)"},{opacity:1,transform:"scale(1)"}],{duration:150});return}const n=el.getBoundingClientRect(),dx=old.left-n.left,dy=old.top-n.top;if(Math.abs(dx)>1||Math.abs(dy)>1)el.animate([{transform:`translate(${dx}px,${dy}px)`},{transform:"translate(0,0)"}],{duration:170,easing:"ease-out"})}));
+  qa4BindWorkspaceEdit(project,workspace);qa6BindProjectComponents(project,workspace);qa7BindWorkspaceControls(project,workspace,root);qa4BindProjectNotes(root);
+}
+qa4BindWorkspaceEdit=function(project,workspace){
+  if(!state.projectWorkspaceEdit)return;const root=$("#qa4WorkspaceGrid");if(!root)return;a31NormalizeLayout(workspace.widgets||[]);
+  a31BindLayout(root,workspace.widgets||[],{attr:"data-pw-widget",dragAttr:"data-pw-drag",resizeAttr:"data-pw-resize",persist:async()=>{await qa4SaveProjectWorkspaces(project,qa4Workspaces(project))}});
+  $$("[data-pw-preset]",root).forEach(sel=>sel.onchange=async()=>{if(!sel.value)return;const w=workspace.widgets.find(x=>x.id===sel.dataset.pwPreset);if(!w)return;const p=workspacePreset(sel.value,w);w.width=p.col;w.height=p.row;w.col=p.col;w.row=p.row;a31ResolveLayout(workspace.widgets,w.id);a31ApplyLayout(root,workspace.widgets,"data-pw-widget",true);await qa4SaveProjectWorkspaces(project,qa4Workspaces(project))});
+  $$("[data-pw-remove]",root).forEach(b=>b.onclick=async()=>{const el=b.closest("[data-pw-widget]");if(el?.animate)await el.animate([{opacity:1},{opacity:0,transform:"scale(.96)"}],{duration:130}).finished.catch(()=>{});workspace.widgets=workspace.widgets.filter(x=>x.id!==b.dataset.pwRemove);a31NormalizeLayout(workspace.widgets);await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));a31RefreshProjectGrid(project,workspace,true)});
+};
+qa4AddWorkspaceComponent=function(project,workspace){
+  const used=new Set((workspace.widgets||[]).map(x=>x.type)),available=qa4WorkspaceCatalogue().filter(([t])=>!used.has(t)||["notes","chat"].includes(t));
+  openModal("Add workspace component",`<div class="component-picker-grid">${available.map(([t,title])=>`<button class="component-choice" data-a31-add-project-component="${t}"><strong>${escapeHtml(title)}</strong><span>Add to ${escapeHtml(workspace.name)}</span></button>`).join("")}</div>`);
+  $$("[data-a31-add-project-component]").forEach(b=>b.onclick=async()=>{const [type,title]=qa4WorkspaceCatalogue().find(x=>x[0]===b.dataset.a31AddProjectComponent),item={id:`pw-${type}-${Date.now().toString(36)}`,type,title,width:type==="tasks"||type==="scheduled"?6:4,height:type==="chat"?5:4};workspace.widgets=workspace.widgets||[];a31NormalizeLayout(workspace.widgets);const slot=a31FirstFree(workspace.widgets,item,null);item.x=slot.x;item.y=slot.y;item.col=item.width;item.row=item.height;workspace.widgets.push(item);await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));closeModal();await a31RefreshProjectGrid(project,workspace,true)});
+};
+const a31ProjectRenderBase=qa6RenderProjectsBase;
+renderProjects=async function(){
+  const epoch=qa31ViewEpoch;await a31ProjectRenderBase();if(epoch!==qa31ViewEpoch||!a31RouteIs("projects"))return;
+  const project=a31CurrentProject(),workspace=project?a31CurrentWorkspace():null;if(!project||!workspace)return;qa7NormalizeWorkspace(project,workspace);a31NormalizeLayout(workspace.widgets||[]);
+  $(".workspace-chat-panel")?.remove();const bar=$(".workspace-context-bar .list-meta");if(bar)bar.textContent=` · workspace sandbox ${workspace.sandbox.internet?'internet allowed':'internet blocked'} · ${workspace.routing.enabled!==false?'routing enabled':'single-path'} · ${titleCase(workspace.orchestration?.mode||'direct')}`;
+  const settings=$("#qa4WorkspaceSettings");if(settings){settings.textContent="Workspace settings";settings.onclick=()=>qa6OpenInInspector(project,workspace,"settings")}
+  qa6BindProjectComponents(project,workspace);qa7BindWorkspaceControls(project,workspace,$("#qa4WorkspaceGrid")||document);qa6StartEventStream();renderNav();
+};
+
+/* Managed components */
+async function a31ComponentAction(id,action,statusSelector){
+  const status=statusSelector?$(statusSelector):null;if(status)status.textContent=`${titleCase(action)} queued…`;
+  try{const job=await apiRequest(`/v1/local-ai/components/${encodeURIComponent(id)}/${encodeURIComponent(action)}`,{method:"POST",body:"{}"});for(let i=0;i<180;i++){const j=await apiRequest(`/v1/local-ai/component-jobs/${encodeURIComponent(job.id)}`);if(status)status.textContent=`${titleCase(j.stage||j.status||action)}…`;if(["succeeded","failed","interrupted"].includes(j.status)){if(j.status!=="succeeded")throw new Error(j.failure_reason||`${id} ${action} failed`);notice(`${titleCase(id)} ${action} complete.`);if(a31RouteIs("models"))renderModels();return}await new Promise(r=>setTimeout(r,600))}throw new Error("component job timed out")}catch(ex){if(status)status.innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`;notice(ex.message,"bad")}
+}
+function a31ComponentButtons(id,c){
+  const st=String(c?.state||"not_installed"),installed=!!c?.installed;
+  if(!installed)return `<button class="btn primary" data-a31-component="${id}:install">Install</button>`;
+  const running=st==="running";
+  return `<button class="btn" data-a31-component="${id}:${running?'disable':'enable'}">${running?'Disable':'Enable'}</button><button class="btn" data-a31-component="${id}:update">Update</button><button class="btn" data-a31-component="${id}:repair">Repair</button><button class="btn danger" data-a31-component="${id}:remove">Remove</button>`
+}
+function a31BindComponentButtons(root=document){$$("[data-a31-component]",root).forEach(b=>b.onclick=()=>{const [id,action]=b.dataset.a31Component.split(":");a31ComponentAction(id,action,`#a31-${id}-status`)})}
+
+/* Models */
+function a31ModelTabs(){return `<div class="models-section-tabs"><button class="subtab ${a31ModelView==='local'?'active':''}" data-a31-model-tab="local">Local Models</button><button class="subtab ${a31ModelView==='cloud'?'active':''}" data-a31-model-tab="cloud">Cloud Models</button></div>`}
+function a31PlacementLabel(d){const p=d?.placement||{},m=String(p.mode||"").toLowerCase();if(m==="cpu_only")return "CPU";if(m==="cpu_offload")return "HYBRID";if(a31Array(p.devices).some(x=>x.kind==="accelerator"))return "GPU";return "AUTO"}
+async function a31OpenCompute(dep){
+  if(!localProfileQA){try{localProfileQA=await apiRequest("/v1/local-ai/detect",{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace})})}catch(ex){notice(ex.message,"bad");return}}
+  const gpus=a31Array(localProfileQA?.gpus);
+  let current={preference:"auto",placement_mode:"auto",required_device_ids:[]};try{current=await apiRequest(`/v1/local-ai/deployments/${encodeURIComponent(dep.deployment_id)}/compute-policy?workspace_id=${encodeURIComponent(onepaneWorkspace)}`)}catch{}
+  openModal("Compute placement",`<form id="a31ComputeForm" class="qa-form"><p class="page-subtitle">Change placement without redownloading the model. A resident runtime is stopped and restarted automatically.</p><label>Compute placement<select name="preference"><option value="auto">Auto</option><option value="prefer_gpu">Prefer GPU</option><option value="prefer_cpu">Prefer CPU</option><option value="require_gpu">Require GPU</option><option value="require_cpu">Require CPU</option><option value="hybrid">Hybrid / CPU + GPU</option></select></label><label>GPU device<select name="device"><option value="">Automatic</option>${gpus.map((g,i)=>`<option value="${escapeHtml(g.device_id||`gpu-${g.device_index??i}`)}">${escapeHtml(g.name||`GPU ${i}`)} · ${bytesQA(g.vram_bytes||0)}</option>`).join("")}</select></label><label>Advanced placement<select name="mode"><option value="auto">Automatic</option><option value="single_device">Single device</option><option value="layer_sharded">Layer split</option><option value="row_sharded">Row split</option><option value="tensor_sharded">Tensor split</option><option value="cpu_offload">CPU offload</option><option value="cpu_only">CPU only</option></select></label><button class="btn primary">Apply placement</button><div class="page-subtitle" id="a31ComputeStatus"></div></form>`);
+  const form=$("#a31ComputeForm");form.elements.preference.value=current.preference||"auto";form.elements.mode.value=current.placement_mode||"auto";if(a31Array(current.required_device_ids).length)form.elements.device.value=current.required_device_ids[0];
+  form.onsubmit=async e=>{e.preventDefault();const pref=form.elements.preference.value,device=form.elements.device.value,required=pref==="require_gpu"&&device?[device]:[],preferred=pref==="prefer_gpu"&&device?[device]:[];$("#a31ComputeStatus").textContent="Applying…";try{await apiRequest(`/v1/local-ai/deployments/${encodeURIComponent(dep.deployment_id)}/compute-policy`,{method:"PATCH",body:JSON.stringify({workspace_id:onepaneWorkspace,preference:pref,placement_mode:form.elements.mode.value,preferred_device_ids:preferred,required_device_ids:required})});notice("Compute placement updated.");closeModal();renderModels()}catch(ex){$("#a31ComputeStatus").innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`}}
+}
+async function a31InstallModel(model){
+  if(!model.installable){notice(model.install_reason||"This model is advisory only; no verified artifact is available.","bad");return}
+  if(!localProfileQA){try{localProfileQA=await apiRequest("/v1/local-ai/detect",{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace})})}catch(ex){notice(ex.message,"bad");return}}
+  const qs=a31Array(model.installable_quantizations),defaultQ=qs[0]||a31Array(model.quantizations)[0]||"";
+  openModal("Download & Install",`<form id="a31InstallModelForm" class="qa-form"><strong>${escapeHtml(model.display_name||model.model_ref)}</strong><p class="page-subtitle">OnePane will resolve and verify the managed llama.cpp runtime and model artifact automatically.</p><label>Quantization<select name="quantization">${qs.map(q=>`<option>${escapeHtml(q)}</option>`).join("")}</select></label><label>Compute<select name="compute"><option value="auto">Auto</option><option value="prefer_gpu">Prefer GPU</option><option value="prefer_cpu">Prefer CPU</option><option value="require_gpu">Require GPU</option><option value="require_cpu">Require CPU</option><option value="hybrid">Hybrid / CPU + GPU</option></select></label><button class="btn primary">Download & Install</button><div class="install-progress" id="a31InstallProgress"></div></form>`);
+  const form=$("#a31InstallModelForm");form.elements.quantization.value=defaultQ;form.onsubmit=async e=>{e.preventDefault();const box=$("#a31InstallProgress");box.innerHTML='<div class="install-step active">Resolving trusted catalogue…</div>';try{const job=await apiRequest("/v1/local-ai/install-jobs",{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace,profile_id:localProfileQA.id,role_name:"local-managed",use_case:"general",context_tokens:8192,model_ref:model.model_ref,quantization:form.elements.quantization.value,compute_preference:form.elements.compute.value})});for(let i=0;i<1200;i++){const j=await apiRequest(`/v1/local-ai/install-jobs/${encodeURIComponent(job.id)}`),stage=String(j.stage||j.status||"queued").replaceAll("_"," ");box.innerHTML=`<div class="install-step active">${escapeHtml(titleCase(stage))}</div><div class="list-meta">${Math.round(Number(j.progress_pct||0))}%</div>`;if(["succeeded","failed","cancelled"].includes(String(j.status))){if(j.status!=="succeeded")throw new Error(j.failure_reason||"Install failed");notice("Model installed and registered.");closeModal();renderModels();return}await new Promise(r=>setTimeout(r,800))}}catch(ex){box.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`}}
+}
+async function a31RenderLocalModels(){
+  const root=$("#a31ModelsRoot");let catalog=[],deployments=[],components={};
+  try{[catalog,deployments,components]=await Promise.all([apiRequest("/v1/local-ai/catalog"),qa5LoadManagedDeployments(),qa5ModelComponents()])}catch(ex){root.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;return}
+  const colibri=components.colibri||{};
+  root.innerHTML=`<div class="models-single-column"><section class="panel-card local-models-main"><div class="card-header models-card-header"><div><div class="card-title">Local Models</div><div class="list-meta">Hardware-aware trusted model installation and per-deployment CPU/GPU placement.</div></div><button class="btn primary a31-detect-large" id="detectLocal">⚙ Detect Hardware</button></div><div class="a31-local-content"><div id="localResult" class="model-result">${localProfileQA?`<div class="hardware-summary"><strong>${escapeHtml(localProfileQA.cpu?.name||"CPU")}</strong><br>${a31Array(localProfileQA.gpus).map(g=>`${escapeHtml(g.name||"GPU")} · ${bytesQA(g.vram_bytes||0)} VRAM`).join("<br>")||"No GPU detected"}<br>${bytesQA(localProfileQA.memory?.total_bytes||0)} RAM</div>`:'<div class="page-subtitle">Detect this machine to calculate safe placements.</div>'}</div><div class="subsection-title">Installed / registered</div><div class="model-tile-scroll">${deployments.length?deployments.map(d=>`<article class="model-tile"><div><strong>${escapeHtml(d.display_name||d.model_ref)}</strong><div class="list-meta">${escapeHtml(d.quantization||"")} · ${escapeHtml(d.runtime_name||d.runtime_backend||"managed")} · ${escapeHtml(d.status||"unknown")}</div><div class="list-meta"><span class="pill">${a31PlacementLabel(d)}</span> · admission ${escapeHtml(d.admission_status||"pending")}</div></div><div class="toolbar"><button class="btn" data-a31-compute="${escapeHtml(d.deployment_id)}">Compute</button><button class="btn" data-a31-model-spec="${escapeHtml(d.deployment_id)}">Spec sheet</button><button class="btn primary" data-a31-agent-check="${escapeHtml(d.deployment_id)}">Agent Check</button></div></article>`).join(""):'<div class="empty-state compact">No managed local models yet.</div>'}</div><div class="subsection-title">Available catalogue</div><input id="a31LocalFilter" class="catalogue-filter" placeholder="Filter local models…"><div id="a31CatalogRows" class="model-tile-scroll"></div></div></section><section class="panel-card"><div class="card-header models-card-header"><div><div class="card-title">Managed Local Runtime</div><div class="list-meta">OnePane installs the verified llama.cpp CPU/CUDA/Vulkan runtime automatically when required.</div></div><span class="pill good">Managed automatically</span></div><div class="widget-body"><p>No separate llama.cpp installation is required. Runtime artifacts are selected from the trusted catalogue to match placement and hardware.</p></div></section><section class="panel-card"><div class="card-header models-card-header"><div><div class="card-title">Colibri Large Model</div><div class="list-meta">Optional large-model backend; lifecycle is managed independently.</div></div><span class="pill ${["running","installed_disabled"].includes(String(colibri.state))?'good':''}">${escapeHtml(titleCase(String(colibri.state||"not installed").replaceAll("_"," ")))}</span></div><div class="widget-body"><div class="toolbar">${a31ComponentButtons("colibri",colibri)}${colibri.installed?'<button class="btn" id="a31ColibriRegister">Register model folder</button>':""}</div><div id="a31-colibri-status" class="page-subtitle">${escapeHtml(colibri.last_error||"")}</div></div></section></div>`;
+  $("#detectLocal").onclick=async()=>{const b=$("#localResult");b.textContent="Detecting…";try{localProfileQA=await apiRequest("/v1/local-ai/detect",{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace})});renderModels()}catch(ex){b.innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`}};
+  const drawCatalog=()=>{const q=($("#a31LocalFilter").value||"").toLowerCase(),rows=catalog.filter(m=>JSON.stringify(m).toLowerCase().includes(q));$("#a31CatalogRows").innerHTML=rows.map((m,i)=>`<article class="model-tile"><div><strong>${escapeHtml(m.display_name||m.model_ref)}</strong><div class="list-meta">${escapeHtml(String(m.parameter_count||m.parameter_scale||"—"))} · ${formatContextQA(m.max_context_tokens||m.context_tokens)} context</div><div class="list-meta">${m.installable?`Trusted · ${escapeHtml(a31Array(m.installable_quantizations).join(", "))}`:`Advisory · ${escapeHtml(m.install_reason||"No trusted artifact")}`}</div></div><button class="btn ${m.installable?'primary':''}" data-a31-install-model="${i}" ${m.installable?'':'disabled'}>${m.installable?'Download & Install':'Unavailable'}</button></article>`).join("")||'<div class="empty-state compact">No models match.</div>';$$("[data-a31-install-model]").forEach(b=>b.onclick=()=>a31InstallModel(rows[Number(b.dataset.a31InstallModel)]))};
+  $("#a31LocalFilter").oninput=drawCatalog;drawCatalog();a31BindComponentButtons();$("#a31ColibriRegister")?.addEventListener("click",qa5RegisterColibri);
+  $$("[data-a31-compute]").forEach(b=>b.onclick=()=>a31OpenCompute(deployments.find(d=>d.deployment_id===b.dataset.a31Compute)));
+  $$("[data-a31-model-spec]").forEach(b=>b.onclick=()=>qa5InspectModel(deployments.find(d=>d.deployment_id===b.dataset.a31ModelSpec)));
+  $$("[data-a31-agent-check]").forEach(b=>b.onclick=()=>qa5AgentCheck(deployments.find(d=>d.deployment_id===b.dataset.a31AgentCheck)));
+}
+async function a31StartOAuth(preset){
+  const callback=`${location.origin}/v1/provider-oauth/callback`;
+  try{const out=await apiRequest(`/v1/provider-oauth/${encodeURIComponent(preset)}/start`,{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace,redirect_uri:callback})});const win=window.open(out.authorization_url,"onepane-oauth","width=720,height=780");if(!win)throw new Error("Browser blocked the OAuth window.");const listener=e=>{if(e.origin!==location.origin||e.data?.type!=="onepane-oauth-complete")return;window.removeEventListener("message",listener);notice("OAuth account connected.");renderModels()};window.addEventListener("message",listener)}catch(ex){notice(ex.message,"bad")}
+}
+async function a31RenderCloudModels(){
+  const root=$("#a31ModelsRoot"),qs=encodeURIComponent(onepaneWorkspace);let presets=[],providers=[],components={},oauthCfg=[],oauthConn=[];
+  try{[presets,providers,components,oauthCfg,oauthConn]=await Promise.all([providerPresetsQA(),apiRequest(`/v1/providers?workspace_id=${qs}`),qa5ModelComponents(),apiRequest(`/v1/provider-oauth/configs?workspace_id=${qs}`).catch(()=>[]),apiRequest(`/v1/provider-oauth/connections?workspace_id=${qs}`).catch(()=>[])])}catch(ex){root.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;return}
+  const omni=components.omniroute||{},cloud=a31Array(presets).filter(p=>p.id!=="omniroute"),providerRows=a31Array(providers);
+  root.innerHTML=`<div class="models-single-column"><section class="panel-card"><div class="card-header models-card-header"><div><div class="card-title">Cloud Providers</div><div class="list-meta">Direct provider connections. OAuth tokens and API keys remain Vault-backed.</div></div><button class="btn" id="a31ApiKeys">API Keys</button></div><div class="provider-tile-grid">${cloud.map(p=>{const connected=providerRows.find(x=>String(x.provider).toLowerCase()===String(p.id).toLowerCase()&&x.status!=="revoked"),oauth=String(p.auth_type||"").includes("oauth"),cfg=a31Array(oauthCfg).find(x=>x.preset_id===p.id&&x.enabled),oc=a31Array(oauthConn).find(x=>x.preset_id===p.id&&x.status==="connected");return `<article class="provider-tile"><div class="provider-tile-head"><strong>${escapeHtml(p.display_name||p.id)}</strong><span class="pill ${connected||oc?'good':''}">${oc?'OAuth connected':connected?'Connected':oauth?(cfg?'OAuth ready':'OAuth not configured'):'Available'}</span></div><p>${escapeHtml(p.description||"")}</p><div class="provider-meta"><span>${oauth?'OAuth2 / PKCE':escapeHtml(p.auth_type||"API key")}</span><span>${escapeHtml(p.cost_hint||"")}</span></div><div class="toolbar">${oc?`<button class="btn danger" data-a31-oauth-revoke="${escapeHtml(oc.id)}">Revoke</button>`:connected?`<button class="btn danger" data-a31-provider-revoke="${escapeHtml(connected.id)}">Revoke</button>`:oauth?(cfg?`<button class="btn primary" data-a31-oauth-start="${escapeHtml(p.id)}">Connect account</button>`:'<button class="btn" data-route="settings">Configure OAuth</button>'):`<button class="btn primary" data-a31-provider-connect="${escapeHtml(p.id)}">Connect</button>`}</div></article>`}).join("")}</div></section><section class="panel-card"><div class="card-header models-card-header"><div><div class="card-title">OmniRoute · Managed Local</div><div class="list-meta">OnePane-owned headless gateway on 127.0.0.1:20128. Independent of external OmniRoute connections.</div></div><span class="pill ${omni.state==="running"?'good':''}">${escapeHtml(titleCase(String(omni.state||"not installed").replaceAll("_"," ")))}</span></div><div class="widget-body"><div class="toolbar">${a31ComponentButtons("omniroute",omni)}</div><div id="a31-omniroute-status" class="page-subtitle">${escapeHtml(omni.last_error||"")}</div></div></section><section class="panel-card"><div class="card-header models-card-header"><div><div class="card-title">OmniRoute · External Gateway</div><div class="list-meta">Connect an existing local or trusted remote OmniRoute instance.</div></div></div><div class="widget-body omni-provider-layout"><label>Gateway URL<input id="omniUrl" value="${escapeHtml(localStorage.getItem('onepane:omniroute-url')||'http://127.0.0.1:20128/v1')}"></label><label>Gateway credential<select id="omniCredential"><option value="">No gateway credential</option></select></label><label class="inline-check"><input id="omniStrict" type="checkbox" checked> Require verified strict zero-cost</label><div class="toolbar"><button class="btn" id="omniProbe">Probe</button><button class="btn primary" id="omniConnect" disabled>Connect / Reconnect</button></div><div id="omniResult" class="page-subtitle">Probe before connecting.</div></div></section></div>`;
+  $("#a31ApiKeys").onclick=()=>openRoute("secrets");a31BindComponentButtons();$("#omniProbe").onclick=()=>omniQA(false);$("#omniConnect").onclick=()=>omniQA(true);populateOmniCredentials();
+  $$("[data-a31-provider-connect]").forEach(b=>b.onclick=()=>qa4ConnectCloudProvider(b.dataset.a31ProviderConnect));$$("[data-a31-provider-revoke]").forEach(b=>b.onclick=()=>qa4RevokeProvider(b.dataset.a31ProviderRevoke));$$("[data-a31-oauth-start]").forEach(b=>b.onclick=()=>a31StartOAuth(b.dataset.a31OauthStart));$$("[data-a31-oauth-revoke]").forEach(b=>b.onclick=async()=>{try{await apiRequest(`/v1/provider-oauth/connections/${encodeURIComponent(b.dataset.a31OauthRevoke)}/revoke`,{method:"POST",body:"{}"});renderModels()}catch(ex){notice(ex.message,"bad")}});
+}
+renderModels=async function(){
+  const epoch=qa31ViewEpoch;$("#viewHost").innerHTML=`<section class="page models-page">${pageHeader("Models",a31ModelView==="local"?"Local model installation, qualification and compute placement.":"Cloud providers, OAuth and OmniRoute routing.",'<button class="btn" id="a31ModelSettings">Settings</button>')}${a31ModelTabs()}<div id="a31ModelsRoot"><div class="widget-body">Loading…</div></div></section>`;
+  $("#a31ModelSettings").onclick=()=>openRoute("settings");$$("[data-a31-model-tab]").forEach(b=>b.onclick=()=>a31SetModelView(b.dataset.a31ModelTab));
+  if(a31ModelView==="local")await a31RenderLocalModels();else await a31RenderCloudModels();if(epoch!==qa31ViewEpoch||!a31RouteIs("models"))return;bindViewActions($("#viewHost"));renderNav();
+};
+
+/* Nodes */
+renderNodes=async function(){
+  $("#viewHost").innerHTML=`<section class="page">${pageHeader("Nodes","Enrolled machines are schedulable CPU/GPU resource pools.",'<button class="btn primary" id="a31AddNode">Add Node</button>')}<div id="a31Nodes"><div class="widget-body">Loading nodes…</div></div></section>`;
+  try{const rows=await apiRequest("/v1/nodes");$("#a31Nodes").innerHTML=`<div class="node-grid">${a31Array(rows).map(n=>{const id=n.id||n.node_id,name=n.display_name||id,state=n.status||n.state||"unknown";return `<article class="panel-card node-card" data-a31-node="${escapeHtml(id)}"><div class="card-header"><div><div class="card-title">${escapeHtml(name)}</div><div class="list-meta">${escapeHtml(n.os_name||n.os||"")} ${escapeHtml(n.architecture||"")}</div></div><span class="pill ${["online","ready","active"].includes(String(state).toLowerCase())?'good':''}">${escapeHtml(titleCase(state))}</span></div><div class="widget-body"><dl class="definition-grid"><dt>CPU</dt><dd>${escapeHtml(n.cpu_name||n.cpu||"Detected by node")}</dd><dt>GPU</dt><dd>${escapeHtml(n.gpu_name||n.compute||"See capabilities")}</dd><dt>Last seen</dt><dd>${escapeHtml(String(n.last_seen_at||n.last_seen||"—"))}</dd></dl><div class="toolbar"><button class="btn" data-a31-node-cap="${escapeHtml(id)}">Capabilities</button><button class="btn" data-a31-node-models="${escapeHtml(id)}">Model management</button><button class="btn danger" data-a31-node-revoke="${escapeHtml(id)}">Revoke</button></div></div></article>`}).join("")||'<div class="empty-state">No enrolled nodes yet.</div>'}</div>`;
+    $$("[data-a31-node-cap]").forEach(b=>b.onclick=async()=>{try{const x=await apiRequest(`/v1/nodes/${encodeURIComponent(b.dataset.a31NodeCap)}/capabilities`);openModal("Node capabilities",`<pre class="json-preview">${escapeHtml(JSON.stringify(x,null,2))}</pre>`)}catch(ex){notice(ex.message,"bad")}});
+    $$("[data-a31-node-models]").forEach(b=>b.onclick=async()=>{try{const x=await apiRequest(`/v1/nodes/${encodeURIComponent(b.dataset.a31NodeModels)}/model-management`);openModal("Node model management",`<pre class="json-preview">${escapeHtml(JSON.stringify(x,null,2))}</pre>`)}catch(ex){notice(ex.message,"bad")}});
+    $$("[data-a31-node-revoke]").forEach(b=>b.onclick=async()=>{if(!confirm("Revoke this node?"))return;try{await apiRequest(`/v1/nodes/${encodeURIComponent(b.dataset.a31NodeRevoke)}/revoke`,{method:"POST",body:"{}"});renderNodes()}catch(ex){notice(ex.message,"bad")}});
+  }catch(ex){$("#a31Nodes").innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`}
+  $("#a31AddNode").onclick=()=>openModal("Add Node",'<div class="widget-body"><p>Start OnePane on the target Windows or Ubuntu node, then pair its node ID here.</p><button class="btn" data-route="nodes">Refresh discovered nodes</button></div>');bindViewActions($("#viewHost"));renderNav();
+};
+
+/* Agents, Teams, Research */
+function a31ProfileMeta(p){return a31JSON(p.metadata,{})}
+async function a31DuplicateProfile(p){
+  openModal("Duplicate Agent Profile",`<form id="a31DuplicateProfile" class="qa-form"><label>Name<input name="name" value="${escapeHtml((p.name||"Profile")+" - Custom")}"></label><label>Instructions<textarea name="instructions" rows="9">${escapeHtml(p.instructions_md||"")}</textarea></label><button class="btn primary">Create custom profile</button></form>`);
+  $("#a31DuplicateProfile").onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.currentTarget),meta=a31ProfileMeta(p);try{await apiRequest("/v1/agent-profiles",{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace,name:fd.get("name"),description:p.description||"",instructions_md:fd.get("instructions"),default_role:p.default_role||"",capability_id:p.capability_id||"inference.general",protocol_level:p.protocol_level||"L1",metadata:{...meta,based_on:p.id}})});closeModal();renderAgents()}catch(ex){notice(ex.message,"bad")}}
+}
+async function a31CreateTeamPreset(preset){
+  const cfg=a31JSON(preset.configuration??preset.Configuration,{}),presetName=preset.name||preset.Name,presetDescription=preset.description||preset.Description||"";try{const t=await apiRequest("/v1/teams",{method:"POST",body:JSON.stringify({WorkspaceID:onepaneWorkspace,Name:presetName,Purpose:presetDescription})});const teamID=t.id||t.ID,teamRevision=t.revision||t.Revision;for(const [i,seat] of a31Array(cfg.seats).entries()){const [name,profile]=seat;await apiRequest(`/v1/teams/${encodeURIComponent(teamID)}/members`,{method:"POST",body:JSON.stringify({member_kind:"agent",display_name:name,role_name:name,capability_id:"inference.general",protocol_level:"L2",route_policy:{},config:{agent_profile_id:profile},ordinal:i})})}await apiRequest(`/v1/teams/${encodeURIComponent(teamID)}/configuration`,{method:"PATCH",body:JSON.stringify({expected_revision:teamRevision,configuration:cfg})});notice(`${presetName} team created.`);renderAgents()}catch(ex){notice(ex.message,"bad")}
+}
+async function a31EditTeam(team){
+  let members=[];try{members=await apiRequest(`/v1/teams/${encodeURIComponent(teamID)}/members`)}catch{}
+  const teamID=team.id||team.ID,teamRevision=team.revision||team.Revision,cfg=a31JSON(team.configuration??team.Configuration,{}),r={pin_models:true,disable_model_substitution:true,same_model_retries:true,preserve_failed_seats:true,independent_first_pass:true,scoped_evidence:true,record_raw_outputs:true,full_provenance:true,require_all_seats:true,anonymized_cross_critique:true,synthesis_pass:true,...a31Object(cfg.research)};
+  openModal("Team Configuration",`<form id="a31TeamConfig" class="qa-form"><div class="team-member-list">${a31Array(members).map(m=>`<div class="team-member-row"><strong>${escapeHtml(m.display_name)}</strong><span>${escapeHtml(a31JSON(m.config,{}).agent_profile_id||m.role_name||"Agent")}</span></div>`).join("")}</div><label class="inline-check research-toggle"><input type="checkbox" name="research_mode" ${cfg.research_mode?'checked':''}> Research mode</label><div class="research-options">${Object.entries(r).map(([k,v])=>`<label class="inline-check"><input type="checkbox" data-research-key="${k}" ${v?'checked':''}> ${escapeHtml(titleCase(k.replaceAll("_"," ")))}</label>`).join("")}</div><p class="page-subtitle">Research mode pins configured models, preserves failed seats, isolates first passes, scopes evidence and records provenance. Profile instructions never expand authority.</p><button class="btn primary">Save Team configuration</button></form>`);
+  $("#a31TeamConfig").onsubmit=async e=>{e.preventDefault();const research={};$$("[data-research-key]",e.currentTarget).forEach(x=>research[x.dataset.researchKey]=x.checked);const next={...cfg,research_mode:e.currentTarget.elements.research_mode.checked,research};try{await apiRequest(`/v1/teams/${encodeURIComponent(teamID)}/configuration`,{method:"PATCH",body:JSON.stringify({expected_revision:teamRevision,configuration:next})});closeModal();renderAgents()}catch(ex){notice(ex.message,"bad")}}
 }
 renderAgents=async function(){
-  $('#viewHost').innerHTML=`<section class="page">${pageHeader('Agents','Reusable Agent Profiles and real execution sessions. Assistant and Project Orchestrator remain control-plane layers, not ordinary Agents.','<button class="btn primary" id="qa31NewProfile">New Profile</button>')}<div class="subtabs">${[['profiles','Profiles'],['sessions','Sessions'],['teams','Teams'],['councils','Councils']].map(([id,label])=>`<button class="subtab ${qa31AgentTab===id?'active':''}" data-qa31-agent-tab="${id}">${label}</button>`).join('')}</div><div id="qa31AgentsBody" class="widget-body">Loading…</div></section>`;
-  $$('[data-qa31-agent-tab]').forEach(b=>b.onclick=()=>{qa31AgentTab=b.dataset.qa31AgentTab;renderAgents();});
-  $('#qa31NewProfile').onclick=()=>qa31ProfileDialog();
-  const qs=encodeURIComponent(onepaneWorkspace),body=$('#qa31AgentsBody');
+  $("#viewHost").innerHTML=`<section class="page">${pageHeader("Agents","Reusable Profiles, Sessions, Teams and Councils with policy-scoped capabilities.")}<div class="subtabs"><button class="subtab ${a31AgentView==='profiles'?'active':''}" data-a31-agent-tab="profiles">Profiles</button><button class="subtab ${a31AgentView==='teams'?'active':''}" data-a31-agent-tab="teams">Teams</button><button class="subtab ${a31AgentView==='sessions'?'active':''}" data-a31-agent-tab="sessions">Sessions</button><button class="subtab ${a31AgentView==='councils'?'active':''}" data-a31-agent-tab="councils">Councils</button></div><div id="a31AgentsBody"><div class="widget-body">Loading…</div></div></section>`;$$("[data-a31-agent-tab]").forEach(b=>b.onclick=()=>a31SetAgentView(b.dataset.a31AgentTab));const body=$("#a31AgentsBody");
   try{
-    if(qa31AgentTab==='profiles'){
-      const profiles=await qa31AgentRequest('/v1/agent-profiles?workspace_id='+qs);
-      body.innerHTML=(profiles||[]).length?`<div class="cards-grid">${(profiles||[]).map(qa31ProfileCard).join('')}</div>`:'<div class="empty-state compact">No Agent Profiles yet. Create a Profile to reuse instructions across Direct, Team and Council execution.</div>';
-      $$('[data-profile-edit]',body).forEach(b=>b.onclick=()=>{const p=(profiles||[]).find(x=>x.id===b.dataset.profileEdit);if(p)qa31ProfileDialog(p)});
-      $$('[data-profile-archive]',body).forEach(b=>b.onclick=async()=>{
-        try{
-          await apiRequest('/v1/agent-profiles/'+encodeURIComponent(b.dataset.profileArchive)+'/archive',{method:'POST',body:JSON.stringify({workspace_id:onepaneWorkspace})});
-          notice('Profile archived.');renderAgents();
-        }catch(ex){notice(ex.message,'bad')}
-      });
-    }else if(qa31AgentTab==='sessions'){
-      const sessions=await qa31AgentRequest('/v1/agent-sessions?workspace_id='+qs+'&limit=100');
-      body.innerHTML=(sessions||[]).length?`<div class="table-shell"><table class="data-table"><thead><tr><th>Task</th><th>Mode</th><th>Profile</th><th>State</th><th>Project</th></tr></thead><tbody>${sessions.map(s=>`<tr><td>${escapeHtml(s.objective||s.id)}</td><td><span class="pill">${escapeHtml(titleCase(s.mode||'direct'))}</span></td><td>${escapeHtml(s.profile_id||'agent.md')}</td><td>${escapeHtml(s.state||'')}</td><td>${escapeHtml(s.project_id||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state compact">No real Agent sessions yet. Direct, Team and Council execution will appear here as Tasks run.</div>';
-    }else if(qa31AgentTab==='teams'){
-      const teams=await qa31AgentRequest('/v1/teams?workspace_id='+qs);
-      body.innerHTML=(teams||[]).length?`<div class="cards-grid">${teams.map(t=>`<article class="panel-card"><div class="card-header"><div><div class="card-title">${escapeHtml(t.name||t.id)}</div><div class="list-meta">${escapeHtml(t.purpose||'Reusable Team composition')}</div></div><span class="pill">${escapeHtml(t.status||'active')}</span></div><div class="widget-body">Reusable by Team or Council execution. Active model-powered seats are capped at 8.</div></article>`).join('')}</div>`:'<div class="empty-state compact">No Teams configured. Workspace Team/Council settings can reference reusable Teams.</div>';
-    }else{
-      const sessions=await qa31AgentRequest('/v1/agent-sessions?workspace_id='+qs+'&limit=100');
-      const councils=(sessions||[]).filter(x=>String(x.mode).toLowerCase()==='council');
-      body.innerHTML=councils.length?`<div class="table-shell"><table class="data-table"><thead><tr><th>Council task</th><th>Team</th><th>State</th><th>Session</th></tr></thead><tbody>${councils.map(s=>`<tr><td>${escapeHtml(s.objective||s.id)}</td><td>${escapeHtml(s.team_id||'—')}</td><td>${escapeHtml(s.state||'')}</td><td>${escapeHtml(s.team_session_id||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state compact">No Council executions yet. Councils reuse governed Team compositions and independent deliberation.</div>';
-    }
-  }catch(ex){
-    body.innerHTML=`<div class="empty-state compact"><div><strong class="error">Agents could not be loaded.</strong><p>${escapeHtml(ex.message)}</p><button class="btn" id="qa31RetryAgents">Retry</button></div></div>`;$('#qa31RetryAgents')?.addEventListener('click',renderAgents);
-  }
-  bindViewActions($('#viewHost'));
+    if(a31AgentView==="profiles"){const [profiles,bundles]=await Promise.all([apiRequest(`/v1/agent-profiles?workspace_id=${encodeURIComponent(onepaneWorkspace)}`),apiRequest(`/v1/skills/tool-bundles?workspace_id=${encodeURIComponent(onepaneWorkspace)}`).catch(()=>[])]);body.innerHTML=`<div class="agent-profile-grid">${a31Array(profiles).map((p,i)=>{const m=a31ProfileMeta(p),pbs=a31Array(m.recommended_tool_bundles);return `<article class="panel-card agent-profile-card"><div class="card-header"><div><div class="card-title">${escapeHtml(p.name)}</div><div class="list-meta">${escapeHtml(titleCase(m.category||p.default_role||"general"))} · ${escapeHtml(p.protocol_level||"L1")}</div></div><span class="pill ${p.source_kind==='builtin'?'good':''}">${p.source_kind==='builtin'?'DigiLogic Core':'Custom'}</span></div><div class="widget-body"><p>${escapeHtml(p.description||"")}</p><div class="tool-chip-row">${pbs.map(x=>`<span class="tool-chip">${escapeHtml(x)}</span>`).join("")}</div><div class="toolbar"><button class="btn" data-a31-profile-view="${i}">View</button>${p.source_kind==='builtin'?`<button class="btn primary" data-a31-profile-duplicate="${i}">Duplicate & customise</button>`:""}</div></div></article>`}).join("")}</div>`;$$("[data-a31-profile-view]").forEach(b=>b.onclick=()=>{const p=profiles[Number(b.dataset.a31ProfileView)];openModal(p.name,`<div class="widget-body"><p>${escapeHtml(p.description||"")}</p><pre class="text-preview">${escapeHtml(p.instructions_md||"")}</pre></div>`)});$$("[data-a31-profile-duplicate]").forEach(b=>b.onclick=()=>a31DuplicateProfile(profiles[Number(b.dataset.a31ProfileDuplicate)]))}
+    else if(a31AgentView==="teams"){const [teams,presets]=await Promise.all([apiRequest(`/v1/teams?workspace_id=${encodeURIComponent(onepaneWorkspace)}`),apiRequest(`/v1/team-presets?workspace_id=${encodeURIComponent(onepaneWorkspace)}`)]);body.innerHTML=`<section class="panel-card"><div class="card-header"><div><div class="card-title">Team templates</div><div class="list-meta">Create a legitimate Team with profile-backed agent seats.</div></div></div><div class="team-preset-grid">${a31Array(presets).map((p,i)=>`<article class="team-preset"><strong>${escapeHtml(p.name||p.Name)}</strong><span>${escapeHtml(p.description||p.Description||"")}</span><button class="btn" data-a31-team-preset="${i}">Create Team</button></article>`).join("")}</div></section><section class="panel-card"><div class="card-header"><div class="card-title">Configured Teams</div></div><div class="team-list">${a31Array(teams).map((t,i)=>{const cfg=a31JSON(t.configuration??t.Configuration,{}),name=t.name||t.Name,purpose=t.purpose||t.Purpose||"";return `<div class="team-row"><div><strong>${escapeHtml(name)}</strong><div class="list-meta">${escapeHtml(purpose)} ${cfg.research_mode?'· Research mode':''}</div></div><span class="pill ${cfg.research_mode?'good':''}">${cfg.research_mode?'Research':'Standard'}</span><button class="btn" data-a31-team-edit="${i}">Configure</button></div>`}).join("")||'<div class="empty-state compact">No Teams configured yet.</div>'}</div></section>`;$$("[data-a31-team-preset]").forEach(b=>b.onclick=()=>a31CreateTeamPreset(presets[Number(b.dataset.a31TeamPreset)]));$$("[data-a31-team-edit]").forEach(b=>b.onclick=()=>a31EditTeam(teams[Number(b.dataset.a31TeamEdit)]))}
+    else if(a31AgentView==="sessions"){const rows=await apiRequest(`/v1/agent-sessions?workspace_id=${encodeURIComponent(onepaneWorkspace)}`);body.innerHTML=`<div class="table-shell"><table class="data-table"><thead><tr><th>Task</th><th>Mode</th><th>Profile</th><th>State</th></tr></thead><tbody>${a31Array(rows).map(x=>`<tr><td>${escapeHtml(x.task_id||"")}</td><td>${escapeHtml(x.execution_mode||"")}</td><td>${escapeHtml(x.profile_id||"")}</td><td>${escapeHtml(x.state||"")}</td></tr>`).join("")}</tbody></table></div>`}
+    else body.innerHTML='<section class="panel-card"><div class="widget-body"><strong>Councils</strong><p>Council execution remains Workspace-owned. Research mode adds pinned-model, independent-pass and provenance constraints when selected from a Research-capable Team/Council configuration.</p><button class="btn" data-route="projects">Configure in Workspace</button></div></section>';
+  }catch(ex){body.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`}bindViewActions($("#viewHost"));renderNav();
 };
 
-
-/* === Alpha 3.1 Project Orchestrator Project-level surface === */
-async function qa31ProjectOrchestratorStrip(project,workspace){
-  try{
-    const [o,handoffs]=await Promise.all([
-      apiRequest('/v1/projects/'+encodeURIComponent(project.id)+'/orchestrator'),
-      apiRequest('/v1/projects/'+encodeURIComponent(project.id)+'/orchestrator/handoffs?limit=20').catch(()=>[])
-    ]);
-    const tasks=(liveOps.tasks||[]).filter(t=>t.project_id===project.id);
-    const waiting=tasks.filter(t=>['waiting_approval','blocked','waiting'].includes(String(t.state||'').toLowerCase())).length;
-    const activeCount=tasks.filter(t=>!['complete','failed','cancelled'].includes(String(t.state||'').toLowerCase())).length;
-    return `<section class="project-orchestrator-strip" id="qa31ProjectOrchestrator"><div class="orchestrator-main"><div><div class="eyebrow">PROJECT ORCHESTRATOR</div><strong>${escapeHtml(project.name||project.id)}</strong><div class="list-meta">Coordinates this Project across all Workspaces while preserving Workspace routing, approvals and sandbox policy.</div></div><span class="pill ${o.status==='ready'?'good':o.status==='degraded'?'warn':''}">${escapeHtml(titleCase(o.status||'ready'))}</span></div><div class="orchestrator-metrics"><span>Active work <strong>${activeCount}</strong></span><span>Waiting <strong>${waiting}</strong></span><span>Workspace <strong>${escapeHtml(workspace?.name||'—')}</strong></span><span>Handoffs <strong>${Array.isArray(handoffs)?handoffs.length:0}</strong></span></div><div class="toolbar"><button class="btn primary" id="qa31AskProject">Ask Project…</button><button class="btn" id="qa31OrchestratorActivity">Activity</button><button class="btn" id="qa31FollowProject">Follow current work</button></div></section>`;
-  }catch(ex){
-    return `<section class="project-orchestrator-strip"><div class="error">Project Orchestrator unavailable: ${escapeHtml(ex.message)}</div></section>`;
-  }
+/* Skills */
+async function a31UploadSkill(){
+  const input=document.createElement("input");input.type="file";input.accept=".opskill,.zip";input.onchange=async()=>{const file=input.files?.[0];if(!file)return;const fd=new FormData();fd.append("workspace_id",onepaneWorkspace);fd.append("package",file,file.name);try{const res=await fetch("/v1/skills/packages/upload",{method:"POST",body:fd,credentials:"same-origin"});if(!res.ok){let e;try{e=await res.json()}catch{}throw new Error(e?.error||`Upload failed (${res.status})`)}notice("Skill package quarantined for review.");renderSkills()}catch(ex){notice(ex.message,"bad")}};input.click();
 }
-function qa31AskProject(project,workspace){
-  openModal(`Project Orchestrator · ${project.name||project.id}`,`<div class="widget-body"><div class="list-meta">Project context · ${escapeHtml(workspace?.name||'current Workspace')}</div><textarea id="qa31ProjectPrompt" rows="6" placeholder="Ask about this Project or request work…"></textarea><div id="qa31ProjectAnswer" class="assistant-project-answer"></div><div class="modal-actions"><button class="btn" id="qa31ProjectAsk">Ask</button><button class="btn primary" id="qa31ProjectRun">Run</button></div></div>`);
-  const submit=async allow=>{
-    const prompt=$('#qa31ProjectPrompt')?.value.trim();if(!prompt)return;
-    const status=$('#qa31ProjectAnswer');status.textContent='Project Orchestrator working…';
-    try{
-      const out=await apiRequest('/v1/projects/'+encodeURIComponent(project.id)+'/orchestrator/turns',{method:'POST',body:JSON.stringify({objective:prompt,project_workspace_id:workspace?.id||'',allow_task_creation:allow,force_task:false})});
-      status.innerHTML=`<div class="assistant-turn-body">${escapeHtml(out?.turn?.content||'Project context reviewed.')}</div>${out?.task_id?`<div class="list-meta">Task ${escapeHtml(out.task_id)} · ${escapeHtml(out.disposition||'created')}</div>`:''}`;
-    }catch(ex){
-      status.innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`;
-    }
-  };
-  $('#qa31ProjectAsk').onclick=()=>submit(false);
-  $('#qa31ProjectRun').onclick=()=>submit(true);
-}
-const qa31RenderProjectsBase=renderProjects;
-renderProjects=async function(){
-  const epoch=qa31ViewEpoch;
-  await qa31RenderProjectsBase();
-  if(epoch!==qa31ViewEpoch||currentTab()?.route!=='projects')return;
-  qa31RenderProjectNavTree?.();
-  const project=qa4ActiveProject?.(),workspace=project?qa4ActiveWorkspace?.():null;
-  if(!project)return;
-  const main=$('.project-main'),toolbar=main?$('.project-toolbar',main):null;
-  if(!main||!toolbar)return;
-  const html=await qa31ProjectOrchestratorStrip(project,workspace);
-  toolbar.insertAdjacentHTML('afterend',html);
-  $('#qa31AskProject')?.addEventListener('click',()=>qa31AskProject(project,workspace));
-  $('#qa31OrchestratorActivity')?.addEventListener('click',()=>{setDrawerOpen(true);activeDrawerTab='events';persist();renderDrawer();});
-  $('#qa31FollowProject')?.addEventListener('click',()=>{
-    const task=(liveOps.tasks||[]).find(t=>t.project_id===project.id&&!['complete','failed','cancelled'].includes(String(t.state||'').toLowerCase()));
-    if(task)qa4Inspect('task',task.id,task.objective||task.id,task);
-    else notice('No active Project task to follow.');
-  });
+renderSkills=async function(){
+  $("#viewHost").innerHTML=`<section class="page">${pageHeader("Skills","Reusable capability packages, tool dependencies and assignments.",'<button class="btn primary" id="a31UploadSkill">Upload Skill</button>')}<div class="subtabs"><button class="subtab ${a31SkillsView==='installed'?'active':''}" data-a31-skills-tab="installed">Installed</button><button class="subtab ${a31SkillsView==='catalogue'?'active':''}" data-a31-skills-tab="catalogue">Catalogue</button><button class="subtab ${a31SkillsView==='assignments'?'active':''}" data-a31-skills-tab="assignments">Assignments</button><button class="subtab ${a31SkillsView==='packages'?'active':''}" data-a31-skills-tab="packages">Packages</button></div><div id="a31SkillsBody"><div class="widget-body">Loading…</div></div></section>`;$("#a31UploadSkill").onclick=a31UploadSkill;$$("[data-a31-skills-tab]").forEach(b=>b.onclick=()=>a31SetSkillsView(b.dataset.a31SkillsTab));const body=$("#a31SkillsBody"),qs=encodeURIComponent(onepaneWorkspace);
+  try{const [packages,bundles,assignments]=await Promise.all([apiRequest(`/v1/skills/packages?workspace_id=${qs}`),apiRequest(`/v1/skills/tool-bundles?workspace_id=${qs}`),apiRequest(`/v1/skills/assignments?workspace_id=${qs}`)]),pkgs=a31Array(packages);
+    if(a31SkillsView==="installed"||a31SkillsView==="catalogue"){const rows=a31SkillsView==="installed"?pkgs.filter(p=>p.status==="installed"):pkgs;body.innerHTML=`<div class="skill-grid">${rows.map((p,i)=>{const m=a31JSON(p.manifest,{});return `<article class="panel-card skill-card"><div class="card-header"><div><div class="card-title">${escapeHtml(p.name)}</div><div class="list-meta">${escapeHtml(p.version)} · ${escapeHtml(p.publisher||"Unknown publisher")}</div></div><span class="pill ${p.trust_state==='builtin'||p.trust_state==='verified'?'good':''}">${escapeHtml(titleCase(p.trust_state||"unverified"))}</span></div><div class="widget-body"><p>${escapeHtml(m.description||m.type||"Capability pack")}</p><div class="tool-chip-row">${a31Array(m.tool_bundles).map(x=>`<span class="tool-chip">${escapeHtml(x)}</span>`).join("")}</div><div class="toolbar">${p.status==="quarantined"?`<button class="btn primary" data-a31-skill-install="${i}">Install</button>`:""}${p.status==="installed"&&p.source_kind!=="builtin"?`<button class="btn" data-a31-skill-status="${i}:disabled">Disable</button>`:""}${p.status==="disabled"?`<button class="btn" data-a31-skill-status="${i}:installed">Enable</button>`:""}</div></div></article>`}).join("")||'<div class="empty-state">No Skills in this view.</div>'}</div>`;$$("[data-a31-skill-install]").forEach(b=>b.onclick=async()=>{const p=rows[Number(b.dataset.a31SkillInstall)];try{await apiRequest(`/v1/skills/packages/${encodeURIComponent(p.id)}/install?workspace_id=${qs}`,{method:"POST",body:"{}"});renderSkills()}catch(ex){notice(ex.message,"bad")}});$$("[data-a31-skill-status]").forEach(b=>b.onclick=async()=>{const [i,status]=b.dataset.a31SkillStatus.split(":"),p=rows[Number(i)];try{await apiRequest(`/v1/skills/packages/${encodeURIComponent(p.id)}?workspace_id=${qs}`,{method:"PATCH",body:JSON.stringify({status})});renderSkills()}catch(ex){notice(ex.message,"bad")}})}
+    else if(a31SkillsView==="assignments"){body.innerHTML=`<section class="panel-card"><div class="card-header"><div><div class="card-title">Assignments</div><div class="list-meta">Assigned does not imply permitted; Workspace policy remains authoritative.</div></div></div><div class="table-shell"><table class="data-table"><thead><tr><th>Skill package</th><th>Subject</th><th>State</th></tr></thead><tbody>${a31Array(assignments).map(a=>`<tr><td>${escapeHtml(a.skill_package_id)}</td><td>${escapeHtml(a.subject_kind)} · ${escapeHtml(a.subject_id)}</td><td>${a.enabled?'Assigned':'Disabled'}</td></tr>`).join("")}</tbody></table></div></section>`}
+    else body.innerHTML=`<section class="panel-card"><div class="card-header"><div><div class="card-title">Packages</div><div class="list-meta">Uploaded packages remain quarantined until validation and explicit installation.</div></div></div><div class="table-shell"><table class="data-table"><thead><tr><th>Name</th><th>Source</th><th>Trust</th><th>Status</th><th>SHA-256</th></tr></thead><tbody>${pkgs.map(p=>`<tr><td>${escapeHtml(p.name)} ${escapeHtml(p.version)}</td><td>${escapeHtml(p.source_kind)}</td><td>${escapeHtml(p.trust_state)}</td><td>${escapeHtml(p.status)}</td><td class="mono-cell">${escapeHtml(String(p.package_sha256).slice(0,16))}…</td></tr>`).join("")}</tbody></table></div></section><section class="panel-card"><div class="card-header"><div class="card-title">Tool Bundles</div></div><div class="widget-body">${a31Array(bundles).map(b=>`<div class="bundle-row"><strong>${escapeHtml(b.Name||b.name||b.ID||b.id)}</strong><span>${escapeHtml(a31Array(b.Tools||b.tools).join(", "))}</span></div>`).join("")}</div></section>`;
+  }catch(ex){body.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`}
 };
 
+/* Persistent Control Chat */
+function a31OpenControlChat(tab=a31ControlTab){
+  a31ControlTab=tab;const panel=$("#controlChatPanel");if(!panel)return;panel.dataset.state="open";panel.removeAttribute("hidden");a31RenderControlChat();
+}
+function a31CloseControlChat(){const p=$("#controlChatPanel");if(p){p.dataset.state="closed";p.setAttribute("hidden","")}}
+async function a31EnsureAssistantThread(){
+  if(a31AssistantThreadID)return a31AssistantThreadID;const rows=await apiRequest(`/v1/assistant/threads?workspace_id=${encodeURIComponent(onepaneWorkspace)}&limit=20`);const t=a31Array(rows)[0]||await apiRequest("/v1/assistant/threads",{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace,title:"OnePane Control Chat"})});a31AssistantThreadID=t.id;return t.id;
+}
+async function a31RenderControlChat(){
+  const body=$("#controlChatBody");if(!body)return;const projects=a31Array(qa4ProjectHub?.projects),current=a31CurrentProject();
+  $("#controlChatAssistantTab")?.classList.toggle("active",a31ControlTab==="assistant");$("#controlChatOrchestratorTab")?.classList.toggle("active",a31ControlTab==="orchestrator");
+  if(a31ControlTab==="assistant"){body.innerHTML='<div class="control-chat-loading">Loading Assistant…</div>';try{const id=await a31EnsureAssistantThread(),turns=await apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/turns?limit=100`);body.innerHTML=`<div class="control-chat-scope">Global OnePane Assistant</div><div class="control-chat-history">${a31Array(turns).map(t=>`<div class="control-chat-message ${t.role||t.author_kind||''}"><strong>${escapeHtml(t.role||t.author_kind||"OnePane")}</strong><span>${escapeHtml(t.content||t.text||"")}</span></div>`).join("")}</div><form id="a31ControlChatForm" class="control-chat-form"><textarea rows="3" placeholder="Ask OnePane…"></textarea><div><button class="btn">Ask</button><button class="btn primary" name="run" value="1">Run</button></div></form>`;$("#a31ControlChatForm").onsubmit=async e=>{e.preventDefault();const text=e.currentTarget.querySelector("textarea").value.trim();if(!text)return;const run=e.submitter?.value==="1";try{await apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/turns`,{method:"POST",body:JSON.stringify({content:text,allow_task_creation:run,force_task:false})});a31RenderControlChat()}catch(ex){notice(ex.message,"bad")}}}catch(ex){body.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`}}
+  else{const pid=$("#controlChatProject")?.value||current?.id||projects[0]?.id;if(!pid){body.innerHTML='<div class="empty-state compact">Create a Project before using Project Orchestrator.</div>';return}const p=projects.find(x=>x.id===pid),workspaces=p?qa4Workspaces(p):[];body.innerHTML=`<div class="control-chat-selectors"><label>Project<select id="controlChatProject">${projects.map(x=>`<option value="${escapeHtml(x.id)}" ${x.id===pid?'selected':''}>${escapeHtml(x.name)}</option>`).join("")}</select></label><label>Workspace<select id="controlChatWorkspace"><option value="">Project-wide</option>${workspaces.map(w=>`<option value="${escapeHtml(w.id)}">${escapeHtml(w.name)}</option>`).join("")}</select></label></div><div id="a31OrchestratorTurns" class="control-chat-history">Loading…</div><form id="a31OrchestratorForm" class="control-chat-form"><textarea rows="3" placeholder="Ask the Project Orchestrator…"></textarea><div><button class="btn">Ask</button><button class="btn primary" name="run" value="1">Run</button></div></form>`;$("#controlChatProject").onchange=()=>a31RenderControlChat();try{const turns=await apiRequest(`/v1/projects/${encodeURIComponent(pid)}/orchestrator/turns?limit=100`);$("#a31OrchestratorTurns").innerHTML=a31Array(turns).map(t=>`<div class="control-chat-message ${t.role||''}"><strong>${escapeHtml(t.role||"OnePane")}</strong><span>${escapeHtml(t.content||t.objective||t.response||"")}</span></div>`).join("");$("#a31OrchestratorForm").onsubmit=async e=>{e.preventDefault();const objective=e.currentTarget.querySelector("textarea").value.trim(),run=e.submitter?.value==="1",ws=$("#controlChatWorkspace").value;if(!objective)return;try{await apiRequest(`/v1/projects/${encodeURIComponent(pid)}/orchestrator/turns`,{method:"POST",body:JSON.stringify({objective,project_workspace_id:ws,allow_task_creation:run,force_task:false})});a31RenderControlChat()}catch(ex){notice(ex.message,"bad")}}}catch(ex){$("#a31OrchestratorTurns").innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`}}
+}
 
-/* === Alpha 3.1 Models lifecycle and Operations actions === */
-function qa31ColibriActionButtons(c){
-  const state=String(c?.state||'not_installed');
-  const buttons=[];
-  if(['not_installed','removed'].includes(state))buttons.push(['install','Install runtime','primary']);
-  else if(state==='failed')buttons.push(['retry','Retry','primary'],['repair','Repair','']);
-  else if(state==='interrupted')buttons.push(['resume','Resume','primary'],['repair','Repair','']);
-  else if(['queued','downloading','verifying','installing','enabling','disabling','updating','repairing','removing'].includes(state)){
-    return `<span class="pill warn">${escapeHtml(titleCase(state))}</span>`;
-  }else{
-    if(c?.enabled||state==='running'||state==='degraded')buttons.push(['disable','Disable','']);
-    else buttons.push(['enable','Enable','primary']);
-    buttons.push(['update','Update',''],['repair','Repair',''],['remove','Remove runtime','danger']);
-  }
-  return buttons.map(([action,label,cls])=>`<button class="btn ${cls}" data-qa31-colibri-action="${action}">${label}</button>`).join('');
+/* Settings */
+const A31_SETTINGS=[["general","General"],["appearance","Appearance"],["defaults","Defaults"],["models","Models & Compute"],["providers","Providers & Auth"],["nodes","Nodes & Federation"],["agents","Agents & Research"],["skills","Skills & Tools"],["security","Security & Approvals"],["updates","Updates & Diagnostics"]];
+function a31SettingsNav(){return `<div class="settings-nav"><input id="a31SettingsSearch" placeholder="Search settings…">${A31_SETTINGS.map(([id,label])=>`<button class="${a31SettingsView===id?'active':''}" data-a31-settings="${id}" data-settings-search="${escapeHtml(label.toLowerCase())}">${escapeHtml(label)}</button>`).join("")}</div>`}
+async function a31SettingsSection(){
+  const p=qa5Prefs(),d=p.workspace_defaults||{};
+  if(a31SettingsView==="general")return `<section class="settings-section"><h2>General</h2><label>Language<select id="a31Language">${Object.entries(qa5AllLanguages()).map(([id,x])=>`<option value="${escapeHtml(id)}" ${p.language===id?'selected':''}>${escapeHtml(x.name)}</option>`).join("")}</select></label><label>Landing page<select id="a31Landing"><option value="operations">Operations</option><option value="projects">Projects</option><option value="tasks">Tasks</option></select></label><button class="btn" data-action="product-tour">Restart product tour</button></section>`;
+  if(a31SettingsView==="appearance")return `<section class="settings-section"><h2>Appearance</h2><div class="theme-grid">${qa5ThemeButtons()}</div><div class="toolbar"><button class="btn" id="a31InstallTheme">Install theme package</button></div></section>`;
+  if(a31SettingsView==="defaults")return `<section class="settings-section"><h2>Defaults for new Workspaces</h2><p class="page-subtitle">Copied at Workspace creation only. Existing Workspaces are never changed here.</p><label>Default orchestration<select id="a31DefaultMode"><option value="direct">Direct</option><option value="team">Team</option><option value="council">Council</option></select></label><label>Default seats<input id="a31DefaultSeats" type="number" min="1" max="8" value="${Number(d.seats||2)}"></label><label class="inline-check"><input id="a31DefaultRouting" type="checkbox" ${d.model_routing!==false?'checked':''}> Enable model routing</label><label class="inline-check"><input id="a31DefaultRemote" type="checkbox" ${d.remote_models!==false?'checked':''}> Allow qualified remote models/nodes</label><label class="inline-check"><input id="a31DefaultBrowser" type="checkbox" ${d.browser?'checked':''}> Browser capability</label><label class="inline-check"><input id="a31DefaultComputer" type="checkbox" ${d.computer?'checked':''}> Computer capability</label><button class="btn primary" id="a31SaveDefaults">Save defaults</button></section>`;
+  if(a31SettingsView==="models"){let cfg={};try{cfg=await apiRequest("/v1/settings/local-ai")}catch{}return `<section class="settings-section"><h2>Models & Compute</h2><label>Model pool path<input id="a31ModelPool" value="${escapeHtml(cfg.model_pool_path||"")}"></label><label>Default runtime strategy<select id="a31Runtime"><option value="auto">Auto</option><option value="hot-swap">Managed Hot Swap</option><option value="colibri">Colibri Large Model</option></select></label><label>Default compute<select id="a31ComputeDefault"><option value="auto">Auto</option><option value="prefer-gpu">Prefer GPU</option><option value="prefer-cpu">Prefer CPU</option></select></label><p class="page-subtitle">Per-deployment Require CPU/GPU/Hybrid settings are configured on Local Models and override these preferences.</p><button class="btn primary" id="a31SaveModelSettings">Save</button></section>`}
+  if(a31SettingsView==="providers"){const cfg=await apiRequest(`/v1/provider-oauth/configs?workspace_id=${encodeURIComponent(onepaneWorkspace)}`).catch(()=>[]);return `<section class="settings-section"><h2>Providers & Auth</h2><p class="page-subtitle">OAuth is enabled only when a provider has a configured authorization endpoint, token endpoint, public client ID and scopes.</p><div class="oauth-config-list">${a31Array(cfg).map(x=>`<div class="oauth-config-row"><strong>${escapeHtml(x.preset_id)}</strong><span class="pill ${x.enabled?'good':''}">${x.enabled?'Enabled':'Disabled'}</span><span>${escapeHtml(x.authorization_url)}</span></div>`).join("")||'<div class="empty-state compact">No OAuth providers configured. API-key providers remain available from Cloud Models.</div>'}</div><button class="btn" id="a31AddOAuthConfig">Configure OAuth provider</button></section>`}
+  if(a31SettingsView==="nodes")return '<section class="settings-section"><h2>Nodes & Federation</h2><label class="inline-check"><input type="checkbox" checked disabled> Node discovery enabled</label><label class="inline-check"><input type="checkbox" checked disabled> Remote inference enabled</label><p class="page-subtitle">Manage actual enrolled devices, scheduling pools and model caches on the Nodes page.</p><button class="btn" data-route="nodes">Manage Nodes</button></section>';
+  if(a31SettingsView==="agents")return `<section class="settings-section"><h2>Agents & Research</h2><label>Assistant compute preference<select id="a31AssistantCompute"><option value="auto">Auto</option><option value="prefer-gpu">Prefer GPU</option><option value="prefer-cpu">Prefer CPU</option></select></label><label class="inline-check"><input id="a31ResearchDefault" type="checkbox" ${p.research_default?'checked':''}> Recommend Research mode for new Research Team templates</label><p class="page-subtitle">Research integrity is stored per Team/Council. Defaults never silently change existing Teams.</p><button class="btn primary" id="a31SaveAgentSettings">Save</button></section>`;
+  if(a31SettingsView==="skills")return '<section class="settings-section"><h2>Skills & Tools</h2><p>Uploaded .opskill packages are quarantined, hashed and validated before explicit installation. Tool bundles request capability; Workspace policy remains authority.</p><button class="btn" data-route="skills">Manage Skills</button></section>';
+  if(a31SettingsView==="security")return `<section class="settings-section"><h2>Security & Approvals</h2><div class="approval-profile-grid">${["high","medium","low"].map(v=>`<button class="approval-profile ${state.approvalLevel===v?'selected':''}" data-approval-default="${v}"><strong>${titleCase(v)}</strong><span>${v==="high"?"Prompt for every approval-class operation.":v==="medium"?"Auto-approve low risk; prompt for medium/high/critical.":"Auto-approve low and medium risk; prompt for high/critical."}</span></button>`).join("")}</div></section>`;
+  return `<section class="settings-section"><h2>Updates & Diagnostics</h2><label>Release channel<select id="a31UpdateChannel"><option value="alpha">Alpha</option><option value="stable">Stable</option></select></label><div class="toolbar"><button class="btn" id="a31OpenLogs">Open Logs</button><button class="btn" data-action="product-tour">Restart product tour</button></div><p class="page-subtitle">Recovery actions that mutate runtimes live in Operations → Recovery.</p></section>`
 }
-const qa31RenderModelsBase=renderModels;
-renderModels=async function(){
-  await qa31RenderModelsBase();
-  let components={};
-  try{components=await qa5ComponentStatus()}catch{}
-  const colibri=components?.colibri||{};
-  const card=$('.colibri-separate');
-  if(card){
-    const pill=$('.card-header .pill',card);
-    if(pill){
-      const state=String(colibri.state||'not_installed');
-      pill.textContent=titleCase(state.replaceAll('_',' '));
-      pill.className='pill '+(['running','installed_disabled'].includes(state)?'good':(['failed','degraded','interrupted'].includes(state)?'warn':''));
-    }
-    const toolbar=$('.widget-body .toolbar',card);
-    if(toolbar){
-      toolbar.innerHTML=qa31ColibriActionButtons(colibri)+(colibri.installed?'<button class="btn" id="qa5ColibriRegister">Register model folder</button>':'');
-      $$('[data-qa31-colibri-action]',toolbar).forEach(b=>b.onclick=()=>qa5ComponentAction('colibri',b.dataset.qa31ColibriAction,'#qa5ColibriInlineStatus'));
-      $('#qa5ColibriRegister',toolbar)?.addEventListener('click',qa5RegisterColibri);
-    }
-    const status=$('#qa5ColibriInlineStatus',card);
-    if(status){
-      const version=colibri.installed_version||colibri.available_version||'1.12.1';
-      status.innerHTML=`Version ${escapeHtml(version)} · ${escapeHtml(String(colibri.state||'not installed').replaceAll('_',' '))}${colibri.last_error?`<br><span class="warn">${escapeHtml(colibri.last_error)}</span>`:''}`;
-    }
-  }
-  const omni=$('.omniroute-separate');
-  if(omni){
-    const firstToolbar=$('.widget-body > .toolbar',omni);
-    if(firstToolbar)firstToolbar.innerHTML='<span class="list-meta">Provider connection lifecycle · no local runtime installation</span>';
-  }
-};
+renderSettings=async function(){
+  $("#viewHost").innerHTML=`<section class="page">${pageHeader("Settings","Application preferences and defaults. Workspace-owned policy remains in each Workspace.")}<div class="settings-shell">${a31SettingsNav()}<div id="a31SettingsContent"><div class="widget-body">Loading…</div></div></div></section>`;
+  $("#a31SettingsContent").innerHTML=await a31SettingsSection();$$("[data-a31-settings]").forEach(b=>b.onclick=()=>a31SetSettingsView(b.dataset.a31Settings));$("#a31SettingsSearch").oninput=e=>{const q=e.target.value.toLowerCase();$$("[data-settings-search]").forEach(b=>b.hidden=q&&!b.dataset.settingsSearch.includes(q))};
+  $$("[data-settings-theme]").forEach(b=>b.onclick=()=>{applyTheme(b.dataset.settingsTheme);renderSettings()});$$("[data-approval-default]").forEach(b=>b.onclick=()=>{state.approvalLevel=b.dataset.approvalDefault;persist();renderSettings()});
+  const p=qa5Prefs(),d=p.workspace_defaults||{};if($("#a31DefaultMode"))$("#a31DefaultMode").value=d.orchestration||"direct";if($("#a31Landing"))$("#a31Landing").value=p.landing||"operations";if($("#a31Runtime"))$("#a31Runtime").value=p.default_runtime||"auto";if($("#a31ComputeDefault"))$("#a31ComputeDefault").value=p.default_compute||"auto";if($("#a31AssistantCompute"))$("#a31AssistantCompute").value=p.assistant_defaults?.compute_preference||"auto";if($("#a31UpdateChannel"))$("#a31UpdateChannel").value=p.update_channel||"alpha";
+  $("#a31SaveDefaults")?.addEventListener("click",()=>{qa5SavePrefs({workspace_defaults:{orchestration:$("#a31DefaultMode").value,seats:Number($("#a31DefaultSeats").value||2),model_routing:$("#a31DefaultRouting").checked,remote_models:$("#a31DefaultRemote").checked,browser:$("#a31DefaultBrowser").checked,computer:$("#a31DefaultComputer").checked}});notice("Defaults saved for newly created Workspaces.")});
+  $("#a31SaveModelSettings")?.addEventListener("click",async()=>{try{await apiRequest("/v1/settings/local-ai",{method:"POST",body:JSON.stringify({model_pool_path:$("#a31ModelPool").value})});qa5SavePrefs({default_runtime:$("#a31Runtime").value,default_compute:$("#a31ComputeDefault").value});notice("Model defaults saved.")}catch(ex){notice(ex.message,"bad")}});
+  $("#a31SaveAgentSettings")?.addEventListener("click",()=>{qa5SavePrefs({assistant_defaults:{...p.assistant_defaults,compute_preference:$("#a31AssistantCompute").value},research_default:$("#a31ResearchDefault").checked});notice("Agent and Research defaults saved.")});
+  $("#a31Language")?.addEventListener("change",e=>{qa5SavePrefs({language:e.target.value});qa5RefreshShellLanguage();renderSettings()});
+  $("#a31InstallTheme")?.addEventListener("click",()=>{const i=document.createElement("input");i.type="file";i.accept=".json";i.onchange=async()=>{try{await qa5InstallThemePack(i.files[0]);renderSettings()}catch(ex){notice(ex.message,"bad")}};i.click()});
+  $("#a31OpenLogs")?.addEventListener("click",a31ToggleLogs);$("#a31AddOAuthConfig")?.addEventListener("click",()=>openModal("Configure OAuth provider",`<form id="a31OAuthConfigForm" class="qa-form"><label>Provider preset ID<input name="preset" required placeholder="provider-id"></label><label>Authorization URL<input name="auth" required placeholder="https://…/authorize"></label><label>Token URL<input name="token" required placeholder="https://…/token"></label><label>Public client ID<input name="client" required></label><label>Scopes<input name="scopes" placeholder="openid profile"></label><label class="inline-check"><input name="enabled" type="checkbox" checked> Enabled</label><button class="btn primary">Save OAuth configuration</button></form>`));setTimeout(()=>{const form=$("#a31OAuthConfigForm");if(form)form.onsubmit=async e=>{e.preventDefault();const fd=new FormData(form),preset=String(fd.get("preset")||"").trim();try{await apiRequest(`/v1/provider-oauth/configs/${encodeURIComponent(preset)}`,{method:"PUT",body:JSON.stringify({workspace_id:onepaneWorkspace,authorization_url:fd.get("auth"),token_url:fd.get("token"),client_id:fd.get("client"),scopes:String(fd.get("scopes")||"").split(/\s+/).filter(Boolean),enabled:!!fd.get("enabled")})});closeModal();renderSettings()}catch(ex){notice(ex.message,"bad")}}},0);
+  bindViewActions($("#viewHost"));
+}
 
-function qa31BindOperationCardActions(){
-  $$('.operations-layout-grid .panel-card').forEach(card=>{
-    const action=$('.card-action',card);if(!action)return;
-    const title=$('.card-title',card)?.textContent.trim()||'';
-    if(title==='Active Tasks'||title==='Scheduled Tasks'||title==='Scheduled tasks'){
-      action.dataset.qa31OperationAction='tasks';
-    }else if(title==='Nodes'){
-      action.dataset.qa31OperationAction='nodes';
-    }else if(title==='Provider Health'){
-      action.dataset.qa31OperationAction='models';
-    }else if(title==='Recent Activity'){
-      action.dataset.qa31OperationAction='events';
-    }else{
-      action.remove();return;
-    }
-    action.onclick=()=>{
-      const target=action.dataset.qa31OperationAction;
-      if(target==='events'){setDrawerOpen(true);activeDrawerTab='events';persist();renderDrawer();return}
-      openRoute(target);
-    };
-  });
-}
-const qa31RenderOperationsBase=renderOperations;
-renderOperations=function(){
-  qa31RenderOperationsBase();
-  queueMicrotask(qa31BindOperationCardActions);
-};
-
-
-/* === Alpha 3.1 product tour: Assistant → Orchestrator → governed execution === */
-function qa31TourAssistantPreview(){
-  const root=$('#overlayRoot');
-  root.innerHTML=`<div class="overlay qa31-assistant-tour-preview"><section class="command-palette assistant-palette qa31-assistant"><div class="assistant-head"><div><div class="eyebrow">ONEPANE ASSISTANT</div><h2>Global context</h2><div class="list-meta">Guided preview · no model call, Project, Task or session is created</div></div></div><div class="assistant-scope-row"><label>Context<select disabled><option>Global</option></select></label></div><div class="assistant-history"><div class="empty-state compact">Ask OnePane about system state, navigation, or explicitly hand work to a Project Orchestrator.</div></div><div class="assistant-compose"><textarea rows="3" disabled placeholder="Ask OnePane or run a command…"></textarea><div class="assistant-compose-actions"><button class="btn" disabled>Ask</button><button class="btn primary" disabled>Run</button></div></div></section></div>`;
-}
-function qa31CloseTourAssistantPreview(){
-  if($('.qa31-assistant-tour-preview'))$('#overlayRoot').innerHTML='';
-}
-function qa31WaitForTourTarget(step,timeout=2200){
-  if(!step?.target)return Promise.resolve(null);
-  const started=performance.now();
-  return new Promise(resolve=>{
-    const tick=()=>{
-      let target=null;try{target=document.querySelector(step.target)}catch{}
-      if(target||performance.now()-started>=timeout)return resolve(target);
-      requestAnimationFrame(tick);
-    };
-    tick();
-  });
-}
-function startProductTour({replay=false}={}){
-  document.documentElement.dataset.productTour='active';
-  document.querySelector('#qa31TourRoot')?.remove();
-  qa31CloseTourAssistantPreview();
-  if(replay)localStorage.removeItem(TOUR_KEY);
-  const snapshot={
-    tabs:JSON.parse(JSON.stringify(state.tabs||[])),
-    activeTab:state.activeTab,
-    sidebar:state.sidebar,
-    inspector:state.inspector,
-    inspectorWidth:state.inspectorWidth,
-    drawer:state.drawer,
-    drawerHeight:state.drawerHeight,
-    drawerTab:activeDrawerTab,
-    projectID:typeof qa4ProjectHub!=='undefined'?qa4ProjectHub.activeProjectID:'',
-    projectWorkspaceID:typeof qa4ProjectHub!=='undefined'?qa4ProjectHub.activeWorkspaceID:'',
-    scrollX:window.scrollX,scrollY:window.scrollY
-  };
+/* Product tour: crisp target, four-pane focus mask and stable anchored card. */
+startProductTour=function({replay=false,welcome=false}={}){
+  if(replay)localStorage.removeItem(TOUR_KEY);const root=$("#qa31TourRoot");if(!root)return;document.documentElement.dataset.productTour="active";
   const steps=[
-    {title:'Welcome to OnePane',text:'OnePane coordinates Projects, Workspaces, Tasks, models, Agent Profiles, tools and compute while keeping authority in the control plane.'},
-    {title:'OnePane Assistant',text:'The global Assistant is your OnePane-facing layer. Global context stays global; Project-specific work is explicitly handed to that Project’s Orchestrator.',target:'.qa31-assistant-tour-preview .qa31-assistant',prepare:async()=>qa31TourAssistantPreview()},
-    {title:'Projects',text:'Projects are durable scopes containing their own Workspaces, policy, runtime state and work.',target:'[data-route="projects"]',prepare:async()=>{qa31CloseTourAssistantPreview();openRoute('projects');}},
-    {title:'Project Orchestrator',text:'Each Project has one logical Orchestrator coordinating all of its Workspaces and Tasks. It is not a permanently resident model and cannot bypass approvals, routing or sandbox policy.',target:'#qa31ProjectOrchestrator',prepare:async()=>{qa31CloseTourAssistantPreview();openRoute('projects');}},
-    {title:'Workspace execution',text:'Workspaces remain authoritative for Direct, Team or Council execution, model routing, fallback, compute preference and remote-access policy.',target:'[data-qa7-chat-mode]',prepare:async()=>{openRoute('projects');}},
-    {title:'Follow provenance',text:'Follow exposes the real chain: Assistant → Project Orchestrator → Task → Workspace → Direct/Team/Council → Agent Profile → Model → Node. It follows events and snapshots, not model narration.',target:'.qa6-follow',prepare:async()=>{openRoute('projects');}},
-    {title:'Operations',text:'Operations shows active work, node/provider health, attention items and event activity. View-all actions open real destinations.',target:'[data-route="operations"]',prepare:async()=>{openRoute('operations');}},
-    {title:'Local Models',text:'Local Models owns hardware detection, downloads, qualification, runtime strategy, Hot Swap and the managed Colibri lifecycle.',target:'[data-model-nav-view="local"]',prepare:async()=>{qa31SetModelView('local');}},
-    {title:'Colibri Large Model',text:'Colibri is an optional locally managed large-model runtime. OnePane verifies the platform release and keeps install, repair, update and removal independent from OnePane health.',target:'.colibri-separate',prepare:async()=>{qa31SetModelView('local');}},
-    {title:'Cloud Models',text:'Cloud Models contains direct provider connections and OmniRoute without mixing provider connections into the local runtime lifecycle.',target:'[data-model-nav-view="cloud"]',prepare:async()=>{qa31SetModelView('cloud');}},
-    {title:'OmniRoute',text:'OmniRoute is an external routing/provider connection. Probe, connect and revoke use provider APIs; it is not a locally installed component.',target:'.omniroute-separate',prepare:async()=>{qa31SetModelView('cloud');}},
-    {title:'Agents',text:'Agents is built around Profiles, real Sessions, Teams and Councils. Profiles influence reasoning but never grant tools, secrets, network or approval authority.',target:'[data-route="agents"]',prepare:async()=>{openRoute('agents');}},
-    {title:'Attention and approvals',text:'Operations that need human authority surface as attention/approval work without silently changing policy.',target:'#attentionButton'},
-    {title:'Inspector',text:'The resizable right dock shows contextual details without floating over your work.',target:'#inspector',prepare:async()=>{setInspectorOpen(true);}},
-    {title:'Logs and observability',text:'Logs, Events, Watchdog, Metrics, Evidence and Terminal live in the bottom dock. Collapsing it releases the page space immediately.',target:'#bottomDrawer',prepare:async()=>{setDrawerOpen(true);}},
-    {title:'Resource-aware tabs',text:'Inactive UI tabs may suspend rendering, but durable backend Tasks continue unless their own policy or state says otherwise.',target:'#tabStrip'},
-    {title:'Ask OnePane or run a command',text:'Ctrl+K opens the same OnePane Assistant surface for natural-language help, navigation and explicit governed execution.',target:'#commandButton'},
-    {title:'You’re ready',text:'Assistant → Project Orchestrator → Workspace → Direct / Team / Council → Agents / Models / Tools / Nodes. Each layer has a distinct responsibility and authority boundary.'}
+    {title:"Welcome to OnePane",body:"OnePane coordinates Projects, Workspaces, models, Agents, Skills, Nodes and governed execution.",target:null},
+    {title:"Navigation",body:"Primary management surfaces stay identifiable here, including Nodes and Skills.",target:".sidebar"},
+    {title:"OnePane Control Chat",body:"Open persistent Assistant or Project Orchestrator chat without leaving your work.",target:"#controlChatLauncher"},
+    {title:"Projects & Workspaces",body:"Projects contain independently configurable Workspaces and resizable components.",target:'[data-route="projects"]',prepare:()=>openRoute("projects")},
+    {title:"Local Models",body:"Detect hardware, install trusted artifacts and pin each deployment to CPU, GPU or hybrid compute.",target:'[data-a31-model-view="local"]',prepare:()=>{openRoute("models");a31ModelView="local";renderNav()}},
+    {title:"Cloud Models",body:"Connect API-key or OAuth providers and manage local/external OmniRoute.",target:'[data-a31-model-view="cloud"]',prepare:()=>{openRoute("models");a31ModelView="cloud";renderNav()}},
+    {title:"Nodes",body:"Enrolled Windows and Ubuntu devices expose schedulable CPU/GPU resource pools.",target:'[data-route="nodes"]',prepare:()=>openRoute("nodes")},
+    {title:"Agents & Research",body:"Core Profiles, Teams and Research integrity configuration live under Agents.",target:'[data-route="agents"]',prepare:()=>openRoute("agents")},
+    {title:"Skills",body:"Install capability packages, inspect tool bundles and assignments.",target:'[data-route="skills"]',prepare:()=>openRoute("skills")},
+    {title:"Inspector",body:"Selected Tasks, Models, Nodes and Workspaces expose contextual details here.",target:"#inspector",prepare:()=>setInspectorOpen(true)},
+    {title:"Observability",body:"Logs, Events, Watchdog, Metrics, Evidence and Terminal remain in the bottom drawer.",target:"#bottomDrawer",prepare:()=>setDrawerOpen(true)},
+    {title:"Settings",body:"Application defaults are grouped here; Workspace-owned settings remain with each Workspace.",target:'[data-route="settings"]'},
+    {title:"Ready",body:"The control plane is ready. You can replay this tour from Settings or Help / Tour.",target:null}
   ];
-  let index=0,currentTarget=null,closing=false;
-  const host=document.createElement('div');host.id='qa31TourRoot';host.className='tour-overlay';host.innerHTML='<div class="tour-mask"></div><div class="tour-card" role="dialog" aria-modal="true"><div class="tour-kicker"></div><h2></h2><p></p><div class="tour-actions"><button class="btn" id="qa31TourSkip">Skip</button><span class="tour-spacer"></span><button class="btn" id="qa31TourBack">Back</button><button class="btn primary" id="qa31TourNext">Next</button></div></div>';document.body.appendChild(host);
-  const card=$('.tour-card',host),kicker=$('.tour-kicker',host),title=$('h2',card),copy=$('p',card),back=$('#qa31TourBack',host),next=$('#qa31TourNext',host),skip=$('#qa31TourSkip',host);
-  const clearTarget=()=>{if(currentTarget){currentTarget.classList.remove('tour-target');currentTarget=null}};
-  const restore=()=>{
-    state.tabs=JSON.parse(JSON.stringify(snapshot.tabs));state.activeTab=snapshot.activeTab;state.sidebar=snapshot.sidebar;state.inspector=snapshot.inspector;state.inspectorWidth=snapshot.inspectorWidth;state.drawer=snapshot.drawer;state.drawerHeight=snapshot.drawerHeight;activeDrawerTab=snapshot.drawerTab;
-    if(typeof qa4ProjectHub!=='undefined'){qa4ProjectHub.activeProjectID=snapshot.projectID;qa4ProjectHub.activeWorkspaceID=snapshot.projectWorkspaceID}
-    $('#app').dataset.sidebar=state.sidebar;$('#app').dataset.inspector=state.inspector;$('#bottomDrawer').dataset.state=state.drawer;applyInspectorWidth();document.documentElement.style.setProperty('--drawer',state.drawer==='open'?`${state.drawerHeight}px`:'0px');persist();renderTabs();renderActiveView();syncPanelRestoreButtons();window.scrollTo(snapshot.scrollX,snapshot.scrollY);
-  };
-  const finish=(completed=true)=>{if(closing)return;closing=true;clearTarget();qa31CloseTourAssistantPreview();host.classList.add('tour-transitioning');setTimeout(()=>{host.remove();delete document.documentElement.dataset.productTour;restore();if(completed)localStorage.setItem(TOUR_KEY,TOUR_COMPLETE_VALUE);},120)};
-  const resolveTarget=step=>{try{return step.target?document.querySelector(step.target):null}catch{return null}};
-  const place=target=>{
-    const margin=14,w=Math.min(390,innerWidth-24),h=card.offsetHeight||270;
-    let left=(innerWidth-w)/2,top=Math.max(margin,(innerHeight-h)/2);
-    if(target){
-      const r=target.getBoundingClientRect();
-      const below=r.bottom+14,above=r.top-h-14;
-      top=below+h<innerHeight-margin?below:(above>margin?above:Math.max(margin,innerHeight-h-margin));
-      left=Math.max(margin,Math.min(innerWidth-w-margin,r.left+r.width/2-w/2));
-    }
-    card.style.width=`${w}px`;card.style.left=`${Math.round(left)}px`;card.style.top=`${Math.round(top)}px`;
-  };
-  const render=async()=>{
-    host.classList.add('tour-transitioning');clearTarget();
-    const step=steps[index];if(step.prepare)await step.prepare();
-    currentTarget=await qa31WaitForTourTarget(step);if(currentTarget){currentTarget.classList.add('tour-target');currentTarget.scrollIntoView({block:'nearest',inline:'nearest'})}
-    kicker.textContent=`Tour · ${index+1} / ${steps.length}`;title.textContent=step.title;copy.textContent=step.text;back.disabled=index===0;next.textContent=index===steps.length-1?'Finish':'Next';place(currentTarget);
-    requestAnimationFrame(()=>host.classList.remove('tour-transitioning'));
-  };
-  back.onclick=()=>{if(index>0){index--;render()}};
-  next.onclick=()=>{if(index===steps.length-1)finish(true);else{index++;render()}};
-  skip.onclick=()=>finish(true);
-  const key=e=>{if(!document.body.contains(host)){document.removeEventListener('keydown',key,true);return}if(e.key==='Escape'){e.preventDefault();finish(false)}else if(e.key==='ArrowRight'){e.preventDefault();next.click()}else if(e.key==='ArrowLeft'){e.preventDefault();back.click()}};
-  document.addEventListener('keydown',key,true);
-  render();
-}
-
-/* === Alpha 3.1 authoritative Settings + component lifecycle === */
-qa5ComponentStatus=async function(){
-  try{return await apiRequest('/v1/local-ai/components?workspace_id='+encodeURIComponent(onepaneWorkspace))}
-  catch{return {colibri:{installed:null,enabled:null,state:'unavailable',available_version:'1.12.1'}}}
-}
-var qa5WaitComponentJob=async function(job,statusID){
-  const host=$(statusID);let current=job;
-  for(let i=0;i<900;i++){
-    if(host)host.textContent=`${titleCase(current.action||'Component')} · ${String(current.stage||current.status||'queued').replaceAll('_',' ')}`;
-    if(['succeeded','failed','interrupted','cancelled'].includes(current.status))return current;
-    await new Promise(resolve=>setTimeout(resolve,1000));
-    current=await apiRequest(`/v1/local-ai/component-jobs/${encodeURIComponent(job.id)}?workspace_id=${encodeURIComponent(onepaneWorkspace)}`);
+  let i=0,lastAnchor="bottom-center";
+  const cleanup=()=>{delete document.documentElement.dataset.productTour;root.innerHTML="";window.removeEventListener("resize",position)};
+  const finish=()=>{localStorage.setItem(TOUR_KEY,TOUR_COMPLETE_VALUE);cleanup()};
+  function panes(rect,pad=8){const vw=innerWidth,vh=innerHeight,r=rect?{l:Math.max(0,rect.left-pad),t:Math.max(0,rect.top-pad),r:Math.min(vw,rect.right+pad),b:Math.min(vh,rect.bottom+pad)}:{l:vw/2,t:vh/2,r:vw/2,b:vh/2};return `<div class="tour-pane tour-pane-top" style="left:0;top:0;width:100%;height:${r.t}px"></div><div class="tour-pane tour-pane-left" style="left:0;top:${r.t}px;width:${r.l}px;height:${Math.max(0,r.b-r.t)}px"></div><div class="tour-pane tour-pane-right" style="left:${r.r}px;top:${r.t}px;width:${Math.max(0,vw-r.r)}px;height:${Math.max(0,r.b-r.t)}px"></div><div class="tour-pane tour-pane-bottom" style="left:0;top:${r.b}px;width:100%;height:${Math.max(0,vh-r.b)}px"></div>`}
+  function position(){
+    const s=steps[i],card=$("#tourCard",root),mask=$("#tourMask",root),target=s.target?$(s.target):null;if(!card||!mask)return;const tr=target?.getBoundingClientRect();mask.innerHTML=panes(tr,s.padding||8);if(target){target.classList.add("tour-target");const spot=$("#tourSpotlight",root);Object.assign(spot.style,{left:`${tr.left-7}px`,top:`${tr.top-7}px`,width:`${tr.width+14}px`,height:`${tr.height+14}px`});spot.hidden=false}else $("#tourSpotlight",root).hidden=true;
+    const cr=card.getBoundingClientRect(),margin=18,targetRect=tr?{left:tr.left-20,right:tr.right+20,top:tr.top-20,bottom:tr.bottom+20}:null;
+    const candidates={"bottom-center":{left:(innerWidth-cr.width)/2,top:innerHeight-cr.height-margin},"top-center":{left:(innerWidth-cr.width)/2,top:margin},"lower-right":{left:innerWidth-cr.width-margin,top:innerHeight-cr.height-margin},"lower-left":{left:margin,top:innerHeight-cr.height-margin},"upper-right":{left:innerWidth-cr.width-margin,top:margin},"upper-left":{left:margin,top:margin}};
+    const collides=p=>targetRect&&!(p.left+cr.width<targetRect.left||p.left>targetRect.right||p.top+cr.height<targetRect.top||p.top>targetRect.bottom);
+    let pos=candidates[lastAnchor];if(!pos||collides(pos)){const found=Object.entries(candidates).find(([,p])=>!collides(p));if(found){lastAnchor=found[0];pos=found[1]}}Object.assign(card.style,{left:`${Math.max(margin,Math.min(innerWidth-cr.width-margin,pos.left))}px`,top:`${Math.max(margin,Math.min(innerHeight-cr.height-margin,pos.top))}px`});
   }
-  throw new Error('Component lifecycle job timed out.');
-}
-qa5ComponentAction=async function(component,action,statusID){
-  const host=$(statusID);if(host)host.textContent=`${titleCase(action)} requested…`;
-  try{
-    const job=await apiRequest(`/v1/local-ai/components/${component}/${action}`,{method:'POST',body:JSON.stringify({workspace_id:onepaneWorkspace})});
-    const done=await qa5WaitComponentJob(job,statusID);
-    if(done.status!=='succeeded')throw new Error(done.failure_reason||`Component job ${done.status}`);
-    if(host)host.innerHTML='<span class="good">Component lifecycle completed.</span>';
-    if(currentTab()?.route==='models')setTimeout(()=>renderModels(),200);
-  }catch(ex){if(host)host.innerHTML=`<span class="warn">${escapeHtml(ex.message)}</span>`;}
-}
-renderSettings=async function(){
-  const prefs=qa5Prefs(),langs=qa5AllLanguages();
-  const about=await apiRequest('/v1/about').catch(()=>({version:'dev',revision:'unknown',build_time:'unknown'}));
-  $('#viewHost').innerHTML=`<section class="page">${pageHeader('Settings','Application preferences and inheritance defaults. Existing Projects and Workspaces retain their own policy.')}<div class="settings-grid qa5-settings-grid">
-  <section class="panel-card"><div class="card-header"><div><div class="card-title">General</div><div class="list-meta">Application-wide behaviour</div></div></div><div class="widget-body settings-stack"><label>Default landing page<select id="qa5Landing"><option value="operations">Operations</option><option value="projects">Projects</option><option value="tasks">Tasks</option><option value="models">Models</option></select></label><label>Interface density<select id="qa5Density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label><label>Update channel<select id="qa5Update"><option value="alpha">Alpha</option><option value="stable" disabled>Stable (future)</option></select></label><label>Inactive tab suspension<input id="qa5Suspend" type="number" min="1" max="120" value="${Number(prefs.suspend_minutes||5)}"> minutes</label><label class="inline-check"><input id="qa5PauseBackground" type="checkbox" ${prefs.pause_background!==false?'checked':''}> Reduce background UI refresh when hidden</label><button class="btn primary" id="qa5SaveGeneral">Save preferences</button></div></section>
-  <section class="panel-card"><div class="card-header"><div><div class="card-title">Appearance & theme packs</div><div class="list-meta">Built-in, two-tone and installable themes</div></div></div><div class="widget-body"><div class="theme-grid settings-theme-grid">${qa5ThemeButtons()}</div><div class="toolbar" style="margin-top:12px"><label class="btn file-button">Install theme pack<input id="qa5ThemeFile" type="file" accept="application/json,.json" hidden></label><button class="btn" data-action="product-tour">Restart product tour</button></div><div class="page-subtitle">Theme packs are local appearance data only and never gain code or tool authority.</div></div></section>
-  <section class="panel-card"><div class="card-header"><div><div class="card-title">Language & region</div><div class="list-meta">Built-in shell translations plus installable language packs</div></div></div><div class="widget-body settings-stack"><label>UI language<select id="qa5Language">${Object.entries(langs).map(([id,l])=>`<option value="${escapeHtml(id)}" ${prefs.language===id?'selected':''}>${escapeHtml(l.name||id)}</option>`).join('')}</select></label><label class="btn file-button">Install language pack<input id="qa5LanguageFile" type="file" accept="application/json,.json" hidden></label><div class="page-subtitle">Missing pack keys fall back to English.</div></div></section>
-  <section class="panel-card"><div class="card-header"><div><div class="card-title">OnePane Assistant defaults</div><div class="list-meta">Global reasoning preferences; authority still comes from OnePane policy</div></div></div><div class="widget-body settings-stack"><label>Compute preference<select id="qa31AssistantCompute"><option value="auto">Auto</option><option value="prefer-gpu">Prefer GPU</option><option value="prefer-cpu">Prefer CPU</option></select></label><label class="inline-check"><input id="qa31AssistantSubscription" type="checkbox" ${prefs.assistant_defaults?.allow_subscription?'checked':''}> Allow protected subscription capacity</label><label class="inline-check"><input id="qa31AssistantPaid" type="checkbox" ${prefs.assistant_defaults?.allow_paid?'checked':''}> Allow routes that may incur monetary cost</label><button class="btn primary" id="qa31SaveAssistant">Save Assistant defaults</button></div></section>
-  <section class="panel-card"><div class="card-header"><div><div class="card-title">Defaults for new Workspaces</div><div class="list-meta">Copied at creation only; existing Workspaces are never overwritten here</div></div></div><div class="widget-body settings-stack"><label>Default orchestration<select id="qa5DefaultMode">${['direct','team','council'].map(x=>`<option value="${x}" ${prefs.workspace_defaults?.orchestration===x?'selected':''}>${titleCase(x)}</option>`).join('')}</select></label><label>Default Team/Council seats<input id="qa31DefaultSeats" type="number" min="1" max="8" value="${Math.max(1,Math.min(8,Number(prefs.workspace_defaults?.seats||2)))}"></label><label class="inline-check"><input id="qa5DefaultRouting" type="checkbox" ${prefs.workspace_defaults?.model_routing!==false?'checked':''}> Enable model routing / delegation in new Workspaces</label><label class="inline-check"><input id="qa5DefaultRemote" type="checkbox" ${prefs.workspace_defaults?.remote_models!==false?'checked':''}> Allow qualified remote models/nodes in new Workspaces</label><label class="inline-check"><input id="qa5DefaultNetwork" type="checkbox" ${prefs.workspace_defaults?.external_network?'checked':''}> Allow external network by default</label><label class="inline-check"><input id="qa5DefaultBrowser" type="checkbox" ${prefs.workspace_defaults?.browser?'checked':''}> Allow browser by default</label><label class="inline-check"><input id="qa5DefaultComputer" type="checkbox" ${prefs.workspace_defaults?.computer?'checked':''}> Allow computer control by default</label><button class="btn primary" id="qa5SaveDefaults">Save new-Workspace defaults</button></div></section>
-  <section class="panel-card"><div class="card-header"><div><div class="card-title">Storage & data locations</div><div class="list-meta">Application paths; runtime operation belongs under Models</div></div></div><div class="widget-body settings-stack"><label>Model pool path<input id="modelPoolPath" placeholder="D:\\OnePane\\Models"></label><button class="btn primary" id="saveModelPool">Save model pool</button><div id="modelPoolStatus" class="page-subtitle"></div></div></section>
-  <section class="panel-card"><div class="card-header"><div><div class="card-title">Core Skills pack</div><div class="list-meta">Bundled policy-aware capabilities</div></div></div><div class="widget-body"><div class="skills-list">${QA5_CORE_SKILLS.map(s=>`<div class="skill-row"><span class="pill good">Core</span><div><strong>${escapeHtml(s.name)}</strong><div class="list-meta">${escapeHtml(s.detail)}</div></div></div>`).join('')}</div><div class="page-subtitle">Skills never create authority: ToolGateway, CapabilityLeases and Project sandbox policy still apply.</div></div></section>
-  <section class="panel-card"><div class="card-header"><div class="card-title">Security & approvals</div><span class="pill good">Recommended: Medium</span></div><div class="widget-body"><div class="approval-profile-grid">${['high','medium','low'].map(v=>`<button class="approval-profile ${state.approvalLevel===v?'selected':''}" data-approval-default="${v}"><strong>${titleCase(v)}</strong><span>${v==='high'?'Prompt for every approval-class operation.':v==='medium'?'Auto-approve low-risk actions; prompt for medium/high/critical.':'Auto-approve low and medium risk; prompt for high/critical.'}</span></button>`).join('')}</div></div></section>
-  <section class="panel-card"><div class="card-header"><div class="card-title">Interface panels & federation</div></div><div class="widget-body"><div class="toolbar"><button class="btn" id="restoreInspectorSettings">Show Inspector</button><button class="btn" id="restoreDrawerSettings">Show Logs drawer</button></div><p class="page-subtitle">Node discovery, remote inference and wake-to-execute follow daemon/federation policy. Per-Workspace routing, sandbox and remote-access controls remain inside Projects.</p></div></section>
-  <section class="panel-card"><div class="card-header"><div class="card-title">About</div></div><div class="widget-body"><div class="about-block"><strong>OnePane ${escapeHtml(about.version||'dev')}</strong><span>DigiLogic · GitHub: DigiLogicTech/OnePane</span><span class="list-meta">Revision ${escapeHtml((about.revision||'unknown').slice(0,12))} · ${escapeHtml(about.build_time||'unknown')}</span></div></div></section>
-  </div></section>`;
-  $('#qa5Landing').value=prefs.landing||'operations';$('#qa5Density').value=prefs.density||'comfortable';$('#qa5Update').value=prefs.update_channel||'alpha';$('#qa31AssistantCompute').value=prefs.assistant_defaults?.compute_preference||'auto';
-  $$('[data-settings-theme]').forEach(b=>b.onclick=()=>{applyTheme(b.dataset.settingsTheme);renderSettings();});
-  $('#qa5ThemeFile').onchange=async e=>{try{await qa5InstallThemePack(e.target.files[0]);notice('Theme pack installed.');renderSettings();}catch(ex){notice(ex.message,'bad');}};
-  $('#qa5LanguageFile').onchange=async e=>{try{await qa5InstallLanguagePack(e.target.files[0]);notice('Language pack installed.');renderSettings();}catch(ex){notice(ex.message,'bad');}};
-  $('#qa5Language').onchange=e=>{qa5SavePrefs({language:e.target.value});qa5RefreshShellLanguage();renderSettings();};
-  $('#qa5SaveGeneral').onclick=()=>{qa5SavePrefs({landing:$('#qa5Landing').value,density:$('#qa5Density').value,update_channel:$('#qa5Update').value,suspend_minutes:Number($('#qa5Suspend').value||5),pause_background:$('#qa5PauseBackground').checked});document.documentElement.dataset.density=$('#qa5Density').value;notice('Preferences saved.');};
-  $('#qa31SaveAssistant').onclick=()=>{qa5SavePrefs({assistant_defaults:{compute_preference:$('#qa31AssistantCompute').value,allow_subscription:$('#qa31AssistantSubscription').checked,allow_paid:$('#qa31AssistantPaid').checked}});notice('Assistant defaults saved.');};
-  $('#qa5SaveDefaults').onclick=()=>{qa5SavePrefs({workspace_defaults:{orchestration:$('#qa5DefaultMode').value,seats:Math.max(1,Math.min(8,Number($('#qa31DefaultSeats').value||2))),model_routing:$('#qa5DefaultRouting').checked,remote_models:$('#qa5DefaultRemote').checked,external_network:$('#qa5DefaultNetwork').checked,browser:$('#qa5DefaultBrowser').checked,computer:$('#qa5DefaultComputer').checked}});notice('Defaults for new Workspaces saved. Existing Workspaces were not changed.');};
-  $('#restoreInspectorSettings').onclick=()=>setInspectorOpen(true);$('#restoreDrawerSettings').onclick=()=>setDrawerOpen(true);
-  try{let s;try{s=await apiRequest('/desktop/settings');}catch{s=await apiRequest('/v1/settings/local-ai?workspace_id='+encodeURIComponent(onepaneWorkspace));}$('#modelPoolPath').value=s.model_pool_path||'';}catch{$('#modelPoolStatus').textContent='Current installer model-pool selection remains active.';}
-  $('#saveModelPool').onclick=async()=>{const path=$('#modelPoolPath').value.trim();if(!path){notice('Enter a model pool path.');return;}try{try{await apiRequest('/desktop/settings/model-pool',{method:'POST',body:JSON.stringify({model_pool_path:path})});$('#modelPoolStatus').innerHTML=`<span class="good">Administrator update requested: ${escapeHtml(path)}</span>`;}catch{const out=await apiRequest('/v1/settings/local-ai',{method:'POST',body:JSON.stringify({workspace_id:onepaneWorkspace,model_pool_path:path})});$('#modelPoolStatus').innerHTML=`<span class="good">Saved: ${escapeHtml(out.model_pool_path||path)}</span>`;}}catch(ex){$('#modelPoolStatus').innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`;}};
-  bindViewActions($('#viewHost'));
-}
-
-const qa31SettingsAuthoritativeBase=renderSettings;
-renderSettings=async function(){
-  await qa31SettingsAuthoritativeBase();
-  qa8SettingsEnhance();
-  try{
-    const s=await apiRequest('/desktop/settings');
-    if($('#qa8ProjectRoot'))$('#qa8ProjectRoot').value=s.project_root||'';
-  }catch{}
-  const save=$('#saveModelPool');
-  if(save){
-    const base=save.onclick;
-    save.onclick=async()=>{
-      const projectRoot=$('#qa8ProjectRoot')?.value.trim()||'';
-      if(projectRoot){
-        try{await apiRequest('/desktop/settings/project-root',{method:'POST',body:JSON.stringify({project_root:projectRoot})});}
-        catch(ex){notice(`Project storage update failed: ${ex.message}`,'bad');return;}
-      }
-      await base?.();
-    };
+  async function draw(){
+    root.querySelectorAll(".tour-target").forEach(x=>x.classList.remove("tour-target"));const s=steps[i];if(s.prepare)await s.prepare();root.innerHTML=`<div class="tour-overlay"><div id="tourMask" class="tour-focus-mask"></div><div id="tourSpotlight" class="tour-spotlight" hidden></div><section id="tourCard" class="tour-card a31-tour-card"><div class="tour-progress"><span>${i+1} / ${steps.length}</span><span>${Math.round((i+1)/steps.length*100)}%</span></div><h2>${escapeHtml(s.title)}</h2><p>${escapeHtml(s.body)}</p><div class="tour-actions"><button class="btn" id="tourSkip">${i===steps.length-1?'Close':'Skip tour'}</button><span class="tour-spacer"></span>${i?'<button class="btn" id="tourBack">Back</button>':""}<button class="btn primary" id="tourNext">${i===steps.length-1?'Finish':'Next'}</button></div></section></div>`;$("#tourSkip").onclick=finish;$("#tourBack")?.addEventListener("click",()=>{i--;draw()});$("#tourNext").onclick=()=>{if(i===steps.length-1)return finish();i++;draw()};requestAnimationFrame(()=>requestAnimationFrame(position));
   }
+  window.addEventListener("resize",position);draw();
 };
 
-
-/* === Alpha 3.1 RC2 shell navigation + sustained-interaction hardening === */
-function qa31ProjectTreeExpanded(projectID){
-  state.projectNavExpanded=state.projectNavExpanded&&typeof state.projectNavExpanded==='object'?state.projectNavExpanded:{};
-  return state.projectNavExpanded[projectID]!==false;
-}
-function qa31ProjectNavTreeHTML(){
-  if(!qa4ProjectHub?.projects?.length)return '';
-  return `<div class="project-nav-tree" aria-label="Project workspaces">${qa4ProjectHub.projects.map(project=>{
-    const expanded=qa31ProjectTreeExpanded(project.id),activeProject=project.id===qa4ProjectHub.activeProjectID,workspaces=qa4Workspaces(project);
-    return `<div class="project-nav-node ${activeProject?'active-project':''}" data-project-nav-node="${escapeHtml(project.id)}"><div class="project-nav-row"><button class="project-nav-disclosure shell-panel-toggle compact" data-project-nav-toggle="${escapeHtml(project.id)}" aria-label="${expanded?'Collapse':'Expand'} ${escapeHtml(project.name||'Project')}" aria-expanded="${expanded}">${qa31ChevronIcon(expanded?'down':'right')}</button><button class="project-nav-project" data-project-nav-project="${escapeHtml(project.id)}" title="${escapeHtml(project.name||project.id)}"><span>${escapeHtml(project.name||project.id)}</span></button></div><div class="project-nav-workspaces ${expanded?'':'hidden'}">${workspaces.map(ws=>`<button class="project-nav-workspace ${activeProject&&ws.id===qa4ProjectHub.activeWorkspaceID?'active':''}" data-project-nav-workspace="${escapeHtml(ws.id)}" data-project-nav-parent="${escapeHtml(project.id)}" title="${escapeHtml(ws.name||ws.id)}"><span class="project-nav-branch" aria-hidden="true"></span><span>${escapeHtml(ws.name||ws.id)}</span></button>`).join('')}</div></div>`;
-  }).join('')}</div>`;
-}
-function qa31BindProjectNavTree(root){
-  $$('[data-project-nav-toggle]',root).forEach(b=>b.onclick=e=>{e.stopPropagation();const id=b.dataset.projectNavToggle;state.projectNavExpanded=state.projectNavExpanded||{};state.projectNavExpanded[id]=!qa31ProjectTreeExpanded(id);persist();qa31RenderProjectNavTree();});
-  $$('[data-project-nav-project]',root).forEach(b=>b.onclick=()=>{const id=b.dataset.projectNavProject,project=qa4ProjectHub.projects.find(p=>p.id===id);if(!project)return;qa4ProjectHub.activeProjectID=id;const rows=qa4Workspaces(project);if(!rows.some(w=>w.id===qa4ProjectHub.activeWorkspaceID))qa4ProjectHub.activeWorkspaceID=rows[0]?.id||'';openRoute('projects');qa31RenderProjectNavTree();});
-  $$('[data-project-nav-workspace]',root).forEach(b=>b.onclick=()=>{const project=qa4ProjectHub.projects.find(p=>p.id===b.dataset.projectNavParent);if(!project)return;qa4ProjectHub.activeProjectID=project.id;qa4ProjectHub.activeWorkspaceID=b.dataset.projectNavWorkspace;openRoute('projects');qa31RenderProjectNavTree();});
-}
-function qa31RenderProjectNavTree(){
-  const root=$('#primaryNav'),projectsButton=root?.querySelector('[data-route="projects"]');if(!root||!projectsButton)return;
-  root.querySelector('.project-nav-tree')?.remove();
-  projectsButton.insertAdjacentHTML('afterend',qa31ProjectNavTreeHTML());
-  const tree=root.querySelector('.project-nav-tree');if(tree)qa31BindProjectNavTree(tree);
-}
-const qa31RenderNavBase=renderNav;
-renderNav=function(){
-  qa31RenderNavBase();
-  qa31RenderProjectNavTree();
-  syncPanelRestoreButtons();
-  if(onepaneWorkspace&&!qa4ProjectHub.projects.length){
-    qa4LoadProjectHub(false).then(()=>qa31RenderProjectNavTree()).catch(()=>{});
-  }
+/* Shell bindings and final routing */
+const a31BindShellBase=bindShell;
+bindShell=function(){a31BindShellBase();$("#controlChatLauncher")?.addEventListener("click",()=>a31OpenControlChat());$("#controlChatClose")?.addEventListener("click",a31CloseControlChat);$("#controlChatAssistantTab")?.addEventListener("click",()=>a31OpenControlChat("assistant"));$("#controlChatOrchestratorTab")?.addEventListener("click",()=>a31OpenControlChat("orchestrator"))};
+renderActiveView=async function(){
+  const epoch=++qa31ViewEpoch,t=currentTab();if(!t)return;if(t.state==="suspended")t.state="active";const route=t.route;
+  const renderers={operations:renderOperations,tasks:renderTasks,projects:renderProjects,models:renderModels,nodes:renderNodes,agents:renderAgents,skills:renderSkills,settings:renderSettings,secrets:renderSecrets,evidence:()=>renderPlaceholder("Evidence / Audit","Event Ledger, Artifacts, Observations and Verifications.")};
+  try{await Promise.resolve((renderers[route]||renderOperations)())}finally{const host=$("#viewHost");if(epoch===qa31ViewEpoch){if(host)host.dataset.renderedRoute=route;renderNav()}}
 };
-
-/* === Alpha 3.1 consolidated UI authority === */
-let modelView=localStorage.getItem("onepane:models-view")||"local";
-
-    function currentRoute(){return currentTab()?.route||"operations";}
-    function routeIs(route){return currentRoute()===route;}
-    function modelPageTabs(){
-      return '<div class="models-section-tabs" role="tablist" aria-label="Models pages">'+
-        '<button class="subtab '+(modelView==="local"?"active":"")+'" data-model-page="local" role="tab" aria-selected="'+(modelView==="local")+'">Local Models</button>'+
-        '<button class="subtab '+(modelView==="cloud"?"active":"")+'" data-model-page="cloud" role="tab" aria-selected="'+(modelView==="cloud")+'">Cloud Models</button>'+
-      '</div>';
-    }
-    function qa31SetModelView(view){
-      modelView=view==="cloud"?"cloud":"local";
-      localStorage.setItem("onepane:models-view",modelView);
-      const existing=state.tabs.find(t=>t.route==="models");
-      if(existing)activateTab(existing.id);else openRoute("models");
-    }
-    function modelNavTreeHTML(){
-      return '<div class="model-nav-tree" aria-label="Model pages">'+
-        '<button class="model-nav-child '+(modelView==="local"?"active":"")+'" data-model-nav-view="local"><span class="project-nav-branch" aria-hidden="true"></span><span>Local Models</span></button>'+
-        '<button class="model-nav-child '+(modelView==="cloud"?"active":"")+'" data-model-nav-view="cloud"><span class="project-nav-branch" aria-hidden="true"></span><span>Cloud Models</span></button>'+
-      '</div>';
-    }
-    function renderModelNavTree(){
-      const root=$("#primaryNav"),modelsButton=root?.querySelector('[data-route="models"]');
-      if(!root||!modelsButton)return;
-      root.querySelector(".model-nav-tree")?.remove();
-      modelsButton.insertAdjacentHTML("afterend",modelNavTreeHTML());
-      $$("[data-model-nav-view]",root).forEach(b=>b.onclick=e=>{e.stopPropagation();qa31SetModelView(b.dataset.modelNavView);});
-    }
-
-    const navBase=renderNav;
-    renderNav=function(){
-      navBase();
-      renderModelNavTree();
-      syncPanelRestoreButtons();
-    };
-
-    function bindModelPageTabs(){
-      $$("[data-model-page]").forEach(b=>b.onclick=()=>qa31SetModelView(b.dataset.modelPage));
-    }
-    function cloudProviderCards(presets,connections){
-      return presets.map(p=>{
-        const match=connections.find(c=>String(c.provider||"")===String(p.id)||String(c.display_name||"").toLowerCase()===String(p.display_name||"").toLowerCase());
-        const connected=match&&String(match.status||"").toLowerCase()!=="revoked";
-        const oauth=p.auth_type==="oauth2-pkce";
-        const action=connected
-          ? '<button class="btn danger" data-revoke-cloud="'+escapeHtml(match.id)+'">Revoke</button>'
-          : oauth
-            ? '<button class="btn" data-oauth-info="'+escapeHtml(p.id)+'">Connect OAuth</button>'
-            : '<button class="btn primary" data-connect-cloud="'+escapeHtml(p.id)+'">Connect</button>';
-        return '<article class="provider-tile">'+
-          '<div class="provider-tile-head"><strong>'+escapeHtml(p.display_name)+'</strong><span class="pill '+(connected?"good":"")+'">'+
-          (connected?(oauth?"OAuth connected":"Connected"):(match?.status==="revoked"?"Revoked":"Available"))+'</span></div>'+
-          '<p>'+escapeHtml(p.description||"")+'</p>'+
-          '<div class="provider-meta"><span>'+(oauth?"OAuth":escapeHtml(p.auth_type||"API key"))+'</span><span>'+escapeHtml(p.cost_hint||"")+'</span></div>'+
-          '<div class="toolbar">'+action+'</div></article>';
-      }).join("");
-    }
-    function bindCloudCards(presets){
-      $$("[data-revoke-cloud]").forEach(b=>b.onclick=()=>qa4RevokeProvider(b.dataset.revokeCloud));
-      $$("[data-connect-cloud]").forEach(b=>b.onclick=()=>qa4ConnectCloudProvider(b.dataset.connectCloud));
-      $$("[data-oauth-info]").forEach(b=>b.onclick=()=>{
-        const preset=presets.find(p=>String(p.id)===b.dataset.oauthInfo);
-        openModal("OAuth connection",'<div class="widget-body"><strong>'+escapeHtml(preset?.display_name||"OAuth provider")+'</strong><p>When an OAuth broker is available, OnePane records the connection here and exposes status and revoke controls. This alpha will not fake an OAuth consent flow.</p></div>');
-      });
-    }
-    async function revokeOmni(id){
-      if(!id)return;
-      try{
-        await apiRequest("/v1/providers/"+encodeURIComponent(id)+"/revoke",{method:"POST",body:"{}"});
-        notice("OmniRoute connection revoked.");
-        if(routeIs("models"))renderModels();
-      }catch(ex){notice(ex.message,"bad");}
-    }
-
-    async function renderLocal(catalog,deployments,components,runtimePref){
-      const colibri=components?.colibri||{};
-      const stateName=String(colibri.state||"not_installed");
-      const pillClass=["running","installed_disabled"].includes(stateName)?"good":(["failed","degraded","interrupted"].includes(stateName)?"warn":"");
-      $("#qa5ModelsRoot").innerHTML=
-        '<div class="models-single-column">'+
-          '<section class="panel-card models-local-card">'+
-            '<div class="card-header models-card-header">'+
-              '<div class="models-header-copy"><div class="card-title">Local models</div><div class="list-meta">Managed Hot Swap for ordinary models; Colibri Large Model for compatible sparse/MoE models spanning VRAM + RAM + NVMe.</div></div>'+
-              '<div class="header-actions qa31-local-models-controls"><button class="btn qa31-detect-hardware" id="detectLocal">Detect hardware</button>'+
-                '<select class="qa31-runtime-strategy" id="qa5RuntimeStrategy">'+
-                  '<option value="auto" '+(runtimePref==="auto"?"selected":"")+'>Auto</option>'+
-                  '<option value="hot-swap" '+(runtimePref==="hot-swap"?"selected":"")+'>Managed Hot Swap</option>'+
-                  '<option value="colibri" '+(runtimePref==="colibri"?"selected":"")+'>Colibri Large Model</option>'+
-                '</select></div>'+
-            '</div>'+
-            '<div id="localResult" class="model-result"></div>'+
-            '<div class="local-managed-section"><div class="subsection-title">Installed / registered</div><div id="qa5ManagedModels" class="model-tile-scroll"></div></div>'+
-            '<div class="subsection-title">Available catalogue</div><input id="qa4LocalFilter" class="catalogue-filter" placeholder="Filter local models…"><div id="qa4LocalModels" class="model-tile-scroll"></div>'+
-          '</section>'+
-          '<section class="panel-card colibri-separate">'+
-            '<div class="card-header models-card-header"><div class="models-header-copy"><div class="card-title">Colibri Large Model</div><div class="list-meta">Optional Apache-2.0 backend v1.12.1 for very large sparse/MoE models.</div></div><span class="pill '+pillClass+'">'+escapeHtml(titleCase(stateName.replaceAll("_"," ")))+'</span></div>'+
-            '<div class="widget-body"><p>OnePane remains scheduler/admission authority; Colibri manages model placement across VRAM, RAM and NVMe. Registered models remain quarantined until Agent Check/Testbed qualification.</p>'+
-              '<div class="toolbar" id="qa31ColibriActions">'+qa31ColibriActionButtons(colibri)+(colibri.installed?'<button class="btn" id="qa5ColibriRegister">Register model folder</button>':"")+'</div>'+
-              '<div id="qa5ColibriInlineStatus" class="page-subtitle">'+
-                (colibri.last_error?'<span class="warn">'+escapeHtml(colibri.last_error)+'</span>':(colibri.installed?"Runtime installed. Use Enable/Disable for availability; Update/Repair/Remove are lifecycle operations.":"Install the verified runtime before registering compatible models."))+
-              '</div>'+
-            '</div>'+
-          '</section>'+
-        '</div>';
-
-      $("#detectLocal").onclick=detectLocalQA;
-      $("#qa5RuntimeStrategy").onchange=e=>qa5SavePrefs({default_runtime:e.target.value});
-      $$("[data-qa31-colibri-action]").forEach(b=>b.onclick=()=>qa5ComponentAction("colibri",b.dataset.qa31ColibriAction,"#qa5ColibriInlineStatus"));
-      $("#qa5ColibriRegister")?.addEventListener("click",qa5RegisterColibri);
-
-      const drawManaged=()=>{
-        $("#qa5ManagedModels").innerHTML=deployments.length?deployments.map((d,i)=>{
-          const ctx=d.context_max_verified?(formatContextQA(d.context_max_verified)+" verified context"):(d.context_max_reported?(formatContextQA(d.context_max_reported)+" reported context"):"context pending qualification");
-          return '<article class="model-tile inspectable" data-model-inspect="'+i+'"><div><strong>'+escapeHtml(d.display_name||d.model_ref||"Local model")+'</strong>'+
-            '<div class="list-meta">'+escapeHtml(d.runtime_name||d.runtime_backend||"managed")+' '+escapeHtml(d.runtime_version||"")+' · '+escapeHtml(d.status||"unknown")+' · admission '+escapeHtml(d.admission_status||"pending")+'</div>'+
-            '<div class="list-meta">'+escapeHtml(d.quantization||"")+' · '+ctx+'</div></div>'+
-            '<div class="toolbar"><button class="btn" data-model-spec="'+i+'">Spec sheet</button><button class="btn primary" data-agent-check="'+i+'">Agent Check</button></div></article>';
-        }).join(""):'<div class="empty-state compact">No managed local models yet.</div>';
-        $$("[data-model-spec]").forEach(b=>b.onclick=e=>{e.stopPropagation();qa5InspectModel(deployments[Number(b.dataset.modelSpec)]);});
-        $$("[data-agent-check]").forEach(b=>b.onclick=e=>{e.stopPropagation();qa5AgentCheck(deployments[Number(b.dataset.agentCheck)]);});
-        $$("[data-model-inspect]").forEach(el=>el.onclick=e=>{if(e.target.closest("button"))return;qa5InspectModel(deployments[Number(el.dataset.modelInspect)]);});
-      };
-      drawManaged();
-
-      const drawLocal=()=>{
-        const q=($("#qa4LocalFilter").value||"").toLowerCase();
-        const rows=catalog.filter(m=>JSON.stringify(m).toLowerCase().includes(q));
-        $("#qa4LocalModels").innerHTML=rows.length?rows.map((m,i)=>{
-          const quant=Array.isArray(m.quantizations)?m.quantizations.join(", "):(m.quantization||"llama.cpp");
-          return '<article class="model-tile"><div><strong>'+escapeHtml(m.display_name||m.name||m.model_ref||"Model")+'</strong>'+
-            '<div class="list-meta">'+escapeHtml(String(m.parameter_count||m.parameter_scale||"—"))+' · '+formatContextQA(m.max_context_tokens||m.context_tokens)+' context</div>'+
-            '<div class="list-meta">'+escapeHtml(quant)+'</div></div><button class="btn primary" data-download-model="'+i+'">Download</button></article>';
-        }).join(""):'<div class="empty-state compact">No local models match this filter.</div>';
-        $$("[data-download-model]").forEach(b=>b.onclick=()=>qa4InstallLocalModel(rows[Number(b.dataset.downloadModel)]));
-      };
-      $("#qa4LocalFilter").oninput=drawLocal;
-      drawLocal();
-      queueMicrotask(()=>{try{qa8ManagedDeployments=deployments;qa8DecorateModels();}catch{}});
-    }
-
-    async function renderCloud(presets,connections){
-      const cloud=presets.filter(p=>p.id!=="omniroute");
-      const omni=connections.find(p=>String(p.provider||"").toLowerCase()==="omniroute"&&String(p.status||"").toLowerCase()!=="revoked");
-      const saved=localStorage.getItem("onepane:omniroute-url")||omni?.connection?.base_url||"http://127.0.0.1:20128/v1";
-      $("#qa5ModelsRoot").innerHTML=
-        '<div class="models-single-column">'+
-          '<section class="panel-card cloud-provider-card">'+
-            '<div class="card-header models-card-header"><div class="models-header-copy"><div class="card-title">Cloud providers</div><div class="list-meta">Direct cloud model/API connections. These remain separate from OmniRoute.</div></div><div class="header-actions"><button class="btn" id="qa4OpenSecrets">API keys</button></div></div>'+
-            '<div id="qa4CloudProviders" class="provider-tile-grid">'+cloudProviderCards(cloud,connections)+'</div>'+
-          '</section>'+
-          '<section class="panel-card omniroute-separate">'+
-            '<div class="card-header models-card-header"><div class="models-header-copy"><div class="card-title">OmniRoute</div><div class="list-meta">Optional external provider/router connection. It is not installed or managed as a local runtime.</div></div><span class="pill '+(omni?"good":"")+'">'+(omni?"Connected":"Optional")+'</span></div>'+
-            '<div class="widget-body omni-provider-layout">'+
-              '<label>Gateway URL<input id="omniUrl" value="'+escapeHtml(saved)+'"></label>'+
-              '<label>Gateway credential<select id="omniCredential"><option value="">No gateway credential</option></select></label>'+
-              '<label class="inline-check"><input id="omniStrict" type="checkbox" checked> Require verified strict zero-cost</label>'+
-              '<div class="toolbar"><button class="btn" id="omniProbe">Probe</button><button class="btn primary" id="omniConnect" '+(omni?"":"disabled")+'>'+(omni?"Reconnect":"Connect")+'</button>'+(omni?'<button class="btn danger" id="qa31OmniRevoke">Revoke</button>':"")+'</div>'+
-              '<div id="omniResult" class="page-subtitle">'+(omni?'<span class="good">Connected</span> · '+escapeHtml(omni.status||"configured"):"Probe the gateway before connecting. OmniRoute failure never makes OnePane unhealthy.")+'</div>'+
-            '</div>'+
-          '</section>'+
-        '</div>';
-
-      $("#qa4OpenSecrets").onclick=()=>openRoute("secrets");
-      bindCloudCards(cloud);
-      $("#omniProbe").onclick=()=>omniQA(false);
-      $("#omniConnect").onclick=()=>omniQA(true);
-      $("#qa31OmniRevoke")?.addEventListener("click",()=>revokeOmni(omni?.id));
-      $("#omniUrl").addEventListener("change",()=>localStorage.setItem("onepane:omniroute-url",$("#omniUrl").value.trim()));
-      populateOmniCredentials();
-    }
-
-    renderModels=async function(){
-      const epoch=qa31ViewEpoch;
-      const view=modelView==="cloud"?"cloud":"local";
-      const subtitle=view==="local"?"Local model downloads, qualification, runtime strategy and managed Colibri lifecycle.":"Direct cloud providers and optional OmniRoute provider routing.";
-      $("#viewHost").innerHTML='<section class="page models-page">'+pageHeader("Models",subtitle,'<button class="btn" id="modelSettings">Local AI settings</button>')+modelPageTabs()+'<div id="qa5ModelsRoot" class="widget-body">Loading '+(view==="local"?"local models":"cloud providers")+'…</div></section>';
-      $("#modelSettings").onclick=()=>openRoute("settings");
-      bindModelPageTabs();
-      const qs=encodeURIComponent(onepaneWorkspace);
-      try{
-        if(view==="local"){
-          const data=await Promise.all([apiRequest("/v1/local-ai/catalog"),qa5LoadManagedDeployments(),qa5ComponentStatus()]);
-          if(epoch!==qa31ViewEpoch||!routeIs("models")||modelView!=="local")return;
-          qa4ProjectHub.catalog=Array.isArray(data[0])?data[0]:[];
-          await renderLocal(qa4ProjectHub.catalog,Array.isArray(data[1])?data[1]:[],data[2]||{},qa5Prefs().default_runtime||"auto");
-        }else{
-          const data=await Promise.all([providerPresetsQA(),apiRequest("/v1/providers?workspace_id="+qs)]);
-          if(epoch!==qa31ViewEpoch||!routeIs("models")||modelView!=="cloud")return;
-          qa4ProjectHub.providerPresets=Array.isArray(data[0])?data[0]:[];
-          qa4ProjectHub.providers=Array.isArray(data[1])?data[1]:[];
-          await renderCloud(qa4ProjectHub.providerPresets,qa4ProjectHub.providers);
-        }
-        bindViewActions($("#viewHost"));
-      }catch(ex){
-        if(epoch===qa31ViewEpoch&&routeIs("models")){
-          const root=$("#qa5ModelsRoot");if(root)root.innerHTML='<div class="error">'+escapeHtml(ex.message)+'</div>';
-        }
-      }
-    };
-
-        renderActiveView=async function(){
-      const epoch=++qa31ViewEpoch;
-      const t=currentTab();if(!t)return;
-      if(QA4_ROUTE_ALIASES[t.route]){t.route=QA4_ROUTE_ALIASES[t.route];t.title=pages[t.route]?.title||t.route;persist();}
-      if(t.state==="suspended")t.state="active";
-      const route=t.route;
-      const renderers={
-        operations:renderOperations,tasks:renderTasks,projects:renderProjects,models:renderModels,nodes:renderNodes,agents:renderAgents,
-        routines:renderTasks,integrations:renderIntegrations,secrets:renderSecrets,
-        evidence:()=>renderPlaceholder("Evidence / Audit","Event Ledger, Artifacts, Observations, Verifications, Operations and CapabilityLease activity."),
-        settings:renderSettings
-      };
-      try{await Promise.resolve((renderers[route]||renderOperations)());}
-      finally{
-        const host=$("#viewHost");
-        if(epoch===qa31ViewEpoch){
-          if(host)host.dataset.renderedRoute=route;
-        }else if(currentRoute()!==route){
-          const active=currentRoute();
-          if(host?.dataset?.renderedRoute!==active)queueMicrotask(()=>{if(currentRoute()===active)renderActiveView();});
-        }
-      }
-    };
 bootOnePane();

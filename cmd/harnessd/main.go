@@ -74,6 +74,8 @@ func main() {
 	apiServer.SetAssistant(runtime.Assistant)
 	apiServer.SetProjectOrchestrator(runtime.ProjectOrchestrator)
 	apiServer.SetAgentProfiles(runtime.AgentProfiles)
+	apiServer.SetSkills(runtime.Skills)
+	apiServer.SetProviderOAuth(runtime.ProviderOAuth)
 	apiServer.SetLocalAI(runtime.LocalAI, n.ID)
 	apiServer.SetAssurance(runtime.Assurance)
 	modelPoolPath := strings.TrimSpace(cfg.LocalAI.ModelPoolPath)

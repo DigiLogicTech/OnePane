@@ -59,7 +59,7 @@ CONTROL
 
 OUTPUT="$OUT/onepane_${VERSION#v}_${ARCH}.deb"
 dpkg-deb --root-owner-group --build "$PKGROOT" "$OUTPUT"
-sha256sum "$OUTPUT" > "$OUTPUT.sha256"
+(cd "$(dirname "$OUTPUT")" && sha256sum "$(basename "$OUTPUT")" > "$(basename "$OUTPUT").sha256")
 
 echo "Built $OUTPUT"
 cat "$OUTPUT.sha256"

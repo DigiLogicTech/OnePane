@@ -101,3 +101,139 @@ jobs:
             dist/**
           if-no-files-found: warn
           retention-days: 7
+
+
+  windows-installed-smoke:
+    name: Windows installed-product smoke
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: OnePane-alpha3.1-source-native
+          path: artifact
+      - name: Install launch uninstall reinstall
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Get-ChildItem -Path artifact -Recurse -Filter '*-windows-x64-setup.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'Windows installer artifact not found' }
+
+          $root = Join-Path $env:RUNNER_TEMP 'OnePaneInstalledSmoke'
+          $install = Join-Path $root 'App'
+          $projects = Join-Path $root 'Projects'
+          $models = Join-Path $root 'Models'
+          New-Item -ItemType Directory -Force -Path $root,$projects,$models | Out-Null
+
+          function Invoke-OnePaneSetup([string[]]$SetupArgs) {
+            & $installer.FullName @SetupArgs
+            if ($LASTEXITCODE -ne 0) { throw "OnePane Setup failed with exit code $LASTEXITCODE: $($SetupArgs -join ' ')" }
+          }
+          function Wait-OnePaneHealth([int]$Seconds = 90) {
+            $deadline = (Get-Date).AddSeconds($Seconds)
+            while ((Get-Date) -lt $deadline) {
+              try {
+                $health = Invoke-RestMethod -Uri 'http://127.0.0.1:18181/v1/health' -TimeoutSec 2
+                if ($health.status -eq 'ok') { return }
+              } catch {}
+              Start-Sleep -Milliseconds 750
+            }
+            throw 'OnePane service did not become healthy'
+          }
+          function Assert-OnePaneVersion {
+            $about = Invoke-RestMethod -Uri 'http://127.0.0.1:18181/v1/about' -TimeoutSec 5
+            if ($about.version -ne $env:ONEPANE_VERSION) { throw "Backend version mismatch: $($about.version)" }
+            $reg = Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\OnePane'
+            if ($reg.DisplayVersion -ne $env:ONEPANE_VERSION) { throw "Installed Apps version mismatch: $($reg.DisplayVersion)" }
+          }
+          function Assert-NativeUIReady {
+            $marker = Join-Path $env:LOCALAPPDATA 'OnePane\ui-ready.txt'
+            Remove-Item -Force -ErrorAction SilentlyContinue $marker
+            $desktop = Start-Process -FilePath (Join-Path $install 'OnePane.Desktop.exe') -PassThru
+            try {
+              $deadline = (Get-Date).AddSeconds(75)
+              while ((Get-Date) -lt $deadline) {
+                if (Test-Path $marker) {
+                  $value = (Get-Content -Raw $marker).Trim()
+                  if ($value -eq "onepane-ui-ready|$env:ONEPANE_VERSION") { return }
+                  throw "Unexpected native UI-ready marker: $value"
+                }
+                if ($desktop.HasExited) { throw "OnePane Desktop exited before UI-ready (exit $($desktop.ExitCode))" }
+                Start-Sleep -Milliseconds 750
+              }
+              $log = Join-Path $env:LOCALAPPDATA 'OnePane\desktop.log'
+              if (Test-Path $log) { Get-Content $log -Tail 120 | Write-Host }
+              throw 'Native OnePane UI did not acknowledge JavaScript bootstrap'
+            } finally {
+              Get-Process 'OnePane.Desktop' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          try {
+            Invoke-OnePaneSetup @(
+              '--elevated','--silent','--no-launch','--skip-optional-runtime',
+              '--install-dir',$install,'--project-root',$projects,'--model-pool',$models
+            )
+            Wait-OnePaneHealth
+            Assert-OnePaneVersion
+            Assert-NativeUIReady
+
+            $sentinel = Join-Path $env:ProgramData 'OnePane\qa-preserve.txt'
+            Set-Content -Path $sentinel -Value 'preserve-alpha3.1' -NoNewline
+            Invoke-OnePaneSetup @('--elevated','--silent','--no-launch','--uninstall')
+
+            $deadline = (Get-Date).AddSeconds(30)
+            while ((Test-Path $install) -and ((Get-Date) -lt $deadline)) { Start-Sleep -Milliseconds 500 }
+            if (Test-Path $install) { throw 'Application install directory survived uninstall' }
+            if (-not (Test-Path $sentinel)) { throw 'Durable ProgramData content was deleted by uninstall' }
+
+            Invoke-OnePaneSetup @(
+              '--elevated','--silent','--no-launch','--skip-optional-runtime',
+              '--install-dir',$install,'--project-root',$projects,'--model-pool',$models
+            )
+            Wait-OnePaneHealth
+            Assert-OnePaneVersion
+            Assert-NativeUIReady
+            if ((Get-Content -Raw $sentinel).Trim() -ne 'preserve-alpha3.1') { throw 'Durable data changed across reinstall' }
+          } finally {
+            Get-Process 'OnePane.Desktop' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            try { Invoke-OnePaneSetup @('--elevated','--silent','--no-launch','--uninstall') } catch { Write-Warning $_ }
+          }
+
+  ubuntu-installed-smoke:
+    name: Ubuntu installed-package smoke
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: OnePane-alpha3.1-source-native
+          path: artifact
+      - name: Install verify and preserve data
+        shell: bash
+        run: |
+          set -euo pipefail
+          deb="$(find artifact -type f -name 'onepane_*_amd64.deb' -print -quit)"
+          test -n "$deb"
+          test "$(dpkg-deb -f "$deb" Version)" = "$ONEPANE_VERSION"
+          sudo apt-get update
+          sudo apt-get install -y "$deb"
+          test "$(dpkg-query -W -f='${Version}' onepane)" = "$ONEPANE_VERSION"
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8080/v1/health >/tmp/onepane-health.json; then break; fi
+            sleep 1
+          done
+          grep -q '"status":"ok"' /tmp/onepane-health.json
+          curl -fsS http://127.0.0.1:8080/v1/about >/tmp/onepane-about.json
+          python3 - <<'PY'
+          import json, os
+          data=json.load(open('/tmp/onepane-about.json'))
+          assert data['version']==os.environ['ONEPANE_VERSION'], data
+          PY
+          sudo systemctl is-active --quiet onepane.service
+          echo preserve-alpha3.1 | sudo tee /var/lib/onepane/qa-preserve.txt >/dev/null
+          sudo apt-get remove -y onepane
+          test -f /var/lib/onepane/qa-preserve.txt
+          test "$(sudo cat /var/lib/onepane/qa-preserve.txt | tr -d '\n')" = "preserve-alpha3.1"

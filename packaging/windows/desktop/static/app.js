@@ -92,18 +92,6 @@ const mock = {
   ]
 };
 
-const chatDemo = {
-  sessionID:'chat-demo-1', busy:true, busyMode:'queue', queuePaused:false, yolo:false, approvalLevel:'medium', model:'Auto', agent:'OnePane Agent', reasoning:'Auto',
-  queue:[
-    {id:'q1',prompt:'Run the integration tests after this analysis.'},
-    {id:'q2',prompt:'If they pass, review the resulting diff.'}
-  ],
-  messages:[
-    {role:'user',text:'Review the authentication changes and identify anything risky.'},
-    {role:'assistant',text:'I’m reviewing the changed authentication paths and their tests now.',meta:'Working · tool call in progress'}
-  ]
-};
-
 function init(){
   document.documentElement.dataset.theme = state.theme;
   document.documentElement.dataset.formFactor = isPhoneLayout() ? 'phone' : (innerWidth < 1100 ? 'tablet' : 'desktop');
@@ -285,115 +273,6 @@ function providersCard(){
   return card('Provider Health',liveOps.providers.length?`<ul class="list">${liveOps.providers.slice(0,8).map(p=>`<li class="list-row" data-route="providers"><span>⌁</span><div class="list-main"><div>${escapeHtml(p.display_name||p.provider||'Provider')}</div></div><span class="pill ${p.status==='connected'?'good':p.status==='unavailable'?'bad':''}">${escapeHtml(p.status||'configured')}</span></li>`).join('')}</ul>`:'<div class="empty-state compact">No providers configured.</div>','View all');
 }
 
-let agentSurface='chat';
-function renderAgents(){
-  if(agentSurface==='bots') return renderBots();
-  $('#viewHost').innerHTML=`<section class="page chat-page">${pageHeader('Agents','Human-interactive sessions and autonomous agent runtimes','<button class="btn">New chat</button><button class="btn">Sessions</button><button class="btn" id="openBotRuntime">Bot Runtime</button>')}
-    <div class="chat-layout">
-      <aside class="chat-roster">
-        <div class="chat-roster-title">Sessions</div>
-        <button class="chat-session active"><strong>Auth review</strong><span>OnePane Agent · ${escapeHtml(chatDemo.model)}</span></button>
-        <button class="chat-session"><strong>Research</strong><span>Hermes · OmniRoute</span></button>
-        <button class="chat-session"><strong>Code review</strong><span>Claude Code · Local</span></button>
-      </aside>
-      <section class="chat-surface">
-        <header class="chat-header"><div><strong>Auth review</strong><div class="list-meta">${escapeHtml(chatDemo.agent)} · ${escapeHtml(chatDemo.model)}</div></div><div class="chat-header-actions"><span class="pill">Busy: ${escapeHtml(chatDemo.busyMode)}</span><span class="pill">Approvals: ${escapeHtml(titleCase(chatDemo.approvalLevel))}</span>${chatDemo.yolo?'<span class="pill warn">YOLO</span>':''}<span class="pill ${chatDemo.busy?'warn':'good'}">${chatDemo.busy?'Working':'Ready'}</span></div></header>
-        <div class="chat-messages" id="chatMessages">${chatDemo.messages.map(renderChatMessage).join('')}</div>
-        ${renderQueueTray()}
-        <div class="chat-composer-wrap">
-          <div id="slashSuggestions" class="slash-suggestions" hidden></div>
-          <textarea id="chatComposer" class="chat-composer" rows="3" placeholder="Message ${escapeHtml(chatDemo.agent)}…  Type / for commands"></textarea>
-          <div class="chat-composer-footer"><span class="list-meta"><kbd>/</kbd> commands · <kbd>Shift+Enter</kbd> newline</span><button id="chatSend" class="btn primary">Send</button></div>
-        </div>
-      </section>
-    </div>
-  </section>`;
-  bindChatUI(); bindViewActions();
-  $('#openBotRuntime')?.addEventListener('click',()=>{agentSurface='bots';renderAgents();});
-}
-async function renderBots(){
-  $('#viewHost').innerHTML=`<section class="page">${pageHeader('Bot Runtime','Provider bots remain an Agents capability rather than a top-level destination','<button class="btn" id="backToAgentChat">Back to Agents</button><button class="btn primary" id="openProviderBot">Open provider Bot</button>')}<div class="models-top-grid"><section class="panel-card"><div class="card-header"><div class="card-title">Native runtime authority</div><span class="pill good">OnePane governed</span></div><div class="widget-body"><p>Bot sessions use the existing OnePane Bot Runtime, Vault-backed credentials, capability policy, approvals and durable session history.</p><div class="list-meta">Hosted surfaces stay separate from OnePane-native autonomous execution.</div></div></section><section class="panel-card"><div class="card-header"><div class="card-title">Provider Bots</div></div><div id="botRuntimeRows" class="widget-body">Loading Bot Runtime…</div></section></div></section>`;
-  $('#backToAgentChat')?.addEventListener('click',()=>{agentSurface='chat';renderAgents();});
-  $('#openProviderBot')?.addEventListener('click',()=>notice('Create and open provider Bot connections from the governed Bot Runtime.'));
-  const [presets,bots]=await Promise.all([api.json('/v1/bot-presets'),api.json('/v1/bots')]);
-  const presetRows=Array.isArray(presets)?presets:(presets?.presets||[]), botRows=Array.isArray(bots)?bots:(bots?.bots||[]);
-  const host=$('#botRuntimeRows'); if(!host)return;
-  const active=botRows.length?botRows.map(b=>`<div class="resource-row"><span>${escapeHtml(b.display_name||b.name||b.id||'Bot')}</span><span class="pill">${escapeHtml(b.authority||b.runtime_authority||'configured')}</span></div>`).join(''):'<div class="empty-state compact">No provider Bots configured.</div>';
-  const available=presetRows.length?`<div class="list-meta" style="margin-top:10px">Available presets: ${presetRows.slice(0,8).map(p=>escapeHtml(p.display_name||p.name||p.id||'Bot')).join(' · ')}</div>`:'';
-  host.innerHTML=active+available;
-  bindViewActions($('#viewHost'));
-}
-function renderChatMessage(m){return `<div class="chat-message ${m.role}"><div class="chat-role">${m.role==='user'?'You':m.role==='system'?'OnePane':'Agent'}</div><div class="chat-bubble">${escapeHtml(m.text)}${m.meta?`<div class="chat-meta">${escapeHtml(m.meta)}</div>`:''}</div></div>`;}
-function renderQueueTray(){
-  if(!chatDemo.queue.length) return `<div class="queue-tray empty"><span>Queue empty</span><span class="list-meta">Use <code>/queue &lt;prompt&gt;</code> while the agent works.</span></div>`;
-  return `<div class="queue-tray"><div class="queue-title"><strong>Queued prompts</strong><span class="pill">${chatDemo.queue.length}</span><button class="btn tiny" data-chat-command="/queue ${chatDemo.queuePaused?'resume':'pause'}">${chatDemo.queuePaused?'Resume':'Pause'}</button><button class="btn tiny" data-chat-command="/queue clear">Clear</button></div><div class="queue-items">${chatDemo.queue.map((q,i)=>`<div class="queue-item"><span class="queue-grip">≡</span><span class="queue-number">${i+1}</span><span class="queue-prompt">${escapeHtml(q.prompt)}</span><button title="Move up" data-queue-up="${i}">↑</button><button title="Move down" data-queue-down="${i}">↓</button><button title="Remove" data-queue-remove="${i}">×</button></div>`).join('')}</div></div>`;
-}
-function bindChatUI(){
-  const input=$('#chatComposer'); if(!input) return;
-  input.addEventListener('input',()=>drawSlashSuggestions(input));
-  input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();submitChatInput();}});
-  $('#chatSend').onclick=submitChatInput;
-  $$('[data-chat-command]').forEach(b=>b.onclick=()=>runChatSlash(b.dataset.chatCommand));
-  $$('[data-queue-remove]').forEach(b=>b.onclick=()=>{chatDemo.queue.splice(+b.dataset.queueRemove,1);renderAgents();});
-  $$('[data-queue-up]').forEach(b=>b.onclick=()=>moveDemoQueue(+b.dataset.queueUp,-1));
-  $$('[data-queue-down]').forEach(b=>b.onclick=()=>moveDemoQueue(+b.dataset.queueDown,1));
-}
-function moveDemoQueue(i,delta){const j=i+delta;if(j<0||j>=chatDemo.queue.length)return;[chatDemo.queue[i],chatDemo.queue[j]]=[chatDemo.queue[j],chatDemo.queue[i]];renderAgents();}
-function drawSlashSuggestions(input){
-  const box=$('#slashSuggestions'); const items=suggestChatCommands(input.value); if(!items.length){box.hidden=true;box.innerHTML='';return;}
-  box.hidden=false;box.innerHTML=items.map(c=>`<button class="slash-item" data-slash="${c.usage}"><strong>/${c.name}</strong><span>${escapeHtml(c.description)}</span><small>${escapeHtml(c.category)}</small></button>`).join('');
-  $$('.slash-item',box).forEach(b=>b.onclick=()=>{input.value=b.dataset.slash.replace(/\s*[<\[].*$/,' ');input.focus();drawSlashSuggestions(input);});
-}
-async function submitChatInput(){
-  const input=$('#chatComposer'); const value=input.value.trim(); if(!value)return; input.value='';
-  if(value.startsWith('/')) return runChatSlash(value);
-  if(chatDemo.busy){
-    if(chatDemo.busyMode==='queue'){chatDemo.queue.push({id:`q${Date.now()}`,prompt:value});chatDemo.messages.push({role:'system',text:'Message queued after the current turn.'});}
-    else if(chatDemo.busyMode==='steer'){chatDemo.messages.push({role:'system',text:`Steering note scheduled for the next safe boundary: ${value}`});}
-    else {chatDemo.messages.push({role:'system',text:'Interrupt requested; the message will be delivered after safe cancellation.'});chatDemo.busy=false;chatDemo.messages.push({role:'user',text:value});}
-  } else {chatDemo.messages.push({role:'user',text:value});chatDemo.busy=true;chatDemo.messages.push({role:'assistant',text:'Working…',meta:'Active turn'});}
-  renderAgents();
-}
-async function runChatSlash(raw){
-  const parsed=parseChatCommand(raw); if(!parsed)return;
-  const server=await api.chatCommand(chatDemo.sessionID,raw);
-  if(server){applyServerChatResult(server);return renderAgents();}
-  const name=parsed.name,args=parsed.args;
-  const add=(text,meta='')=>chatDemo.messages.push({role:'system',text,meta});
-  if(name==='queue'){
-    const p=args.trim();
-    if(!p||p==='list') add(chatDemo.queue.length?`Queue: ${chatDemo.queue.map((q,i)=>`${i+1}. ${q.prompt}`).join(' · ')}`:'Queue is empty.');
-    else if(p==='pause'){chatDemo.queuePaused=true;add('Queue paused.');}
-    else if(p==='resume'){chatDemo.queuePaused=false;add('Queue resumed.');}
-    else if(p==='clear'){chatDemo.queue=[];add('Queue cleared.');}
-    else {const rm=p.match(/^(?:remove|rm)\s+(\d+)$/);const mv=p.match(/^move\s+(\d+)\s+(\d+)$/);if(rm){const i=+rm[1]-1;if(i>=0&&i<chatDemo.queue.length)chatDemo.queue.splice(i,1);}else if(mv){const a=+mv[1]-1,b=+mv[2]-1;if(a>=0&&b>=0&&a<chatDemo.queue.length&&b<chatDemo.queue.length){const [q]=chatDemo.queue.splice(a,1);chatDemo.queue.splice(b,0,q);}}else{chatDemo.queue.push({id:`q${Date.now()}`,prompt:p});add('Prompt queued.');}}
-  } else if(name==='busy'){if(['queue','steer','interrupt'].includes(args)){chatDemo.busyMode=args;add(`Busy-message mode: ${args}.`);}else add(`Busy-message mode is ${chatDemo.busyMode}.`);}
-  else if(name==='approvals'||name==='security'){const v=(args||'status').toLowerCase();if(['high','medium','low'].includes(v)){chatDemo.approvalLevel=v;chatDemo.yolo=false;add(`Approval strictness: ${titleCase(v)}${v==='medium'?' (recommended)':''}. YOLO is off.`);}else add(`Approval strictness is ${titleCase(chatDemo.approvalLevel)}${chatDemo.yolo?' · YOLO on':''}.`);}
-  else if(name==='yolo'){const v=args||'status';if(v==='on'){chatDemo.yolo=true;add('YOLO enabled for this chat. Actions you are already authorized to approve will be auto-approved. Hard policy/capability boundaries remain enforced.');}else if(v==='off'){chatDemo.yolo=false;add('YOLO disabled. Approvals are manual.');}else add(`YOLO is ${chatDemo.yolo?'on':'off'}.`);}
-  else if(name==='stop'){chatDemo.busy=false;add('Safe stop requested.');}
-  else if(name==='steer'){add(args?`Steering note scheduled: ${args}`:'Usage: /steer <guidance>');}
-  else if(name==='model'){if(args){chatDemo.model=args==='auto'?'Auto':args;add(`Session model: ${chatDemo.model}.`);}else add(`Current model: ${chatDemo.model}.`);}
-  else if(name==='agent'){if(args){chatDemo.agent=args==='auto'?'Auto':args;add(`Session agent: ${chatDemo.agent}.`);}else add(`Current agent: ${chatDemo.agent}.`);}
-  else if(name==='status') add(`Working: ${chatDemo.busy?'yes':'no'} · queued: ${chatDemo.queue.length} · busy mode: ${chatDemo.busyMode} · approvals: ${chatDemo.approvalLevel} · model: ${chatDemo.model} · agent: ${chatDemo.agent} · YOLO: ${chatDemo.yolo?'on':'off'}`);
-  else if(name==='route') add('Route: local qualified model → OmniRoute free fallback → policy-permitted paid providers. Use /route explain for scheduler rationale.');
-  else if(name==='context') add('Context: 18.4K / 64K tokens · verified checkpoints prioritized · compression available.');
-  else if(name==='usage') add('Usage: 21.7K input · 4.2K output · 2 tool turns.');
-  else if(name==='cost') add('Cost: $0.00 current turn · local/OmniRoute-free route.');
-  else if(name==='budget') add('Task budget: $0.00 spent · $0.00 reserved · paid fallback disabled by current route policy.');
-  else if(name==='sandbox') add('Sandbox: workspace RW · Internet restricted · LAN blocked · selected secrets only.');
-  else if(name==='evidence') add('Evidence: 3 observations · 2 independently verified · completion verification pending.');
-  else if(name==='verify') add('Verification requested through OnePane completion policy.');
-  else if(name==='why') add('Scheduler selected the current route because it is qualified, currently available, and satisfies the task policy without paid inference.');
-  else if(name==='help'||name==='') add(`Commands: ${CHAT_COMMANDS.map(c=>'/'+c.name).join(', ')}`);
-  else add(`/${name}${args?' '+args:''} accepted. The running OnePane backend performs this command through the session command API.`);
-  renderAgents();
-}
-function applyServerChatResult(r){
-  if(r.controls){chatDemo.busyMode=r.controls.busy_mode||chatDemo.busyMode;chatDemo.yolo=r.controls.approval_mode==='auto_authorized';chatDemo.approvalLevel=r.controls.approval_level||chatDemo.approvalLevel;chatDemo.model=r.controls.model_override||chatDemo.model;chatDemo.agent=r.controls.agent_override||chatDemo.agent;chatDemo.queuePaused=!!r.controls.queue_paused;}
-  if(Array.isArray(r.queue))chatDemo.queue=r.queue.map(q=>({id:q.id,prompt:q.prompt}));
-  if(r.message)chatDemo.messages.push({role:'system',text:r.message});
-}
-
 function renderWorkspaces(){
   $('#viewHost').innerHTML=`<section class="page">${pageHeader('Workspaces','Composable operational views with draggable, resizable components',`<button class="btn ${state.workspaceEdit?'primary':''}" id="editWorkspace">${state.workspaceEdit?'Done':'Edit layout'}</button><button class="btn">Add component</button>`)}
     <div class="workspace-toolbar"><select><option>Development</option><option>AI Lab</option><option>Infrastructure</option></select><button class="btn">Duplicate</button><button class="btn">Save preset</button></div>
@@ -439,7 +318,7 @@ function renderSandboxes(){
   $('#viewHost').innerHTML=`<section class="page">${pageHeader('Sandboxes','Reusable execution environments with explicit network, host, secret and device access','<button class="btn primary">New sandbox profile</button>')}<div class="table-shell"><table class="data-table"><thead><tr><th>Profile</th><th>Internet</th><th>LAN</th><th>Host files</th><th>GPU</th><th>Secrets</th></tr></thead><tbody><tr><td>dev-standard</td><td>Outbound</td><td>Blocked</td><td>Workspace RW</td><td>Allowed</td><td>Selected only</td></tr><tr><td>research-restricted</td><td>HTTP/S</td><td>Blocked</td><td>Workspace RO</td><td>None</td><td>None</td></tr><tr><td>trusted-admin</td><td>Full outbound</td><td>Restricted</td><td>Explicit mounts</td><td>Allowed</td><td>Selected only</td></tr></tbody></table></div></section>`;
 }
 function renderSettings(){
-  $('#viewHost').innerHTML=`<section class="page">${pageHeader('Defaults','Application preferences and defaults inherited by new workspaces')}<div class="operations-grid"><section class="panel-card"><div class="card-header"><div class="card-title">Appearance</div></div><div class="widget-body">Theme: ${state.theme}<br><br>Density: Comfortable<br><br>Phone layout: Native responsive · automatic<br><br>Inactive tab suspension: Balanced<br><br><button class="btn" data-action="product-tour">Restart product tour</button></div></section><section class="panel-card"><div class="card-header"><div class="card-title">Security & Approvals</div><span class="pill good" style="margin-left:auto">Recommended: Medium</span></div><div class="widget-body"><p class="page-subtitle">Approval strictness controls how often OnePane asks before an operation that you are already authorized to approve.</p><div class="approval-profile-grid"><button class="approval-profile ${state.approvalLevel==='high'?'selected':''}" data-approval-default="high"><strong>High</strong><span>Prompt for every approval-class operation.</span></button><button class="approval-profile ${state.approvalLevel==='medium'?'selected':''}" data-approval-default="medium"><strong>Medium</strong><span>Auto-approve low-risk actions; prompt for medium, high and critical.</span></button><button class="approval-profile ${state.approvalLevel==='low'?'selected':''}" data-approval-default="low"><strong>Low</strong><span>Auto-approve low and medium risk; prompt for high and critical.</span></button></div><div class="page-subtitle" style="margin-top:10px">YOLO remains session-only and auto-approves all actions you are already authorized to approve. Hard policy denials and unknown-outcome protections still apply.</div></div></section><section class="panel-card"><div class="card-header"><div class="card-title">Performance</div></div><div class="widget-body">Suspend inactive tabs after 5 minutes<br><br>Pause background telemetry ✓<br><br>Keep pinned tabs warm ✓</div></section><section class="panel-card"><div class="card-header"><div class="card-title">Federation</div></div><div class="widget-body">Node discovery: Enabled<br><br>Remote inference: Enabled<br><br>Wake-to-execute: Enabled</div></section></div></section>`; bindViewActions($('#viewHost'));
+  $('#viewHost').innerHTML=`<section class="page">${pageHeader('Settings','Application preferences and defaults inherited by new workspaces')}<div class="operations-grid"><section class="panel-card"><div class="card-header"><div class="card-title">Appearance</div></div><div class="widget-body">Theme: ${state.theme}<br><br>Density: Comfortable<br><br>Phone layout: Native responsive · automatic<br><br>Inactive tab suspension: Balanced<br><br><button class="btn" data-action="product-tour">Restart product tour</button></div></section><section class="panel-card"><div class="card-header"><div class="card-title">Security & Approvals</div><span class="pill good" style="margin-left:auto">Recommended: Medium</span></div><div class="widget-body"><p class="page-subtitle">Approval strictness controls how often OnePane asks before an operation that you are already authorized to approve.</p><div class="approval-profile-grid"><button class="approval-profile ${state.approvalLevel==='high'?'selected':''}" data-approval-default="high"><strong>High</strong><span>Prompt for every approval-class operation.</span></button><button class="approval-profile ${state.approvalLevel==='medium'?'selected':''}" data-approval-default="medium"><strong>Medium</strong><span>Auto-approve low-risk actions; prompt for medium, high and critical.</span></button><button class="approval-profile ${state.approvalLevel==='low'?'selected':''}" data-approval-default="low"><strong>Low</strong><span>Auto-approve low and medium risk; prompt for high and critical.</span></button></div><div class="page-subtitle" style="margin-top:10px">YOLO remains session-only and auto-approves all actions you are already authorized to approve. Hard policy denials and unknown-outcome protections still apply.</div></div></section><section class="panel-card"><div class="card-header"><div class="card-title">Performance</div></div><div class="widget-body">Suspend inactive tabs after 5 minutes<br><br>Pause background telemetry ✓<br><br>Keep pinned tabs warm ✓</div></section><section class="panel-card"><div class="card-header"><div class="card-title">Federation</div></div><div class="widget-body">Node discovery: Enabled<br><br>Remote inference: Enabled<br><br>Wake-to-execute: Enabled</div></section></div></section>`; bindViewActions($('#viewHost'));
 }
 function renderPlaceholder(title,copy){$('#viewHost').innerHTML=`<section class="page">${pageHeader(title,copy,'<button class="btn">Configure</button>')}<div class="empty-state"><div><div style="font-size:36px;opacity:.5">${pages[currentTab().route]?.icon||'◫'}</div><h2>${title}</h2><p>${copy}</p><p>This canonical management surface is scaffolded into the new shell.</p></div></div></section>`;}
 
@@ -1024,7 +903,7 @@ function formatContextQA(n){n=Number(n||0);if(!n)return'—';return n>=1024?`${M
 async function omniQA(connect){const box=$('#omniResult'),button=$('#omniConnect');box.textContent=connect?'Connecting…':'Probing…';const payload={workspace_id:onepaneWorkspace,base_url:$('#omniUrl').value};if(connect){payload.require_strict_zero_cost=$('#omniStrict').checked;payload.default_model=payload.require_strict_zero_cost?'auto/coding':'auto';}try{const out=await apiRequest(connect?'/v1/providers/omniroute':'/v1/providers/omniroute/probe',{method:'POST',body:JSON.stringify(payload)});const p=connect?(out.probe||out):out;box.innerHTML=`<strong class="good">${p.reachable?'Gateway reachable':'Probe completed'}</strong>${p.strict_zero_cost_verified?' · strict $0 verified':' · strict $0 not verified'}${Array.isArray(p.models)&&p.models.length?`<br>${escapeHtml(p.models.slice(0,8).join(', '))}`:''}`;if(!connect)button.disabled=!p.reachable;}catch(ex){button.disabled=true;box.innerHTML=`<span class="warn">OmniRoute is not reachable at this address.</span><br><span>Install/start OmniRoute or change the endpoint. This does not affect OnePane health.</span><br><span class="list-meta">${escapeHtml(ex.message)}</span>`;}}
 
 async function renderSettings(){
-  $('#viewHost').innerHTML=`<section class="page">${pageHeader('Defaults','Application preferences and defaults inherited by new workspaces')}<div class="settings-grid"><section class="panel-card"><div class="card-header"><div class="card-title">Appearance</div></div><div class="widget-body"><p>Theme</p><div class="theme-grid settings-theme-grid">${Object.keys(THEME_PALETTES).map(t=>`<button class="theme-choice ${state.theme===t?'active':''}" data-settings-theme="${t}">${titleCase(t)}</button>`).join('')}</div><br><button class="btn" data-action="product-tour">Restart product tour</button></div></section><section class="panel-card"><div class="card-header"><div class="card-title">Local model pool</div></div><div class="widget-body"><p class="page-subtitle">Choose the absolute folder where managed LLM weights and runtimes are stored.</p><label>Model pool path<input id="modelPoolPath" placeholder="D:\\OnePane\\Models"></label><div class="toolbar"><button class="btn primary" id="saveModelPool">Save model pool</button></div><div id="modelPoolStatus" class="page-subtitle"></div></div></section><section class="panel-card"><div class="card-header"><div class="card-title">Security & Approvals</div><span class="pill good" style="margin-left:auto">Recommended: Medium</span></div><div class="widget-body"><div class="approval-profile-grid">${['high','medium','low'].map(v=>`<button class="approval-profile ${state.approvalLevel===v?'selected':''}" data-approval-default="${v}"><strong>${titleCase(v)}</strong><span>${v==='high'?'Prompt for every approval-class operation.':v==='medium'?'Auto-approve low-risk actions; prompt for medium/high/critical.':'Auto-approve low and medium risk; prompt for high/critical.'}</span></button>`).join('')}</div></div></section><section class="panel-card"><div class="card-header"><div class="card-title">Performance & panels</div></div><div class="widget-body">Inactive tab suspension: Balanced<br><br><button class="btn" id="restoreInspectorSettings">Show Inspector</button> <button class="btn" id="restoreDrawerSettings">Show Logs drawer</button></div></section></div></section>`;
+  $('#viewHost').innerHTML=`<section class="page">${pageHeader('Settings','Application preferences and defaults inherited by new workspaces')}<div class="settings-grid"><section class="panel-card"><div class="card-header"><div class="card-title">Appearance</div></div><div class="widget-body"><p>Theme</p><div class="theme-grid settings-theme-grid">${Object.keys(THEME_PALETTES).map(t=>`<button class="theme-choice ${state.theme===t?'active':''}" data-settings-theme="${t}">${titleCase(t)}</button>`).join('')}</div><br><button class="btn" data-action="product-tour">Restart product tour</button></div></section><section class="panel-card"><div class="card-header"><div class="card-title">Local model pool</div></div><div class="widget-body"><p class="page-subtitle">Choose the absolute folder where managed LLM weights and runtimes are stored.</p><label>Model pool path<input id="modelPoolPath" placeholder="D:\\OnePane\\Models"></label><div class="toolbar"><button class="btn primary" id="saveModelPool">Save model pool</button></div><div id="modelPoolStatus" class="page-subtitle"></div></div></section><section class="panel-card"><div class="card-header"><div class="card-title">Security & Approvals</div><span class="pill good" style="margin-left:auto">Recommended: Medium</span></div><div class="widget-body"><div class="approval-profile-grid">${['high','medium','low'].map(v=>`<button class="approval-profile ${state.approvalLevel===v?'selected':''}" data-approval-default="${v}"><strong>${titleCase(v)}</strong><span>${v==='high'?'Prompt for every approval-class operation.':v==='medium'?'Auto-approve low-risk actions; prompt for medium/high/critical.':'Auto-approve low and medium risk; prompt for high/critical.'}</span></button>`).join('')}</div></div></section><section class="panel-card"><div class="card-header"><div class="card-title">Performance & panels</div></div><div class="widget-body">Inactive tab suspension: Balanced<br><br><button class="btn" id="restoreInspectorSettings">Show Inspector</button> <button class="btn" id="restoreDrawerSettings">Show Logs drawer</button></div></section></div></section>`;
   $$('[data-settings-theme]').forEach(b=>b.onclick=()=>{applyTheme(b.dataset.settingsTheme);renderSettings();});
   $('#restoreInspectorSettings').onclick=()=>setInspectorOpen(true);$('#restoreDrawerSettings').onclick=()=>setDrawerOpen(true);
   try{let s;try{s=await apiRequest('/desktop/settings');}catch{s=await apiRequest('/v1/settings/local-ai?workspace_id='+encodeURIComponent(onepaneWorkspace));}$('#modelPoolPath').value=s.model_pool_path||'';}catch(ex){$('#modelPoolStatus').textContent='The installer model-pool selection remains authoritative until this setting is changed.';}

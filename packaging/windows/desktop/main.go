@@ -826,6 +826,16 @@ func applyInitialNativeTheme() {
 }
 
 func handleWebMessage(message string) {
+	if strings.HasPrefix(message, "onepane-ui-ready|") {
+		desktopLogf("%s", message)
+		dir := filepath.Join(os.Getenv("LOCALAPPDATA"), "OnePane")
+		if os.Getenv("LOCALAPPDATA") == "" {
+			dir = filepath.Join(os.TempDir(), "OnePane")
+		}
+		_ = os.MkdirAll(dir, 0o755)
+		_ = os.WriteFile(filepath.Join(dir, "ui-ready.txt"), []byte(message), 0o644)
+		return
+	}
 	if !strings.HasPrefix(message, "onepane-theme|") {
 		return
 	}

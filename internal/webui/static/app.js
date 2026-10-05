@@ -2071,4 +2071,80 @@ function startProductTour({replay=false}={}){
   render();
 }
 
+/* === Alpha 3.1 authoritative Settings + component lifecycle === */
+qa5ComponentStatus=async function(){
+  try{return await apiRequest('/v1/local-ai/components?workspace_id='+encodeURIComponent(onepaneWorkspace))}
+  catch{return {colibri:{installed:null,enabled:null,state:'unavailable',available_version:'1.12.1'}}}
+}
+var qa5WaitComponentJob=async function(job,statusID){
+  const host=$(statusID);let current=job;
+  for(let i=0;i<900;i++){
+    if(host)host.textContent=`${titleCase(current.action||'Component')} · ${String(current.stage||current.status||'queued').replaceAll('_',' ')}`;
+    if(['succeeded','failed','interrupted','cancelled'].includes(current.status))return current;
+    await new Promise(resolve=>setTimeout(resolve,1000));
+    current=await apiRequest(`/v1/local-ai/component-jobs/${encodeURIComponent(job.id)}?workspace_id=${encodeURIComponent(onepaneWorkspace)}`);
+  }
+  throw new Error('Component lifecycle job timed out.');
+}
+qa5ComponentAction=async function(component,action,statusID){
+  const host=$(statusID);if(host)host.textContent=`${titleCase(action)} requested…`;
+  try{
+    const job=await apiRequest(`/v1/local-ai/components/${component}/${action}`,{method:'POST',body:JSON.stringify({workspace_id:onepaneWorkspace})});
+    const done=await qa5WaitComponentJob(job,statusID);
+    if(done.status!=='succeeded')throw new Error(done.failure_reason||`Component job ${done.status}`);
+    if(host)host.innerHTML='<span class="good">Component lifecycle completed.</span>';
+    if(currentTab()?.route==='models')setTimeout(()=>renderModels(),200);
+  }catch(ex){if(host)host.innerHTML=`<span class="warn">${escapeHtml(ex.message)}</span>`;}
+}
+renderSettings=async function(){
+  const prefs=qa5Prefs(),langs=qa5AllLanguages();
+  const about=await apiRequest('/v1/about').catch(()=>({version:'dev',revision:'unknown',build_time:'unknown'}));
+  $('#viewHost').innerHTML=`<section class="page">${pageHeader('Settings','Application preferences and inheritance defaults. Existing Projects and Workspaces retain their own policy.')}<div class="settings-grid qa5-settings-grid">
+  <section class="panel-card"><div class="card-header"><div><div class="card-title">General</div><div class="list-meta">Application-wide behaviour</div></div></div><div class="widget-body settings-stack"><label>Default landing page<select id="qa5Landing"><option value="operations">Operations</option><option value="projects">Projects</option><option value="tasks">Tasks</option><option value="models">Models</option></select></label><label>Interface density<select id="qa5Density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label><label>Update channel<select id="qa5Update"><option value="alpha">Alpha</option><option value="stable" disabled>Stable (future)</option></select></label><label>Inactive tab suspension<input id="qa5Suspend" type="number" min="1" max="120" value="${Number(prefs.suspend_minutes||5)}"> minutes</label><label class="inline-check"><input id="qa5PauseBackground" type="checkbox" ${prefs.pause_background!==false?'checked':''}> Reduce background UI refresh when hidden</label><button class="btn primary" id="qa5SaveGeneral">Save preferences</button></div></section>
+  <section class="panel-card"><div class="card-header"><div><div class="card-title">Appearance & theme packs</div><div class="list-meta">Built-in, two-tone and installable themes</div></div></div><div class="widget-body"><div class="theme-grid settings-theme-grid">${qa5ThemeButtons()}</div><div class="toolbar" style="margin-top:12px"><label class="btn file-button">Install theme pack<input id="qa5ThemeFile" type="file" accept="application/json,.json" hidden></label><button class="btn" data-action="product-tour">Restart product tour</button></div><div class="page-subtitle">Theme packs are local appearance data only and never gain code or tool authority.</div></div></section>
+  <section class="panel-card"><div class="card-header"><div><div class="card-title">Language & region</div><div class="list-meta">Built-in shell translations plus installable language packs</div></div></div><div class="widget-body settings-stack"><label>UI language<select id="qa5Language">${Object.entries(langs).map(([id,l])=>`<option value="${escapeHtml(id)}" ${prefs.language===id?'selected':''}>${escapeHtml(l.name||id)}</option>`).join('')}</select></label><label class="btn file-button">Install language pack<input id="qa5LanguageFile" type="file" accept="application/json,.json" hidden></label><div class="page-subtitle">Missing pack keys fall back to English.</div></div></section>
+  <section class="panel-card"><div class="card-header"><div><div class="card-title">OnePane Assistant defaults</div><div class="list-meta">Global reasoning preferences; authority still comes from OnePane policy</div></div></div><div class="widget-body settings-stack"><label>Compute preference<select id="qa31AssistantCompute"><option value="auto">Auto</option><option value="prefer-gpu">Prefer GPU</option><option value="prefer-cpu">Prefer CPU</option></select></label><label class="inline-check"><input id="qa31AssistantSubscription" type="checkbox" ${prefs.assistant_defaults?.allow_subscription?'checked':''}> Allow protected subscription capacity</label><label class="inline-check"><input id="qa31AssistantPaid" type="checkbox" ${prefs.assistant_defaults?.allow_paid?'checked':''}> Allow routes that may incur monetary cost</label><button class="btn primary" id="qa31SaveAssistant">Save Assistant defaults</button></div></section>
+  <section class="panel-card"><div class="card-header"><div><div class="card-title">Defaults for new Workspaces</div><div class="list-meta">Copied at creation only; existing Workspaces are never overwritten here</div></div></div><div class="widget-body settings-stack"><label>Default orchestration<select id="qa5DefaultMode">${['direct','team','council'].map(x=>`<option value="${x}" ${prefs.workspace_defaults?.orchestration===x?'selected':''}>${titleCase(x)}</option>`).join('')}</select></label><label>Default Team/Council seats<input id="qa31DefaultSeats" type="number" min="1" max="8" value="${Math.max(1,Math.min(8,Number(prefs.workspace_defaults?.seats||2)))}"></label><label class="inline-check"><input id="qa5DefaultRouting" type="checkbox" ${prefs.workspace_defaults?.model_routing!==false?'checked':''}> Enable model routing / delegation in new Workspaces</label><label class="inline-check"><input id="qa5DefaultRemote" type="checkbox" ${prefs.workspace_defaults?.remote_models!==false?'checked':''}> Allow qualified remote models/nodes in new Workspaces</label><label class="inline-check"><input id="qa5DefaultNetwork" type="checkbox" ${prefs.workspace_defaults?.external_network?'checked':''}> Allow external network by default</label><label class="inline-check"><input id="qa5DefaultBrowser" type="checkbox" ${prefs.workspace_defaults?.browser?'checked':''}> Allow browser by default</label><label class="inline-check"><input id="qa5DefaultComputer" type="checkbox" ${prefs.workspace_defaults?.computer?'checked':''}> Allow computer control by default</label><button class="btn primary" id="qa5SaveDefaults">Save new-Workspace defaults</button></div></section>
+  <section class="panel-card"><div class="card-header"><div><div class="card-title">Storage & data locations</div><div class="list-meta">Application paths; runtime operation belongs under Models</div></div></div><div class="widget-body settings-stack"><label>Model pool path<input id="modelPoolPath" placeholder="D:\\OnePane\\Models"></label><button class="btn primary" id="saveModelPool">Save model pool</button><div id="modelPoolStatus" class="page-subtitle"></div></div></section>
+  <section class="panel-card"><div class="card-header"><div><div class="card-title">Core Skills pack</div><div class="list-meta">Bundled policy-aware capabilities</div></div></div><div class="widget-body"><div class="skills-list">${QA5_CORE_SKILLS.map(s=>`<div class="skill-row"><span class="pill good">Core</span><div><strong>${escapeHtml(s.name)}</strong><div class="list-meta">${escapeHtml(s.detail)}</div></div></div>`).join('')}</div><div class="page-subtitle">Skills never create authority: ToolGateway, CapabilityLeases and Project sandbox policy still apply.</div></div></section>
+  <section class="panel-card"><div class="card-header"><div class="card-title">Security & approvals</div><span class="pill good">Recommended: Medium</span></div><div class="widget-body"><div class="approval-profile-grid">${['high','medium','low'].map(v=>`<button class="approval-profile ${state.approvalLevel===v?'selected':''}" data-approval-default="${v}"><strong>${titleCase(v)}</strong><span>${v==='high'?'Prompt for every approval-class operation.':v==='medium'?'Auto-approve low-risk actions; prompt for medium/high/critical.':'Auto-approve low and medium risk; prompt for high/critical.'}</span></button>`).join('')}</div></div></section>
+  <section class="panel-card"><div class="card-header"><div class="card-title">Interface panels & federation</div></div><div class="widget-body"><div class="toolbar"><button class="btn" id="restoreInspectorSettings">Show Inspector</button><button class="btn" id="restoreDrawerSettings">Show Logs drawer</button></div><p class="page-subtitle">Node discovery, remote inference and wake-to-execute follow daemon/federation policy. Per-Workspace routing, sandbox and remote-access controls remain inside Projects.</p></div></section>
+  <section class="panel-card"><div class="card-header"><div class="card-title">About</div></div><div class="widget-body"><div class="about-block"><strong>OnePane ${escapeHtml(about.version||'dev')}</strong><span>DigiLogic · GitHub: DigiLogicTech/OnePane</span><span class="list-meta">Revision ${escapeHtml((about.revision||'unknown').slice(0,12))} · ${escapeHtml(about.build_time||'unknown')}</span></div></div></section>
+  </div></section>`;
+  $('#qa5Landing').value=prefs.landing||'operations';$('#qa5Density').value=prefs.density||'comfortable';$('#qa5Update').value=prefs.update_channel||'alpha';$('#qa31AssistantCompute').value=prefs.assistant_defaults?.compute_preference||'auto';
+  $('[data-settings-theme]').forEach(b=>b.onclick=()=>{applyTheme(b.dataset.settingsTheme);renderSettings();});
+  $('#qa5ThemeFile').onchange=async e=>{try{await qa5InstallThemePack(e.target.files[0]);notice('Theme pack installed.');renderSettings();}catch(ex){notice(ex.message,'bad');}};
+  $('#qa5LanguageFile').onchange=async e=>{try{await qa5InstallLanguagePack(e.target.files[0]);notice('Language pack installed.');renderSettings();}catch(ex){notice(ex.message,'bad');}};
+  $('#qa5Language').onchange=e=>{qa5SavePrefs({language:e.target.value});qa5RefreshShellLanguage();renderSettings();};
+  $('#qa5SaveGeneral').onclick=()=>{qa5SavePrefs({landing:$('#qa5Landing').value,density:$('#qa5Density').value,update_channel:$('#qa5Update').value,suspend_minutes:Number($('#qa5Suspend').value||5),pause_background:$('#qa5PauseBackground').checked});document.documentElement.dataset.density=$('#qa5Density').value;notice('Preferences saved.');};
+  $('#qa31SaveAssistant').onclick=()=>{qa5SavePrefs({assistant_defaults:{compute_preference:$('#qa31AssistantCompute').value,allow_subscription:$('#qa31AssistantSubscription').checked,allow_paid:$('#qa31AssistantPaid').checked}});notice('Assistant defaults saved.');};
+  $('#qa5SaveDefaults').onclick=()=>{qa5SavePrefs({workspace_defaults:{orchestration:$('#qa5DefaultMode').value,seats:Math.max(1,Math.min(8,Number($('#qa31DefaultSeats').value||2))),model_routing:$('#qa5DefaultRouting').checked,remote_models:$('#qa5DefaultRemote').checked,external_network:$('#qa5DefaultNetwork').checked,browser:$('#qa5DefaultBrowser').checked,computer:$('#qa5DefaultComputer').checked}});notice('Defaults for new Workspaces saved. Existing Workspaces were not changed.');};
+  $('#restoreInspectorSettings').onclick=()=>setInspectorOpen(true);$('#restoreDrawerSettings').onclick=()=>setDrawerOpen(true);
+  try{let s;try{s=await apiRequest('/desktop/settings');}catch{s=await apiRequest('/v1/settings/local-ai?workspace_id='+encodeURIComponent(onepaneWorkspace));}$('#modelPoolPath').value=s.model_pool_path||'';}catch{$('#modelPoolStatus').textContent='Current installer model-pool selection remains active.';}
+  $('#saveModelPool').onclick=async()=>{const path=$('#modelPoolPath').value.trim();if(!path){notice('Enter a model pool path.');return;}try{try{await apiRequest('/desktop/settings/model-pool',{method:'POST',body:JSON.stringify({model_pool_path:path})});$('#modelPoolStatus').innerHTML=`<span class="good">Administrator update requested: ${escapeHtml(path)}</span>`;}catch{const out=await apiRequest('/v1/settings/local-ai',{method:'POST',body:JSON.stringify({workspace_id:onepaneWorkspace,model_pool_path:path})});$('#modelPoolStatus').innerHTML=`<span class="good">Saved: ${escapeHtml(out.model_pool_path||path)}</span>`;}}catch(ex){$('#modelPoolStatus').innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`;}};
+  bindViewActions($('#viewHost'));
+}
+
+const qa31SettingsAuthoritativeBase=renderSettings;
+renderSettings=async function(){
+  await qa31SettingsAuthoritativeBase();
+  qa8SettingsEnhance();
+  try{
+    const s=await apiRequest('/desktop/settings');
+    if($('#qa8ProjectRoot'))$('#qa8ProjectRoot').value=s.project_root||'';
+  }catch{}
+  const save=$('#saveModelPool');
+  if(save){
+    const base=save.onclick;
+    save.onclick=async()=>{
+      const projectRoot=$('#qa8ProjectRoot')?.value.trim()||'';
+      if(projectRoot){
+        try{await apiRequest('/desktop/settings/project-root',{method:'POST',body:JSON.stringify({project_root:projectRoot})});}
+        catch(ex){notice(`Project storage update failed: ${ex.message}`,'bad');return;}
+      }
+      await base?.();
+    };
+  }
+};
+
 bootOnePane();

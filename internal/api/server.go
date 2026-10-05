@@ -1980,8 +1980,6 @@ func (s *Server) recommendLocalAI(w http.ResponseWriter, r *http.Request) {
 		StorageHeadroomPct  int                   `json:"storage_headroom_pct"`
 		PreferGPU           bool                  `json:"prefer_gpu"`
 		PlacementPreference localai.PlacementMode `json:"placement_preference,omitempty"`
-		ComputePreference   string                `json:"compute_preference,omitempty"`
-		ComputePreference   string                `json:"compute_preference,omitempty"`
 	}
 	if !decodeJSON(w, r, &in) {
 		return
@@ -2058,6 +2056,7 @@ func (s *Server) queueLocalAIInstall(w http.ResponseWriter, r *http.Request) {
 		Quantization        string                `json:"quantization"`
 		PreferGPU           bool                  `json:"prefer_gpu"`
 		PlacementPreference localai.PlacementMode `json:"placement_preference,omitempty"`
+		ComputePreference   string                `json:"compute_preference,omitempty"`
 	}
 	if !decodeJSON(w, r, &in) {
 		return

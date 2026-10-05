@@ -56,6 +56,7 @@ ck('new Workspace defaults expose only Direct Team Council', "['direct','team','
 ck('Agents active surface is Profiles Sessions Teams Councils', '/* === Alpha 3.1 authoritative Agents surface === */' in app and all(x in app for x in ["['profiles','Profiles']","['sessions','Sessions']","['teams','Teams']","['councils','Councils']"]))
 ck('seeded demo Agent sessions are removed', 'chat-demo-1' not in app and 'Auth review' not in app and 'Code review' not in app)
 ck('retired Bot UI terminology is removed', 'Bot Runtime' not in app and 'Provider Bots' not in app)
+ck('retired Supervisor Workers labels are absent from frontend', 'Supervisor' not in app and 'Workers' not in app)
 ck('no dormant top-level Defaults renderer remains', "pageHeader('Defaults'" not in app)
 
 # Models / runtimes

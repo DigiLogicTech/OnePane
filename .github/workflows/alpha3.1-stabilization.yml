@@ -5,6 +5,10 @@ on:
     branches: [alpha3.1-orchestration]
   workflow_dispatch:
 
+concurrency:
+  group: alpha31-source-native-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

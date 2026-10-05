@@ -16,7 +16,7 @@ checks=[]
 def ck(n,c): checks.append((n,bool(c)))
 ck("Assistant and Project Orchestrator remain durable", "assistant_threads" in migration and "project_orchestrators" in migration and "type Service struct" in assistant and "type Service struct" in orch)
 ck("Control Chat reuses real Assistant and Orchestrator routes", "a31RenderControlChat" in app and "/v1/assistant/threads/" in app and "/orchestrator/turns" in app)
-ck("Agent Profiles remain durable and non-authoritative", "agent_profiles" in migration and "Agent Profiles" in app and "DigiLogic Core" in app)
+ck("Agent Profiles remain durable and non-authoritative", "agent_profiles" in migration and "Profiles" in app and "DigiLogic Core" in app)
 ck("expanded built-in profiles and Team presets are seeded", migration.count("INSERT OR IGNORE INTO agent_profiles") >= 20 and migration.count("INSERT OR IGNORE INTO team_presets") >= 4)
 ck("Research Team integrity is persisted", "configuration_json" in migration and all(x in app for x in ["pin_models","independent_first_pass","full_provenance","preserve_failed_seats"]))
 ck("Skills and tool bundles are durable", all(x in migration for x in ["skill_packages","skill_assignments","tool_bundles","agent_profile_tool_bundles"]) and "manifest.json" in skills)

@@ -12,7 +12,7 @@ checks=[]
 def ck(n,c): checks.append((n,bool(c)))
 ck("Tasks retain current and scheduled paths", "Recurring / Scheduled" in ui and "/v1/routines" in ui and "GET /v1/routines" in api)
 ck("Projects retain nested Workspaces", "workspace-tabs" in ui and "qa4SaveProjectWorkspaces" in ui and "UpdateProjectPolicy" in projects)
-ck("Workspace layout has real drag resize remove add", all(x in ui for x in ["data-pw-widget","data-pw-drag","data-pw-resize","data-pw-remove","a31AddWorkspaceComponent"]) and "layout-resize-handle" in css)
+ck("Workspace layout has real drag resize remove add", all(x in ui for x in ["data-pw-widget","data-pw-drag","data-pw-resize","data-pw-remove","qa4AddWorkspaceComponent"]) and "layout-resize-handle" in css)
 ck("Workspace settings stay per Workspace", "qa7SaveWorkspaceSettings" in ui and "Saved for this workspace only." in ui)
 ck("Workspace sandbox controls remain", all(x in ui for x in ["Internet access","LAN access","Browser capability","Computer capability"]))
 ck("scheduler candidates API remains", "GET /v1/scheduler/candidates" in api and "/v1/scheduler/candidates?workspace_id=" in ui)

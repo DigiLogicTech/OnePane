@@ -3,6 +3,7 @@ const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 
 const STORAGE_KEY = 'onepane.ui.v1';
 const TOUR_KEY = 'onepane.ui.product-tour.v1.completed';
+const TOUR_COMPLETE_VALUE = 'done';
 const TAB_SUSPEND_MS = 5 * 60 * 1000;
 const TAB_BACKGROUND_MS = 20 * 1000;
 const PHONE_MEDIA = window.matchMedia('(max-width: 700px)');
@@ -327,7 +328,7 @@ function renderPlaceholder(title,copy){$('#viewHost').innerHTML=`<section class=
 
 
 function bindShell(){
-  $('#sidebarToggle').onclick=()=>{state.sidebar=state.sidebar==='expanded'?'collapsed':'expanded';$('#app').dataset.sidebar=state.sidebar;persist();};
+  $('#sidebarToggle').onclick=()=>setSidebarExpanded(state.sidebar!=='expanded');
   $('#primaryNav').addEventListener('click',e=>{const b=e.target.closest('[data-route]');if(b)openRoute(b.dataset.route);});
   $('#tabStrip').addEventListener('click',e=>{const close=e.target.closest('[data-close-tab]');if(close){e.stopPropagation();return closeTab(close.dataset.closeTab);} const t=e.target.closest('[data-tab]');if(t)activateTab(t.dataset.tab);});
   $('#newTabButton').onclick=()=>openRoute('operations',{newTab:true});
@@ -411,8 +412,9 @@ function openAttentionPopover(anchor){popoverFor(anchor,`<div class="popover"><h
 function openHealthPopover(anchor){popoverFor(anchor,`<div class="popover"><h3>System Health</h3><div class="popover-row">Watchdog <span class="good" style="float:right">Healthy</span></div><div class="popover-row">Control plane <span class="good" style="float:right">Healthy</span></div><div class="popover-row">Database <span class="good" style="float:right">Healthy</span></div><div class="popover-row">Federation <span style="float:right">5 / 8 active</span></div><div class="popover-row">Providers <span class="good" style="float:right">8 / 8</span></div></div>`);}
 
 
+function productTourCompleted(){return ['1',TOUR_COMPLETE_VALUE].includes(localStorage.getItem(TOUR_KEY));}
 function maybeStartProductTour(){
-  if(localStorage.getItem(TOUR_KEY)==='1') return;
+  if(productTourCompleted()) return;
   startProductTour({welcome:true});
 }
 
@@ -911,17 +913,40 @@ async function renderSettings(){
   bindViewActions($('#viewHost'));
 }
 
+function qa31ChevronIcon(direction){
+  const paths={left:'M15 18l-6-6 6-6',right:'M9 6l6 6-6 6',up:'M6 15l6-6 6 6',down:'M6 9l6 6 6-6'};
+  return `<svg class="panel-toggle-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="${paths[direction]||paths.right}"/></svg>`;
+}
+function qa31SetPanelToggle(button,direction,label,expanded){
+  if(!button)return;
+  button.innerHTML=qa31ChevronIcon(direction);
+  button.setAttribute('aria-label',label);
+  button.setAttribute('title',label);
+  if(expanded!==undefined)button.setAttribute('aria-expanded',String(!!expanded));
+}
+function setSidebarExpanded(expanded){
+  state.sidebar=expanded?'expanded':'collapsed';
+  $('#app').dataset.sidebar=state.sidebar;
+  persist();
+  syncPanelRestoreButtons();
+}
 function setInspectorOpen(open){state.inspector=open?'open':'closed';$('#app').dataset.inspector=state.inspector;applyInspectorWidth();persist();if(open)renderInspector();syncPanelRestoreButtons();}
 function setDrawerOpen(open){state.drawer=open?'open':'closed';$('#bottomDrawer').dataset.state=state.drawer;document.documentElement.style.setProperty('--drawer',open?`${state.drawerHeight}px`:'0px');persist();if(open)renderDrawer();syncPanelRestoreButtons();}
 function syncPanelRestoreButtons(){
-  const phone=isPhoneLayout(),inspectorToggle=$('#inspectorRestore'),drawerRestore=$('#drawerRestore'),resizer=$('#inspectorResizer');
-  if(inspectorToggle){inspectorToggle.classList.toggle('hidden',phone);inspectorToggle.textContent=state.inspector==='open'?'<|':'|>';inspectorToggle.setAttribute('aria-label',state.inspector==='open'?'Collapse Inspector':'Open Inspector');inspectorToggle.title=state.inspector==='open'?'Collapse Inspector':'Open Inspector';}
+  const phone=isPhoneLayout(),sidebarToggle=$('#sidebarToggle'),inspectorToggle=$('#inspectorRestore'),drawerToggle=$('#drawerToggle'),drawerRestore=$('#drawerRestore'),resizer=$('#inspectorResizer');
+  qa31SetPanelToggle(sidebarToggle,state.sidebar==='expanded'?'left':'right',state.sidebar==='expanded'?'Collapse navigation':'Expand navigation',state.sidebar==='expanded');
+  if(inspectorToggle){
+    inspectorToggle.classList.toggle('hidden',phone);
+    qa31SetPanelToggle(inspectorToggle,state.inspector==='open'?'right':'left',state.inspector==='open'?'Collapse Inspector':'Open Inspector',state.inspector==='open');
+  }
+  qa31SetPanelToggle(drawerToggle,'down','Collapse Logs drawer',true);
+  qa31SetPanelToggle(drawerRestore,'up','Open Logs drawer',false);
   drawerRestore?.classList.toggle('hidden',state.drawer==='open'||phone);
   resizer?.classList.toggle('hidden',state.inspector!=='open'||phone);
 }
 
 function bindShell(){
-  $('#sidebarToggle').onclick=()=>{state.sidebar=state.sidebar==='expanded'?'collapsed':'expanded';$('#app').dataset.sidebar=state.sidebar;persist();};
+  $('#sidebarToggle').onclick=()=>setSidebarExpanded(state.sidebar!=='expanded');
   $('#newTabButton').onclick=openNewTabPicker;
   $('#drawerToggle').onclick=()=>setDrawerOpen(false);$('#drawerRestore').onclick=()=>setDrawerOpen(true);$('#inspectorRestore').onclick=()=>setInspectorOpen(state.inspector!=='open');
   $('#userButton').onclick=()=>openUserMenu($('#userButton'));
@@ -1290,7 +1315,7 @@ async function renderModels(){
   $('#viewHost').innerHTML=`<section class="page">${pageHeader('Models','Local model downloads, qualification and runtime strategy alongside direct cloud providers. OmniRoute remains a separate optional router.','<button class="btn" id="modelSettings">Local AI settings</button>')}<div id="qa5ModelsRoot" class="widget-body">Loading model inventory…</div></section>`;$('#modelSettings').onclick=()=>openRoute('settings');
   const qs=encodeURIComponent(onepaneWorkspace);let catalog=[],presets=[],connections=[],deployments=[],components={};try{[catalog,presets,connections,deployments,components]=await Promise.all([apiRequest('/v1/local-ai/catalog'),providerPresetsQA(),apiRequest(`/v1/providers?workspace_id=${qs}`),qa5LoadManagedDeployments(),qa5ModelComponents()]);}catch(ex){$('#qa5ModelsRoot').innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;return;}qa4ProjectHub.catalog=Array.isArray(catalog)?catalog:[];qa4ProjectHub.providerPresets=Array.isArray(presets)?presets:[];qa4ProjectHub.providers=Array.isArray(connections)?connections:[];
   const cloudPresets=qa4ProjectHub.providerPresets.filter(p=>p.id!=='omniroute'),omni=qa4ProjectHub.providers.find(p=>String(p.provider||'').toLowerCase()==='omniroute'),runtimePref=qa5Prefs().default_runtime||'auto';
-  $('#qa5ModelsRoot').outerHTML=`<div class="models-cloud-layout qa5-models-layout"><section class="panel-card"><div class="card-header"><div><div class="card-title">Local models</div><div class="list-meta">Managed Hot Swap for ordinary models; Colibri Large Model for compatible sparse/MoE models spanning VRAM + RAM + NVMe.</div></div><div class="toolbar"><button class="btn" id="detectLocal">Detect hardware</button><select id="qa5RuntimeStrategy"><option value="auto" ${runtimePref==='auto'?'selected':''}>Auto</option><option value="hot-swap" ${runtimePref==='hot-swap'?'selected':''}>Managed Hot Swap</option><option value="colibri" ${runtimePref==='colibri'?'selected':''}>Colibri Large Model</option></select></div></div><div id="localResult" class="model-result"></div><div class="local-managed-section"><div class="subsection-title">Installed / registered</div><div id="qa5ManagedModels" class="model-tile-scroll"></div></div><div class="subsection-title">Available catalogue</div><input id="qa4LocalFilter" class="catalogue-filter" placeholder="Filter local models…"><div id="qa4LocalModels" class="model-tile-scroll"></div></section><section class="panel-card"><div class="card-header"><div><div class="card-title">Cloud providers</div><div class="list-meta">Direct cloud model/API connections. These are not OmniRoute.</div></div><button class="btn" id="qa4OpenSecrets">API keys</button></div><div id="qa4CloudProviders" class="provider-tile-grid"></div></section></div>
+  $('#qa5ModelsRoot').outerHTML=`<div class="models-cloud-layout qa5-models-layout"><section class="panel-card"><div class="card-header qa31-local-models-header"><div class="qa31-local-models-copy"><div class="card-title">Local models</div><div class="list-meta">Managed Hot Swap for ordinary models; Colibri Large Model for compatible sparse/MoE models spanning VRAM + RAM + NVMe.</div></div><div class="toolbar qa31-local-models-controls"><button class="btn qa31-detect-hardware" id="detectLocal">Detect hardware</button><select class="qa31-runtime-strategy" id="qa5RuntimeStrategy"><option value="auto" ${runtimePref==='auto'?'selected':''}>Auto</option><option value="hot-swap" ${runtimePref==='hot-swap'?'selected':''}>Managed Hot Swap</option><option value="colibri" ${runtimePref==='colibri'?'selected':''}>Colibri Large Model</option></select></div></div><div id="localResult" class="model-result"></div><div class="local-managed-section"><div class="subsection-title">Installed / registered</div><div id="qa5ManagedModels" class="model-tile-scroll"></div></div><div class="subsection-title">Available catalogue</div><input id="qa4LocalFilter" class="catalogue-filter" placeholder="Filter local models…"><div id="qa4LocalModels" class="model-tile-scroll"></div></section><section class="panel-card"><div class="card-header"><div><div class="card-title">Cloud providers</div><div class="list-meta">Direct cloud model/API connections. These are not OmniRoute.</div></div><button class="btn" id="qa4OpenSecrets">API keys</button></div><div id="qa4CloudProviders" class="provider-tile-grid"></div></section></div>
   <section class="panel-card colibri-separate"><div class="card-header"><div><div class="card-title">Colibri Large Model</div><div class="list-meta">Optional Apache-2.0 backend v1.12.1 for very large sparse/MoE models.</div></div><span class="pill ${components.colibri?.installed?'good':''}">${components.colibri?.installed?'Installed':'Optional'}</span></div><div class="widget-body"><p>OnePane remains scheduler/admission authority; Colibri manages model placement across VRAM, RAM and NVMe. Registered models are quarantined until Agent Check/Testbed qualification.</p><div class="toolbar"><button class="btn primary" id="qa5ColibriInstallModel">${components.colibri?.installed?'Installed':'Install runtime'}</button><button class="btn" id="qa5ColibriEnableModel">Enable</button><button class="btn" id="qa5ColibriDisableModel">Disable</button><button class="btn" id="qa5ColibriRegister">Register model folder</button><button class="btn danger" id="qa5ColibriRemoveModel">Remove runtime</button></div><div id="qa5ColibriInlineStatus" class="page-subtitle">${components.colibri?.installed?`Runtime installed${components.colibri?.python_ready===false?' · Python required':''}.`:'Install the runtime first, then place/download a compatible Colibri model inside the OnePane model pool.'}</div></div></section>
   <section class="panel-card omniroute-separate"><div class="card-header"><div><div class="card-title">OmniRoute</div><div class="list-meta">Optional routing gateway. Local models and direct cloud providers remain fully independent.</div></div><span class="pill ${components.omniroute?.installed||omni?'good':''}">${components.omniroute?.installed?'Installed':omni?'Connected':'Optional'}</span></div><div class="widget-body omni-inline"><div class="toolbar"><button class="btn" id="qa5OmniInstallModel">Install</button><button class="btn danger" id="qa5OmniRemoveModel">Remove</button></div><label>Gateway URL<input id="omniUrl" value="${escapeHtml(localStorage.getItem('onepane:omniroute-url')||omni?.connection?.base_url||'http://127.0.0.1:20128/v1')}"></label><label>Gateway credential<select id="omniCredential"><option value="">No gateway credential</option></select></label><label class="inline-check"><input id="omniStrict" type="checkbox" checked> Require verified strict zero-cost</label><div class="toolbar"><button class="btn" id="omniProbe">Probe</button><button class="btn primary" id="omniConnect" disabled>Connect</button></div><div id="omniResult" class="page-subtitle">${omni?'Connected provider record exists.':'Probe before connecting.'}</div></div></section>`;
   $('#detectLocal').onclick=detectLocalQA;$('#qa4OpenSecrets').onclick=()=>openRoute('secrets');$('#qa5RuntimeStrategy').onchange=e=>qa5SavePrefs({default_runtime:e.target.value});$('#qa5ColibriInstallModel').onclick=()=>qa5ComponentAction('colibri','install','#qa5ColibriInlineStatus');$('#qa5ColibriEnableModel').onclick=()=>qa5ComponentAction('colibri','enable','#qa5ColibriInlineStatus');$('#qa5ColibriDisableModel').onclick=()=>qa5ComponentAction('colibri','disable','#qa5ColibriInlineStatus');$('#qa5ColibriRemoveModel').onclick=()=>qa5ComponentAction('colibri','remove','#qa5ColibriInlineStatus');$('#qa5ColibriRegister').onclick=qa5RegisterColibri;$('#qa5OmniInstallModel').onclick=()=>qa5ComponentAction('omniroute','install','#omniResult');$('#qa5OmniRemoveModel').onclick=()=>qa5ComponentAction('omniroute','remove','#omniResult');$('#omniProbe').onclick=()=>omniQA(false);$('#omniConnect').onclick=()=>omniQA(true);populateOmniCredentials();
@@ -1800,6 +1825,12 @@ function qa31ProfileDialog(profile=null){
     }catch(ex){notice(ex.message,'bad')}
   };
 }
+async function qa31AgentRequest(path,timeoutMs=12000){
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);
+  try{return await apiRequest(path,{signal:controller.signal});}
+  catch(ex){if(ex?.name==='AbortError'||/abort/i.test(String(ex?.message||'')))throw new Error('Agent data did not respond within 12 seconds.');throw ex;}
+  finally{clearTimeout(timer);}
+}
 renderAgents=async function(){
   $('#viewHost').innerHTML=`<section class="page">${pageHeader('Agents','Reusable Agent Profiles and real execution sessions. Assistant and Project Orchestrator remain control-plane layers, not ordinary Agents.','<button class="btn primary" id="qa31NewProfile">New Profile</button>')}<div class="subtabs">${[['profiles','Profiles'],['sessions','Sessions'],['teams','Teams'],['councils','Councils']].map(([id,label])=>`<button class="subtab ${qa31AgentTab===id?'active':''}" data-qa31-agent-tab="${id}">${label}</button>`).join('')}</div><div id="qa31AgentsBody" class="widget-body">Loading…</div></section>`;
   $('[data-qa31-agent-tab]').forEach(b=>b.onclick=()=>{qa31AgentTab=b.dataset.qa31AgentTab;renderAgents();});
@@ -1807,8 +1838,8 @@ renderAgents=async function(){
   const qs=encodeURIComponent(onepaneWorkspace),body=$('#qa31AgentsBody');
   try{
     if(qa31AgentTab==='profiles'){
-      const profiles=await apiRequest('/v1/agent-profiles?workspace_id='+qs);
-      body.innerHTML=`<div class="cards-grid">${(profiles||[]).map(qa31ProfileCard).join('')}</div>`;
+      const profiles=await qa31AgentRequest('/v1/agent-profiles?workspace_id='+qs);
+      body.innerHTML=(profiles||[]).length?`<div class="cards-grid">${(profiles||[]).map(qa31ProfileCard).join('')}</div>`:'<div class="empty-state compact">No Agent Profiles yet. Create a Profile to reuse instructions across Direct, Team and Council execution.</div>';
       $('[data-profile-edit]',body).forEach(b=>b.onclick=()=>{const p=(profiles||[]).find(x=>x.id===b.dataset.profileEdit);if(p)qa31ProfileDialog(p)});
       $('[data-profile-archive]',body).forEach(b=>b.onclick=async()=>{
         try{
@@ -1817,18 +1848,18 @@ renderAgents=async function(){
         }catch(ex){notice(ex.message,'bad')}
       });
     }else if(qa31AgentTab==='sessions'){
-      const sessions=await apiRequest('/v1/agent-sessions?workspace_id='+qs+'&limit=100');
+      const sessions=await qa31AgentRequest('/v1/agent-sessions?workspace_id='+qs+'&limit=100');
       body.innerHTML=(sessions||[]).length?`<div class="table-shell"><table class="data-table"><thead><tr><th>Task</th><th>Mode</th><th>Profile</th><th>State</th><th>Project</th></tr></thead><tbody>${sessions.map(s=>`<tr><td>${escapeHtml(s.objective||s.id)}</td><td><span class="pill">${escapeHtml(titleCase(s.mode||'direct'))}</span></td><td>${escapeHtml(s.profile_id||'agent.md')}</td><td>${escapeHtml(s.state||'')}</td><td>${escapeHtml(s.project_id||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state compact">No real Agent sessions yet. Direct, Team and Council execution will appear here as Tasks run.</div>';
     }else if(qa31AgentTab==='teams'){
-      const teams=await apiRequest('/v1/teams?workspace_id='+qs);
+      const teams=await qa31AgentRequest('/v1/teams?workspace_id='+qs);
       body.innerHTML=(teams||[]).length?`<div class="cards-grid">${teams.map(t=>`<article class="panel-card"><div class="card-header"><div><div class="card-title">${escapeHtml(t.name||t.id)}</div><div class="list-meta">${escapeHtml(t.purpose||'Reusable Team composition')}</div></div><span class="pill">${escapeHtml(t.status||'active')}</span></div><div class="widget-body">Reusable by Team or Council execution. Active model-powered seats are capped at 8.</div></article>`).join('')}</div>`:'<div class="empty-state compact">No Teams configured. Workspace Team/Council settings can reference reusable Teams.</div>';
     }else{
-      const sessions=await apiRequest('/v1/agent-sessions?workspace_id='+qs+'&limit=100');
+      const sessions=await qa31AgentRequest('/v1/agent-sessions?workspace_id='+qs+'&limit=100');
       const councils=(sessions||[]).filter(x=>String(x.mode).toLowerCase()==='council');
       body.innerHTML=councils.length?`<div class="table-shell"><table class="data-table"><thead><tr><th>Council task</th><th>Team</th><th>State</th><th>Session</th></tr></thead><tbody>${councils.map(s=>`<tr><td>${escapeHtml(s.objective||s.id)}</td><td>${escapeHtml(s.team_id||'—')}</td><td>${escapeHtml(s.state||'')}</td><td>${escapeHtml(s.team_session_id||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state compact">No Council executions yet. Councils reuse governed Team compositions and independent deliberation.</div>';
     }
   }catch(ex){
-    body.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;
+    body.innerHTML=`<div class="empty-state compact"><div><strong class="error">Agents could not be loaded.</strong><p>${escapeHtml(ex.message)}</p><button class="btn" id="qa31RetryAgents">Retry</button></div></div>`;$('#qa31RetryAgents')?.addEventListener('click',renderAgents);
   }
   bindViewActions($('#viewHost'));
 };
@@ -1867,6 +1898,7 @@ function qa31AskProject(project,workspace){
 const qa31RenderProjectsBase=renderProjects;
 renderProjects=async function(){
   await qa31RenderProjectsBase();
+  qa31RenderProjectNavTree?.();
   const project=qa4ActiveProject?.(),workspace=project?qa4ActiveWorkspace?.():null;
   if(!project)return;
   const main=$('.project-main'),toolbar=main?$('.project-toolbar',main):null;
@@ -2014,7 +2046,7 @@ function startProductTour({replay=false}={}){
     if(typeof qa4ProjectHub!=='undefined'){qa4ProjectHub.activeProjectID=snapshot.projectID;qa4ProjectHub.activeWorkspaceID=snapshot.projectWorkspaceID}
     $('#app').dataset.sidebar=state.sidebar;$('#app').dataset.inspector=state.inspector;$('#bottomDrawer').dataset.state=state.drawer;applyInspectorWidth();document.documentElement.style.setProperty('--drawer',state.drawer==='open'?`${state.drawerHeight}px`:'0px');persist();renderTabs();renderActiveView();syncPanelRestoreButtons();window.scrollTo(snapshot.scrollX,snapshot.scrollY);
   };
-  const finish=(completed=true)=>{if(closing)return;closing=true;clearTarget();qa31CloseTourAssistantPreview();host.classList.add('tour-transitioning');setTimeout(()=>{host.remove();restore();if(completed)localStorage.setItem(TOUR_KEY,'done');},120)};
+  const finish=(completed=true)=>{if(closing)return;closing=true;clearTarget();qa31CloseTourAssistantPreview();host.classList.add('tour-transitioning');setTimeout(()=>{host.remove();restore();if(completed)localStorage.setItem(TOUR_KEY,TOUR_COMPLETE_VALUE);},120)};
   const resolveTarget=step=>{try{return step.target?document.querySelector(step.target):null}catch{return null}};
   const place=target=>{
     const margin=14,w=Math.min(390,innerWidth-24),h=card.offsetHeight||270;
@@ -2116,6 +2148,40 @@ renderSettings=async function(){
       }
       await base?.();
     };
+  }
+};
+
+
+/* === Alpha 3.1 RC2 shell navigation + sustained-interaction hardening === */
+function qa31ProjectTreeExpanded(projectID){
+  state.projectNavExpanded=state.projectNavExpanded&&typeof state.projectNavExpanded==='object'?state.projectNavExpanded:{};
+  return state.projectNavExpanded[projectID]!==false;
+}
+function qa31ProjectNavTreeHTML(){
+  if(!qa4ProjectHub?.projects?.length)return '';
+  return `<div class="project-nav-tree" aria-label="Project workspaces">${qa4ProjectHub.projects.map(project=>{
+    const expanded=qa31ProjectTreeExpanded(project.id),activeProject=project.id===qa4ProjectHub.activeProjectID,workspaces=qa4Workspaces(project);
+    return `<div class="project-nav-node ${activeProject?'active-project':''}" data-project-nav-node="${escapeHtml(project.id)}"><div class="project-nav-row"><button class="project-nav-disclosure shell-panel-toggle compact" data-project-nav-toggle="${escapeHtml(project.id)}" aria-label="${expanded?'Collapse':'Expand'} ${escapeHtml(project.name||'Project')}" aria-expanded="${expanded}">${qa31ChevronIcon(expanded?'down':'right')}</button><button class="project-nav-project" data-project-nav-project="${escapeHtml(project.id)}" title="${escapeHtml(project.name||project.id)}"><span>${escapeHtml(project.name||project.id)}</span></button></div><div class="project-nav-workspaces ${expanded?'':'hidden'}">${workspaces.map(ws=>`<button class="project-nav-workspace ${activeProject&&ws.id===qa4ProjectHub.activeWorkspaceID?'active':''}" data-project-nav-workspace="${escapeHtml(ws.id)}" data-project-nav-parent="${escapeHtml(project.id)}" title="${escapeHtml(ws.name||ws.id)}"><span class="project-nav-branch" aria-hidden="true"></span><span>${escapeHtml(ws.name||ws.id)}</span></button>`).join('')}</div></div>`;
+  }).join('')}</div>`;
+}
+function qa31BindProjectNavTree(root){
+  $('[data-project-nav-toggle]',root).forEach(b=>b.onclick=e=>{e.stopPropagation();const id=b.dataset.projectNavToggle;state.projectNavExpanded=state.projectNavExpanded||{};state.projectNavExpanded[id]=!qa31ProjectTreeExpanded(id);persist();qa31RenderProjectNavTree();});
+  $('[data-project-nav-project]',root).forEach(b=>b.onclick=()=>{const id=b.dataset.projectNavProject,project=qa4ProjectHub.projects.find(p=>p.id===id);if(!project)return;qa4ProjectHub.activeProjectID=id;const rows=qa4Workspaces(project);if(!rows.some(w=>w.id===qa4ProjectHub.activeWorkspaceID))qa4ProjectHub.activeWorkspaceID=rows[0]?.id||'';openRoute('projects');qa31RenderProjectNavTree();});
+  $('[data-project-nav-workspace]',root).forEach(b=>b.onclick=()=>{const project=qa4ProjectHub.projects.find(p=>p.id===b.dataset.projectNavParent);if(!project)return;qa4ProjectHub.activeProjectID=project.id;qa4ProjectHub.activeWorkspaceID=b.dataset.projectNavWorkspace;openRoute('projects');qa31RenderProjectNavTree();});
+}
+function qa31RenderProjectNavTree(){
+  const root=$('#primaryNav'),projectsButton=root?.querySelector('[data-route="projects"]');if(!root||!projectsButton)return;
+  root.querySelector('.project-nav-tree')?.remove();
+  projectsButton.insertAdjacentHTML('afterend',qa31ProjectNavTreeHTML());
+  const tree=root.querySelector('.project-nav-tree');if(tree)qa31BindProjectNavTree(tree);
+}
+const qa31RenderNavBase=renderNav;
+renderNav=function(){
+  qa31RenderNavBase();
+  qa31RenderProjectNavTree();
+  syncPanelRestoreButtons();
+  if(onepaneWorkspace&&!qa4ProjectHub.projects.length){
+    qa4LoadProjectHub(false).then(()=>qa31RenderProjectNavTree()).catch(()=>{});
   }
 };
 

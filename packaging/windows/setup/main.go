@@ -42,6 +42,9 @@ func main() {
 	uninstall := hasArg("--uninstall")
 	repair := hasArg("--repair")
 	elevated := hasArg("--elevated")
+	silent := hasArg("--silent")
+	noLaunch := hasArg("--no-launch")
+	skipOptionalRuntime := hasArg("--skip-optional-runtime")
 	setModelPool := argValue("--set-model-pool")
 	setProjectRoot := argValue("--set-project-root")
 	installDirArg := argValue("--install-dir")
@@ -55,6 +58,9 @@ func main() {
 		if repair {
 			args = append(args, "--repair")
 		}
+		if silent { args = append(args, "--silent") }
+		if noLaunch { args = append(args, "--no-launch") }
+		if skipOptionalRuntime { args = append(args, "--skip-optional-runtime") }
 		for _, item := range [][2]string{{"--set-model-pool", setModelPool}, {"--set-project-root", setProjectRoot}, {"--install-dir", installDirArg}, {"--project-root", projectRootArg}, {"--model-pool", modelPoolArg}} {
 			if item[1] != "" {
 				args = append(args, item[0], item[1])
@@ -83,24 +89,24 @@ func main() {
 	}
 	if uninstall {
 		if err := uninstallProduct(); err != nil {
-			message("OnePane Uninstall", "Uninstall encountered an error:\n\n"+err.Error(), 0x10)
-			return
+			logf("uninstall failed: %v", err)
+			if !silent { message("OnePane Uninstall", "Uninstall encountered an error:\n\n"+err.Error(), 0x10) }
+			os.Exit(1)
 		}
-		message("OnePane Uninstall", "OnePane has been uninstalled.\n\nProjects, models and application data were preserved.", 0x40)
+		if !silent { message("OnePane Uninstall", "OnePane has been uninstalled.\n\nProjects, models and application data were preserved.", 0x40) }
 		return
 	}
-	if err := installProduct(installDirArg, projectRootArg, modelPoolArg, repair); err != nil {
-		message("OnePane Setup", "Installation failed:\n\n"+err.Error()+"\n\nSee %TEMP%\\OnePaneSetup.log for details.", 0x10)
-		return
+	if err := installProduct(installDirArg, projectRootArg, modelPoolArg, repair, skipOptionalRuntime); err != nil {
+		logf("installation failed: %v", err)
+		if !silent { message("OnePane Setup", "Installation failed:\n\n"+err.Error()+"\n\nSee %TEMP%\\OnePaneSetup.log for details.", 0x10) }
+		os.Exit(1)
 	}
 	verb := "installed"
-	if repair {
-		verb = "repaired"
-	}
-	message("OnePane Setup", "OnePane v"+version+" is "+verb+".\n\nThe Windows service is running and the desktop application will open now.", 0x40)
-	launchDesktop()
+	if repair { verb = "repaired" }
+	if !silent { message("OnePane Setup", "OnePane v"+version+" is "+verb+".\n\nThe Windows service is running and the desktop application will open now.", 0x40) }
+	if !noLaunch { launchDesktop() }
 }
-func installProduct(installDirArg, projectRootArg, modelPoolArg string, repair bool) error {
+func installProduct(installDirArg, projectRootArg, modelPoolArg string, repair, skipOptionalRuntime bool) error {
 	logf("starting OnePane %s installation", version)
 	programFiles := os.Getenv("ProgramFiles")
 	if programFiles == "" {
@@ -256,7 +262,7 @@ func installProduct(installDirArg, projectRootArg, modelPoolArg string, repair b
 	if err := installWebView2(); err != nil {
 		return err
 	}
-	if freshConfig && !repair {
+	if freshConfig && !repair && !skipOptionalRuntime {
 		if err := offerOllamaInstall(); err != nil {
 			logf("optional Ollama installation skipped/failed: %v", err)
 		}

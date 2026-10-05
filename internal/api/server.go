@@ -1981,6 +1981,7 @@ func (s *Server) recommendLocalAI(w http.ResponseWriter, r *http.Request) {
 		PreferGPU           bool                  `json:"prefer_gpu"`
 		PlacementPreference localai.PlacementMode `json:"placement_preference,omitempty"`
 		ComputePreference   string                `json:"compute_preference,omitempty"`
+		ComputePreference   string                `json:"compute_preference,omitempty"`
 	}
 	if !decodeJSON(w, r, &in) {
 		return

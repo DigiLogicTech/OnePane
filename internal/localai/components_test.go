@@ -35,8 +35,12 @@ func TestManagedComponentLifecycleIsDurableAndHarnessOwned(t *testing.T) {
 	if all["colibri"].Installed || all["colibri"].Enabled || all["colibri"].State != "not_installed" {
 		t.Fatalf("colibri must be optional by default: %+v", all["colibri"])
 	}
-	if _, ok := all["omniroute"]; ok {
-		t.Fatal("OmniRoute must remain a provider connection, not a managed local component")
+	omni, ok := all["omniroute"]
+	if !ok {
+		t.Fatal("OmniRoute managed-local lifecycle must be present")
+	}
+	if omni.Installed || omni.Enabled || omni.State != "not_installed" {
+		t.Fatalf("OmniRoute must remain optional by default: %+v", omni)
 	}
 
 	// Installation itself is covered by archive/fetcher tests and release-manifest
@@ -77,12 +81,12 @@ func TestManagedComponentLifecycleIsDurableAndHarnessOwned(t *testing.T) {
 	}
 }
 
-func TestEnableRequiresInstallAndOmniRouteIsNotManaged(t *testing.T) {
+func TestEnableRequiresInstallForManagedComponents(t *testing.T) {
 	s, ctx := componentTestService(t)
 	if _, err := s.ManageComponent(ctx, "colibri", "enable"); err == nil {
 		t.Fatal("expected enable-before-install to fail")
 	}
 	if _, err := s.ManageComponent(ctx, "omniroute", "enable"); err == nil {
-		t.Fatal("expected OmniRoute managed-component action to fail")
+		t.Fatal("expected OmniRoute enable-before-install to fail")
 	}
 }

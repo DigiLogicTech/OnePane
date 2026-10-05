@@ -69,7 +69,7 @@ ck("Project Orchestrator remains authoritative", "function qa31ProjectOrchestrat
 ck("Tour model-page switcher is defined", "function qa31SetModelView(view)" in app and "qa31SetModelView('local')" in app and "qa31SetModelView('cloud')" in app)
 ck("Single-element selector helper is never used as a collection", not single_selector_collection_calls(app))
 ck("Projects capture render epoch before async load", app.count("const qa31ProjectRenderEpoch=qa31ViewEpoch;") >= 2 and "qa31ProjectRenderEpoch!==qa31ViewEpoch" in app)
-ck("Project Orchestrator wrapper is route-safe", "if(epoch!==qa31ViewEpoch||currentTab()?.route!='projects')return;" in app.replace('"', "'"))
+ck("Project Orchestrator wrapper is route-safe", "if(epoch!==qa31ViewEpoch||currentTab()?.route!=='projects')return;" in app.replace('"', "'"))
 failed=[n for n,o in checks if not o]
 for n,o in checks: print(f"[{'PASS' if o else 'FAIL'}] {n}")
 if failed:

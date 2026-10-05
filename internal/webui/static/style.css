@@ -806,3 +806,164 @@ body { background:var(--app-gradient),var(--bg); }
 @media(prefers-reduced-motion:reduce){
   #qa31TourRoot .tour-card{transition:none!important}
 }
+
+
+/* === Alpha 3.1 RC2 shell controls, project tree and responsive model header === */
+.shell-panel-toggle{
+  appearance:none;
+  -webkit-appearance:none;
+  display:grid;
+  place-items:center;
+  flex:none;
+  margin:0;
+  padding:0;
+  border:1px solid color-mix(in srgb,var(--border) 86%,var(--text) 14%);
+  background:var(--panel-2);
+  color:var(--muted);
+  box-shadow:0 3px 10px rgba(0,0,0,.12);
+  cursor:pointer;
+  user-select:none;
+  -webkit-user-select:none;
+  transition:border-color 120ms ease,background 120ms ease,color 120ms ease,box-shadow 120ms ease,transform 180ms cubic-bezier(.2,.7,.2,1),right 180ms cubic-bezier(.2,.7,.2,1),opacity 120ms ease;
+}
+.shell-panel-toggle:hover{
+  border-color:color-mix(in srgb,var(--accent) 75%,var(--border));
+  background:var(--panel-3);
+  color:var(--text);
+  box-shadow:0 4px 14px rgba(0,0,0,.16);
+}
+.shell-panel-toggle:active{background:color-mix(in srgb,var(--panel-3) 84%,var(--accent) 16%);}
+.shell-panel-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.panel-toggle-icon{
+  width:15px;
+  height:15px;
+  display:block;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:2.35;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+  pointer-events:none;
+}
+.sidebar-panel-toggle{
+  width:32px;
+  height:32px;
+  border-radius:8px;
+}
+.panel-restore{
+  font:inherit;
+  backdrop-filter:blur(8px);
+}
+.inspector-restore{
+  width:28px;
+  height:48px;
+  right:calc(var(--inspector) - 28px);
+  border-radius:8px 0 0 8px;
+}
+.app-shell[data-inspector="closed"] .inspector-restore{right:0;}
+.drawer-edge-toggle{
+  width:42px;
+  height:26px;
+  border-radius:8px;
+  font:inherit;
+}
+.drawer-edge-toggle:hover{transform:translateX(-50%) translateY(1px);}
+.drawer-restore{
+  width:42px;
+  height:26px;
+  border-radius:8px 8px 0 0;
+}
+.drawer-restore:hover{transform:translateX(-50%) translateY(-1px);}
+
+/* Nested Projects → Workspaces navigation. */
+.primary-nav{min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;}
+.project-nav-tree{display:grid;gap:2px;margin:1px 0 5px 20px;padding-left:7px;border-left:1px solid var(--border);}
+.project-nav-node{min-width:0;}
+.project-nav-row{display:grid;grid-template-columns:24px minmax(0,1fr);align-items:center;gap:2px;min-width:0;}
+.project-nav-disclosure.shell-panel-toggle.compact{
+  width:22px;
+  height:22px;
+  border:0;
+  border-radius:6px;
+  background:transparent;
+  box-shadow:none;
+}
+.project-nav-disclosure .panel-toggle-icon{width:12px;height:12px;stroke-width:2.2;}
+.project-nav-disclosure:hover{background:var(--panel-2);}
+.project-nav-project,.project-nav-workspace{
+  min-width:0;
+  width:100%;
+  min-height:29px;
+  border:0;
+  border-radius:7px;
+  background:transparent;
+  color:var(--muted);
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:4px 7px;
+  text-align:left;
+}
+.project-nav-project span,.project-nav-workspace span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.project-nav-project:hover,.project-nav-workspace:hover{background:var(--panel-2);color:var(--text);}
+.project-nav-node.active-project>.project-nav-row .project-nav-project{color:var(--text);}
+.project-nav-workspaces{display:grid;gap:1px;margin-left:24px;}
+.project-nav-workspace{position:relative;font-size:12px;}
+.project-nav-workspace.active{background:var(--accent-soft);color:var(--text);box-shadow:inset 2px 0 0 var(--accent);}
+.project-nav-branch{width:8px;height:8px;border-left:1px solid var(--border);border-bottom:1px solid var(--border);margin-top:-7px;flex:none;}
+.app-shell[data-sidebar="collapsed"] .project-nav-tree{display:none;}
+.app-shell[data-sidebar="collapsed"] .sidebar-panel-toggle{margin-inline:auto;}
+
+/* Local Models header keeps copy readable and action controls compact. */
+.qa31-local-models-header{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:start;
+  gap:10px 14px;
+}
+.qa31-local-models-copy{min-width:0;}
+.qa31-local-models-copy .list-meta{
+  max-width:100%;
+  white-space:normal;
+  overflow-wrap:anywhere;
+  line-height:1.35;
+}
+.qa31-local-models-controls{
+  align-items:center;
+  flex-wrap:nowrap;
+  gap:7px;
+}
+.qa31-detect-hardware{
+  min-width:78px;
+  max-width:88px;
+  padding:6px 8px;
+  font-size:11px;
+  line-height:1.12;
+  white-space:normal;
+  text-align:center;
+}
+.qa31-runtime-strategy{min-width:150px;max-width:190px;}
+@media(max-width:1250px){
+  .qa31-local-models-header{grid-template-columns:1fr;}
+  .qa31-local-models-controls{justify-content:flex-start;flex-wrap:wrap;}
+  .qa31-runtime-strategy{min-width:150px;max-width:min(100%,220px);}
+}
+
+/* The RC1 click blocker was an invisible modern tour card inside a live full-screen overlay. */
+#qa31TourRoot{pointer-events:auto;}
+#qa31TourRoot .tour-mask{
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  background:rgba(5,8,14,.54);
+  backdrop-filter:blur(1px);
+}
+#qa31TourRoot .tour-card{
+  visibility:visible;
+  z-index:2;
+}
+#qa31TourRoot .tour-target{visibility:visible;}
+
+@media(prefers-reduced-motion:reduce){
+  .shell-panel-toggle{transition:none!important;}
+}

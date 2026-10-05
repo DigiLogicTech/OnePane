@@ -48,7 +48,7 @@
   <div id="app" class="app-shell hidden" data-sidebar="expanded" data-inspector="open">
     <aside class="sidebar" aria-label="Primary navigation">
       <div class="brand-row">
-        <button class="icon-button" id="sidebarToggle" aria-label="Collapse navigation" title="Collapse navigation">◫</button>
+        <button class="shell-panel-toggle sidebar-panel-toggle" id="sidebarToggle" aria-label="Collapse navigation" title="Collapse navigation" aria-controls="primaryNav" aria-expanded="true"><svg class="panel-toggle-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 18l-6-6 6-6"/></svg></button>
         <img src="/onepane-icon.svg" class="brand-icon" alt=""><div class="brand">OnePane</div>
       </div>
       <nav id="primaryNav" class="primary-nav"></nav>
@@ -81,21 +81,21 @@
 
       <main id="viewHost" class="view-host"></main>
 
-      <button id="drawerRestore" class="panel-restore drawer-restore hidden" aria-label="Open Logs drawer" title="Open Logs drawer">⌃</button>
+      <button id="drawerRestore" class="shell-panel-toggle panel-restore drawer-restore hidden" aria-label="Open Logs drawer" title="Open Logs drawer" aria-controls="bottomDrawer" aria-expanded="false"><svg class="panel-toggle-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 15l6-6 6 6"/></svg></button>
       <section id="bottomDrawer" class="bottom-drawer" data-state="open">
         <div class="drawer-resizer" id="drawerResizer" role="separator" aria-orientation="horizontal"></div>
         <div class="drawer-tabs" id="drawerTabs"></div>
         <div class="drawer-actions">
           <select id="logScope"><option>All components</option><option>Local node</option><option>Watchdog</option><option>Scheduler</option></select>
           <select id="logLevel"><option>All levels</option><option>Info</option><option>Warn</option><option>Error</option></select>
-          <button class="drawer-edge-toggle" id="drawerToggle" aria-label="Collapse Logs drawer" title="Collapse Logs drawer">⌄</button>
+          <button class="shell-panel-toggle drawer-edge-toggle" id="drawerToggle" aria-label="Collapse Logs drawer" title="Collapse Logs drawer" aria-controls="bottomDrawer" aria-expanded="true"><svg class="panel-toggle-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6"/></svg></button>
         </div>
         <div id="drawerContent" class="drawer-content"></div>
       </section>
     </section>
 
     <div id="inspectorResizer" class="inspector-resizer" role="separator" aria-orientation="vertical" aria-label="Resize Inspector" title="Drag to resize; double-click to reset"></div>
-    <button id="inspectorRestore" class="panel-restore inspector-restore" aria-label="Collapse Inspector" title="Collapse Inspector">&lt;|</button>
+    <button id="inspectorRestore" class="shell-panel-toggle panel-restore inspector-restore" aria-label="Collapse Inspector" title="Collapse Inspector" aria-controls="inspector" aria-expanded="true"><svg class="panel-toggle-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6"/></svg></button>
     <aside id="inspector" class="inspector" data-state="open" aria-label="Inspector"></aside>
   </div>
 

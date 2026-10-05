@@ -30,6 +30,7 @@ ck("Collapsed sidebar hides brand icon", '.app-shell[data-sidebar="collapsed"] .
 ck("Models headers grow with wrapped copy", ".models-page .card-header.models-card-header{" in css and "height:auto;" in css)
 ck("Project Orchestrator remains authoritative", "function qa31ProjectOrchestratorStrip" in app and "qa31ProjectOrchestrator" in app)
 
+ck("Tour model-page switcher is defined", "function qa31SetModelView(view)" in app and "qa31SetModelView('local')" in app and "qa31SetModelView('cloud')" in app)
 failed=[n for n,o in checks if not o]
 for n,o in checks: print(f"[{'PASS' if o else 'FAIL'}] {n}")
 if failed:

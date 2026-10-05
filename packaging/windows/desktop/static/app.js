@@ -2227,7 +2227,7 @@ let modelView=localStorage.getItem("onepane:models-view")||"local";
         '<button class="subtab '+(modelView==="cloud"?"active":"")+'" data-model-page="cloud" role="tab" aria-selected="'+(modelView==="cloud")+'">Cloud Models</button>'+
       '</div>';
     }
-    function setModelView(view){
+    function qa31SetModelView(view){
       modelView=view==="cloud"?"cloud":"local";
       localStorage.setItem("onepane:models-view",modelView);
       const existing=state.tabs.find(t=>t.route==="models");
@@ -2244,7 +2244,7 @@ let modelView=localStorage.getItem("onepane:models-view")||"local";
       if(!root||!modelsButton)return;
       root.querySelector(".model-nav-tree")?.remove();
       modelsButton.insertAdjacentHTML("afterend",modelNavTreeHTML());
-      $("[data-model-nav-view]",root).forEach(b=>b.onclick=e=>{e.stopPropagation();setModelView(b.dataset.modelNavView);});
+      $("[data-model-nav-view]",root).forEach(b=>b.onclick=e=>{e.stopPropagation();qa31SetModelView(b.dataset.modelNavView);});
     }
 
     const navBase=renderNav;
@@ -2255,7 +2255,7 @@ let modelView=localStorage.getItem("onepane:models-view")||"local";
     };
 
     function bindModelPageTabs(){
-      $("[data-model-page]").forEach(b=>b.onclick=()=>setModelView(b.dataset.modelPage));
+      $("[data-model-page]").forEach(b=>b.onclick=()=>qa31SetModelView(b.dataset.modelPage));
     }
     function cloudProviderCards(presets,connections){
       return presets.map(p=>{

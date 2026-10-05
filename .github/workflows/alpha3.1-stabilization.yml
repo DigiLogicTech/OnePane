@@ -3,8 +3,6 @@ name: Alpha 3.1 Source Native CI
 on:
   push:
     branches: [alpha3.1-orchestration]
-  pull_request:
-    branches: [alpha3-integration]
   workflow_dispatch:
 
 permissions:

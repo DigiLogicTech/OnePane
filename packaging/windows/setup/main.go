@@ -525,10 +525,84 @@ func uninstallProduct() error {
 	_ = runHidden("reg.exe", "delete", `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "/v", "OnePane", "/f")
 	_ = runHidden("reg.exe", "delete", `HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\OnePane`, "/f")
 	_ = os.Remove(filepath.Join(programData, "Microsoft", "Windows", "Start Menu", "Programs", "OnePane.lnk"))
-	// Delete after this running uninstaller exits. ProgramData is intentionally retained.
-	cmd := exec.Command("cmd.exe", "/c", "ping 127.0.0.1 -n 3 >nul & rmdir /s /q \""+installDir+"\"")
+
+	// Remove the application payload deterministically. Durable ProgramData is
+	// intentionally retained. When Setup is launched from outside installDir
+	// (CI, repair media, or an administrator copy), remove the directory
+	// synchronously and report a real failure if a lock remains. When the
+	// installed Setup is uninstalling itself, remove every sibling first and
+	// schedule only the final self/delete step after this process exits.
+	self, _ := os.Executable()
+	if !pathWithin(self, installDir) {
+		if err := removeTreeWithRetry(installDir, 20*time.Second); err != nil {
+			return fmt.Errorf("remove OnePane application directory: %w", err)
+		}
+		return nil
+	}
+	if err := removeInstallSiblings(installDir, self); err != nil {
+		return fmt.Errorf("remove OnePane application payload: %w", err)
+	}
+	cmd := exec.Command("cmd.exe", "/d", "/c",
+		"ping 127.0.0.1 -n 3 >nul & del /f /q \""+self+"\" >nul 2>&1 & rmdir /s /q \""+installDir+"\" >nul 2>&1")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	_ = cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("schedule OnePane uninstaller cleanup: %w", err)
+	}
+	return nil
+}
+
+func pathWithin(path, root string) bool {
+	pathAbs, err1 := filepath.Abs(path)
+	rootAbs, err2 := filepath.Abs(root)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	pathAbs = filepath.Clean(pathAbs)
+	rootAbs = filepath.Clean(rootAbs)
+	rel, err := filepath.Rel(rootAbs, pathAbs)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
+}
+
+func removeTreeWithRetry(path string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		lastErr = os.RemoveAll(path)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			if lastErr == nil {
+				lastErr = fmt.Errorf("directory still exists")
+			}
+			return lastErr
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func removeInstallSiblings(installDir, self string) error {
+	entries, err := os.ReadDir(installDir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	selfAbs, _ := filepath.Abs(self)
+	for _, entry := range entries {
+		path := filepath.Join(installDir, entry.Name())
+		pathAbs, _ := filepath.Abs(path)
+		if strings.EqualFold(filepath.Clean(pathAbs), filepath.Clean(selfAbs)) {
+			continue
+		}
+		if err := removeTreeWithRetry(path, 10*time.Second); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

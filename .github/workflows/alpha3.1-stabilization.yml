@@ -119,7 +119,7 @@ jobs:
           setup.write_text(text)
           PY
           go build -trimpath -ldflags "-H windowsgui $BUILD_LDFLAGS" -o dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe ./packaging/windows/setup
-          sha256sum dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe > dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe.sha256
+          (cd dist/windows-x64 && sha256sum "OnePane-$ONEPANE_VERSION-windows-x64-setup.exe" > "OnePane-$ONEPANE_VERSION-windows-x64-setup.exe.sha256")
           test -s dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe
           python3 - <<'PY'
           from pathlib import Path

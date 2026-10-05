@@ -22,6 +22,7 @@ setup=read('packaging/windows/setup/main.go')
 desktop=read('packaging/windows/desktop/main.go')
 deb=read('scripts/build-ubuntu-deb.sh')
 buildinfo=read('internal/buildinfo/buildinfo.go')
+workflow=read('.github/workflows/alpha3.1-stabilization.yml')
 m23=read('migrations/0023_alpha31_assistant_orchestrator.sql')
 m24=read('migrations/0024_alpha31_agents_components.sql')
 
@@ -74,6 +75,10 @@ ck('Tour distinguishes Colibri and OmniRoute', "title:'Colibri Large Model'" in 
 ck('Tour restores Project and panel context', all(x in app for x in ['projectID:typeof qa4ProjectHub','projectWorkspaceID:typeof qa4ProjectHub','inspectorWidth:state.inspectorWidth','drawerHeight:state.drawerHeight']))
 ck('shell polish remains present', 'Alpha 3.1 shell polish: docked panels' in css and '--inspector-open:360px' in css and ':root[data-theme="light"] { --good:#2d78a8; }' in css)
 ck('classic-script bootstrap remains enforced', '<script src="/chat-commands.js"></script>' in html and '<script src="/app.js"></script>' in html and 'type="module"' not in html)
+ck('native desktop emits UI-ready acknowledgement', 'onepane-ui-ready|' in app and 'ui-ready.txt' in desktop and 'onepane-ui-ready|' in desktop)
+ck('Windows setup supports noninteractive installed-product QA', all(x in setup for x in ['--silent','--no-launch','--skip-optional-runtime']))
+ck('CI includes Windows installed-product lifecycle', 'windows-installed-smoke:' in workflow and 'Install launch uninstall reinstall' in workflow and 'Assert-NativeUIReady' in workflow)
+ck('CI includes Ubuntu installed-package lifecycle', 'ubuntu-installed-smoke:' in workflow and 'systemctl is-active --quiet onepane.service' in workflow and '/var/lib/onepane/qa-preserve.txt' in workflow)
 
 failed=[name for name,ok in checks if not ok]
 for name,ok in checks: print(f"[{'PASS' if ok else 'FAIL'}] {name}")

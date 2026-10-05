@@ -2185,4 +2185,5 @@ renderNav=function(){
   }
 };
 
+window.ONEPANE_APPLY_RC3?.();
 bootOnePane();

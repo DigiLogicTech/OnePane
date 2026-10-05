@@ -805,6 +805,7 @@ function openNewTask(){
 }
 
 async function renderProjects(){
+  const qa31ProjectRenderEpoch=qa31ViewEpoch;
   $('#viewHost').innerHTML=`<section class="page">${pageHeader('Projects','Project configuration, applications, endpoints, workspace bindings and runtime state.','<button class="btn primary" id="configureProject">Configure project</button>')}<div id="projectsBody" class="table-shell"><div class="widget-body">Loading projects…</div></div></section>`;
   $('#configureProject').onclick=openProjectDialog;
   try{const rows=await apiRequest('/v1/projects?workspace_id='+encodeURIComponent(onepaneWorkspace));uiProjects=Array.isArray(rows)?rows:[];$('#projectsBody').innerHTML=`<table class="data-table"><thead><tr><th>Project</th><th>ID</th><th>Description</th><th>Status</th></tr></thead><tbody>${uiProjects.length?uiProjects.map(p=>`<tr><td><strong>${escapeHtml(p.name||'Project')}</strong></td><td>${escapeHtml(p.id||'')}</td><td>${escapeHtml(p.description||'')}</td><td><span class="pill ${p.status==='active'?'good':''}">${escapeHtml(p.status||'configured')}</span></td></tr>`).join(''):'<tr><td colspan="4" class="muted-cell">No projects configured.</td></tr>'}</tbody></table>`;}catch(ex){$('#projectsBody').innerHTML=`<div class="widget-body error">${escapeHtml(ex.message)}</div>`;}
@@ -1165,7 +1166,7 @@ function qa4RenderWorkspaceWidget(w,project,workspace){const edit=!!state.projec
 async function renderProjects(){
   $('#viewHost').innerHTML=`<section class="page">${pageHeader('Projects','Projects contain one or more working surfaces, sandbox policy, routing policy and governed model chat','<button class="btn primary" id="qa4NewProject">New project</button>')}<div class="project-hub-loading widget-body">Loading projects…</div></section>`;
   $('#qa4NewProject').onclick=openProjectDialog;
-  await qa4LoadProjectHub(true);const host=$('.project-hub-loading');
+  await qa4LoadProjectHub(true);if(qa31ProjectRenderEpoch!==qa31ViewEpoch||currentTab()?.route!=='projects')return;const host=$('.project-hub-loading');
   if(!qa4ProjectHub.projects.length){host.outerHTML='<div class="empty-state"><strong>No projects yet.</strong><br>Create a project to get a workspace, sandbox policy and model chat.</div>';return;}
   const p=qa4ActiveProject(),workspaces=qa4Workspaces(p),ws=qa4ActiveWorkspace();
   host.outerHTML=`<div class="project-hub"><aside class="project-rail"><div class="project-rail-title">Projects</div>${qa4ProjectHub.projects.map(x=>`<button class="project-choice ${x.id===p.id?'active':''}" data-qa4-project="${escapeHtml(x.id)}"><strong>${escapeHtml(x.name||'Project')}</strong><span>${escapeHtml(x.description||'')}</span></button>`).join('')}</aside><section class="project-main"><div class="project-toolbar"><div><h2>${escapeHtml(p.name||'Project')}</h2><div class="page-subtitle">${escapeHtml(p.description||'')}</div></div><div class="toolbar"><button class="btn" id="qa4ProjectSettings">Project settings</button><button class="btn" id="qa4AddWorkspace">Add workspace</button><button class="btn ${state.projectWorkspaceEdit?'primary':''}" id="qa4EditWorkspace">${state.projectWorkspaceEdit?'Done':'Edit layout'}</button>${state.projectWorkspaceEdit?'<button class="btn" id="qa4AddComponent">Add component</button>':''}</div></div><div class="workspace-tabs">${workspaces.map(x=>`<button class="workspace-tab ${x.id===ws.id?'active':''}" data-qa4-workspace="${escapeHtml(x.id)}">${escapeHtml(x.name)}</button>`).join('')}</div><div class="workspace-context-bar"><div><strong>${escapeHtml(ws.name)}</strong><span class="list-meta"> · project sandbox ${qa4ProjectSandbox(p).internet?'internet allowed':'internet blocked'} · ${escapeHtml(titleCase(ws.orchestration?.mode||'supervisor'))}</span></div><button class="btn" id="qa4WorkspaceSettings">Configure workspace</button></div><div class="workspace-grid ${state.projectWorkspaceEdit?'editing':''}" id="qa4WorkspaceGrid">${(ws.widgets||[]).map(w=>qa4RenderWorkspaceWidget(w,p,ws)).join('')}</div><section class="workspace-chat-panel"><div class="card-header"><div><div class="card-title">${escapeHtml(ws.name)} chat</div><div class="list-meta">Governed interactive task · model/agent routing comes from workspace configuration</div></div></div><div class="workspace-chat-history" id="qa4ChatHistory"></div><form id="qa4WorkspaceChat" class="workspace-chat-composer"><textarea id="qa4ChatInput" rows="2" placeholder="Ask the models assigned to this workspace…"></textarea><button class="btn primary">Send</button></form></section></section></div>`;
@@ -1239,7 +1240,24 @@ async function renderIntegrations(){
 
 function attentionFromLiveData(){const out=[];for(const t of liveOps.tasks){const st=String(t.state||'').toLowerCase();if(st==='waiting_approval')out.push({id:`task-${t.id}-approval`,title:'Approval required',detail:t.objective||t.id,route:'tasks',severity:'warn'});else if(st==='blocked'||st==='failed')out.push({id:`task-${t.id}-${st}`,title:`Task ${st}`,detail:t.objective||t.id,route:'tasks',severity:'bad'});}for(const p of liveOps.providers){const st=String(p.status||'').toLowerCase();if(['degraded','rate_limited','expired','reauth_required','unavailable'].includes(st))out.push({id:`provider-${p.id}-${st}`,title:`Cloud provider ${st.replaceAll('_',' ')}`,detail:p.display_name||p.provider||p.id,route:'models',severity:st==='degraded'||st==='rate_limited'?'warn':'bad'});}for(const n of liveOps.nodes){const st=String(n.status||n.state||'').toLowerCase();if(['offline','failed','unavailable','stale'].includes(st))out.push({id:`node-${n.id||n.node_id}-${st}`,title:'Node unavailable',detail:n.display_name||n.node_id||n.id,route:'nodes',severity:'bad'});}const failure=/failed|error|blocked|approval_required|degraded|unavailable|rate_limited|recovery_required/i;for(const e of [...liveOps.events].reverse()){const type=String(e.event_type||'');if(!failure.test(type))continue;out.push({id:`event-${e.sequence||e.id}`,title:eventLabel(e),detail:`${e.aggregate_type||''} ${e.aggregate_id||''}`.trim(),route:type.includes('provider')?'models':type.includes('node')?'nodes':type.includes('task')?'tasks':'operations',severity:/failed|error|blocked|unavailable|recovery/i.test(type)?'bad':'warn'});if(out.length>=20)break;}const seen=new Set();return out.filter(x=>x.id&&!seen.has(x.id)&&(seen.add(x.id),true)).slice(0,20);}
 
-function renderActiveView(){const t=currentTab();if(!t)return;if(QA4_ROUTE_ALIASES[t.route]){t.route=QA4_ROUTE_ALIASES[t.route];t.title=pages[t.route]?.title||t.route;persist();}if(t.state==='suspended')t.state='active';const renderers={operations:renderOperations,tasks:renderTasks,projects:renderProjects,models:renderModels,nodes:renderNodes,agents:renderAgents,routines:renderTasks,integrations:renderIntegrations,secrets:renderSecrets,evidence:()=>renderPlaceholder('Evidence / Audit','Event Ledger, Artifacts, Observations, Verifications, Operations and CapabilityLease activity.'),settings:renderSettings};(renderers[t.route]||renderOperations)();}
+let qa31ViewEpoch=0;
+async function renderActiveView(){
+  const epoch=++qa31ViewEpoch;
+  const t=currentTab();if(!t)return;
+  if(QA4_ROUTE_ALIASES[t.route]){t.route=QA4_ROUTE_ALIASES[t.route];t.title=pages[t.route]?.title||t.route;persist();}
+  if(t.state==='suspended')t.state='active';
+  const route=t.route;
+  const renderers={operations:renderOperations,tasks:renderTasks,projects:renderProjects,models:renderModels,nodes:renderNodes,agents:renderAgents,routines:renderTasks,integrations:renderIntegrations,secrets:renderSecrets,evidence:()=>renderPlaceholder('Evidence / Audit','Event Ledger, Artifacts, Observations, Verifications, Operations and CapabilityLease activity.'),settings:renderSettings};
+  try{await Promise.resolve((renderers[route]||renderOperations)());}
+  finally{
+    const host=$('#viewHost');
+    if(epoch===qa31ViewEpoch){if(host)host.dataset.renderedRoute=route;}
+    else if(currentTab()?.route!==route){
+      const active=currentTab()?.route;
+      if(active&&host?.dataset?.renderedRoute!==active)queueMicrotask(()=>{if(currentTab()?.route===active)renderActiveView();});
+    }
+  }
+}
 
 /* === QA5 / alpha.2 final product pass: global settings, packs, model Testbed and runtime strategies === */
 const QA5_PREFS_KEY='onepane:global-preferences:v1';
@@ -2001,7 +2019,20 @@ function qa31TourAssistantPreview(){
 function qa31CloseTourAssistantPreview(){
   if($('.qa31-assistant-tour-preview'))$('#overlayRoot').innerHTML='';
 }
+function qa31WaitForTourTarget(step,timeout=2200){
+  if(!step?.target)return Promise.resolve(null);
+  const started=performance.now();
+  return new Promise(resolve=>{
+    const tick=()=>{
+      let target=null;try{target=document.querySelector(step.target)}catch{}
+      if(target||performance.now()-started>=timeout)return resolve(target);
+      requestAnimationFrame(tick);
+    };
+    tick();
+  });
+}
 function startProductTour({replay=false}={}){
+  document.documentElement.dataset.productTour='active';
   document.querySelector('#qa31TourRoot')?.remove();
   qa31CloseTourAssistantPreview();
   if(replay)localStorage.removeItem(TOUR_KEY);
@@ -2021,18 +2052,19 @@ function startProductTour({replay=false}={}){
   const steps=[
     {title:'Welcome to OnePane',text:'OnePane coordinates Projects, Workspaces, Tasks, models, Agent Profiles, tools and compute while keeping authority in the control plane.'},
     {title:'OnePane Assistant',text:'The global Assistant is your OnePane-facing layer. Global context stays global; Project-specific work is explicitly handed to that Project’s Orchestrator.',target:'.qa31-assistant-tour-preview .qa31-assistant',prepare:async()=>qa31TourAssistantPreview()},
-    {title:'Projects',text:'Projects are durable scopes containing their own Workspaces, policy, runtime state and work.',target:'[data-route="projects"]',prepare:async()=>{qa31CloseTourAssistantPreview();openRoute('projects');await new Promise(r=>setTimeout(r,120));}},
-    {title:'Project Orchestrator',text:'Each Project has one logical Orchestrator coordinating all of its Workspaces and Tasks. It is not a permanently resident model and cannot bypass approvals, routing or sandbox policy.',target:'#qa31ProjectOrchestrator',prepare:async()=>{qa31CloseTourAssistantPreview();openRoute('projects');await new Promise(r=>setTimeout(r,180));}},
-    {title:'Workspace execution',text:'Workspaces remain authoritative for Direct, Team or Council execution, model routing, fallback, compute preference and remote-access policy.',target:'[data-qa7-chat-mode]',prepare:async()=>{openRoute('projects');await new Promise(r=>setTimeout(r,150));}},
-    {title:'Follow provenance',text:'Follow exposes the real chain: Assistant → Project Orchestrator → Task → Workspace → Direct/Team/Council → Agent Profile → Model → Node. It follows events and snapshots, not model narration.',target:'.qa6-follow',prepare:async()=>{openRoute('projects');await new Promise(r=>setTimeout(r,120));}},
-    {title:'Operations',text:'Operations shows active work, node/provider health, attention items and event activity. View-all actions open real destinations.',target:'[data-route="operations"]',prepare:async()=>{openRoute('operations');await new Promise(r=>setTimeout(r,100));}},
-    {title:'Models and Hot Swap',text:'Models owns runtime strategy, qualification and resource-aware placement. Managed Hot Swap changes model residency without changing durable Task identity.',target:'[data-route="models"]',prepare:async()=>{openRoute('models');await new Promise(r=>setTimeout(r,180));}},
-    {title:'Colibri Large Model',text:'Colibri is an optional locally managed large-model runtime. OnePane downloads the platform-specific signed release, verifies SHA-256, and keeps its lifecycle independent from OnePane health.',target:'.colibri-separate',prepare:async()=>{openRoute('models');await new Promise(r=>setTimeout(r,180));}},
-    {title:'OmniRoute',text:'OmniRoute is different: it is an optional external routing/provider connection, not a locally installed OnePane runtime.',target:'.omniroute-separate',prepare:async()=>{openRoute('models');await new Promise(r=>setTimeout(r,140));}},
-    {title:'Agents',text:'Agents is built around Profiles, real Sessions, Teams and Councils. Profiles influence reasoning but never grant tools, secrets, network or approval authority.',target:'[data-route="agents"]',prepare:async()=>{openRoute('agents');await new Promise(r=>setTimeout(r,120));}},
+    {title:'Projects',text:'Projects are durable scopes containing their own Workspaces, policy, runtime state and work.',target:'[data-route="projects"]',prepare:async()=>{qa31CloseTourAssistantPreview();openRoute('projects');}},
+    {title:'Project Orchestrator',text:'Each Project has one logical Orchestrator coordinating all of its Workspaces and Tasks. It is not a permanently resident model and cannot bypass approvals, routing or sandbox policy.',target:'#qa31ProjectOrchestrator',prepare:async()=>{qa31CloseTourAssistantPreview();openRoute('projects');}},
+    {title:'Workspace execution',text:'Workspaces remain authoritative for Direct, Team or Council execution, model routing, fallback, compute preference and remote-access policy.',target:'[data-qa7-chat-mode]',prepare:async()=>{openRoute('projects');}},
+    {title:'Follow provenance',text:'Follow exposes the real chain: Assistant → Project Orchestrator → Task → Workspace → Direct/Team/Council → Agent Profile → Model → Node. It follows events and snapshots, not model narration.',target:'.qa6-follow',prepare:async()=>{openRoute('projects');}},
+    {title:'Operations',text:'Operations shows active work, node/provider health, attention items and event activity. View-all actions open real destinations.',target:'[data-route="operations"]',prepare:async()=>{openRoute('operations');}},
+    {title:'Local Models',text:'Local Models owns hardware detection, downloads, qualification, runtime strategy, Hot Swap and the managed Colibri lifecycle.',target:'[data-model-nav-view="local"]',prepare:async()=>{qa31SetModelView('local');}},
+    {title:'Colibri Large Model',text:'Colibri is an optional locally managed large-model runtime. OnePane verifies the platform release and keeps install, repair, update and removal independent from OnePane health.',target:'.colibri-separate',prepare:async()=>{qa31SetModelView('local');}},
+    {title:'Cloud Models',text:'Cloud Models contains direct provider connections and OmniRoute without mixing provider connections into the local runtime lifecycle.',target:'[data-model-nav-view="cloud"]',prepare:async()=>{qa31SetModelView('cloud');}},
+    {title:'OmniRoute',text:'OmniRoute is an external routing/provider connection. Probe, connect and revoke use provider APIs; it is not a locally installed component.',target:'.omniroute-separate',prepare:async()=>{qa31SetModelView('cloud');}},
+    {title:'Agents',text:'Agents is built around Profiles, real Sessions, Teams and Councils. Profiles influence reasoning but never grant tools, secrets, network or approval authority.',target:'[data-route="agents"]',prepare:async()=>{openRoute('agents');}},
     {title:'Attention and approvals',text:'Operations that need human authority surface as attention/approval work without silently changing policy.',target:'#attentionButton'},
-    {title:'Inspector',text:'The resizable right dock shows contextual details without floating over your work.',target:'#inspector',prepare:async()=>{setInspectorOpen(true);await new Promise(r=>setTimeout(r,80));}},
-    {title:'Logs and observability',text:'Logs, Events, Watchdog, Metrics, Evidence and Terminal live in the bottom dock. Collapsing it releases the page space immediately.',target:'#bottomDrawer',prepare:async()=>{setDrawerOpen(true);await new Promise(r=>setTimeout(r,80));}},
+    {title:'Inspector',text:'The resizable right dock shows contextual details without floating over your work.',target:'#inspector',prepare:async()=>{setInspectorOpen(true);}},
+    {title:'Logs and observability',text:'Logs, Events, Watchdog, Metrics, Evidence and Terminal live in the bottom dock. Collapsing it releases the page space immediately.',target:'#bottomDrawer',prepare:async()=>{setDrawerOpen(true);}},
     {title:'Resource-aware tabs',text:'Inactive UI tabs may suspend rendering, but durable backend Tasks continue unless their own policy or state says otherwise.',target:'#tabStrip'},
     {title:'Ask OnePane or run a command',text:'Ctrl+K opens the same OnePane Assistant surface for natural-language help, navigation and explicit governed execution.',target:'#commandButton'},
     {title:'You’re ready',text:'Assistant → Project Orchestrator → Workspace → Direct / Team / Council → Agents / Models / Tools / Nodes. Each layer has a distinct responsibility and authority boundary.'}
@@ -2046,7 +2078,7 @@ function startProductTour({replay=false}={}){
     if(typeof qa4ProjectHub!=='undefined'){qa4ProjectHub.activeProjectID=snapshot.projectID;qa4ProjectHub.activeWorkspaceID=snapshot.projectWorkspaceID}
     $('#app').dataset.sidebar=state.sidebar;$('#app').dataset.inspector=state.inspector;$('#bottomDrawer').dataset.state=state.drawer;applyInspectorWidth();document.documentElement.style.setProperty('--drawer',state.drawer==='open'?`${state.drawerHeight}px`:'0px');persist();renderTabs();renderActiveView();syncPanelRestoreButtons();window.scrollTo(snapshot.scrollX,snapshot.scrollY);
   };
-  const finish=(completed=true)=>{if(closing)return;closing=true;clearTarget();qa31CloseTourAssistantPreview();host.classList.add('tour-transitioning');setTimeout(()=>{host.remove();restore();if(completed)localStorage.setItem(TOUR_KEY,TOUR_COMPLETE_VALUE);},120)};
+  const finish=(completed=true)=>{if(closing)return;closing=true;clearTarget();qa31CloseTourAssistantPreview();host.classList.add('tour-transitioning');setTimeout(()=>{host.remove();delete document.documentElement.dataset.productTour;restore();if(completed)localStorage.setItem(TOUR_KEY,TOUR_COMPLETE_VALUE);},120)};
   const resolveTarget=step=>{try{return step.target?document.querySelector(step.target):null}catch{return null}};
   const place=target=>{
     const margin=14,w=Math.min(390,innerWidth-24),h=card.offsetHeight||270;
@@ -2062,8 +2094,7 @@ function startProductTour({replay=false}={}){
   const render=async()=>{
     host.classList.add('tour-transitioning');clearTarget();
     const step=steps[index];if(step.prepare)await step.prepare();
-    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
-    currentTarget=resolveTarget(step);if(currentTarget){currentTarget.classList.add('tour-target');currentTarget.scrollIntoView({block:'nearest',inline:'nearest'})}
+    currentTarget=await qa31WaitForTourTarget(step);if(currentTarget){currentTarget.classList.add('tour-target');currentTarget.scrollIntoView({block:'nearest',inline:'nearest'})}
     kicker.textContent=`Tour · ${index+1} / ${steps.length}`;title.textContent=step.title;copy.textContent=step.text;back.disabled=index===0;next.textContent=index===steps.length-1?'Finish':'Next';place(currentTarget);
     requestAnimationFrame(()=>host.classList.remove('tour-transitioning'));
   };
@@ -2185,5 +2216,229 @@ renderNav=function(){
   }
 };
 
-window.ONEPANE_APPLY_RC3?.();
+/* === Alpha 3.1 consolidated UI authority === */
+let modelView=localStorage.getItem("onepane:models-view")||"local";
+
+    function currentRoute(){return currentTab()?.route||"operations";}
+    function routeIs(route){return currentRoute()===route;}
+    function modelPageTabs(){
+      return '<div class="models-section-tabs" role="tablist" aria-label="Models pages">'+
+        '<button class="subtab '+(modelView==="local"?"active":"")+'" data-model-page="local" role="tab" aria-selected="'+(modelView==="local")+'">Local Models</button>'+
+        '<button class="subtab '+(modelView==="cloud"?"active":"")+'" data-model-page="cloud" role="tab" aria-selected="'+(modelView==="cloud")+'">Cloud Models</button>'+
+      '</div>';
+    }
+    function setModelView(view){
+      modelView=view==="cloud"?"cloud":"local";
+      localStorage.setItem("onepane:models-view",modelView);
+      const existing=state.tabs.find(t=>t.route==="models");
+      if(existing)activateTab(existing.id);else openRoute("models");
+    }
+    function modelNavTreeHTML(){
+      return '<div class="model-nav-tree" aria-label="Model pages">'+
+        '<button class="model-nav-child '+(modelView==="local"?"active":"")+'" data-model-nav-view="local"><span class="project-nav-branch" aria-hidden="true"></span><span>Local Models</span></button>'+
+        '<button class="model-nav-child '+(modelView==="cloud"?"active":"")+'" data-model-nav-view="cloud"><span class="project-nav-branch" aria-hidden="true"></span><span>Cloud Models</span></button>'+
+      '</div>';
+    }
+    function renderModelNavTree(){
+      const root=$("#primaryNav"),modelsButton=root?.querySelector('[data-route="models"]');
+      if(!root||!modelsButton)return;
+      root.querySelector(".model-nav-tree")?.remove();
+      modelsButton.insertAdjacentHTML("afterend",modelNavTreeHTML());
+      $("[data-model-nav-view]",root).forEach(b=>b.onclick=e=>{e.stopPropagation();setModelView(b.dataset.modelNavView);});
+    }
+
+    const navBase=renderNav;
+    renderNav=function(){
+      navBase();
+      renderModelNavTree();
+      syncPanelRestoreButtons();
+    };
+
+    function bindModelPageTabs(){
+      $("[data-model-page]").forEach(b=>b.onclick=()=>setModelView(b.dataset.modelPage));
+    }
+    function cloudProviderCards(presets,connections){
+      return presets.map(p=>{
+        const match=connections.find(c=>String(c.provider||"")===String(p.id)||String(c.display_name||"").toLowerCase()===String(p.display_name||"").toLowerCase());
+        const connected=match&&String(match.status||"").toLowerCase()!=="revoked";
+        const oauth=p.auth_type==="oauth2-pkce";
+        const action=connected
+          ? '<button class="btn danger" data-revoke-cloud="'+escapeHtml(match.id)+'">Revoke</button>'
+          : oauth
+            ? '<button class="btn" data-oauth-info="'+escapeHtml(p.id)+'">Connect OAuth</button>'
+            : '<button class="btn primary" data-connect-cloud="'+escapeHtml(p.id)+'">Connect</button>';
+        return '<article class="provider-tile">'+
+          '<div class="provider-tile-head"><strong>'+escapeHtml(p.display_name)+'</strong><span class="pill '+(connected?"good":"")+'">'+
+          (connected?(oauth?"OAuth connected":"Connected"):(match?.status==="revoked"?"Revoked":"Available"))+'</span></div>'+
+          '<p>'+escapeHtml(p.description||"")+'</p>'+
+          '<div class="provider-meta"><span>'+(oauth?"OAuth":escapeHtml(p.auth_type||"API key"))+'</span><span>'+escapeHtml(p.cost_hint||"")+'</span></div>'+
+          '<div class="toolbar">'+action+'</div></article>';
+      }).join("");
+    }
+    function bindCloudCards(presets){
+      $("[data-revoke-cloud]").forEach(b=>b.onclick=()=>qa4RevokeProvider(b.dataset.revokeCloud));
+      $("[data-connect-cloud]").forEach(b=>b.onclick=()=>qa4ConnectCloudProvider(b.dataset.connectCloud));
+      $("[data-oauth-info]").forEach(b=>b.onclick=()=>{
+        const preset=presets.find(p=>String(p.id)===b.dataset.oauthInfo);
+        openModal("OAuth connection",'<div class="widget-body"><strong>'+escapeHtml(preset?.display_name||"OAuth provider")+'</strong><p>When an OAuth broker is available, OnePane records the connection here and exposes status and revoke controls. This alpha will not fake an OAuth consent flow.</p></div>');
+      });
+    }
+    async function revokeOmni(id){
+      if(!id)return;
+      try{
+        await apiRequest("/v1/providers/"+encodeURIComponent(id)+"/revoke",{method:"POST",body:"{}"});
+        notice("OmniRoute connection revoked.");
+        if(routeIs("models"))renderModels();
+      }catch(ex){notice(ex.message,"bad");}
+    }
+
+    async function renderLocal(catalog,deployments,components,runtimePref){
+      const colibri=components?.colibri||{};
+      const stateName=String(colibri.state||"not_installed");
+      const pillClass=["running","installed_disabled"].includes(stateName)?"good":(["failed","degraded","interrupted"].includes(stateName)?"warn":"");
+      $("#qa5ModelsRoot").innerHTML=
+        '<div class="models-single-column">'+
+          '<section class="panel-card models-local-card">'+
+            '<div class="card-header models-card-header">'+
+              '<div class="models-header-copy"><div class="card-title">Local models</div><div class="list-meta">Managed Hot Swap for ordinary models; Colibri Large Model for compatible sparse/MoE models spanning VRAM + RAM + NVMe.</div></div>'+
+              '<div class="header-actions qa31-local-models-controls"><button class="btn qa31-detect-hardware" id="detectLocal">Detect hardware</button>'+
+                '<select class="qa31-runtime-strategy" id="qa5RuntimeStrategy">'+
+                  '<option value="auto" '+(runtimePref==="auto"?"selected":"")+'>Auto</option>'+
+                  '<option value="hot-swap" '+(runtimePref==="hot-swap"?"selected":"")+'>Managed Hot Swap</option>'+
+                  '<option value="colibri" '+(runtimePref==="colibri"?"selected":"")+'>Colibri Large Model</option>'+
+                '</select></div>'+
+            '</div>'+
+            '<div id="localResult" class="model-result"></div>'+
+            '<div class="local-managed-section"><div class="subsection-title">Installed / registered</div><div id="qa5ManagedModels" class="model-tile-scroll"></div></div>'+
+            '<div class="subsection-title">Available catalogue</div><input id="qa4LocalFilter" class="catalogue-filter" placeholder="Filter local models…"><div id="qa4LocalModels" class="model-tile-scroll"></div>'+
+          '</section>'+
+          '<section class="panel-card colibri-separate">'+
+            '<div class="card-header models-card-header"><div class="models-header-copy"><div class="card-title">Colibri Large Model</div><div class="list-meta">Optional Apache-2.0 backend v1.12.1 for very large sparse/MoE models.</div></div><span class="pill '+pillClass+'">'+escapeHtml(titleCase(stateName.replaceAll("_"," ")))+'</span></div>'+
+            '<div class="widget-body"><p>OnePane remains scheduler/admission authority; Colibri manages model placement across VRAM, RAM and NVMe. Registered models remain quarantined until Agent Check/Testbed qualification.</p>'+
+              '<div class="toolbar" id="qa31ColibriActions">'+qa31ColibriActionButtons(colibri)+(colibri.installed?'<button class="btn" id="qa5ColibriRegister">Register model folder</button>':"")+'</div>'+
+              '<div id="qa5ColibriInlineStatus" class="page-subtitle">'+
+                (colibri.last_error?'<span class="warn">'+escapeHtml(colibri.last_error)+'</span>':(colibri.installed?"Runtime installed. Use Enable/Disable for availability; Update/Repair/Remove are lifecycle operations.":"Install the verified runtime before registering compatible models."))+
+              '</div>'+
+            '</div>'+
+          '</section>'+
+        '</div>';
+
+      $("#detectLocal").onclick=detectLocalQA;
+      $("#qa5RuntimeStrategy").onchange=e=>qa5SavePrefs({default_runtime:e.target.value});
+      $("[data-qa31-colibri-action]").forEach(b=>b.onclick=()=>qa5ComponentAction("colibri",b.dataset.qa31ColibriAction,"#qa5ColibriInlineStatus"));
+      $("#qa5ColibriRegister")?.addEventListener("click",qa5RegisterColibri);
+
+      const drawManaged=()=>{
+        $("#qa5ManagedModels").innerHTML=deployments.length?deployments.map((d,i)=>{
+          const ctx=d.context_max_verified?(formatContextQA(d.context_max_verified)+" verified context"):(d.context_max_reported?(formatContextQA(d.context_max_reported)+" reported context"):"context pending qualification");
+          return '<article class="model-tile inspectable" data-model-inspect="'+i+'"><div><strong>'+escapeHtml(d.display_name||d.model_ref||"Local model")+'</strong>'+
+            '<div class="list-meta">'+escapeHtml(d.runtime_name||d.runtime_backend||"managed")+' '+escapeHtml(d.runtime_version||"")+' · '+escapeHtml(d.status||"unknown")+' · admission '+escapeHtml(d.admission_status||"pending")+'</div>'+
+            '<div class="list-meta">'+escapeHtml(d.quantization||"")+' · '+ctx+'</div></div>'+
+            '<div class="toolbar"><button class="btn" data-model-spec="'+i+'">Spec sheet</button><button class="btn primary" data-agent-check="'+i+'">Agent Check</button></div></article>';
+        }).join(""):'<div class="empty-state compact">No managed local models yet.</div>';
+        $("[data-model-spec]").forEach(b=>b.onclick=e=>{e.stopPropagation();qa5InspectModel(deployments[Number(b.dataset.modelSpec)]);});
+        $("[data-agent-check]").forEach(b=>b.onclick=e=>{e.stopPropagation();qa5AgentCheck(deployments[Number(b.dataset.agentCheck)]);});
+        $("[data-model-inspect]").forEach(el=>el.onclick=e=>{if(e.target.closest("button"))return;qa5InspectModel(deployments[Number(el.dataset.modelInspect)]);});
+      };
+      drawManaged();
+
+      const drawLocal=()=>{
+        const q=($("#qa4LocalFilter").value||"").toLowerCase();
+        const rows=catalog.filter(m=>JSON.stringify(m).toLowerCase().includes(q));
+        $("#qa4LocalModels").innerHTML=rows.length?rows.map((m,i)=>{
+          const quant=Array.isArray(m.quantizations)?m.quantizations.join(", "):(m.quantization||"llama.cpp");
+          return '<article class="model-tile"><div><strong>'+escapeHtml(m.display_name||m.name||m.model_ref||"Model")+'</strong>'+
+            '<div class="list-meta">'+escapeHtml(String(m.parameter_count||m.parameter_scale||"—"))+' · '+formatContextQA(m.max_context_tokens||m.context_tokens)+' context</div>'+
+            '<div class="list-meta">'+escapeHtml(quant)+'</div></div><button class="btn primary" data-download-model="'+i+'">Download</button></article>';
+        }).join(""):'<div class="empty-state compact">No local models match this filter.</div>';
+        $("[data-download-model]").forEach(b=>b.onclick=()=>qa4InstallLocalModel(rows[Number(b.dataset.downloadModel)]));
+      };
+      $("#qa4LocalFilter").oninput=drawLocal;
+      drawLocal();
+      queueMicrotask(()=>{try{qa8ManagedDeployments=deployments;qa8DecorateModels();}catch{}});
+    }
+
+    async function renderCloud(presets,connections){
+      const cloud=presets.filter(p=>p.id!=="omniroute");
+      const omni=connections.find(p=>String(p.provider||"").toLowerCase()==="omniroute"&&String(p.status||"").toLowerCase()!=="revoked");
+      const saved=localStorage.getItem("onepane:omniroute-url")||omni?.connection?.base_url||"http://127.0.0.1:20128/v1";
+      $("#qa5ModelsRoot").innerHTML=
+        '<div class="models-single-column">'+
+          '<section class="panel-card cloud-provider-card">'+
+            '<div class="card-header models-card-header"><div class="models-header-copy"><div class="card-title">Cloud providers</div><div class="list-meta">Direct cloud model/API connections. These remain separate from OmniRoute.</div></div><div class="header-actions"><button class="btn" id="qa4OpenSecrets">API keys</button></div></div>'+
+            '<div id="qa4CloudProviders" class="provider-tile-grid">'+cloudProviderCards(cloud,connections)+'</div>'+
+          '</section>'+
+          '<section class="panel-card omniroute-separate">'+
+            '<div class="card-header models-card-header"><div class="models-header-copy"><div class="card-title">OmniRoute</div><div class="list-meta">Optional external provider/router connection. It is not installed or managed as a local runtime.</div></div><span class="pill '+(omni?"good":"")+'">'+(omni?"Connected":"Optional")+'</span></div>'+
+            '<div class="widget-body omni-provider-layout">'+
+              '<label>Gateway URL<input id="omniUrl" value="'+escapeHtml(saved)+'"></label>'+
+              '<label>Gateway credential<select id="omniCredential"><option value="">No gateway credential</option></select></label>'+
+              '<label class="inline-check"><input id="omniStrict" type="checkbox" checked> Require verified strict zero-cost</label>'+
+              '<div class="toolbar"><button class="btn" id="omniProbe">Probe</button><button class="btn primary" id="omniConnect" '+(omni?"":"disabled")+'>'+(omni?"Reconnect":"Connect")+'</button>'+(omni?'<button class="btn danger" id="qa31OmniRevoke">Revoke</button>':"")+'</div>'+
+              '<div id="omniResult" class="page-subtitle">'+(omni?'<span class="good">Connected</span> · '+escapeHtml(omni.status||"configured"):"Probe the gateway before connecting. OmniRoute failure never makes OnePane unhealthy.")+'</div>'+
+            '</div>'+
+          '</section>'+
+        '</div>';
+
+      $("#qa4OpenSecrets").onclick=()=>openRoute("secrets");
+      bindCloudCards(cloud);
+      $("#omniProbe").onclick=()=>omniQA(false);
+      $("#omniConnect").onclick=()=>omniQA(true);
+      $("#qa31OmniRevoke")?.addEventListener("click",()=>revokeOmni(omni?.id));
+      $("#omniUrl").addEventListener("change",()=>localStorage.setItem("onepane:omniroute-url",$("#omniUrl").value.trim()));
+      populateOmniCredentials();
+    }
+
+    renderModels=async function(){
+      const epoch=qa31ViewEpoch;
+      const view=modelView==="cloud"?"cloud":"local";
+      const subtitle=view==="local"?"Local model downloads, qualification, runtime strategy and managed Colibri lifecycle.":"Direct cloud providers and optional OmniRoute provider routing.";
+      $("#viewHost").innerHTML='<section class="page models-page">'+pageHeader("Models",subtitle,'<button class="btn" id="modelSettings">Local AI settings</button>')+modelPageTabs()+'<div id="qa5ModelsRoot" class="widget-body">Loading '+(view==="local"?"local models":"cloud providers")+'…</div></section>';
+      $("#modelSettings").onclick=()=>openRoute("settings");
+      bindModelPageTabs();
+      const qs=encodeURIComponent(onepaneWorkspace);
+      try{
+        if(view==="local"){
+          const data=await Promise.all([apiRequest("/v1/local-ai/catalog"),qa5LoadManagedDeployments(),qa5ComponentStatus()]);
+          if(epoch!==qa31ViewEpoch||!routeIs("models")||modelView!=="local")return;
+          qa4ProjectHub.catalog=Array.isArray(data[0])?data[0]:[];
+          await renderLocal(qa4ProjectHub.catalog,Array.isArray(data[1])?data[1]:[],data[2]||{},qa5Prefs().default_runtime||"auto");
+        }else{
+          const data=await Promise.all([providerPresetsQA(),apiRequest("/v1/providers?workspace_id="+qs)]);
+          if(epoch!==qa31ViewEpoch||!routeIs("models")||modelView!=="cloud")return;
+          qa4ProjectHub.providerPresets=Array.isArray(data[0])?data[0]:[];
+          qa4ProjectHub.providers=Array.isArray(data[1])?data[1]:[];
+          await renderCloud(qa4ProjectHub.providerPresets,qa4ProjectHub.providers);
+        }
+        bindViewActions($("#viewHost"));
+      }catch(ex){
+        if(epoch===qa31ViewEpoch&&routeIs("models")){
+          const root=$("#qa5ModelsRoot");if(root)root.innerHTML='<div class="error">'+escapeHtml(ex.message)+'</div>';
+        }
+      }
+    };
+
+        renderActiveView=async function(){
+      const epoch=++qa31ViewEpoch;
+      const t=currentTab();if(!t)return;
+      if(QA4_ROUTE_ALIASES[t.route]){t.route=QA4_ROUTE_ALIASES[t.route];t.title=pages[t.route]?.title||t.route;persist();}
+      if(t.state==="suspended")t.state="active";
+      const route=t.route;
+      const renderers={
+        operations:renderOperations,tasks:renderTasks,projects:renderProjects,models:renderModels,nodes:renderNodes,agents:renderAgents,
+        routines:renderTasks,integrations:renderIntegrations,secrets:renderSecrets,
+        evidence:()=>renderPlaceholder("Evidence / Audit","Event Ledger, Artifacts, Observations, Verifications, Operations and CapabilityLease activity."),
+        settings:renderSettings
+      };
+      try{await Promise.resolve((renderers[route]||renderOperations)());}
+      finally{
+        const host=$("#viewHost");
+        if(epoch===qa31ViewEpoch){
+          if(host)host.dataset.renderedRoute=route;
+        }else if(currentRoute()!==route){
+          const active=currentRoute();
+          if(host?.dataset?.renderedRoute!==active)queueMicrotask(()=>{if(currentRoute()===active)renderActiveView();});
+        }
+      }
+    };
 bootOnePane();

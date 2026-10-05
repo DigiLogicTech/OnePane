@@ -789,7 +789,7 @@ body { background:var(--app-gradient),var(--bg); }
 .orchestrator-metrics strong{color:var(--text);margin-left:4px}
 .agent-profile-card .profile-instructions{max-height:220px;overflow:auto;white-space:pre-wrap}
 .assistant-project-answer{margin-top:10px;min-height:44px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--panel-2)}
-#qa31TourRoot{z-index:1200}
+#qa31TourRoot{z-index:1300}
 #qa31TourRoot.tour-transitioning .tour-card{opacity:0;transform:translateY(4px)}
 #qa31TourRoot .tour-card{transition:opacity 120ms ease,transform 120ms ease}
 .tour-target{position:relative;z-index:1201;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 70%,transparent),0 0 0 9999px rgba(0,0,0,.42)!important}
@@ -955,8 +955,8 @@ body { background:var(--app-gradient),var(--bg); }
   position:fixed;
   inset:0;
   pointer-events:none;
-  background:rgba(5,8,14,.54);
-  backdrop-filter:blur(1px);
+  background:transparent;
+  backdrop-filter:none;
 }
 #qa31TourRoot .tour-card{
   visibility:visible;
@@ -969,7 +969,7 @@ body { background:var(--app-gradient),var(--bg); }
 }
 
 
-/* === Alpha 3.1 RC3 visual corrections === */
+/* === Alpha 3.1 consolidated shell / tour / Models === */
 .overlay{backdrop-filter:none!important;}
 .command-palette{
   width:min(760px,calc(100vw - 28px));

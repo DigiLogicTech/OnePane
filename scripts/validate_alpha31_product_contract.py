@@ -54,6 +54,9 @@ ck('Profiles affect Team/Council seats without authority', 'Kind:"agent_profile"
 ck('visible modes are Direct Team Council', "const qa8VisibleModes=['direct','team','council']" in app)
 ck('new Workspace defaults expose only Direct Team Council', "['direct','team','council']" in app and 'Default Team/Council seats' in app)
 ck('Agents active surface is Profiles Sessions Teams Councils', '/* === Alpha 3.1 authoritative Agents surface === */' in app and all(x in app for x in ["['profiles','Profiles']","['sessions','Sessions']","['teams','Teams']","['councils','Councils']"]))
+ck('seeded demo Agent sessions are removed', 'chat-demo-1' not in app and 'Auth review' not in app and 'Code review' not in app)
+ck('retired Bot UI terminology is removed', 'Bot Runtime' not in app and 'Provider Bots' not in app)
+ck('no dormant top-level Defaults renderer remains', "pageHeader('Defaults'" not in app)
 
 # Models / runtimes
 ck('Colibri has durable lifecycle jobs', 'managed_component_jobs' in m24 and 'RequestComponentAction' in components and 'RecoverManagedComponents' in components)

@@ -46,7 +46,7 @@ checks=[
  ('component harness API','/v1/local-ai/components' in files['app'] and '/v1/local-ai/components' in files['api']),
  ('OmniRoute separate','Direct cloud providers' in files['app'] and 'OmniRoute remains a separate optional router' in files['app']),
  ('OAuth connected/revoke','OAuth connected' in files['app'] and 'Revoke' in files['app']),
- ('Operations view-all hidden','qa5StripOperationViewAll' in files['app']),
+ ('Operations view-all functional','qa31BindOperationCardActions' in files['app'] and 'qa31OperationAction' in files['app'] and 'openRoute(target)' in files['app'] and "target==='events'" in files['app']),
  ('DigiLogic about branding','DigiLogic · GitHub: DigiLogicTech/OnePane' in files['app']),
 ]
 failed=[]

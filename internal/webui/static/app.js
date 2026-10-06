@@ -19,19 +19,34 @@ navItems.splice(0,navItems.length,
   ["models","◇","Models"],["nodes","⬡","Nodes"],["agents","♙","Agents"],["skills","✦","Skills"]
 );
 
-const A31_OPERATIONS_LAYOUT_VERSION=3;
+const A31_OPERATIONS_LAYOUT_VERSION=4;
 function a31OperationsLayoutBroken(rows){
-  if(!Array.isArray(rows)||rows.length<4)return true;
-  const normalized=rows.map(x=>({...x}));a31NormalizeLayout(normalized);
-  const oneRow=normalized.every(w=>Number(w.y||0)===0),rowWidth=normalized.reduce((n,w)=>n+Number(w.width||0),0);
-  const overlaps=normalized.some((a,i)=>normalized.slice(i+1).some(b=>a31Overlap(a,b)));
-  const invalid=normalized.some(w=>!Number.isFinite(w.x)||!Number.isFinite(w.y)||w.x<0||w.y<0||w.width<3||w.width>12||w.x+w.width>12);
-  return overlaps||invalid||(oneRow&&rowWidth>A31_LAYOUT_COLUMNS);
+  if(!Array.isArray(rows))return true;
+  const ids=new Set();
+  for(const w of rows){
+    const id=String(w?.id||""),c=a31Constraints(w||{}),x=Number(w?.x),y=Number(w?.y),width=Number(w?.width??w?.col),height=Number(w?.height??w?.row);
+    if(!id||ids.has(id))return true;ids.add(id);
+    if(!Number.isFinite(x)||!Number.isFinite(y)||!Number.isFinite(width)||!Number.isFinite(height)||x<0||y<0||width<c.minW||width>c.maxW||height<c.minH||height>c.maxH||x+width>A31_LAYOUT_COLUMNS)return true;
+  }
+  return rows.some((a,i)=>rows.slice(i+1).some(b=>a31Overlap({x:Number(a.x),y:Number(a.y),width:Number(a.width??a.col),height:Number(a.height??a.row)},{x:Number(b.x),y:Number(b.y),width:Number(b.width??b.col),height:Number(b.height??b.row)})));
+}
+function a31RepairLayoutInPlace(items){
+  if(!Array.isArray(items))return false;
+  const ids=new Set();for(const item of items){const id=String(item?.id||"");if(!id||ids.has(id))return false;ids.add(id)}
+  a31NormalizeLayout(items);
+  const placed=[];
+  for(const item of items){
+    if(placed.some(p=>a31Overlap(item,p))){const slot=a31FirstFree(placed,item,null);item.x=slot.x;item.y=slot.y}
+    item.col=item.width;item.row=item.height;placed.push(item);
+  }
+  return true;
 }
 function a31RepairPersistedUIState(){
   let changed=false;
-  if(a31OperationsLayoutBroken(state.operationsWidgets)){
-    state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));
+  if(!Array.isArray(state.operationsWidgets)){
+    state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));changed=true;
+  }else if(a31OperationsLayoutBroken(state.operationsWidgets)){
+    if(!a31RepairLayoutInPlace(state.operationsWidgets))state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));
     changed=true;
   }
   if(Number(state.operationsLayoutVersion||0)!==A31_OPERATIONS_LAYOUT_VERSION){
@@ -180,7 +195,7 @@ function a31BindLayout(root,items,{attr,dragAttr,resizeAttr,persist:save}){
       root.dataset.layoutSaving='true';a31LayoutSaveInFlight++;
       try{await save?.();root.dataset.layoutSaved='true';setTimeout(()=>{if(root.isConnected)delete root.dataset.layoutSaved},900)}
       catch(ex){restore();notice('Layout save failed: '+ex.message,'bad')}
-      finally{a31LayoutSaveInFlight=Math.max(0,a31LayoutSaveInFlight-1);delete root.dataset.layoutSaving}
+      finally{a31LayoutSaveInFlight=Math.max(0,a31LayoutSaveInFlight-1);delete root.dataset.layoutSaving;if(root.dataset.layoutRefreshPending==='true'){delete root.dataset.layoutRefreshPending;if(typeof a31RefreshOperationsData==='function')a31RefreshOperationsData()}}
     };
     const up=()=>finish(false),cancel=()=>finish(true);
     try{target.setPointerCapture?.(e.pointerId)}catch{}
@@ -192,6 +207,11 @@ function a31BindLayout(root,items,{attr,dragAttr,resizeAttr,persist:save}){
 }
 
 /* Operations */
+function a31PersistOperationsLayout(){
+  state.operationsLayoutVersion=A31_OPERATIONS_LAYOUT_VERSION;
+  state.operationsLayoutRevision=Math.max(0,Number(state.operationsLayoutRevision||0))+1;
+  persist();
+}
 
 /* Operations */
 function a31OperationsTabs(){
@@ -211,19 +231,19 @@ function a31OpsWidget(w){
 }
 function a31RenderOperationsGrid(){
   const root=$("#operationsLayout");if(!root)return;
-  if(a31OperationsLayoutBroken(state.operationsWidgets)){state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));state.operationsLayoutVersion=A31_OPERATIONS_LAYOUT_VERSION;persist()}
+  if(a31OperationsLayoutBroken(state.operationsWidgets)){if(!a31RepairLayoutInPlace(state.operationsWidgets))state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));state.operationsLayoutVersion=A31_OPERATIONS_LAYOUT_VERSION;persist()}
   a31NormalizeLayout(state.operationsWidgets);root.innerHTML=state.operationsWidgets.map(a31OpsWidget).join("");
   if(state.operationsEdit){
-    a31BindLayout(root,state.operationsWidgets,{attr:"data-op-widget",dragAttr:"data-op-drag",resizeAttr:"data-op-resize",persist:async()=>persist()});
-    $$("[data-op-remove]",root).forEach(b=>b.onclick=async()=>{const el=b.closest("[data-op-widget]");if(el?.animate)await el.animate([{opacity:1,transform:"scale(1)"},{opacity:0,transform:"scale(.96)"}],{duration:130}).finished.catch(()=>{});state.operationsWidgets=state.operationsWidgets.filter(x=>x.id!==b.dataset.opRemove);a31NormalizeLayout(state.operationsWidgets);persist();a31RenderOperationsGrid()});
-    $$("[data-op-preset]",root).forEach(sel=>sel.onchange=()=>{if(!sel.value)return;const item=state.operationsWidgets.find(x=>x.id===sel.dataset.opPreset);if(!item)return;const p=operationsSizePreset(sel.value,item);item.width=p.col;item.height=p.row;item.col=p.col;item.row=p.row;a31ResolveLayout(state.operationsWidgets,item.id);a31ApplyLayout(root,state.operationsWidgets,"data-op-widget",true);persist()});
+    a31BindLayout(root,state.operationsWidgets,{attr:"data-op-widget",dragAttr:"data-op-drag",resizeAttr:"data-op-resize",persist:async()=>a31PersistOperationsLayout()});
+    $$("[data-op-remove]",root).forEach(b=>b.onclick=async()=>{const el=b.closest("[data-op-widget]");if(el?.animate)await el.animate([{opacity:1,transform:"scale(1)"},{opacity:0,transform:"scale(.96)"}],{duration:130}).finished.catch(()=>{});state.operationsWidgets=state.operationsWidgets.filter(x=>x.id!==b.dataset.opRemove);a31NormalizeLayout(state.operationsWidgets);a31PersistOperationsLayout();a31RenderOperationsGrid()});
+    $$("[data-op-preset]",root).forEach(sel=>sel.onchange=()=>{if(!sel.value)return;const item=state.operationsWidgets.find(x=>x.id===sel.dataset.opPreset);if(!item)return;const p=operationsSizePreset(sel.value,item);item.width=p.col;item.height=p.row;item.col=p.col;item.row=p.row;a31ResolveLayout(state.operationsWidgets,item.id);a31ApplyLayout(root,state.operationsWidgets,"data-op-widget",true);a31PersistOperationsLayout()});
   }
   bindViewActions(root);
 }
 openOperationsComponentPicker=function(){
   const catalogue=[["metrics","System metrics"],["tasks","Task list"],["scheduled","Scheduled tasks"],["nodes","Nodes"],["resources","Resource Utilisation"],["activity","Recent Activity"],["attention","Attention"],["providers","Cloud Provider Health"]],used=new Set(state.operationsWidgets.map(x=>x.type)),available=catalogue.filter(([t])=>!used.has(t));
   openModal("Add Operations component",available.length?`<div class="component-picker-grid">${available.map(([type,title])=>`<button class="component-choice" data-a31-add-op="${type}"><strong>${escapeHtml(title)}</strong><span>Add ${escapeHtml(title.toLowerCase())} to Operations</span></button>`).join("")}</div>`:'<div class="empty-state compact">All Operations components are already present.</div>');
-  $$("[data-a31-add-op]").forEach(b=>b.onclick=()=>{const [type,title]=catalogue.find(x=>x[0]===b.dataset.a31AddOp),item={id:`op-${type}-${Date.now().toString(36)}`,title,type,width:type==="metrics"?12:4,height:type==="metrics"?3:5};a31NormalizeLayout(state.operationsWidgets);const slot=a31FirstFree(state.operationsWidgets,item,null);item.x=slot.x;item.y=slot.y;item.col=item.width;item.row=item.height;state.operationsWidgets.push(item);persist();closeModal();a31RenderOperationsGrid()});
+  $$("[data-a31-add-op]").forEach(b=>b.onclick=()=>{const [type,title]=catalogue.find(x=>x[0]===b.dataset.a31AddOp),item={id:`op-${type}-${Date.now().toString(36)}`,title,type,width:type==="metrics"?12:4,height:type==="metrics"?3:5};a31NormalizeLayout(state.operationsWidgets);const slot=a31FirstFree(state.operationsWidgets,item,null);item.x=slot.x;item.y=slot.y;item.col=item.width;item.row=item.height;state.operationsWidgets.push(item);a31PersistOperationsLayout();closeModal();a31RenderOperationsGrid()});
 };
 function a31OperationsActivity(){if(!liveOpsReported("events"))return `<section class="panel-card"><div class="card-header"><div><div class="card-title">Activity</div><div class="list-meta">Recent control-plane, scheduler, model, node and provider events.</div></div></div><div class="empty-state compact">Event feed not reported.</div></section>`;const rows=a31Array(liveOps.events).slice(-100).reverse();return `<section class="panel-card"><div class="card-header"><div><div class="card-title">Activity</div><div class="list-meta">Recent control-plane, scheduler, model, node and provider events.</div></div></div><div class="activity-stream">${rows.length?rows.map(e=>`<div class="activity-row"><span class="mono-cell">${escapeHtml(String(e.sequence||""))}</span><div><strong>${escapeHtml(eventLabel(e))}</strong><div class="list-meta">${escapeHtml([e.aggregate_type,e.aggregate_id].filter(Boolean).join(" · "))}</div></div><span class="list-meta">${e.occurred_at?new Date(Number(e.occurred_at)).toLocaleTimeString():""}</span></div>`).join(""):'<div class="empty-state compact">No activity recorded yet.</div>'}</div></section>`}
 function a31OperationsHealth(){
@@ -244,6 +264,17 @@ async function a31RecoveryContent(){
   const empty=componentsReported&&tasksReported&&!compRows.length&&!failed.length?'<div class="empty-state compact">No degraded components or failed/blocked tasks require recovery.</div>':"";
   return `<section class="panel-card"><div class="card-header recovery-card-header"><div><div class="card-title">Recovery</div><div class="list-meta">Actionable degraded state only; OnePane does not reset healthy components.</div></div><button class="btn" id="a31RecoveryRefresh">Refresh health</button></div><div class="widget-body"><div class="recovery-list">${unavailable}${compRows.map(c=>`<div class="recovery-row"><div><strong>${escapeHtml(c.display_name||c.id)}</strong><div class="list-meta">${escapeHtml(c.last_error||c.state||"degraded")}</div></div><button class="btn" data-a31-repair-component="${escapeHtml(c.id)}">Repair</button></div>`).join("")}${failed.map(t=>`<div class="recovery-row"><div><strong>Task ${escapeHtml(t.id||"")}</strong><div class="list-meta">${escapeHtml(t.objective||t.state||"")}</div></div><button class="btn" data-route="tasks">Open Tasks</button></div>`).join("")}${empty}</div></div></section>`
 }
+function a31RefreshOperationsData(){
+  if(!a31RouteIs("operations"))return false;
+  if(a31OperationsView!=="overview"){renderOperations();return true}
+  const root=$("#operationsLayout");if(!root){renderOperations();return true}
+  if(root.classList.contains("layout-interacting")||root.dataset.layoutSaving==="true"){root.dataset.layoutRefreshPending="true";return true}
+  for(const w of state.operationsWidgets||[]){
+    const card=$(`[data-op-widget="${CSS.escape(w.id)}"]`,root),content=card?.querySelector(".dashboard-widget-content");
+    if(content)content.innerHTML=operationsComponentContent(w.type);
+  }
+  bindViewActions(root);return true;
+}
 renderOperations=async function(){
   const actions=`<button class="btn ${state.operationsEdit?'primary':''}" id="editOperations">${state.operationsEdit?'Done':'Edit layout'}</button>${state.operationsEdit?'<button class="btn" id="addOperationsComponent">Add component</button><button class="btn" id="resetOperationsLayout">Reset layout</button>':""}`;
   $("#viewHost").innerHTML=`<section class="page">${pageHeader("Operations","System overview, activity, health and recovery",actions)}${a31OperationsTabs()}<div id="a31OperationsBody"></div></section>`;
@@ -254,7 +285,7 @@ renderOperations=async function(){
   else if(a31OperationsView==="health")body.innerHTML=a31OperationsHealth();
   else if(a31OperationsView==="recovery"){body.innerHTML=await a31RecoveryContent();$("#a31RecoveryRefresh")?.addEventListener("click",async()=>{await refreshOperationalDataQA(true);renderOperations()});$$("[data-a31-repair-component]").forEach(b=>b.onclick=()=>a31ComponentAction(b.dataset.a31RepairComponent,"repair"))}
   $("#editOperations")?.addEventListener("click",()=>{state.operationsEdit=!state.operationsEdit;persist();renderOperations()});
-  $("#resetOperationsLayout")?.addEventListener("click",()=>{state.operationsWidgets=defaultState().operationsWidgets;a31NormalizeLayout(state.operationsWidgets);persist();renderOperations()});
+  $("#resetOperationsLayout")?.addEventListener("click",()=>{state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));a31NormalizeLayout(state.operationsWidgets);a31PersistOperationsLayout();renderOperations()});
   $("#addOperationsComponent")?.addEventListener("click",openOperationsComponentPicker);
   bindViewActions($("#viewHost"));
 }

@@ -84,7 +84,15 @@
     state.operationsEdit=true;a31RenderOperationsGrid();
     check(document.querySelector(".dashboard-edit-bar[data-op-drag]"),"Operations edit header is drag surface");
     check(document.querySelectorAll("[data-op-resize]").length>=8,"Operations exposes edge and corner resize handles");
+    const resizeCard=check(document.querySelector('[data-op-widget="op-tasks"]'),"Operations resize card"),resizeEast=check(resizeCard.querySelector('[data-op-resize][data-resize-edge="e"]'),"Operations east resize handle"),resizeCardRect=resizeCard.getBoundingClientRect(),resizeEastRect=resizeEast.getBoundingClientRect();
+    check(resizeEastRect.left>=resizeCardRect.left-1&&resizeEastRect.right<=resizeCardRect.right+1,"Operations resize hit target stays inside card");
     state.operationsEdit=false;a31RenderOperationsGrid();
+    const custom=check(state.operationsWidgets.find(w=>w.id==="op-activity"),"Operations custom layout probe");custom.x=0;custom.y=20;custom.width=6;custom.height=5;custom.col=6;custom.row=5;a31ResolveLayout(state.operationsWidgets,custom.id);a31PersistOperationsLayout();a31RenderOperationsGrid();
+    const rootBeforeRefresh=check(document.querySelector("#operationsLayout"),"Operations layout before polling"),revisionBefore=Number(state.operationsLayoutRevision||0);await refreshOperationalDataQA(true);
+    check(document.querySelector("#operationsLayout")===rootBeforeRefresh,"Operations polling preserves layout DOM");
+    const storedOps=JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}"),storedActivity=(storedOps.operationsWidgets||[]).find(w=>w.id==="op-activity");
+    check(Number(storedActivity?.y)===20&&Number(state.operationsWidgets.find(w=>w.id==="op-activity")?.y)===20,"Operations custom geometry survives polling and persistence");
+    check(Number(state.operationsLayoutRevision||0)===revisionBefore,"Operations polling does not rewrite layout revision");
     const resolveProbe=[{id:"anchor",x:4,y:0,width:4,height:4},{id:"left",x:0,y:0,width:4,height:4},{id:"conflict",x:4,y:0,width:4,height:4}];a31ResolveLayout(resolveProbe,"anchor");
     check(!resolveProbe.some((a,i)=>resolveProbe.slice(i+1).some(b=>a31Overlap(a,b))),"Shared layout resolves collisions only at commit");
     state.operationsWidgets=defaultState().operationsWidgets.map((x,i)=>({...x,x:i,y:0,width:3,col:3,height:3,row:3}));a31RenderOperationsGrid();

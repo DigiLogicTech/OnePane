@@ -111,6 +111,9 @@ ck("Effective Operations Activity and Recovery preserve unknown telemetry", "Eve
 ck("Final Nodes renderer consumes API envelope and launches pairing", "a31Array(out?.nodes)" in effective_nodes and '$("#a31AddNode").onclick=openPairNode' in effective_nodes)
 ck("Project policy saves are serialized against latest revision", "qa4ProjectSaveQueues" in project_saves and "const current=qa4ProjectHub.projects.find" in project_saves and "expected_revision:Number(current.revision||1)" in project_saves)
 ck("Project layout mutations rollback and refresh from saved revision", "refreshSaved" in effective_project_layout and "workspace.widgets.splice(0,workspace.widgets.length,...snapshot)" in effective_project_layout and "workspace.widgets=snapshot" in effective_project_layout and 'root.dataset.layoutSaving==="true"' in effective_project_layout)
+ck("Operations telemetry refresh preserves the active layout DOM", "a31RefreshOperationsData" in app and "layoutRefreshPending" in app and "typeof a31RefreshOperationsData==='function'" in app)
+ck("Operations geometry has explicit durable revisioning", "operationsLayoutRevision" in app and "a31PersistOperationsLayout" in app)
+ck("Resize hit targets stay inside clipped dashboard cards", ".layout-resize-handle.resize-e{right:0}" in css and ".layout-resize-handle.resize-w{left:0}" in css and ".layout-resize-handle.resize-n{top:0}" in css and ".layout-resize-handle.resize-s{bottom:0}" in css)
 ck("Layout generation participates in stale rollback protection", "root.dataset.layoutGeneration" in app and "String(generation)" in app and "root.dataset.layoutSaving==='true'" in app)
 ck("Command palette cannot replace an active product tour", 'dataset.productTour==="active"' in effective_palette)
 

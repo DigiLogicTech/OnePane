@@ -86,7 +86,7 @@ ck("Skills expose first-class Tool Bundles view", 'data-a31-skills-tab="bundles"
 ck("Settings have canonical information architecture", all(x in app for x in ["General","Appearance","Defaults","Models & Compute","Providers & Auth","Nodes & Federation","Agents & Research","Skills & Tools","Security & Approvals","Updates & Diagnostics"]))
 ck("Settings preserve new Workspace default semantics", "Existing Workspaces are never changed here" in app)
 ck("Settings content is centered in remaining canvas", "#a31SettingsContent" in css and "justify-self:center" in css and "width:min(100%,1100px)" in css)
-ck("Tour uses four-pane focus with centred collision-aware placement", "tour-pane-top" in app and "const center=clamp" in app and "if(collides(pos)&&targetRect)" in app and 'card.dataset.positioned="true"' in app and ".a31-tour-card" in css and "backdrop-filter:blur(3px)" in css)
+ck("Tour uses spotlight focus with centred collision-aware placement", 'overlay.dataset.focus="target"' in app and "const center=clamp" in app and "if(collides(pos)&&targetRect)" in app and 'card.dataset.positioned="true"' in app and ".a31-tour-card" in css and "9999px" in css)
 ck("Tour target remains crisp and outlined", ".tour-spotlight" in css and ".tour-target" in css and "filter:none!important" in css)
 ck("Tour uses the canonical overlay root", 'const root=$("#overlayRoot")' in app and "qa31TourRoot" not in app and "qa31TourRoot" not in html)
 ck("Tour cleanup removes live highlights and restores shell state", 'document.querySelectorAll(".tour-target")' in app and 'removeEventListener("keydown",onKeyDown)' in app and 'setInspectorOpen(originalInspector==="open")' in app and 'setDrawerOpen(originalDrawer==="open")' in app and 'e.key==="Escape"' in app)
@@ -145,6 +145,6 @@ ck("Product tour cannot create an invisible click-blocking overlay", "visibility
 ck("Operations render self-heals overlapping persisted geometry", "if(a31OperationsLayoutBroken(state.operationsWidgets))" in app and "Operations render repairs injected overlap" in smoke)
 
 ck("Product tour is centred first and only repositions for focus collisions", 'const center=clamp' in app and 'if(collides(pos)&&targetRect)' in app and 'card.dataset.positioned="true"' in app)
-ck("Product tour reveals only after positioning and visibly focuses the background", 'visibility:hidden!important' in css and 'data-positioned="true"' in css and 'rgba(3,8,13,.58)' in css and "Tour defaults to page centre" in smoke)
+ck("Product tour reveals only after positioning and defaults to centre", 'visibility:hidden!important' in css and 'data-positioned="true"' in css and "Tour defaults to page centre" in smoke)
 
-ck("Product tour visibly isolates the active target", "z-index:1;pointer-events:none" in css and "blur(5px)" in css and "9999px" in css and "Tour target spotlight visible" in smoke)
+ck("Product tour visibly isolates the active target", "9999px" in css and 'data-focus="target"' in css and "Tour target spotlight visible" in smoke and "proven surrounding focus shade" in smoke)

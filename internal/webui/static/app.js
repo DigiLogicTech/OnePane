@@ -456,10 +456,13 @@ startProductTour=function({replay=false,welcome=false}={}){
   const onKeyDown=e=>{if(e.key==="Escape"){e.preventDefault();cleanup()}};
   function panes(rect,pad=8){const vw=innerWidth,vh=innerHeight,r=rect?{l:Math.max(0,rect.left-pad),t:Math.max(0,rect.top-pad),r:Math.min(vw,rect.right+pad),b:Math.min(vh,rect.bottom+pad)}:{l:vw/2,t:vh/2,r:vw/2,b:vh/2};return `<div class="tour-pane tour-pane-top" style="left:0;top:0;width:100%;height:${r.t}px"></div><div class="tour-pane tour-pane-left" style="left:0;top:${r.t}px;width:${r.l}px;height:${Math.max(0,r.b-r.t)}px"></div><div class="tour-pane tour-pane-right" style="left:${r.r}px;top:${r.t}px;width:${Math.max(0,vw-r.r)}px;height:${Math.max(0,r.b-r.t)}px"></div><div class="tour-pane tour-pane-bottom" style="left:0;top:${r.b}px;width:100%;height:${Math.max(0,vh-r.b)}px"></div>`}
   function position(){
-    const s=steps[i],card=$("#tourCard",root),mask=$("#tourMask",root),target=s.target?$(s.target):null;if(!card||!mask)return;
-    const tr=target?.getBoundingClientRect(),pad=s.padding||8;mask.innerHTML=panes(tr,pad);
-    const spot=$("#tourSpotlight",root);
-    if(target&&tr){target.classList.add("tour-target");Object.assign(spot.style,{left:`${tr.left-7}px`,top:`${tr.top-7}px`,width:`${tr.width+14}px`,height:`${tr.height+14}px`});spot.hidden=false}else spot.hidden=true;
+    const s=steps[i],card=$("#tourCard",root),overlay=$(".tour-overlay",root),target=s.target?$(s.target):null,spot=$("#tourSpotlight",root);if(!card||!overlay||!spot)return;
+    const tr=target?.getBoundingClientRect(),pad=s.padding||8;
+    if(target&&tr){
+      overlay.dataset.focus="target";target.classList.add("tour-target");
+      Object.assign(spot.style,{left:`${Math.max(0,tr.left-pad)}px`,top:`${Math.max(0,tr.top-pad)}px`,width:`${Math.max(8,tr.width+pad*2)}px`,height:`${Math.max(8,tr.height+pad*2)}px`,borderRadius:getComputedStyle(target).borderRadius||"12px"});
+      spot.hidden=false;
+    }else{overlay.dataset.focus="none";spot.hidden=true}
     const cr=card.getBoundingClientRect(),margin=18,host=$("#viewHost"),hr=host?.getBoundingClientRect();
     const usable={
       left:Math.max(margin,hr?.left??margin),
@@ -490,7 +493,7 @@ startProductTour=function({replay=false,welcome=false}={}){
     card.dataset.positioned="true";
   }
   async function draw(){
-    document.querySelectorAll(".tour-target").forEach(x=>x.classList.remove("tour-target"));const s=steps[i];if(s.prepare)await s.prepare();root.innerHTML=`<div class="tour-overlay"><div id="tourMask" class="tour-focus-mask"></div><div id="tourSpotlight" class="tour-spotlight" hidden></div><section id="tourCard" class="tour-card a31-tour-card"><div class="tour-progress"><span>${i+1} / ${steps.length}</span><span>${Math.round((i+1)/steps.length*100)}%</span></div><h2>${escapeHtml(s.title)}</h2><p>${escapeHtml(s.body)}</p><div class="tour-actions"><button class="btn" id="tourSkip">${i===steps.length-1?'Close':'Skip tour'}</button><span class="tour-spacer"></span>${i?'<button class="btn" id="tourBack">Back</button>':""}<button class="btn primary" id="tourNext">${i===steps.length-1?'Finish':'Next'}</button></div></section></div>`;$("#tourSkip").onclick=finish;$("#tourBack")?.addEventListener("click",()=>{i--;draw()});$("#tourNext").onclick=()=>{if(i===steps.length-1)return finish();i++;draw()};requestAnimationFrame(()=>position());
+    document.querySelectorAll(".tour-target").forEach(x=>x.classList.remove("tour-target"));const s=steps[i];if(s.prepare)await s.prepare();root.innerHTML=`<div class="tour-overlay" data-focus="${s.target?'target':'none'}"><div id="tourSpotlight" class="tour-spotlight" hidden></div><section id="tourCard" class="tour-card a31-tour-card"><div class="tour-progress"><span>${i+1} / ${steps.length}</span><span>${Math.round((i+1)/steps.length*100)}%</span></div><h2>${escapeHtml(s.title)}</h2><p>${escapeHtml(s.body)}</p><div class="tour-actions"><button class="btn" id="tourSkip">${i===steps.length-1?'Close':'Skip tour'}</button><span class="tour-spacer"></span>${i?'<button class="btn" id="tourBack">Back</button>':""}<button class="btn primary" id="tourNext">${i===steps.length-1?'Finish':'Next'}</button></div></section></div>`;$("#tourSkip").onclick=finish;$("#tourBack")?.addEventListener("click",()=>{i--;draw()});$("#tourNext").onclick=()=>{if(i===steps.length-1)return finish();i++;draw()};requestAnimationFrame(()=>position());
   }
   window.addEventListener("resize",position);document.addEventListener("keydown",onKeyDown);
   Promise.resolve(draw()).catch(ex=>{console.error("Product tour failed",ex);cleanup();notice("Product tour could not start.","bad")});

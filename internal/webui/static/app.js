@@ -378,13 +378,33 @@ function a32BindWorkspaceDelete(project,workspace){
   button.disabled=onlyWorkspace;button.title=onlyWorkspace?"A project must keep at least one workspace.":`Delete ${workspace.name||"workspace"}`;
   button.onclick=()=>a32DeleteWorkspace(project,workspace);
 }
+async function a33DeleteProject(project){
+  openModal("Delete project",`<div class="widget-body"><strong>Delete ${escapeHtml(project.name||"this project")}?</strong><p>The project will be removed from active OnePane views. Audit history, tasks, artifacts and provenance remain retained.</p></div>`,`<button class="btn" id="a33CancelDeleteProject">Cancel</button><button class="btn danger" id="a33ConfirmDeleteProject">Delete project</button>`);
+  $("#a33CancelDeleteProject")?.addEventListener("click",closeModal);
+  $("#a33ConfirmDeleteProject")?.addEventListener("click",async e=>{
+    const button=e.currentTarget;button.disabled=true;button.textContent="Deleting…";
+    try{
+      await apiRequest(`/v1/projects/${encodeURIComponent(project.id)}`,{method:"DELETE",body:JSON.stringify({expected_revision:Number(project.revision)})});
+      qa4ProjectHub.projects=a31Array(qa4ProjectHub.projects).filter(x=>x.id!==project.id);
+      qa4ProjectHub.activeProjectID=qa4ProjectHub.projects[0]?.id||"";qa4ProjectHub.activeWorkspaceID="";
+      if(qa4Inspector?.kind==="project"&&qa4Inspector.id===project.id){qa4Inspector={kind:"system",id:"system",title:"OnePane",data:{}};qa4InspectorTab="overview";setInspectorOpen(false)}
+      closeModal();await renderProjects();notice(`Project "${project.name||"Project"}" deleted.`);
+    }catch(ex){button.disabled=false;button.textContent="Delete project";notice("Project delete failed: "+ex.message,"bad")}
+  });
+}
+function a33BindProjectDelete(project){
+  const settings=$("#qa4ProjectSettings"),toolbar=settings?.closest(".toolbar");if(!settings||!toolbar)return;
+  let button=toolbar.querySelector("#a33DeleteProject");
+  if(!button){button=document.createElement("button");button.id="a33DeleteProject";button.className="btn danger";button.textContent="Delete project";toolbar.insertBefore(button,settings.nextSibling)}
+  button.onclick=()=>a33DeleteProject(project);
+}
 const a31ProjectRenderBase=qa6RenderProjectsBase;
 renderProjects=async function(){
   const epoch=qa31ViewEpoch;await a31ProjectRenderBase();if(epoch!==qa31ViewEpoch||!a31RouteIs("projects"))return;
   const project=a31CurrentProject(),workspace=project?a31CurrentWorkspace():null;if(!project||!workspace)return;qa7NormalizeWorkspace(project,workspace);a31NormalizeLayout(workspace.widgets||[]);
   $(".workspace-chat-panel")?.remove();const bar=$(".workspace-context-bar .list-meta");if(bar)bar.textContent=` · workspace sandbox ${workspace.sandbox.internet?'internet allowed':'internet blocked'} · ${workspace.routing.enabled!==false?'routing enabled':'single-path'} · ${titleCase(workspace.orchestration?.mode||'direct')}`;
   const settings=$("#qa4WorkspaceSettings");if(settings){settings.textContent="Workspace settings";settings.onclick=()=>qa6OpenInInspector(project,workspace,"settings")}
-  a32BindWorkspaceDelete(project,workspace);
+  a32BindWorkspaceDelete(project,workspace);a33BindProjectDelete(project);
   const workspaceGrid=$("#qa4WorkspaceGrid");if(workspaceGrid)a31ApplyLayout(workspaceGrid,workspace.widgets||[],"data-pw-widget");
   qa4BindWorkspaceEdit(project,workspace);qa6BindProjectComponents(project,workspace);qa7BindWorkspaceControls(project,workspace,$("#qa4WorkspaceGrid")||document);qa6StartEventStream();renderNav();
 };
@@ -512,10 +532,10 @@ renderSkills=async function(){
 
 /* Persistent Control Chat */
 function a31SetControlChatCollapsed(collapsed){
-  state.controlChatCollapsed=!!collapsed;persist();const panel=$("#controlChatPanel"),toggle=$("#controlChatToggle");if(panel)panel.dataset.collapsed=state.controlChatCollapsed?"true":"false";if(toggle){toggle.setAttribute("aria-expanded",state.controlChatCollapsed?"false":"true");toggle.title=state.controlChatCollapsed?"Expand OnePane Chat":"Collapse OnePane Chat"}
+  state.controlChatCollapsed=!!collapsed;persist();const panel=$("#controlChatPanel"),toggle=$("#controlChatToggle");if(panel)panel.dataset.collapsed=state.controlChatCollapsed?"true":"false";if(toggle){toggle.setAttribute("aria-expanded",state.controlChatCollapsed?"false":"true");toggle.title=state.controlChatCollapsed?"Expand OnePane Chat":"Collapse OnePane Chat"}requestAnimationFrame(()=>a33ApplyControlChatPosition());
 }
 function a31OpenControlChat(tab=a31ControlTab){
-  a31ControlTab=tab;const panel=$("#controlChatPanel");if(!panel)return;panel.dataset.state="open";panel.removeAttribute("hidden");a31SetControlChatCollapsed(!!state.controlChatCollapsed);a31RenderControlChat();
+  a31ControlTab=tab;const panel=$("#controlChatPanel");if(!panel)return;panel.dataset.state="open";panel.removeAttribute("hidden");a31SetControlChatCollapsed(!!state.controlChatCollapsed);a31RenderControlChat();requestAnimationFrame(()=>a33ApplyControlChatPosition());
 }
 function a31CloseControlChat(){const p=$("#controlChatPanel");if(p){p.dataset.state="closed";p.setAttribute("hidden","")}}
 async function a31EnsureAssistantThread(){
@@ -678,10 +698,26 @@ function a32BindPanelToggleMovement(){
   a32BindPanelToggleDrag($("#drawerToggle"),"x","drawerTogglePosition",()=>$("#bottomDrawer"));
   a32BindPanelToggleDrag($("#drawerRestore"),"x","drawerTogglePosition",()=>$(".main-shell"));
 }
+function a33ControlChatPosition(){const n=Number(state.controlChatVerticalPosition);return Number.isFinite(n)?Math.max(0,Math.min(100,n)):100}
+function a33ApplyControlChatPosition(){
+  const panel=$("#controlChatPanel");if(!panel||panel.hasAttribute("hidden"))return;
+  const rect=panel.getBoundingClientRect(),minTop=8,maxTop=Math.max(minTop,innerHeight-rect.height-12),top=minTop+(maxTop-minTop)*(a33ControlChatPosition()/100);
+  panel.style.top=`${Math.round(top)}px`;panel.style.bottom="auto";
+}
+function a33ControlChatOpen(){const p=$("#controlChatPanel");return !!p&&p.dataset.state==="open"&&!p.hasAttribute("hidden")}
+function a33ToggleControlChatPanel(){if(a33ControlChatOpen())a31CloseControlChat();else a31OpenControlChat()}
+function a33BindControlChatDrag(){
+  const panel=$("#controlChatPanel"),handle=$("#controlChatToggle");if(!panel||!handle||handle.dataset.chatMoveBound==="true")return;handle.dataset.chatMoveBound="true";
+  let active=false,moved=false,startY=0,startTop=0;
+  const move=e=>{if(!active)return;const delta=e.clientY-startY;if(Math.abs(delta)>3)moved=true;if(!moved)return;e.preventDefault();const rect=panel.getBoundingClientRect(),minTop=8,maxTop=Math.max(minTop,innerHeight-rect.height-12),next=Math.max(minTop,Math.min(maxTop,startTop+delta));state.controlChatVerticalPosition=maxTop===minTop?0:((next-minTop)/(maxTop-minTop))*100;panel.style.top=`${Math.round(next)}px`;panel.style.bottom="auto"};
+  const finish=()=>{if(!active)return;active=false;handle.classList.remove("control-chat-moving");window.removeEventListener("pointermove",move);window.removeEventListener("pointerup",finish);window.removeEventListener("pointercancel",finish);if(moved){handle.dataset.chatDragged="true";persist();setTimeout(()=>delete handle.dataset.chatDragged,0)}};
+  handle.addEventListener("pointerdown",e=>{if(e.button!==0)return;active=true;moved=false;startY=e.clientY;startTop=panel.getBoundingClientRect().top;handle.classList.add("control-chat-moving");window.addEventListener("pointermove",move,{passive:false});window.addEventListener("pointerup",finish,{once:true});window.addEventListener("pointercancel",finish,{once:true})});
+}
+function a33ToggleControlChatCollapsed(){const handle=$("#controlChatToggle");if(handle?.dataset.chatDragged==="true"){delete handle.dataset.chatDragged;return}a31SetControlChatCollapsed(!state.controlChatCollapsed)}
 const a31BindShellBase=bindShell;
 bindShell=function(){
-  a31BindShellBase();a32BindPanelToggleMovement();
-  $("#controlChatLauncher")?.addEventListener("click",()=>a31OpenControlChat());$("#controlChatClose")?.addEventListener("click",e=>{e.stopPropagation();a31CloseControlChat()});$("#controlChatToggle")?.addEventListener("click",()=>a31SetControlChatCollapsed(!state.controlChatCollapsed));$("#controlChatAssistantTab")?.addEventListener("click",()=>a31OpenControlChat("assistant"));$("#controlChatOrchestratorTab")?.addEventListener("click",()=>a31OpenControlChat("orchestrator"));
+  a31BindShellBase();a32BindPanelToggleMovement();a33BindControlChatDrag();window.addEventListener("resize",a33ApplyControlChatPosition);
+  $("#controlChatLauncher")?.addEventListener("click",()=>a33ToggleControlChatPanel());$("#controlChatClose")?.addEventListener("click",e=>{e.stopPropagation();a31CloseControlChat()});$("#controlChatToggle")?.addEventListener("click",()=>a33ToggleControlChatCollapsed());$("#controlChatAssistantTab")?.addEventListener("click",()=>a31OpenControlChat("assistant"));$("#controlChatOrchestratorTab")?.addEventListener("click",()=>a31OpenControlChat("orchestrator"));
 };
 renderActiveView=async function(){
   const epoch=++qa31ViewEpoch,t=currentTab();if(!t)return;if(t.state==="suspended")t.state="active";const route=t.route;

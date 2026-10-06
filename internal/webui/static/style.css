@@ -916,3 +916,17 @@ body { background:var(--app-gradient),var(--bg); }
 .panel-toggle-moving{cursor:grabbing!important;transition:none!important}
 .drawer-actions{border-bottom:0!important}
 .a32-workspace-actions{flex:none}
+
+
+/* Alpha 3.2 shell/tour follow-up */
+.app-shell[data-inspector="open"] #inspectorRestore{width:26px!important;height:42px!important}
+.app-shell[data-inspector="closed"] #inspectorRestore{width:26px!important;height:54px!important}
+.tour-overlay{z-index:2000!important;isolation:isolate}
+.tour-spotlight{z-index:2!important}
+.a31-tour-card{z-index:3!important}
+.tour-target{z-index:auto!important}
+.control-chat-title{cursor:grab;touch-action:none}
+.control-chat-title.control-chat-moving{cursor:grabbing}
+.control-chat-chevron{transform:rotate(180deg)}
+.control-chat-panel[data-collapsed="true"] .control-chat-chevron{transform:none}
+.control-chat-panel{will-change:top,left,opacity,transform}

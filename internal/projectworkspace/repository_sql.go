@@ -35,7 +35,7 @@ func (r *sqlRepository) Project(ctx context.Context, id string) (Project, error)
 	return scanProject(r.db.QueryRowContext(ctx, projectSelect, id))
 }
 func (r *sqlRepository) Projects(ctx context.Context, workspaceID string) ([]Project, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id,workspace_id,name,description,status,project_policy_json,indexing_config_json,revision,created_by,created_at,updated_at FROM projects WHERE workspace_id=? ORDER BY updated_at DESC`, workspaceID)
+	rows, err := r.db.QueryContext(ctx, `SELECT id,workspace_id,name,description,status,project_policy_json,indexing_config_json,revision,created_by,created_at,updated_at FROM projects WHERE workspace_id=? AND status='active' ORDER BY updated_at DESC`, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
@@ -68,6 +68,21 @@ func (r *sqlRepository) UpdateProjectPolicy(ctx context.Context, tx storage.Tx, 
 	res, err := tx.ExecContext(ctx, `UPDATE projects SET project_policy_json=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?`, string(policy), now, p.ID, p.Revision)
 	if err != nil {
 		return fmt.Errorf("update project policy: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrRevisionConflict
+	}
+	return nil
+}
+
+func (r *sqlRepository) ArchiveProject(ctx context.Context, tx storage.Tx, p Project, now int64) error {
+	res, err := tx.ExecContext(ctx, `UPDATE projects SET status='archived',revision=revision+1,updated_at=? WHERE id=? AND revision=? AND status='active'`, now, p.ID, p.Revision)
+	if err != nil {
+		return fmt.Errorf("archive project: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {

@@ -164,6 +164,13 @@ type UpdateProjectPolicyCommand struct {
 	RequestID, TraceID *string
 }
 
+type ArchiveProjectCommand struct {
+	ProjectID          string
+	ExpectedRevision   int64
+	ActorPrincipalID   string
+	RequestID, TraceID *string
+}
+
 type CreateRuntimeCommand struct {
 	ProjectID                                                    string
 	NodeID                                                       *string

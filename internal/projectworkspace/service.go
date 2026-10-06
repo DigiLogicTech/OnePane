@@ -237,6 +237,50 @@ func (s *Service) UpdateProjectPolicy(ctx context.Context, cmd UpdateProjectPoli
 	return s.repo.Project(ctx, cmd.ProjectID)
 }
 
+type projectArchiveRepository interface {
+	ArchiveProject(context.Context, storage.Tx, Project, int64) error
+}
+
+func (s *Service) ArchiveProject(ctx context.Context, cmd ArchiveProjectCommand) (Project, error) {
+	if strings.TrimSpace(cmd.ProjectID) == "" || cmd.ExpectedRevision < 1 || strings.TrimSpace(cmd.ActorPrincipalID) == "" {
+		return Project{}, ErrInvalidCommand
+	}
+	archiver, ok := s.repo.(projectArchiveRepository)
+	if !ok {
+		return Project{}, fmt.Errorf("project archive repository unavailable")
+	}
+	eid, err := s.ids.New("evt")
+	if err != nil {
+		return Project{}, err
+	}
+	now := s.clock.UnixMilli()
+	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		p, err := s.repo.ProjectTx(ctx, tx, cmd.ProjectID)
+		if err != nil {
+			return err
+		}
+		if p.Revision != cmd.ExpectedRevision {
+			return ErrRevisionConflict
+		}
+		if p.Status != "active" {
+			return ErrProjectInactive
+		}
+		if err := s.requireActor(ctx, tx, p.WorkspaceID, cmd.ActorPrincipalID); err != nil {
+			return err
+		}
+		if err := archiver.ArchiveProject(ctx, tx, p, now); err != nil {
+			return err
+		}
+		payload, _ := json.Marshal(map[string]any{"project_id": p.ID, "revision": p.Revision + 1, "status": "archived"})
+		actor := cmd.ActorPrincipalID
+		return s.events.Append(ctx, tx, event.Event{ID: eid, WorkspaceID: &p.WorkspaceID, Type: "project.archived", AggregateType: "project", AggregateID: p.ID, ActorPrincipalID: &actor, RequestID: cmd.RequestID, TraceID: cmd.TraceID, Payload: payload, OccurredAt: now})
+	})
+	if err != nil {
+		return Project{}, err
+	}
+	return s.repo.Project(ctx, cmd.ProjectID)
+}
+
 func (s *Service) CreateRuntime(ctx context.Context, cmd CreateRuntimeCommand) (ProjectRuntime, error) {
 	if strings.TrimSpace(cmd.ProjectID) == "" || strings.TrimSpace(cmd.CreatedBy) == "" {
 		return ProjectRuntime{}, fmt.Errorf("%w: project and creator required", ErrInvalidCommand)

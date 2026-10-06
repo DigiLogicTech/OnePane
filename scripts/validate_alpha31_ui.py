@@ -64,6 +64,7 @@ ck("Desktop components have real pointer resize handles", "function a31BindLayou
 ck("Operations add path updates grid without page rerender", "openOperationsComponentPicker=function" in app and "closeModal();a31RenderOperationsGrid()" in app)
 ck("Project component mutations refresh only project grid", "a31RefreshProjectGrid(project,workspace" in app and "qa4SaveProjectWorkspaces" in app)
 ck("Workspace deletion is confirmed revision-safe and guards the final workspace", "a32DeleteWorkspace" in app and "a32ConfirmDeleteWorkspace" in app and "A project must keep at least one workspace." in app and "workspace removed from durable project policy" in smoke)
+ck("Project deletion is confirmed and lifecycle-safe", "a33DeleteProject" in app and 'method:"DELETE"' in app and "a33ConfirmDeleteProject" in app and "Project lifecycle delete persisted" in smoke)
 ck("Nodes prefer federation machine name and mark the local host", "a32NodeDisplayName" in app and 'n?.name||n?.hostname' in app and '" (Local)"' in app and "Nodes prefer machine name and mark local device" in smoke)
 
 ck("Operations Activity Health Recovery are functional", '["activity","Activity"]' in app and '["health","Health"]' in app and '["recovery","Recovery"]' in app and "a31OperationsActivity" in app and "a31OperationsHealth" in app and "a31RecoveryContent" in app)
@@ -161,3 +162,8 @@ ck("Product tour visibly isolates the active target", "9999px" in css and 'data-
 ck("Operations and Workspaces share smooth pixel drag preview", 'data-op-drag=' in app and 'data-pw-drag=' in app and 'translate3d(' in app and 'card.style.willChange="transform,width,height"' in app)
 ck("Shared resize previews continuously then snaps once on release", "previewResize" in app and "a31ResizeRect(start,edge,dx,dy,constraints)" in app and "Object.assign(item,previewRect)" in app)
 ck("Installed smoke performs real pointer drag and resize", 'const gesture=async' in smoke and "Operations pointer resize committed" in smoke and "Workspace pointer drag changes geometry" in smoke and "Workspace resized geometry survives project reload" in smoke)
+
+ck("Tour spotlight owns top stacking layer", ".tour-overlay{z-index:2000!important" in css and ".tour-target{z-index:auto!important}" in css and "Tour spotlight owns top stacking layer" in smoke)
+ck("OnePane Chat launcher toggles and panel moves vertically", "a33ToggleControlChatPanel" in app and "a33BindControlChatDrag" in app and "controlChatVerticalPosition" in app and "Chat moves vertically" in smoke and "Chat launcher closes open chat" in smoke)
+ck("OnePane Chat chevron reflects collapse direction", ".control-chat-chevron{transform:rotate(180deg)}" in css and '.control-chat-panel[data-collapsed="true"] .control-chat-chevron{transform:none}' in css and "Chat chevron direction matches collapse state" in smoke)
+ck("Inspector expanded and collapsed controls are explicitly distinct", '.app-shell[data-inspector="open"] #inspectorRestore' in css and '.app-shell[data-inspector="closed"] #inspectorRestore' in css)

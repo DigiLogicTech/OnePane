@@ -28,7 +28,11 @@
     if(path==="/v1/about")return originalFetch(input,opts);
     if(path==="/v1/health")return json({status:"ok"});
     if(path==="/v1/nodes")return json({nodes:[{id:"node-release",name:"RELEASE-PC",local:true,trust_state:"local",status:"ready",architecture:"amd64",os_name:"Windows"}]});
-    if(path==="/v1/projects"&&method==="GET")return json([clone(project)]);
+    if(path==="/v1/projects"&&method==="GET")return json(project.status==="active"?[clone(project)]:[]);
+    if(path==="/v1/projects/project-release"&&method==="DELETE"){
+      const body=JSON.parse(opts.body||"{}");if(Number(body.expected_revision)!==Number(project.revision))return json({error:"revision conflict"},409);
+      project={...project,status:"archived",revision:project.revision+1};return json(clone(project));
+    }
     if(path==="/v1/projects/project-release"&&method==="PATCH"){
       const body=JSON.parse(opts.body||"{}");
       if(Number(body.expected_revision)!==Number(project.revision))return json({error:"revision conflict"},409);
@@ -195,13 +199,18 @@
     const overlay=document.querySelector(".tour-overlay"),overlayStyle=getComputedStyle(overlay);check(overlay.dataset.focus==="none"&&overlayStyle.backgroundColor!=="rgba(0, 0, 0, 0)","Tour non-target step dims background");
     check(document.elementFromPoint(Math.min(innerWidth-1,Math.max(1,cardRect.left+20)),Math.min(innerHeight-1,Math.max(1,cardRect.top+20)))?.closest("#tourCard"),"Tour card receives pointer input");
     document.querySelector("#tourNext")?.click();await waitFor(()=>document.querySelector('#tourCard[data-positioned="true"]')?.querySelector("h2")?.textContent==="Navigation","Tour next step positioned");
-    const spotlight=check(document.querySelector("#tourSpotlight:not([hidden])"),"Tour target spotlight visible"),spotStyle=getComputedStyle(spotlight),targetOverlay=document.querySelector(".tour-overlay");check(targetOverlay.dataset.focus==="target","Tour target step uses spotlight focus mode");check(spotStyle.boxShadow.includes("9999px"),"Tour target has proven surrounding focus shade");
+    const spotlight=check(document.querySelector("#tourSpotlight:not([hidden])"),"Tour target spotlight visible"),spotStyle=getComputedStyle(spotlight),targetOverlay=document.querySelector(".tour-overlay"),tourTarget=document.querySelector(".tour-target");check(targetOverlay.dataset.focus==="target","Tour target step uses spotlight focus mode");check(spotStyle.boxShadow.includes("9999px"),"Tour target has proven surrounding focus shade");check(Number.parseInt(getComputedStyle(targetOverlay).zIndex||"0",10)>=2000&&getComputedStyle(tourTarget).zIndex==="auto","Tour spotlight owns top stacking layer");
     document.querySelector("#tourSkip")?.click();await waitFor(()=>!document.documentElement.dataset.productTour,"Tour cleanup");check(!document.querySelector(".tour-target"),"Tour target cleanup");check(!document.querySelector(".tour-overlay"),"Tour overlay removed");
 
     const launcher=check(document.querySelector("#controlChatLauncher"),"Chat launcher");launcher.click();await waitFor(()=>document.querySelector("#a31ControlChatForm"),"Assistant chat");
+    const panel=check(document.querySelector("#controlChatPanel"),"Chat panel"),chatToggle=check(document.querySelector("#controlChatToggle"),"Chat header toggle"),chatPosBefore=a33ControlChatPosition();
+    await gesture(chatToggle,0,-90);check(a33ControlChatPosition()!==chatPosBefore,"Chat moves vertically");check(a33ControlChatOpen(),"Chat drag keeps panel open");
     const form=document.querySelector("#a31ControlChatForm");form.querySelector("textarea").value="hello";form.requestSubmit(form.querySelector('button:not([name="run"])'));
     await waitFor(()=>document.querySelector("#controlChatBody")?.textContent?.includes("No eligible reasoning model is configured."),"no-model Assistant response",30000);
-    const panel=document.querySelector("#controlChatPanel"),before=panel.dataset.collapsed;document.querySelector("#controlChatToggle")?.click();check(panel.dataset.collapsed!==before,"Chat collapse");document.querySelector("#controlChatToggle")?.click();a31CloseControlChat();
+    const expandedTransform=getComputedStyle(panel.querySelector(".control-chat-chevron")).transform;chatToggle.click();check(panel.dataset.collapsed==="true","Chat collapses from header");const collapsedTransform=getComputedStyle(panel.querySelector(".control-chat-chevron")).transform;check(expandedTransform!=="none"&&collapsedTransform==="none","Chat chevron direction matches collapse state");chatToggle.click();check(panel.dataset.collapsed==="false","Chat expands from header");
+    launcher.click();check(!a33ControlChatOpen(),"Chat launcher closes open chat");launcher.click();await waitFor(()=>a33ControlChatOpen(),"Chat launcher reopens closed chat");a31CloseControlChat();
+
+    await route("projects");const projectDelete=check(document.querySelector("#a33DeleteProject"),"Delete project action");projectDelete.click();const confirmProjectDelete=await waitFor(()=>document.querySelector("#a33ConfirmDeleteProject"),"Delete project confirmation");confirmProjectDelete.click();await waitFor(()=>project.status==="archived"&&!qa4ProjectHub.projects.some(x=>x.id==="project-release"),"Project lifecycle delete persisted",30000);check(document.querySelector(".empty-state")?.textContent?.includes("No projects yet"),"Deleted project leaves active Projects list");
 
     results.push("installed behavioural acceptance complete");post("PASS");
   }

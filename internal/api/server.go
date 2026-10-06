@@ -73,6 +73,10 @@ type projectService interface {
 	BindRoutine(context.Context, projectworkspace.BindRoutineCommand) (projectworkspace.RoutineBinding, error)
 }
 
+type projectArchiver interface {
+	ArchiveProject(context.Context, projectworkspace.ArchiveProjectCommand) (projectworkspace.Project, error)
+}
+
 type eventReader interface {
 	After(context.Context, string, int64, int) ([]event.Stored, error)
 }
@@ -447,6 +451,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/orchestrator/turns", s.submitProjectOrchestratorTurn)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/orchestrator/handoffs", s.listProjectHandoffs)
 	s.mux.HandleFunc("PATCH /v1/projects/{projectID}", s.updateProjectPolicy)
+	s.mux.HandleFunc("DELETE /v1/projects/{projectID}", s.deleteProject)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/runtime", s.createRuntime)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/runtime", s.getRuntimeByProject)
 	s.mux.HandleFunc("POST /v1/project-runtimes/{runtimeID}/desired-state", s.setRuntimeDesired)
@@ -680,6 +685,34 @@ func (s *Server) updateProjectPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := s.projects.UpdateProjectPolicy(r.Context(), projectworkspace.UpdateProjectPolicyCommand{ProjectID: p.ID, ExpectedRevision: in.ExpectedRevision, ProjectPolicyJSON: in.ProjectPolicy, ActorPrincipalID: i.PrincipalID, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
+	respondDomain(w, out, err, http.StatusOK)
+}
+
+func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
+	i, ok := s.authenticate(w, r)
+	if !ok {
+		return
+	}
+	p, err := s.projects.Project(r.Context(), r.PathValue("projectID"))
+	if err != nil {
+		respondDomain(w, nil, err, 0)
+		return
+	}
+	if !s.authorize(w, r, i, p.WorkspaceID, "project.write") {
+		return
+	}
+	var in struct {
+		ExpectedRevision int64 `json:"expected_revision"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	archiver, ok := s.projects.(projectArchiver)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "project deletion is unavailable")
+		return
+	}
+	out, err := archiver.ArchiveProject(r.Context(), projectworkspace.ArchiveProjectCommand{ProjectID: p.ID, ExpectedRevision: in.ExpectedRevision, ActorPrincipalID: i.PrincipalID, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
 	respondDomain(w, out, err, http.StatusOK)
 }
 

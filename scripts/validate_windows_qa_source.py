@@ -22,7 +22,7 @@ ck("OmniRoute external URL policy remains safe", 'u.Scheme != "https"' in omni a
 ck("trusted model catalogue is rendered", "/v1/local-ai/catalog" in ui and "Download & Install" in ui and "model.installable" in ui)
 ck("model pool remains GUI-configurable", "/v1/settings/local-ai" in ui and "model_pool_path" in setup)
 ck("desktop uses authoritative backend WebUI", "NewSingleHostReverseProxy" in desktop and "127.0.0.1:18181" in desktop)
-ck("root WebUI serves directly", "index.html" in webui and "fs.ReadFile(staticFS, \"index.html\")" in desktop)
+ck("root WebUI is canonical and proxied", "index.html" in webui and 'mux.Handle("/", proxy)' in desktop and "fs.ReadFile(staticFS" not in desktop)
 ck("desktop reserves native settings routes", "/desktop/settings" in desktop and "/desktop/settings/model-pool" in desktop)
 ck("app icon and verifier remain integrated", "OnePane.ico" in desktop and "OnePane.ico" in setup and "Verify-OnePane.ps1" in verify)
 failed=[n for n,o in checks if not o]

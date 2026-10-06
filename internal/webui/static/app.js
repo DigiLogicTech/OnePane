@@ -393,9 +393,9 @@ async function a33DeleteProject(project){
   });
 }
 function a33BindProjectDelete(project){
-  const settings=$("#qa4ProjectSettings"),toolbar=settings?.closest(".toolbar");if(!settings||!toolbar)return;
+  const settings=$("#qa4ProjectSettings"),toolbar=settings?.closest(".toolbar")||$(".project-toolbar .toolbar");if(!toolbar)return;
   let button=toolbar.querySelector("#a33DeleteProject");
-  if(!button){button=document.createElement("button");button.id="a33DeleteProject";button.className="btn danger";button.textContent="Delete project";toolbar.insertBefore(button,settings.nextSibling)}
+  if(!button){button=document.createElement("button");button.id="a33DeleteProject";button.className="btn danger";button.textContent="Delete project";if(settings&&settings.parentElement===toolbar)toolbar.insertBefore(button,settings.nextSibling);else toolbar.prepend(button)}
   button.onclick=()=>a33DeleteProject(project);
 }
 const a31ProjectRenderBase=qa6RenderProjectsBase;

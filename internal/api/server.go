@@ -191,6 +191,8 @@ type teamService interface {
 	StartSession(context.Context, team.StartSessionCommand) (team.Session, error)
 	Session(context.Context, string) (team.Session, error)
 	SessionByTask(context.Context, string) (team.Session, error)
+	SessionManifest(context.Context, string) (team.SessionManifest, error)
+	ListSeatBindings(context.Context, string) ([]team.SeatBinding, error)
 	PostMessage(context.Context, team.PostMessageCommand) (team.Message, error)
 	ListMessages(context.Context, string, int) ([]team.Message, error)
 	RequestRound(context.Context, team.RequestRoundCommand) ([]team.TurnRequest, error)

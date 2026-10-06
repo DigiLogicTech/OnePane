@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -24,6 +25,35 @@ type migration struct {
 	filename string
 	body     []byte
 	checksum string
+}
+
+// MigrationError reports a failed schema upgrade together with the durable
+// rollback snapshot created immediately before pending migrations were applied.
+type MigrationError struct {
+	Cause         error
+	BackupPath    string
+	TargetVersion int
+}
+
+func (e *MigrationError) Error() string {
+	if e == nil {
+		return "migration failed"
+	}
+	return fmt.Sprintf("migration to schema v%04d failed: %v; pre-migration backup preserved at %s", e.TargetVersion, e.Cause, e.BackupPath)
+}
+
+func (e *MigrationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+func migrationFailure(cause error, backupPath string, targetVersion int) error {
+	if strings.TrimSpace(backupPath) == "" {
+		return cause
+	}
+	return &MigrationError{Cause: cause, BackupPath: backupPath, TargetVersion: targetVersion}
 }
 
 func (d *DB) Migrate(ctx context.Context) error {
@@ -52,18 +82,19 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 		}
 	}
 	backupPath := ""
+	targetVersion := 0
+	if len(pending) > 0 {
+		targetVersion = pending[len(pending)-1].version
+	}
 	if len(applied) > 0 && len(pending) > 0 {
-		backupPath, err = d.createMigrationBackup(ctx, pending[len(pending)-1].version)
+		backupPath, err = d.createMigrationBackup(ctx, targetVersion)
 		if err != nil {
 			return fmt.Errorf("create pre-migration backup: %w", err)
 		}
 	}
 	for _, item := range items {
 		if err := d.applyMigration(ctx, item); err != nil {
-			if backupPath != "" {
-				return fmt.Errorf("%w; pre-migration backup preserved at %s", err, backupPath)
-			}
-			return err
+			return migrationFailure(err, backupPath, targetVersion)
 		}
 	}
 	if len(pending) > 0 {
@@ -72,10 +103,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 			if err == nil {
 				err = fmt.Errorf("quick_check returned %q", check)
 			}
-			if backupPath != "" {
-				return fmt.Errorf("post-migration validation failed: %w; pre-migration backup preserved at %s", err, backupPath)
-			}
-			return fmt.Errorf("post-migration validation failed: %w", err)
+			return migrationFailure(fmt.Errorf("post-migration validation failed: %w", err), backupPath, targetVersion)
 		}
 	}
 	return nil
@@ -133,6 +161,150 @@ func (d *DB) createMigrationBackup(ctx context.Context, targetVersion int) (stri
 		return "", err
 	}
 	return backup, nil
+}
+
+// RestoreMigrationBackup atomically replaces a failed upgraded database with
+// the pre-migration snapshot. The caller must close every connection to the
+// target database before invoking this function.
+func RestoreMigrationBackup(targetPath, backupPath string) error {
+	targetAbs, err := filepath.Abs(strings.TrimSpace(targetPath))
+	if err != nil {
+		return fmt.Errorf("resolve migration rollback target: %w", err)
+	}
+	backupAbs, err := filepath.Abs(strings.TrimSpace(backupPath))
+	if err != nil {
+		return fmt.Errorf("resolve migration rollback backup: %w", err)
+	}
+	if targetAbs == backupAbs {
+		return errors.New("migration rollback target and backup are the same file")
+	}
+	info, err := os.Stat(backupAbs)
+	if err != nil {
+		return fmt.Errorf("stat migration rollback backup: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("migration rollback backup is not a regular file")
+	}
+	if err := verifyDatabaseFile(backupAbs); err != nil {
+		return fmt.Errorf("pre-migration backup failed integrity validation: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(targetAbs), 0o700); err != nil {
+		return err
+	}
+
+	in, err := os.Open(backupAbs)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(targetAbs), "."+filepath.Base(targetAbs)+".restore-*")
+	if err != nil {
+		_ = in.Close()
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanupTmp := true
+	defer func() {
+		_ = in.Close()
+		_ = tmp.Close()
+		if cleanupTmp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		return err
+	}
+	if _, err := io.Copy(tmp, in); err != nil {
+		return fmt.Errorf("copy migration rollback snapshot: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := in.Close(); err != nil {
+		return err
+	}
+
+	stamp := time.Now().UTC().Format("20060102T150405.000000000Z")
+	failedPath := targetAbs + ".failed-migrate-" + stamp
+	targetExisted := false
+	if _, err := os.Stat(targetAbs); err == nil {
+		if err := os.Rename(targetAbs, failedPath); err != nil {
+			return fmt.Errorf("preserve failed migrated database: %w", err)
+		}
+		targetExisted = true
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	type movedSidecar struct{ original, failed string }
+	var sidecars []movedSidecar
+	for _, suffix := range []string{"-wal", "-shm"} {
+		original := targetAbs + suffix
+		failed := failedPath + suffix
+		if _, err := os.Stat(original); err == nil {
+			if err := os.Rename(original, failed); err != nil {
+				if targetExisted {
+					_ = os.Rename(failedPath, targetAbs)
+				}
+				return fmt.Errorf("preserve failed migration sidecar %s: %w", suffix, err)
+			}
+			sidecars = append(sidecars, movedSidecar{original: original, failed: failed})
+		} else if !errors.Is(err, os.ErrNotExist) {
+			if targetExisted {
+				_ = os.Rename(failedPath, targetAbs)
+			}
+			return err
+		}
+	}
+
+	rollbackOriginal := func() {
+		_ = os.Remove(targetAbs)
+		if targetExisted {
+			_ = os.Rename(failedPath, targetAbs)
+		}
+		for _, s := range sidecars {
+			_ = os.Rename(s.failed, s.original)
+		}
+	}
+	if err := os.Rename(tmpPath, targetAbs); err != nil {
+		rollbackOriginal()
+		return fmt.Errorf("activate migration rollback snapshot: %w", err)
+	}
+	cleanupTmp = false
+	if err := os.Chmod(targetAbs, 0o600); err != nil {
+		rollbackOriginal()
+		return err
+	}
+	if err := verifyDatabaseFile(targetAbs); err != nil {
+		rollbackOriginal()
+		return fmt.Errorf("restored database failed integrity validation: %w", err)
+	}
+
+	if targetExisted {
+		_ = os.Remove(failedPath)
+	}
+	for _, s := range sidecars {
+		_ = os.Remove(s.failed)
+	}
+	return nil
+}
+
+func verifyDatabaseFile(path string) error {
+	db, err := Open(path)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	var check string
+	if err := db.SQL().QueryRow("PRAGMA quick_check").Scan(&check); err != nil {
+		return err
+	}
+	if !strings.EqualFold(strings.TrimSpace(check), "ok") {
+		return fmt.Errorf("quick_check returned %q", check)
+	}
+	return nil
 }
 
 func loadMigrations() ([]migration, error) {

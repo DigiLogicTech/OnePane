@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -117,6 +118,14 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 		return nil, err
 	}
 	if err := db.Migrate(ctx); err != nil {
+		var migrationErr *sqlite.MigrationError
+		if errors.As(err, &migrationErr) && strings.TrimSpace(migrationErr.BackupPath) != "" {
+			_ = db.Close()
+			if rollbackErr := sqlite.RestoreMigrationBackup(dbPath, migrationErr.BackupPath); rollbackErr != nil {
+				return nil, fmt.Errorf("migrate database: %v; automatic rollback failed: %w", err, rollbackErr)
+			}
+			return nil, fmt.Errorf("migrate database: %w; automatic rollback restored the pre-migration database", err)
+		}
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate database: %w", err)
 	}

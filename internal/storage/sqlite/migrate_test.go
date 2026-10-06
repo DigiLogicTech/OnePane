@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -111,5 +112,92 @@ func TestAlpha31SchemaUpgradesToAlpha32WithoutLosingDurableData(t *testing.T) {
 	defer copyDB.Close()
 	if err := copyDB.SQL().QueryRow(`SELECT name FROM workspaces WHERE id=?`, workspaceID).Scan(&name); err != nil {
 		t.Fatalf("rollback copy does not contain Alpha 3.1 workspace: %v", err)
+	}
+}
+func TestRestoreMigrationBackupRestoresPreUpgradeState(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "onepane.sqlite")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SQL().Exec(`CREATE TABLE sample(id INTEGER PRIMARY KEY, value TEXT NOT NULL); INSERT INTO sample(value) VALUES('alpha31');`); err != nil {
+		t.Fatal(err)
+	}
+	backup, err := db.createMigrationBackup(ctx, 26)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SQL().Exec(`UPDATE sample SET value='alpha32-mutated'; CREATE TABLE upgrade_only(id INTEGER PRIMARY KEY);`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate stale sidecars left by a failed upgraded process. The restore
+	// path must not let them attach to the pre-migration snapshot.
+	if err := os.WriteFile(path+"-wal", []byte("stale-wal"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+"-shm", []byte("stale-shm"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RestoreMigrationBackup(path, backup); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(backup); err != nil {
+		t.Fatalf("rollback snapshot was not preserved: %v", err)
+	}
+
+	restored, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value string
+	if err := restored.SQL().QueryRow(`SELECT value FROM sample LIMIT 1`).Scan(&value); err != nil {
+		t.Fatal(err)
+	}
+	if value != "alpha31" {
+		t.Fatalf("restored value=%q", value)
+	}
+	var upgradeOnly int
+	if err := restored.SQL().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='upgrade_only'`).Scan(&upgradeOnly); err != nil {
+		t.Fatal(err)
+	}
+	if upgradeOnly != 0 {
+		t.Fatal("upgrade-only schema survived rollback")
+	}
+	if err := restored.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path+"-wal"); err == nil || !os.IsNotExist(err) {
+		t.Fatalf("stale WAL survived rollback: %v", err)
+	}
+	if _, err := os.Stat(path+"-shm"); err == nil || !os.IsNotExist(err) {
+		t.Fatalf("stale SHM survived rollback: %v", err)
+	}
+	failedCopies, err := filepath.Glob(path + ".failed-migrate-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failedCopies) != 0 {
+		t.Fatalf("temporary failed migration copies were not cleaned up: %v", failedCopies)
+	}
+}
+
+func TestMigrationFailureExposesRollbackMetadata(t *testing.T) {
+	cause := errors.New("synthetic migration failure")
+	err := migrationFailure(cause, "/tmp/onepane.rollback.bak", 26)
+	var migrationErr *MigrationError
+	if !errors.As(err, &migrationErr) {
+		t.Fatalf("expected MigrationError, got %T", err)
+	}
+	if migrationErr.BackupPath != "/tmp/onepane.rollback.bak" || migrationErr.TargetVersion != 26 {
+		t.Fatalf("unexpected migration metadata: %+v", migrationErr)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatal("migration error did not preserve original cause")
 	}
 }

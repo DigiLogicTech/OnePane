@@ -72,10 +72,12 @@ type Trigger struct {
 type Policy struct {
 	CatchUp        string          `json:"catch_up,omitempty"` // latest | all | skip
 	MaxCatchUp     int             `json:"max_catch_up,omitempty"`
-	MaxOccurrences int             `json:"max_occurrences,omitempty"`
-	Objective      string          `json:"objective,omitempty"`
-	Priority       int             `json:"priority,omitempty"`
-	Completion     json.RawMessage `json:"completion,omitempty"`
+	MaxOccurrences    int             `json:"max_occurrences,omitempty"`
+	ProjectID         *string         `json:"project_id,omitempty"`
+	ProjectWorkspaceID *string        `json:"project_workspace_id,omitempty"`
+	Objective          string          `json:"objective,omitempty"`
+	Priority           int             `json:"priority,omitempty"`
+	Completion         json.RawMessage `json:"completion,omitempty"`
 }
 
 type CreateCommand struct {
@@ -570,13 +572,17 @@ func (s *Service) materialize(ctx context.Context, r Routine, d dueOccurrence) (
 			payload, _ := json.Marshal(map[string]any{"routine_id": r.ID, "occurrence_id": o.ID, "occurrence_key": key, "state": o.State})
 			return s.events.Append(ctx, tx, event.Event{ID: eid, WorkspaceID: &r.WorkspaceID, Type: "routine.occurrence_missed", AggregateType: "routine_occurrence", AggregateID: o.ID, Payload: payload, OccurredAt: now})
 		}
-		projectID, err := resolveSingleProjectBinding(ctx, tx, r.ID)
-		if err != nil {
-			return err
-		}
 		var pol Policy
 		_ = json.Unmarshal(r.PolicyJSON, &pol)
 		pol, _ = normalizePolicy(pol)
+		projectID := pol.ProjectID
+		if projectID == nil {
+			var err error
+			projectID, err = resolveSingleProjectBinding(ctx, tx, r.ID)
+			if err != nil {
+				return err
+			}
+		}
 		objective := strings.TrimSpace(pol.Objective)
 		if objective == "" {
 			objective = "Routine: " + r.Name
@@ -585,7 +591,7 @@ func (s *Service) materialize(ctx context.Context, r Routine, d dueOccurrence) (
 		if len(completion) == 0 {
 			completion = json.RawMessage(`{}`)
 		}
-		t, err := s.tasks.CreateInTransaction(ctx, tx, task.CreateCommand{WorkspaceID: r.WorkspaceID, ProjectID: projectID, Objective: objective, SchedulingClass: task.ClassBackgroundRoutine, Priority: pol.Priority, Completion: completion})
+		t, err := s.tasks.CreateInTransaction(ctx, tx, task.CreateCommand{WorkspaceID: r.WorkspaceID, ProjectID: projectID, ProjectWorkspaceID: pol.ProjectWorkspaceID, Objective: objective, SchedulingClass: task.ClassBackgroundRoutine, Priority: pol.Priority, Completion: completion})
 		if err != nil {
 			return err
 		}

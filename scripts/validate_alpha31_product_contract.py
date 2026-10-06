@@ -44,7 +44,7 @@ ck("Task JSON columns round-trip SQLite TEXT safely", all(x in taskrepo for x in
 ck("Managed component status is callable from Models", "async function qa5ComponentStatus()" in app and "/v1/local-ai/components?workspace_id=" in app)
 ck("Project and Operations layout commits are collision-aware and save-safe", all(x in app for x in ["a31ResolveLayout(items,item.id)","a31LayoutSaveInFlight","Layout save failed:","qa4BindWorkspaceEdit(project,workspace)"]))
 ck("component layout is pointer-resizable without mutation rerender", "a31BindLayout" in app and "data-pw-resize" in app and "data-op-resize" in app)
-ck("Tour uses isolated focus panes", "tour-pane-top" in app and "bottom-center" in app and ".tour-spotlight" in css)
+ck("Tour uses isolated focus panes", "tour-pane-top" in app and "const center=clamp" in app and "if(collides(pos)&&targetRect)" in app and 'card.dataset.positioned="true"' in app and ".tour-spotlight" in css)
 ck("Tour launches from canonical overlay host", 'const root=$("#overlayRoot")' in app and "qa31TourRoot" not in app and "qa31TourRoot" not in html)
 ck("Windows desktop consumes the canonical backend WebUI", 'mux.Handle("/", proxy)' in desktop and "test ! -d packaging/windows/desktop/static" in workflow)
 ck("Windows and Ubuntu packages remain CI outputs", "Build Windows x64 installer" in workflow and "Build Ubuntu amd64 package" in workflow)

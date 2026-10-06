@@ -3,8 +3,10 @@ package task
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/DigiLogicTech/OnePane/internal/storage"
 )
@@ -22,15 +24,29 @@ type rowScanner interface {
 func scanTask(row rowScanner) (Task, error) {
 	var t Task
 	var project, artifactSession, plan, parent sql.NullString
-	var result []byte
+	var completion, result sql.NullString
 	var readyAt, cancelAt sql.NullInt64
 	if err := row.Scan(
 		&t.ID, &t.WorkspaceID, &project, &artifactSession, &plan, &parent,
 		&t.Objective, &t.State, &t.SchedulingClass, &t.Priority,
-		&t.Completion, &result, &t.Revision, &readyAt, &cancelAt,
+		&completion, &result, &t.Revision, &readyAt, &cancelAt,
 		&t.CreatedAt, &t.UpdatedAt,
 	); err != nil {
 		return Task{}, err
+	}
+	if completion.Valid && strings.TrimSpace(completion.String) != "" {
+		raw := json.RawMessage(completion.String)
+		if !json.Valid(raw) {
+			return Task{}, fmt.Errorf("task %s completion_json contains invalid JSON", t.ID)
+		}
+		t.Completion = append(json.RawMessage(nil), raw...)
+	}
+	if result.Valid && strings.TrimSpace(result.String) != "" {
+		raw := json.RawMessage(result.String)
+		if !json.Valid(raw) {
+			return Task{}, fmt.Errorf("task %s result_json contains invalid JSON", t.ID)
+		}
+		t.Result = append(json.RawMessage(nil), raw...)
 	}
 	if project.Valid {
 		t.ProjectID = &project.String
@@ -43,9 +59,6 @@ func scanTask(row rowScanner) (Task, error) {
 	}
 	if parent.Valid {
 		t.ParentTaskID = &parent.String
-	}
-	if len(result) > 0 {
-		t.Result = result
 	}
 	if readyAt.Valid {
 		v := readyAt.Int64
@@ -180,13 +193,20 @@ INSERT INTO task_attempts(
 
 func scanAttempt(row rowScanner) (Attempt, error) {
 	var a Attempt
-	var worker, recovery sql.NullString
+	var worker, recovery, metadata sql.NullString
 	var started, ended sql.NullInt64
 	if err := row.Scan(
 		&a.ID, &a.TaskID, &a.AttemptNumber, &worker, &a.State,
-		&recovery, &started, &ended, &a.Metadata,
+		&recovery, &started, &ended, &metadata,
 	); err != nil {
 		return Attempt{}, err
+	}
+	if metadata.Valid && strings.TrimSpace(metadata.String) != "" {
+		raw := json.RawMessage(metadata.String)
+		if !json.Valid(raw) {
+			return Attempt{}, fmt.Errorf("task attempt %s metadata_json contains invalid JSON", a.ID)
+		}
+		a.Metadata = append(json.RawMessage(nil), raw...)
 	}
 	if worker.Valid {
 		a.WorkerPrincipalID = &worker.String

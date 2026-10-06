@@ -3,8 +3,15 @@ package localai
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
+	"crypto/sha256"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -35,5 +42,80 @@ func TestExtractAllowsNormalFile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "bin", "llama-server")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHTTPFetcherResumesPartialDownload(t *testing.T) {
+	payload := []byte(strings.Repeat("onepane-resume-", 4096))
+	split := len(payload) / 3
+	sum := fmt.Sprintf("%x", sha256.Sum256(payload))
+	var calls atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call := calls.Add(1)
+		if call == 1 {
+			w.Header().Set("Content-Length", fmt.Sprint(len(payload)))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(payload[:split])
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			panic(http.ErrAbortHandler)
+		}
+		wantRange := fmt.Sprintf("bytes=%d-", split)
+		if got := r.Header.Get("Range"); got != wantRange {
+			t.Errorf("Range=%q want %q", got, wantRange)
+		}
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", split, len(payload)-1, len(payload)))
+		w.Header().Set("Content-Length", fmt.Sprint(len(payload)-split))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(payload[split:])
+	}))
+	defer srv.Close()
+
+	fetcher := &HTTPFetcher{Client: srv.Client(), MaxBytes: int64(len(payload) * 2)}
+	dest := filepath.Join(t.TempDir(), "model.gguf")
+	if _, err := fetcher.Fetch(context.Background(), srv.URL, dest, sum); err == nil {
+		t.Fatal("first interrupted fetch unexpectedly succeeded")
+	}
+	st, err := os.Stat(dest + ".partial")
+	if err != nil {
+		t.Fatalf("partial download was not preserved: %v", err)
+	}
+	if st.Size() != int64(split) {
+		t.Fatalf("partial size=%d want %d", st.Size(), split)
+	}
+	got, err := fetcher.Fetch(context.Background(), srv.URL, dest, sum)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Size != int64(len(payload)) || got.SHA256 != sum {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+	body, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != string(payload) {
+		t.Fatal("resumed artifact does not match source")
+	}
+	if _, err := os.Stat(dest + ".partial"); !os.IsNotExist(err) {
+		t.Fatalf("partial file should be removed after completion, err=%v", err)
+	}
+}
+
+func TestHTTPFetcherReusesVerifiedCompletedArtifact(t *testing.T) {
+	payload := []byte("verified local model artifact")
+	sum := fmt.Sprintf("%x", sha256.Sum256(payload))
+	dest := filepath.Join(t.TempDir(), "model.gguf")
+	if err := os.WriteFile(dest, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fetcher := &HTTPFetcher{Client: &http.Client{}, MaxBytes: 1024}
+	got, err := fetcher.Fetch(context.Background(), "https://invalid.example/not-requested", dest, sum)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SHA256 != sum || got.Size != int64(len(payload)) {
+		t.Fatalf("unexpected result: %+v", got)
 	}
 }

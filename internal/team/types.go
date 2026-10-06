@@ -23,6 +23,65 @@ type Session struct {
 	RoundNumber, Revision, CreatedAt, UpdatedAt        int64
 	Config                                             json.RawMessage
 }
+type ResearchSettings struct {
+	PinModels               bool `json:"pin_models"`
+	DisableModelSubstitution bool `json:"disable_model_substitution"`
+	SameModelRetries         bool `json:"same_model_retries"`
+	PreserveFailedSeats      bool `json:"preserve_failed_seats"`
+	IndependentFirstPass     bool `json:"independent_first_pass"`
+	ScopedEvidence           bool `json:"scoped_evidence"`
+	RecordRawOutputs         bool `json:"record_raw_outputs"`
+	FullProvenance           bool `json:"full_provenance"`
+	RequireAllSeats          bool `json:"require_all_seats"`
+	AnonymizedCrossCritique  bool `json:"anonymized_cross_critique"`
+	SynthesisPass            bool `json:"synthesis_pass"`
+}
+type SnapshotAgentProfile struct {
+	ID           string `json:"id"`
+	Name         string `json:"name,omitempty"`
+	Role         string `json:"role,omitempty"`
+	Instructions string `json:"instructions,omitempty"`
+	Revision     int64  `json:"revision,omitempty"`
+}
+type SnapshotMember struct {
+	ID            string                `json:"id"`
+	MemberKind    string                `json:"member_kind"`
+	DisplayName   string                `json:"display_name"`
+	RoleName      string                `json:"role_name"`
+	CapabilityID  string                `json:"capability_id"`
+	ProtocolLevel string                `json:"protocol_level"`
+	PrincipalID   *string               `json:"principal_id,omitempty"`
+	RoutePolicy   json.RawMessage       `json:"route_policy"`
+	Config        json.RawMessage       `json:"config"`
+	Ordinal       int                   `json:"ordinal"`
+	Status        string                `json:"status"`
+	Profile       *SnapshotAgentProfile `json:"profile,omitempty"`
+}
+type SessionSnapshot struct {
+	SessionID            string           `json:"session_id"`
+	TaskID               string           `json:"task_id"`
+	TaskObjective        string           `json:"task_objective"`
+	TeamID               string           `json:"team_id"`
+	TeamRevision         int64            `json:"team_revision"`
+	TeamConfiguration    json.RawMessage  `json:"team_configuration"`
+	SessionConfiguration json.RawMessage  `json:"session_configuration"`
+	ExecutionMode        string           `json:"execution_mode"`
+	ResearchMode         bool             `json:"research_mode"`
+	Research             ResearchSettings `json:"research"`
+	GatewayTargetID      *string          `json:"gateway_target_id,omitempty"`
+	Members               []SnapshotMember `json:"members"`
+}
+type SessionManifest struct {
+	SessionID, WorkspaceID, TeamID, ExecutionMode, SnapshotSHA256 string
+	ResearchMode                                                   bool
+	Snapshot                                                       json.RawMessage
+	CreatedAt                                                      int64
+}
+type SeatBinding struct {
+	SessionID, MemberID, CandidateKind, CandidateID string
+	CandidateSnapshot                               json.RawMessage
+	CreatedAt                                       int64
+}
 type Message struct {
 	ID, WorkspaceID, SessionID, Kind                    string
 	AuthorMemberID, AuthorPrincipalID, ReplyToMessageID *string

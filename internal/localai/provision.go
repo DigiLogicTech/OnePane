@@ -60,6 +60,20 @@ func NewHTTPFetcher(maxBytes int64) *HTTPFetcher {
 	}}, MaxBytes: maxBytes}
 }
 
+func existingDownload(path string) (DownloadResult, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return DownloadResult{}, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	n, err := io.Copy(h, f)
+	if err != nil {
+		return DownloadResult{}, err
+	}
+	return DownloadResult{Path: path, SHA256: hex.EncodeToString(h.Sum(nil)), Size: n}, nil
+}
+
 func (f *HTTPFetcher) Fetch(ctx context.Context, sourceURL, dest, expectedSHA string) (DownloadResult, error) {
 	if f == nil || f.Client == nil || f.MaxBytes <= 0 {
 		return DownloadResult{}, errors.New("invalid fetcher")
@@ -70,68 +84,140 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, sourceURL, dest, expectedSHA st
 	if strings.TrimSpace(dest) == "" {
 		return DownloadResult{}, errors.New("destination required")
 	}
-	if expectedSHA != "" && (len(expectedSHA) != 64 || strings.ContainsAny(expectedSHA, " /\\")) {
+	if expectedSHA != "" && (len(expectedSHA) != 64 || strings.ContainsAny(expectedSHA, " /\\\\"")) {
 		return DownloadResult{}, errors.New("invalid expected sha256")
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return DownloadResult{}, err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(dest), ".download-*")
+
+	// A completed verified artifact is durable install state. Reuse it instead
+	// of downloading the same multi-gigabyte model again after a daemon restart.
+	if st, err := os.Stat(dest); err == nil && !st.IsDir() {
+		got, hashErr := existingDownload(dest)
+		if hashErr != nil {
+			return DownloadResult{}, hashErr
+		}
+		if expectedSHA == "" || strings.EqualFold(got.SHA256, expectedSHA) {
+			return got, nil
+		}
+		if err := os.Remove(dest); err != nil {
+			return DownloadResult{}, fmt.Errorf("remove corrupt completed download: %w", err)
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return DownloadResult{}, err
+	}
+
+	partial := dest + ".partial"
+	h := sha256.New()
+	var offset int64
+	if st, err := os.Stat(partial); err == nil {
+		if st.IsDir() {
+			return DownloadResult{}, errors.New("partial download path is a directory")
+		}
+		if st.Size() > f.MaxBytes {
+			_ = os.Remove(partial)
+			return DownloadResult{}, errors.New("partial download exceeds maximum size")
+		}
+		offset = st.Size()
+		in, err := os.Open(partial)
+		if err != nil {
+			return DownloadResult{}, err
+		}
+		_, hashErr := io.Copy(h, in)
+		closeErr := in.Close()
+		if hashErr != nil {
+			return DownloadResult{}, hashErr
+		}
+		if closeErr != nil {
+			return DownloadResult{}, closeErr
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return DownloadResult{}, err
+	}
+
+	out, err := os.OpenFile(partial, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return DownloadResult{}, err
 	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
 	if err != nil {
-		tmp.Close()
+		_ = out.Close()
 		return DownloadResult{}, err
+	}
+	if offset > 0 {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
 	}
 	resp, err := f.Client.Do(req)
 	if err != nil {
-		tmp.Close()
+		_ = out.Close()
 		return DownloadResult{}, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		tmp.Close()
+
+	if offset > 0 && resp.StatusCode == http.StatusOK {
+		// The origin ignored Range. Restart safely using the same durable partial
+		// path rather than appending a second copy of the artifact.
+		if err := out.Close(); err != nil {
+			return DownloadResult{}, err
+		}
+		out, err = os.OpenFile(partial, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+		if err != nil {
+			return DownloadResult{}, err
+		}
+		offset = 0
+		h = sha256.New()
+	} else if offset > 0 && resp.StatusCode == http.StatusPartialContent {
+		want := fmt.Sprintf("bytes %d-", offset)
+		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Range"))), want) {
+			_ = out.Close()
+			return DownloadResult{}, errors.New("download server returned an incompatible content range")
+		}
+	} else if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_ = out.Close()
 		return DownloadResult{}, fmt.Errorf("download returned HTTP %d", resp.StatusCode)
 	}
-	if resp.ContentLength > f.MaxBytes {
-		tmp.Close()
-		return DownloadResult{}, fmt.Errorf("download exceeds maximum size")
+
+	if resp.ContentLength >= 0 && offset+resp.ContentLength > f.MaxBytes {
+		_ = out.Close()
+		return DownloadResult{}, errors.New("download exceeds maximum size")
 	}
-	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(resp.Body, f.MaxBytes+1))
-	if err != nil {
-		tmp.Close()
+	remaining := f.MaxBytes - offset
+	n, copyErr := io.Copy(io.MultiWriter(out, h), io.LimitReader(resp.Body, remaining+1))
+	if copyErr != nil {
+		_ = out.Sync()
+		_ = out.Close()
+		// Deliberately retain .partial so a subsequent install tick can resume.
+		return DownloadResult{}, copyErr
+	}
+	total := offset + n
+	if n > remaining || total > f.MaxBytes {
+		_ = out.Close()
+		_ = os.Remove(partial)
+		return DownloadResult{}, errors.New("download exceeds maximum size")
+	}
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
 		return DownloadResult{}, err
 	}
-	if n > f.MaxBytes {
-		tmp.Close()
-		return DownloadResult{}, fmt.Errorf("download exceeds maximum size")
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return DownloadResult{}, err
-	}
-	if err := tmp.Close(); err != nil {
+	if err := out.Close(); err != nil {
 		return DownloadResult{}, err
 	}
 	actual := hex.EncodeToString(h.Sum(nil))
 	if expectedSHA != "" && !strings.EqualFold(actual, expectedSHA) {
+		_ = os.Remove(partial)
 		return DownloadResult{}, fmt.Errorf("sha256 mismatch: expected %s got %s", expectedSHA, actual)
 	}
-	if err := os.Chmod(tmpName, 0o600); err != nil {
+	if err := os.Chmod(partial, 0o600); err != nil {
 		return DownloadResult{}, err
 	}
-	if err := os.Rename(tmpName, dest); err != nil {
+	if err := os.Rename(partial, dest); err != nil {
 		return DownloadResult{}, err
 	}
-	return DownloadResult{Path: dest, SHA256: actual, Size: n}, nil
+	return DownloadResult{Path: dest, SHA256: actual, Size: total}, nil
 }
 
-func safeArchivePath(root, name string) (string, error) {
+func safeArchivePathfunc safeArchivePath(root, name string) (string, error) {
 	name = strings.ReplaceAll(name, "\\", "/")
 	clean := filepath.Clean(name)
 	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {

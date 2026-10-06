@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -40,12 +41,98 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 	if err != nil {
 		return err
 	}
-	for _, m := range items {
-		if err := d.applyMigration(ctx, m); err != nil {
+	applied, err := d.appliedMigrationVersions(ctx)
+	if err != nil {
+		return err
+	}
+	pending := make([]migration, 0, len(items))
+	for _, item := range items {
+		if _, ok := applied[item.version]; !ok {
+			pending = append(pending, item)
+		}
+	}
+	backupPath := ""
+	if len(applied) > 0 && len(pending) > 0 {
+		backupPath, err = d.createMigrationBackup(ctx, pending[len(pending)-1].version)
+		if err != nil {
+			return fmt.Errorf("create pre-migration backup: %w", err)
+		}
+	}
+	for _, item := range items {
+		if err := d.applyMigration(ctx, item); err != nil {
+			if backupPath != "" {
+				return fmt.Errorf("%w; pre-migration backup preserved at %s", err, backupPath)
+			}
 			return err
 		}
 	}
+	if len(pending) > 0 {
+		var check string
+		if err := d.db.QueryRowContext(ctx, "PRAGMA quick_check").Scan(&check); err != nil || !strings.EqualFold(strings.TrimSpace(check), "ok") {
+			if err == nil {
+				err = fmt.Errorf("quick_check returned %q", check)
+			}
+			if backupPath != "" {
+				return fmt.Errorf("post-migration validation failed: %w; pre-migration backup preserved at %s", err, backupPath)
+			}
+			return fmt.Errorf("post-migration validation failed: %w", err)
+		}
+	}
 	return nil
+}
+
+func (d *DB) appliedMigrationVersions(ctx context.Context) (map[int]struct{}, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT version FROM schema_migrations ORDER BY version`)
+	if err != nil {
+		return nil, fmt.Errorf("list applied migrations: %w", err)
+	}
+	defer rows.Close()
+	out := map[int]struct{}{}
+	for rows.Next() {
+		var version int
+		if err := rows.Scan(&version); err != nil {
+			return nil, err
+		}
+		out[version] = struct{}{}
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) createMigrationBackup(ctx context.Context, targetVersion int) (string, error) {
+	rows, err := d.db.QueryContext(ctx, "PRAGMA database_list")
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	var mainPath string
+	for rows.Next() {
+		var seq int
+		var name, file string
+		if err := rows.Scan(&seq, &name, &file); err != nil {
+			return "", err
+		}
+		if name == "main" {
+			mainPath = file
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(mainPath) == "" {
+		return "", errors.New("main sqlite database has no durable path")
+	}
+	stamp := time.Now().UTC().Format("20060102T150405.000000000Z")
+	backup := fmt.Sprintf("%s.pre-migrate-v%04d-%s.bak", mainPath, targetVersion, stamp)
+	escaped := strings.ReplaceAll(backup, "'", "''")
+	if _, err := d.db.ExecContext(ctx, "VACUUM INTO '"+escaped+"'"); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(backup, 0o600); err != nil {
+		_ = os.Remove(backup)
+		return "", err
+	}
+	return backup, nil
 }
 
 func loadMigrations() ([]migration, error) {

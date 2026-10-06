@@ -4,14 +4,15 @@ import sys
 ROOT=Path(__file__).resolve().parents[1]
 read=lambda p:(ROOT/p).read_text(encoding="utf-8")
 app=read("internal/webui/static/app.js"); html=read("internal/webui/static/index.html"); css=read("internal/webui/static/style.css")
-api=read("internal/api/server.go")+read("internal/api/assistant_orchestrator.go")+read("internal/api/provider_oauth.go")+read("internal/api/skills.go")+read("internal/api/local_ai_compute.go")
+api=read("internal/api/server.go")+read("internal/api/team.go")+read("internal/api/assistant_orchestrator.go")+read("internal/api/provider_oauth.go")+read("internal/api/skills.go")+read("internal/api/local_ai_compute.go")
 boot=read("internal/bootstrap/bootstrap.go")
 assistant=read("internal/assistant/service.go"); orch=read("internal/projectorchestrator/service.go"); profiles=read("internal/agentprofile/service.go")
 components=read("internal/localai/components.go")+read("internal/localai/components_omniroute.go")
 catalog=read("internal/localai/catalog_bundled.go")+read("internal/localai/catalog_signed.go")
 compute=read("internal/localai/compute_policy.go"); oauth=read("internal/provideroauth/service.go"); skills=read("internal/skillcatalog/service.go")
 setup=read("packaging/windows/setup/main.go"); desktop=read("packaging/windows/desktop/main.go"); workflow=read(".github/workflows/alpha3.1-stabilization.yml")
-migration=read("migrations/0023_alpha31_assistant_orchestrator.sql")+read("migrations/0024_alpha31_agents_components.sql")+read("migrations/0025_alpha31_refinement.sql")
+migration=read("migrations/0023_alpha31_assistant_orchestrator.sql")+read("migrations/0024_alpha31_agents_components.sql")+read("migrations/0025_alpha31_refinement.sql")+read("migrations/0026_alpha32_reliability.sql")
+reliability=read("internal/storage/sqlite/migrate.go"); provision=read("internal/localai/provision.go"); teamsvc=read("internal/team/service.go"); teamworker=read("internal/teamworker/service.go")
 checks=[]
 def ck(n,c): checks.append((n,bool(c)))
 ck("Assistant and Project Orchestrator remain durable", "assistant_threads" in migration and "project_orchestrators" in migration and "type Service struct" in assistant and "type Service struct" in orch)
@@ -35,6 +36,12 @@ ck("Windows static assets remain canonical", "cmp internal/webui/static/app.js p
 ck("Windows and Ubuntu packages remain CI outputs", "Build Windows x64 installer" in workflow and "Build Ubuntu amd64 package" in workflow)
 ck("native Windows UI-ready smoke contract remains", "onepane-ui-ready|" in app and "ui-ready.txt" in desktop and "Assert-NativeUIReady" in workflow)
 ck("Windows setup remains noninteractive-test capable", all(x in setup for x in ["--silent","--no-launch","--skip-optional-runtime"]))
+ck("Alpha upgrades create and validate a durable rollback point", "VACUUM INTO" in reliability and "pre-migration backup preserved" in reliability and "PRAGMA quick_check" in reliability)
+ck("managed downloads resume durable partial artifacts", all(x in provision for x in ['dest + ".partial"','Header.Set("Range"','StatusPartialContent','existingDownload']))
+ck("Research sessions freeze immutable manifests", all(x in migration+teamsvc for x in ["team_session_manifests","snapshot_sha256","SessionSnapshot","manifest_sha256"]))
+ck("Research seats pin one resolved candidate across retries", "team_session_seat_bindings" in migration and "IncludeCandidateIDs" in teamworker and "BindSeat" in teamworker and "seat_binding_candidate_id" in teamworker)
+ck("Research first pass can remain independent and complete", "IndependentFirstPass" in teamworker and "m.Kind == \"agent\"" in teamworker and "RequireAllSeats" in teamsvc)
+ck("Research manifest provenance is readable", "/v1/team-sessions/{sessionID}/manifest" in api and "getTeamSessionManifest" in api)
 failed=[n for n,o in checks if not o]
 for n,o in checks: print(f"[{'PASS' if o else 'FAIL'}] {n}")
 if failed:

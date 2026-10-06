@@ -2,7 +2,9 @@ package team
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -241,6 +243,127 @@ func (s *Service) ListMembers(ctx context.Context, teamID string) ([]Member, err
 	return out, rows.Err()
 }
 
+func profileIDFromMemberConfig(raw json.RawMessage) string {
+	var cfg map[string]any
+	if json.Unmarshal(raw, &cfg) != nil {
+		return ""
+	}
+	for _, key := range []string{"agent_profile_id", "agent_profile"} {
+		if v, ok := cfg[key].(string); ok && strings.TrimSpace(v) != "" {
+			idv := strings.TrimSpace(v)
+			if strings.EqualFold(idv, "onepane-default") {
+				return "agent.md"
+			}
+			return idv
+		}
+	}
+	return "agent.md"
+}
+
+func (s *Service) snapshotMembers(ctx context.Context, teamID, workspaceID string) ([]SnapshotMember, error) {
+	members, err := s.ListMembers(ctx, teamID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SnapshotMember, 0, len(members))
+	for _, m := range members {
+		if m.Status != "active" {
+			continue
+		}
+		sm := SnapshotMember{ID: m.ID, MemberKind: m.MemberKind, DisplayName: m.DisplayName, RoleName: m.RoleName, CapabilityID: m.CapabilityID, ProtocolLevel: m.ProtocolLevel, PrincipalID: m.PrincipalID, RoutePolicy: append(json.RawMessage(nil), m.RoutePolicy...), Config: append(json.RawMessage(nil), m.Config...), Ordinal: m.Ordinal, Status: m.Status}
+		if m.MemberKind != "human" {
+			profileID := profileIDFromMemberConfig(m.Config)
+			if profileID != "" {
+				var p SnapshotAgentProfile
+				p.ID = profileID
+				err := s.db.QueryRowContext(ctx, `SELECT name,instructions_md,default_role,revision FROM agent_profiles WHERE id=? AND status='active' AND (workspace_id=? OR workspace_id IS NULL) ORDER BY CASE WHEN workspace_id=? THEN 0 ELSE 1 END LIMIT 1`, profileID, workspaceID, workspaceID).Scan(&p.Name, &p.Instructions, &p.Role, &p.Revision)
+				if err == nil {
+					sm.Profile = &p
+				} else if !errors.Is(err, sql.ErrNoRows) {
+					return nil, err
+				}
+			}
+		}
+		out = append(out, sm)
+	}
+	return out, nil
+}
+
+func researchConfiguration(raw json.RawMessage) (bool, ResearchSettings) {
+	var cfg struct {
+		ResearchMode bool             `json:"research_mode"`
+		Research     ResearchSettings `json:"research"`
+	}
+	_ = json.Unmarshal(raw, &cfg)
+	return cfg.ResearchMode, cfg.Research
+}
+
+func (s *Service) SessionManifest(ctx context.Context, sessionID string) (SessionManifest, error) {
+	var m SessionManifest
+	var research int
+	var raw string
+	err := s.db.QueryRowContext(ctx, `SELECT session_id,workspace_id,team_id,execution_mode,research_mode,snapshot_json,snapshot_sha256,created_at FROM team_session_manifests WHERE session_id=?`, sessionID).Scan(&m.SessionID, &m.WorkspaceID, &m.TeamID, &m.ExecutionMode, &research, &raw, &m.SnapshotSHA256, &m.CreatedAt)
+	m.ResearchMode = research != 0
+	m.Snapshot = json.RawMessage(raw)
+	return m, err
+}
+
+func (s *Service) SeatBinding(ctx context.Context, sessionID, memberID string) (SeatBinding, error) {
+	var b SeatBinding
+	var raw string
+	err := s.db.QueryRowContext(ctx, `SELECT session_id,member_id,candidate_kind,candidate_id,candidate_snapshot_json,created_at FROM team_session_seat_bindings WHERE session_id=? AND member_id=?`, sessionID, memberID).Scan(&b.SessionID, &b.MemberID, &b.CandidateKind, &b.CandidateID, &raw, &b.CreatedAt)
+	b.CandidateSnapshot = json.RawMessage(raw)
+	return b, err
+}
+
+func (s *Service) ListSeatBindings(ctx context.Context, sessionID string) ([]SeatBinding, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT session_id,member_id,candidate_kind,candidate_id,candidate_snapshot_json,created_at FROM team_session_seat_bindings WHERE session_id=? ORDER BY member_id`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SeatBinding
+	for rows.Next() {
+		var b SeatBinding
+		var raw string
+		if err := rows.Scan(&b.SessionID, &b.MemberID, &b.CandidateKind, &b.CandidateID, &raw, &b.CreatedAt); err != nil {
+			return nil, err
+		}
+		b.CandidateSnapshot = json.RawMessage(raw)
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+func (s *Service) BindSeat(ctx context.Context, sessionID, memberID, candidateKind, candidateID string, candidateSnapshot json.RawMessage) (SeatBinding, error) {
+	ss, err := s.Session(ctx, sessionID)
+	if err != nil {
+		return SeatBinding{}, err
+	}
+	if candidateKind != "model_deployment" && candidateKind != "agent_runtime" || strings.TrimSpace(candidateID) == "" {
+		return SeatBinding{}, ErrInvalid
+	}
+	var teamID string
+	if err := s.db.QueryRowContext(ctx, `SELECT team_id FROM team_members WHERE id=? AND status='active'`, memberID).Scan(&teamID); err != nil || teamID != ss.TeamID {
+		return SeatBinding{}, ErrInvalid
+	}
+	raw, err := canonical(candidateSnapshot)
+	if err != nil {
+		return SeatBinding{}, err
+	}
+	now := s.clock.UnixMilli()
+	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO team_session_seat_bindings(session_id,member_id,candidate_kind,candidate_id,candidate_snapshot_json,created_at) VALUES(?,?,?,?,?,?)`, sessionID, memberID, candidateKind, candidateID, string(raw), now); err != nil {
+			return err
+		}
+		return s.emit(ctx, tx, ss.WorkspaceID, "team.seat_bound", "team_session", sessionID, nil, map[string]any{"member_id": memberID, "candidate_kind": candidateKind, "candidate_id": candidateID})
+	})
+	if err != nil {
+		return SeatBinding{}, err
+	}
+	return s.SeatBinding(ctx, sessionID, memberID)
+}
+
 func (s *Service) StartSession(ctx context.Context, c StartSessionCommand) (Session, error) {
 	t, err := s.Team(ctx, c.TeamID)
 	if err != nil {
@@ -264,8 +387,23 @@ func (s *Service) StartSession(ctx context.Context, c StartSessionCommand) (Sess
 	if err != nil {
 		return Session{}, err
 	}
+	members, err := s.snapshotMembers(ctx, t.ID, t.WorkspaceID)
+	if err != nil {
+		return Session{}, err
+	}
+	researchMode, research := researchConfiguration(t.Configuration)
+	if mode != "council" {
+		researchMode = false
+	}
 	sid, _ := s.ids.New("tsession")
 	now := s.clock.UnixMilli()
+	snapshot := SessionSnapshot{SessionID: sid, TaskID: taskRow.ID, TaskObjective: taskRow.Objective, TeamID: t.ID, TeamRevision: t.Revision, TeamConfiguration: append(json.RawMessage(nil), t.Configuration...), SessionConfiguration: append(json.RawMessage(nil), cfg...), ExecutionMode: mode, ResearchMode: researchMode, Research: research, GatewayTargetID: c.GatewayTargetID, Members: members}
+	snapshotRaw, err := json.Marshal(snapshot)
+	if err != nil {
+		return Session{}, err
+	}
+	sum := sha256.Sum256(snapshotRaw)
+	manifestSHA := hex.EncodeToString(sum[:])
 	ss := Session{ID: sid, WorkspaceID: t.WorkspaceID, TeamID: t.ID, TaskID: taskRow.ID, Status: "deliberating", GatewayTargetID: c.GatewayTargetID, RoundNumber: 0, Revision: 1, Config: cfg, CreatedBy: c.CreatedBy, CreatedAt: now, UpdatedAt: now}
 	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
 		if c.GatewayTargetID != nil {
@@ -280,8 +418,15 @@ func (s *Service) StartSession(ctx context.Context, c StartSessionCommand) (Sess
 		if _, e := tx.ExecContext(ctx, `INSERT INTO task_execution_profiles(task_id,workspace_id,execution_mode,team_id,team_session_id,config_json,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?, ?,?,?)`, ss.TaskID, ss.WorkspaceID, mode, ss.TeamID, ss.ID, string(ss.Config), ss.CreatedBy, now, now); e != nil {
 			return e
 		}
+		researchInt := 0
+		if researchMode {
+			researchInt = 1
+		}
+		if _, e := tx.ExecContext(ctx, `INSERT INTO team_session_manifests(session_id,workspace_id,team_id,execution_mode,research_mode,snapshot_json,snapshot_sha256,created_at) VALUES(?,?,?,?,?,?,?,?)`, ss.ID, ss.WorkspaceID, ss.TeamID, mode, researchInt, string(snapshotRaw), manifestSHA, now); e != nil {
+			return e
+		}
 		actor := c.CreatedBy
-		return s.emit(ctx, tx, ss.WorkspaceID, "team.session_started", "team_session", ss.ID, &actor, map[string]any{"task_id": ss.TaskID, "team_id": ss.TeamID, "execution_mode": mode})
+		return s.emit(ctx, tx, ss.WorkspaceID, "team.session_started", "team_session", ss.ID, &actor, map[string]any{"task_id": ss.TaskID, "team_id": ss.TeamID, "execution_mode": mode, "research_mode": researchMode, "manifest_sha256": manifestSHA})
 	})
 	return ss, err
 }
@@ -400,9 +545,27 @@ func (s *Service) RequestRound(ctx context.Context, c RequestRoundCommand) ([]Tu
 	if err != nil {
 		return nil, err
 	}
+	var researchMode bool
+	var research ResearchSettings
+	if manifest, manifestErr := s.SessionManifest(ctx, ss.ID); manifestErr == nil {
+		var snapshot SessionSnapshot
+		if err := json.Unmarshal(manifest.Snapshot, &snapshot); err != nil {
+			return nil, err
+		}
+		researchMode = snapshot.ResearchMode && snapshot.ExecutionMode == "council"
+		research = snapshot.Research
+		members = members[:0]
+		for _, sm := range snapshot.Members {
+			members = append(members, Member{ID: sm.ID, TeamID: ss.TeamID, WorkspaceID: ss.WorkspaceID, PrincipalID: sm.PrincipalID, MemberKind: sm.MemberKind, DisplayName: sm.DisplayName, RoleName: sm.RoleName, CapabilityID: sm.CapabilityID, ProtocolLevel: sm.ProtocolLevel, RoutePolicy: append(json.RawMessage(nil), sm.RoutePolicy...), Ordinal: sm.Ordinal, Status: sm.Status, Config: append(json.RawMessage(nil), sm.Config...)})
+		}
+	} else if !errors.Is(manifestErr, sql.ErrNoRows) {
+		return nil, manifestErr
+	}
 	want := map[string]bool{}
-	for _, v := range c.MemberIDs {
-		want[v] = true
+	if !(researchMode && research.RequireAllSeats) {
+		for _, v := range c.MemberIDs {
+			want[v] = true
+		}
 	}
 	now := s.clock.UnixMilli()
 	var out []TurnRequest
@@ -431,7 +594,7 @@ func (s *Service) RequestRound(ctx context.Context, c RequestRoundCommand) ([]Tu
 			out = append(out, tr)
 		}
 		actor := c.RequestedByPrincipalID
-		return s.emit(ctx, tx, ss.WorkspaceID, "team.round_requested", "team_session", ss.ID, &actor, map[string]any{"round": round, "turns": len(out)})
+		return s.emit(ctx, tx, ss.WorkspaceID, "team.round_requested", "team_session", ss.ID, &actor, map[string]any{"round": round, "turns": len(out), "research_mode": researchMode, "require_all_seats": researchMode && research.RequireAllSeats})
 	})
 	return out, err
 }

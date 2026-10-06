@@ -2,7 +2,9 @@ package teamworker
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -157,30 +159,59 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 	if ss.WorkspaceID != ws {
 		return s.fail(ctx, res, team.ErrWorkspaceMismatch)
 	}
-	members, err := s.teams.ListMembers(ctx, ss.TeamID)
-	if err != nil {
-		return s.fail(ctx, res, err)
+	manifestRecord, manifestErr := s.teams.SessionManifest(ctx, ss.ID)
+	hasManifest := manifestErr == nil
+	if manifestErr != nil && !errors.Is(manifestErr, sql.ErrNoRows) {
+		return s.fail(ctx, res, manifestErr)
+	}
+	var snapshot team.SessionSnapshot
+	if hasManifest {
+		if err := json.Unmarshal(manifestRecord.Snapshot, &snapshot); err != nil {
+			return s.fail(ctx, res, fmt.Errorf("decode immutable session manifest: %w", err))
+		}
 	}
 	var member *team.Member
-	for i := range members {
-		if members[i].ID == memberID {
-			member = &members[i]
+	var profileSnapshot *team.SnapshotAgentProfile
+	var taskObjective, executionMode string
+	var research team.ResearchSettings
+	var researchMode bool
+	if hasManifest {
+		for _, sm := range snapshot.Members {
+			if sm.ID != memberID {
+				continue
+			}
+			member = &team.Member{ID: sm.ID, TeamID: ss.TeamID, WorkspaceID: ss.WorkspaceID, PrincipalID: sm.PrincipalID, MemberKind: sm.MemberKind, DisplayName: sm.DisplayName, RoleName: sm.RoleName, CapabilityID: sm.CapabilityID, ProtocolLevel: sm.ProtocolLevel, RoutePolicy: append(json.RawMessage(nil), sm.RoutePolicy...), Ordinal: sm.Ordinal, Status: sm.Status, Config: append(json.RawMessage(nil), sm.Config...)}
+			profileSnapshot = sm.Profile
 			break
+		}
+		taskObjective = snapshot.TaskObjective
+		executionMode = snapshot.ExecutionMode
+		researchMode = snapshot.ResearchMode && executionMode == "council"
+		research = snapshot.Research
+	} else {
+		members, err := s.teams.ListMembers(ctx, ss.TeamID)
+		if err != nil {
+			return s.fail(ctx, res, err)
+		}
+		for i := range members {
+			if members[i].ID == memberID {
+				member = &members[i]
+				break
+			}
+		}
+		if err := s.db.QueryRowContext(ctx, `SELECT objective FROM tasks WHERE id=?`, ss.TaskID).Scan(&taskObjective); err != nil {
+			return s.fail(ctx, res, err)
+		}
+		if err := s.db.QueryRowContext(ctx, `SELECT execution_mode FROM task_execution_profiles WHERE task_id=?`, ss.TaskID).Scan(&executionMode); err != nil {
+			return s.fail(ctx, res, err)
 		}
 	}
 	if member == nil || member.Status != "active" || member.MemberKind == "human" {
 		return s.fail(ctx, res, fmt.Errorf("ineligible team member"))
 	}
-	var taskObjective string
-	if err := s.db.QueryRowContext(ctx, `SELECT objective FROM tasks WHERE id=?`, ss.TaskID).Scan(&taskObjective); err != nil {
-		return s.fail(ctx, res, err)
-	}
-	var executionMode string
-	if err := s.db.QueryRowContext(ctx, `SELECT execution_mode FROM task_execution_profiles WHERE task_id=?`, ss.TaskID).Scan(&executionMode); err != nil {
-		return s.fail(ctx, res, err)
-	}
 	if executionMode != "council" {
 		executionMode = "team"
+		researchMode = false
 	}
 	msgs, err := s.teams.ListMessages(ctx, ss.ID, 200)
 	if err != nil {
@@ -196,7 +227,11 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 	if strings.EqualFold(profileID,"onepane-default"){profileID="agent.md"}
 	var profileName,profileInstructions,profileRole string
 	var profileRevision int64
-	if err:=s.db.QueryRowContext(ctx,`SELECT name,instructions_md,default_role,revision FROM agent_profiles WHERE id=? AND status='active' AND (workspace_id=? OR workspace_id IS NULL) ORDER BY CASE WHEN workspace_id=? THEN 0 ELSE 1 END LIMIT 1`,profileID,ws,ws).Scan(&profileName,&profileInstructions,&profileRole,&profileRevision);err==nil{
+	if profileSnapshot != nil {
+		profileID, profileName, profileInstructions, profileRole, profileRevision = profileSnapshot.ID, profileSnapshot.Name, profileSnapshot.Instructions, profileSnapshot.Role, profileSnapshot.Revision
+		raw,_:=json.Marshal(map[string]any{"profile_id":profileID,"name":profileName,"role":profileRole,"revision":profileRevision,"instructions":profileInstructions,"authority":false,"frozen":true,"note":"Profile instructions are frozen at session start, affect reasoning only, and grant no capabilities or permissions."})
+		sections=append(sections,agentprotocol.ContextSection{ID:"agent-profile",Kind:"agent_profile",Trust:"USER_INSTRUCTION",Authoritative:false,Content:raw})
+	} else if err:=s.db.QueryRowContext(ctx,`SELECT name,instructions_md,default_role,revision FROM agent_profiles WHERE id=? AND status='active' AND (workspace_id=? OR workspace_id IS NULL) ORDER BY CASE WHEN workspace_id=? THEN 0 ELSE 1 END LIMIT 1`,profileID,ws,ws).Scan(&profileName,&profileInstructions,&profileRole,&profileRevision);err==nil{
 		raw,_:=json.Marshal(map[string]any{"profile_id":profileID,"name":profileName,"role":profileRole,"revision":profileRevision,"instructions":profileInstructions,"authority":false,"note":"Profile instructions affect reasoning only and grant no capabilities or permissions."})
 		sections=append(sections,agentprotocol.ContextSection{ID:"agent-profile",Kind:"agent_profile",Trust:"USER_INSTRUCTION",Authoritative:false,Content:raw})
 	}else if !errors.Is(err,sql.ErrNoRows){return s.fail(ctx,res,err)}
@@ -208,6 +243,9 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		start = len(msgs) - 80
 	}
 	for _, m := range msgs[start:] {
+		if researchMode && research.IndependentFirstPass && ss.RoundNumber <= 1 && m.Kind == "agent" {
+			continue
+		}
 		trust := "UNVERIFIED_DERIVED"
 		if m.Kind == "human" {
 			trust = "USER_INSTRUCTION"
@@ -219,11 +257,21 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		used += len(raw)
 		sections = append(sections, agentprotocol.ContextSection{ID: "msg-" + m.ID, Kind: "team_message", Trust: trust, Authoritative: m.Kind == "human", Content: raw})
 	}
-	manifest, _ := json.Marshal(map[string]any{"session_id": ss.ID, "message_count": len(sections) - 1, "bytes": used, "round": ss.RoundNumber})
 	rp := routePolicy{PreferZeroIncrementalCost: true, AllowMediated: true, AllowDegraded: true}
 	_ = json.Unmarshal(member.RoutePolicy, &rp)
 	label := policy.DataLabel{WorkspaceID: ws, Confidentiality: policy.ConfidentialityInternal, Residency: policy.ResidencyAny, Trust: policy.TrustUserInstruction}
-	decision, err := s.scheduler.Route(ctx, scheduler.RouteRequest{WorkspaceID: ws, CapabilityID: member.CapabilityID, RoleName: member.RoleName, ProtocolLevel: member.ProtocolLevel, ContextTokens: int64((used + 3) / 4), DataLabel: label, AllowUntested: rp.AllowUntested, AllowLimited: rp.AllowLimited, AllowMediated: rp.AllowMediated, AllowDegraded: rp.AllowDegraded, RequireZeroIncrementalCost: rp.RequireZeroIncrementalCost, PreferZeroIncrementalCost: rp.PreferZeroIncrementalCost, AllowSubscriptionUsage: rp.AllowSubscriptionUsage, AllowPotentialMonetarySpend: rp.AllowPotentialMonetarySpend})
+	request := scheduler.RouteRequest{WorkspaceID: ws, CapabilityID: member.CapabilityID, RoleName: member.RoleName, ProtocolLevel: member.ProtocolLevel, ContextTokens: int64((used + 3) / 4), DataLabel: label, AllowUntested: rp.AllowUntested, AllowLimited: rp.AllowLimited, AllowMediated: rp.AllowMediated, AllowDegraded: rp.AllowDegraded, RequireZeroIncrementalCost: rp.RequireZeroIncrementalCost, PreferZeroIncrementalCost: rp.PreferZeroIncrementalCost, AllowSubscriptionUsage: rp.AllowSubscriptionUsage, AllowPotentialMonetarySpend: rp.AllowPotentialMonetarySpend}
+	pinSeat := researchMode && (research.PinModels || research.DisableModelSubstitution || research.SameModelRetries)
+	var seatBinding team.SeatBinding
+	if pinSeat {
+		if b, err := s.teams.SeatBinding(ctx, ss.ID, member.ID); err == nil {
+			seatBinding = b
+			request.IncludeCandidateIDs = []string{b.CandidateID}
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return s.fail(ctx, res, err)
+		}
+	}
+	decision, err := s.scheduler.Route(ctx, request)
 	if err != nil || decision.Selected == nil {
 		if err == nil {
 			err = scheduler.ErrNoEligibleCandidate
@@ -231,6 +279,23 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		return s.block(ctx, res, err)
 	}
 	cand := decision.Selected.Candidate
+	if pinSeat && seatBinding.CandidateID == "" {
+		raw,_:=json.Marshal(map[string]any{"id":cand.ID,"kind":cand.Kind,"display_name":cand.DisplayName,"provider":cand.Provider,"node_id":cand.NodeID,"compute_mode":cand.ComputeMode,"runtime_backend":cand.RuntimeBackend,"local":cand.Local,"cost_class":cand.CostClass,"qualification":cand.Qualification,"protocol_level":cand.ProtocolLevel,"context_max":cand.ContextMax,"metadata":cand.Metadata})
+		bound, bindErr := s.teams.BindSeat(ctx, ss.ID, member.ID, string(cand.Kind), cand.ID, raw)
+		if bindErr != nil {
+			return s.fail(ctx, res, bindErr)
+		}
+		seatBinding = bound
+		if bound.CandidateID != cand.ID {
+			request.IncludeCandidateIDs = []string{bound.CandidateID}
+			decision, err = s.scheduler.Route(ctx, request)
+			if err != nil || decision.Selected == nil {
+				if err == nil { err = scheduler.ErrNoEligibleCandidate }
+				return s.block(ctx, res, err)
+			}
+			cand = decision.Selected.Candidate
+		}
+	}
 	kind, cid := string(cand.Kind), cand.ID
 	_, _ = s.db.ExecContext(ctx, `UPDATE team_turn_requests SET selected_candidate_kind=?,selected_candidate_id=?,updated_at=? WHERE id=?`, kind, cid, s.clock.UnixMilli(), turnID)
 	reservationID, err := s.reserve(ctx, ws, ss.TaskID, rp, cand, int64((used+3)/4))
@@ -244,6 +309,13 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 	if executionMode == "council" {
 		objective = fmt.Sprintf("Participate independently in a pre-execution Council deliberation as %s. Produce your own assessment without converging on other members' conclusions; surface assumptions, objections, risks, and a recommended answer for later synthesis. Do not execute tools or side effects. Task: %s", member.RoleName, taskObjective)
 	}
+	sectionsRaw,_:=json.Marshal(sections)
+	contextSum:=sha256.Sum256(sectionsRaw)
+	contextHash:=hex.EncodeToString(contextSum[:])
+	manifestPayload:=map[string]any{"session_id":ss.ID,"message_count":len(sections)-1,"bytes":used,"round":ss.RoundNumber,"context_sha256":contextHash,"research_mode":researchMode,"candidate_id":cand.ID,"candidate_kind":cand.Kind,"profile_id":profileID,"profile_revision":profileRevision}
+	if hasManifest { manifestPayload["session_manifest_sha256"]=manifestRecord.SnapshotSHA256 }
+	if seatBinding.CandidateID!="" { manifestPayload["seat_binding_candidate_id"]=seatBinding.CandidateID }
+	manifest,_:=json.Marshal(manifestPayload)
 	areq := agentprotocol.Request{ProtocolVersion: agentprotocol.Version, RequestID: "", WorkspaceID: ws, TaskID: ss.TaskID, PrincipalID: WorkerPrincipal, Role: member.RoleName, Objective: objective, Constraints: json.RawMessage(`{"deliberation_only":true,"no_side_effects":true}`), Context: sections, ContextManifest: manifest, PermittedProposalTypes: []agentprotocol.ProposalType{agentprotocol.ProposalReplan, agentprotocol.ProposalHuman, agentprotocol.ProposalComplete, agentprotocol.ProposalWait, agentprotocol.ProposalFail}, ToolCallback: false}
 	response, err := s.dispatch(ctx, areq, cand, label, reservationID)
 	if err != nil {

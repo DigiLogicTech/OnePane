@@ -391,6 +391,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/tasks/{taskID}/team-session", s.startTeamSession)
 	s.mux.HandleFunc("GET /v1/tasks/{taskID}/team-session", s.getTaskTeamSession)
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}", s.getTeamSession)
+	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/manifest", s.getTeamSessionManifest)
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/messages", s.listTeamMessages)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/messages", s.postTeamMessage)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/rounds", s.requestTeamRound)

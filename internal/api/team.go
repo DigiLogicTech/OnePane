@@ -145,6 +145,23 @@ func (s *Server) getTeamSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, ss)
 	}
 }
+func (s *Server) getTeamSessionManifest(w http.ResponseWriter, r *http.Request) {
+	_, ss, ok := s.sessionFor(w, r, "team.read")
+	if !ok {
+		return
+	}
+	manifest, err := s.team.SessionManifest(r.Context(), ss.ID)
+	if err != nil {
+		respondDomain(w, nil, err, 0)
+		return
+	}
+	bindings, err := s.team.ListSeatBindings(r.Context(), ss.ID)
+	if err != nil {
+		respondDomain(w, nil, err, 0)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"manifest": manifest, "seat_bindings": bindings})
+}
 func (s *Server) listTeamMessages(w http.ResponseWriter, r *http.Request) {
 	_, ss, ok := s.sessionFor(w, r, "team.read")
 	if !ok {

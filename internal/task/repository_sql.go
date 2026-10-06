@@ -23,13 +23,13 @@ type rowScanner interface {
 
 func scanTask(row rowScanner) (Task, error) {
 	var t Task
-	var project, artifactSession, plan, parent sql.NullString
+	var project, projectWorkspace, artifactSession, plan, parent sql.NullString
 	var completion, result sql.NullString
-	var readyAt, cancelAt sql.NullInt64
+	var readyAt, cancelAt, archivedAt sql.NullInt64
 	if err := row.Scan(
-		&t.ID, &t.WorkspaceID, &project, &artifactSession, &plan, &parent,
+		&t.ID, &t.WorkspaceID, &project, &projectWorkspace, &artifactSession, &plan, &parent,
 		&t.Objective, &t.State, &t.SchedulingClass, &t.Priority,
-		&completion, &result, &t.Revision, &readyAt, &cancelAt,
+		&completion, &result, &t.Revision, &readyAt, &cancelAt, &archivedAt,
 		&t.CreatedAt, &t.UpdatedAt,
 	); err != nil {
 		return Task{}, err
@@ -51,6 +51,9 @@ func scanTask(row rowScanner) (Task, error) {
 	if project.Valid {
 		t.ProjectID = &project.String
 	}
+	if projectWorkspace.Valid {
+		t.ProjectWorkspaceID = &projectWorkspace.String
+	}
 	if artifactSession.Valid {
 		t.ArtifactSessionID = &artifactSession.String
 	}
@@ -68,13 +71,17 @@ func scanTask(row rowScanner) (Task, error) {
 		v := cancelAt.Int64
 		t.CancelRequestedAt = &v
 	}
+	if archivedAt.Valid {
+		v := archivedAt.Int64
+		t.ArchivedAt = &v
+	}
 	return t, nil
 }
 
 const taskSelect = `
-SELECT id,workspace_id,project_id,artifact_session_id,plan_id,parent_task_id,
+SELECT id,workspace_id,project_id,project_workspace_id,artifact_session_id,plan_id,parent_task_id,
        objective,state,scheduling_class,priority,completion_json,result_json,
-       revision,ready_at,cancel_requested_at,created_at,updated_at
+       revision,ready_at,cancel_requested_at,archived_at,created_at,updated_at
 FROM tasks WHERE id = ?`
 
 func (r *sqlRepository) Get(ctx context.Context, id string) (Task, error) {
@@ -89,12 +96,38 @@ func (r *sqlRepository) List(ctx context.Context, workspaceID string, limit int)
 	if limit < 1 || limit > 500 {
 		limit = 100
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT id,workspace_id,project_id,artifact_session_id,plan_id,parent_task_id,
+	rows, err := r.db.QueryContext(ctx, `SELECT id,workspace_id,project_id,project_workspace_id,artifact_session_id,plan_id,parent_task_id,
        objective,state,scheduling_class,priority,completion_json,result_json,
-       revision,ready_at,cancel_requested_at,created_at,updated_at
-FROM tasks WHERE workspace_id=? ORDER BY updated_at DESC LIMIT ?`, workspaceID, limit)
+       revision,ready_at,cancel_requested_at,archived_at,created_at,updated_at
+FROM tasks WHERE workspace_id=? AND archived_at IS NULL ORDER BY updated_at DESC LIMIT ?`, workspaceID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list tasks: %w", err)
+	}
+	defer rows.Close()
+	out := make([]Task, 0)
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (r *sqlRepository) ListArchived(ctx context.Context, workspaceID string, limit int) ([]Task, error) {
+	if limit < 1 || limit > 500 {
+		limit = 100
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT id,workspace_id,project_id,project_workspace_id,artifact_session_id,plan_id,parent_task_id,
+       objective,state,scheduling_class,priority,completion_json,result_json,
+       revision,ready_at,cancel_requested_at,archived_at,created_at,updated_at
+FROM tasks WHERE workspace_id=? AND archived_at IS NOT NULL ORDER BY archived_at DESC,updated_at DESC LIMIT ?`, workspaceID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list archived tasks: %w", err)
 	}
 	defer rows.Close()
 	out := make([]Task, 0)
@@ -122,16 +155,36 @@ func (r *sqlRepository) GetForUpdate(ctx context.Context, tx storage.Tx, id stri
 func (r *sqlRepository) Insert(ctx context.Context, tx storage.Tx, t Task) error {
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO tasks(
-    id,workspace_id,project_id,artifact_session_id,plan_id,parent_task_id,
+    id,workspace_id,project_id,project_workspace_id,artifact_session_id,plan_id,parent_task_id,
     objective,state,scheduling_class,priority,completion_json,result_json,
-    revision,ready_at,cancel_requested_at,created_at,updated_at
-) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		t.ID, t.WorkspaceID, t.ProjectID, t.ArtifactSessionID, t.PlanID, t.ParentTaskID,
+    revision,ready_at,cancel_requested_at,archived_at,created_at,updated_at
+) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		t.ID, t.WorkspaceID, t.ProjectID, t.ProjectWorkspaceID, t.ArtifactSessionID, t.PlanID, t.ParentTaskID,
 		t.Objective, t.State, t.SchedulingClass, t.Priority, string(t.Completion), nil,
-		t.Revision, t.ReadyAt, t.CancelRequestedAt, t.CreatedAt, t.UpdatedAt,
+		t.Revision, t.ReadyAt, t.CancelRequestedAt, t.ArchivedAt, t.CreatedAt, t.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert task: %w", err)
+	}
+	return nil
+}
+
+func (r *sqlRepository) SetArchived(ctx context.Context, tx storage.Tx, taskID string, expectedRevision int64, archivedAt *int64, updatedAt int64) error {
+	res, err := tx.ExecContext(ctx, `
+UPDATE tasks
+SET archived_at = ?,
+    revision = revision + 1,
+    updated_at = ?
+WHERE id = ? AND revision = ?`, archivedAt, updatedAt, taskID, expectedRevision)
+	if err != nil {
+		return fmt.Errorf("set task archive state: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrRevisionConflict
 	}
 	return nil
 }

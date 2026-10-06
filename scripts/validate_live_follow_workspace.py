@@ -2,7 +2,7 @@
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
-app=(ROOT/'internal/webui/static/app.js').read_text(encoding='utf-8')
+app=(ROOT/'internal/webui/static/app-foundation.js').read_text(encoding='utf-8')+"\n"+(ROOT/'internal/webui/static/app.js').read_text(encoding='utf-8')
 css=(ROOT/'internal/webui/static/style.css').read_text(encoding='utf-8')
 sse=(ROOT/'internal/api/sse.go').read_text(encoding='utf-8')
 op=(ROOT/'internal/operation/coordinator.go').read_text(encoding='utf-8')

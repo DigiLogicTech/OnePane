@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 ROOT=Path(__file__).resolve().parents[1]
 read=lambda p:(ROOT/p).read_text(encoding="utf-8")
-app=read("internal/webui/static/app.js"); html=read("internal/webui/static/index.html"); css=read("internal/webui/static/style.css")
+app=read("internal/webui/static/app-foundation.js")+"\n"+read("internal/webui/static/app.js"); html=read("internal/webui/static/index.html"); css=read("internal/webui/static/style.css")
 checks=[]
 def ck(n,c): checks.append((n,bool(c)))
 ck("Inspector defaults to 360px", "inspectorWidth:360" in app and "--inspector-open:360px" in css)

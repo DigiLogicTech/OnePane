@@ -107,7 +107,10 @@
 
     <aside id="controlChatPanel" class="control-chat-panel" data-state="closed" hidden aria-label="OnePane Control Chat">
       <div class="control-chat-head">
-        <div><strong>OnePane Chat</strong><div class="list-meta">Control-plane conversation</div></div>
+        <button class="control-chat-title" id="controlChatToggle" type="button" aria-expanded="true" title="Collapse OnePane Chat">
+          <span class="control-chat-title-copy"><strong>OnePane Chat</strong><span class="list-meta">Control-plane conversation</span></span>
+          <svg class="control-chat-chevron panel-toggle-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 15l6-6 6 6"/></svg>
+        </button>
         <button class="icon-button" id="controlChatClose" aria-label="Close OnePane Chat">×</button>
       </div>
       <div class="control-chat-tabs">

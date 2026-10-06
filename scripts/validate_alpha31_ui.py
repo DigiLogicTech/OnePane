@@ -46,8 +46,11 @@ ck("Single-element selector helper is never used as a collection", not single_se
 
 ck("Primary navigation exposes Nodes and Skills", '["nodes","⬡","Nodes"]' in app and '["skills","✦","Skills"]' in app)
 ck("Projects and Models have nested navigation", "project-nav-tree" in app and "model-nav-tree" in app and 'data-a31-model-view="local"' in app and 'data-a31-model-view="cloud"' in app)
+ck("Primary navigation survives sidebar rerenders", "nav.dataset.delegatedNav" in app and 'e.target.closest("[data-route]")' in app)
+ck("Nested navigation has a single active leaf", "const parentActive=route===r&&!hasLeaf" in app and "projectActive&&!qa4ProjectHub.activeWorkspaceID" in app)
 ck("Persistent Control Chat shell exists", 'id="controlChatLauncher"' in html and 'id="controlChatPanel"' in html and "a31RenderControlChat" in app)
 ck("Assistant and Project Orchestrator share persistent panel", 'id="controlChatAssistantTab"' in html and 'id="controlChatOrchestratorTab"' in html and "/orchestrator/turns" in app)
+ck("OnePane Chat can persistently collapse", 'id="controlChatToggle"' in html and "a31SetControlChatCollapsed" in app and 'data-collapsed="true"' in css)
 
 ck("Shared grid layout stores x y width height", "function a31NormalizeLayout" in app and "item.width" in app and "item.height" in app and "item.x" in app and "item.y" in app)
 ck("Desktop components have real pointer resize handles", "function a31BindLayout" in app and 'data-op-resize' in app and 'data-pw-resize' in app and ".layout-resize-handle" in css)
@@ -56,12 +59,15 @@ ck("Project component mutations refresh only project grid", "a31RefreshProjectGr
 
 ck("Operations Activity Health Recovery are functional", '["activity","Activity"]' in app and '["health","Health"]' in app and '["recovery","Recovery"]' in app and "a31OperationsActivity" in app and "a31OperationsHealth" in app and "a31RecoveryContent" in app)
 ck("Operations Logs is a true drawer toggle", "function a31ToggleLogs" in app and 'activeDrawerTab==="logs"' in app and "setDrawerOpen(false)" in app)
+ck("Operations default layout is meaningful and collision-aware", "x:0,y:0,width:12,height:3" in app and "a31ResolveLayout(state.operationsWidgets,item.id)" in app)
+ck("Recovery header preserves action spacing", "recovery-card-header" in app and ".recovery-card-header" in css)
 
 ck("Local Models distinguish trusted installability", "installable_quantizations" not in app or "model.installable" in app)
 ck("Download action is Download & Install", app.count("Download & Install")>=2)
 ck("Local Models expose prominent Detect Hardware", "a31-detect-large" in app and "⚙ Detect Hardware" in app)
 ck("Per-deployment compute placement is exposed", "a31OpenCompute" in app and "Require GPU" in app and "Require CPU" in app and "Hybrid / CPU + GPU" in app)
 ck("Managed local runtime explains zero manual dependency", "No separate llama.cpp installation is required" in app)
+ck("Models component telemetry helper exists and is isolated", "async function qa5ComponentStatus()" in app and "/v1/local-ai/components?workspace_id=" in app and "qa5ModelComponents().catch(()=>({}))" in app)
 ck("Colibri and OmniRoute managed lifecycle are present", 'a31ComponentButtons("colibri"' in app and 'a31ComponentButtons("omniroute"' in app)
 ck("External OmniRoute provider lifecycle remains", "omniQA(false)" in app and "omniQA(true)" in app)
 
@@ -69,20 +75,25 @@ ck("Cloud Models expose OAuth when configured", "a31StartOAuth" in app and "/v1/
 ck("Agents expose Research Team configuration", "research_mode" in app and "independent_first_pass" in app and "full_provenance" in app)
 ck("Agents expose DigiLogic Core profile metadata", "DigiLogic Core" in app and "Duplicate & customise" in app)
 ck("Skills surface supports upload install assignments packages", "a31UploadSkill" in app and 'data-a31-skills-tab="assignments"' in app and 'data-a31-skills-tab="packages"' in app)
+ck("Skills expose governed capability matrix", 'data-a31-skills-tab="matrix"' in app and "Effective Capability Matrix" in app and "Known model deployments" in app)
 
 ck("Settings have canonical information architecture", all(x in app for x in ["General","Appearance","Defaults","Models & Compute","Providers & Auth","Nodes & Federation","Agents & Research","Skills & Tools","Security & Approvals","Updates & Diagnostics"]))
 ck("Settings preserve new Workspace default semantics", "Existing Workspaces are never changed here" in app)
+ck("Settings content is centered in remaining canvas", "#a31SettingsContent" in css and "justify-self:center" in css and "width:min(100%,1100px)" in css)
 ck("Tour uses four-pane focus and stable card anchors", "tour-pane-top" in app and "bottom-center" in app and ".a31-tour-card" in css and "backdrop-filter:blur(2px)" in css)
 ck("Tour target remains crisp and outlined", ".tour-spotlight" in css and ".tour-target" in css and "filter:none!important" in css)
+ck("Tour uses the canonical overlay root", 'const root=$("#overlayRoot")' in app and "qa31TourRoot" not in app and "qa31TourRoot" not in html)
 
-ck("All shell collapse controls use 42x26 geometry", "width:42px!important" in css and "height:26px!important" in css)
+ck("Shell collapse controls use orientation-aware geometry", ".drawer-edge-toggle,.drawer-restore" in css and "width:42px!important" in css and "height:26px!important" in css and ".inspector-restore" in css and "width:26px!important" in css and "height:54px!important" in css and ".panel-toggle-icon" in css and "stroke:currentColor" in css)
 ck("Collapsed sidebar hides brand icon", '.app-shell[data-sidebar="collapsed"] .brand-icon{display:none}' in css)
 ck("Models headers grow with wrapped copy", ".models-page .card-header.models-card-header" in css and "height:auto" in css)
 
-ck("First-run setup requires an explicit language choice", 'id="setup-language-step"' in html and 'id="setup-language"' in html and "qa5PrepareFirstRunLanguage" in app and "QA5_SETUP_LANGUAGE_KEY" in app)
+ck("Command palette exposes real actions", "function a31CommandRegistry()" in app and "Detect local hardware" in app and "New scheduled task" in app and "Restart product tour" in app)\nck("Health popover is live and never hard-codes inventory counts", "async function openHealthPopover" in app and "Not reported" in app and "5 / 8 active" not in app and "8 / 8" not in app)\nck("First-run setup requires an explicit language choice", 'id="setup-language-step"' in html and 'id="setup-language"' in html and "qa5PrepareFirstRunLanguage" in app and "QA5_SETUP_LANGUAGE_KEY" in app)
 ck("Language remains changeable from Settings", 'id="a31Language"' in app and "qa5ApplyAuthLanguage(e.target.value)" in app)
 ck("Theme-aware sleek scrollbars use shared tokens", all(x in css for x in ["--scrollbar-thumb","--scrollbar-thumb-hover","--scrollbar-thumb-active","::-webkit-scrollbar-thumb","scrollbar-gutter:stable"]))
-ck("Workspace layout previews only the active component", "function a31ApplyItemLayout" in app and "requestAnimationFrame(render)" in app and "a31ResolveLayout(items,item.id)" not in app)
+ck("Theme accent contrast is tokenized", "--on-accent" in css and "color:var(--on-accent)" in css and 'data-theme="graphite"' in css)
+ck("Dark and Midnight are deliberately distinct", 'data-theme="dark"' in css and 'data-theme="midnight"' in css and "--app-gradient:linear-gradient" in css)
+ck("Workspace layout resolves collisions only at commit", "function a31ApplyItemLayout" in app and "requestAnimationFrame(render)" in app and "a31ResolveLayout(items,item.id)" in app and "const snapshot=items.map" in app and "Layout save failed:" in app)
 ck("Desktop layout exposes edge and corner resize handles", "A31_RESIZE_EDGES" in app and "data-resize-edge" in app and all(x in css for x in [".resize-n",".resize-e",".resize-se",".resize-nw"]))
 
 ck("Research Integrity is visible from task Inspector", "A32_RESEARCH_INSPECTOR" in app and "/v1/tasks/" in app and "/team-session" in app and "/manifest" in app and "Research Integrity" in app and "Bound candidate" in app)

@@ -34,15 +34,15 @@ function defaultState(){
   return {
     theme:'system', sidebar:'expanded', inspector:'open', inspectorWidth:360, drawer:'open', drawerHeight:210, approvalLevel:'medium',
     tabs:[{id:'tab-operations',route:'operations',title:'Operations',pinned:true,state:'active',lastActive:Date.now()}],
-    activeTab:'tab-operations', workspaceEdit:false, operationsEdit:false,
+    activeTab:'tab-operations', workspaceEdit:false, operationsEdit:false, controlChatCollapsed:false,
     operationsWidgets:[
-      {id:'op-metrics',title:'System metrics',type:'metrics',col:12,row:3},
-      {id:'op-tasks',title:'Active Tasks',type:'tasks',col:6,row:6},
-      {id:'op-nodes',title:'Nodes',type:'nodes',col:3,row:6},
-      {id:'op-resources',title:'Resource Utilisation',type:'resources',col:3,row:6},
-      {id:'op-activity',title:'Recent Activity',type:'activity',col:6,row:5},
-      {id:'op-attention',title:'Attention',type:'attention',col:3,row:5},
-      {id:'op-providers',title:'Provider Health',type:'providers',col:3,row:5}
+      {id:'op-metrics',title:'System metrics',type:'metrics',x:0,y:0,width:12,height:3,col:12,row:3},
+      {id:'op-tasks',title:'Active Tasks',type:'tasks',x:0,y:3,width:6,height:5,col:6,row:5},
+      {id:'op-nodes',title:'Nodes',type:'nodes',x:6,y:3,width:3,height:5,col:3,row:5},
+      {id:'op-resources',title:'Resource Utilisation',type:'resources',x:9,y:3,width:3,height:5,col:3,row:5},
+      {id:'op-activity',title:'Recent Activity',type:'activity',x:0,y:8,width:6,height:5,col:6,row:5},
+      {id:'op-attention',title:'Attention',type:'attention',x:6,y:8,width:3,height:5,col:3,row:5},
+      {id:'op-providers',title:'Provider Health',type:'providers',x:9,y:8,width:3,height:5,col:3,row:5}
     ],
     workspaceWidgets:[
       {id:'ww-tasks',title:'Active Tasks',type:'tasks',col:4,row:4},
@@ -53,8 +53,23 @@ function defaultState(){
     ]
   };
 }
+function a32LegacyOperationsLayoutBroken(rows){
+  if(!Array.isArray(rows)||rows.length<4)return false;
+  const tiny=rows.filter(w=>Number(w.width||w.col||0)<3).length;
+  const oneRow=rows.every(w=>Number(w.y||0)===0);
+  return tiny>=Math.ceil(rows.length/2)||oneRow;
+}
 function loadState(){
-  try { return Object.assign(defaultState(), JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}')); } catch { return defaultState(); }
+  try {
+    const base=defaultState(),stored=JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}'),merged=Object.assign(base,stored);
+    if(Number(stored.operationsLayoutVersion||0)<2&&a32LegacyOperationsLayoutBroken(stored.operationsWidgets)){
+      merged.operationsWidgets=base.operationsWidgets;
+      merged.operationsLayoutVersion=2;
+    }else if(Number(stored.operationsLayoutVersion||0)<2){
+      merged.operationsLayoutVersion=2;
+    }
+    return merged;
+  } catch { return defaultState(); }
 }
 function persist(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
 
@@ -409,7 +424,16 @@ function popoverFor(anchor,html){
 }
 function openThemePopover(anchor){popoverFor(anchor,`<div class="popover"><h3>Theme</h3><div class="theme-grid">${['system','light','dark','graphite','midnight','forest'].map(t=>`<button class="theme-choice ${state.theme===t?'active':''}" data-theme-choice="${t}">${titleCase(t)}</button>`).join('')}</div></div>`);$$('[data-theme-choice]').forEach(b=>b.onclick=()=>{state.theme=b.dataset.themeChoice;document.documentElement.dataset.theme=state.theme;persist();$('#overlayRoot').innerHTML='';});}
 function openAttentionPopover(anchor){popoverFor(anchor,`<div class="popover"><h3>Attention</h3><div class="popover-row"><strong>Approval required</strong><div class="list-meta">T-1833 · External mutation</div></div><div class="popover-row"><strong>Node unavailable</strong><div class="list-meta">AI-Lab-02 · Wake failed</div></div><div class="popover-row"><strong>Routine failed</strong><div class="list-meta">Nightly Research</div></div></div>`);}
-function openHealthPopover(anchor){popoverFor(anchor,`<div class="popover"><h3>System Health</h3><div class="popover-row">Watchdog <span class="good" style="float:right">Healthy</span></div><div class="popover-row">Control plane <span class="good" style="float:right">Healthy</span></div><div class="popover-row">Database <span class="good" style="float:right">Healthy</span></div><div class="popover-row">Federation <span style="float:right">5 / 8 active</span></div><div class="popover-row">Providers <span class="good" style="float:right">8 / 8</span></div></div>`);}
+async function openHealthPopover(anchor){
+  try{await refreshOperationalDataQA(true)}catch{}
+  const nodeRows=a31Array(liveOps.nodes),providerRows=a31Array(liveOps.providers);
+  const healthyNodes=nodeRows.filter(n=>['online','ready','active'].includes(String(n.status||n.state||'').toLowerCase())).length;
+  const healthyProviders=providerRows.filter(p=>['connected','ready'].includes(String(p.status||'').toLowerCase())).length;
+  const watchdogSeen=[...a31Array(liveOps.events)].reverse().find(e=>String(e.aggregate_type||'').toLowerCase()==='watchdog'||/watchdog/i.test(String(e.event_type||'')));
+  const controlOK=liveOps.health==='ok';
+  const row=(label,value,kind='')=>`<div class="popover-row health-popover-row"><span>${escapeHtml(label)}</span><span class="${kind}">${escapeHtml(value)}</span></div>`;
+  popoverFor(anchor,`<div class="popover"><h3>System Health</h3>${row('Control plane',controlOK?'Healthy':'Unknown',controlOK?'good':'warn')}${row('Watchdog',watchdogSeen?'Observed':'Not reported',watchdogSeen?'good':'')}${row('Database','Not reported')}${row('Federation',nodeRows.length?`${healthyNodes} / ${nodeRows.length} healthy`:'No nodes')}${row('Providers',providerRows.length?`${healthyProviders} / ${providerRows.length} connected`:'None configured',providerRows.length&&healthyProviders===providerRows.length?'good':'')}</div>`);
+}
 
 
 function productTourCompleted(){return ['1',TOUR_COMPLETE_VALUE].includes(localStorage.getItem(TOUR_KEY));}
@@ -573,7 +597,9 @@ function startProductTour({replay=false,welcome=false}={}){
   draw();
 }
 async function hydrateHealth(){
-  const h=await api.health(); if(!h) return; const b=$('#healthButton'); if(h.status && String(h.status).toLowerCase()!=='ok'){b.classList.remove('health-ok');b.classList.add('bad');$('span:last-child',b).textContent='Degraded';}
+  const h=await api.health(),buttons=[$('#healthButton'),$('#mobileHealthButton')].filter(Boolean);
+  const status=String(h?.status||'unknown').toLowerCase(),label=status==='ok'?'Healthy':status==='unknown'?'Unknown':'Degraded';
+  for(const b of buttons){b.classList.toggle('health-ok',status==='ok');b.classList.toggle('bad',status!=='ok'&&status!=='unknown');b.classList.toggle('health-unknown',status==='unknown');const text=$('span:last-child',b);if(text&&text!==$('.status-dot',b))text.textContent=label;}
 }
 function titleCase(s){return s.replace(/(^|[-_ ])\w/g,m=>m.toUpperCase());}
 function escapeHtml(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -591,9 +617,9 @@ let operationsRefreshInFlight=null;
 const THEME_PALETTES={
   system:{mode:'dark',caption:'#0d1721',text:'#e7edf4',border:'#203142'},
   light:{mode:'light',caption:'#e9eef5',text:'#182532',border:'#cbd6e2'},
-  dark:{mode:'dark',caption:'#0d1721',text:'#e7edf4',border:'#203142'},
+  dark:{mode:'dark',caption:'#111316',text:'#eef1f4',border:'#2b3138'},
   graphite:{mode:'dark',caption:'#171a1d',text:'#eef2f5',border:'#31373d'},
-  midnight:{mode:'dark',caption:'#0a0f1e',text:'#edf4ff',border:'#253251'},
+  midnight:{mode:'dark',caption:'#070d1b',text:'#edf4ff',border:'#263654'},
   forest:{mode:'dark',caption:'#0b1812',text:'#e8f7ef',border:'#244638'},
   ocean:{mode:'dark',caption:'#071a24',text:'#e7f7ff',border:'#16485e'},
   violet:{mode:'dark',caption:'#171225',text:'#f1eaff',border:'#493a66'},
@@ -995,12 +1021,29 @@ function renderDrawer(){
   syncPanelRestoreButtons();
 }
 
+function a31CommandRegistry(){
+  const pageItems=navItems.map(([route,icon,label])=>({category:'Navigate',label,icon,keywords:[route,label],run:()=>openRoute(route)}));
+  pageItems.push({category:'Navigate',label:'Settings',icon:'⚙',keywords:['settings','preferences','defaults'],run:()=>openRoute('settings')});
+  return pageItems.concat([
+    {category:'Models',label:'Open Local Models',icon:'◇',keywords:['model','local','llama','gpu','cpu'],run:()=>{openRoute('models');a31SetModelView('local')}},
+    {category:'Models',label:'Open Cloud Models',icon:'☁',keywords:['provider','cloud','oauth','api'],run:()=>{openRoute('models');a31SetModelView('cloud')}},
+    {category:'Models',label:'Detect local hardware',icon:'◎',keywords:['gpu','cpu','hardware','vram'],run:()=>{openRoute('models');a31SetModelView('local');setTimeout(()=>$('#detectLocal')?.click(),80)}},
+    {category:'Create',label:'New task',icon:'＋',keywords:['task','create','work'],run:()=>{openRoute('tasks');setTimeout(()=>$('#newTaskButton')?.click(),80)}},
+    {category:'Create',label:'New scheduled task',icon:'◷',keywords:['schedule','routine','recurring','task'],run:()=>{openRoute('tasks');setTimeout(()=>$('#newScheduledTask')?.click(),80)}},
+    {category:'Create',label:'New project',icon:'▢',keywords:['project','workspace','create'],run:()=>{openRoute('projects');setTimeout(()=>$('#qa4NewProject')?.click(),80)}},
+    {category:'Skills',label:'Capability Matrix',icon:'✦',keywords:['skill','tool','capability','model','assignment'],run:()=>{openRoute('skills');a31SetSkillsView('matrix')}},
+    {category:'Shell',label:state.inspector==='open'?'Collapse Inspector':'Open Inspector',icon:'◫',keywords:['inspector','panel','collapse'],run:()=>setInspectorOpen(state.inspector!=='open')},
+    {category:'Shell',label:state.drawer==='open'?'Collapse Logs drawer':'Open Logs drawer',icon:'▤',keywords:['logs','drawer','events'],run:()=>setDrawerOpen(state.drawer!=='open')},
+    {category:'Settings',label:'Change language',icon:'文',keywords:['language','locale','translation'],run:()=>{openRoute('settings');a31SetSettingsView('general')}},
+    {category:'Settings',label:'Appearance & themes',icon:'◐',keywords:['theme','dark','light','graphite','midnight'],run:()=>{openRoute('settings');a31SetSettingsView('appearance')}},
+    {category:'Help',label:'Restart product tour',icon:'?',keywords:['help','tour','onboarding'],run:()=>startProductTour({replay:true})}
+  ]);
+}
 function openCommandPalette(){
-  const root=$('#overlayRoot');root.innerHTML=`<div class="overlay"><section class="command-palette"><input id="paletteInput" autofocus placeholder="Search pages or run a command…"><div id="paletteResults"></div><div class="palette-help"><span>↑↓ Navigate</span><span>Enter Open</span><span>Esc Close</span><span>Ctrl+K Toggle</span></div></section></div>`;
-  const input=$('#paletteInput'),results=$('#paletteResults');let selected=0;
-  const items=navItems.map(([route,icon,label])=>({route,icon,label})).concat([{route:'settings',icon:'⚙',label:'Defaults'}]);
-  const draw=()=>{const q=input.value.toLowerCase();const xs=items.filter(x=>x.label.toLowerCase().includes(q)||x.route.includes(q));selected=Math.min(selected,Math.max(0,xs.length-1));results.innerHTML=xs.map((x,i)=>`<button class="palette-row ${i===selected?'selected':''}" data-palette-route="${x.route}"><span>${x.icon}</span><strong>${x.label}</strong><kbd>Enter</kbd></button>`).join('');$$('[data-palette-route]',results).forEach(b=>b.onclick=()=>{root.innerHTML='';openRoute(b.dataset.paletteRoute);});};
-  input.oninput=draw;input.onkeydown=e=>{const rows=$$('[data-palette-route]',results);if(e.key==='ArrowDown'){e.preventDefault();selected=Math.min(selected+1,rows.length-1);draw();}else if(e.key==='ArrowUp'){e.preventDefault();selected=Math.max(0,selected-1);draw();}else if(e.key==='Enter'&&rows[selected])rows[selected].click();else if(e.key==='Escape')root.innerHTML='';};root.firstElementChild.onclick=e=>{if(e.target===root.firstElementChild)root.innerHTML='';};draw();input.focus();
+  const root=$('#overlayRoot');root.innerHTML=`<div class="overlay"><section class="command-palette"><input id="paletteInput" autofocus placeholder="Search pages or run a command…"><div id="paletteResults"></div><div class="palette-help"><span>↑↓ Navigate</span><span>Enter Run</span><span>Esc Close</span><span>Ctrl+K Toggle</span></div></section></div>`;
+  const input=$('#paletteInput'),results=$('#paletteResults'),items=a31CommandRegistry();let selected=0,current=[];
+  const draw=()=>{const q=input.value.trim().toLowerCase();current=items.filter(x=>!q||[x.label,x.category,...a31Array(x.keywords)].join(' ').toLowerCase().includes(q));selected=Math.min(selected,Math.max(0,current.length-1));let last='';results.innerHTML=current.length?current.map((x,i)=>{const group=x.category!==last?`<div class="palette-category">${escapeHtml(x.category)}</div>`:'';last=x.category;return group+`<button class="palette-row ${i===selected?'selected':''}" data-palette-index="${i}"><span>${x.icon||'›'}</span><strong>${escapeHtml(x.label)}</strong><small>${escapeHtml(x.category)}</small></button>`}).join(''):'<div class="empty-state compact">No matching pages or commands.</div>';$$('[data-palette-index]',results).forEach(b=>b.onclick=()=>{const item=current[Number(b.dataset.paletteIndex)];root.innerHTML='';item?.run?.()})};
+  input.oninput=()=>{selected=0;draw()};input.onkeydown=e=>{if(e.key==='ArrowDown'){e.preventDefault();selected=Math.min(selected+1,current.length-1);draw()}else if(e.key==='ArrowUp'){e.preventDefault();selected=Math.max(0,selected-1);draw()}else if(e.key==='Enter'&&current[selected]){e.preventDefault();root.innerHTML='';current[selected].run?.()}else if(e.key==='Escape')root.innerHTML=''};root.firstElementChild.onclick=e=>{if(e.target===root.firstElementChild)root.innerHTML=''};draw();input.focus();
 }
 
 /* QA hardening: Vault-backed provider selection and OmniRoute credential flow. */
@@ -1382,8 +1425,8 @@ function qa5PrepareFirstRunLanguage(){
   $('#setup-language-back').onclick=showLanguage;
 }
 function qa5ThemeName(id){return qa5ThemePacks()[id]?.name||titleCase(id);}
-function qa5ClearCustomTheme(){for(const k of ['--bg','--panel','--panel-2','--panel-3','--text','--muted','--border','--accent','--accent-soft','--good','--warn','--bad','--app-gradient','--scrollbar-size','--scrollbar-track','--scrollbar-thumb','--scrollbar-thumb-hover','--scrollbar-thumb-active'])document.documentElement.style.removeProperty(k);}
-function qa5ApplyCustomTheme(id){qa5ClearCustomTheme();const pack=qa5ThemePacks()[id];if(!pack)return false;const allowed=new Set(['--bg','--panel','--panel-2','--panel-3','--text','--muted','--border','--accent','--accent-soft','--good','--warn','--bad','--scrollbar-size','--scrollbar-track','--scrollbar-thumb','--scrollbar-thumb-hover','--scrollbar-thumb-active']);for(const [k,v] of Object.entries(pack.vars||{})){if(allowed.has(k)&&typeof v==='string'&&v.length<128)document.documentElement.style.setProperty(k,v);}if(typeof pack.gradient==='string'&&pack.gradient.length<256)document.documentElement.style.setProperty('--app-gradient',pack.gradient);return true;}
+function qa5ClearCustomTheme(){for(const k of ['--bg','--panel','--panel-2','--panel-3','--text','--muted','--border','--accent','--on-accent','--accent-soft','--good','--warn','--bad','--app-gradient','--scrollbar-size','--scrollbar-track','--scrollbar-thumb','--scrollbar-thumb-hover','--scrollbar-thumb-active'])document.documentElement.style.removeProperty(k);}
+function qa5ApplyCustomTheme(id){qa5ClearCustomTheme();const pack=qa5ThemePacks()[id];if(!pack)return false;const allowed=new Set(['--bg','--panel','--panel-2','--panel-3','--text','--muted','--border','--accent','--on-accent','--accent-soft','--good','--warn','--bad','--scrollbar-size','--scrollbar-track','--scrollbar-thumb','--scrollbar-thumb-hover','--scrollbar-thumb-active']);for(const [k,v] of Object.entries(pack.vars||{})){if(allowed.has(k)&&typeof v==='string'&&v.length<128)document.documentElement.style.setProperty(k,v);}if(typeof pack.gradient==='string'&&pack.gradient.length<256)document.documentElement.style.setProperty('--app-gradient',pack.gradient);return true;}
 function effectiveThemePalette(name=state.theme){const custom=qa5ThemePacks()[name];if(custom)return {mode:custom.mode==='light'?'light':'dark',caption:custom.caption||custom.vars?.['--panel']||'#0d1721',text:custom.caption_text||custom.vars?.['--text']||'#e7edf4',border:custom.border||custom.vars?.['--border']||'#203142'};if(name==='system'){if(matchMedia('(prefers-color-scheme: light)').matches)return {mode:'light',caption:'#e8edf2',text:'#263746',border:'#c5d0da'};return THEME_PALETTES.system;}return THEME_PALETTES[name]||THEME_PALETTES.dark;}
 function applyTheme(name){state.theme=name||'system';qa5ClearCustomTheme();if(qa5ThemePacks()[state.theme])qa5ApplyCustomTheme(state.theme);document.documentElement.dataset.theme=qa5ThemePacks()[state.theme]?'custom':state.theme;try{persist()}catch{}sendNativeTheme();}
 function qa5ThemeButtons(){const ids=[...Object.keys(THEME_PALETTES),...Object.keys(qa5ThemePacks())];return ids.filter((x,i,a)=>a.indexOf(x)===i).map(t=>`<button class="theme-choice ${state.theme===t?'active':''}" data-settings-theme="${escapeHtml(t)}">${escapeHtml(qa5ThemeName(t))}</button>`).join('');}
@@ -1796,7 +1839,7 @@ function a31RenderOperationsGrid(){
   if(state.operationsEdit){
     a31BindLayout(root,state.operationsWidgets,{attr:"data-op-widget",dragAttr:"data-op-drag",resizeAttr:"data-op-resize",persist:async()=>persist()});
     $$("[data-op-remove]",root).forEach(b=>b.onclick=async()=>{const el=b.closest("[data-op-widget]");if(el?.animate)await el.animate([{opacity:1,transform:"scale(1)"},{opacity:0,transform:"scale(.96)"}],{duration:130}).finished.catch(()=>{});state.operationsWidgets=state.operationsWidgets.filter(x=>x.id!==b.dataset.opRemove);a31NormalizeLayout(state.operationsWidgets);persist();a31RenderOperationsGrid()});
-    $$("[data-op-preset]",root).forEach(sel=>sel.onchange=()=>{if(!sel.value)return;const item=state.operationsWidgets.find(x=>x.id===sel.dataset.opPreset);if(!item)return;const p=operationsSizePreset(sel.value,item);item.width=p.col;item.height=p.row;item.col=p.col;item.row=p.row;a31ApplyItemLayout(root,item,"data-op-widget");persist()});
+    $("[data-op-preset]",root).forEach(sel=>sel.onchange=()=>{if(!sel.value)return;const item=state.operationsWidgets.find(x=>x.id===sel.dataset.opPreset);if(!item)return;const p=operationsSizePreset(sel.value,item);item.width=p.col;item.height=p.row;item.col=p.col;item.row=p.row;a31ResolveLayout(state.operationsWidgets,item.id);a31ApplyLayout(root,state.operationsWidgets,"data-op-widget",true);persist()});
   }
   bindViewActions(root);
 }
@@ -1817,7 +1860,7 @@ async function a31RecoveryContent(){
   let comps={};try{comps=await qa5ModelComponents()}catch{}
   const failed=a31Array(liveOps.tasks).filter(t=>["failed","blocked"].includes(String(t.state||"").toLowerCase()));
   const compRows=Object.values(a31Object(comps)).filter(x=>["failed","degraded","interrupted"].includes(String(x.state||"").toLowerCase()));
-  return `<section class="panel-card"><div class="card-header"><div><div class="card-title">Recovery</div><div class="list-meta">Actionable degraded state only; OnePane does not reset healthy components.</div></div><button class="btn" id="a31RecoveryRefresh">Refresh health</button></div><div class="widget-body"><div class="recovery-list">${compRows.map(c=>`<div class="recovery-row"><div><strong>${escapeHtml(c.display_name||c.id)}</strong><div class="list-meta">${escapeHtml(c.last_error||c.state||"degraded")}</div></div><button class="btn" data-a31-repair-component="${escapeHtml(c.id)}">Repair</button></div>`).join("")}${failed.map(t=>`<div class="recovery-row"><div><strong>Task ${escapeHtml(t.id||"")}</strong><div class="list-meta">${escapeHtml(t.objective||t.state||"")}</div></div><button class="btn" data-route="tasks">Open Tasks</button></div>`).join("")}${!compRows.length&&!failed.length?'<div class="empty-state compact">No degraded components or failed/blocked tasks require recovery.</div>':""}</div></div></section>`
+  return `<section class="panel-card"><div class="card-header recovery-card-header"><div><div class="card-title">Recovery</div><div class="list-meta">Actionable degraded state only; OnePane does not reset healthy components.</div></div><button class="btn" id="a31RecoveryRefresh">Refresh health</button></div><div class="widget-body"><div class="recovery-list">${compRows.map(c=>`<div class="recovery-row"><div><strong>${escapeHtml(c.display_name||c.id)}</strong><div class="list-meta">${escapeHtml(c.last_error||c.state||"degraded")}</div></div><button class="btn" data-a31-repair-component="${escapeHtml(c.id)}">Repair</button></div>`).join("")}${failed.map(t=>`<div class="recovery-row"><div><strong>Task ${escapeHtml(t.id||"")}</strong><div class="list-meta">${escapeHtml(t.objective||t.state||"")}</div></div><button class="btn" data-route="tasks">Open Tasks</button></div>`).join("")}${!compRows.length&&!failed.length?'<div class="empty-state compact">No degraded components or failed/blocked tasks require recovery.</div>':""}</div></div></section>`
 }
 renderOperations=async function(){
   const actions=`<button class="btn ${state.operationsEdit?'primary':''}" id="editOperations">${state.operationsEdit?'Done':'Edit layout'}</button>${state.operationsEdit?'<button class="btn" id="addOperationsComponent">Add component</button><button class="btn" id="resetOperationsLayout">Reset layout</button>':""}`;
@@ -1851,7 +1894,7 @@ async function a31RefreshProjectGrid(project,workspace,animate=true){
 qa4BindWorkspaceEdit=function(project,workspace){
   if(!state.projectWorkspaceEdit)return;const root=$("#qa4WorkspaceGrid");if(!root)return;a31NormalizeLayout(workspace.widgets||[]);
   a31BindLayout(root,workspace.widgets||[],{attr:"data-pw-widget",dragAttr:"data-pw-drag",resizeAttr:"data-pw-resize",persist:async()=>{await qa4SaveProjectWorkspaces(project,qa4Workspaces(project))}});
-  $$("[data-pw-preset]",root).forEach(sel=>sel.onchange=async()=>{if(!sel.value)return;const w=workspace.widgets.find(x=>x.id===sel.dataset.pwPreset);if(!w)return;const p=workspacePreset(sel.value,w);w.width=p.col;w.height=p.row;w.col=p.col;w.row=p.row;a31ApplyItemLayout(root,w,"data-pw-widget");await qa4SaveProjectWorkspaces(project,qa4Workspaces(project))});
+  $("[data-pw-preset]",root).forEach(sel=>sel.onchange=async()=>{if(!sel.value)return;const w=workspace.widgets.find(x=>x.id===sel.dataset.pwPreset);if(!w)return;const p=workspacePreset(sel.value,w);w.width=p.col;w.height=p.row;w.col=p.col;w.row=p.row;a31ResolveLayout(workspace.widgets,w.id);a31ApplyLayout(root,workspace.widgets,"data-pw-widget",true);a31LayoutSaveInFlight++;try{await qa4SaveProjectWorkspaces(project,qa4Workspaces(project))}finally{a31LayoutSaveInFlight=Math.max(0,a31LayoutSaveInFlight-1)}});
   $$("[data-pw-remove]",root).forEach(b=>b.onclick=async()=>{const el=b.closest("[data-pw-widget]");if(el?.animate)await el.animate([{opacity:1},{opacity:0,transform:"scale(.96)"}],{duration:130}).finished.catch(()=>{});workspace.widgets=workspace.widgets.filter(x=>x.id!==b.dataset.pwRemove);a31NormalizeLayout(workspace.widgets);await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));a31RefreshProjectGrid(project,workspace,true)});
 };
 qa4AddWorkspaceComponent=function(project,workspace){
@@ -1970,17 +2013,25 @@ async function a31UploadSkill(){
   const input=document.createElement("input");input.type="file";input.accept=".opskill,.zip";input.onchange=async()=>{const file=input.files?.[0];if(!file)return;const fd=new FormData();fd.append("workspace_id",onepaneWorkspace);fd.append("package",file,file.name);try{const res=await fetch("/v1/skills/packages/upload",{method:"POST",body:fd,credentials:"same-origin"});if(!res.ok){let e;try{e=await res.json()}catch{}throw new Error(e?.error||`Upload failed (${res.status})`)}notice("Skill package quarantined for review.");renderSkills()}catch(ex){notice(ex.message,"bad")}};input.click();
 }
 renderSkills=async function(){
-  $("#viewHost").innerHTML=`<section class="page">${pageHeader("Skills","Reusable capability packages, tool dependencies and assignments.",'<button class="btn primary" id="a31UploadSkill">Upload Skill</button>')}<div class="subtabs"><button class="subtab ${a31SkillsView==='installed'?'active':''}" data-a31-skills-tab="installed">Installed</button><button class="subtab ${a31SkillsView==='catalogue'?'active':''}" data-a31-skills-tab="catalogue">Catalogue</button><button class="subtab ${a31SkillsView==='assignments'?'active':''}" data-a31-skills-tab="assignments">Assignments</button><button class="subtab ${a31SkillsView==='packages'?'active':''}" data-a31-skills-tab="packages">Packages</button></div><div id="a31SkillsBody"><div class="widget-body">Loading…</div></div></section>`;$("#a31UploadSkill").onclick=a31UploadSkill;$$("[data-a31-skills-tab]").forEach(b=>b.onclick=()=>a31SetSkillsView(b.dataset.a31SkillsTab));const body=$("#a31SkillsBody"),qs=encodeURIComponent(onepaneWorkspace);
-  try{const [packages,bundles,assignments]=await Promise.all([apiRequest(`/v1/skills/packages?workspace_id=${qs}`),apiRequest(`/v1/skills/tool-bundles?workspace_id=${qs}`),apiRequest(`/v1/skills/assignments?workspace_id=${qs}`)]),pkgs=a31Array(packages);
+  $("#viewHost").innerHTML=`<section class="page">${pageHeader("Skills","Reusable capability packages, tool dependencies and assignments.",'<button class="btn primary" id="a31UploadSkill">Upload Skill</button>')}<div class="subtabs"><button class="subtab ${a31SkillsView==='installed'?'active':''}" data-a31-skills-tab="installed">Installed</button><button class="subtab ${a31SkillsView==='catalogue'?'active':''}" data-a31-skills-tab="catalogue">Catalogue</button><button class="subtab ${a31SkillsView==='assignments'?'active':''}" data-a31-skills-tab="assignments">Assignments</button><button class="subtab ${a31SkillsView==='matrix'?'active':''}" data-a31-skills-tab="matrix">Capability Matrix</button><button class="subtab ${a31SkillsView==='packages'?'active':''}" data-a31-skills-tab="packages">Packages</button></div><div id="a31SkillsBody"><div class="widget-body">Loading…</div></div></section>`;$("#a31UploadSkill").onclick=a31UploadSkill;$$("[data-a31-skills-tab]").forEach(b=>b.onclick=()=>a31SetSkillsView(b.dataset.a31SkillsTab));const body=$("#a31SkillsBody"),qs=encodeURIComponent(onepaneWorkspace);
+  try{const [packages,bundles,assignments,profiles,deployments]=await Promise.all([apiRequest(`/v1/skills/packages?workspace_id=${qs}`),apiRequest(`/v1/skills/tool-bundles?workspace_id=${qs}`),apiRequest(`/v1/skills/assignments?workspace_id=${qs}`),apiRequest(`/v1/agent-profiles?workspace_id=${qs}`).catch(()=>[]),qa5LoadManagedDeployments().catch(()=>[])]),pkgs=a31Array(packages);
     if(a31SkillsView==="installed"||a31SkillsView==="catalogue"){const rows=a31SkillsView==="installed"?pkgs.filter(p=>p.status==="installed"):pkgs;body.innerHTML=`<div class="skill-grid">${rows.map((p,i)=>{const m=a31JSON(p.manifest,{});return `<article class="panel-card skill-card"><div class="card-header"><div><div class="card-title">${escapeHtml(p.name)}</div><div class="list-meta">${escapeHtml(p.version)} · ${escapeHtml(p.publisher||"Unknown publisher")}</div></div><span class="pill ${p.trust_state==='builtin'||p.trust_state==='verified'?'good':''}">${escapeHtml(titleCase(p.trust_state||"unverified"))}</span></div><div class="widget-body"><p>${escapeHtml(m.description||m.type||"Capability pack")}</p><div class="tool-chip-row">${a31Array(m.tool_bundles).map(x=>`<span class="tool-chip">${escapeHtml(x)}</span>`).join("")}</div><div class="toolbar">${p.status==="quarantined"?`<button class="btn primary" data-a31-skill-install="${i}">Install</button>`:""}${p.status==="installed"&&p.source_kind!=="builtin"?`<button class="btn" data-a31-skill-status="${i}:disabled">Disable</button>`:""}${p.status==="disabled"?`<button class="btn" data-a31-skill-status="${i}:installed">Enable</button>`:""}</div></div></article>`}).join("")||'<div class="empty-state">No Skills in this view.</div>'}</div>`;$$("[data-a31-skill-install]").forEach(b=>b.onclick=async()=>{const p=rows[Number(b.dataset.a31SkillInstall)];try{await apiRequest(`/v1/skills/packages/${encodeURIComponent(p.id)}/install?workspace_id=${qs}`,{method:"POST",body:"{}"});renderSkills()}catch(ex){notice(ex.message,"bad")}});$$("[data-a31-skill-status]").forEach(b=>b.onclick=async()=>{const [i,status]=b.dataset.a31SkillStatus.split(":"),p=rows[Number(i)];try{await apiRequest(`/v1/skills/packages/${encodeURIComponent(p.id)}?workspace_id=${qs}`,{method:"PATCH",body:JSON.stringify({status})});renderSkills()}catch(ex){notice(ex.message,"bad")}})}
     else if(a31SkillsView==="assignments"){body.innerHTML=`<section class="panel-card"><div class="card-header"><div><div class="card-title">Assignments</div><div class="list-meta">Assigned does not imply permitted; Workspace policy remains authoritative.</div></div></div><div class="table-shell"><table class="data-table"><thead><tr><th>Skill package</th><th>Subject</th><th>State</th></tr></thead><tbody>${a31Array(assignments).map(a=>`<tr><td>${escapeHtml(a.skill_package_id)}</td><td>${escapeHtml(a.subject_kind)} · ${escapeHtml(a.subject_id)}</td><td>${a.enabled?'Assigned':'Disabled'}</td></tr>`).join("")}</tbody></table></div></section>`}
+    else if(a31SkillsView==="matrix"){
+      const packageMap=new Map(pkgs.map(p=>[String(p.id),p])),profileMap=new Map(a31Array(profiles).map(p=>[String(p.id),p])),bundleMap=new Map(a31Array(bundles).map(b=>[String(b.ID||b.id||b.Name||b.name),b]));
+      const rows=a31Array(assignments).filter(a=>a.enabled).map(a=>{const pkg=packageMap.get(String(a.skill_package_id)),manifest=a31JSON(pkg?.manifest,{}),bundleIDs=a31Array(manifest.tool_bundles),tools=bundleIDs.flatMap(id=>a31Array(bundleMap.get(String(id))?.Tools||bundleMap.get(String(id))?.tools)),profile=String(a.subject_kind)==="agent_profile"?profileMap.get(String(a.subject_id)):null,meta=profile?a31ProfileMeta(profile):{},model=meta.model_ref||meta.model||meta.default_model||profile?.model_ref||(String(a.subject_kind)==="workspace"?"Workspace routing":String(a.subject_kind).startsWith("team")?"Team/Council pinned at run":"Auto / policy-routed");return {subject:`${a.subject_kind} · ${a.subject_id}`,model,skill:pkg?`${pkg.name} ${pkg.version}`:a.skill_package_id,bundles:bundleIDs.join(", ")||"—",tools:[...new Set(tools)].join(", ")||"Resolved by bundle/policy"}});
+      body.innerHTML=`<section class="panel-card capability-matrix"><div class="card-header"><div><div class="card-title">Effective Capability Matrix</div><div class="list-meta">Skills are assigned to governed scopes; models inherit capability through Agent/Team/Workspace routing rather than owning authority directly.</div></div></div><div class="table-shell"><table class="data-table"><thead><tr><th>Subject</th><th>Model / routing</th><th>Skill</th><th>Tool bundles</th><th>Effective tools</th></tr></thead><tbody>${rows.length?rows.map(r=>`<tr><td>${escapeHtml(r.subject)}</td><td>${escapeHtml(r.model)}</td><td>${escapeHtml(r.skill)}</td><td>${escapeHtml(r.bundles)}</td><td>${escapeHtml(r.tools)}</td></tr>`).join(""):'<tr><td colspan="5" class="muted-cell">No enabled Skill assignments yet.</td></tr>'}</tbody></table></div></section><section class="panel-card"><div class="card-header"><div><div class="card-title">Known model deployments</div><div class="list-meta">Use this alongside the matrix to see which runtime/model candidates are currently available to routed Agents.</div></div></div><div class="widget-body">${a31Array(deployments).length?a31Array(deployments).map(d=>`<div class="bundle-row"><strong>${escapeHtml(d.display_name||d.model_ref||d.deployment_id)}</strong><span>${escapeHtml(d.runtime_name||d.runtime_backend||"managed")} · ${escapeHtml(a31PlacementLabel(d))} · ${escapeHtml(d.status||"unknown")}</span></div>`).join(""):'No managed local model deployments are currently registered.'}</div></section>`;
+    }
     else body.innerHTML=`<section class="panel-card"><div class="card-header"><div><div class="card-title">Packages</div><div class="list-meta">Uploaded packages remain quarantined until validation and explicit installation.</div></div></div><div class="table-shell"><table class="data-table"><thead><tr><th>Name</th><th>Source</th><th>Trust</th><th>Status</th><th>SHA-256</th></tr></thead><tbody>${pkgs.map(p=>`<tr><td>${escapeHtml(p.name)} ${escapeHtml(p.version)}</td><td>${escapeHtml(p.source_kind)}</td><td>${escapeHtml(p.trust_state)}</td><td>${escapeHtml(p.status)}</td><td class="mono-cell">${escapeHtml(String(p.package_sha256).slice(0,16))}…</td></tr>`).join("")}</tbody></table></div></section><section class="panel-card"><div class="card-header"><div class="card-title">Tool Bundles</div></div><div class="widget-body">${a31Array(bundles).map(b=>`<div class="bundle-row"><strong>${escapeHtml(b.Name||b.name||b.ID||b.id)}</strong><span>${escapeHtml(a31Array(b.Tools||b.tools).join(", "))}</span></div>`).join("")}</div></section>`;
   }catch(ex){body.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`}
 };
 
 /* Persistent Control Chat */
+function a31SetControlChatCollapsed(collapsed){
+  state.controlChatCollapsed=!!collapsed;persist();const panel=$("#controlChatPanel"),toggle=$("#controlChatToggle");if(panel)panel.dataset.collapsed=state.controlChatCollapsed?"true":"false";if(toggle){toggle.setAttribute("aria-expanded",state.controlChatCollapsed?"false":"true");toggle.title=state.controlChatCollapsed?"Expand OnePane Chat":"Collapse OnePane Chat"}
+}
 function a31OpenControlChat(tab=a31ControlTab){
-  a31ControlTab=tab;const panel=$("#controlChatPanel");if(!panel)return;panel.dataset.state="open";panel.removeAttribute("hidden");a31RenderControlChat();
+  a31ControlTab=tab;const panel=$("#controlChatPanel");if(!panel)return;panel.dataset.state="open";panel.removeAttribute("hidden");a31SetControlChatCollapsed(!!state.controlChatCollapsed);a31RenderControlChat();
 }
 function a31CloseControlChat(){const p=$("#controlChatPanel");if(p){p.dataset.state="closed";p.setAttribute("hidden","")}}
 async function a31EnsureAssistantThread(){
@@ -2071,7 +2122,7 @@ bindShell=function(){
       const route=e.target.closest("[data-route]");if(route){e.preventDefault();openRoute(route.dataset.route)}
     });
   }
-  $("#controlChatLauncher")?.addEventListener("click",()=>a31OpenControlChat());$("#controlChatClose")?.addEventListener("click",a31CloseControlChat);$("#controlChatAssistantTab")?.addEventListener("click",()=>a31OpenControlChat("assistant"));$("#controlChatOrchestratorTab")?.addEventListener("click",()=>a31OpenControlChat("orchestrator"));
+  $("#controlChatLauncher")?.addEventListener("click",()=>a31OpenControlChat());$("#controlChatClose")?.addEventListener("click",e=>{e.stopPropagation();a31CloseControlChat()});$("#controlChatToggle")?.addEventListener("click",()=>a31SetControlChatCollapsed(!state.controlChatCollapsed));$("#controlChatAssistantTab")?.addEventListener("click",()=>a31OpenControlChat("assistant"));$("#controlChatOrchestratorTab")?.addEventListener("click",()=>a31OpenControlChat("orchestrator"));
 };
 renderActiveView=async function(){
   const epoch=++qa31ViewEpoch,t=currentTab();if(!t)return;if(t.state==="suspended")t.state="active";const route=t.route;

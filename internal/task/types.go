@@ -48,10 +48,11 @@ const (
 )
 
 type Task struct {
-	ID                string
-	WorkspaceID       string
-	ProjectID         *string
-	ArtifactSessionID *string
+	ID                 string
+	WorkspaceID        string
+	ProjectID          *string
+	ProjectWorkspaceID *string
+	ArtifactSessionID  *string
 	PlanID            *string
 	ParentTaskID      *string
 	Objective         string
@@ -63,6 +64,7 @@ type Task struct {
 	Revision          int64
 	ReadyAt           *int64
 	CancelRequestedAt *int64
+	ArchivedAt        *int64
 	CreatedAt         int64
 	UpdatedAt         int64
 }
@@ -80,9 +82,10 @@ type Attempt struct {
 }
 
 type CreateCommand struct {
-	WorkspaceID       string
-	ProjectID         *string
-	ArtifactSessionID *string
+	WorkspaceID        string
+	ProjectID          *string
+	ProjectWorkspaceID *string
+	ArtifactSessionID  *string
 	PlanID            *string
 	ParentTaskID      *string
 	Objective         string
@@ -101,6 +104,14 @@ type TransitionCommand struct {
 	RequestID        *string
 	TraceID          *string
 	Reason           string
+}
+
+type ArchiveCommand struct {
+	TaskID           string
+	ExpectedRevision int64
+	ActorPrincipalID *string
+	RequestID        *string
+	TraceID          *string
 }
 
 type StartCommand struct {

@@ -112,7 +112,7 @@ ck("Effective Operations cards preserve unknown telemetry", all(x in effective_c
 ck("Effective Operations Activity and Recovery preserve unknown telemetry", "Event feed not reported." in effective_ops and "componentsReported=false" in effective_ops and "Task recovery status not reported" in effective_ops)
 ck("Final Nodes renderer consumes API envelope and launches pairing", "a31Array(out?.nodes)" in effective_nodes and '$("#a31AddNode").onclick=openPairNode' in effective_nodes)
 ck("Project policy saves are serialized against latest revision", "qa4ProjectSaveQueues" in project_saves and "const current=qa4ProjectHub.projects.find" in project_saves and "expected_revision:Number(current.revision||1)" in project_saves)
-ck("Project layout mutations rollback and refresh from saved revision", "refreshSaved" in effective_project_layout and "workspace.widgets=snapshot" in effective_project_layout and 'root.dataset.layoutSaving==="true"' in effective_project_layout)
+ck("Project layout mutations rollback and refresh from saved revision", "refreshSaved" in effective_project_layout and "workspace.widgets.splice(0,workspace.widgets.length,...snapshot)" in effective_project_layout and "workspace.widgets=snapshot" in effective_project_layout and 'root.dataset.layoutSaving==="true"' in effective_project_layout)
 ck("Layout generation participates in stale rollback protection", "root.dataset.layoutGeneration" in app and "String(generation)" in app and "root.dataset.layoutSaving==='true'" in app)
 ck("Command palette cannot replace an active product tour", 'dataset.productTour==="active"' in effective_palette)
 

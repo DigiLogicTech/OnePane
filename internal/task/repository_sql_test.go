@@ -14,36 +14,38 @@ type taskScanFixture struct {
 }
 
 func (f taskScanFixture) Scan(dest ...any) error {
-	if len(dest) == 17 {
+	if len(dest) == 19 {
 		*dest[0].(*string) = "task-1"
 		*dest[1].(*string) = "ws-1"
-		*dest[2].(*sql.NullString) = sql.NullString{}
-		*dest[3].(*sql.NullString) = sql.NullString{}
+		*dest[2].(*sql.NullString) = sql.NullString{String: "project-1", Valid: true}
+		*dest[3].(*sql.NullString) = sql.NullString{String: "pws-1", Valid: true}
 		*dest[4].(*sql.NullString) = sql.NullString{}
 		*dest[5].(*sql.NullString) = sql.NullString{}
-		*dest[6].(*string) = "hello"
-		*dest[7].(*State) = StateCreated
-		*dest[8].(*SchedulingClass) = ClassUserInteractive
-		*dest[9].(*int) = 1
+		*dest[6].(*sql.NullString) = sql.NullString{}
+		*dest[7].(*string) = "hello"
+		*dest[8].(*State) = StateCreated
+		*dest[9].(*SchedulingClass) = ClassUserInteractive
+		*dest[10].(*int) = 1
 		switch v := f.completion.(type) {
 		case string:
-			*dest[10].(*sql.NullString) = sql.NullString{String: v, Valid: true}
+			*dest[11].(*sql.NullString) = sql.NullString{String: v, Valid: true}
 		case nil:
 		default:
 			return fmt.Errorf("unexpected completion fixture %T", v)
 		}
 		switch v := f.result.(type) {
 		case string:
-			*dest[11].(*sql.NullString) = sql.NullString{String: v, Valid: true}
+			*dest[12].(*sql.NullString) = sql.NullString{String: v, Valid: true}
 		case nil:
 		default:
 			return fmt.Errorf("unexpected result fixture %T", v)
 		}
-		*dest[12].(*int64) = 1
-		*dest[13].(*sql.NullInt64) = sql.NullInt64{}
+		*dest[13].(*int64) = 1
 		*dest[14].(*sql.NullInt64) = sql.NullInt64{}
-		*dest[15].(*int64) = 1
-		*dest[16].(*int64) = 1
+		*dest[15].(*sql.NullInt64) = sql.NullInt64{}
+		*dest[16].(*sql.NullInt64) = sql.NullInt64{}
+		*dest[17].(*int64) = 1
+		*dest[18].(*int64) = 1
 		return nil
 	}
 	if len(dest) == 9 {
@@ -77,6 +79,9 @@ func TestScanTaskAcceptsSQLiteTextJSON(t *testing.T) {
 	}
 	if !json.Valid(got.Result) || string(got.Result) != `{"ok":true}` {
 		t.Fatalf("result=%q", got.Result)
+	}
+	if got.ProjectID == nil || *got.ProjectID != "project-1" || got.ProjectWorkspaceID == nil || *got.ProjectWorkspaceID != "pws-1" {
+		t.Fatalf("scope project=%v workspace=%v", got.ProjectID, got.ProjectWorkspaceID)
 	}
 }
 

@@ -144,16 +144,16 @@ function a31ResolveLayout(items,anchorID){
     placed.push(item);
   }
 }
-function a31GridStyle(item){a31NormalizeLayout([item]);return `grid-column:${item.x+1} / span ${item.width};grid-row:${item.y+1} / span ${item.height}`}
+function a31SetGridPlacement(el,item){if(!el)return;el.style.gridColumnStart=String(item.x+1);el.style.gridColumnEnd=`span ${item.width}`;el.style.gridRowStart=String(item.y+1);el.style.gridRowEnd=`span ${item.height}`}
 function a31ApplyLayout(root,items,attr,animate=false,beforeOverride=null){
   const before=new Map();if(animate)$$(`[${attr}]`,root).forEach(el=>before.set(el.getAttribute(attr),el.getBoundingClientRect()));
   if(beforeOverride)for(const [id,rect] of beforeOverride)before.set(id,rect);
-  for(const item of items){const el=$(`[${attr}="${CSS.escape(item.id)}"]`,root);if(!el)continue;el.style.gridColumn=`${item.x+1} / span ${item.width}`;el.style.gridRow=`${item.y+1} / span ${item.height}`}
+  for(const item of items){const el=$(`[${attr}="${CSS.escape(item.id)}"]`,root);if(!el)continue;a31SetGridPlacement(el,item)}
   if(animate&&Element.prototype.animate)requestAnimationFrame(()=>$$(`[${attr}]`,root).forEach(el=>{const old=before.get(el.getAttribute(attr));if(!old)return;const now=el.getBoundingClientRect(),dx=old.left-now.left,dy=old.top-now.top,sx=old.width&&now.width?old.width/now.width:1,sy=old.height&&now.height?old.height/now.height:1;if(Math.abs(dx)>1||Math.abs(dy)>1||Math.abs(sx-1)>.015||Math.abs(sy-1)>.015)el.animate([{transform:`translate(${dx}px,${dy}px) scale(${sx},${sy})`,transformOrigin:"top left"},{transform:"translate(0,0) scale(1)",transformOrigin:"top left"}],{duration:180,easing:"cubic-bezier(.2,.7,.2,1)"})}));
 }
 function a31ApplyItemLayout(root,item,attr){
   const el=$(`[${attr}="${CSS.escape(item.id)}"]`,root);if(!el)return;
-  el.style.gridColumn=`${item.x+1} / span ${item.width}`;el.style.gridRow=`${item.y+1} / span ${item.height}`;
+  a31SetGridPlacement(el,item);
 }
 const A31_RESIZE_EDGES=['n','ne','e','se','s','sw','w','nw'];
 function a31ResizeHandles(id,attr,label='component'){
@@ -253,12 +253,12 @@ function a31ToggleLogs(){
   activeDrawerTab="logs";setDrawerOpen(true);renderDrawer();if(a31RouteIs("operations"))renderOperations();
 }
 function a31OpsWidget(w){
-  return `<section class="dashboard-widget a31-layout-item ${state.operationsEdit?'editable':''}" data-op-widget="${escapeHtml(w.id)}" style="${a31GridStyle(w)}"><div class="dashboard-edit-bar ${state.operationsEdit?'':'hidden'}" data-op-drag="${escapeHtml(w.id)}" title="Drag component"><span class="dashboard-drag" aria-hidden="true">⋮⋮</span><strong>${escapeHtml(w.title)}</strong><span class="dashboard-edit-spacer"></span><select class="dashboard-size" data-op-preset="${escapeHtml(w.id)}"><option value="">Size…</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="wide">Wide</option><option value="full">Full</option></select><button class="tiny danger" data-op-remove="${escapeHtml(w.id)}">×</button></div><div class="dashboard-widget-content">${operationsComponentContent(w.type)}</div>${state.operationsEdit?a31ResizeHandles(w.id,"data-op-resize",w.title):""}</section>`
+  return `<section class="dashboard-widget a31-layout-item ${state.operationsEdit?'editable':''}" data-op-widget="${escapeHtml(w.id)}"><div class="dashboard-edit-bar ${state.operationsEdit?'':'hidden'}" data-op-drag="${escapeHtml(w.id)}" title="Drag component"><span class="dashboard-drag" aria-hidden="true">⋮⋮</span><strong>${escapeHtml(w.title)}</strong><span class="dashboard-edit-spacer"></span><select class="dashboard-size" data-op-preset="${escapeHtml(w.id)}"><option value="">Size…</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="wide">Wide</option><option value="full">Full</option></select><button class="tiny danger" data-op-remove="${escapeHtml(w.id)}">×</button></div><div class="dashboard-widget-content">${operationsComponentContent(w.type)}</div>${state.operationsEdit?a31ResizeHandles(w.id,"data-op-resize",w.title):""}</section>`
 }
 function a31RenderOperationsGrid(){
   const root=$("#operationsLayout");if(!root)return;
   if(a31OperationsLayoutBroken(state.operationsWidgets)){if(!a31RepairLayoutInPlace(state.operationsWidgets))state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));state.operationsLayoutVersion=A31_OPERATIONS_LAYOUT_VERSION;persist()}
-  a31NormalizeLayout(state.operationsWidgets);root.innerHTML=state.operationsWidgets.map(a31OpsWidget).join("");
+  a31NormalizeLayout(state.operationsWidgets);root.innerHTML=state.operationsWidgets.map(a31OpsWidget).join("");a31ApplyLayout(root,state.operationsWidgets,"data-op-widget");
   if(state.operationsEdit){
     a31BindLayout(root,state.operationsWidgets,{attr:"data-op-widget",dragAttr:"data-op-drag",resizeAttr:"data-op-resize",persist:async()=>a31PersistOperationsLayout()});
     $$("[data-op-remove]",root).forEach(b=>b.onclick=async()=>{const el=b.closest("[data-op-widget]");if(el?.animate)await el.animate([{opacity:1,transform:"scale(1)"},{opacity:0,transform:"scale(.96)"}],{duration:130}).finished.catch(()=>{});state.operationsWidgets=state.operationsWidgets.filter(x=>x.id!==b.dataset.opRemove);a31NormalizeLayout(state.operationsWidgets);a31PersistOperationsLayout();a31RenderOperationsGrid()});
@@ -328,12 +328,12 @@ qa4RenderWorkspaceWidget=function(w,project,workspace){
   a31NormalizeLayout(workspace.widgets||[]);
   const edit=!!state.projectWorkspaceEdit;
   const controls=edit?`<div class="dashboard-edit-bar" data-pw-drag="${escapeHtml(w.id)}" title="Drag component"><span class="dashboard-drag" aria-hidden="true">⋮⋮</span><strong>${escapeHtml(w.title||w.type)}</strong><span class="dashboard-edit-spacer"></span><select class="dashboard-size" data-pw-preset="${escapeHtml(w.id)}"><option value="">Size…</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="wide">Wide</option><option value="full">Full</option></select><button class="tiny danger" data-pw-remove="${escapeHtml(w.id)}">×</button></div>`:"";
-  return `<section class="workspace-widget dashboard-widget a31-layout-item ${edit?'editable':''}" data-pw-widget="${escapeHtml(w.id)}" style="${a31GridStyle(w)}">${controls}<div class="dashboard-widget-content"><div class="widget-handle"><strong>${escapeHtml(w.title||w.type)}</strong></div>${qa6ComponentContent(w,project,workspace)}</div>${edit?a31ResizeHandles(w.id,"data-pw-resize",w.title||w.type):""}</section>`
+  return `<section class="workspace-widget dashboard-widget a31-layout-item ${edit?'editable':''}" data-pw-widget="${escapeHtml(w.id)}">${controls}<div class="dashboard-widget-content"><div class="widget-handle"><strong>${escapeHtml(w.title||w.type)}</strong></div>${qa6ComponentContent(w,project,workspace)}</div>${edit?a31ResizeHandles(w.id,"data-pw-resize",w.title||w.type):""}</section>`
 };
 async function a31RefreshProjectGrid(project,workspace,animate=true){
   const root=$("#qa4WorkspaceGrid");if(!root)return;a31NormalizeLayout(workspace.widgets||[]);
   const before=new Map();if(animate)$$("[data-pw-widget]",root).forEach(el=>before.set(el.dataset.pwWidget,el.getBoundingClientRect()));
-  root.innerHTML=(workspace.widgets||[]).map(w=>qa4RenderWorkspaceWidget(w,project,workspace)).join("");
+  root.innerHTML=(workspace.widgets||[]).map(w=>qa4RenderWorkspaceWidget(w,project,workspace)).join("");a31ApplyLayout(root,workspace.widgets||[],"data-pw-widget");
   if(animate&&Element.prototype.animate)requestAnimationFrame(()=>$$("[data-pw-widget]",root).forEach(el=>{const old=before.get(el.dataset.pwWidget);if(!old){el.animate([{opacity:0,transform:"scale(.97)"},{opacity:1,transform:"scale(1)"}],{duration:150});return}const n=el.getBoundingClientRect(),dx=old.left-n.left,dy=old.top-n.top;if(Math.abs(dx)>1||Math.abs(dy)>1)el.animate([{transform:`translate(${dx}px,${dy}px)`},{transform:"translate(0,0)"}],{duration:170,easing:"ease-out"})}));
   qa4BindWorkspaceEdit(project,workspace);qa6BindProjectComponents(project,workspace);qa7BindWorkspaceControls(project,workspace,root);qa4BindProjectNotes(root);
 }
@@ -355,6 +355,7 @@ renderProjects=async function(){
   const project=a31CurrentProject(),workspace=project?a31CurrentWorkspace():null;if(!project||!workspace)return;qa7NormalizeWorkspace(project,workspace);a31NormalizeLayout(workspace.widgets||[]);
   $(".workspace-chat-panel")?.remove();const bar=$(".workspace-context-bar .list-meta");if(bar)bar.textContent=` · workspace sandbox ${workspace.sandbox.internet?'internet allowed':'internet blocked'} · ${workspace.routing.enabled!==false?'routing enabled':'single-path'} · ${titleCase(workspace.orchestration?.mode||'direct')}`;
   const settings=$("#qa4WorkspaceSettings");if(settings){settings.textContent="Workspace settings";settings.onclick=()=>qa6OpenInInspector(project,workspace,"settings")}
+  const workspaceGrid=$("#qa4WorkspaceGrid");if(workspaceGrid)a31ApplyLayout(workspaceGrid,workspace.widgets||[],"data-pw-widget");
   qa4BindWorkspaceEdit(project,workspace);qa6BindProjectComponents(project,workspace);qa7BindWorkspaceControls(project,workspace,$("#qa4WorkspaceGrid")||document);qa6StartEventStream();renderNav();
 };
 

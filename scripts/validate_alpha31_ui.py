@@ -58,6 +58,7 @@ ck("Assistant and Project Orchestrator share persistent panel", 'id="controlChat
 ck("OnePane Chat can persistently collapse", 'id="controlChatToggle"' in html and "a31SetControlChatCollapsed" in app and 'data-collapsed="true"' in css)
 
 ck("Shared grid layout stores x y width height", "function a31NormalizeLayout" in app and "item.width" in app and "item.height" in app and "item.x" in app and "item.y" in app)
+ck("Shared layout placement is CSP-safe", "function a31SetGridPlacement" in app and "gridColumnStart" in app and "gridColumnEnd" in app and "gridRowStart" in app and "gridRowEnd" in app and 'style="${a31GridStyle' not in app)
 ck("Layout normalization rejects non-finite persisted geometry", "a31FiniteLayoutNumber" in app and "Number.isFinite(n)" in app and "a31FallbackLayoutSize" in app and "Math.round(rawW??fallback.width)" in app)
 ck("Desktop components have real pointer resize handles", "function a31BindLayout" in app and 'data-op-resize' in app and 'data-pw-resize' in app and ".layout-resize-handle" in css)
 ck("Operations add path updates grid without page rerender", "openOperationsComponentPicker=function" in app and "closeModal();a31RenderOperationsGrid()" in app)

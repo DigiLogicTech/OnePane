@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       run_hosted_smoke:
-        description: "Also run destructive/native installed-product smoke tests on GitHub-hosted runners"
+        description: "Run installed-product smoke tests when manually dispatching this workflow"
         required: false
         type: boolean
         default: false
@@ -136,7 +136,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: OnePane-alpha3.1-source-native-${{ github.sha }}
+          name: OnePane-alpha3.2-source-native-${{ github.sha }}
           path: |
             dist/**
           if-no-files-found: warn
@@ -148,15 +148,15 @@ jobs:
           rm -rf dist packaging/windows/setup/payload
 
   windows-installed-smoke:
-    name: Windows installed-product smoke (optional hosted)
+    name: Windows installed-product smoke (release gate)
     needs: validate
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_hosted_smoke == true }}
+    if: ${{ needs.validate.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_hosted_smoke == true)) }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.1-source-native-${{ github.sha }}
+          name: OnePane-alpha3.2-source-native-${{ github.sha }}
           path: artifact
       - name: Install launch uninstall reinstall
         shell: pwsh
@@ -225,7 +225,7 @@ jobs:
             Assert-NativeUIReady
 
             $sentinel = Join-Path $env:ProgramData 'OnePane\qa-preserve.txt'
-            Set-Content -Path $sentinel -Value 'preserve-alpha3.1' -NoNewline
+            Set-Content -Path $sentinel -Value 'preserve-alpha3.2' -NoNewline
             Invoke-OnePaneSetup @('--elevated','--silent','--no-launch','--uninstall')
 
             $deadline = (Get-Date).AddSeconds(30)
@@ -240,22 +240,22 @@ jobs:
             Wait-OnePaneHealth
             Assert-OnePaneVersion
             Assert-NativeUIReady
-            if ((Get-Content -Raw $sentinel).Trim() -ne 'preserve-alpha3.1') { throw 'Durable data changed across reinstall' }
+            if ((Get-Content -Raw $sentinel).Trim() -ne 'preserve-alpha3.2') { throw 'Durable data changed across reinstall' }
           } finally {
             Get-Process 'OnePane.Desktop' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
             try { Invoke-OnePaneSetup @('--elevated','--silent','--no-launch','--uninstall') } catch { Write-Warning $_ }
           }
 
   ubuntu-installed-smoke:
-    name: Ubuntu installed-package smoke (optional hosted)
+    name: Ubuntu installed-package smoke (release gate)
     needs: validate
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_hosted_smoke == true }}
+    if: ${{ needs.validate.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_hosted_smoke == true)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.1-source-native-${{ github.sha }}
+          name: OnePane-alpha3.2-source-native-${{ github.sha }}
           path: artifact
       - name: Install verify and preserve data
         shell: bash
@@ -279,7 +279,7 @@ jobs:
           assert data['version']==os.environ['ONEPANE_VERSION'], data
           PY
           sudo systemctl is-active --quiet onepane.service
-          echo preserve-alpha3.1 | sudo tee /var/lib/onepane/qa-preserve.txt >/dev/null
+          echo preserve-alpha3.2 | sudo tee /var/lib/onepane/qa-preserve.txt >/dev/null
           sudo apt-get remove -y onepane
           sudo test -f /var/lib/onepane/qa-preserve.txt
-          test "$(sudo cat /var/lib/onepane/qa-preserve.txt | tr -d '\n')" = "preserve-alpha3.1"
+          test "$(sudo cat /var/lib/onepane/qa-preserve.txt | tr -d '\n')" = "preserve-alpha3.2"

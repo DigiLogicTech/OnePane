@@ -42,6 +42,13 @@ type taskService interface {
 	List(context.Context, string, int) ([]task.Task, error)
 }
 
+type taskArchiveService interface {
+	Get(context.Context, string) (task.Task, error)
+	ListArchived(context.Context, string, int) ([]task.Task, error)
+	Archive(context.Context, task.ArchiveCommand) (task.Task, error)
+	Unarchive(context.Context, task.ArchiveCommand) (task.Task, error)
+}
+
 type routineService interface {
 	List(context.Context, string) ([]routine.Routine, error)
 	Create(context.Context, routine.CreateCommand) (routine.Routine, error)
@@ -75,6 +82,11 @@ type projectService interface {
 
 type projectArchiver interface {
 	ArchiveProject(context.Context, projectworkspace.ArchiveProjectCommand) (projectworkspace.Project, error)
+}
+
+type projectWorkspaceViewReader interface {
+	WorkspaceView(context.Context, string) (projectworkspace.WorkspaceView, error)
+	WorkspaceViews(context.Context, string) ([]projectworkspace.WorkspaceView, error)
 }
 
 type eventReader interface {
@@ -325,6 +337,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/agent-sessions", s.listAgentSessions)
 	s.mux.HandleFunc("GET /v1/tasks", s.listTasks)
 	s.mux.HandleFunc("POST /v1/tasks", s.createTask)
+	s.mux.HandleFunc("POST /v1/tasks/{taskID}/archive", s.archiveTask)
+	s.mux.HandleFunc("POST /v1/tasks/{taskID}/unarchive", s.unarchiveTask)
 	s.mux.HandleFunc("GET /v1/routines", s.listRoutines)
 	s.mux.HandleFunc("POST /v1/routines", s.createRoutine)
 	s.mux.HandleFunc("GET /v1/chat-commands", s.listChatCommands)
@@ -446,6 +460,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/projects", s.listProjects)
 	s.mux.HandleFunc("POST /v1/projects", s.createProject)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}", s.getProject)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces", s.listProjectWorkspaces)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/orchestrator", s.getProjectOrchestrator)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/orchestrator/turns", s.listProjectOrchestratorTurns)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/orchestrator/turns", s.submitProjectOrchestratorTurn)
@@ -714,6 +729,42 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := archiver.ArchiveProject(r.Context(), projectworkspace.ArchiveProjectCommand{ProjectID: p.ID, ExpectedRevision: in.ExpectedRevision, ActorPrincipalID: i.PrincipalID, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
 	respondDomain(w, out, err, http.StatusOK)
+}
+
+
+func (s *Server) listProjectWorkspaces(w http.ResponseWriter, r *http.Request) {
+	i, ok := s.authenticate(w, r)
+	if !ok {
+		return
+	}
+	if s.projects == nil {
+		writeError(w, http.StatusServiceUnavailable, "project service unavailable")
+		return
+	}
+	projectID := strings.TrimSpace(r.PathValue("projectID"))
+	projectRow, err := s.projects.Project(r.Context(), projectID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !s.authorize(w, r, i, projectRow.WorkspaceID, "project.read") {
+		return
+	}
+	reader, ok := s.projects.(projectWorkspaceViewReader)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "project workspace service unavailable")
+		return
+	}
+	rows, err := reader.WorkspaceViews(r.Context(), projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
 }
 
 func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
@@ -1264,10 +1315,67 @@ func (s *Server) createProviderCredential(w http.ResponseWriter, r *http.Request
 
 func taskResponse(t task.Task) map[string]any {
 	return map[string]any{
-		"id": t.ID, "workspace_id": t.WorkspaceID, "project_id": t.ProjectID, "objective": t.Objective,
+		"id": t.ID, "workspace_id": t.WorkspaceID, "project_id": t.ProjectID, "project_workspace_id": t.ProjectWorkspaceID, "objective": t.Objective,
 		"state": t.State, "scheduling_class": t.SchedulingClass, "priority": t.Priority, "revision": t.Revision,
-		"ready_at": t.ReadyAt, "cancel_requested_at": t.CancelRequestedAt, "created_at": t.CreatedAt, "updated_at": t.UpdatedAt,
+		"ready_at": t.ReadyAt, "cancel_requested_at": t.CancelRequestedAt, "archived_at": t.ArchivedAt, "created_at": t.CreatedAt, "updated_at": t.UpdatedAt,
 	}
+}
+
+
+func (s *Server) setTaskArchived(w http.ResponseWriter, r *http.Request, archived bool) {
+	i, ok := s.authenticate(w, r)
+	if !ok {
+		return
+	}
+	archiver, ok := s.tasks.(taskArchiveService)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "task archive service unavailable")
+		return
+	}
+	taskID := strings.TrimSpace(r.PathValue("taskID"))
+	current, err := archiver.Get(r.Context(), taskID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !s.authorize(w, r, i, current.WorkspaceID, "task.write") {
+		return
+	}
+	var in struct {
+		ExpectedRevision int64 `json:"expected_revision"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	actor := i.PrincipalID
+	cmd := task.ArchiveCommand{TaskID: taskID, ExpectedRevision: in.ExpectedRevision, ActorPrincipalID: &actor, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")}
+	var out task.Task
+	if archived {
+		out, err = archiver.Archive(r.Context(), cmd)
+	} else {
+		out, err = archiver.Unarchive(r.Context(), cmd)
+	}
+	if err != nil {
+		if task.IsRevisionConflict(err) {
+			writeError(w, http.StatusConflict, "task revision conflict")
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, taskResponse(out))
+}
+
+func (s *Server) archiveTask(w http.ResponseWriter, r *http.Request) {
+	s.setTaskArchived(w, r, true)
+}
+
+func (s *Server) unarchiveTask(w http.ResponseWriter, r *http.Request) {
+	s.setTaskArchived(w, r, false)
 }
 
 func (s *Server) listRoutines(w http.ResponseWriter, r *http.Request) {
@@ -1362,7 +1470,18 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	rows, err := s.tasks.List(r.Context(), workspaceID, limit)
+	var rows []task.Task
+	var err error
+	if r.URL.Query().Get("archived") == "1" || strings.EqualFold(r.URL.Query().Get("archived"), "true") {
+		archiver, ok := s.tasks.(taskArchiveService)
+		if !ok {
+			writeError(w, http.StatusServiceUnavailable, "task archive service unavailable")
+			return
+		}
+		rows, err = archiver.ListArchived(r.Context(), workspaceID, limit)
+	} else {
+		rows, err = s.tasks.List(r.Context(), workspaceID, limit)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1384,18 +1503,62 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		WorkspaceID     string               `json:"workspace_id"`
-		ProjectID       *string              `json:"project_id"`
-		Objective       string               `json:"objective"`
-		SchedulingClass task.SchedulingClass `json:"scheduling_class"`
-		Priority        int                  `json:"priority"`
-		Completion      json.RawMessage      `json:"completion"`
+		WorkspaceID        string               `json:"workspace_id"`
+		ProjectID          *string              `json:"project_id"`
+		ProjectWorkspaceID *string              `json:"project_workspace_id"`
+		Objective          string               `json:"objective"`
+		SchedulingClass    task.SchedulingClass `json:"scheduling_class"`
+		Priority           int                  `json:"priority"`
+		Completion         json.RawMessage      `json:"completion"`
 	}
 	if !decodeJSON(w, r, &in) {
 		return
 	}
 	if !s.authorize(w, r, i, in.WorkspaceID, "task.write") {
 		return
+	}
+	if in.ProjectID != nil {
+		v := strings.TrimSpace(*in.ProjectID)
+		if v == "" {
+			in.ProjectID = nil
+		} else {
+			in.ProjectID = &v
+		}
+	}
+	if in.ProjectWorkspaceID != nil {
+		v := strings.TrimSpace(*in.ProjectWorkspaceID)
+		if v == "" {
+			in.ProjectWorkspaceID = nil
+		} else {
+			in.ProjectWorkspaceID = &v
+		}
+	}
+	if in.ProjectWorkspaceID != nil && in.ProjectID == nil {
+		writeError(w, http.StatusBadRequest, "project_workspace_id requires project_id")
+		return
+	}
+	if in.ProjectID != nil {
+		if s.projects == nil {
+			writeError(w, http.StatusServiceUnavailable, "project service unavailable")
+			return
+		}
+		projectRow, err := s.projects.Project(r.Context(), *in.ProjectID)
+		if err != nil || projectRow.WorkspaceID != in.WorkspaceID || projectRow.Status == "archived" {
+			writeError(w, http.StatusBadRequest, "selected project is not available in this workspace")
+			return
+		}
+		if in.ProjectWorkspaceID != nil {
+			reader, ok := s.projects.(projectWorkspaceViewReader)
+			if !ok {
+				writeError(w, http.StatusServiceUnavailable, "project workspace service unavailable")
+				return
+			}
+			workspaceRow, err := reader.WorkspaceView(r.Context(), *in.ProjectWorkspaceID)
+			if err != nil || workspaceRow.ProjectID != projectRow.ID || workspaceRow.Status == "archived" {
+				writeError(w, http.StatusBadRequest, "selected project workspace does not belong to the selected project")
+				return
+			}
+		}
 	}
 	if in.SchedulingClass == "" {
 		in.SchedulingClass = task.ClassUserInteractive
@@ -1404,7 +1567,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		in.Completion = json.RawMessage(`{"type":"operator_review"}`)
 	}
 	actor := i.PrincipalID
-	out, err := s.tasks.Create(r.Context(), task.CreateCommand{WorkspaceID: in.WorkspaceID, ProjectID: in.ProjectID, Objective: in.Objective, SchedulingClass: in.SchedulingClass, Priority: in.Priority, Completion: in.Completion, ActorPrincipalID: &actor, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
+	out, err := s.tasks.Create(r.Context(), task.CreateCommand{WorkspaceID: in.WorkspaceID, ProjectID: in.ProjectID, ProjectWorkspaceID: in.ProjectWorkspaceID, Objective: in.Objective, SchedulingClass: in.SchedulingClass, Priority: in.Priority, Completion: in.Completion, ActorPrincipalID: &actor, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

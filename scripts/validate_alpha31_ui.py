@@ -90,6 +90,10 @@ ck("Models headers grow with wrapped copy", ".models-page .card-header.models-ca
 
 ck("Command palette exposes real actions", "function a31CommandRegistry()" in app and "Detect local hardware" in app and "New scheduled task" in app and "Restart product tour" in app)
 ck("Health popover is live and never hard-codes inventory counts", "async function openHealthPopover" in app and "Not reported" in app and "5 / 8 active" not in app and "8 / 8" not in app)
+attention_start=app.find("async function openAttentionPopover")
+attention_end=app.find("async function openHealthPopover", attention_start)
+attention_popover=app[attention_start:attention_end] if attention_start >= 0 and attention_end > attention_start else ""
+ck("Attention popover uses live operational data without fabricated incidents", "refreshOperationalDataQA(true)" in attention_popover and "ATTENTION_ITEMS" in attention_popover and "No attention items reported." in attention_popover and all(x not in attention_popover for x in ["T-1833","AI-Lab-02","Nightly Research"]))
 ck("First-run setup requires an explicit language choice", 'id="setup-language-step"' in html and 'id="setup-language"' in html and "qa5PrepareFirstRunLanguage" in app and "QA5_SETUP_LANGUAGE_KEY" in app)
 ck("Language remains changeable from Settings", 'id="a31Language"' in app and "qa5ApplyAuthLanguage(e.target.value)" in app)
 ck("Theme-aware sleek scrollbars use shared tokens", all(x in css for x in ["--scrollbar-thumb","--scrollbar-thumb-hover","--scrollbar-thumb-active","::-webkit-scrollbar-thumb","scrollbar-gutter:stable"]))

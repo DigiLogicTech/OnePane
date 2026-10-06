@@ -423,7 +423,12 @@ function popoverFor(anchor,html){
   activePopoverCleanup=()=>{clearTimeout(timer);document.removeEventListener('click',closer,{capture:true});};
 }
 function openThemePopover(anchor){popoverFor(anchor,`<div class="popover"><h3>Theme</h3><div class="theme-grid">${['system','light','dark','graphite','midnight','forest'].map(t=>`<button class="theme-choice ${state.theme===t?'active':''}" data-theme-choice="${t}">${titleCase(t)}</button>`).join('')}</div></div>`);$$('[data-theme-choice]').forEach(b=>b.onclick=()=>{state.theme=b.dataset.themeChoice;document.documentElement.dataset.theme=state.theme;persist();$('#overlayRoot').innerHTML='';});}
-function openAttentionPopover(anchor){popoverFor(anchor,`<div class="popover"><h3>Attention</h3><div class="popover-row"><strong>Approval required</strong><div class="list-meta">T-1833 · External mutation</div></div><div class="popover-row"><strong>Node unavailable</strong><div class="list-meta">AI-Lab-02 · Wake failed</div></div><div class="popover-row"><strong>Routine failed</strong><div class="list-meta">Nightly Research</div></div></div>`);}
+async function openAttentionPopover(anchor){
+  try{await refreshOperationalDataQA(true)}catch{}
+  const items=a31Array(ATTENTION_ITEMS);
+  const rows=items.slice(0,8).map(item=>`<div class="popover-row"><strong>${escapeHtml(item.title||'Attention item')}</strong><div class="list-meta">${escapeHtml(item.detail||'No detail reported')}</div></div>`).join('');
+  popoverFor(anchor,`<div class="popover"><h3>Attention</h3>${rows||'<div class="popover-row"><strong>No attention items reported.</strong><div class="list-meta">No current task, provider, node, or event condition has been reported by the operational feeds.</div></div>'}</div>`);
+}
 async function openHealthPopover(anchor){
   try{await refreshOperationalDataQA(true)}catch{}
   const nodeRows=a31Array(liveOps.nodes),providerRows=a31Array(liveOps.providers);

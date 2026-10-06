@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import re, sys
+import hashlib, re, sys
 
 ROOT=Path(__file__).resolve().parents[1]
 foundation=(ROOT/"internal/webui/static/app-foundation.js").read_text(encoding="utf-8")
@@ -16,6 +16,10 @@ def definitions(src):
         if match:
             out.setdefault(match.group(1),[]).append(line_no)
     return out
+
+expected_foundation_blob="8bb6eec38da56b85e6bd6a460fce0e286b9d3543"
+foundation_bytes=foundation.encode("utf-8")
+actual_foundation_blob=hashlib.sha1(b"blob "+str(len(foundation_bytes)).encode("ascii")+b"\0"+foundation_bytes).hexdigest()
 
 foundation_defs=definitions(foundation)
 canonical_defs=definitions(canonical)
@@ -70,6 +74,11 @@ critical=["renderNav","renderOperations","renderProjects","renderModels","render
 failed=[]
 def fail(msg): failed.append(msg); print("[FAIL] "+msg)
 def ok(msg): print("[PASS] "+msg)
+
+if actual_foundation_blob!=expected_foundation_blob:
+    fail(f"compatibility foundation changed: {actual_foundation_blob}; review deliberately and update the frozen hash")
+else:
+    ok("compatibility foundation content is frozen")
 
 canonical_dupes={name:lines for name,lines in canonical_defs.items() if len(lines)>1}
 if canonical_dupes: fail(f"canonical runtime contains duplicate definitions: {canonical_dupes}")

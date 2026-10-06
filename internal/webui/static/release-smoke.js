@@ -17,7 +17,7 @@
     if(!path.startsWith("/v1/"))return originalFetch(input,opts);
     if(path==="/v1/setup/status")return json({required:false});
     if(path==="/v1/auth/me")return json({principal_id:"qa-release",display_name:"Release QA",workspaces:[{id:"workspace-release"}],capabilities:[]});
-    if(path==="/v1/about")return json({version:"0.1.0-alpha.3.2"});
+    if(path==="/v1/about")return originalFetch(input,opts);
     if(path==="/v1/health")return json({status:"ok"});
     if(path==="/v1/nodes")return json({nodes:[{id:"node-release",node_id:"node-release",display_name:"Release Node",status:"ready",architecture:"amd64",os_name:"Windows"}]});
     if(path==="/v1/projects"&&method==="GET")return json([clone(project)]);

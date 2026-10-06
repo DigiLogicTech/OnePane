@@ -441,7 +441,7 @@ startProductTour=function({replay=false,welcome=false}={}){
     {title:"Settings",body:"Application defaults are grouped here; Workspace-owned settings remain with each Workspace.",target:'[data-route="settings"]'},
     {title:"Ready",body:"The control plane is ready. You can replay this tour from Settings or Help / Tour.",target:null}
   ];
-  let i=0,lastAnchor="bottom-center",ended=false;
+  let i=0,ended=false;
   const cleanup=()=>{
     if(ended)return;ended=true;
     delete document.documentElement.dataset.productTour;
@@ -456,14 +456,41 @@ startProductTour=function({replay=false,welcome=false}={}){
   const onKeyDown=e=>{if(e.key==="Escape"){e.preventDefault();cleanup()}};
   function panes(rect,pad=8){const vw=innerWidth,vh=innerHeight,r=rect?{l:Math.max(0,rect.left-pad),t:Math.max(0,rect.top-pad),r:Math.min(vw,rect.right+pad),b:Math.min(vh,rect.bottom+pad)}:{l:vw/2,t:vh/2,r:vw/2,b:vh/2};return `<div class="tour-pane tour-pane-top" style="left:0;top:0;width:100%;height:${r.t}px"></div><div class="tour-pane tour-pane-left" style="left:0;top:${r.t}px;width:${r.l}px;height:${Math.max(0,r.b-r.t)}px"></div><div class="tour-pane tour-pane-right" style="left:${r.r}px;top:${r.t}px;width:${Math.max(0,vw-r.r)}px;height:${Math.max(0,r.b-r.t)}px"></div><div class="tour-pane tour-pane-bottom" style="left:0;top:${r.b}px;width:100%;height:${Math.max(0,vh-r.b)}px"></div>`}
   function position(){
-    const s=steps[i],card=$("#tourCard",root),mask=$("#tourMask",root),target=s.target?$(s.target):null;if(!card||!mask)return;const tr=target?.getBoundingClientRect();mask.innerHTML=panes(tr,s.padding||8);if(target){target.classList.add("tour-target");const spot=$("#tourSpotlight",root);Object.assign(spot.style,{left:`${tr.left-7}px`,top:`${tr.top-7}px`,width:`${tr.width+14}px`,height:`${tr.height+14}px`});spot.hidden=false}else $("#tourSpotlight",root).hidden=true;
-    const cr=card.getBoundingClientRect(),margin=18,targetRect=tr?{left:tr.left-20,right:tr.right+20,top:tr.top-20,bottom:tr.bottom+20}:null;
-    const candidates={"bottom-center":{left:(innerWidth-cr.width)/2,top:innerHeight-cr.height-margin},"top-center":{left:(innerWidth-cr.width)/2,top:margin},"lower-right":{left:innerWidth-cr.width-margin,top:innerHeight-cr.height-margin},"lower-left":{left:margin,top:innerHeight-cr.height-margin},"upper-right":{left:innerWidth-cr.width-margin,top:margin},"upper-left":{left:margin,top:margin}};
-    const collides=p=>targetRect&&!(p.left+cr.width<targetRect.left||p.left>targetRect.right||p.top+cr.height<targetRect.top||p.top>targetRect.bottom);
-    let pos=candidates[lastAnchor];if(!pos||collides(pos)){const found=Object.entries(candidates).find(([,p])=>!collides(p));if(found){lastAnchor=found[0];pos=found[1]}}Object.assign(card.style,{left:`${Math.max(margin,Math.min(innerWidth-cr.width-margin,pos.left))}px`,top:`${Math.max(margin,Math.min(innerHeight-cr.height-margin,pos.top))}px`});
+    const s=steps[i],card=$("#tourCard",root),mask=$("#tourMask",root),target=s.target?$(s.target):null;if(!card||!mask)return;
+    const tr=target?.getBoundingClientRect(),pad=s.padding||8;mask.innerHTML=panes(tr,pad);
+    const spot=$("#tourSpotlight",root);
+    if(target&&tr){target.classList.add("tour-target");Object.assign(spot.style,{left:`${tr.left-7}px`,top:`${tr.top-7}px`,width:`${tr.width+14}px`,height:`${tr.height+14}px`});spot.hidden=false}else spot.hidden=true;
+    const cr=card.getBoundingClientRect(),margin=18,host=$("#viewHost"),hr=host?.getBoundingClientRect();
+    const usable={
+      left:Math.max(margin,hr?.left??margin),
+      top:Math.max(margin,hr?.top??margin),
+      right:Math.min(innerWidth-margin,hr?.right??(innerWidth-margin)),
+      bottom:Math.min(innerHeight-margin,hr?.bottom??(innerHeight-margin))
+    };
+    const clamp=p=>({left:Math.max(usable.left,Math.min(usable.right-cr.width,p.left)),top:Math.max(usable.top,Math.min(usable.bottom-cr.height,p.top))});
+    const center=clamp({left:(usable.left+usable.right-cr.width)/2,top:(usable.top+usable.bottom-cr.height)/2});
+    const targetRect=tr?{left:tr.left-pad-18,right:tr.right+pad+18,top:tr.top-pad-18,bottom:tr.bottom+pad+18}:null;
+    const collides=p=>targetRect&&!(p.left+cr.width<=targetRect.left||p.left>=targetRect.right||p.top+cr.height<=targetRect.top||p.top>=targetRect.bottom);
+    const fits=p=>p.left>=usable.left&&p.top>=usable.top&&p.left+cr.width<=usable.right&&p.top+cr.height<=usable.bottom;
+    let pos=center;
+    if(collides(pos)&&targetRect){
+      const around=[
+        {left:(usable.left+usable.right-cr.width)/2,top:targetRect.top-cr.height-margin},
+        {left:(usable.left+usable.right-cr.width)/2,top:targetRect.bottom+margin},
+        {left:targetRect.right+margin,top:(usable.top+usable.bottom-cr.height)/2},
+        {left:targetRect.left-cr.width-margin,top:(usable.top+usable.bottom-cr.height)/2},
+        {left:usable.left,top:usable.top},
+        {left:usable.right-cr.width,top:usable.top},
+        {left:usable.left,top:usable.bottom-cr.height},
+        {left:usable.right-cr.width,top:usable.bottom-cr.height}
+      ];
+      pos=around.find(p=>fits(p)&&!collides(p))||clamp(around.find(p=>!collides(clamp(p)))||center);
+    }
+    Object.assign(card.style,{left:`${pos.left}px`,top:`${pos.top}px`});
+    card.dataset.positioned="true";
   }
   async function draw(){
-    document.querySelectorAll(".tour-target").forEach(x=>x.classList.remove("tour-target"));const s=steps[i];if(s.prepare)await s.prepare();root.innerHTML=`<div class="tour-overlay"><div id="tourMask" class="tour-focus-mask"></div><div id="tourSpotlight" class="tour-spotlight" hidden></div><section id="tourCard" class="tour-card a31-tour-card"><div class="tour-progress"><span>${i+1} / ${steps.length}</span><span>${Math.round((i+1)/steps.length*100)}%</span></div><h2>${escapeHtml(s.title)}</h2><p>${escapeHtml(s.body)}</p><div class="tour-actions"><button class="btn" id="tourSkip">${i===steps.length-1?'Close':'Skip tour'}</button><span class="tour-spacer"></span>${i?'<button class="btn" id="tourBack">Back</button>':""}<button class="btn primary" id="tourNext">${i===steps.length-1?'Finish':'Next'}</button></div></section></div>`;$("#tourSkip").onclick=finish;$("#tourBack")?.addEventListener("click",()=>{i--;draw()});$("#tourNext").onclick=()=>{if(i===steps.length-1)return finish();i++;draw()};requestAnimationFrame(()=>requestAnimationFrame(position));
+    document.querySelectorAll(".tour-target").forEach(x=>x.classList.remove("tour-target"));const s=steps[i];if(s.prepare)await s.prepare();root.innerHTML=`<div class="tour-overlay"><div id="tourMask" class="tour-focus-mask"></div><div id="tourSpotlight" class="tour-spotlight" hidden></div><section id="tourCard" class="tour-card a31-tour-card"><div class="tour-progress"><span>${i+1} / ${steps.length}</span><span>${Math.round((i+1)/steps.length*100)}%</span></div><h2>${escapeHtml(s.title)}</h2><p>${escapeHtml(s.body)}</p><div class="tour-actions"><button class="btn" id="tourSkip">${i===steps.length-1?'Close':'Skip tour'}</button><span class="tour-spacer"></span>${i?'<button class="btn" id="tourBack">Back</button>':""}<button class="btn primary" id="tourNext">${i===steps.length-1?'Finish':'Next'}</button></div></section></div>`;$("#tourSkip").onclick=finish;$("#tourBack")?.addEventListener("click",()=>{i--;draw()});$("#tourNext").onclick=()=>{if(i===steps.length-1)return finish();i++;draw()};requestAnimationFrame(()=>position());
   }
   window.addEventListener("resize",position);document.addEventListener("keydown",onKeyDown);
   Promise.resolve(draw()).catch(ex=>{console.error("Product tour failed",ex);cleanup();notice("Product tour could not start.","bad")});

@@ -143,3 +143,6 @@ ck("Inspector Overview is implicit rather than a permanent rail", 'root.dataset.
 ck("Product tour cannot create an invisible click-blocking overlay", "visibility:visible!important" in css and "Product tour failed" in app and "Tour card is visible" in smoke)
 
 ck("Operations render self-heals overlapping persisted geometry", "if(a31OperationsLayoutBroken(state.operationsWidgets))" in app and "Operations render repairs injected overlap" in smoke)
+
+ck("Product tour is centred first and only repositions for focus collisions", 'const center=clamp' in app and 'if(collides(pos)&&targetRect)' in app and 'card.dataset.positioned="true"' in app)
+ck("Product tour reveals only after positioning and visibly focuses the background", 'visibility:hidden!important' in css and 'data-positioned="true"' in css and 'rgba(3,8,13,.58)' in css and "Tour defaults to page centre" in smoke)

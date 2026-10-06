@@ -16,6 +16,7 @@
   ],orchestration:{mode:"direct",supervisor:{model:"auto",agent:"onepane-default"},team:{model:"auto",agent:"onepane-default",count:2},council:{model:"auto",agent:"onepane-default",count:2}}};
   const workspace2={id:"pws-release-2",name:"Disposable workspace",widgets:[{id:"pw-release-2-notes",type:"notes",title:"Notes",col:6,row:4}],orchestration:{mode:"direct",supervisor:{model:"auto",agent:"onepane-default"},team:{model:"auto",agent:"onepane-default",count:2},council:{model:"auto",agent:"onepane-default",count:2}}};
   let project={id:"project-release",workspace_id:"workspace-release",name:"Release QA Project",description:"Installed behavioural acceptance",status:"active",revision:1,project_policy:{onepane_ui:{workspaces:[workspace,workspace2]}}};
+  let taskRows=[{id:"task-release",workspace_id:"workspace-release",project_id:"project-release",project_workspace_id:"pws-release",objective:"Release task",state:"complete",scheduling_class:"user_interactive",priority:0,revision:1,created_at:1700000000000,updated_at:1700000000000}],archivedTaskRows=[],routineRows=[],lastRoutinePayload=null;
   let projectPatchCount=0,turns=[];
   const originalFetch=window.fetch.bind(window);
   window.EventSource=class{addEventListener(){}close(){}};
@@ -29,6 +30,7 @@
     if(path==="/v1/health")return json({status:"ok"});
     if(path==="/v1/nodes")return json({nodes:[{id:"node-release",name:"RELEASE-PC",local:true,trust_state:"local",status:"ready",architecture:"amd64",os_name:"Windows"}]});
     if(path==="/v1/projects"&&method==="GET")return json(project.status==="active"?[clone(project)]:[]);
+    if(path==="/v1/projects/project-release/workspaces"&&method==="GET")return json([{id:"pws-release",project_id:"project-release",name:"Main workspace",status:"active"},{id:"pws-release-2",project_id:"project-release",name:"Disposable workspace",status:"active"}]);
     if(path==="/v1/projects/project-release"&&method==="DELETE"){
       const body=JSON.parse(opts.body||"{}");if(Number(body.expected_revision)!==Number(project.revision))return json({error:"revision conflict"},409);
       project={...project,status:"archived",revision:project.revision+1};return json(clone(project));
@@ -44,7 +46,21 @@
     if(path==="/v1/assistant/threads/thread-release/turns"&&method==="POST"){
       const body=JSON.parse(opts.body||"{}");turns.push({role:"user",content:body.content||""},{role:"assistant",content:"No eligible reasoning model is configured. Configure a model to run reasoning."});return json(turns.at(-1),201);
     }
-    if(["/v1/tasks","/v1/routines","/v1/providers","/v1/events","/v1/provider-presets","/v1/agent-runtime-presets","/v1/scheduler/candidates","/v1/local-ai/catalog","/v1/skills/packages","/v1/skills/assignments","/v1/agent-profiles","/v1/teams","/v1/team-presets","/v1/provider-oauth/configs"].includes(path))return json([]);
+    if(path==="/v1/tasks"&&method==="GET")return json(clone(u.searchParams.get("archived")==="1"?archivedTaskRows:taskRows));
+    if(path==="/v1/tasks"&&method==="POST"){
+      const body=JSON.parse(opts.body||"{}"),task={id:"task-created-"+(taskRows.length+archivedTaskRows.length+1),...body,state:"created",revision:1,created_at:Date.now(),updated_at:Date.now()};taskRows.unshift(task);return json(clone(task),201);
+    }
+    if(path==="/v1/tasks/task-release/archive"&&method==="POST"){
+      const body=JSON.parse(opts.body||"{}"),i=taskRows.findIndex(x=>x.id==="task-release");if(i<0)return json({error:"not found"},404);if(Number(body.expected_revision)!==Number(taskRows[i].revision))return json({error:"revision conflict"},409);const t={...taskRows.splice(i,1)[0],archived_at:Date.now(),revision:Number(body.expected_revision)+1,updated_at:Date.now()};archivedTaskRows.unshift(t);return json(clone(t));
+    }
+    if(path==="/v1/tasks/task-release/unarchive"&&method==="POST"){
+      const body=JSON.parse(opts.body||"{}"),i=archivedTaskRows.findIndex(x=>x.id==="task-release");if(i<0)return json({error:"not found"},404);if(Number(body.expected_revision)!==Number(archivedTaskRows[i].revision))return json({error:"revision conflict"},409);const t={...archivedTaskRows.splice(i,1)[0],archived_at:null,revision:Number(body.expected_revision)+1,updated_at:Date.now()};taskRows.unshift(t);return json(clone(t));
+    }
+    if(path==="/v1/routines"&&method==="GET")return json(clone(routineRows));
+    if(path==="/v1/routines"&&method==="POST"){
+      const body=JSON.parse(opts.body||"{}");lastRoutinePayload=clone(body);const row={id:"routine-release-"+(routineRows.length+1),name:body.name,timezone:body.timezone,status:"active",trigger_json:body.trigger,policy_json:body.policy,updated_at:Date.now()};routineRows.unshift(row);return json(clone(row),201);
+    }
+    if(["/v1/providers","/v1/events","/v1/provider-presets","/v1/agent-runtime-presets","/v1/scheduler/candidates","/v1/local-ai/catalog","/v1/skills/packages","/v1/skills/assignments","/v1/agent-profiles","/v1/teams","/v1/team-presets","/v1/provider-oauth/configs"].includes(path))return json([]);
     if(path==="/v1/local-ai/deployments")return json({deployments:[]});
     if(path==="/v1/local-ai/components")return json({});
     if(path==="/v1/settings/local-ai")return json({model_pool_path:""});

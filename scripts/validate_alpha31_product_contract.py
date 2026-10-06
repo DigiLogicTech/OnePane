@@ -42,6 +42,8 @@ ck("Research sessions freeze immutable manifests", all(x in migration+teamsvc fo
 ck("Research seats pin one resolved candidate across retries", "team_session_seat_bindings" in migration and "IncludeCandidateIDs" in teamworker and "BindSeat" in teamworker and "seat_binding_candidate_id" in teamworker)
 ck("Research first pass can remain independent and complete", "IndependentFirstPass" in teamworker and "m.Kind == \"agent\"" in teamworker and "RequireAllSeats" in teamsvc)
 ck("Research manifest provenance is readable", "/v1/team-sessions/{sessionID}/manifest" in api and "getTeamSessionManifest" in api)
+ck("Research provenance is presented in Inspector", all(x in app for x in ["A32_RESEARCH_INSPECTOR","Research Integrity","Bound candidate","Manifest SHA-256","/team-session","/manifest"]))
+ck("Research Team configuration member fetch is ordered safely", app.index("const teamID=team.id||team.ID") < app.index("members=await apiRequest(`/v1/teams/${encodeURIComponent(teamID)}/members`)"))
 failed=[n for n,o in checks if not o]
 for n,o in checks: print(f"[{'PASS' if o else 'FAIL'}] {n}")
 if failed:

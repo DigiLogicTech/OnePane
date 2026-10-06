@@ -39,6 +39,7 @@ fi
 if [[ -f "$ROOT/NOTICE" ]]; then
   install -m 0644 "$ROOT/NOTICE" "$PKGROOT/usr/share/doc/onepane/NOTICE"
 fi
+install -m 0755 "$ROOT/packaging/debian/preinst" "$PKGROOT/DEBIAN/preinst"
 install -m 0755 "$ROOT/packaging/debian/postinst" "$PKGROOT/DEBIAN/postinst"
 install -m 0755 "$ROOT/packaging/debian/prerm" "$PKGROOT/DEBIAN/prerm"
 install -m 0755 "$ROOT/packaging/debian/postrm" "$PKGROOT/DEBIAN/postrm"

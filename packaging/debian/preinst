@@ -1,0 +1,45 @@
+#!/bin/sh
+set -eu
+
+RECOVERY_ROOT=/var/lib/onepane/recovery/package-upgrade
+PENDING="$RECOVERY_ROOT/pending"
+ACTIVE="$RECOVERY_ROOT/active"
+
+sanitize_version() {
+  printf '%s' "${1:-unknown}" | tr -c 'A-Za-z0-9._+-' '_'
+}
+
+if [ "${1:-}" = "upgrade" ]; then
+  install -d -o root -g root -m 0755 "$RECOVERY_ROOT"
+
+  # If a previous package configure already fell back to a known-good binary,
+  # keep that binary as the rollback candidate rather than snapshotting the
+  # newer package file that dpkg may have already unpacked.
+  if [ -s "$ACTIVE" ]; then
+    candidate="$(cat "$ACTIVE" 2>/dev/null || true)"
+    if [ -n "$candidate" ] && [ -x "$candidate/onepane" ]; then
+      printf '%s\n' "$candidate" > "$PENDING"
+      chmod 0600 "$PENDING"
+      exit 0
+    fi
+  fi
+
+  if [ -x /usr/bin/onepane ]; then
+    old_version="$(sanitize_version "${2:-unknown}")"
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    candidate="$RECOVERY_ROOT/${old_version}-${stamp}"
+    install -d -o root -g root -m 0755 "$candidate"
+    cp -p /usr/bin/onepane "$candidate/onepane"
+    chown root:root "$candidate/onepane"
+    chmod 0755 "$candidate/onepane"
+    if [ -f /lib/systemd/system/onepane.service ]; then
+      cp -p /lib/systemd/system/onepane.service "$candidate/onepane.service"
+      chown root:root "$candidate/onepane.service"
+      chmod 0644 "$candidate/onepane.service"
+    fi
+    printf '%s\n' "$candidate" > "$PENDING"
+    chmod 0600 "$PENDING"
+  fi
+fi
+
+exit 0

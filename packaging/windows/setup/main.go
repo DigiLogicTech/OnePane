@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -106,7 +107,7 @@ func main() {
 	if !silent { message("OnePane Setup", "OnePane v"+version+" is "+verb+".\n\nThe Windows service is running and the desktop application will open now.", 0x40) }
 	if !noLaunch { launchDesktop() }
 }
-func installProduct(installDirArg, projectRootArg, modelPoolArg string, repair, skipOptionalRuntime bool) error {
+func installProduct(installDirArg, projectRootArg, modelPoolArg string, repair, skipOptionalRuntime bool) (retErr error) {
 	logf("starting OnePane %s installation", version)
 	programFiles := os.Getenv("ProgramFiles")
 	if programFiles == "" {
@@ -156,6 +157,24 @@ func installProduct(installDirArg, projectRootArg, modelPoolArg string, repair, 
 	if !waitForServiceDeletion(20 * time.Second) {
 		return fmt.Errorf("previous OnePane service is still pending deletion; reboot Windows or wait a moment and run Setup again")
 	}
+
+	rollback, err := capturePayloadRollback(installDir, dataDir)
+	if err != nil {
+		return fmt.Errorf("capture existing OnePane application for rollback: %w", err)
+	}
+	rollbackArmed := rollback != nil
+	defer func() {
+		if retErr == nil || !rollbackArmed || rollback == nil {
+			return
+		}
+		logf("installation failed after payload replacement; restoring previous OnePane application")
+		if rollbackErr := rollback.Restore(); rollbackErr != nil {
+			retErr = fmt.Errorf("%w; application payload rollback failed: %v", retErr, rollbackErr)
+			logf("application payload rollback failed: %v", rollbackErr)
+			return
+		}
+		logf("previous OnePane application payload restored and service is healthy")
+	}()
 
 	payloads := map[string]string{
 		"OnePane.Backend.exe": "b6f6bebfa65677c620e68a5ca15d6c3d1aab4ad58bcdae138217007195196b66",
@@ -294,6 +313,14 @@ func installProduct(installDirArg, projectRootArg, modelPoolArg string, repair, 
 	}
 	desktopExe := filepath.Join(installDir, "OnePane.Desktop.exe")
 	_ = runHidden("reg.exe", "add", `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "/v", "OnePane", "/t", "REG_SZ", "/d", `"`+desktopExe+`"`, "/f")
+	if err := runHidden("sc.exe", "start", serviceName); err != nil {
+		return fmt.Errorf("start OnePane service: %w", err)
+	}
+	if !waitForHealth(75 * time.Second) {
+		logf("service did not become healthy within 75 seconds")
+		return fmt.Errorf("the OnePane service installed but did not become healthy; inspect %s", filepath.Join(logDir, "onepane.log"))
+	}
+
 	uninstallCmd := `"` + filepath.Join(installDir, "OnePane.Setup.exe") + `" --uninstall`
 	repairCmd := `"` + filepath.Join(installDir, "OnePane.Setup.exe") + `" --repair`
 	uninstallKey := `HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\OnePane`
@@ -307,15 +334,95 @@ func installProduct(installDirArg, projectRootArg, modelPoolArg string, repair, 
 	_ = runHidden("reg.exe", "add", uninstallKey, "/v", "NoModify", "/t", "REG_DWORD", "/d", "0", "/f")
 	_ = runHidden("reg.exe", "add", uninstallKey, "/v", "NoRepair", "/t", "REG_DWORD", "/d", "0", "/f")
 
-	if err := runHidden("sc.exe", "start", serviceName); err != nil {
-		return fmt.Errorf("start OnePane service: %w", err)
-	}
-	if !waitForHealth(75 * time.Second) {
-		logf("service did not become healthy within 75 seconds")
-		return fmt.Errorf("the OnePane service installed but did not become healthy; inspect %s", filepath.Join(logDir, "onepane.log"))
+	rollbackArmed = false
+	if rollback != nil {
+		rollback.Cleanup()
 	}
 	logf("installation complete and health endpoint is responding")
 	return nil
+}
+
+type payloadRollback struct {
+	installDir string
+	backupDir  string
+	files      []string
+}
+
+func capturePayloadRollback(installDir, dataDir string) (*payloadRollback, error) {
+	names := []string{"OnePane.Backend.exe", "OnePane.Service.exe", "OnePane.Desktop.exe", "OnePane.ico"}
+	stamp := time.Now().UTC().Format("20060102T150405.000000000Z")
+	backupDir := filepath.Join(dataDir, "recovery", "package-upgrade", "windows-"+stamp)
+	var files []string
+	for _, name := range names {
+		src := filepath.Join(installDir, name)
+		st, err := os.Stat(src)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if st.IsDir() {
+			return nil, fmt.Errorf("existing payload %s is a directory", name)
+		}
+		if len(files) == 0 {
+			if err := os.MkdirAll(backupDir, 0o700); err != nil {
+				return nil, err
+			}
+		}
+		if err := copyFile(src, filepath.Join(backupDir, name)); err != nil {
+			_ = os.RemoveAll(backupDir)
+			return nil, err
+		}
+		files = append(files, name)
+	}
+	if len(files) == 0 {
+		return nil, nil
+	}
+	logf("captured previous OnePane payload for rollback: %s", backupDir)
+	return &payloadRollback{installDir: installDir, backupDir: backupDir, files: files}, nil
+}
+
+func (r *payloadRollback) Restore() error {
+	if r == nil || len(r.files) == 0 {
+		return nil
+	}
+	_ = runHidden("taskkill.exe", "/IM", "OnePane.Desktop.exe", "/F")
+	_ = runHidden("sc.exe", "stop", serviceName)
+	_ = runHidden("taskkill.exe", "/IM", "OnePane.Backend.exe", "/F")
+	_ = runHidden("taskkill.exe", "/IM", "OnePane.Service.exe", "/F")
+	_ = runHidden("sc.exe", "delete", serviceName)
+	_ = waitForServiceDeletion(20 * time.Second)
+
+	for _, name := range r.files {
+		if err := copyFile(filepath.Join(r.backupDir, name), filepath.Join(r.installDir, name)); err != nil {
+			return fmt.Errorf("restore %s: %w", name, err)
+		}
+	}
+	serviceExe := filepath.Join(r.installDir, "OnePane.Service.exe")
+	if _, err := os.Stat(serviceExe); err != nil {
+		return fmt.Errorf("restored service executable unavailable: %w", err)
+	}
+	if err := runHidden("sc.exe", "create", serviceName, "binPath=", `"`+serviceExe+`"`, "start=", "auto", "DisplayName=", "OnePane"); err != nil {
+		return fmt.Errorf("register restored OnePane service: %w", err)
+	}
+	_ = runHidden("sc.exe", "description", serviceName, "OnePane local-first autonomous AI control plane")
+	_ = runHidden("sc.exe", "failure", serviceName, "reset=", "86400", "actions=", "restart/5000/restart/15000/restart/60000")
+	_ = runHidden("sc.exe", "failureflag", serviceName, "1")
+	if err := runHidden("sc.exe", "start", serviceName); err != nil {
+		return fmt.Errorf("start restored OnePane service: %w", err)
+	}
+	if !waitForHealth(45 * time.Second) {
+		return errors.New("restored OnePane service did not become healthy")
+	}
+	return nil
+}
+
+func (r *payloadRollback) Cleanup() {
+	if r == nil || strings.TrimSpace(r.backupDir) == "" {
+		return
+	}
+	_ = os.RemoveAll(r.backupDir)
 }
 
 func installWebView2() error {
@@ -634,7 +741,7 @@ func waitForHealth(timeout time.Duration) bool {
 		resp, err := client.Get(controlURL + "/v1/health")
 		if err == nil {
 			resp.Body.Close()
-			if resp.StatusCode >= 200 && resp.StatusCode < 500 {
+			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				return true
 			}
 		}

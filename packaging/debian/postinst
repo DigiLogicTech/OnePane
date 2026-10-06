@@ -4,6 +4,75 @@ set -eu
 DATA_DIR=/var/lib/onepane
 CONFIG_DIR=/etc/onepane
 MODEL_POOL="$DATA_DIR/models"
+RECOVERY_ROOT="$DATA_DIR/recovery/package-upgrade"
+PENDING_ROLLBACK="$RECOVERY_ROOT/pending"
+ACTIVE_ROLLBACK="$RECOVERY_ROOT/active"
+ROLLBACK_DROPIN_DIR=/etc/systemd/system/onepane.service.d
+ROLLBACK_DROPIN="$ROLLBACK_DROPIN_DIR/rollback.conf"
+
+health_port() {
+  port=8080
+  if [ -f "$CONFIG_DIR/config.yaml" ]; then
+    configured="$(awk '
+      /^server:[[:space:]]*$/ { in_server=1; next }
+      in_server && /^[^[:space:]]/ { in_server=0 }
+      in_server && $1=="listen:" {
+        value=$2
+        gsub(/"/, "", value)
+        sub(/^.*:/, "", value)
+        print value
+        exit
+      }
+    ' "$CONFIG_DIR/config.yaml" 2>/dev/null || true)"
+    case "$configured" in
+      ''|*[!0-9]*) ;;
+      *) port="$configured" ;;
+    esac
+  fi
+  printf '%s\n' "$port"
+}
+
+wait_healthy() {
+  attempts="${1:-45}"
+  port="$(health_port)"
+  i=0
+  while [ "$i" -lt "$attempts" ]; do
+    if systemctl is-active --quiet onepane.service 2>/dev/null &&
+       curl -fsS --max-time 1 "http://127.0.0.1:$port/v1/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    i=$((i+1))
+    sleep 1
+  done
+  return 1
+}
+
+clear_rollback_override() {
+  rm -f "$ROLLBACK_DROPIN"
+  rmdir "$ROLLBACK_DROPIN_DIR" >/dev/null 2>&1 || true
+  systemctl daemon-reload >/dev/null 2>&1 || true
+}
+
+activate_previous_binary() {
+  [ -s "$PENDING_ROLLBACK" ] || return 1
+  candidate="$(cat "$PENDING_ROLLBACK" 2>/dev/null || true)"
+  [ -n "$candidate" ] || return 1
+  [ -x "$candidate/onepane" ] || return 1
+
+  install -d -o root -g root -m 0755 "$ROLLBACK_DROPIN_DIR"
+  cat > "$ROLLBACK_DROPIN" <<EOF_ROLLBACK
+[Service]
+ExecStart=
+ExecStart=$candidate/onepane --config $CONFIG_DIR/config.yaml
+EOF_ROLLBACK
+  chown root:root "$ROLLBACK_DROPIN"
+  chmod 0644 "$ROLLBACK_DROPIN"
+  printf '%s\n' "$candidate" > "$ACTIVE_ROLLBACK"
+  chmod 0600 "$ACTIVE_ROLLBACK"
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl restart onepane.service >/dev/null 2>&1 || return 1
+  wait_healthy 30
+}
 
 if ! getent group onepane >/dev/null 2>&1; then
   addgroup --system onepane >/dev/null
@@ -64,9 +133,22 @@ chown onepane:onepane "$DATA_DIR/.config/containers/containers.conf"
 chmod 0600 "$DATA_DIR/.config/containers/containers.conf"
 
 if command -v systemctl >/dev/null 2>&1; then
+  # Always test the newly unpacked package without an old recovery override.
+  clear_rollback_override
   systemctl daemon-reload
   systemctl enable onepane.service >/dev/null 2>&1 || true
-  systemctl restart onepane.service
+  if systemctl restart onepane.service >/dev/null 2>&1 && wait_healthy 60; then
+    rm -f "$ACTIVE_ROLLBACK" "$PENDING_ROLLBACK"
+  else
+    echo "OnePane upgrade did not become healthy; attempting previous-binary recovery." >&2
+    if activate_previous_binary; then
+      echo "Previous OnePane binary restored through systemd recovery override." >&2
+      echo "The new package remains unconfigured so package-manager state records the failed upgrade." >&2
+      exit 1
+    fi
+    echo "OnePane upgrade failed and no healthy previous-binary recovery candidate was available." >&2
+    exit 1
+  fi
 fi
 
 exit 0

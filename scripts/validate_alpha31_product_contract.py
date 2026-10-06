@@ -10,7 +10,7 @@ assistant=read("internal/assistant/service.go"); orch=read("internal/projectorch
 components=read("internal/localai/components.go")+read("internal/localai/components_omniroute.go")
 catalog=read("internal/localai/catalog_bundled.go")+read("internal/localai/catalog_signed.go")
 compute=read("internal/localai/compute_policy.go"); oauth=read("internal/provideroauth/service.go"); skills=read("internal/skillcatalog/service.go")
-setup=read("packaging/windows/setup/main.go"); desktop=read("packaging/windows/desktop/main.go"); workflow=read(".github/workflows/alpha3.1-stabilization.yml")
+setup=read("packaging/windows/setup/main.go"); desktop=read("packaging/windows/desktop/main.go"); workflow=read(".github/workflows/alpha3.1-stabilization.yml"); debpre=read("packaging/debian/preinst"); debpost=read("packaging/debian/postinst"); debbuild=read("scripts/build-ubuntu-deb.sh")
 migration=read("migrations/0023_alpha31_assistant_orchestrator.sql")+read("migrations/0024_alpha31_agents_components.sql")+read("migrations/0025_alpha31_refinement.sql")+read("migrations/0026_alpha32_reliability.sql")
 reliability=read("internal/storage/sqlite/migrate.go"); provision=read("internal/localai/provision.go"); installjobs=read("internal/localai/install_jobs.go"); localsvc=read("internal/localai/service.go"); teamsvc=read("internal/team/service.go"); teamworker=read("internal/teamworker/service.go")
 checks=[]
@@ -36,6 +36,8 @@ ck("Windows static assets remain canonical", "cmp internal/webui/static/app.js p
 ck("Windows and Ubuntu packages remain CI outputs", "Build Windows x64 installer" in workflow and "Build Ubuntu amd64 package" in workflow)
 ck("native Windows UI-ready smoke contract remains", "onepane-ui-ready|" in app and "ui-ready.txt" in desktop and "Assert-NativeUIReady" in workflow)
 ck("Windows setup remains noninteractive-test capable", all(x in setup for x in ["--silent","--no-launch","--skip-optional-runtime"]))
+ck("Windows upgrades retain and restore previous application payload on failed health", all(x in setup for x in ["capturePayloadRollback","rollback.Restore()","rollbackArmed","previous OnePane application payload restored"]) and "resp.StatusCode < 300" in setup)
+ck("Ubuntu upgrades retain previous binary and activate recovery override on failed health", all(x in debpre+debpost+debbuild for x in ["package-upgrade","PENDING_ROLLBACK","ROLLBACK_DROPIN","activate_previous_binary","packaging/debian/preinst"]))
 ck("Alpha upgrades create validate and auto-restore a durable rollback point", all(x in reliability for x in ["VACUUM INTO","pre-migration backup preserved","PRAGMA quick_check","type MigrationError struct","RestoreMigrationBackup","verifyDatabaseFile"]) and "errors.As(err, &migrationErr)" in boot and "sqlite.RestoreMigrationBackup" in boot)
 ck("managed downloads resume durable partial artifacts", all(x in provision for x in ['dest + ".partial"','Header.Set("Range"','StatusPartialContent','StatusRequestedRangeNotSatisfiable','existingDownload','markResumableDownload','isResumableDownloadError']) and "markInstallJobInterrupted" in installjobs and "!isResumableDownloadError(err)" in localsvc)
 ck("Research sessions freeze immutable manifests", all(x in migration+teamsvc for x in ["team_session_manifests","snapshot_sha256","SessionSnapshot","manifest_sha256"]))

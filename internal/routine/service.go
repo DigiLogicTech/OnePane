@@ -64,16 +64,18 @@ type Trigger struct {
 	Kind         string `json:"kind"`
 	EverySeconds int64  `json:"every_seconds,omitempty"`
 	StartAtUTC   *int64 `json:"start_at_utc,omitempty"`
+	EndAtUTC     *int64 `json:"end_at_utc,omitempty"`
 	LocalTime    string `json:"local_time,omitempty"`
 	Weekdays     []int  `json:"weekdays,omitempty"`
 }
 
 type Policy struct {
-	CatchUp    string          `json:"catch_up,omitempty"` // latest | all | skip
-	MaxCatchUp int             `json:"max_catch_up,omitempty"`
-	Objective  string          `json:"objective,omitempty"`
-	Priority   int             `json:"priority,omitempty"`
-	Completion json.RawMessage `json:"completion,omitempty"`
+	CatchUp        string          `json:"catch_up,omitempty"` // latest | all | skip
+	MaxCatchUp     int             `json:"max_catch_up,omitempty"`
+	MaxOccurrences int             `json:"max_occurrences,omitempty"`
+	Objective      string          `json:"objective,omitempty"`
+	Priority       int             `json:"priority,omitempty"`
+	Completion     json.RawMessage `json:"completion,omitempty"`
 }
 
 type CreateCommand struct {
@@ -96,6 +98,12 @@ func NewService(db *sql.DB, tx storage.Transactor, clk clock.Clock, tasks *task.
 }
 
 func validateTrigger(t Trigger) error {
+	if t.EndAtUTC != nil && *t.EndAtUTC <= 0 {
+		return errors.New("end_at_utc must be a positive unix millisecond timestamp")
+	}
+	if t.StartAtUTC != nil && t.EndAtUTC != nil && *t.EndAtUTC < *t.StartAtUTC {
+		return errors.New("end_at_utc must not be before start_at_utc")
+	}
 	switch t.Kind {
 	case "interval":
 		if t.EverySeconds < 60 || t.EverySeconds > 365*24*3600 {
@@ -132,6 +140,9 @@ func normalizePolicy(p Policy) (Policy, error) {
 	if p.MaxCatchUp < 1 || p.MaxCatchUp > 100 {
 		return p, errors.New("max_catch_up must be 1..100")
 	}
+	if p.MaxOccurrences < 0 || p.MaxOccurrences > 100000 {
+		return p, errors.New("max_occurrences must be 1..100000 when set")
+	}
 	if len(p.Completion) == 0 {
 		p.Completion = json.RawMessage(`{}`)
 	}
@@ -155,10 +166,13 @@ func (s *Service) Create(ctx context.Context, cmd CreateCommand) (Routine, error
 	if err != nil {
 		return Routine{}, err
 	}
+	now := s.clock.UnixMilli()
+	if cmd.Trigger.EndAtUTC != nil && *cmd.Trigger.EndAtUTC <= now {
+		return Routine{}, errors.New("end_at_utc must be in the future")
+	}
 	triggerRaw, _ := json.Marshal(cmd.Trigger)
 	policyRaw, _ := json.Marshal(pol)
 	idv, _ := s.ids.New("routine")
-	now := s.clock.UnixMilli()
 	r := Routine{ID: idv, WorkspaceID: cmd.WorkspaceID, Name: strings.TrimSpace(cmd.Name), DefinitionVersion: 1, Status: StatusActive, TriggerJSON: triggerRaw, PolicyJSON: policyRaw, Timezone: cmd.Timezone, CreatedBy: cmd.CreatedBy, CreatedAt: now, UpdatedAt: now}
 	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
 		var ok int
@@ -291,6 +305,9 @@ func (s *Service) Tick(ctx context.Context, now time.Time) ([]Occurrence, error)
 			}
 			created = append(created, o)
 		}
+		if err := s.disableIfExhausted(ctx, r, now); err != nil {
+			return created, fmt.Errorf("routine %s exhaustion: %w", r.ID, err)
+		}
 	}
 	return created, nil
 }
@@ -314,6 +331,13 @@ func (s *Service) due(ctx context.Context, r Routine, now time.Time) ([]dueOccur
 	if err != nil {
 		return nil, err
 	}
+	completedRuns, err := s.materializedOccurrenceCount(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	if pol.MaxOccurrences > 0 && completedRuns >= pol.MaxOccurrences {
+		return nil, nil
+	}
 	var last sql.NullInt64
 	if err := s.db.QueryRowContext(ctx, `SELECT MAX(trigger_time_utc) FROM routine_occurrences WHERE routine_id=? AND definition_version=?`, r.ID, r.DefinitionVersion).Scan(&last); err != nil {
 		return nil, err
@@ -322,11 +346,21 @@ func (s *Service) due(ctx context.Context, r Routine, now time.Time) ([]dueOccur
 	if last.Valid {
 		after = time.UnixMilli(last.Int64)
 	}
-	if !after.Before(now) {
+	effectiveNow := now
+	if trig.EndAtUTC != nil {
+		end := time.UnixMilli(*trig.EndAtUTC).UTC()
+		if after.After(end) || after.Equal(end) {
+			return nil, nil
+		}
+		if effectiveNow.After(end) {
+			effectiveNow = end
+		}
+	}
+	if !after.Before(effectiveNow) {
 		return nil, nil
 	}
 	if pol.CatchUp == "latest" || pol.CatchUp == "skip" {
-		latest, intended, ok, err := latestDueTrigger(trig, r.Timezone, time.UnixMilli(r.CreatedAt), after, now)
+		latest, intended, ok, err := latestDueTrigger(trig, r.Timezone, time.UnixMilli(r.CreatedAt), after, effectiveNow)
 		if err != nil || !ok {
 			return nil, err
 		}
@@ -339,20 +373,79 @@ func (s *Service) due(ctx context.Context, r Routine, now time.Time) ([]dueOccur
 	// `all` is intentionally bounded. If more work remains, the next scheduler
 	// tick continues from the newest materialized occurrence rather than trying
 	// to synthesize an unbounded backlog in one transaction burst.
-	due := make([]dueOccurrence, 0, pol.MaxCatchUp)
+	remaining := pol.MaxCatchUp
+	if pol.MaxOccurrences > 0 && pol.MaxOccurrences-completedRuns < remaining {
+		remaining = pol.MaxOccurrences - completedRuns
+	}
+	due := make([]dueOccurrence, 0, remaining)
 	cursor := after
-	for len(due) < pol.MaxCatchUp {
+	for len(due) < remaining {
 		next, intended, ok, err := nextTrigger(trig, r.Timezone, time.UnixMilli(r.CreatedAt), cursor)
 		if err != nil {
 			return nil, err
 		}
-		if !ok || next.After(now) {
+		if !ok || next.After(effectiveNow) {
 			break
 		}
 		due = append(due, dueOccurrence{TriggerUTC: next, IntendedLocal: intended, State: OccurrenceExpected})
 		cursor = next
 	}
 	return due, nil
+}
+
+
+func (s *Service) materializedOccurrenceCount(ctx context.Context, r Routine) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM routine_occurrences WHERE routine_id=? AND definition_version=? AND task_id IS NOT NULL`, r.ID, r.DefinitionVersion).Scan(&n)
+	return n, err
+}
+
+func (s *Service) disableIfExhausted(ctx context.Context, r Routine, now time.Time) error {
+	var trig Trigger
+	var pol Policy
+	if err := json.Unmarshal(r.TriggerJSON, &trig); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(r.PolicyJSON, &pol); err != nil {
+		return err
+	}
+	pol, err := normalizePolicy(pol)
+	if err != nil {
+		return err
+	}
+	exhausted := false
+	reason := ""
+	if pol.MaxOccurrences > 0 {
+		n, err := s.materializedOccurrenceCount(ctx, r)
+		if err != nil {
+			return err
+		}
+		if n >= pol.MaxOccurrences {
+			exhausted = true
+			reason = "max_occurrences"
+		}
+	}
+	if !exhausted && trig.EndAtUTC != nil && !now.Before(time.UnixMilli(*trig.EndAtUTC).UTC()) {
+		exhausted = true
+		reason = "end_at_utc"
+	}
+	if !exhausted {
+		return nil
+	}
+	at := s.clock.UnixMilli()
+	return s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE routines SET status='disabled',updated_at=? WHERE id=? AND status='active'`, at, r.ID)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil || n == 0 {
+			return err
+		}
+		eid, _ := s.ids.New("evt")
+		payload, _ := json.Marshal(map[string]any{"routine_id": r.ID, "reason": reason})
+		return s.events.Append(ctx, tx, event.Event{ID: eid, WorkspaceID: &r.WorkspaceID, Type: "routine.exhausted", AggregateType: "routine", AggregateID: r.ID, Payload: payload, OccurredAt: at})
+	})
 }
 
 func latestDueTrigger(t Trigger, tz string, created, after, now time.Time) (time.Time, string, bool, error) {

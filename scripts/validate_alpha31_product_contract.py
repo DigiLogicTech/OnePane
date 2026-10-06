@@ -27,6 +27,7 @@ ck("trusted Local AI bootstrap is build pinned", "BundledCatalogKeyID" in catalo
 ck("trusted Local AI includes CPU CUDA Vulkan runtimes", all(x in catalog for x in ['Backend: "cpu"','Backend: "cuda"','Backend: "vulkan"']))
 ck("CUDA runtimes manage pinned companion libraries", all(x in catalog+provision+localsvc for x in ["Dependencies","cuda-runtime-12.4","cuda-runtime-12.8","runtimeInstallFingerprint","runtime.Dependencies"]))
 ck("Clean runners execute the pinned managed CPU runtime", "TestBundledCPURuntimeArtifactSmoke" in runtime_smoke and "ONEPANE_RUNTIME_ARTIFACT_SMOKE" in workflow and "Managed runtime artifact smoke" in workflow and "needs.runtime_artifact_smoke.result" in workflow)
+ck("Linux runtime archives allow only in-root relative symlinks", "safeArchiveSymlinkTarget" in provision and "tar.TypeSymlink" in provision and "../../outside" in runtime_smoke+read("internal/localai/provision_test.go") and 'ExecutableRel: "llama-b11430/llama-server"' in catalog)
 ck("per-deployment compute policy is real", "deployment_compute_policies" in migration and "SetComputePolicy" in compute and "supervisor.Stop" in compute and "supervisor.Start" in compute)
 ck("managed OmniRoute and external OmniRoute coexist", "installOmniRoute" in components and "startOmniRoute" in components and "omniQA(false)" in app and "omniQA(true)" in app)
 ck("OAuth PKCE is real and Vault-backed", "code_challenge_method" in oauth and "S256" in oauth and "CreateProviderCredential" in oauth and "/v1/provider-oauth/callback" in api)

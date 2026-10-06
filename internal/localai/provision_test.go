@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -28,6 +29,54 @@ func makeTar(t *testing.T, name string) string {
 	f.Close()
 	return p
 }
+func makeTarEntries(t *testing.T, headers []*tar.Header, bodies map[string][]byte) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "entries.tar.gz")
+	f, err := os.Create(p)
+	if err != nil { t.Fatal(err) }
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	for _, h := range headers {
+		if err := tw.WriteHeader(h); err != nil { t.Fatal(err) }
+		if h.Typeflag == tar.TypeReg {
+			if _, err := tw.Write(bodies[h.Name]); err != nil { t.Fatal(err) }
+		}
+	}
+	if err := tw.Close(); err != nil { t.Fatal(err) }
+	if err := gz.Close(); err != nil { t.Fatal(err) }
+	if err := f.Close(); err != nil { t.Fatal(err) }
+	return p
+}
+
+func TestExtractAllowsSafeInternalSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("tar symlink extraction is used by Unix runtime archives")
+	}
+	target := []byte("library")
+	p := makeTarEntries(t, []*tar.Header{
+		{Name: "llama-b11430/libmtmd.so.1", Mode: 0o700, Size: int64(len(target)), Typeflag: tar.TypeReg},
+		{Name: "llama-b11430/libmtmd.so", Mode: 0o777, Typeflag: tar.TypeSymlink, Linkname: "libmtmd.so.1"},
+	}, map[string][]byte{"llama-b11430/libmtmd.so.1": target})
+	root := t.TempDir()
+	if err := ExtractRuntimeArchive(p, "tar.gz", root); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "llama-b11430", "libmtmd.so"))
+	if err != nil { t.Fatal(err) }
+	if string(got) != string(target) {
+		t.Fatalf("symlink content=%q", string(got))
+	}
+}
+
+func TestExtractRejectsEscapingSymlink(t *testing.T) {
+	p := makeTarEntries(t, []*tar.Header{
+		{Name: "bin/evil", Mode: 0o777, Typeflag: tar.TypeSymlink, Linkname: "../../outside"},
+	}, nil)
+	if err := ExtractRuntimeArchive(p, "tar.gz", t.TempDir()); err == nil {
+		t.Fatal("expected escaping symlink rejection")
+	}
+}
+
 func TestExtractRejectsTraversal(t *testing.T) {
 	p := makeTar(t, "../../escape")
 	if err := ExtractRuntimeArchive(p, "tar.gz", t.TempDir()); err == nil {

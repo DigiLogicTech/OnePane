@@ -306,6 +306,19 @@ func safeArchivePath(root, name string) (string, error) {
 	return dest, nil
 }
 
+func safeArchiveSymlinkTarget(root, linkPath, target string) error {
+	target = strings.ReplaceAll(strings.TrimSpace(target), "\\", "/")
+	if target == "" || strings.HasPrefix(target, "/") {
+		return fmt.Errorf("unsafe archive symlink target %q", target)
+	}
+	resolved := filepath.Clean(filepath.Join(filepath.Dir(linkPath), filepath.FromSlash(target)))
+	rel, err := filepath.Rel(root, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("archive symlink escapes root: %q", target)
+	}
+	return nil
+}
+
 func ExtractRuntimeArchive(archivePath, format, destRoot string) error {
 	if err := os.MkdirAll(destRoot, 0o700); err != nil {
 		return err
@@ -355,6 +368,21 @@ func ExtractRuntimeArchive(archivePath, format, destRoot string) error {
 				}
 				if ce != nil {
 					return ce
+				}
+			case tar.TypeSymlink:
+				if err := safeArchiveSymlinkTarget(destRoot, dst, h.Linkname); err != nil {
+					return err
+				}
+				if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+					return err
+				}
+				if _, err := os.Lstat(dst); err == nil {
+					return fmt.Errorf("duplicate archive entry %s", h.Name)
+				} else if !os.IsNotExist(err) {
+					return err
+				}
+				if err := os.Symlink(filepath.FromSlash(strings.ReplaceAll(h.Linkname, "\\", "/")), dst); err != nil {
+					return err
 				}
 			default:
 				return fmt.Errorf("unsupported archive entry type for %s", h.Name)

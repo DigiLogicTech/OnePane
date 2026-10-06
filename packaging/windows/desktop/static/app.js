@@ -223,7 +223,8 @@ function operationsComponentContent(type){
   if(type==='attention') return attentionCard();
   if(type==='providers') return providersCard();
   return card('Component','<div class="widget-body">Component unavailable.</div>');
-}function renderOperationsWidget(w){
+}
+function renderOperationsWidget(w){
   const controls=state.operationsEdit?`<div class="dashboard-edit-bar"><span class="dashboard-drag" title="Drag to move">⋮⋮</span><strong>${escapeHtml(w.title)}</strong><span class="dashboard-edit-spacer"></span><button class="tiny" data-op-move="up" data-op-id="${w.id}" title="Move earlier">↑</button><button class="tiny" data-op-move="down" data-op-id="${w.id}" title="Move later">↓</button><select class="dashboard-size" data-op-size data-op-id="${w.id}" aria-label="Component size"><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="wide">Wide</option><option value="full">Full</option></select><button class="tiny danger" data-op-remove="${w.id}" title="Remove component">×</button></div>`:'';
   return `<section class="dashboard-widget ${state.operationsEdit?'editable':''}" draggable="${state.operationsEdit}" data-op-widget="${w.id}" style="grid-column:span ${Math.max(2,Math.min(12,w.col||4))};grid-row:span ${Math.max(2,Math.min(10,w.row||4))}">${controls}<div class="dashboard-widget-content">${operationsComponentContent(w.type)}</div></section>`;
 }
@@ -269,10 +270,12 @@ function taskCard(){
   if(!liveOpsReported('tasks'))return card('Active Tasks','<div class="empty-state compact">Task status not reported.</div>','View all');
   const rows=liveOps.tasks.filter(t=>!['complete','cancelled'].includes(String(t.state||'').toLowerCase())).slice(0,6);
   return card('Active Tasks',rows.length?`<ul class="list">${rows.map(t=>`<li class="list-row" data-route="tasks"><span class="pill ${['failed','blocked','waiting_approval'].includes(t.state)?'warn':'good'}">${escapeHtml(t.state||'created')}</span><div class="list-main"><div class="list-title">${escapeHtml(t.objective||t.id||'Task')}</div><div class="list-meta">${escapeHtml(t.scheduling_class||'')} · priority ${Number(t.priority||0)}</div></div></li>`).join('')}</ul>`:'<div class="empty-state compact">No active tasks.</div>','View all');
-}function nodesCard(){
+}
+function nodesCard(){
   if(!liveOpsReported('nodes'))return card('Nodes','<div class="empty-state compact">Node status not reported.</div>','View all');
   return card('Nodes',liveOps.nodes.length?`<ul class="list">${liveOps.nodes.slice(0,6).map(n=>`<li class="list-row" data-route="nodes"><span>⬡</span><div class="list-main"><div class="list-title">${escapeHtml(n.display_name||n.node_id||n.id||'Node')}</div><div class="list-meta">${escapeHtml(n.peer_endpoint||n.advertise_url||'local')}</div></div><span class="pill">${escapeHtml(n.status||n.state||n.trust_state||'registered')}</span></li>`).join('')}</ul>`:'<div class="empty-state compact">No node records returned.</div>','View all');
-}function resourceCard(){
+}
+function resourceCard(){
   if(!localProfileQA)return card('Resource Utilisation','<div class="empty-state compact">Live capacity telemetry is not fabricated. Use Models → Detect hardware to load this node’s hardware profile.</div>');
   const g=Array.isArray(localProfileQA.gpus)?localProfileQA.gpus:[];
   return card('Resource Utilisation',`<div class="widget-body"><strong>${escapeHtml(localProfileQA.cpu?.name||'CPU')}</strong><div class="list-meta">${escapeHtml(bytesQA(localProfileQA.memory?.total_bytes||0))} RAM</div>${g.map(x=>`<div class="resource-row"><span>${escapeHtml(x.name||'GPU')}</span><strong>${escapeHtml(bytesQA(x.vram_bytes||0))} VRAM</strong></div>`).join('')||'<div class="list-meta">No GPU detected.</div>'}</div>`);
@@ -286,10 +289,12 @@ function activityCard(){
 function attentionCard(){
   if(!liveOpsAttentionReported())return card('Attention','<div class="empty-state compact">Attention status not fully reported because one or more operational feeds are unavailable.</div>');
   return card(`Attention (${ATTENTION_ITEMS.length})`,ATTENTION_ITEMS.length?`<ul class="list">${ATTENTION_ITEMS.map((n,i)=>`<li class="list-row"><span class="pill ${n.severity||'warn'}">!</span><div class="list-main"><div>${escapeHtml(n.title)}</div><div class="list-meta">${escapeHtml(n.detail)}</div></div><button class="btn" data-attention-item="${i}">${n.drawer?'View logs':'Open'}</button></li>`).join('')}</ul>`:'<div class="empty-state compact">Nothing currently requires approval or intervention.</div>');
-}function providersCard(){
+}
+function providersCard(){
   if(!liveOpsReported('providers'))return card('Provider Health','<div class="empty-state compact">Provider status not reported.</div>','View all');
   return card('Provider Health',liveOps.providers.length?`<ul class="list">${liveOps.providers.slice(0,8).map(p=>`<li class="list-row" data-route="providers"><span>⌁</span><div class="list-main"><div>${escapeHtml(p.display_name||p.provider||'Provider')}</div></div><span class="pill ${p.status==='connected'?'good':p.status==='unavailable'?'bad':''}">${escapeHtml(p.status||'configured')}</span></li>`).join('')}</ul>`:'<div class="empty-state compact">No providers configured.</div>','View all');
-}function renderWorkspaces(){
+}
+function renderWorkspaces(){
   $('#viewHost').innerHTML=`<section class="page">${pageHeader('Workspaces','Composable operational views with draggable, resizable components',`<button class="btn ${state.workspaceEdit?'primary':''}" id="editWorkspace">${state.workspaceEdit?'Done':'Edit layout'}</button><button class="btn">Add component</button>`)}
     <div class="workspace-toolbar"><select><option>Development</option><option>AI Lab</option><option>Infrastructure</option></select><button class="btn">Duplicate</button><button class="btn">Save preset</button></div>
     <div class="workspace-grid" id="workspaceGrid">${state.workspaceWidgets.map(renderWorkspaceWidget).join('')}</div></section>`;
@@ -1873,7 +1878,68 @@ function a31OperationsHealth(){
   const nodeValue=!liveOpsReported("nodes")?"Not reported":nodes.length?`${nodes.length-badNodes.length}/${nodes.length} healthy`:"No nodes";
   const providerValue=!liveOpsReported("providers")?"Not reported":providers.length?`${providers.length-badProviders.length}/${providers.length} healthy`:"No providers";
   return `<div class="health-grid">${metric("Control plane",controlState,controlState==="Healthy"?"API responding":controlState==="Degraded"?`Reported status: ${liveOps.health}`:"Health endpoint not reported",controlState==="Healthy"?"good":controlState==="Degraded"?"bad":"")}${metric("Active tasks",taskValue,liveOpsReported("tasks")?"Scheduler workload":"Task feed unavailable")}${metric("Nodes",nodeValue,!liveOpsReported("nodes")?"Node feed unavailable":badNodes.length?"Review degraded nodes":nodes.length?"All observed nodes healthy":"No node health entries returned",liveOpsReported("nodes")&&nodes.length&&!badNodes.length?"good":badNodes.length?"warn":"")}${metric("Providers",providerValue,!liveOpsReported("providers")?"Provider feed unavailable":badProviders.length?"Provider attention required":providers.length?"Connections healthy":"No provider health entries returned",liveOpsReported("providers")&&providers.length&&!badProviders.length?"good":badProviders.length?"warn":"")}</div><section class="panel-card"><div class="widget-body"><strong>Health boundaries</strong><p class="page-subtitle">Managed component failures, unavailable nodes and provider problems remain isolated from the OnePane control plane. Use Recovery for actionable degraded items.</p></div></section>`;
-}function a31ComponentButtons(id,c){
+}
+async function a31RecoveryContent(){
+  let comps={};try{comps=await qa5ModelComponents()}catch{}
+  const failed=a31Array(liveOps.tasks).filter(t=>["failed","blocked"].includes(String(t.state||"").toLowerCase()));
+  const compRows=Object.values(a31Object(comps)).filter(x=>["failed","degraded","interrupted"].includes(String(x.state||"").toLowerCase()));
+  return `<section class="panel-card"><div class="card-header recovery-card-header"><div><div class="card-title">Recovery</div><div class="list-meta">Actionable degraded state only; OnePane does not reset healthy components.</div></div><button class="btn" id="a31RecoveryRefresh">Refresh health</button></div><div class="widget-body"><div class="recovery-list">${compRows.map(c=>`<div class="recovery-row"><div><strong>${escapeHtml(c.display_name||c.id)}</strong><div class="list-meta">${escapeHtml(c.last_error||c.state||"degraded")}</div></div><button class="btn" data-a31-repair-component="${escapeHtml(c.id)}">Repair</button></div>`).join("")}${failed.map(t=>`<div class="recovery-row"><div><strong>Task ${escapeHtml(t.id||"")}</strong><div class="list-meta">${escapeHtml(t.objective||t.state||"")}</div></div><button class="btn" data-route="tasks">Open Tasks</button></div>`).join("")}${!compRows.length&&!failed.length?'<div class="empty-state compact">No degraded components or failed/blocked tasks require recovery.</div>':""}</div></div></section>`
+}
+renderOperations=async function(){
+  const actions=`<button class="btn ${state.operationsEdit?'primary':''}" id="editOperations">${state.operationsEdit?'Done':'Edit layout'}</button>${state.operationsEdit?'<button class="btn" id="addOperationsComponent">Add component</button><button class="btn" id="resetOperationsLayout">Reset layout</button>':""}`;
+  $("#viewHost").innerHTML=`<section class="page">${pageHeader("Operations","System overview, activity, health and recovery",actions)}${a31OperationsTabs()}<div id="a31OperationsBody"></div></section>`;
+  a31BindOperationsTabs();
+  const body=$("#a31OperationsBody");
+  if(a31OperationsView==="overview"){body.innerHTML=`<div class="operations-layout-grid ${state.operationsEdit?'editing':''}" id="operationsLayout"></div>`;a31RenderOperationsGrid()}
+  else if(a31OperationsView==="activity")body.innerHTML=a31OperationsActivity();
+  else if(a31OperationsView==="health")body.innerHTML=a31OperationsHealth();
+  else if(a31OperationsView==="recovery"){body.innerHTML=await a31RecoveryContent();$("#a31RecoveryRefresh")?.addEventListener("click",async()=>{await refreshOperationalDataQA(true);renderOperations()});$$("[data-a31-repair-component]").forEach(b=>b.onclick=()=>a31ComponentAction(b.dataset.a31RepairComponent,"repair"))}
+  $("#editOperations")?.addEventListener("click",()=>{state.operationsEdit=!state.operationsEdit;persist();renderOperations()});
+  $("#resetOperationsLayout")?.addEventListener("click",()=>{state.operationsWidgets=defaultState().operationsWidgets;a31NormalizeLayout(state.operationsWidgets);persist();renderOperations()});
+  $("#addOperationsComponent")?.addEventListener("click",openOperationsComponentPicker);
+  bindViewActions($("#viewHost"));
+}
+
+/* Projects: preserve durable project/workspace services, replace layout interaction. */
+qa4RenderWorkspaceWidget=function(w,project,workspace){
+  a31NormalizeLayout(workspace.widgets||[]);
+  const edit=!!state.projectWorkspaceEdit;
+  const controls=edit?`<div class="dashboard-edit-bar"><button class="dashboard-drag" data-pw-drag="${escapeHtml(w.id)}" title="Drag component">⋮⋮</button><strong>${escapeHtml(w.title||w.type)}</strong><span class="dashboard-edit-spacer"></span><select class="dashboard-size" data-pw-preset="${escapeHtml(w.id)}"><option value="">Size…</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="wide">Wide</option><option value="full">Full</option></select><button class="tiny danger" data-pw-remove="${escapeHtml(w.id)}">×</button></div>`:"";
+  return `<section class="workspace-widget dashboard-widget a31-layout-item ${edit?'editable':''}" data-pw-widget="${escapeHtml(w.id)}" style="${a31GridStyle(w)}">${controls}<div class="dashboard-widget-content"><div class="widget-handle"><strong>${escapeHtml(w.title||w.type)}</strong></div>${qa6ComponentContent(w,project,workspace)}</div>${edit?a31ResizeHandles(w.id,"data-pw-resize",w.title||w.type):""}</section>`
+};
+async function a31RefreshProjectGrid(project,workspace,animate=true){
+  const root=$("#qa4WorkspaceGrid");if(!root)return;a31NormalizeLayout(workspace.widgets||[]);
+  const before=new Map();if(animate)$$("[data-pw-widget]",root).forEach(el=>before.set(el.dataset.pwWidget,el.getBoundingClientRect()));
+  root.innerHTML=(workspace.widgets||[]).map(w=>qa4RenderWorkspaceWidget(w,project,workspace)).join("");
+  if(animate&&Element.prototype.animate)requestAnimationFrame(()=>$$("[data-pw-widget]",root).forEach(el=>{const old=before.get(el.dataset.pwWidget);if(!old){el.animate([{opacity:0,transform:"scale(.97)"},{opacity:1,transform:"scale(1)"}],{duration:150});return}const n=el.getBoundingClientRect(),dx=old.left-n.left,dy=old.top-n.top;if(Math.abs(dx)>1||Math.abs(dy)>1)el.animate([{transform:`translate(${dx}px,${dy}px)`},{transform:"translate(0,0)"}],{duration:170,easing:"ease-out"})}));
+  qa4BindWorkspaceEdit(project,workspace);qa6BindProjectComponents(project,workspace);qa7BindWorkspaceControls(project,workspace,root);qa4BindProjectNotes(root);
+}
+qa4BindWorkspaceEdit=function(project,workspace){
+  if(!state.projectWorkspaceEdit)return;const root=$("#qa4WorkspaceGrid");if(!root)return;a31NormalizeLayout(workspace.widgets||[]);
+  a31BindLayout(root,workspace.widgets||[],{attr:"data-pw-widget",dragAttr:"data-pw-drag",resizeAttr:"data-pw-resize",persist:async()=>{await qa4SaveProjectWorkspaces(project,qa4Workspaces(project))}});
+  $$("[data-pw-preset]",root).forEach(sel=>sel.onchange=async()=>{if(!sel.value)return;const w=workspace.widgets.find(x=>x.id===sel.dataset.pwPreset);if(!w)return;const p=workspacePreset(sel.value,w);w.width=p.col;w.height=p.row;w.col=p.col;w.row=p.row;a31ResolveLayout(workspace.widgets,w.id);a31ApplyLayout(root,workspace.widgets,"data-pw-widget",true);a31LayoutSaveInFlight++;try{await qa4SaveProjectWorkspaces(project,qa4Workspaces(project))}finally{a31LayoutSaveInFlight=Math.max(0,a31LayoutSaveInFlight-1)}});
+  $$("[data-pw-remove]",root).forEach(b=>b.onclick=async()=>{const el=b.closest("[data-pw-widget]");if(el?.animate)await el.animate([{opacity:1},{opacity:0,transform:"scale(.96)"}],{duration:130}).finished.catch(()=>{});workspace.widgets=workspace.widgets.filter(x=>x.id!==b.dataset.pwRemove);a31NormalizeLayout(workspace.widgets);await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));a31RefreshProjectGrid(project,workspace,true)});
+};
+qa4AddWorkspaceComponent=function(project,workspace){
+  const used=new Set((workspace.widgets||[]).map(x=>x.type)),available=qa4WorkspaceCatalogue().filter(([t])=>!used.has(t)||["notes","chat"].includes(t));
+  openModal("Add workspace component",`<div class="component-picker-grid">${available.map(([t,title])=>`<button class="component-choice" data-a31-add-project-component="${t}"><strong>${escapeHtml(title)}</strong><span>Add to ${escapeHtml(workspace.name)}</span></button>`).join("")}</div>`);
+  $$("[data-a31-add-project-component]").forEach(b=>b.onclick=async()=>{const [type,title]=qa4WorkspaceCatalogue().find(x=>x[0]===b.dataset.a31AddProjectComponent),item={id:`pw-${type}-${Date.now().toString(36)}`,type,title,width:type==="tasks"||type==="scheduled"?6:4,height:type==="chat"?5:4};workspace.widgets=workspace.widgets||[];a31NormalizeLayout(workspace.widgets);const slot=a31FirstFree(workspace.widgets,item,null);item.x=slot.x;item.y=slot.y;item.col=item.width;item.row=item.height;workspace.widgets.push(item);await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));closeModal();await a31RefreshProjectGrid(project,workspace,true)});
+};
+const a31ProjectRenderBase=qa6RenderProjectsBase;
+renderProjects=async function(){
+  const epoch=qa31ViewEpoch;await a31ProjectRenderBase();if(epoch!==qa31ViewEpoch||!a31RouteIs("projects"))return;
+  const project=a31CurrentProject(),workspace=project?a31CurrentWorkspace():null;if(!project||!workspace)return;qa7NormalizeWorkspace(project,workspace);a31NormalizeLayout(workspace.widgets||[]);
+  $(".workspace-chat-panel")?.remove();const bar=$(".workspace-context-bar .list-meta");if(bar)bar.textContent=` · workspace sandbox ${workspace.sandbox.internet?'internet allowed':'internet blocked'} · ${workspace.routing.enabled!==false?'routing enabled':'single-path'} · ${titleCase(workspace.orchestration?.mode||'direct')}`;
+  const settings=$("#qa4WorkspaceSettings");if(settings){settings.textContent="Workspace settings";settings.onclick=()=>qa6OpenInInspector(project,workspace,"settings")}
+  qa4BindWorkspaceEdit(project,workspace);qa6BindProjectComponents(project,workspace);qa7BindWorkspaceControls(project,workspace,$("#qa4WorkspaceGrid")||document);qa6StartEventStream();renderNav();
+};
+
+/* Managed components */
+async function a31ComponentAction(id,action,statusSelector){
+  const status=statusSelector?$(statusSelector):null;if(status)status.textContent=`${titleCase(action)} queued…`;
+  try{const job=await apiRequest(`/v1/local-ai/components/${encodeURIComponent(id)}/${encodeURIComponent(action)}`,{method:"POST",body:"{}"});for(let i=0;i<180;i++){const j=await apiRequest(`/v1/local-ai/component-jobs/${encodeURIComponent(job.id)}`);if(status)status.textContent=`${titleCase(j.stage||j.status||action)}…`;if(["succeeded","failed","interrupted"].includes(j.status)){if(j.status!=="succeeded")throw new Error(j.failure_reason||`${id} ${action} failed`);notice(`${titleCase(id)} ${action} complete.`);if(a31RouteIs("models"))renderModels();return}await new Promise(r=>setTimeout(r,600))}throw new Error("component job timed out")}catch(ex){if(status)status.innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`;notice(ex.message,"bad")}
+}
+function a31ComponentButtons(id,c){
   const st=String(c?.state||"not_installed"),installed=!!c?.installed;
   if(!installed)return `<button class="btn primary" data-a31-component="${id}:install">Install</button>`;
   const running=st==="running";

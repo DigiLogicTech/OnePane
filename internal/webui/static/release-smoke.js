@@ -211,6 +211,34 @@
     check(noOverlap(state.operationsWidgets),"Operations persisted geometry remains collision free");
 
     await route("tasks");check(!document.querySelector("#tasksBody .error"),"Tasks route");
+    const newTaskButton=check(document.querySelector("#newTaskButton"),"New task control");newTaskButton.click();
+    const taskForm=await waitFor(()=>document.querySelector("#newTaskForm"),"New task modal");
+    const taskBackdrop=check(document.querySelector(".modal-backdrop"),"Task modal backdrop"),inspectorResizer=check(document.querySelector("#inspectorResizer"),"Inspector resizer behind modal");
+    check(Number.parseInt(getComputedStyle(taskBackdrop).zIndex||"0",10)>Number.parseInt(getComputedStyle(inspectorResizer).zIndex||"0",10),"Task modal is above Inspector controls");
+    const taskProject=check(document.querySelector("#newTaskProject"),"New task Project selector"),taskWorkspace=check(document.querySelector("#newTaskWorkspace"),"New task Workspace selector");
+    check(taskProject.tagName==="SELECT"&&taskProject.querySelector('option[value="project-release"]'),"New task Project uses live dropdown");
+    taskProject.value="project-release";taskProject.dispatchEvent(new Event("change",{bubbles:true}));
+    await waitFor(()=>!taskWorkspace.disabled&&taskWorkspace.querySelector('option[value="pws-release"]'),"New task Workspace scoped options");closeModal();
+
+    const scheduledButton=check(document.querySelector("#newScheduledTask"),"New scheduled task control");scheduledButton.click();
+    const routineForm=await waitFor(()=>document.querySelector("#qa4RoutineForm"),"Scheduled task modal");
+    const routineProject=check(document.querySelector("#qa4RoutineProject"),"Scheduled Project selector"),routineWorkspace=check(document.querySelector("#qa4RoutineWorkspace"),"Scheduled Workspace selector");
+    routineProject.value="project-release";routineProject.dispatchEvent(new Event("change",{bubbles:true}));
+    await waitFor(()=>!routineWorkspace.disabled&&routineWorkspace.querySelector('option[value="pws-release"]'),"Scheduled Workspace scoped options");routineWorkspace.value="pws-release";
+    const endMode=check(document.querySelector("#qa4RoutineEndMode"),"Scheduled end condition");endMode.value="count";endMode.dispatchEvent(new Event("change",{bubbles:true}));
+    check(!document.querySelector("#qa4RoutineEndCount").classList.contains("hidden"),"After N runs control is exposed");
+    routineForm.elements.name.value="Finite release task";routineForm.elements.objective.value="Run exactly three times";routineForm.elements.end_count.value="3";
+    routineForm.dispatchEvent(new Event("submit",{bubbles:true,cancelable:true}));
+    await waitFor(()=>lastRoutinePayload&&lastRoutinePayload.name==="Finite release task","bounded scheduled task submitted");
+    check(Number(lastRoutinePayload.policy?.max_occurrences)===3,"Scheduled task preserves maximum run count");
+    check(lastRoutinePayload.policy?.project_id==="project-release"&&lastRoutinePayload.policy?.project_workspace_id==="pws-release","Scheduled task preserves Project and Workspace scope");
+    await waitFor(()=>!document.querySelector("#qa4RoutineForm"),"Scheduled modal closes after create");
+
+    const archiveButton=check(document.querySelector('[data-task-archive="task-release"][data-task-restore="0"]'),"Task Archive action");archiveButton.click();
+    await waitFor(()=>taskRows.length===0&&archivedTaskRows.some(t=>t.id==="task-release"),"Task archived without deletion");
+    const archivedTab=check(document.querySelector('[data-task-tab="archived"]'),"Archived Tasks tab");archivedTab.click();
+    const restoreButton=await waitFor(()=>document.querySelector('[data-task-archive="task-release"][data-task-restore="1"]'),"Task Restore action");restoreButton.click();
+    await waitFor(()=>taskRows.some(t=>t.id==="task-release")&&!archivedTaskRows.some(t=>t.id==="task-release"),"Archived task restored");
     await route("models");check(document.querySelector("#a31ModelsRoot")&&!document.querySelector("#a31ModelsRoot .error"),"Models route");
     await route("nodes");check(document.querySelector("#a31Nodes")&&!document.querySelector("#a31Nodes .error"),"Nodes envelope");
     document.querySelector("#a31AddNode")?.click();await waitFor(()=>document.querySelector("#pairNodeForm"),"pairing modal");check(document.querySelector("#pairNodeForm"),"Add Node pairing flow");closeModal();

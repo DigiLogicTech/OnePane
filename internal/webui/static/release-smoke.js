@@ -97,7 +97,7 @@
     check(noOverlap(ws.widgets),"Workspace persisted geometry remains collision free");
 
     const disposable=check(document.querySelector('[data-qa4-workspace="pws-release-2"]'),"second workspace available for deletion");disposable.click();
-    await waitFor(()=>a31CurrentWorkspace()?.id==="pws-release-2","second workspace active");
+    await waitFor(()=>a31CurrentWorkspace()?.id==="pws-release-2"&&document.querySelector("#a32DeleteWorkspace"),"second workspace rendered with delete action");
     const deleteButton=check(document.querySelector("#a32DeleteWorkspace"),"workspace delete action");check(!deleteButton.disabled,"workspace delete enabled when alternatives exist");const patchBeforeDelete=projectPatchCount;deleteButton.click();
     const confirmDelete=await waitFor(()=>document.querySelector("#a32ConfirmDeleteWorkspace"),"workspace delete confirmation");confirmDelete.click();
     await waitFor(()=>projectPatchCount>patchBeforeDelete&&a31CurrentWorkspace()?.id==="pws-release","workspace delete saved",30000);

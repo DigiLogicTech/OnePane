@@ -70,15 +70,22 @@ function a31SetSettingsView(view){a31SettingsView=view;if(a31RouteIs("settings")
 function a31CurrentProject(){return typeof qa4ActiveProject==="function"?qa4ActiveProject():null}
 function a31CurrentWorkspace(){return typeof qa4ActiveWorkspace==="function"?qa4ActiveWorkspace():null}
 
+function a34NavTreeState(){if(!state.navTreeCollapsed||typeof state.navTreeCollapsed!=="object"||Array.isArray(state.navTreeCollapsed))state.navTreeCollapsed={};return state.navTreeCollapsed}
+function a34NavExpanded(key){return a34NavTreeState()[key]!==true}
+function a34SetNavExpanded(key,expanded){a34NavTreeState()[key]=!expanded;persist();renderNav()}
+function a34NavDisclosure(key,expanded,label,project=false){const attr=project?"data-a34-project-toggle":"data-a34-nav-toggle";return `<button class="nav-disclosure" ${attr}="${escapeHtml(key)}" aria-expanded="${expanded}" title="${expanded?'Collapse':'Expand'} ${escapeHtml(label)}"><span aria-hidden="true">${expanded?'⌄':'›'}</span></button>`}
 function renderNav(){
   const route=currentTab()?.route||"operations",projects=a31Array(qa4ProjectHub?.projects),nav=$("#primaryNav");if(!nav)return;
-  const projectTree=projects.length?`<div class="project-nav-tree">${projects.map(p=>{const projectActive=route==="projects"&&p.id===qa4ProjectHub.activeProjectID,workspaces=typeof qa4Workspaces==="function"?qa4Workspaces(p):[];return `<div class="project-nav-node ${projectActive&&!qa4ProjectHub.activeWorkspaceID?'active-project':''}"><button class="project-nav-project ${projectActive&&!qa4ProjectHub.activeWorkspaceID?'active':''}" data-a31-project-nav="${escapeHtml(p.id)}"><span>▢</span><span>${escapeHtml(p.name||"Project")}</span></button><div class="project-nav-workspaces">${workspaces.map(w=>`<button class="project-nav-workspace ${projectActive&&w.id===qa4ProjectHub.activeWorkspaceID?'active':''}" data-a31-project-nav="${escapeHtml(p.id)}" data-a31-workspace-nav="${escapeHtml(w.id)}"><span class="project-nav-branch"></span><span>${escapeHtml(w.name||"Workspace")}</span></button>`).join("")}</div></div>`}).join("")}</div>`:"";
-  const modelTree=`<div class="model-nav-tree"><button class="model-nav-child ${route==="models"&&a31ModelView==="local"?'active':''}" data-a31-model-view="local"><span>◈</span><span>Local Models</span></button><button class="model-nav-child ${route==="models"&&a31ModelView==="cloud"?'active':''}" data-a31-model-view="cloud"><span>☁</span><span>Cloud Models</span></button></div>`;
-  const html=navItems.map(([r,icon,label])=>{const translated=qa5T(r,label),hasLeaf=(r==="models"||r==="projects"),parentActive=route===r&&!hasLeaf;const row=`<button class="nav-item ${parentActive?'active':''}" data-route="${r}" title="${escapeHtml(translated)}"><span class="nav-icon">${icon}</span><span class="nav-label">${escapeHtml(translated)}</span></button>`;if(r==="projects")return row+projectTree;if(r==="models")return row+modelTree;return row}).join("");
+  const projectsOpen=a34NavExpanded("projects"),modelsOpen=a34NavExpanded("models");
+  const projectTree=projectsOpen&&projects.length?`<div class="project-nav-tree">${projects.map(p=>{const projectActive=route==="projects"&&p.id===qa4ProjectHub.activeProjectID,workspaces=typeof qa4Workspaces==="function"?qa4Workspaces(p):[],workspaceKey=`project:${p.id}`,workspacesOpen=a34NavExpanded(workspaceKey);return `<div class="project-nav-node ${projectActive&&!qa4ProjectHub.activeWorkspaceID?'active-project':''}"><div class="project-nav-row">${workspaces.length?a34NavDisclosure(p.id,workspacesOpen,`${p.name||"Project"} Workspaces`,true):'<span class="nav-disclosure-spacer"></span>'}<button class="project-nav-project ${projectActive&&!qa4ProjectHub.activeWorkspaceID?'active':''}" data-a31-project-nav="${escapeHtml(p.id)}"><span>▢</span><span>${escapeHtml(p.name||"Project")}</span></button></div>${workspacesOpen?`<div class="project-nav-workspaces">${workspaces.map(w=>`<button class="project-nav-workspace ${projectActive&&w.id===qa4ProjectHub.activeWorkspaceID?'active':''}" data-a31-project-nav="${escapeHtml(p.id)}" data-a31-workspace-nav="${escapeHtml(w.id)}"><span class="project-nav-branch"></span><span>${escapeHtml(w.name||"Workspace")}</span></button>`).join("")}</div>`:""}</div>`}).join("")}</div>`:"";
+  const modelTree=modelsOpen?`<div class="model-nav-tree"><button class="model-nav-child ${route==="models"&&a31ModelView==="local"?'active':''}" data-a31-model-view="local"><span>◈</span><span>Local Models</span></button><button class="model-nav-child ${route==="models"&&a31ModelView==="cloud"?'active':''}" data-a31-model-view="cloud"><span>☁</span><span>Cloud Models</span></button></div>`:"";
+  const html=navItems.map(([r,icon,label])=>{const translated=qa5T(r,label),expandable=r==="projects"||r==="models",expanded=r==="projects"?projectsOpen:r==="models"?modelsOpen:false,parentActive=route===r&&!expandable;const row=`<button class="nav-item ${parentActive?'active':''}" data-route="${r}" title="${escapeHtml(translated)}"><span class="nav-icon">${icon}</span><span class="nav-label">${escapeHtml(translated)}</span></button>`;if(!expandable)return row;return `<div class="nav-parent-row">${row}${a34NavDisclosure(r,expanded,translated)}</div>`+(r==="projects"?projectTree:modelTree)}).join("");
   nav.innerHTML=html;
+  $$("[data-a34-nav-toggle]",nav).forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();const key=b.dataset.a34NavToggle;a34SetNavExpanded(key,!a34NavExpanded(key))});
+  $$("[data-a34-project-toggle]",nav).forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();const key=`project:${b.dataset.a34ProjectToggle}`;a34SetNavExpanded(key,!a34NavExpanded(key))});
   $$("[data-a31-model-view]",nav).forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();openRoute("models");a31SetModelView(b.dataset.a31ModelView)});
   $$("[data-a31-project-nav]",nav).forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();qa4ProjectHub.activeProjectID=b.dataset.a31ProjectNav;qa4ProjectHub.activeWorkspaceID=b.dataset.a31WorkspaceNav||"";openRoute("projects")});
-  $$(":scope > [data-route]",nav).forEach(b=>b.onclick=e=>{e.preventDefault();openRoute(b.dataset.route)});
+  $$("[data-route]",nav).forEach(b=>b.onclick=e=>{e.preventDefault();openRoute(b.dataset.route)});
 }
 
 /* Shared deterministic component layout. */
@@ -472,10 +479,7 @@ renderModels=async function(){
 };
 
 /* Nodes */
-function a32NodeDisplayName(n){
-  const id=String(n?.id||n?.node_id||""),friendly=String(n?.name||n?.hostname||n?.host_name||n?.computer_name||n?.display_name||"").trim()||id||"Node";
-  return friendly+(n?.local===true?" (Local)":"");
-}
+function a32NodeDisplayName(n){return a34NodeDisplayName(n)}
 renderNodes=async function(){
   $("#viewHost").innerHTML=`<section class="page">${pageHeader("Nodes","Enrolled machines are schedulable CPU/GPU resource pools.",'<button class="btn primary" id="a31AddNode">Add Node</button>')}<div id="a31Nodes"><div class="widget-body">Loading nodes…</div></div></section>`;
   try{const out=await apiRequest("/v1/nodes"),nodeRows=Array.isArray(out)?out:a31Array(out?.nodes);liveOps.nodes=nodeRows;liveOps.reported.nodes=true;syncLiveNotifications();$("#a31Nodes").innerHTML=`<div class="node-grid">${nodeRows.map(n=>{const id=n.id||n.node_id,name=a32NodeDisplayName(n),state=n.status||n.state||(n.local?"ready":n.trust_state)||"unknown",platform=[n.os_name||n.os,n.architecture].filter(Boolean).join(" · "),meta=[platform,id&&id!==String(n.name||"").trim()?id:""].filter(Boolean).join(" · ");return `<article class="panel-card node-card" data-a31-node="${escapeHtml(id)}"><div class="card-header"><div><div class="card-title">${escapeHtml(name)}</div><div class="list-meta">${escapeHtml(meta)}</div></div><span class="pill ${["online","ready","active","paired","local"].includes(String(state).toLowerCase())?'good':''}">${escapeHtml(titleCase(state))}</span></div><div class="widget-body"><dl class="definition-grid"><dt>CPU</dt><dd>${escapeHtml(n.cpu_name||n.cpu||"Detected by node")}</dd><dt>GPU</dt><dd>${escapeHtml(n.gpu_name||n.compute||"See capabilities")}</dd><dt>Last seen</dt><dd>${escapeHtml(String(n.last_seen_at||n.last_seen||"—"))}</dd></dl><div class="toolbar"><button class="btn" data-a31-node-cap="${escapeHtml(id)}">Capabilities</button><button class="btn" data-a31-node-models="${escapeHtml(id)}">Model management</button><button class="btn danger" data-a31-node-revoke="${escapeHtml(id)}">Revoke</button></div></div></article>`}).join("")||'<div class="empty-state">No enrolled nodes yet.</div>'}</div>`;
@@ -584,7 +588,7 @@ startProductTour=function({replay=false,welcome=false}={}){
   const originalInspector=state.inspector,originalDrawer=state.drawer;
   const steps=[
     {title:"Welcome to OnePane",body:"OnePane coordinates Projects, Workspaces, models, Agents, Skills, Nodes and governed execution.",target:null},
-    {title:"Navigation",body:"Primary management surfaces stay identifiable here, including Nodes and Skills.",target:".sidebar"},
+    {title:"Navigation",body:"Primary management surfaces stay identifiable here, including Nodes and Skills.",target:".sidebar",padding:0},
     {title:"OnePane Control Chat",body:"Open persistent Assistant or Project Orchestrator chat without leaving your work.",target:"#controlChatLauncher"},
     {title:"Projects & Workspaces",body:"Projects contain independently configurable Workspaces and resizable components.",target:'[data-route="projects"]',prepare:()=>openRoute("projects")},
     {title:"Local Models",body:"Detect hardware, install trusted artifacts and pin each deployment to CPU, GPU or hybrid compute.",target:'[data-a31-model-view="local"]',prepare:()=>{openRoute("models");a31ModelView="local";renderNav()}},
@@ -613,7 +617,7 @@ startProductTour=function({replay=false,welcome=false}={}){
   function panes(rect,pad=8){const vw=innerWidth,vh=innerHeight,r=rect?{l:Math.max(0,rect.left-pad),t:Math.max(0,rect.top-pad),r:Math.min(vw,rect.right+pad),b:Math.min(vh,rect.bottom+pad)}:{l:vw/2,t:vh/2,r:vw/2,b:vh/2};return `<div class="tour-pane tour-pane-top" style="left:0;top:0;width:100%;height:${r.t}px"></div><div class="tour-pane tour-pane-left" style="left:0;top:${r.t}px;width:${r.l}px;height:${Math.max(0,r.b-r.t)}px"></div><div class="tour-pane tour-pane-right" style="left:${r.r}px;top:${r.t}px;width:${Math.max(0,vw-r.r)}px;height:${Math.max(0,r.b-r.t)}px"></div><div class="tour-pane tour-pane-bottom" style="left:0;top:${r.b}px;width:100%;height:${Math.max(0,vh-r.b)}px"></div>`}
   function position(){
     const s=steps[i],card=$("#tourCard",root),overlay=$(".tour-overlay",root),target=s.target?$(s.target):null,spot=$("#tourSpotlight",root);if(!card||!overlay||!spot)return;
-    const tr=target?.getBoundingClientRect(),pad=s.padding||8;
+    const tr=target?.getBoundingClientRect(),pad=s.padding===undefined?8:Number(s.padding);
     if(target&&tr){
       overlay.dataset.focus="target";target.classList.add("tour-target");
       Object.assign(spot.style,{left:`${Math.max(0,tr.left-pad)}px`,top:`${Math.max(0,tr.top-pad)}px`,width:`${Math.max(8,tr.width+pad*2)}px`,height:`${Math.max(8,tr.height+pad*2)}px`,borderRadius:getComputedStyle(target).borderRadius||"12px"});

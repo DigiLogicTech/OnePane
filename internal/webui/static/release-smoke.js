@@ -121,12 +121,20 @@
     check(Number(state.operationsWidgets.find(w=>w.id==="op-metrics")?.width)===12,"Operations malformed legacy geometry resets to meaningful default");
     await waitFor(()=>document.querySelector("#app")&&!document.querySelector("#app").classList.contains("hidden"),"application shell",30000);
     check(onepaneWorkspace==="workspace-release","mock workspace authenticated");
+    renderNav();
+    const projectDisclosure=check(document.querySelector('[data-a34-nav-toggle="projects"]'),"Projects disclosure"),modelDisclosure=check(document.querySelector('[data-a34-nav-toggle="models"]'),"Models disclosure");
+    projectDisclosure.click();check(a34NavTreeState().projects===true&&!document.querySelector(".project-nav-tree"),"Projects tree collapses");check(JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}").navTreeCollapsed?.projects===true,"Projects collapse persists");a34SetNavExpanded("projects",true);
+    modelDisclosure.click();check(a34NavTreeState().models===true&&!document.querySelector(".model-nav-tree"),"Models tree collapses");a34SetNavExpanded("models",true);
+    const workspaceDisclosure=check(document.querySelector('[data-a34-project-toggle="project-release"]'),"Project Workspaces disclosure");workspaceDisclosure.click();check(a34NavTreeState()["project:project-release"]===true&&!document.querySelector('[data-a31-workspace-nav="workspace-release"]'),"Workspace list collapses per Project");a34SetNavExpanded("project:project-release",true);
+    setSidebarExpanded(false);const chatIcon=check(document.querySelector("#controlChatLauncher .nav-icon"),"collapsed Chat icon"),commandIcon=check(document.querySelector('[data-action="command-palette"] .sidebar-action-icon'),"collapsed Command icon");check(chatIcon.getBoundingClientRect().width>0&&getComputedStyle(chatIcon).display!=="none","Collapsed sidebar keeps OnePane Chat icon");check(commandIcon.getBoundingClientRect().width>0&&getComputedStyle(commandIcon).display!=="none","Collapsed sidebar keeps Command icon");setSidebarExpanded(true);
     renderInspector();
     check(document.querySelector("#inspector")?.dataset.tabMode==="single","Inspector Overview is implicit");
     check(getComputedStyle(document.querySelector("#inspector .inspector-tabs")).display==="none","single Inspector Overview rail is hidden");
     const inspectorToggle=check(document.querySelector("#inspectorRestore"),"Inspector edge toggle"),drawerToggle=check(document.querySelector("#drawerToggle"),"Logs edge toggle");
     setInspectorOpen(true);setDrawerOpen(true);syncPanelRestoreButtons();
-    const inspectorOpenSize=inspectorToggle.getBoundingClientRect().height,drawerOpenSize=drawerToggle.getBoundingClientRect().width,inspectorPosBefore=a32PanelTogglePosition("inspectorTogglePosition"),drawerPosBefore=a32PanelTogglePosition("drawerTogglePosition");
+    const inspectorOpenRect=inspectorToggle.getBoundingClientRect(),drawerOpenRect=drawerToggle.getBoundingClientRect(),inspectorOpenSize=inspectorOpenRect.height,drawerOpenSize=drawerOpenRect.width,inspectorPosBefore=a32PanelTogglePosition("inspectorTogglePosition"),drawerPosBefore=a32PanelTogglePosition("drawerTogglePosition");
+    check(Math.abs(inspectorOpenRect.height-drawerOpenRect.width)<1&&Math.abs(inspectorOpenRect.width-drawerOpenRect.height)<1,"Inspector and Logs expanded controls share rotated geometry");
+    check(getComputedStyle(inspectorToggle).borderRadius===getComputedStyle(drawerToggle).borderRadius,"Inspector and Logs expanded controls share shape");
     await gesture(inspectorToggle,0,70);check(a32PanelTogglePosition("inspectorTogglePosition")!==inspectorPosBefore,"Inspector toggle moves vertically");check(state.inspector==="open","Inspector drag does not collapse panel");
     await gesture(drawerToggle,90,0);check(a32PanelTogglePosition("drawerTogglePosition")!==drawerPosBefore,"Logs toggle moves horizontally");check(state.drawer==="open","Logs drag does not collapse drawer");
     setInspectorOpen(false);setDrawerOpen(false);syncPanelRestoreButtons();
@@ -141,7 +149,7 @@
       check(!document.querySelector(".tour-target"),"welcome Tour target cleanup");
     }
 
-    await route("operations");check(document.querySelector("#operationsLayout"),"Operations overview");
+    await route("operations");check(document.querySelector("#operationsLayout"),"Operations overview");await waitFor(()=>document.querySelector('[data-op-widget="op-nodes"]')?.textContent?.includes("RELEASE-PC (Local)"),"Operations Nodes component uses hostname");
     await waitFor(()=>innerWidth>700&&document.querySelector("#operationsLayout")?.getBoundingClientRect().width>100,"visible desktop Operations geometry",30000);
     check(innerWidth>700,"Installed acceptance is exercising desktop layout");
     state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));a31NormalizeLayout(state.operationsWidgets);state.operationsEdit=true;a31RenderOperationsGrid();
@@ -188,6 +196,7 @@
     document.querySelector('[data-a31-settings="appearance"]')?.click();await waitFor(()=>a31SettingsView==="appearance","Appearance settings");check(document.querySelector("[data-settings-theme]"),"Themes rendered");
 
     await testProjectLayout();
+    const workspaceThemeSelect=check(document.querySelector(".qa7-workspace-settings select"),"Workspace settings themed select");check(getComputedStyle(workspaceThemeSelect).colorScheme.includes("dark"),"Workspace settings selects inherit dark color scheme");
 
     const command=check(document.querySelector('[data-action="command-palette"]'),"command launcher");command.click();await waitFor(()=>document.querySelector("#paletteInput"),"command palette");
     check(document.querySelectorAll("[data-palette-index]").length>0,"command actions populated");document.querySelector("#paletteInput").dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}));await waitFor(()=>!document.querySelector("#paletteInput"),"command close");
@@ -199,7 +208,7 @@
     const overlay=document.querySelector(".tour-overlay"),overlayStyle=getComputedStyle(overlay);check(overlay.dataset.focus==="none"&&overlayStyle.backgroundColor!=="rgba(0, 0, 0, 0)","Tour non-target step dims background");
     check(document.elementFromPoint(Math.min(innerWidth-1,Math.max(1,cardRect.left+20)),Math.min(innerHeight-1,Math.max(1,cardRect.top+20)))?.closest("#tourCard"),"Tour card receives pointer input");
     document.querySelector("#tourNext")?.click();await waitFor(()=>document.querySelector('#tourCard[data-positioned="true"]')?.querySelector("h2")?.textContent==="Navigation","Tour next step positioned");
-    const spotlight=check(document.querySelector("#tourSpotlight:not([hidden])"),"Tour target spotlight visible"),spotStyle=getComputedStyle(spotlight),targetOverlay=document.querySelector(".tour-overlay"),tourTarget=document.querySelector(".tour-target");check(targetOverlay.dataset.focus==="target","Tour target step uses spotlight focus mode");check(spotStyle.boxShadow.includes("9999px"),"Tour target has proven surrounding focus shade");check(Number.parseInt(getComputedStyle(targetOverlay).zIndex||"0",10)>=2000&&getComputedStyle(tourTarget).zIndex==="auto","Tour spotlight owns top stacking layer");
+    const spotlight=check(document.querySelector("#tourSpotlight:not([hidden])"),"Tour target spotlight visible"),spotStyle=getComputedStyle(spotlight),targetOverlay=document.querySelector(".tour-overlay"),tourTarget=document.querySelector(".tour-target"),sidebarRect=document.querySelector(".sidebar").getBoundingClientRect(),spotRect=spotlight.getBoundingClientRect();check(targetOverlay.dataset.focus==="target","Tour target step uses spotlight focus mode");check(spotStyle.boxShadow.includes("9999px"),"Tour target has proven surrounding focus shade");check(Number.parseInt(getComputedStyle(targetOverlay).zIndex||"0",10)>=2000&&getComputedStyle(tourTarget).zIndex==="auto","Tour spotlight owns top stacking layer");check(Math.abs(sidebarRect.left-spotRect.left)<3&&Math.abs(sidebarRect.top-spotRect.top)<3&&Math.abs(sidebarRect.width-spotRect.width)<3&&Math.abs(sidebarRect.height-spotRect.height)<3,"Tour Navigation outline hugs sidebar bounds");
     document.querySelector("#tourSkip")?.click();await waitFor(()=>!document.documentElement.dataset.productTour,"Tour cleanup");check(!document.querySelector(".tour-target"),"Tour target cleanup");check(!document.querySelector(".tour-overlay"),"Tour overlay removed");
 
     const launcher=check(document.querySelector("#controlChatLauncher"),"Chat launcher");launcher.click();await waitFor(()=>document.querySelector("#a31ControlChatForm"),"Assistant chat");

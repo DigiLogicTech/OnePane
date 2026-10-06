@@ -167,3 +167,10 @@ ck("Tour spotlight owns top stacking layer", ".tour-overlay{z-index:2000!importa
 ck("OnePane Chat launcher toggles and panel moves vertically", "a33ToggleControlChatPanel" in app and "a33BindControlChatDrag" in app and "controlChatVerticalPosition" in app and "Chat moves vertically" in smoke and "Chat launcher closes open chat" in smoke)
 ck("OnePane Chat chevron reflects collapse direction", ".control-chat-chevron{transform:rotate(180deg)}" in css and '.control-chat-panel[data-collapsed="true"] .control-chat-chevron{transform:none}' in css and "Chat chevron direction matches collapse state" in smoke)
 ck("Inspector expanded and collapsed controls are explicitly distinct", '.app-shell[data-inspector="open"] #inspectorRestore' in css and '.app-shell[data-inspector="closed"] #inspectorRestore' in css)
+
+ck("Expanded Inspector and Logs controls share one visual geometry", "Inspector and Logs expanded controls share rotated geometry" in smoke and "Inspector and Logs expanded controls share shape" in smoke and '.app-shell[data-inspector="open"] #inspectorRestore' in css)
+ck("Collapsed sidebar preserves Chat and Command icons", "sidebar-action-icon" in html and "Collapsed sidebar keeps OnePane Chat icon" in smoke and "Collapsed sidebar keeps Command icon" in smoke)
+ck("Projects Models and per-Project Workspaces are persistently collapsible", "a34NavTreeState" in app and "data-a34-nav-toggle" in app and "data-a34-project-toggle" in app and "Projects collapse persists" in smoke and "Workspace list collapses per Project" in smoke)
+ck("Workspace settings native selects inherit theme color scheme", "select{color-scheme:inherit" in css and "Workspace settings selects inherit dark color scheme" in smoke)
+ck("Tour Navigation outline uses exact sidebar bounds", 'target:".sidebar",padding:0' in app and "Tour Navigation outline hugs sidebar bounds" in smoke)
+ck("Node widgets use canonical hostname display", "function a34NodeDisplayName" in app and "Operations Nodes component uses hostname" in smoke and "a34NodeDisplayName(n)" in app)

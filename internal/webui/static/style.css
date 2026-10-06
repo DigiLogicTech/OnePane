@@ -930,3 +930,29 @@ body { background:var(--app-gradient),var(--bg); }
 .control-chat-chevron{transform:rotate(180deg)}
 .control-chat-panel[data-collapsed="true"] .control-chat-chevron{transform:none}
 .control-chat-panel{will-change:top,left,opacity,transform}
+
+
+/* Alpha 3.2 navigation/theme polish */
+.app-shell[data-inspector="open"] #inspectorRestore{width:26px!important;height:42px!important;border-radius:8px!important}
+.drawer-edge-toggle{width:42px!important;height:26px!important;border-radius:8px!important}
+.app-shell[data-inspector="closed"] #inspectorRestore{border-radius:9px 0 0 9px!important}
+
+.app-shell[data-sidebar="collapsed"] .sidebar-action .nav-icon,
+.app-shell[data-sidebar="collapsed"] .sidebar-action .sidebar-action-icon{display:inline-block!important}
+.app-shell[data-sidebar="collapsed"] .sidebar-action{justify-content:center;padding-left:0;padding-right:0;gap:0}
+.app-shell[data-sidebar="collapsed"] .sidebar-action .shortcut-label,
+.app-shell[data-sidebar="collapsed"] .sidebar-action .sidebar-action-label{display:none!important}
+
+.nav-parent-row{display:grid;grid-template-columns:minmax(0,1fr) 26px;align-items:center;gap:2px}
+.nav-parent-row>.nav-item{min-width:0;width:100%}
+.nav-disclosure{width:26px;height:30px;display:grid;place-items:center;border:0;border-radius:7px;background:transparent;color:var(--muted);padding:0;font-size:16px;line-height:1}
+.nav-disclosure:hover{background:var(--panel-2);color:var(--text)}
+.nav-disclosure-spacer{width:24px;height:1px}
+.project-nav-row{grid-template-columns:24px minmax(0,1fr)}
+.app-shell[data-sidebar="collapsed"] .nav-parent-row{grid-template-columns:1fr}
+.app-shell[data-sidebar="collapsed"] .nav-disclosure{display:none}
+
+select{color-scheme:inherit;background-color:var(--panel-2);color:var(--text)}
+select option,select optgroup{background-color:var(--panel);color:var(--text)}
+:root[data-theme="dark"],:root[data-theme="graphite"],:root[data-theme="midnight"],:root[data-theme="forest"],:root[data-theme="aurora"],:root[data-theme="cobalt"],:root[data-theme="dusk"],:root[data-theme="custom"]{color-scheme:dark}
+:root[data-theme="light"]{color-scheme:light}

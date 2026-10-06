@@ -43,6 +43,21 @@ type DownloadResult struct {
 	Size   int64
 }
 
+type resumableDownloadError struct{ err error }
+
+func (e *resumableDownloadError) Error() string { return e.err.Error() }
+func (e *resumableDownloadError) Unwrap() error { return e.err }
+func markResumableDownload(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &resumableDownloadError{err: err}
+}
+func isResumableDownloadError(err error) bool {
+	var target *resumableDownloadError
+	return errors.As(err, &target)
+}
+
 type HTTPFetcher struct {
 	Client   *http.Client
 	MaxBytes int64
@@ -84,8 +99,14 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, sourceURL, dest, expectedSHA st
 	if strings.TrimSpace(dest) == "" {
 		return DownloadResult{}, errors.New("destination required")
 	}
-	if expectedSHA != "" && (len(expectedSHA) != 64 || strings.ContainsAny(expectedSHA, " /\\\"")) {
-		return DownloadResult{}, errors.New("invalid expected sha256")
+	expectedSHA = strings.ToLower(strings.TrimSpace(expectedSHA))
+	if expectedSHA != "" {
+		if len(expectedSHA) != 64 {
+			return DownloadResult{}, errors.New("invalid expected sha256")
+		}
+		if _, err := hex.DecodeString(expectedSHA); err != nil {
+			return DownloadResult{}, errors.New("invalid expected sha256")
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return DownloadResult{}, err
@@ -136,6 +157,15 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, sourceURL, dest, expectedSHA st
 		return DownloadResult{}, err
 	}
 
+	// Digest-pinned catalogue artifacts can be resumed safely because the final
+	// SHA-256 verifies the entire object. Unverified partials restart instead of
+	// risking an append from a changed upstream object.
+	if offset > 0 && expectedSHA == "" {
+		_ = os.Remove(partial)
+		offset = 0
+		h = sha256.New()
+	}
+
 	out, err := os.OpenFile(partial, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return DownloadResult{}, err
@@ -151,13 +181,13 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, sourceURL, dest, expectedSHA st
 	resp, err := f.Client.Do(req)
 	if err != nil {
 		_ = out.Close()
-		return DownloadResult{}, err
+		return DownloadResult{}, markResumableDownload(err)
 	}
 	defer resp.Body.Close()
 
 	if offset > 0 && resp.StatusCode == http.StatusOK {
-		// The origin ignored Range. Restart safely using the same durable partial
-		// path rather than appending a second copy of the artifact.
+		// Origin ignored Range or changed the selected representation. Restart
+		// safely with the full response instead of appending duplicate bytes.
 		if err := out.Close(); err != nil {
 			return DownloadResult{}, err
 		}
@@ -167,20 +197,44 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, sourceURL, dest, expectedSHA st
 		}
 		offset = 0
 		h = sha256.New()
-	} else if offset > 0 && resp.StatusCode == http.StatusPartialContent {
+	} else if resp.StatusCode == http.StatusRequestedRangeNotSatisfiable && offset > 0 {
+		// A crash can happen after the final byte was flushed but before the
+		// .partial file was renamed. If its digest is already complete, promote it.
+		if err := out.Close(); err != nil {
+			return DownloadResult{}, err
+		}
+		actual := hex.EncodeToString(h.Sum(nil))
+		if expectedSHA != "" && strings.EqualFold(actual, expectedSHA) {
+			if err := os.Chmod(partial, 0o600); err != nil {
+				return DownloadResult{}, err
+			}
+			if err := os.Rename(partial, dest); err != nil {
+				return DownloadResult{}, err
+			}
+			return DownloadResult{Path: dest, SHA256: actual, Size: offset}, nil
+		}
+		_ = os.Remove(partial)
+		return DownloadResult{}, markResumableDownload(errors.New("origin rejected partial range; partial reset"))
+	} else if resp.StatusCode == http.StatusPartialContent {
 		want := fmt.Sprintf("bytes %d-", offset)
 		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Range"))), want) {
 			_ = out.Close()
-			return DownloadResult{}, errors.New("download server returned an incompatible content range")
+			_ = os.Remove(partial)
+			return DownloadResult{}, markResumableDownload(errors.New("download server returned an incompatible content range; partial reset"))
 		}
 	} else if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_ = out.Close()
-		return DownloadResult{}, fmt.Errorf("download returned HTTP %d", resp.StatusCode)
+		err := fmt.Errorf("download returned HTTP %d", resp.StatusCode)
+		if resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			return DownloadResult{}, markResumableDownload(err)
+		}
+		return DownloadResult{}, err
 	}
 
 	if resp.ContentLength >= 0 && offset+resp.ContentLength > f.MaxBytes {
 		_ = out.Close()
 		return DownloadResult{}, errors.New("download exceeds maximum size")
+		_ = os.Remove(partial)
 	}
 	remaining := f.MaxBytes - offset
 	n, copyErr := io.Copy(io.MultiWriter(out, h), io.LimitReader(resp.Body, remaining+1))
@@ -188,7 +242,7 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, sourceURL, dest, expectedSHA st
 		_ = out.Sync()
 		_ = out.Close()
 		// Deliberately retain .partial so a subsequent install tick can resume.
-		return DownloadResult{}, copyErr
+		return DownloadResult{}, markResumableDownload(copyErr)
 	}
 	total := offset + n
 	if n > remaining || total > f.MaxBytes {

@@ -76,6 +76,8 @@ func TestHTTPFetcherResumesPartialDownload(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "model.gguf")
 	if _, err := fetcher.Fetch(context.Background(), srv.URL, dest, sum); err == nil {
 		t.Fatal("first interrupted fetch unexpectedly succeeded")
+	} else if !isResumableDownloadError(err) {
+		t.Fatalf("interrupted transfer must be resumable, got %T: %v", err, err)
 	}
 	st, err := os.Stat(dest + ".partial")
 	if err != nil {
@@ -117,5 +119,106 @@ func TestHTTPFetcherReusesVerifiedCompletedArtifact(t *testing.T) {
 	}
 	if got.SHA256 != sum || got.Size != int64(len(payload)) {
 		t.Fatalf("unexpected result: %+v", got)
+	}
+}
+func TestHTTPFetcherRestartsWhenRangeIgnored(t *testing.T) {
+	payload := []byte(strings.Repeat("range-fallback-", 1024))
+	split := len(payload) / 4
+	sum := fmt.Sprintf("%x", sha256.Sum256(payload))
+	var gotRange string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRange = r.Header.Get("Range")
+		w.Header().Set("Content-Length", fmt.Sprint(len(payload)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "model.gguf")
+	if err := os.WriteFile(dest+".partial", payload[:split], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fetcher := &HTTPFetcher{Client: srv.Client(), MaxBytes: int64(len(payload) * 2)}
+	got, err := fetcher.Fetch(context.Background(), srv.URL, dest, sum)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotRange != fmt.Sprintf("bytes=%d-", split) {
+		t.Fatalf("Range=%q", gotRange)
+	}
+	if got.Size != int64(len(payload)) || got.SHA256 != sum {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+	body, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != string(payload) {
+		t.Fatal("range fallback duplicated or corrupted bytes")
+	}
+}
+
+func TestHTTPFetcherPromotesCompletePartialAfter416(t *testing.T) {
+	payload := []byte(strings.Repeat("complete-before-rename-", 512))
+	sum := fmt.Sprintf("%x", sha256.Sum256(payload))
+	var gotRange string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRange = r.Header.Get("Range")
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", len(payload)))
+		w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+	}))
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "model.gguf")
+	if err := os.WriteFile(dest+".partial", payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fetcher := &HTTPFetcher{Client: srv.Client(), MaxBytes: int64(len(payload) * 2)}
+	got, err := fetcher.Fetch(context.Background(), srv.URL, dest, sum)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotRange != fmt.Sprintf("bytes=%d-", len(payload)) {
+		t.Fatalf("Range=%q", gotRange)
+	}
+	if got.Size != int64(len(payload)) || got.SHA256 != sum {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+	if _, err := os.Stat(dest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dest+".partial"); !os.IsNotExist(err) {
+		t.Fatalf("partial should have been promoted, err=%v", err)
+	}
+}
+
+func TestHTTPFetcherDoesNotResumeUnverifiedPartial(t *testing.T) {
+	payload := []byte("new-unverified-object")
+	var gotRange string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRange = r.Header.Get("Range")
+		w.Header().Set("Content-Length", fmt.Sprint(len(payload)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "artifact.bin")
+	if err := os.WriteFile(dest+".partial", []byte("stale-unverified-prefix"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fetcher := &HTTPFetcher{Client: srv.Client(), MaxBytes: 1024}
+	if _, err := fetcher.Fetch(context.Background(), srv.URL, dest, ""); err != nil {
+		t.Fatal(err)
+	}
+	if gotRange != "" {
+		t.Fatalf("unverified partial must restart, got Range=%q", gotRange)
+	}
+	body, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != string(payload) {
+		t.Fatalf("payload=%q", string(body))
 	}
 }

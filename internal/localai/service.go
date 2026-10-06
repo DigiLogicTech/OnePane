@@ -393,7 +393,9 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 		}
 		archive := filepath.Join(s.dataDir, "downloads", "runtime-"+runtime.Name+"-"+runtime.Version+"-"+backendDir)
 		if _, err := s.fetcher.Fetch(ctx, runtime.SourceURL, archive, runtime.SHA256); err != nil {
-			_ = s.failPlan(ctx, p, err.Error())
+			if !isResumableDownloadError(err) {
+				_ = s.failPlan(ctx, p, err.Error())
+			}
 			return inference.ModelDeployment{}, err
 		}
 		staging := runtimeRoot + ".installing"
@@ -444,7 +446,9 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 	modelPath := filepath.Join(modelDir, filename)
 	dr, err := s.fetcher.Fetch(ctx, model.SourceURL, modelPath, model.ExpectedSHA256)
 	if err != nil {
-		_ = s.failPlan(ctx, p, err.Error())
+		if !isResumableDownloadError(err) {
+			_ = s.failPlan(ctx, p, err.Error())
+		}
 		return inference.ModelDeployment{}, err
 	}
 	provider := "local"

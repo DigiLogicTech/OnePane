@@ -69,7 +69,7 @@ ck("Nodes prefer federation machine name and mark the local host", "function a34
 
 ck("Operations Activity Health Recovery are functional", '["activity","Activity"]' in app and '["health","Health"]' in app and '["recovery","Recovery"]' in app and "a31OperationsActivity" in app and "a31OperationsHealth" in app and "a31RecoveryContent" in app)
 ck("Operations Logs is a true drawer toggle", "function a31ToggleLogs" in app and 'activeDrawerTab==="logs"' in app and "setDrawerOpen(false)" in app)
-ck("Operations default layout is meaningful and collision-aware", "x:0,y:0,width:12,height:3" in app and "a31ResolveLayout(state.operationsWidgets,item.id)" in app and "a31RepairPersistedUIState()" in app and "a31OperationsLayoutBroken" in app)
+ck("Operations default layout is meaningful and collision-aware", "x:0,y:0,width:12,height:3" in app and "a31ResolveLayout" in app and "a31OperationsLayoutItems()" in app and "a31RepairPersistedUIState()" in app and "a31OperationsLayoutBroken" in app and "Operations navigation discards draft changes" in smoke)
 ck("Recovery header preserves action spacing", "recovery-card-header" in app and ".recovery-card-header" in css)
 
 ck("Local Models distinguish trusted installability", "installable_quantizations" not in app or "model.installable" in app)

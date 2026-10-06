@@ -23,11 +23,10 @@ const A31_OPERATIONS_LAYOUT_VERSION=3;
 function a31OperationsLayoutBroken(rows){
   if(!Array.isArray(rows)||rows.length<4)return true;
   const normalized=rows.map(x=>({...x}));a31NormalizeLayout(normalized);
-  const oneRow=normalized.every(w=>Number(w.y||0)===0);
-  const mostlyMinimum=normalized.filter(w=>Number(w.width||0)<=3).length>=Math.ceil(normalized.length/2);
+  const oneRow=normalized.every(w=>Number(w.y||0)===0),rowWidth=normalized.reduce((n,w)=>n+Number(w.width||0),0);
   const overlaps=normalized.some((a,i)=>normalized.slice(i+1).some(b=>a31Overlap(a,b)));
   const invalid=normalized.some(w=>!Number.isFinite(w.x)||!Number.isFinite(w.y)||w.x<0||w.y<0||w.width<3||w.width>12||w.x+w.width>12);
-  return oneRow||mostlyMinimum||overlaps||invalid;
+  return overlaps||invalid||(oneRow&&rowWidth>A31_LAYOUT_COLUMNS);
 }
 function a31RepairPersistedUIState(){
   let changed=false;

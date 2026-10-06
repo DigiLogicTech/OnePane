@@ -61,6 +61,7 @@
   }
 
   async function run(){
+    localStorage.setItem(TOUR_KEY,TOUR_COMPLETE_VALUE);
     await waitFor(()=>document.querySelector("#app")&&!document.querySelector("#app").classList.contains("hidden"),"application shell",30000);
     check(onepaneWorkspace==="workspace-release","mock workspace authenticated");
     if(document.documentElement.dataset.productTour==="active"){

@@ -14,6 +14,13 @@ wcss=read("packaging/windows/desktop/static/style.css")
 checks=[]
 def ck(name, cond): checks.append((name,bool(cond)))
 
+def last_segment(src, start_token, end_token):
+    start=src.rfind(start_token)
+    if start < 0:
+        return ""
+    end=src.find(end_token, start+len(start_token))
+    return src[start:] if end < 0 else src[start:end]
+
 def single_selector_collection_calls(src):
     out=[]; i=0; methods=("forEach","map","filter","some","every","find","reduce")
     while i < len(src)-1:
@@ -95,6 +102,20 @@ ck("Health popover is live and never hard-codes inventory counts", "async functi
 ck("Operational telemetry distinguishes zero from unreported feeds", "Promise.allSettled" in app and "liveOps.reported" in app and "liveOpsAttentionReported()" in app and "Attention status not fully reported" in app and "Node feed unavailable" in app and "Provider feed unavailable" in app)
 ck("Drawer telemetry distinguishes unreported feeds", "Event feed not reported." in app and "liveOpsAttentionReported()?String(ATTENTION_ITEMS.length):'Not reported'" in app and "Control plane ${escapeHtml(controlState)}" in app)
 ck("Successful management fetches promote telemetry report state", "liveOps.reported.tasks=true;liveOps.reported.routines=true" in app and "liveOps.reported.nodes=true;syncLiveNotifications()" in app and "liveOps.providers=providerRows;liveOps.reported.providers=true" in app)
+effective_cards=last_segment(app, "function qa4ScheduledCard()", "function bindViewActions")
+effective_nodes=last_segment(app, "renderNodes=async function(){", "/* Agents, Teams, Research */")
+effective_ops=last_segment(app, "function a31OperationsActivity()", "renderOperations=async function(){")
+effective_project_layout=last_segment(app, "qa4BindWorkspaceEdit=function(project,workspace){", "const a31ProjectRenderBase=qa6RenderProjectsBase;")
+effective_palette=last_segment(app, "function openCommandPalette(){", "/* QA hardening: Vault-backed provider selection")
+project_saves=last_segment(app, "const qa4ProjectSaveQueues=new Map();", "async function qa4EnsureProjectRuntime")
+ck("Effective Operations cards preserve unknown telemetry", all(x in effective_cards for x in ["liveOpsReported('routines')","liveOpsReported('tasks')","liveOpsReported('nodes')","liveOpsReported('events')","liveOpsAttentionReported()","liveOpsReported('providers')"]))
+ck("Effective Operations Activity and Recovery preserve unknown telemetry", "Event feed not reported." in effective_ops and "componentsReported=false" in effective_ops and "Task recovery status not reported" in effective_ops)
+ck("Final Nodes renderer consumes API envelope and launches pairing", "a31Array(out?.nodes)" in effective_nodes and '$("#a31AddNode").onclick=openPairNode' in effective_nodes)
+ck("Project policy saves are serialized against latest revision", "qa4ProjectSaveQueues" in project_saves and "const current=qa4ProjectHub.projects.find" in project_saves and "expected_revision:Number(current.revision||1)" in project_saves)
+ck("Project layout mutations rollback and refresh from saved revision", "refreshSaved" in effective_project_layout and "workspace.widgets=snapshot" in effective_project_layout and 'root.dataset.layoutSaving==="true"' in effective_project_layout)
+ck("Layout generation participates in stale rollback protection", "root.dataset.layoutGeneration" in app and "String(generation)" in app and "root.dataset.layoutSaving==='true'" in app)
+ck("Command palette cannot replace an active product tour", 'dataset.productTour==="active"' in effective_palette)
+
 attention_start=app.find("async function openAttentionPopover")
 attention_end=app.find("async function openHealthPopover", attention_start)
 attention_popover=app[attention_start:attention_end] if attention_start >= 0 and attention_end > attention_start else ""

@@ -17,7 +17,7 @@ ck("Projects expose nested Workspace navigation", "project-nav-tree" in app and 
 ck("Models expose Local Cloud nested navigation", "model-nav-tree" in app and 'data-a31-model-view="local"' in app and 'data-a31-model-view="cloud"' in app)
 ck("Detect Hardware is prominent", "a31-detect-large" in app and ".a31-detect-large" in css)
 ck("Control Chat is persistent left-side surface", 'id="controlChatLauncher"' in html and 'id="controlChatPanel"' in html and ".control-chat-panel" in css)
-ck("Tour uses four-pane mask and stable anchors", "tour-pane-top" in app and "bottom-center" in app and ".a31-tour-card" in css)
+ck("Tour uses four-pane mask and centred collision-aware placement", "tour-pane-top" in app and "const center=clamp" in app and "if(collides(pos)&&targetRect)" in app and 'card.dataset.positioned="true"' in app and ".a31-tour-card" in css)
 ck("Tour target remains crisp", ".tour-target" in css and "filter:none!important" in css and ".tour-spotlight" in css)
 ck("collapsed sidebar hides brand icon", '.app-shell[data-sidebar="collapsed"] .brand-icon{display:none}' in css)
 failed=[n for n,o in checks if not o]

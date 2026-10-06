@@ -479,7 +479,20 @@ renderModels=async function(){
 };
 
 /* Nodes */
+function a34NodeDisplayName(n){
+  const id=String(n?.id||n?.node_id||""),friendly=String(n?.name||n?.hostname||n?.host_name||n?.computer_name||n?.display_name||"").trim()||id||"Node";
+  return friendly+(n?.local===true?" (Local)":"");
+}
 function a32NodeDisplayName(n){return a34NodeDisplayName(n)}
+nodesCard=function(){
+  if(!liveOpsReported("nodes"))return card("Nodes",'<div class="empty-state compact">Node status not reported.</div>',"View all");
+  return card("Nodes",liveOps.nodes.length?`<ul class="list">${liveOps.nodes.slice(0,6).map(n=>`<li class="list-row inspectable" data-inspect-kind="node" data-inspect-id="${escapeHtml(n.id||n.node_id||"local")}"><span>⬡</span><div class="list-main"><div class="list-title">${escapeHtml(a34NodeDisplayName(n))}</div><div class="list-meta">${escapeHtml(n.peer_endpoint||n.advertise_url||"local")}</div></div><span class="pill">${escapeHtml(n.status||n.state||n.trust_state||"registered")}</span></li>`).join("")}</ul>`:'<div class="empty-state compact">No node records returned.</div>',"View all");
+};
+const a34WorkspaceComponentBase=qa6ComponentContent;
+qa6ComponentContent=function(w,project,workspace){
+  if(w?.type==="nodes")return liveOps.nodes.length?`<ul class="list">${liveOps.nodes.slice(0,6).map(n=>`<li class="list-row" data-inspect-kind="node" data-inspect-id="${escapeHtml(n.id||n.node_id||"local")}"><div class="list-main"><div class="list-title">${escapeHtml(a34NodeDisplayName(n))}</div><div class="list-meta">${escapeHtml(n.status||n.state||"registered")}</div></div></li>`).join("")}</ul>`:'<div class="empty-state compact">No node records.</div>';
+  return a34WorkspaceComponentBase(w,project,workspace);
+};
 renderNodes=async function(){
   $("#viewHost").innerHTML=`<section class="page">${pageHeader("Nodes","Enrolled machines are schedulable CPU/GPU resource pools.",'<button class="btn primary" id="a31AddNode">Add Node</button>')}<div id="a31Nodes"><div class="widget-body">Loading nodes…</div></div></section>`;
   try{const out=await apiRequest("/v1/nodes"),nodeRows=Array.isArray(out)?out:a31Array(out?.nodes);liveOps.nodes=nodeRows;liveOps.reported.nodes=true;syncLiveNotifications();$("#a31Nodes").innerHTML=`<div class="node-grid">${nodeRows.map(n=>{const id=n.id||n.node_id,name=a32NodeDisplayName(n),state=n.status||n.state||(n.local?"ready":n.trust_state)||"unknown",platform=[n.os_name||n.os,n.architecture].filter(Boolean).join(" · "),meta=[platform,id&&id!==String(n.name||"").trim()?id:""].filter(Boolean).join(" · ");return `<article class="panel-card node-card" data-a31-node="${escapeHtml(id)}"><div class="card-header"><div><div class="card-title">${escapeHtml(name)}</div><div class="list-meta">${escapeHtml(meta)}</div></div><span class="pill ${["online","ready","active","paired","local"].includes(String(state).toLowerCase())?'good':''}">${escapeHtml(titleCase(state))}</span></div><div class="widget-body"><dl class="definition-grid"><dt>CPU</dt><dd>${escapeHtml(n.cpu_name||n.cpu||"Detected by node")}</dd><dt>GPU</dt><dd>${escapeHtml(n.gpu_name||n.compute||"See capabilities")}</dd><dt>Last seen</dt><dd>${escapeHtml(String(n.last_seen_at||n.last_seen||"—"))}</dd></dl><div class="toolbar"><button class="btn" data-a31-node-cap="${escapeHtml(id)}">Capabilities</button><button class="btn" data-a31-node-models="${escapeHtml(id)}">Model management</button><button class="btn danger" data-a31-node-revoke="${escapeHtml(id)}">Revoke</button></div></div></article>`}).join("")||'<div class="empty-state">No enrolled nodes yet.</div>'}</div>`;

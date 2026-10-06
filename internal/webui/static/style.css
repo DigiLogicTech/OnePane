@@ -129,6 +129,8 @@ kbd { font:11px var(--font); padding:2px 5px; border:1px solid var(--border); bo
 .dashboard-widget > .dashboard-widget-content { height:100%; min-height:0; }
 .dashboard-widget > .dashboard-widget-content > .panel-card { height:100%; min-height:0; overflow:auto; }
 .dashboard-widget > .dashboard-widget-content > .metric-grid { height:100%; margin-bottom:0; align-content:stretch; }
+.dashboard-widget > .dashboard-widget-content > .operations-metrics { display:flex; flex-wrap:wrap; }
+.dashboard-widget > .dashboard-widget-content > .operations-metrics > .metric-card { flex:1 1 150px; min-width:min(150px,100%); }
 .dashboard-widget.editable { border:1px dashed color-mix(in srgb,var(--accent) 72%,var(--border)); background:color-mix(in srgb,var(--panel) 86%,var(--accent) 14%); padding-top:36px; }
 .dashboard-widget.editable.dragging { opacity:.58; outline:2px solid var(--accent); }
 .dashboard-edit-bar { position:absolute; z-index:3; inset:0 0 auto 0; height:36px; display:flex; align-items:center; gap:6px; padding:0 8px; border-bottom:1px solid var(--border); background:var(--panel-2); }

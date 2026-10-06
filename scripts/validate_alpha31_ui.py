@@ -63,6 +63,8 @@ ck("Layout normalization rejects non-finite persisted geometry", "a31FiniteLayou
 ck("Desktop components have real pointer resize handles", "function a31BindLayout" in app and 'data-op-resize' in app and 'data-pw-resize' in app and ".layout-resize-handle" in css)
 ck("Operations add path updates grid without page rerender", "openOperationsComponentPicker=function" in app and "closeModal();a31RenderOperationsGrid()" in app)
 ck("Project component mutations refresh only project grid", "a31RefreshProjectGrid(project,workspace" in app and "qa4SaveProjectWorkspaces" in app)
+ck("Workspace deletion is confirmed revision-safe and guards the final workspace", "a32DeleteWorkspace" in app and "a32ConfirmDeleteWorkspace" in app and "A project must keep at least one workspace." in app and "workspace removed from durable project policy" in smoke)
+ck("Nodes prefer federation machine name and mark the local host", "a32NodeDisplayName" in app and 'n?.name||n?.hostname' in app and '" (Local)"' in app and "Nodes prefer machine name and mark local device" in smoke)
 
 ck("Operations Activity Health Recovery are functional", '["activity","Activity"]' in app and '["health","Health"]' in app and '["recovery","Recovery"]' in app and "a31OperationsActivity" in app and "a31OperationsHealth" in app and "a31RecoveryContent" in app)
 ck("Operations Logs is a true drawer toggle", "function a31ToggleLogs" in app and 'activeDrawerTab==="logs"' in app and "setDrawerOpen(false)" in app)
@@ -93,7 +95,9 @@ ck("Tour target remains crisp and outlined", ".tour-spotlight" in css and ".tour
 ck("Tour uses the canonical overlay root", 'const root=$("#overlayRoot")' in app and "qa31TourRoot" not in app and "qa31TourRoot" not in html)
 ck("Tour cleanup removes live highlights and restores shell state", 'document.querySelectorAll(".tour-target")' in app and 'removeEventListener("keydown",onKeyDown)' in app and 'setInspectorOpen(originalInspector==="open")' in app and 'setDrawerOpen(originalDrawer==="open")' in app and 'e.key==="Escape"' in app)
 
-ck("Shell collapse controls use orientation-aware geometry", ".drawer-edge-toggle,.drawer-restore" in css and "width:42px!important" in css and "height:26px!important" in css and ".inspector-restore" in css and "width:26px!important" in css and "height:54px!important" in css and ".panel-toggle-icon" in css and "stroke:currentColor" in css)
+ck("Shell collapse controls use orientation-aware geometry", ".drawer-edge-toggle" in css and "width:42px!important" in css and ".drawer-restore" in css and "width:54px!important" in css and ".inspector-restore" in css and "height:42px!important" in css and '.app-shell[data-inspector="closed"] .inspector-restore' in css and "height:54px!important" in css and ".panel-toggle-icon" in css and "stroke:currentColor" in css)
+ck("Inspector and Logs edge controls are movable and persistent", "a32BindPanelToggleDrag" in app and "inspectorTogglePosition" in app and "drawerTogglePosition" in app and "Inspector toggle moves vertically" in smoke and "Logs toggle moves horizontally" in smoke)
+ck("Logs action strip has no stray underline", ".drawer-actions{border-bottom:0!important}" in css)
 ck("Collapsed sidebar hides brand icon", '.app-shell[data-sidebar="collapsed"] .brand-icon{display:none}' in css)
 ck("Models headers grow with wrapped copy", ".models-page .card-header.models-card-header" in css and "height:auto" in css)
 

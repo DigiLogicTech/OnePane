@@ -14,7 +14,8 @@
     {id:"pw-release-notes",type:"notes",title:"Notes",col:6,row:4},
     {id:"pw-release-settings",type:"settings",title:"Workspace settings",col:6,row:5}
   ],orchestration:{mode:"direct",supervisor:{model:"auto",agent:"onepane-default"},team:{model:"auto",agent:"onepane-default",count:2},council:{model:"auto",agent:"onepane-default",count:2}}};
-  let project={id:"project-release",workspace_id:"workspace-release",name:"Release QA Project",description:"Installed behavioural acceptance",status:"active",revision:1,project_policy:{onepane_ui:{workspaces:[workspace]}}};
+  const workspace2={id:"pws-release-2",name:"Disposable workspace",widgets:[{id:"pw-release-2-notes",type:"notes",title:"Notes",col:6,row:4}],orchestration:{mode:"direct",supervisor:{model:"auto",agent:"onepane-default"},team:{model:"auto",agent:"onepane-default",count:2},council:{model:"auto",agent:"onepane-default",count:2}}};
+  let project={id:"project-release",workspace_id:"workspace-release",name:"Release QA Project",description:"Installed behavioural acceptance",status:"active",revision:1,project_policy:{onepane_ui:{workspaces:[workspace,workspace2]}}};
   let projectPatchCount=0,turns=[];
   const originalFetch=window.fetch.bind(window);
   window.EventSource=class{addEventListener(){}close(){}};
@@ -26,7 +27,7 @@
     if(path==="/v1/auth/me")return json({principal_id:"qa-release",display_name:"Release QA",workspaces:[{id:"workspace-release"}],capabilities:[]});
     if(path==="/v1/about")return originalFetch(input,opts);
     if(path==="/v1/health")return json({status:"ok"});
-    if(path==="/v1/nodes")return json({nodes:[{id:"node-release",node_id:"node-release",display_name:"Release Node",status:"ready",architecture:"amd64",os_name:"Windows"}]});
+    if(path==="/v1/nodes")return json({nodes:[{id:"node-release",name:"RELEASE-PC",local:true,trust_state:"local",status:"ready",architecture:"amd64",os_name:"Windows"}]});
     if(path==="/v1/projects"&&method==="GET")return json([clone(project)]);
     if(path==="/v1/projects/project-release"&&method==="PATCH"){
       const body=JSON.parse(opts.body||"{}");
@@ -94,6 +95,14 @@
     check(Number(reloadedFollow?.width)===Number(expectedFollow.width)&&Number(reloadedFollow?.x)===Number(expectedFollow.x)&&Number(reloadedFollow?.y)===Number(expectedFollow.y),"Workspace resized geometry survives project reload");
     check(Number(reloadedSettings?.x)===Number(expectedSettings.x)&&Number(reloadedSettings?.y)===Number(expectedSettings.y),"Workspace dragged geometry survives project reload");
     check(noOverlap(ws.widgets),"Workspace persisted geometry remains collision free");
+
+    const disposable=check(document.querySelector('[data-qa4-workspace="pws-release-2"]'),"second workspace available for deletion");disposable.click();
+    await waitFor(()=>a31CurrentWorkspace()?.id==="pws-release-2","second workspace active");
+    const deleteButton=check(document.querySelector("#a32DeleteWorkspace"),"workspace delete action");check(!deleteButton.disabled,"workspace delete enabled when alternatives exist");const patchBeforeDelete=projectPatchCount;deleteButton.click();
+    const confirmDelete=await waitFor(()=>document.querySelector("#a32ConfirmDeleteWorkspace"),"workspace delete confirmation");confirmDelete.click();
+    await waitFor(()=>projectPatchCount>patchBeforeDelete&&a31CurrentWorkspace()?.id==="pws-release","workspace delete saved",30000);
+    check(!qa4Workspaces(a31CurrentProject()).some(x=>x.id==="pws-release-2"),"workspace removed from durable project policy");
+    check(document.querySelector("#a32DeleteWorkspace")?.disabled===true,"last workspace delete is guarded");
   }
 
   async function run(){
@@ -111,6 +120,17 @@
     renderInspector();
     check(document.querySelector("#inspector")?.dataset.tabMode==="single","Inspector Overview is implicit");
     check(getComputedStyle(document.querySelector("#inspector .inspector-tabs")).display==="none","single Inspector Overview rail is hidden");
+    const inspectorToggle=check(document.querySelector("#inspectorRestore"),"Inspector edge toggle"),drawerToggle=check(document.querySelector("#drawerToggle"),"Logs edge toggle");
+    setInspectorOpen(true);setDrawerOpen(true);syncPanelRestoreButtons();
+    const inspectorOpenSize=inspectorToggle.getBoundingClientRect().height,drawerOpenSize=drawerToggle.getBoundingClientRect().width,inspectorPosBefore=a32PanelTogglePosition("inspectorTogglePosition"),drawerPosBefore=a32PanelTogglePosition("drawerTogglePosition");
+    await gesture(inspectorToggle,0,70);check(a32PanelTogglePosition("inspectorTogglePosition")!==inspectorPosBefore,"Inspector toggle moves vertically");check(state.inspector==="open","Inspector drag does not collapse panel");
+    await gesture(drawerToggle,90,0);check(a32PanelTogglePosition("drawerTogglePosition")!==drawerPosBefore,"Logs toggle moves horizontally");check(state.drawer==="open","Logs drag does not collapse drawer");
+    setInspectorOpen(false);setDrawerOpen(false);syncPanelRestoreButtons();
+    const inspectorClosedSize=inspectorToggle.getBoundingClientRect().height,drawerRestore=check(document.querySelector("#drawerRestore"),"Logs restore toggle"),drawerClosedSize=drawerRestore.getBoundingClientRect().width;
+    check(inspectorClosedSize>inspectorOpenSize,"Inspector collapsed control uses longer restore shape");
+    check(drawerClosedSize>drawerOpenSize,"Logs collapsed control uses longer restore shape");
+    check(Math.abs(parseFloat(drawerRestore.style.left)-a32PanelTogglePosition("drawerTogglePosition"))<.2,"Logs restore retains moved position");
+    setInspectorOpen(true);setDrawerOpen(true);syncPanelRestoreButtons();
     if(document.documentElement.dataset.productTour==="active"){
       document.querySelector("#tourSkip")?.click();
       await waitFor(()=>!document.documentElement.dataset.productTour,"welcome Tour cleanup");
@@ -154,6 +174,7 @@
     await route("models");check(document.querySelector("#a31ModelsRoot")&&!document.querySelector("#a31ModelsRoot .error"),"Models route");
     await route("nodes");check(document.querySelector("#a31Nodes")&&!document.querySelector("#a31Nodes .error"),"Nodes envelope");
     document.querySelector("#a31AddNode")?.click();await waitFor(()=>document.querySelector("#pairNodeForm"),"pairing modal");check(document.querySelector("#pairNodeForm"),"Add Node pairing flow");closeModal();
+    await route("nodes");await waitFor(()=>document.querySelector('[data-a31-node="node-release"]'),"Node card");check(document.querySelector('[data-a31-node="node-release"] .card-title')?.textContent==="RELEASE-PC (Local)","Nodes prefer machine name and mark local device");check(document.querySelector('[data-a31-node="node-release"] .list-meta')?.textContent?.includes("node-release"),"Node ID remains secondary metadata");
     await route("agents");check(!document.querySelector("#viewHost .error"),"Agents route");
 
     await route("skills");const bundles=check(document.querySelector('[data-a31-skills-tab="bundles"]'),"Tool Bundles tab");bundles.click();

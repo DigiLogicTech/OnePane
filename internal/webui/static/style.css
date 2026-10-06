@@ -905,3 +905,14 @@ body { background:var(--app-gradient),var(--bg); }
   .layout-resize-handle{opacity:.68}
   .a31-layout-item[data-layout-active="true"] .layout-resize-handle{opacity:1}
 }
+
+
+/* Alpha 3.2 shell control refinement */
+.panel-restore,.shell-panel-toggle{border-color:color-mix(in srgb,var(--text) 42%,var(--border));box-shadow:0 4px 14px rgba(0,0,0,.12),0 0 0 1px color-mix(in srgb,var(--text) 6%,transparent)}
+.inspector-restore{width:26px!important;height:42px!important;cursor:grab;touch-action:none}
+.app-shell[data-inspector="closed"] .inspector-restore{width:26px!important;height:54px!important}
+.drawer-edge-toggle{width:42px!important;height:26px!important;cursor:grab;touch-action:none}
+.drawer-restore{width:54px!important;height:26px!important;cursor:grab;touch-action:none}
+.panel-toggle-moving{cursor:grabbing!important;transition:none!important}
+.drawer-actions{border-bottom:0!important}
+.a32-workspace-actions{flex:none}

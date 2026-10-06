@@ -349,12 +349,42 @@ qa4AddWorkspaceComponent=function(project,workspace){
   openModal("Add workspace component",`<div class="component-picker-grid">${available.map(([t,title])=>`<button class="component-choice" data-a31-add-project-component="${t}"><strong>${escapeHtml(title)}</strong><span>Add to ${escapeHtml(workspace.name)}</span></button>`).join("")}</div>`);
   $$("[data-a31-add-project-component]").forEach(b=>b.onclick=async()=>{const root=$("#qa4WorkspaceGrid");if(root?.dataset.layoutSaving==="true")return;const [type,title]=qa4WorkspaceCatalogue().find(x=>x[0]===b.dataset.a31AddProjectComponent),snapshot=(workspace.widgets||[]).map(x=>({...x})),item={id:`pw-${type}-${Date.now().toString(36)}`,type,title,width:type==="tasks"||type==="scheduled"?6:4,height:type==="chat"?5:4};workspace.widgets=workspace.widgets||[];a31NormalizeLayout(workspace.widgets);const slot=a31FirstFree(workspace.widgets,item,null);item.x=slot.x;item.y=slot.y;item.col=item.width;item.row=item.height;workspace.widgets.push(item);if(root)root.dataset.layoutSaving="true";a31LayoutSaveInFlight++;try{await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));closeModal();const freshProject=qa4ProjectHub.projects.find(x=>x.id===project.id),freshWorkspace=freshProject?qa4Workspaces(freshProject).find(x=>x.id===workspace.id):null;if(freshProject&&freshWorkspace)await a31RefreshProjectGrid(freshProject,freshWorkspace,true)}catch(ex){workspace.widgets.splice(0,workspace.widgets.length,...snapshot);notice("Component add failed: "+ex.message,"bad")}finally{a31LayoutSaveInFlight=Math.max(0,a31LayoutSaveInFlight-1);if(root)delete root.dataset.layoutSaving}});
 };
+async function a32DeleteWorkspace(project,workspace){
+  const rows=qa4Workspaces(project),index=rows.findIndex(x=>x.id===workspace.id);
+  if(index<0)return notice("Workspace is no longer available.","bad");
+  if(rows.length<=1)return notice("A project must keep at least one workspace.","bad");
+  const fallback=rows[index+1]||rows[index-1],remaining=rows.filter(x=>x.id!==workspace.id);
+  openModal("Delete workspace",`<div class="widget-body"><strong>Delete ${escapeHtml(workspace.name||"this workspace")}?</strong><p>This removes its workspace-owned layout, settings, notes and routing configuration from the project. This cannot be undone.</p></div>`,`<button class="btn" id="a32CancelDeleteWorkspace">Cancel</button><button class="btn danger" id="a32ConfirmDeleteWorkspace">Delete workspace</button>`);
+  $("#a32CancelDeleteWorkspace")?.addEventListener("click",closeModal);
+  $("#a32ConfirmDeleteWorkspace")?.addEventListener("click",async e=>{
+    const button=e.currentTarget;button.disabled=true;button.textContent="Deleting…";
+    try{
+      await qa4SaveProjectWorkspaces(project,remaining);
+      qa4ProjectHub.activeWorkspaceID=fallback?.id||"";
+      if(qa4Inspector?.kind==="workspace"&&qa4Inspector.id===workspace.id){
+        qa4Inspector={kind:"system",id:"system",title:"OnePane",data:{}};qa4InspectorTab="overview";setInspectorOpen(false);
+      }
+      closeModal();await renderProjects();notice(`Workspace "${workspace.name||"Workspace"}" deleted.`);
+    }catch(ex){button.disabled=false;button.textContent="Delete workspace";notice("Workspace delete failed: "+ex.message,"bad")}
+  });
+}
+function a32BindWorkspaceDelete(project,workspace){
+  const settings=$("#qa4WorkspaceSettings"),bar=settings?.closest(".workspace-context-bar");if(!settings||!bar)return;
+  let actions=bar.querySelector(".a32-workspace-actions");
+  if(!actions){actions=document.createElement("div");actions.className="toolbar compact a32-workspace-actions";bar.appendChild(actions);actions.appendChild(settings)}
+  let button=actions.querySelector("#a32DeleteWorkspace");
+  if(!button){button=document.createElement("button");button.id="a32DeleteWorkspace";button.className="btn danger";button.textContent="Delete workspace";actions.appendChild(button)}
+  const onlyWorkspace=qa4Workspaces(project).length<=1;
+  button.disabled=onlyWorkspace;button.title=onlyWorkspace?"A project must keep at least one workspace.":`Delete ${workspace.name||"workspace"}`;
+  button.onclick=()=>a32DeleteWorkspace(project,workspace);
+}
 const a31ProjectRenderBase=qa6RenderProjectsBase;
 renderProjects=async function(){
   const epoch=qa31ViewEpoch;await a31ProjectRenderBase();if(epoch!==qa31ViewEpoch||!a31RouteIs("projects"))return;
   const project=a31CurrentProject(),workspace=project?a31CurrentWorkspace():null;if(!project||!workspace)return;qa7NormalizeWorkspace(project,workspace);a31NormalizeLayout(workspace.widgets||[]);
   $(".workspace-chat-panel")?.remove();const bar=$(".workspace-context-bar .list-meta");if(bar)bar.textContent=` · workspace sandbox ${workspace.sandbox.internet?'internet allowed':'internet blocked'} · ${workspace.routing.enabled!==false?'routing enabled':'single-path'} · ${titleCase(workspace.orchestration?.mode||'direct')}`;
   const settings=$("#qa4WorkspaceSettings");if(settings){settings.textContent="Workspace settings";settings.onclick=()=>qa6OpenInInspector(project,workspace,"settings")}
+  a32BindWorkspaceDelete(project,workspace);
   const workspaceGrid=$("#qa4WorkspaceGrid");if(workspaceGrid)a31ApplyLayout(workspaceGrid,workspace.widgets||[],"data-pw-widget");
   qa4BindWorkspaceEdit(project,workspace);qa6BindProjectComponents(project,workspace);qa7BindWorkspaceControls(project,workspace,$("#qa4WorkspaceGrid")||document);qa6StartEventStream();renderNav();
 };
@@ -422,9 +452,13 @@ renderModels=async function(){
 };
 
 /* Nodes */
+function a32NodeDisplayName(n){
+  const id=String(n?.id||n?.node_id||""),friendly=String(n?.name||n?.hostname||n?.host_name||n?.computer_name||n?.display_name||"").trim()||id||"Node";
+  return friendly+(n?.local===true?" (Local)":"");
+}
 renderNodes=async function(){
   $("#viewHost").innerHTML=`<section class="page">${pageHeader("Nodes","Enrolled machines are schedulable CPU/GPU resource pools.",'<button class="btn primary" id="a31AddNode">Add Node</button>')}<div id="a31Nodes"><div class="widget-body">Loading nodes…</div></div></section>`;
-  try{const out=await apiRequest("/v1/nodes"),nodeRows=Array.isArray(out)?out:a31Array(out?.nodes);liveOps.nodes=nodeRows;liveOps.reported.nodes=true;syncLiveNotifications();$("#a31Nodes").innerHTML=`<div class="node-grid">${nodeRows.map(n=>{const id=n.id||n.node_id,name=n.display_name||id,state=n.status||n.state||"unknown";return `<article class="panel-card node-card" data-a31-node="${escapeHtml(id)}"><div class="card-header"><div><div class="card-title">${escapeHtml(name)}</div><div class="list-meta">${escapeHtml(n.os_name||n.os||"")} ${escapeHtml(n.architecture||"")}</div></div><span class="pill ${["online","ready","active"].includes(String(state).toLowerCase())?'good':''}">${escapeHtml(titleCase(state))}</span></div><div class="widget-body"><dl class="definition-grid"><dt>CPU</dt><dd>${escapeHtml(n.cpu_name||n.cpu||"Detected by node")}</dd><dt>GPU</dt><dd>${escapeHtml(n.gpu_name||n.compute||"See capabilities")}</dd><dt>Last seen</dt><dd>${escapeHtml(String(n.last_seen_at||n.last_seen||"—"))}</dd></dl><div class="toolbar"><button class="btn" data-a31-node-cap="${escapeHtml(id)}">Capabilities</button><button class="btn" data-a31-node-models="${escapeHtml(id)}">Model management</button><button class="btn danger" data-a31-node-revoke="${escapeHtml(id)}">Revoke</button></div></div></article>`}).join("")||'<div class="empty-state">No enrolled nodes yet.</div>'}</div>`;
+  try{const out=await apiRequest("/v1/nodes"),nodeRows=Array.isArray(out)?out:a31Array(out?.nodes);liveOps.nodes=nodeRows;liveOps.reported.nodes=true;syncLiveNotifications();$("#a31Nodes").innerHTML=`<div class="node-grid">${nodeRows.map(n=>{const id=n.id||n.node_id,name=a32NodeDisplayName(n),state=n.status||n.state||(n.local?"ready":n.trust_state)||"unknown",platform=[n.os_name||n.os,n.architecture].filter(Boolean).join(" · "),meta=[platform,id&&id!==String(n.name||"").trim()?id:""].filter(Boolean).join(" · ");return `<article class="panel-card node-card" data-a31-node="${escapeHtml(id)}"><div class="card-header"><div><div class="card-title">${escapeHtml(name)}</div><div class="list-meta">${escapeHtml(meta)}</div></div><span class="pill ${["online","ready","active","paired","local"].includes(String(state).toLowerCase())?'good':''}">${escapeHtml(titleCase(state))}</span></div><div class="widget-body"><dl class="definition-grid"><dt>CPU</dt><dd>${escapeHtml(n.cpu_name||n.cpu||"Detected by node")}</dd><dt>GPU</dt><dd>${escapeHtml(n.gpu_name||n.compute||"See capabilities")}</dd><dt>Last seen</dt><dd>${escapeHtml(String(n.last_seen_at||n.last_seen||"—"))}</dd></dl><div class="toolbar"><button class="btn" data-a31-node-cap="${escapeHtml(id)}">Capabilities</button><button class="btn" data-a31-node-models="${escapeHtml(id)}">Model management</button><button class="btn danger" data-a31-node-revoke="${escapeHtml(id)}">Revoke</button></div></div></article>`}).join("")||'<div class="empty-state">No enrolled nodes yet.</div>'}</div>`;
     $$("[data-a31-node-cap]").forEach(b=>b.onclick=async()=>{try{const x=await apiRequest(`/v1/nodes/${encodeURIComponent(b.dataset.a31NodeCap)}/capabilities`);openModal("Node capabilities",`<pre class="json-preview">${escapeHtml(JSON.stringify(x,null,2))}</pre>`)}catch(ex){notice(ex.message,"bad")}});
     $$("[data-a31-node-models]").forEach(b=>b.onclick=async()=>{try{const x=await apiRequest(`/v1/nodes/${encodeURIComponent(b.dataset.a31NodeModels)}/model-management`);openModal("Node model management",`<pre class="json-preview">${escapeHtml(JSON.stringify(x,null,2))}</pre>`)}catch(ex){notice(ex.message,"bad")}});
     $$("[data-a31-node-revoke]").forEach(b=>b.onclick=async()=>{if(!confirm("Revoke this node?"))return;try{await apiRequest(`/v1/nodes/${encodeURIComponent(b.dataset.a31NodeRevoke)}/revoke`,{method:"POST",body:"{}"});renderNodes()}catch(ex){notice(ex.message,"bad")}});
@@ -613,9 +647,40 @@ renderInspector=function(){
 };
 
 /* Shell bindings and final routing */
+function a32PanelTogglePosition(key){const n=Number(state[key]);return Number.isFinite(n)?Math.max(8,Math.min(92,n)):50}
+function a32ApplyPanelTogglePositions(){
+  const inspector=a32PanelTogglePosition("inspectorTogglePosition"),drawer=a32PanelTogglePosition("drawerTogglePosition");
+  const inspectorButton=$("#inspectorRestore");if(inspectorButton)inspectorButton.style.top=`${inspector}%`;
+  for(const el of [$("#drawerToggle"),$("#drawerRestore")])if(el)el.style.left=`${drawer}%`;
+}
+const a32SyncPanelRestoreButtonsBase=syncPanelRestoreButtons;
+syncPanelRestoreButtons=function(){a32SyncPanelRestoreButtonsBase();a32ApplyPanelTogglePositions()};
+function a32BindPanelToggleDrag(el,axis,key,host){
+  if(!el||el.dataset.panelMoveBound==="true")return;el.dataset.panelMoveBound="true";
+  let active=false,moved=false,startX=0,startY=0;
+  const move=e=>{
+    if(!active)return;
+    const delta=axis==="y"?Math.abs(e.clientY-startY):Math.abs(e.clientX-startX);if(delta>3)moved=true;if(!moved)return;
+    e.preventDefault();const rect=host()?.getBoundingClientRect();if(!rect)return;
+    const raw=axis==="y"?(e.clientY-rect.top)/Math.max(1,rect.height):(e.clientX-rect.left)/Math.max(1,rect.width);
+    state[key]=Math.max(8,Math.min(92,raw*100));a32ApplyPanelTogglePositions();
+  };
+  const finish=()=>{
+    if(!active)return;active=false;el.classList.remove("panel-toggle-moving");window.removeEventListener("pointermove",move);window.removeEventListener("pointerup",finish);window.removeEventListener("pointercancel",finish);
+    if(moved){el.dataset.panelToggleDragged="true";persist();setTimeout(()=>delete el.dataset.panelToggleDragged,0)}
+  };
+  el.addEventListener("pointerdown",e=>{if(e.button!==0)return;active=true;moved=false;startX=e.clientX;startY=e.clientY;el.classList.add("panel-toggle-moving");window.addEventListener("pointermove",move,{passive:false});window.addEventListener("pointerup",finish,{once:true});window.addEventListener("pointercancel",finish,{once:true})});
+  el.addEventListener("click",e=>{if(el.dataset.panelToggleDragged==="true"){e.preventDefault();e.stopImmediatePropagation();delete el.dataset.panelToggleDragged}},true);
+}
+function a32BindPanelToggleMovement(){
+  a32ApplyPanelTogglePositions();
+  a32BindPanelToggleDrag($("#inspectorRestore"),"y","inspectorTogglePosition",()=>$("#app"));
+  a32BindPanelToggleDrag($("#drawerToggle"),"x","drawerTogglePosition",()=>$("#bottomDrawer"));
+  a32BindPanelToggleDrag($("#drawerRestore"),"x","drawerTogglePosition",()=>$(".main-shell"));
+}
 const a31BindShellBase=bindShell;
 bindShell=function(){
-  a31BindShellBase();
+  a31BindShellBase();a32BindPanelToggleMovement();
   $("#controlChatLauncher")?.addEventListener("click",()=>a31OpenControlChat());$("#controlChatClose")?.addEventListener("click",e=>{e.stopPropagation();a31CloseControlChat()});$("#controlChatToggle")?.addEventListener("click",()=>a31SetControlChatCollapsed(!state.controlChatCollapsed));$("#controlChatAssistantTab")?.addEventListener("click",()=>a31OpenControlChat("assistant"));$("#controlChatOrchestratorTab")?.addEventListener("click",()=>a31OpenControlChat("orchestrator"));
 };
 renderActiveView=async function(){

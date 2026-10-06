@@ -88,7 +88,9 @@ ck("Shell collapse controls use orientation-aware geometry", ".drawer-edge-toggl
 ck("Collapsed sidebar hides brand icon", '.app-shell[data-sidebar="collapsed"] .brand-icon{display:none}' in css)
 ck("Models headers grow with wrapped copy", ".models-page .card-header.models-card-header" in css and "height:auto" in css)
 
-ck("Command palette exposes real actions", "function a31CommandRegistry()" in app and "Detect local hardware" in app and "New scheduled task" in app and "Restart product tour" in app)\nck("Health popover is live and never hard-codes inventory counts", "async function openHealthPopover" in app and "Not reported" in app and "5 / 8 active" not in app and "8 / 8" not in app)\nck("First-run setup requires an explicit language choice", 'id="setup-language-step"' in html and 'id="setup-language"' in html and "qa5PrepareFirstRunLanguage" in app and "QA5_SETUP_LANGUAGE_KEY" in app)
+ck("Command palette exposes real actions", "function a31CommandRegistry()" in app and "Detect local hardware" in app and "New scheduled task" in app and "Restart product tour" in app)
+ck("Health popover is live and never hard-codes inventory counts", "async function openHealthPopover" in app and "Not reported" in app and "5 / 8 active" not in app and "8 / 8" not in app)
+ck("First-run setup requires an explicit language choice", 'id="setup-language-step"' in html and 'id="setup-language"' in html and "qa5PrepareFirstRunLanguage" in app and "QA5_SETUP_LANGUAGE_KEY" in app)
 ck("Language remains changeable from Settings", 'id="a31Language"' in app and "qa5ApplyAuthLanguage(e.target.value)" in app)
 ck("Theme-aware sleek scrollbars use shared tokens", all(x in css for x in ["--scrollbar-thumb","--scrollbar-thumb-hover","--scrollbar-thumb-active","::-webkit-scrollbar-thumb","scrollbar-gutter:stable"]))
 ck("Theme accent contrast is tokenized", "--on-accent" in css and "color:var(--on-accent)" in css and 'data-theme="graphite"' in css)

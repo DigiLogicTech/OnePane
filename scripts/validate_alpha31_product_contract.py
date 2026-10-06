@@ -12,7 +12,7 @@ catalog=read("internal/localai/catalog_bundled.go")+read("internal/localai/catal
 compute=read("internal/localai/compute_policy.go"); oauth=read("internal/provideroauth/service.go"); skills=read("internal/skillcatalog/service.go")
 setup=read("packaging/windows/setup/main.go"); desktop=read("packaging/windows/desktop/main.go"); workflow=read(".github/workflows/alpha3.1-stabilization.yml")
 migration=read("migrations/0023_alpha31_assistant_orchestrator.sql")+read("migrations/0024_alpha31_agents_components.sql")+read("migrations/0025_alpha31_refinement.sql")+read("migrations/0026_alpha32_reliability.sql")
-reliability=read("internal/storage/sqlite/migrate.go"); provision=read("internal/localai/provision.go"); teamsvc=read("internal/team/service.go"); teamworker=read("internal/teamworker/service.go")
+reliability=read("internal/storage/sqlite/migrate.go"); provision=read("internal/localai/provision.go"); installjobs=read("internal/localai/install_jobs.go"); localsvc=read("internal/localai/service.go"); teamsvc=read("internal/team/service.go"); teamworker=read("internal/teamworker/service.go")
 checks=[]
 def ck(n,c): checks.append((n,bool(c)))
 ck("Assistant and Project Orchestrator remain durable", "assistant_threads" in migration and "project_orchestrators" in migration and "type Service struct" in assistant and "type Service struct" in orch)
@@ -37,7 +37,7 @@ ck("Windows and Ubuntu packages remain CI outputs", "Build Windows x64 installer
 ck("native Windows UI-ready smoke contract remains", "onepane-ui-ready|" in app and "ui-ready.txt" in desktop and "Assert-NativeUIReady" in workflow)
 ck("Windows setup remains noninteractive-test capable", all(x in setup for x in ["--silent","--no-launch","--skip-optional-runtime"]))
 ck("Alpha upgrades create and validate a durable rollback point", "VACUUM INTO" in reliability and "pre-migration backup preserved" in reliability and "PRAGMA quick_check" in reliability)
-ck("managed downloads resume durable partial artifacts", all(x in provision for x in ['dest + ".partial"','Header.Set("Range"','StatusPartialContent','existingDownload']))
+ck("managed downloads resume durable partial artifacts", all(x in provision for x in ['dest + ".partial"','Header.Set("Range"','StatusPartialContent','StatusRequestedRangeNotSatisfiable','existingDownload','markResumableDownload','isResumableDownloadError']) and "markInstallJobInterrupted" in installjobs and "!isResumableDownloadError(err)" in localsvc)
 ck("Research sessions freeze immutable manifests", all(x in migration+teamsvc for x in ["team_session_manifests","snapshot_sha256","SessionSnapshot","manifest_sha256"]))
 ck("Research seats pin one resolved candidate across retries", "team_session_seat_bindings" in migration and "IncludeCandidateIDs" in teamworker and "BindSeat" in teamworker and "seat_binding_candidate_id" in teamworker)
 ck("Research first pass can remain independent and complete", "IndependentFirstPass" in teamworker and "m.Kind == \"agent\"" in teamworker and "RequireAllSeats" in teamsvc)

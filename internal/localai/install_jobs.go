@@ -389,6 +389,13 @@ func (s *Service) RunInstallJob(ctx context.Context, jobID string) (InstallJob, 
 		}
 		dep, err = s.ProvisionApprovedPlan(ctx, p.ID, runtime, model)
 		if err != nil {
+			if isResumableDownloadError(err) {
+				latest, markErr := s.markInstallJobInterrupted(ctx, j, err.Error())
+				if markErr != nil {
+					return j, markErr
+				}
+				return latest, err
+			}
 			return j, s.failInstallJob(ctx, j, err.Error())
 		}
 	} else {
@@ -471,6 +478,30 @@ func (s *Service) markInstallJobReady(ctx context.Context, j InstallJob) (Instal
 	return s.InstallJob(ctx, j.ID)
 }
 
+func (s *Service) markInstallJobInterrupted(ctx context.Context, j InstallJob, reason string) (InstallJob, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "install download interrupted"
+	}
+	now := s.clock.UnixMilli()
+	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE local_ai_install_jobs SET status='interrupted',failure_reason=?,completed_at=NULL,revision=revision+1,updated_at=? WHERE id=? AND status NOT IN ('ready','failed','cancelled')`, reason, now, j.ID)
+		if err != nil {
+			return err
+		}
+		n, _ := res.RowsAffected()
+		if n != 1 {
+			return errors.New("install job interruption state conflict")
+		}
+		eid, _ := s.ids.New("evt")
+		payload, _ := json.Marshal(map[string]any{"job_id": j.ID, "plan_id": j.PlanID, "reason": reason, "resumable": true})
+		return s.events.Append(ctx, tx, event.Event{ID: eid, WorkspaceID: j.WorkspaceID, Type: "local_ai.install_job_interrupted", AggregateType: "local_ai_install_job", AggregateID: j.ID, ActorPrincipalID: j.RequestedBy, Payload: payload, OccurredAt: now})
+	})
+	if err != nil {
+		return j, err
+	}
+	return s.InstallJob(ctx, j.ID)
+}
 func (s *Service) failInstallJob(ctx context.Context, j InstallJob, reason string) error {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {

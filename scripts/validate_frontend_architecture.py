@@ -106,9 +106,11 @@ else: ok("compatibility foundation does not claim canonical ownership")
 if canonical.count(marker)!=1: fail("canonical runtime marker must appear exactly once")
 else: ok("canonical runtime marker is unique")
 
-if "bootOnePane();" in foundation: fail("compatibility foundation must not boot the application")
+foundation_boots=len(re.findall(r"\bbootOnePane\s*\(\s*\)", foundation))
+canonical_boots=len(re.findall(r"\bbootOnePane\s*\(\s*\)", canonical))
+if foundation_boots: fail(f"compatibility foundation must not boot the application; found {foundation_boots} call(s)")
 else: ok("only canonical runtime may boot the application")
-if canonical.count("bootOnePane();")!=1: fail("canonical runtime must boot exactly once")
+if canonical_boots!=1: fail(f"canonical runtime must boot exactly once; found {canonical_boots}")
 else: ok("canonical runtime boots exactly once")
 
 foundation_tag='<script src="/app-foundation.js"></script>'

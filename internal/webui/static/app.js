@@ -53,10 +53,43 @@ function a31RepairPersistedUIState(){
   if(storedVersion!==A31_OPERATIONS_LAYOUT_VERSION){
     state.operationsLayoutVersion=A31_OPERATIONS_LAYOUT_VERSION;changed=true;
   }
+  if(state.operationsEdit){state.operationsEdit=false;changed=true}
   if(changed)persist();
   return changed;
 }
 a31RepairPersistedUIState();
+
+let a31OperationsEditActive=false;
+let a31OperationsDraftWidgets=null;
+function a31OperationsEditing(){return a31OperationsEditActive}
+function a31OperationsLayoutItems(){return a31OperationsEditing()&&Array.isArray(a31OperationsDraftWidgets)?a31OperationsDraftWidgets:state.operationsWidgets}
+function a31BeginOperationsEdit(){
+  if(a31OperationsEditing())return;
+  a31OperationsDraftWidgets=(state.operationsWidgets||[]).map(x=>({...x}));
+  a31NormalizeLayout(a31OperationsDraftWidgets);
+  a31OperationsEditActive=true;
+}
+function a31CancelOperationsEdit(){
+  a31OperationsEditActive=false;
+  a31OperationsDraftWidgets=null;
+  state.operationsEdit=false;
+}
+function a31CommitOperationsEdit(){
+  if(!a31OperationsEditing())return;
+  const next=(a31OperationsDraftWidgets||[]).map(x=>({...x}));
+  a31NormalizeLayout(next);
+  a31ResolveLayout(next,null);
+  if(a31OperationsLayoutBroken(next)){notice("Layout could not be saved because it contains invalid geometry.","bad");return}
+  state.operationsWidgets=next;
+  a31CancelOperationsEdit();
+  a31PersistOperationsLayout();
+}
+const a31ActivateTabBase=activateTab;
+activateTab=function(id){
+  const next=state.tabs.find(t=>t.id===id);
+  if(a31OperationsEditing()&&currentTab()?.route==="operations"&&next?.route!=="operations")a31CancelOperationsEdit();
+  return a31ActivateTabBase(id);
+};
 
 function a31Array(v){return Array.isArray(v)?v:[]}
 function a31Object(v){return v&&typeof v==="object"&&!Array.isArray(v)?v:{}}
@@ -65,7 +98,7 @@ function a31RouteIs(route){return currentTab()?.route===route}
 function a31SetModelView(view){a31ModelView=view==="cloud"?"cloud":"local";if(a31RouteIs("models"))renderModels();renderNav()}
 function a31SetAgentView(view){a31AgentView=view;if(a31RouteIs("agents"))renderAgents()}
 function a31SetSkillsView(view){a31SkillsView=view;if(a31RouteIs("skills"))renderSkills()}
-function a31SetOperationsView(view){a31OperationsView=view;if(a31RouteIs("operations"))renderOperations()}
+function a31SetOperationsView(view){if(view!=="overview"&&a31OperationsEditing())a31CancelOperationsEdit();a31OperationsView=view;if(a31RouteIs("operations"))renderOperations()}
 function a31SetSettingsView(view){a31SettingsView=view;if(a31RouteIs("settings"))renderSettings()}
 function a31CurrentProject(){return typeof qa4ActiveProject==="function"?qa4ActiveProject():null}
 function a31CurrentWorkspace(){return typeof qa4ActiveWorkspace==="function"?qa4ActiveWorkspace():null}
@@ -260,24 +293,34 @@ function a31ToggleLogs(){
   activeDrawerTab="logs";setDrawerOpen(true);renderDrawer();if(a31RouteIs("operations"))renderOperations();
 }
 function a31OpsWidget(w){
-  return `<section class="dashboard-widget a31-layout-item ${state.operationsEdit?'editable':''}" data-op-widget="${escapeHtml(w.id)}"><div class="dashboard-edit-bar ${state.operationsEdit?'':'hidden'}" data-op-drag="${escapeHtml(w.id)}" title="Drag component"><span class="dashboard-drag" aria-hidden="true">⋮⋮</span><strong>${escapeHtml(w.title)}</strong><span class="dashboard-edit-spacer"></span><select class="dashboard-size" data-op-preset="${escapeHtml(w.id)}"><option value="">Size…</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="wide">Wide</option><option value="full">Full</option></select><button class="tiny danger" data-op-remove="${escapeHtml(w.id)}">×</button></div><div class="dashboard-widget-content">${operationsComponentContent(w.type)}</div>${state.operationsEdit?a31ResizeHandles(w.id,"data-op-resize",w.title):""}</section>`
+  const edit=a31OperationsEditing();
+  return `<section class="dashboard-widget a31-layout-item ${edit?'editable':''}" data-op-widget="${escapeHtml(w.id)}"><div class="dashboard-edit-bar ${edit?'':'hidden'}" data-op-drag="${escapeHtml(w.id)}" title="Drag component"><span class="dashboard-drag" aria-hidden="true">⋮⋮</span><strong>${escapeHtml(w.title)}</strong><span class="dashboard-edit-spacer"></span><select class="dashboard-size" data-op-preset="${escapeHtml(w.id)}"><option value="">Size…</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="wide">Wide</option><option value="full">Full</option></select><button class="tiny danger" data-op-remove="${escapeHtml(w.id)}">×</button></div><div class="dashboard-widget-content">${operationsComponentContent(w.type)}</div>${edit?a31ResizeHandles(w.id,"data-op-resize",w.title):""}</section>`
 }
 function a31RenderOperationsGrid(){
   const root=$("#operationsLayout");if(!root)return;
-  if(a31OperationsLayoutBroken(state.operationsWidgets)){if(!a31RepairLayoutInPlace(state.operationsWidgets))state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));state.operationsLayoutVersion=A31_OPERATIONS_LAYOUT_VERSION;persist()}
-  a31NormalizeLayout(state.operationsWidgets);root.innerHTML=state.operationsWidgets.map(a31OpsWidget).join("");a31ApplyLayout(root,state.operationsWidgets,"data-op-widget");
-  if(state.operationsEdit){
-    a31BindLayout(root,state.operationsWidgets,{attr:"data-op-widget",dragAttr:"data-op-drag",resizeAttr:"data-op-resize",persist:async()=>a31PersistOperationsLayout()});
-    $$("[data-op-remove]",root).forEach(b=>b.onclick=async()=>{const el=b.closest("[data-op-widget]");if(el?.animate)await el.animate([{opacity:1,transform:"scale(1)"},{opacity:0,transform:"scale(.96)"}],{duration:130}).finished.catch(()=>{});state.operationsWidgets=state.operationsWidgets.filter(x=>x.id!==b.dataset.opRemove);a31NormalizeLayout(state.operationsWidgets);a31PersistOperationsLayout();a31RenderOperationsGrid()});
-    $$("[data-op-preset]",root).forEach(sel=>sel.onchange=()=>{if(!sel.value)return;const item=state.operationsWidgets.find(x=>x.id===sel.dataset.opPreset);if(!item)return;const p=operationsSizePreset(sel.value,item);item.width=p.col;item.height=p.row;item.col=p.col;item.row=p.row;a31ResolveLayout(state.operationsWidgets,item.id);a31ApplyLayout(root,state.operationsWidgets,"data-op-widget",true);a31PersistOperationsLayout()});
+  let items=a31OperationsLayoutItems();
+  if(a31OperationsLayoutBroken(items)){
+    if(!a31RepairLayoutInPlace(items)){
+      items=defaultState().operationsWidgets.map(x=>({...x}));
+      if(a31OperationsEditing())a31OperationsDraftWidgets=items;
+      else state.operationsWidgets=items;
+    }
+    if(!a31OperationsEditing()){state.operationsLayoutVersion=A31_OPERATIONS_LAYOUT_VERSION;persist()}
+  }
+  a31NormalizeLayout(items);root.innerHTML=items.map(a31OpsWidget).join("");a31ApplyLayout(root,items,"data-op-widget");
+  if(a31OperationsEditing()){
+    a31BindLayout(root,items,{attr:"data-op-widget",dragAttr:"data-op-drag",resizeAttr:"data-op-resize",persist:async()=>{}});
+    $$("[data-op-remove]",root).forEach(b=>b.onclick=async()=>{const el=b.closest("[data-op-widget]");if(el?.animate)await el.animate([{opacity:1,transform:"scale(1)"},{opacity:0,transform:"scale(.96)"}],{duration:130}).finished.catch(()=>{});const index=items.findIndex(x=>x.id===b.dataset.opRemove);if(index>=0)items.splice(index,1);a31NormalizeLayout(items);a31RenderOperationsGrid()});
+    $$("[data-op-preset]",root).forEach(sel=>sel.onchange=()=>{if(!sel.value)return;const item=items.find(x=>x.id===sel.dataset.opPreset);if(!item)return;const p=operationsSizePreset(sel.value,item);item.width=p.col;item.height=p.row;item.col=p.col;item.row=p.row;a31ResolveLayout(items,item.id);a31ApplyLayout(root,items,"data-op-widget",true)});
   }
   bindViewActions(root);
 }
 openOperationsComponentPicker=function(){
-  const catalogue=[["metrics","System metrics"],["tasks","Task list"],["scheduled","Scheduled tasks"],["nodes","Nodes"],["resources","Resource Utilisation"],["activity","Recent Activity"],["attention","Attention"],["providers","Cloud Provider Health"]],used=new Set(state.operationsWidgets.map(x=>x.type)),available=catalogue.filter(([t])=>!used.has(t));
+  const items=a31OperationsLayoutItems(),catalogue=[["metrics","System metrics"],["tasks","Task list"],["scheduled","Scheduled tasks"],["nodes","Nodes"],["resources","Resource Utilisation"],["activity","Recent Activity"],["attention","Attention"],["providers","Cloud Provider Health"]],used=new Set(items.map(x=>x.type)),available=catalogue.filter(([t])=>!used.has(t));
   openModal("Add Operations component",available.length?`<div class="component-picker-grid">${available.map(([type,title])=>`<button class="component-choice" data-a31-add-op="${type}"><strong>${escapeHtml(title)}</strong><span>Add ${escapeHtml(title.toLowerCase())} to Operations</span></button>`).join("")}</div>`:'<div class="empty-state compact">All Operations components are already present.</div>');
-  $$("[data-a31-add-op]").forEach(b=>b.onclick=()=>{const [type,title]=catalogue.find(x=>x[0]===b.dataset.a31AddOp),item={id:`op-${type}-${Date.now().toString(36)}`,title,type,width:type==="metrics"?12:4,height:type==="metrics"?3:5};a31NormalizeLayout(state.operationsWidgets);const slot=a31FirstFree(state.operationsWidgets,item,null);item.x=slot.x;item.y=slot.y;item.col=item.width;item.row=item.height;state.operationsWidgets.push(item);a31PersistOperationsLayout();closeModal();a31RenderOperationsGrid()});
+  $$("[data-a31-add-op]").forEach(b=>b.onclick=()=>{const [type,title]=catalogue.find(x=>x[0]===b.dataset.a31AddOp),item={id:`op-${type}-${Date.now().toString(36)}`,title,type,width:type==="metrics"?12:4,height:type==="metrics"?3:5};a31NormalizeLayout(items);const slot=a31FirstFree(items,item,null);item.x=slot.x;item.y=slot.y;item.col=item.width;item.row=item.height;items.push(item);closeModal();a31RenderOperationsGrid()});
 };
+
 function a31OperationsActivity(){if(!liveOpsReported("events"))return `<section class="panel-card"><div class="card-header"><div><div class="card-title">Activity</div><div class="list-meta">Recent control-plane, scheduler, model, node and provider events.</div></div></div><div class="empty-state compact">Event feed not reported.</div></section>`;const rows=a31Array(liveOps.events).slice(-100).reverse();return `<section class="panel-card"><div class="card-header"><div><div class="card-title">Activity</div><div class="list-meta">Recent control-plane, scheduler, model, node and provider events.</div></div></div><div class="activity-stream">${rows.length?rows.map(e=>`<div class="activity-row"><span class="mono-cell">${escapeHtml(String(e.sequence||""))}</span><div><strong>${escapeHtml(eventLabel(e))}</strong><div class="list-meta">${escapeHtml([e.aggregate_type,e.aggregate_id].filter(Boolean).join(" · "))}</div></div><span class="list-meta">${e.occurred_at?new Date(Number(e.occurred_at)).toLocaleTimeString():""}</span></div>`).join(""):'<div class="empty-state compact">No activity recorded yet.</div>'}</div></section>`}
 function a31OperationsHealth(){
   const active=a31Array(liveOps.tasks).filter(t=>!["complete","cancelled","failed"].includes(String(t.state||"").toLowerCase()));
@@ -308,7 +351,7 @@ function a31RefreshOperationsData(){
   if(!a31RouteIs("operations")||a31OperationsView!=="overview")return false;
   const root=$("#operationsLayout");if(!root)return false;
   if(root.classList.contains("layout-interacting")||root.dataset.layoutSaving==="true"){root.dataset.layoutRefreshPending="true";return true}
-  for(const w of state.operationsWidgets||[]){
+  for(const w of a31OperationsLayoutItems()||[]){
     const card=$(`[data-op-widget="${CSS.escape(w.id)}"]`,root),content=card?.querySelector(".dashboard-widget-content");
     if(content)content.innerHTML=operationsComponentContent(w.type);
   }
@@ -316,16 +359,17 @@ function a31RefreshOperationsData(){
 }
 renderOperations=async function(){
   if(a31OperationsRefreshOnly>0&&a31RefreshOperationsData())return;
-  const actions=`<button class="btn ${state.operationsEdit?'primary':''}" id="editOperations">${state.operationsEdit?'Done':'Edit layout'}</button>${state.operationsEdit?'<button class="btn" id="addOperationsComponent">Add component</button><button class="btn" id="resetOperationsLayout">Reset layout</button>':""}`;
+  const edit=a31OperationsEditing();
+  const actions=`<button class="btn ${edit?'primary':''}" id="editOperations">${edit?'Done':'Edit layout'}</button>${edit?'<button class="btn" id="addOperationsComponent">Add component</button><button class="btn" id="resetOperationsLayout">Reset layout</button>':""}`;
   $("#viewHost").innerHTML=`<section class="page">${pageHeader("Operations","System overview, activity, health and recovery",actions)}${a31OperationsTabs()}<div id="a31OperationsBody"></div></section>`;
   a31BindOperationsTabs();
   const body=$("#a31OperationsBody");
-  if(a31OperationsView==="overview"){body.innerHTML=`<div class="operations-layout-grid ${state.operationsEdit?'editing':''}" id="operationsLayout"></div>`;a31RenderOperationsGrid()}
+  if(a31OperationsView==="overview"){body.innerHTML=`<div class="operations-layout-grid ${edit?'editing':''}" id="operationsLayout"></div>`;a31RenderOperationsGrid()}
   else if(a31OperationsView==="activity")body.innerHTML=a31OperationsActivity();
   else if(a31OperationsView==="health")body.innerHTML=a31OperationsHealth();
   else if(a31OperationsView==="recovery"){body.innerHTML=await a31RecoveryContent();$("#a31RecoveryRefresh")?.addEventListener("click",async()=>{await refreshOperationalDataQA(true);renderOperations()});$$("[data-a31-repair-component]").forEach(b=>b.onclick=()=>a31ComponentAction(b.dataset.a31RepairComponent,"repair"))}
-  $("#editOperations")?.addEventListener("click",()=>{state.operationsEdit=!state.operationsEdit;persist();renderOperations()});
-  $("#resetOperationsLayout")?.addEventListener("click",()=>{state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));a31NormalizeLayout(state.operationsWidgets);a31PersistOperationsLayout();renderOperations()});
+  $("#editOperations")?.addEventListener("click",()=>{if(a31OperationsEditing())a31CommitOperationsEdit();else a31BeginOperationsEdit();renderOperations()});
+  $("#resetOperationsLayout")?.addEventListener("click",()=>{a31OperationsDraftWidgets=defaultState().operationsWidgets.map(x=>({...x}));a31NormalizeLayout(a31OperationsDraftWidgets);renderOperations()});
   $("#addOperationsComponent")?.addEventListener("click",openOperationsComponentPicker);
   bindViewActions($("#viewHost"));
 }

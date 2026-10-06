@@ -76,6 +76,7 @@ ck("Agents expose Research Team configuration", "research_mode" in app and "inde
 ck("Agents expose DigiLogic Core profile metadata", "DigiLogic Core" in app and "Duplicate & customise" in app)
 ck("Skills surface supports upload install assignments packages", "a31UploadSkill" in app and 'data-a31-skills-tab="assignments"' in app and 'data-a31-skills-tab="packages"' in app)
 ck("Skills expose governed capability matrix", 'data-a31-skills-tab="matrix"' in app and "Effective Capability Matrix" in app and "Known model deployments" in app)
+ck("Skills expose first-class Tool Bundles view", 'data-a31-skills-tab="bundles"' in app and "Role-scoped tool groupings" in app and "No Tool Bundles are registered." in app)
 
 ck("Settings have canonical information architecture", all(x in app for x in ["General","Appearance","Defaults","Models & Compute","Providers & Auth","Nodes & Federation","Agents & Research","Skills & Tools","Security & Approvals","Updates & Diagnostics"]))
 ck("Settings preserve new Workspace default semantics", "Existing Workspaces are never changed here" in app)

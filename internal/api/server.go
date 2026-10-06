@@ -1425,6 +1425,49 @@ func (s *Server) createRoutine(w http.ResponseWriter, r *http.Request) {
 	if !s.authorize(w, r, i, in.WorkspaceID, "task.write") {
 		return
 	}
+	if in.Policy.ProjectID != nil {
+		v := strings.TrimSpace(*in.Policy.ProjectID)
+		if v == "" {
+			in.Policy.ProjectID = nil
+		} else {
+			in.Policy.ProjectID = &v
+		}
+	}
+	if in.Policy.ProjectWorkspaceID != nil {
+		v := strings.TrimSpace(*in.Policy.ProjectWorkspaceID)
+		if v == "" {
+			in.Policy.ProjectWorkspaceID = nil
+		} else {
+			in.Policy.ProjectWorkspaceID = &v
+		}
+	}
+	if in.Policy.ProjectWorkspaceID != nil && in.Policy.ProjectID == nil {
+		writeError(w, http.StatusBadRequest, "project_workspace_id requires project_id")
+		return
+	}
+	if in.Policy.ProjectID != nil {
+		if s.projects == nil {
+			writeError(w, http.StatusServiceUnavailable, "project service unavailable")
+			return
+		}
+		projectRow, err := s.projects.Project(r.Context(), *in.Policy.ProjectID)
+		if err != nil || projectRow.WorkspaceID != in.WorkspaceID || projectRow.Status == "archived" {
+			writeError(w, http.StatusBadRequest, "selected project is not available in this workspace")
+			return
+		}
+		if in.Policy.ProjectWorkspaceID != nil {
+			reader, ok := s.projects.(projectWorkspaceViewReader)
+			if !ok {
+				writeError(w, http.StatusServiceUnavailable, "project workspace service unavailable")
+				return
+			}
+			workspaceRow, err := reader.WorkspaceView(r.Context(), *in.Policy.ProjectWorkspaceID)
+			if err != nil || workspaceRow.ProjectID != projectRow.ID || workspaceRow.Status == "archived" {
+				writeError(w, http.StatusBadRequest, "selected project workspace does not belong to the selected project")
+				return
+			}
+		}
+	}
 	if s.routines == nil {
 		writeError(w, http.StatusServiceUnavailable, "routine service unavailable")
 		return

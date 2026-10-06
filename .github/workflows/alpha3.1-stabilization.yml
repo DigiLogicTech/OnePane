@@ -84,10 +84,8 @@ jobs:
           ! grep -E '^export[[:space:]]+' internal/webui/static/chat-commands.js
           grep -F '<script src="/chat-commands.js"></script>' internal/webui/static/index.html
           grep -F '<script src="/app.js"></script>' internal/webui/static/index.html
-          cmp internal/webui/static/app.js packaging/windows/desktop/static/app.js
-          cmp internal/webui/static/index.html packaging/windows/desktop/static/index.html
-          cmp internal/webui/static/chat-commands.js packaging/windows/desktop/static/chat-commands.js
-          cmp internal/webui/static/style.css packaging/windows/desktop/static/style.css
+          test ! -d packaging/windows/desktop/static
+          test ! -e internal/webui/static/app.js.orig
           ! grep -F 'data-route="settings">⚙ <span>Defaults</span>' internal/webui/static/index.html
           ! grep -F "QA8_RELEASE" internal/webui/static/app.js
           grep -F "apiRequest('/v1/about')" internal/webui/static/app.js

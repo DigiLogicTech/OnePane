@@ -7,9 +7,6 @@ read=lambda p:(ROOT/p).read_text(encoding="utf-8")
 app=read("internal/webui/static/app.js")
 html=read("internal/webui/static/index.html")
 css=read("internal/webui/static/style.css")
-wapp=read("packaging/windows/desktop/static/app.js")
-whtml=read("packaging/windows/desktop/static/index.html")
-wcss=read("packaging/windows/desktop/static/style.css")
 
 checks=[]
 def ck(name, cond): checks.append((name,bool(cond)))
@@ -46,7 +43,7 @@ def single_selector_collection_calls(src):
     return out
 
 ck("No runtime RC patch layer ships", "/rc3.js" not in html and "ONEPANE_APPLY_RC3" not in app and not (ROOT/"internal/webui/static/rc3.js").exists())
-ck("Canonical and Windows WebUI match", app==wapp and html==whtml and css==wcss)
+ck("Windows desktop consumes the canonical WebUI through the backend proxy", not (ROOT/"packaging/windows/desktop/static").exists())
 ck("Exactly one canonical Alpha 3.1 product layer", app.count("/* === Alpha 3.1 canonical product layer === */")==1 and "/* === Alpha 3 workspace/model/runtime consolidation === */" not in app)
 ck("Route rendering keeps epoch invalidation", "let qa31ViewEpoch=0;" in app and "const epoch=++qa31ViewEpoch" in app and "epoch!==qa31ViewEpoch" in app)
 ck("Single-element selector helper is never used as a collection", not single_selector_collection_calls(app))

@@ -3,10 +3,8 @@
 package main
 
 import (
-	"embed"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -70,9 +68,6 @@ const (
 	cmdRestart = 1002
 	cmdQuit    = 1003
 )
-
-//go:embed static/*
-var inspectionAssets embed.FS
 
 var uiBaseURL string
 
@@ -434,28 +429,10 @@ func startDesktopUIServer() (string, error) {
 	mux.HandleFunc("/desktop/settings/model-pool", desktopModelPoolHandler)
 	mux.HandleFunc("/desktop/settings/project-root", desktopProjectRootHandler)
 	mux.HandleFunc("/desktop/folder-picker", desktopFolderPickerHandler)
-	mux.Handle("/v1/", proxy)
-	mux.Handle("/ws/", proxy)
-	staticFS, err := fs.Sub(inspectionAssets, "static")
-	if err != nil {
-		return "", err
-	}
-	fileServer := http.FileServer(http.FS(staticFS))
-	index, err := fs.ReadFile(staticFS, "index.html")
-	if err != nil {
-		return "", err
-	}
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusOK)
-			if r.Method != http.MethodHead {
-				_, _ = w.Write(index)
-			}
-			return
-		}
-		fileServer.ServeHTTP(w, r)
-	})
+	// The backend owns the only WebUI source tree. The desktop gateway keeps
+	// Windows-native endpoints on this origin and proxies every other route,
+	// including HTML/JS/CSS, to the authoritative control-plane WebUI.
+	mux.Handle("/", proxy)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return "", err

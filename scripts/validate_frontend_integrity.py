@@ -3,7 +3,6 @@ from pathlib import Path
 import sys
 ROOT=Path(__file__).resolve().parents[1]
 ui=(ROOT/"internal/webui/static/app.js").read_text(encoding="utf-8")
-win=(ROOT/"packaging/windows/desktop/static/app.js").read_text(encoding="utf-8")
 groups={
  "tasks/schedules":["Recurring / Scheduled","/v1/routines"],
  "project workspaces":["workspace-tabs","qa4SaveProjectWorkspaces","a31RefreshProjectGrid"],
@@ -30,8 +29,9 @@ for name,needles in groups.items():
 for stale in ["chat-demo-1","Provider Bots","Bot Runtime"]:
  if stale in ui: failed.append(("stale demo/bot UI",[stale])); print(f"[FAIL] stale marker: {stale}")
  else: print(f"[PASS] stale marker absent: {stale}")
-if ui!=win: failed.append(("canonical/Windows frontend parity",["app.js differs"])); print("[FAIL] canonical/Windows frontend parity")
-else: print("[PASS] canonical/Windows frontend parity")
+if (ROOT/"packaging/windows/desktop/static").exists():
+ failed.append(("single-source frontend",["Windows static copy still exists"])); print("[FAIL] Windows static copy still exists")
+else: print("[PASS] Windows desktop uses canonical backend WebUI only")
 if failed:
  print(f"\nFRONTEND INTEGRITY: {len(failed)} CHECK(S) FAILED",file=sys.stderr); sys.exit(1)
 print("\nFRONTEND INTEGRITY: ALL CHECKS PASSED")

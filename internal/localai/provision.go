@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,16 +18,36 @@ import (
 	"time"
 )
 
-type RuntimeManifest struct {
+type RuntimeDependency struct {
 	Name          string `json:"name"`
-	Version       string `json:"version"`
-	Backend       string `json:"backend,omitempty"`
-	OS            string `json:"os"`
-	Architecture  string `json:"architecture"`
 	SourceURL     string `json:"source_url"`
 	SHA256        string `json:"sha256"`
-	ArchiveFormat string `json:"archive_format"` // tar.gz | zip | binary
-	ExecutableRel string `json:"executable_rel"`
+	ArchiveFormat string `json:"archive_format"`
+}
+
+type RuntimeManifest struct {
+	Name          string              `json:"name"`
+	Version       string              `json:"version"`
+	Backend       string              `json:"backend,omitempty"`
+	OS            string              `json:"os"`
+	Architecture  string              `json:"architecture"`
+	SourceURL     string              `json:"source_url"`
+	SHA256        string              `json:"sha256"`
+	ArchiveFormat string              `json:"archive_format"` // tar.gz | zip | binary
+	ExecutableRel string              `json:"executable_rel"`
+	Dependencies  []RuntimeDependency `json:"dependencies,omitempty"`
+}
+
+func runtimeInstallFingerprint(runtime RuntimeManifest) string {
+	type fingerprint struct {
+		SourceURL     string              `json:"source_url"`
+		SHA256        string              `json:"sha256"`
+		ArchiveFormat string              `json:"archive_format"`
+		Dependencies  []RuntimeDependency `json:"dependencies,omitempty"`
+	}
+	raw, _ := json.Marshal(fingerprint{SourceURL: runtime.SourceURL, SHA256: strings.ToLower(runtime.SHA256), ArchiveFormat: runtime.ArchiveFormat, Dependencies: runtime.Dependencies})
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }
 
 type ModelArtifact struct {

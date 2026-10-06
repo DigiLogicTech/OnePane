@@ -21,16 +21,24 @@ import (
 
 const LocalAICatalogSchemaVersion = 1
 
-type RuntimeCatalogEntry struct {
+type RuntimeDependencyCatalogEntry struct {
 	Name          string `json:"name"`
-	Version       string `json:"version"`
-	Backend       string `json:"backend,omitempty"`
-	OS            string `json:"os"`
-	Architecture  string `json:"architecture"`
 	SourceURL     string `json:"source_url"`
 	SHA256        string `json:"sha256"`
 	ArchiveFormat string `json:"archive_format"`
-	ExecutableRel string `json:"executable_rel"`
+}
+
+type RuntimeCatalogEntry struct {
+	Name          string                          `json:"name"`
+	Version       string                          `json:"version"`
+	Backend       string                          `json:"backend,omitempty"`
+	OS            string                          `json:"os"`
+	Architecture  string                          `json:"architecture"`
+	SourceURL     string                          `json:"source_url"`
+	SHA256        string                          `json:"sha256"`
+	ArchiveFormat string                          `json:"archive_format"`
+	ExecutableRel string                          `json:"executable_rel"`
+	Dependencies  []RuntimeDependencyCatalogEntry `json:"dependencies,omitempty"`
 }
 
 type ModelCatalogEntry struct {
@@ -136,6 +144,22 @@ func (c ArtifactCatalog) Validate(now int64) error {
 		case "tar.gz", "zip", "binary":
 		default:
 			return fmt.Errorf("unsupported runtime archive format %q", r.ArchiveFormat)
+		}
+		seenDependency := map[string]struct{}{}
+		for _, dep := range r.Dependencies {
+			name := strings.ToLower(strings.TrimSpace(dep.Name))
+			if name == "" || !strings.HasPrefix(strings.ToLower(dep.SourceURL), "https://") || !validateSHA256(dep.SHA256) {
+				return fmt.Errorf("invalid runtime dependency for %q", r.Name)
+			}
+			switch dep.ArchiveFormat {
+			case "tar.gz", "zip":
+			default:
+				return fmt.Errorf("unsupported runtime dependency archive format %q", dep.ArchiveFormat)
+			}
+			if _, ok := seenDependency[name]; ok {
+				return fmt.Errorf("duplicate runtime dependency %q for %q", dep.Name, r.Name)
+			}
+			seenDependency[name] = struct{}{}
 		}
 		switch strings.ToLower(strings.TrimSpace(r.Backend)) {
 		case "", "cpu", "cuda", "rocm", "hip", "vulkan", "sycl", "metal", "opencl", "musa", "ascend", "cann":
@@ -322,6 +346,17 @@ func (s *CatalogService) ModelSpecifications(ctx context.Context) ([]ModelSpec, 
 	return out, nil
 }
 
+func runtimeDependenciesFromCatalog(in []RuntimeDependencyCatalogEntry) []RuntimeDependency {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]RuntimeDependency, 0, len(in))
+	for _, dep := range in {
+		out = append(out, RuntimeDependency{Name: dep.Name, SourceURL: dep.SourceURL, SHA256: dep.SHA256, ArchiveFormat: dep.ArchiveFormat})
+	}
+	return out
+}
+
 func (s *CatalogService) ResolvePlan(ctx context.Context, plan InstallPlan) (CatalogRecord, RuntimeManifest, ModelArtifact, error) {
 	rec, _, err := s.Active(ctx)
 	if err != nil {
@@ -352,7 +387,7 @@ func (s *CatalogService) ResolvePlanWithCatalog(ctx context.Context, catalogID s
 		}
 		backend := strings.ToLower(strings.TrimSpace(r.Backend))
 		if backend == wantedBackend && wantedBackend != "" {
-			runtime = RuntimeManifest{Name: r.Name, Version: r.Version, Backend: r.Backend, OS: r.OS, Architecture: r.Architecture, SourceURL: r.SourceURL, SHA256: r.SHA256, ArchiveFormat: r.ArchiveFormat, ExecutableRel: r.ExecutableRel}
+			runtime = RuntimeManifest{Name: r.Name, Version: r.Version, Backend: r.Backend, OS: r.OS, Architecture: r.Architecture, SourceURL: r.SourceURL, SHA256: r.SHA256, ArchiveFormat: r.ArchiveFormat, ExecutableRel: r.ExecutableRel, Dependencies: runtimeDependenciesFromCatalog(r.Dependencies)}
 			break
 		}
 		if backend == "" && fallback == nil {
@@ -362,7 +397,7 @@ func (s *CatalogService) ResolvePlanWithCatalog(ctx context.Context, catalogID s
 	}
 	if runtime.Name == "" && fallback != nil {
 		r := *fallback
-		runtime = RuntimeManifest{Name: r.Name, Version: r.Version, Backend: r.Backend, OS: r.OS, Architecture: r.Architecture, SourceURL: r.SourceURL, SHA256: r.SHA256, ArchiveFormat: r.ArchiveFormat, ExecutableRel: r.ExecutableRel}
+		runtime = RuntimeManifest{Name: r.Name, Version: r.Version, Backend: r.Backend, OS: r.OS, Architecture: r.Architecture, SourceURL: r.SourceURL, SHA256: r.SHA256, ArchiveFormat: r.ArchiveFormat, ExecutableRel: r.ExecutableRel, Dependencies: runtimeDependenciesFromCatalog(r.Dependencies)}
 	}
 	if runtime.Name == "" {
 		return catalogRec, runtime, model, fmt.Errorf("active catalog has no %s runtime for %s/%s", plan.RuntimeName, osName, arch)

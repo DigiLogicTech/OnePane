@@ -149,10 +149,33 @@ jobs:
         run: |
           rm -rf dist packaging/windows/setup/payload
 
+  runtime_artifact_smoke:
+    name: Managed runtime artifact smoke (${{ matrix.os }})
+    needs: validate
+    if: ${{ needs.validate.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: true
+          fetch-depth: 1
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Download extract and execute pinned CPU runtime
+        env:
+          ONEPANE_RUNTIME_ARTIFACT_SMOKE: "1"
+        run: go test ./internal/localai -run '^TestBundledCPURuntimeArtifactSmoke$' -count=1 -v
   windows-installed-smoke:
     name: Windows installed-product smoke (release gate)
-    needs: validate
-    if: ${{ needs.validate.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_hosted_smoke == true)) }}
+    needs: [validate, runtime_artifact_smoke]
+    if: ${{ needs.validate.result == 'success' && needs.runtime_artifact_smoke.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_hosted_smoke == true)) }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -250,8 +273,8 @@ jobs:
 
   ubuntu-installed-smoke:
     name: Ubuntu installed-package smoke (release gate)
-    needs: validate
-    if: ${{ needs.validate.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_hosted_smoke == true)) }}
+    needs: [validate, runtime_artifact_smoke]
+    if: ${{ needs.validate.result == 'success' && needs.runtime_artifact_smoke.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_hosted_smoke == true)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

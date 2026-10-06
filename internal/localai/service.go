@@ -373,12 +373,20 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 	if backendDir == "" {
 		backendDir = "generic"
 	}
+	runtimeFingerprint := runtimeInstallFingerprint(runtime)
 	runtimeRoot := filepath.Join(s.dataDir, "runtimes", runtime.Name, runtime.Version, backendDir)
+	if len(runtime.Dependencies) > 0 {
+		runtimeRoot = filepath.Join(s.dataDir, "runtimes", runtime.Name, runtime.Version, backendDir+"-"+runtimeFingerprint[:16])
+	}
 	execPath := filepath.Join(runtimeRoot, runtime.ExecutableRel)
 	reuseRuntime := false
 	var installedVersion, installedSHA, installedExec string
-	err = s.db.QueryRowContext(ctx, `SELECT runtime_version,source_sha256,executable_path FROM managed_local_runtimes WHERE node_id=? AND runtime_name=? AND status='ready'`, p.NodeID, runtime.Name).Scan(&installedVersion, &installedSHA, &installedExec)
-	if err == nil && installedVersion == runtime.Version && strings.EqualFold(installedSHA, runtime.SHA256) && filepath.Clean(installedExec) == filepath.Clean(execPath) {
+	runtimeInventoryName := runtime.Name
+	if b := strings.ToLower(strings.TrimSpace(runtime.Backend)); b != "" {
+		runtimeInventoryName += "@" + b
+	}
+	err = s.db.QueryRowContext(ctx, `SELECT runtime_version,source_sha256,executable_path FROM managed_local_runtimes WHERE node_id=? AND runtime_name=? AND status='ready'`, p.NodeID, runtimeInventoryName).Scan(&installedVersion, &installedSHA, &installedExec)
+	if err == nil && installedVersion == runtime.Version && strings.EqualFold(installedSHA, runtimeFingerprint) && filepath.Clean(installedExec) == filepath.Clean(execPath) {
 		if st, statErr := os.Stat(execPath); statErr == nil && !st.IsDir() {
 			reuseRuntime = true
 		}
@@ -397,6 +405,21 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 				_ = s.failPlan(ctx, p, err.Error())
 			}
 			return inference.ModelDeployment{}, err
+		}
+		type runtimeDependencyDownload struct {
+			dependency RuntimeDependency
+			path       string
+		}
+		dependencyDownloads := make([]runtimeDependencyDownload, 0, len(runtime.Dependencies))
+		for i, dependency := range runtime.Dependencies {
+			dependencyPath := filepath.Join(s.dataDir, "downloads", fmt.Sprintf("runtime-%s-%s-%s-dependency-%02d", runtime.Name, runtime.Version, backendDir, i+1))
+			if _, err := s.fetcher.Fetch(ctx, dependency.SourceURL, dependencyPath, dependency.SHA256); err != nil {
+				if !isResumableDownloadError(err) {
+					_ = s.failPlan(ctx, p, fmt.Sprintf("runtime dependency %s: %v", dependency.Name, err))
+				}
+				return inference.ModelDeployment{}, err
+			}
+			dependencyDownloads = append(dependencyDownloads, runtimeDependencyDownload{dependency: dependency, path: dependencyPath})
 		}
 		staging := runtimeRoot + ".installing"
 		_ = os.RemoveAll(staging)
@@ -417,6 +440,13 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 			_ = os.RemoveAll(staging)
 			_ = s.failPlan(ctx, p, err.Error())
 			return inference.ModelDeployment{}, err
+		}
+		for _, downloaded := range dependencyDownloads {
+			if err := ExtractRuntimeArchive(downloaded.path, downloaded.dependency.ArchiveFormat, staging); err != nil {
+				_ = os.RemoveAll(staging)
+				_ = s.failPlan(ctx, p, fmt.Sprintf("extract runtime dependency %s: %v", downloaded.dependency.Name, err))
+				return inference.ModelDeployment{}, err
+			}
 		}
 		stagedExec := filepath.Join(staging, runtime.ExecutableRel)
 		if st, err := os.Stat(stagedExec); err != nil || st.IsDir() {
@@ -469,7 +499,7 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 	if err != nil {
 		return inference.ModelDeployment{}, err
 	}
-	runtimeID, err := s.ensureManagedRuntime(ctx, p.NodeID, runtime, runtimeRoot, execPath)
+	runtimeID, err := s.ensureManagedRuntime(ctx, p.NodeID, runtime, runtimeRoot, execPath, runtimeFingerprint)
 	if err != nil {
 		return inference.ModelDeployment{}, err
 	}
@@ -550,7 +580,7 @@ func (s *Service) findOrRegisterManagedDeployment(ctx context.Context, modelID s
 	return s.inference.RegisterDeployment(ctx, inference.RegisterDeploymentCommand{ModelID: modelID, NodeID: &p.NodeID, RuntimeName: &rn, RuntimeVersion: &rv, RuntimeConfigJSON: cfg, ContextMaxReported: &p.ContextTokens, ActorPrincipalID: p.ApprovedBy})
 }
 
-func (s *Service) ensureManagedRuntime(ctx context.Context, nodeID string, manifest RuntimeManifest, installRoot, executable string) (string, error) {
+func (s *Service) ensureManagedRuntime(ctx context.Context, nodeID string, manifest RuntimeManifest, installRoot, executable, installFingerprint string) (string, error) {
 	now := s.clock.UnixMilli()
 	runtimeInventoryName := manifest.Name
 	if b := strings.ToLower(strings.TrimSpace(manifest.Backend)); b != "" {
@@ -559,7 +589,7 @@ func (s *Service) ensureManagedRuntime(ctx context.Context, nodeID string, manif
 	var existing string
 	err := s.db.QueryRowContext(ctx, `SELECT id FROM managed_local_runtimes WHERE node_id=? AND runtime_name=?`, nodeID, runtimeInventoryName).Scan(&existing)
 	if err == nil {
-		_, err = s.db.ExecContext(ctx, `UPDATE managed_local_runtimes SET runtime_version=?,install_root=?,executable_path=?,source_url=?,source_sha256=?,status='ready',managed_by_harness=1,installed_at=COALESCE(installed_at,?),updated_at=?,revision=revision+1 WHERE id=?`, manifest.Version, installRoot, executable, manifest.SourceURL, manifest.SHA256, now, now, existing)
+		_, err = s.db.ExecContext(ctx, `UPDATE managed_local_runtimes SET runtime_version=?,install_root=?,executable_path=?,source_url=?,source_sha256=?,status='ready',managed_by_harness=1,installed_at=COALESCE(installed_at,?),updated_at=?,revision=revision+1 WHERE id=?`, manifest.Version, installRoot, executable, manifest.SourceURL, installFingerprint, now, now, existing)
 		return existing, err
 	}
 	if err != sql.ErrNoRows {
@@ -569,7 +599,7 @@ func (s *Service) ensureManagedRuntime(ctx context.Context, nodeID string, manif
 	if err != nil {
 		return "", err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO managed_local_runtimes(id,node_id,runtime_name,runtime_version,install_root,executable_path,source_url,source_sha256,status,managed_by_harness,installed_at,revision,updated_at) VALUES(?,?,?,?,?,?,?,?, 'ready',1,?,1,?)`, idv, nodeID, runtimeInventoryName, manifest.Version, installRoot, executable, manifest.SourceURL, manifest.SHA256, now, now)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO managed_local_runtimes(id,node_id,runtime_name,runtime_version,install_root,executable_path,source_url,source_sha256,status,managed_by_harness,installed_at,revision,updated_at) VALUES(?,?,?,?,?,?,?,?, 'ready',1,?,1,?)`, idv, nodeID, runtimeInventoryName, manifest.Version, installRoot, executable, manifest.SourceURL, installFingerprint, now, now)
 	return idv, err
 }
 

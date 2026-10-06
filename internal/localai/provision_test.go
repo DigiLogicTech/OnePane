@@ -222,3 +222,41 @@ func TestHTTPFetcherDoesNotResumeUnverifiedPartial(t *testing.T) {
 		t.Fatalf("payload=%q", string(body))
 	}
 }
+
+func TestRuntimeInstallFingerprintIncludesDependencies(t *testing.T) {
+	base := RuntimeManifest{
+		Name: "llamacpp", Version: "1", Backend: "cuda", OS: "windows", Architecture: "amd64",
+		SourceURL: "https://example.invalid/llama.zip",
+		SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ArchiveFormat: "zip", ExecutableRel: "llama-server.exe",
+		Dependencies: []RuntimeDependency{{
+			Name: "cuda-runtime",
+			SourceURL: "https://example.invalid/cudart.zip",
+			SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			ArchiveFormat: "zip",
+		}},
+	}
+	first := runtimeInstallFingerprint(base)
+	if len(first) != 64 {
+		t.Fatalf("fingerprint=%q", first)
+	}
+	changed := base
+	changed.Dependencies = append([]RuntimeDependency(nil), base.Dependencies...)
+	changed.Dependencies[0].SHA256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	second := runtimeInstallFingerprint(changed)
+	if first == second {
+		t.Fatal("dependency digest change did not change runtime fingerprint")
+	}
+}
+
+func TestRuntimeInstallFingerprintIsStable(t *testing.T) {
+	runtime := RuntimeManifest{
+		Name: "llamacpp", Version: "1", Backend: "cpu", OS: "linux", Architecture: "amd64",
+		SourceURL: "https://example.invalid/llama.tar.gz",
+		SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ArchiveFormat: "tar.gz", ExecutableRel: "llama-server",
+	}
+	if a, b := runtimeInstallFingerprint(runtime), runtimeInstallFingerprint(runtime); a != b {
+		t.Fatalf("fingerprint unstable: %s != %s", a, b)
+	}
+}

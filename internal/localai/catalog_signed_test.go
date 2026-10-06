@@ -77,3 +77,38 @@ func TestCatalogRejectsExpired(t *testing.T) {
 		t.Fatal("expired catalog unexpectedly verified")
 	}
 }
+
+func TestCatalogRuntimeDependenciesAreValidated(t *testing.T) {
+	now := int64(1_800_000_000_000)
+	raw, trust := signedCatalogFixture(t, now)
+	cat, _, _, err := VerifySignedCatalog(raw, trust, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cat.Runtimes[0].Dependencies = []RuntimeDependencyCatalogEntry{{
+		Name: "cuda-runtime",
+		SourceURL: "https://example.invalid/cudart.tar.gz",
+		SHA256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+		ArchiveFormat: "tar.gz",
+	}}
+	if err := cat.Validate(now); err != nil {
+		t.Fatalf("valid dependency rejected: %v", err)
+	}
+	cat.Runtimes[0].Dependencies[0].SHA256 = "not-a-digest"
+	if err := cat.Validate(now); err == nil {
+		t.Fatal("invalid dependency digest unexpectedly accepted")
+	}
+}
+
+func TestRuntimeDependencyMappingPreservesTrustedArtifacts(t *testing.T) {
+	in := []RuntimeDependencyCatalogEntry{{
+		Name: "cuda-runtime",
+		SourceURL: "https://example.invalid/cudart.zip",
+		SHA256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+		ArchiveFormat: "zip",
+	}}
+	out := runtimeDependenciesFromCatalog(in)
+	if len(out) != 1 || out[0].Name != in[0].Name || out[0].SourceURL != in[0].SourceURL || out[0].SHA256 != in[0].SHA256 || out[0].ArchiveFormat != in[0].ArchiveFormat {
+		t.Fatalf("dependency mapping=%+v", out)
+	}
+}

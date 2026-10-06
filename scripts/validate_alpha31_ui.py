@@ -93,6 +93,7 @@ ck("Models headers grow with wrapped copy", ".models-page .card-header.models-ca
 ck("Command palette exposes real actions", "function a31CommandRegistry()" in app and "Detect local hardware" in app and "New scheduled task" in app and "Restart product tour" in app)
 ck("Health popover is live and never hard-codes inventory counts", "async function openHealthPopover" in app and "Not reported" in app and "5 / 8 active" not in app and "8 / 8" not in app)
 ck("Operational telemetry distinguishes zero from unreported feeds", "Promise.allSettled" in app and "liveOps.reported" in app and "liveOpsAttentionReported()" in app and "Attention status not fully reported" in app and "Node feed unavailable" in app and "Provider feed unavailable" in app)
+ck("Drawer telemetry distinguishes unreported feeds", "Event feed not reported." in app and "liveOpsAttentionReported()?String(ATTENTION_ITEMS.length):'Not reported'" in app and "Control plane ${escapeHtml(controlState)}" in app)
 attention_start=app.find("async function openAttentionPopover")
 attention_end=app.find("async function openHealthPopover", attention_start)
 attention_popover=app[attention_start:attention_end] if attention_start >= 0 and attention_end > attention_start else ""

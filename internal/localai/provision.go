@@ -84,7 +84,7 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, sourceURL, dest, expectedSHA st
 	if strings.TrimSpace(dest) == "" {
 		return DownloadResult{}, errors.New("destination required")
 	}
-	if expectedSHA != "" && (len(expectedSHA) != 64 || strings.ContainsAny(expectedSHA, " /\\\\"")) {
+	if expectedSHA != "" && (len(expectedSHA) != 64 || strings.ContainsAny(expectedSHA, " /\\\"")) {
 		return DownloadResult{}, errors.New("invalid expected sha256")
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {

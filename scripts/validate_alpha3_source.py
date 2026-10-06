@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 ROOT=Path(__file__).resolve().parents[1]
 read=lambda p:(ROOT/p).read_text(encoding="utf-8")
-ui=read("internal/webui/static/app.js")
+ui=read("internal/webui/static/app-foundation.js")+"\n"+read("internal/webui/static/app.js")
 setup=read("packaging/windows/setup/main.go")
 buildinfo=read("internal/buildinfo/buildinfo.go")
 runtime=read("internal/runtimecoord/service.go")

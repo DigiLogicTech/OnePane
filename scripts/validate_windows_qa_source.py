@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 ROOT=Path(__file__).resolve().parents[1]
 read=lambda p:(ROOT/p).read_text(encoding="utf-8")
-ui=read("internal/webui/static/app.js"); html=read("internal/webui/static/index.html"); css=read("internal/webui/static/style.css")
+ui=read("internal/webui/static/app-foundation.js")+"\n"+read("internal/webui/static/app.js"); html=read("internal/webui/static/index.html"); css=read("internal/webui/static/style.css")
 api=read("internal/api/server.go"); omni=read("internal/provideronboarding/omniroute.go"); webui=read("internal/webui/webui.go")
 desktop=read("packaging/windows/desktop/main.go"); setup=read("packaging/windows/setup/main.go"); verify=read("packaging/windows/Verify-OnePane.cmd")
 checks=[]

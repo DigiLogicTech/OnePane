@@ -6,7 +6,14 @@
   const waitFor=async(fn,label,timeout=20000)=>{const end=Date.now()+timeout;while(Date.now()<end){try{const v=await fn();if(v)return v}catch{}await sleep(75)}throw new Error("Timed out: "+label)};
   const clone=v=>JSON.parse(JSON.stringify(v));
   const json=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json"}});
-  const workspace={id:"pws-release",name:"Main workspace",widgets:[{id:"pw-release-chat",type:"chat",title:"Workspace chat",width:6,height:5,x:0,y:0,col:6,row:5}],orchestration:{mode:"direct",supervisor:{model:"auto",agent:"onepane-default"},team:{model:"auto",agent:"onepane-default",count:2},council:{model:"auto",agent:"onepane-default",count:2}}};
+  const workspace={id:"pws-release",name:"Main workspace",widgets:[
+    {id:"pw-release-follow",type:"follow",title:"Follow",col:4,row:5},
+    {id:"pw-release-modelstack",type:"modelstack",title:"Model Stack",col:4,row:5},
+    {id:"pw-release-chat",type:"chat",title:"Workspace chat",col:4,row:5},
+    {id:"pw-release-tasks",type:"tasks",title:"Tasks",col:6,row:4},
+    {id:"pw-release-notes",type:"notes",title:"Notes",col:6,row:4},
+    {id:"pw-release-settings",type:"settings",title:"Workspace settings",col:6,row:5}
+  ],orchestration:{mode:"direct",supervisor:{model:"auto",agent:"onepane-default"},team:{model:"auto",agent:"onepane-default",count:2},council:{model:"auto",agent:"onepane-default",count:2}}};
   let project={id:"project-release",workspace_id:"workspace-release",name:"Release QA Project",description:"Installed behavioural acceptance",status:"active",revision:1,project_policy:{onepane_ui:{workspaces:[workspace]}}};
   let projectPatchCount=0,turns=[];
   const originalFetch=window.fetch.bind(window);
@@ -40,6 +47,16 @@
   };
 
   const post=status=>{try{window.chrome?.webview?.postMessage(`onepane-ui-e2e|${status}|${results.join("; ")}`)}catch{}};
+  let pointerSeq=40;
+  const pointer=(el,type,x,y,id)=>{
+    const Ctor=window.PointerEvent||window.MouseEvent;
+    el.dispatchEvent(new Ctor(type,{bubbles:true,cancelable:true,composed:true,pointerId:id,pointerType:"mouse",isPrimary:true,button:0,buttons:type==="pointerup"?0:1,clientX:x,clientY:y}));
+  };
+  const gesture=async(el,dx,dy)=>{
+    const r=el.getBoundingClientRect(),x=r.left+Math.max(2,Math.min(r.width-2,r.width/2)),y=r.top+Math.max(2,Math.min(r.height-2,r.height/2)),id=++pointerSeq;
+    pointer(el,"pointerdown",x,y,id);await sleep(20);pointer(el,"pointermove",x+dx,y+dy,id);await sleep(35);pointer(el,"pointerup",x+dx,y+dy,id);await sleep(75);
+  };
+  const noOverlap=rows=>!rows.some((a,i)=>rows.slice(i+1).some(b=>a31Overlap(a,b)));
   const route=async name=>{
     const target=document.querySelector(`#primaryNav [data-route="${name}"]`)||document.querySelector(`[data-route="${name}"]`);
     check(target,`nav:${name}`);target.click();
@@ -50,25 +67,45 @@
   async function testProjectLayout(){
     await route("projects");check(document.querySelector("#qa4WorkspaceGrid"),"project workspace rendered");
     const edit=check(document.querySelector("#qa4EditWorkspace"),"workspace edit control");if(!state.projectWorkspaceEdit)edit.click();
-    await waitFor(()=>document.querySelector("[data-pw-preset]"),"workspace preset");
+    await waitFor(()=>document.querySelector('[data-pw-resize][data-resize-edge="e"]'),"workspace native resize handle");
     check(document.querySelector(".dashboard-edit-bar[data-pw-drag]"),"Workspace edit header is drag surface");
-    check(document.querySelectorAll("[data-pw-resize]").length>=8,"Workspace exposes edge and corner resize handles");
-    for(const size of ["wide","full"]){
-      const sel=check(document.querySelector("[data-pw-preset]"),`preset:${size}`);sel.value=size;sel.dispatchEvent(new Event("change",{bubbles:true}));
-      await waitFor(()=>!document.querySelector("#qa4WorkspaceGrid")?.dataset.layoutSaving,`save:${size}`,30000);await sleep(100);
-    }
-    check(projectPatchCount>=2,"sequential project revisions accepted");
+    check(document.querySelectorAll("[data-pw-resize]").length>=48,"Workspace exposes edge and corner resize handles for multiple components");
+
+    let ws=check(a31CurrentWorkspace(),"workspace active for native layout");
+    const follow=check(ws.widgets.find(w=>w.id==="pw-release-follow"),"workspace resize state"),beforeW=Number(follow.width);
+    let root=check(document.querySelector("#qa4WorkspaceGrid"),"workspace layout root"),handle=check(document.querySelector('[data-pw-widget="pw-release-follow"] [data-pw-resize][data-resize-edge="e"]'),"workspace east resize handle");
+    const rs=getComputedStyle(root),gap=parseFloat(rs.columnGap)||0,colW=(root.getBoundingClientRect().width-gap*(A31_LAYOUT_COLUMNS-1))/A31_LAYOUT_COLUMNS;
+    const patchesBeforeResize=projectPatchCount;await gesture(handle,colW+gap+3,0);
+    await waitFor(()=>projectPatchCount>patchesBeforeResize&&!document.querySelector("#qa4WorkspaceGrid")?.dataset.layoutSaving,"workspace pointer resize saved",30000);
+    ws=check(a31CurrentWorkspace(),"workspace after pointer resize");check(Number(ws.widgets.find(w=>w.id==="pw-release-follow")?.width)>beforeW,"Workspace pointer resize changes geometry");
+    check(noOverlap(ws.widgets),"Workspace pointer resize resolves overlap");
+
+    root=check(document.querySelector("#qa4WorkspaceGrid"),"workspace root after resize");
+    const drag=check(root.querySelector('[data-pw-widget="pw-release-settings"] .dashboard-edit-bar[data-pw-drag]'),"workspace native drag surface"),dragBefore=Number(ws.widgets.find(w=>w.id==="pw-release-settings")?.y),rowStep=A31_LAYOUT_ROW_PX+(parseFloat(getComputedStyle(root).rowGap)||0),patchesBeforeDrag=projectPatchCount;
+    await gesture(drag,0,rowStep*2+3);
+    await waitFor(()=>projectPatchCount>patchesBeforeDrag&&!document.querySelector("#qa4WorkspaceGrid")?.dataset.layoutSaving,"workspace pointer drag saved",30000);
+    ws=check(a31CurrentWorkspace(),"workspace after pointer drag");check(Number(ws.widgets.find(w=>w.id==="pw-release-settings")?.y)>dragBefore,"Workspace pointer drag changes geometry");
+    check(noOverlap(ws.widgets),"Workspace pointer drag resolves overlap");
+    const expectedFollow=clone(ws.widgets.find(w=>w.id==="pw-release-follow")),expectedSettings=clone(ws.widgets.find(w=>w.id==="pw-release-settings"));
+
     await route("operations");await route("projects");
-    const ws=check(a31CurrentWorkspace(),"workspace reload");check(Number(ws.widgets?.[0]?.width)===12,"latest layout persisted");
+    ws=check(a31CurrentWorkspace(),"workspace reload");
+    const reloadedFollow=ws.widgets.find(w=>w.id==="pw-release-follow"),reloadedSettings=ws.widgets.find(w=>w.id==="pw-release-settings");
+    check(Number(reloadedFollow?.width)===Number(expectedFollow.width)&&Number(reloadedFollow?.x)===Number(expectedFollow.x)&&Number(reloadedFollow?.y)===Number(expectedFollow.y),"Workspace resized geometry survives project reload");
+    check(Number(reloadedSettings?.x)===Number(expectedSettings.x)&&Number(reloadedSettings?.y)===Number(expectedSettings.y),"Workspace dragged geometry survives project reload");
+    check(noOverlap(ws.widgets),"Workspace persisted geometry remains collision free");
   }
 
   async function run(){
     localStorage.setItem(TOUR_KEY,TOUR_COMPLETE_VALUE);
-    state.operationsWidgets=defaultState().operationsWidgets.map((x,i)=>({...x,x:i,y:0,width:2,height:3,col:2,row:3}));
-    state.operationsLayoutVersion=2;
+    state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));
+    state.operationsWidgets[0].width="NaN";state.operationsWidgets[0].height="not-a-number";state.operationsWidgets[1].x="broken";
+    state.operationsLayoutVersion=4;
     persist();
     check(a31RepairPersistedUIState(),"broken persisted Operations layout repaired");
     check(!a31OperationsLayoutBroken(state.operationsWidgets),"repaired Operations layout is valid");
+    check(state.operationsWidgets.every(w=>[w.x,w.y,w.width,w.height].every(Number.isFinite)),"Operations repair emits only finite geometry");
+    check(Number(state.operationsWidgets.find(w=>w.id==="op-metrics")?.width)===12,"Operations malformed legacy geometry resets to meaningful default");
     await waitFor(()=>document.querySelector("#app")&&!document.querySelector("#app").classList.contains("hidden"),"application shell",30000);
     check(onepaneWorkspace==="workspace-release","mock workspace authenticated");
     renderInspector();
@@ -81,23 +118,33 @@
     }
 
     await route("operations");check(document.querySelector("#operationsLayout"),"Operations overview");
-    state.operationsEdit=true;a31RenderOperationsGrid();
+    state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));a31NormalizeLayout(state.operationsWidgets);state.operationsEdit=true;a31RenderOperationsGrid();
+    let opRoot=check(document.querySelector("#operationsLayout"),"Operations native layout root");
     check(document.querySelector(".dashboard-edit-bar[data-op-drag]"),"Operations edit header is drag surface");
-    check(document.querySelectorAll("[data-op-resize]").length>=8,"Operations exposes edge and corner resize handles");
+    check(document.querySelectorAll("[data-op-resize]").length>=56,"Operations exposes edge and corner resize handles");
+    const metricsRect=check(document.querySelector('[data-op-widget="op-metrics"]'),"Operations metrics card").getBoundingClientRect(),rootRect=opRoot.getBoundingClientRect();
+    check(metricsRect.width>rootRect.width*.9,"Operations default metrics component spans the dashboard");
+
     const resizeCard=check(document.querySelector('[data-op-widget="op-tasks"]'),"Operations resize card"),resizeEast=check(resizeCard.querySelector('[data-op-resize][data-resize-edge="e"]'),"Operations east resize handle"),resizeCardRect=resizeCard.getBoundingClientRect(),resizeEastRect=resizeEast.getBoundingClientRect();
     check(resizeEastRect.left>=resizeCardRect.left-1&&resizeEastRect.right<=resizeCardRect.right+1,"Operations resize hit target stays inside card");
-    state.operationsEdit=false;a31RenderOperationsGrid();
-    const custom=check(state.operationsWidgets.find(w=>w.id==="op-activity"),"Operations custom layout probe");custom.x=0;custom.y=20;custom.width=6;custom.height=5;custom.col=6;custom.row=5;a31ResolveLayout(state.operationsWidgets,custom.id);a31PersistOperationsLayout();a31RenderOperationsGrid();
+    const taskState=state.operationsWidgets.find(w=>w.id==="op-tasks"),taskWidthBefore=Number(taskState.width),opsStyle=getComputedStyle(opRoot),opsGap=parseFloat(opsStyle.columnGap)||0,opsCol=(opRoot.getBoundingClientRect().width-opsGap*(A31_LAYOUT_COLUMNS-1))/A31_LAYOUT_COLUMNS;
+    await gesture(resizeEast,opsCol+opsGap+3,0);
+    await waitFor(()=>Number(state.operationsWidgets.find(w=>w.id==="op-tasks")?.width)>taskWidthBefore&&!document.querySelector("#operationsLayout")?.dataset.layoutSaving,"Operations pointer resize committed");
+    check(noOverlap(state.operationsWidgets),"Operations pointer resize resolves overlap");
+
+    opRoot=check(document.querySelector("#operationsLayout"),"Operations root after resize");
+    const attentionDrag=check(opRoot.querySelector('[data-op-widget="op-attention"] .dashboard-edit-bar[data-op-drag]'),"Operations native drag surface"),attentionY=Number(state.operationsWidgets.find(w=>w.id==="op-attention")?.y),opRow=A31_LAYOUT_ROW_PX+(parseFloat(getComputedStyle(opRoot).rowGap)||0);
+    await gesture(attentionDrag,0,opRow*2+3);
+    await waitFor(()=>Number(state.operationsWidgets.find(w=>w.id==="op-attention")?.y)>attentionY&&!document.querySelector("#operationsLayout")?.dataset.layoutSaving,"Operations pointer drag committed");
+    check(noOverlap(state.operationsWidgets),"Operations pointer drag resolves overlap");
+
+    const custom=check(state.operationsWidgets.find(w=>w.id==="op-activity"),"Operations custom layout probe");custom.x=0;custom.y=24;custom.width=6;custom.height=5;custom.col=6;custom.row=5;a31ResolveLayout(state.operationsWidgets,custom.id);a31PersistOperationsLayout();a31ApplyLayout(opRoot,state.operationsWidgets,"data-op-widget");
     const rootBeforeRefresh=check(document.querySelector("#operationsLayout"),"Operations layout before polling"),revisionBefore=Number(state.operationsLayoutRevision||0);await refreshOperationalDataQA(true);
     check(document.querySelector("#operationsLayout")===rootBeforeRefresh,"Operations polling preserves layout DOM");
     const storedOps=JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}"),storedActivity=(storedOps.operationsWidgets||[]).find(w=>w.id==="op-activity");
-    check(Number(storedActivity?.y)===20&&Number(state.operationsWidgets.find(w=>w.id==="op-activity")?.y)===20,"Operations custom geometry survives polling and persistence");
+    check(Number(storedActivity?.y)===24&&Number(state.operationsWidgets.find(w=>w.id==="op-activity")?.y)===24,"Operations custom geometry survives polling and persistence");
     check(Number(state.operationsLayoutRevision||0)===revisionBefore,"Operations polling does not rewrite layout revision");
-    const resolveProbe=[{id:"anchor",x:4,y:0,width:4,height:4},{id:"left",x:0,y:0,width:4,height:4},{id:"conflict",x:4,y:0,width:4,height:4}];a31ResolveLayout(resolveProbe,"anchor");
-    check(!resolveProbe.some((a,i)=>resolveProbe.slice(i+1).some(b=>a31Overlap(a,b))),"Shared layout resolves collisions only at commit");
-    state.operationsWidgets=defaultState().operationsWidgets.map((x,i)=>({...x,x:i,y:0,width:3,col:3,height:3,row:3}));a31RenderOperationsGrid();
-    check(!a31OperationsLayoutBroken(state.operationsWidgets),"Operations render repairs injected overlap");
-    const ops=a31Array(state.operationsWidgets);for(let i=0;i<ops.length;i++)for(let j=i+1;j<ops.length;j++)check(!a31Overlap(ops[i],ops[j]),`Operations no overlap ${i}/${j}`);
+    check(noOverlap(state.operationsWidgets),"Operations persisted geometry remains collision free");
 
     await route("tasks");check(!document.querySelector("#tasksBody .error"),"Tasks route");
     await route("models");check(document.querySelector("#a31ModelsRoot")&&!document.querySelector("#a31ModelsRoot .error"),"Models route");

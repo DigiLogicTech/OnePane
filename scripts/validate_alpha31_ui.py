@@ -58,6 +58,7 @@ ck("Assistant and Project Orchestrator share persistent panel", 'id="controlChat
 ck("OnePane Chat can persistently collapse", 'id="controlChatToggle"' in html and "a31SetControlChatCollapsed" in app and 'data-collapsed="true"' in css)
 
 ck("Shared grid layout stores x y width height", "function a31NormalizeLayout" in app and "item.width" in app and "item.height" in app and "item.x" in app and "item.y" in app)
+ck("Layout normalization rejects non-finite persisted geometry", "a31FiniteLayoutNumber" in app and "Number.isFinite(n)" in app and "a31FallbackLayoutSize" in app and "Math.round(rawW??fallback.width)" in app)
 ck("Desktop components have real pointer resize handles", "function a31BindLayout" in app and 'data-op-resize' in app and 'data-pw-resize' in app and ".layout-resize-handle" in css)
 ck("Operations add path updates grid without page rerender", "openOperationsComponentPicker=function" in app and "closeModal();a31RenderOperationsGrid()" in app)
 ck("Project component mutations refresh only project grid", "a31RefreshProjectGrid(project,workspace" in app and "qa4SaveProjectWorkspaces" in app)
@@ -154,3 +155,4 @@ ck("Product tour visibly isolates the active target", "9999px" in css and 'data-
 
 ck("Operations and Workspaces share smooth pixel drag preview", 'data-op-drag=' in app and 'data-pw-drag=' in app and 'translate3d(' in app and 'card.style.willChange="transform,width,height"' in app)
 ck("Shared resize previews continuously then snaps once on release", "previewResize" in app and "a31ResizeRect(start,edge,dx,dy,constraints)" in app and "Object.assign(item,previewRect)" in app)
+ck("Installed smoke performs real pointer drag and resize", 'const gesture=async' in smoke and "Operations pointer resize committed" in smoke and "Workspace pointer drag changes geometry" in smoke and "Workspace resized geometry survives project reload" in smoke)

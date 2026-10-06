@@ -19,7 +19,7 @@ navItems.splice(0,navItems.length,
   ["models","◇","Models"],["nodes","⬡","Nodes"],["agents","♙","Agents"],["skills","✦","Skills"]
 );
 
-const A31_OPERATIONS_LAYOUT_VERSION=4;
+const A31_OPERATIONS_LAYOUT_VERSION=5;
 function a31OperationsLayoutBroken(rows){
   if(!Array.isArray(rows))return true;
   const ids=new Set();
@@ -39,17 +39,18 @@ function a31RepairLayoutInPlace(items){
     if(placed.some(p=>a31Overlap(item,p))){const slot=a31FirstFree(placed,item,null);item.x=slot.x;item.y=slot.y}
     item.col=item.width;item.row=item.height;placed.push(item);
   }
-  return true;
+  return !a31OperationsLayoutBroken(items);
 }
 function a31RepairPersistedUIState(){
   let changed=false;
+  const storedVersion=Number(state.operationsLayoutVersion||0);
   if(!Array.isArray(state.operationsWidgets)){
     state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));changed=true;
   }else if(a31OperationsLayoutBroken(state.operationsWidgets)){
-    if(!a31RepairLayoutInPlace(state.operationsWidgets))state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));
+    if(storedVersion<A31_OPERATIONS_LAYOUT_VERSION||!a31RepairLayoutInPlace(state.operationsWidgets))state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));
     changed=true;
   }
-  if(Number(state.operationsLayoutVersion||0)!==A31_OPERATIONS_LAYOUT_VERSION){
+  if(storedVersion!==A31_OPERATIONS_LAYOUT_VERSION){
     state.operationsLayoutVersion=A31_OPERATIONS_LAYOUT_VERSION;changed=true;
   }
   if(changed)persist();
@@ -88,16 +89,41 @@ function a31Constraints(item){
   return {minW,minH,maxW:12,maxH:12};
 }
 function a31Overlap(a,b){return !(a.x+a.width<=b.x||b.x+b.width<=a.x||a.y+a.height<=b.y||b.y+b.height<=a.y)}
+function a31FiniteLayoutNumber(...values){
+  for(const value of values){
+    if(value===null||value===undefined||value==="")continue;
+    const n=Number(value);if(Number.isFinite(n))return n;
+  }
+  return null;
+}
+function a31FallbackLayoutSize(item){
+  const id=String(item?.id||""),type=String(item?.type||"");
+  if(id.startsWith("op-")){
+    const defaults=defaultState().operationsWidgets,known=defaults.find(x=>x.id===id)||defaults.find(x=>x.type===type);
+    if(known)return {width:Number(known.width||known.col||4),height:Number(known.height||known.row||4)};
+  }
+  if(type==="chat")return {width:6,height:5};
+  if(type==="tasks"||type==="scheduled")return {width:6,height:4};
+  if(type==="settings")return {width:6,height:5};
+  if(type==="follow"||type==="modelstack"||type==="models")return {width:4,height:5};
+  return {width:4,height:4};
+}
 function a31NormalizeLayout(items){
+  if(!Array.isArray(items))return [];
   let cursorX=0,cursorY=0,rowH=0;
   for(const item of items){
-    const c=a31Constraints(item);
-    item.width=Math.max(c.minW,Math.min(c.maxW,Number(item.width||item.col||4)));
-    item.height=Math.max(c.minH,Math.min(c.maxH,Number(item.height||item.row||4)));
-    if(!Number.isFinite(Number(item.x))||!Number.isFinite(Number(item.y))){
+    const c=a31Constraints(item),fallback=a31FallbackLayoutSize(item);
+    const rawW=a31FiniteLayoutNumber(item.width,item.col),rawH=a31FiniteLayoutNumber(item.height,item.row);
+    item.width=Math.max(c.minW,Math.min(c.maxW,Math.round(rawW??fallback.width)));
+    item.height=Math.max(c.minH,Math.min(c.maxH,Math.round(rawH??fallback.height)));
+    const rawX=a31FiniteLayoutNumber(item.x),rawY=a31FiniteLayoutNumber(item.y);
+    if(rawX===null||rawY===null){
       if(cursorX+item.width>A31_LAYOUT_COLUMNS){cursorX=0;cursorY+=Math.max(1,rowH);rowH=0}
       item.x=cursorX;item.y=cursorY;cursorX+=item.width;rowH=Math.max(rowH,item.height);
-    }else{item.x=Math.max(0,Math.min(A31_LAYOUT_COLUMNS-item.width,Number(item.x)));item.y=Math.max(0,Number(item.y))}
+    }else{
+      item.x=Math.max(0,Math.min(A31_LAYOUT_COLUMNS-item.width,Math.round(rawX)));
+      item.y=Math.max(0,Math.round(rawY));
+    }
     item.col=item.width;item.row=item.height;
   }
   return items;
@@ -118,7 +144,7 @@ function a31ResolveLayout(items,anchorID){
     placed.push(item);
   }
 }
-function a31GridStyle(item){return `grid-column:${Number(item.x)+1} / span ${item.width};grid-row:${Number(item.y)+1} / span ${item.height}`}
+function a31GridStyle(item){a31NormalizeLayout([item]);return `grid-column:${item.x+1} / span ${item.width};grid-row:${item.y+1} / span ${item.height}`}
 function a31ApplyLayout(root,items,attr,animate=false,beforeOverride=null){
   const before=new Map();if(animate)$$(`[${attr}]`,root).forEach(el=>before.set(el.getAttribute(attr),el.getBoundingClientRect()));
   if(beforeOverride)for(const [id,rect] of beforeOverride)before.set(id,rect);

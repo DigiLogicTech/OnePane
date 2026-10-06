@@ -737,6 +737,8 @@ body { background:var(--app-gradient),var(--bg); }
 .layout-resize-handle.resize-ne,.layout-resize-handle.resize-se,.layout-resize-handle.resize-sw,.layout-resize-handle.resize-nw{width:20px;height:20px;border-radius:6px}
 .layout-resize-handle.resize-ne{right:0;top:0;cursor:nesw-resize}.layout-resize-handle.resize-se{right:0;bottom:0;cursor:nwse-resize}
 .layout-resize-handle.resize-sw{left:0;bottom:0;cursor:nesw-resize}.layout-resize-handle.resize-nw{left:0;top:0;cursor:nwse-resize}
+.a31-layout-item.editable .layout-resize-handle.resize-se::after{content:"";position:absolute;right:3px;bottom:3px;width:8px;height:8px;border-right:2px solid color-mix(in srgb,var(--accent) 72%,var(--muted));border-bottom:2px solid color-mix(in srgb,var(--accent) 72%,var(--muted));border-radius:0 0 2px 0;pointer-events:none}
+.a31-layout-item.editable .layout-resize-handle:hover{background:color-mix(in srgb,var(--accent) 12%,transparent)}
 .a31-layout-item[data-layout-active="true"]{z-index:20}
 .dashboard-edit-bar.hidden{display:none}
 

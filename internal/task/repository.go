@@ -9,8 +9,10 @@ import (
 type repository interface {
 	Get(context.Context, string) (Task, error)
 	List(context.Context, string, int) ([]Task, error)
+	ListArchived(context.Context, string, int) ([]Task, error)
 	GetForUpdate(context.Context, storage.Tx, string) (Task, error)
 	Insert(context.Context, storage.Tx, Task) error
+	SetArchived(context.Context, storage.Tx, string, int64, *int64, int64) error
 	Transition(context.Context, storage.Tx, transitionRecord) error
 	NextAttemptNumber(context.Context, storage.Tx, string) (int64, error)
 	InsertAttempt(context.Context, storage.Tx, Attempt) error

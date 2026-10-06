@@ -125,7 +125,8 @@
     await waitFor(()=>opRoot.getBoundingClientRect().width>100&&document.querySelector('[data-op-widget="op-metrics"]')?.getBoundingClientRect().width>0,"rendered Operations geometry",10000);
     check(document.querySelector(".dashboard-edit-bar[data-op-drag]"),"Operations edit header is drag surface");
     check(document.querySelectorAll("[data-op-resize]").length>=56,"Operations exposes edge and corner resize handles");
-    const metricsRect=check(document.querySelector('[data-op-widget="op-metrics"]'),"Operations metrics card").getBoundingClientRect(),rootRect=opRoot.getBoundingClientRect();
+    const metricsCard=check(document.querySelector('[data-op-widget="op-metrics"]'),"Operations metrics card"),metricsRect=metricsCard.getBoundingClientRect(),rootRect=opRoot.getBoundingClientRect(),rootStyle=getComputedStyle(opRoot),metricsStyle=getComputedStyle(metricsCard);
+    results.push(`ops-geometry inner=${innerWidth} root=${Math.round(rootRect.width)} card=${Math.round(metricsRect.width)} display=${rootStyle.display} columns=${rootStyle.gridTemplateColumns} start=${metricsStyle.gridColumnStart} end=${metricsStyle.gridColumnEnd} inline=${metricsCard.getAttribute("style")||""}`);
     check(metricsRect.width>rootRect.width*.9,"Operations default metrics component spans the dashboard");
 
     const resizeCard=check(document.querySelector('[data-op-widget="op-tasks"]'),"Operations resize card"),resizeEast=check(resizeCard.querySelector('[data-op-resize][data-resize-edge="e"]'),"Operations east resize handle"),resizeCardRect=resizeCard.getBoundingClientRect(),resizeEastRect=resizeEast.getBoundingClientRect();

@@ -60,9 +60,9 @@ function renderNav(){
   const modelTree=`<div class="model-nav-tree"><button class="model-nav-child ${route==="models"&&a31ModelView==="local"?'active':''}" data-a31-model-view="local"><span>◈</span><span>Local Models</span></button><button class="model-nav-child ${route==="models"&&a31ModelView==="cloud"?'active':''}" data-a31-model-view="cloud"><span>☁</span><span>Cloud Models</span></button></div>`;
   const html=navItems.map(([r,icon,label])=>{const translated=qa5T(r,label),hasLeaf=(r==="models"||r==="projects"),parentActive=route===r&&!hasLeaf;const row=`<button class="nav-item ${parentActive?'active':''}" data-route="${r}" title="${escapeHtml(translated)}"><span class="nav-icon">${icon}</span><span class="nav-label">${escapeHtml(translated)}</span></button>`;if(r==="projects")return row+projectTree;if(r==="models")return row+modelTree;return row}).join("");
   nav.innerHTML=html;
-  $("[data-a31-model-view]",nav).forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();openRoute("models");a31SetModelView(b.dataset.a31ModelView)});
-  $("[data-a31-project-nav]",nav).forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();qa4ProjectHub.activeProjectID=b.dataset.a31ProjectNav;qa4ProjectHub.activeWorkspaceID=b.dataset.a31WorkspaceNav||"";openRoute("projects")});
-  $(":scope > [data-route]",nav).forEach(b=>b.onclick=e=>{e.preventDefault();openRoute(b.dataset.route)});
+  $$("[data-a31-model-view]",nav).forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();openRoute("models");a31SetModelView(b.dataset.a31ModelView)});
+  $$("[data-a31-project-nav]",nav).forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();qa4ProjectHub.activeProjectID=b.dataset.a31ProjectNav;qa4ProjectHub.activeWorkspaceID=b.dataset.a31WorkspaceNav||"";openRoute("projects")});
+  $$(":scope > [data-route]",nav).forEach(b=>b.onclick=e=>{e.preventDefault();openRoute(b.dataset.route)});
 }
 
 /* Shared deterministic component layout. */

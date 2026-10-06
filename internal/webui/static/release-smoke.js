@@ -240,6 +240,7 @@
     const archivedTab=check(document.querySelector('[data-task-tab="archived"]'),"Archived Tasks tab");archivedTab.click();
     const restoreButton=await waitFor(()=>document.querySelector('[data-task-archive="task-release"][data-task-restore="1"]'),"Task Restore action");restoreButton.click();
     await waitFor(()=>taskRows.some(t=>t.id==="task-release")&&!archivedTaskRows.some(t=>t.id==="task-release"),"Archived task restored");
+    await waitFor(()=>document.querySelector('[data-task-archive="task-release"][data-task-restore="0"]')&&!document.querySelector('[data-task-archive="task-release"][data-task-restore="1"]'),"Task restore render settled");
     await route("models");check(document.querySelector("#a31ModelsRoot")&&!document.querySelector("#a31ModelsRoot .error"),"Models route");
     await route("nodes");check(document.querySelector("#a31Nodes")&&!document.querySelector("#a31Nodes .error"),"Nodes envelope");
     document.querySelector("#a31AddNode")?.click();await waitFor(()=>document.querySelector("#pairNodeForm"),"pairing modal");check(document.querySelector("#pairNodeForm"),"Add Node pairing flow");closeModal();

@@ -103,6 +103,10 @@ ck("Collapsed sidebar hides brand icon", '.app-shell[data-sidebar="collapsed"] .
 ck("Models headers grow with wrapped copy", ".models-page .card-header.models-card-header" in css and "height:auto" in css)
 
 ck("Command palette exposes real actions", "function a31CommandRegistry()" in app and "Detect local hardware" in app and "New scheduled task" in app and "Restart product tour" in app)
+ck("Tasks expose durable archive and restore controls", 'data-task-tab="archived"' in app and "data-task-archive" in app and "/archive" in app and "/unarchive" in app and "Task archived without deletion" in smoke)
+ck("Task creation uses Project and Workspace selectors", 'id="newTaskProject"' in app and 'id="newTaskWorkspace"' in app and "/workspaces" in app and "New task Workspace scoped options" in smoke)
+ck("Scheduled tasks support bounded recurrence", 'id="qa4RoutineEndMode"' in app and "max_occurrences" in app and "end_at_utc" in app and "Scheduled task preserves maximum run count" in smoke)
+ck("Modal task flows sit above shell controls", ".modal-backdrop { z-index:1400" in css and "Task modal is above Inspector controls" in smoke)
 ck("Health popover is live and never hard-codes inventory counts", "async function openHealthPopover" in app and "Not reported" in app and "5 / 8 active" not in app and "8 / 8" not in app)
 ck("Operational telemetry distinguishes zero from unreported feeds", "Promise.allSettled" in app and "liveOps.reported" in app and "liveOpsAttentionReported()" in app and "Attention status not fully reported" in app and "Node feed unavailable" in app and "Provider feed unavailable" in app)
 ck("Drawer telemetry distinguishes unreported feeds", "Event feed not reported." in app and "liveOpsAttentionReported()?String(ATTENTION_ITEMS.length):'Not reported'" in app and "Control plane ${escapeHtml(controlState)}" in app)

@@ -12,8 +12,8 @@ on:
         default: false
 
 concurrency:
-  group: alpha32-source-native-${{ github.ref }}
-  cancel-in-progress: true
+  group: alpha32-source-native-${{ github.sha }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -76,6 +76,8 @@ jobs:
           python3 scripts/validate_frontend_architecture.py
           python3 scripts/validate_frontend_integrity.py
           python3 scripts/validate_alpha31_product_contract.py
+          python3 scripts/validate_release_candidate.py
+          python3 scripts/validate_release_process.py
           sh -n packaging/debian/preinst packaging/debian/postinst packaging/debian/prerm packaging/debian/postrm
           bash -n scripts/build-ubuntu-deb.sh scripts/install-ubuntu.sh
           node --check internal/webui/static/chat-commands.js
@@ -94,6 +96,7 @@ jobs:
           ! grep -F 'data-route="settings">⚙ <span>Defaults</span>' internal/webui/static/index.html
           ! grep -F "QA8_RELEASE" internal/webui/static/app-foundation.js internal/webui/static/app.js
           grep -F "apiRequest('/v1/about')" internal/webui/static/app-foundation.js
+          git diff --exit-code
       - name: Go tests
         run: go test ./...
       - name: Build Windows x64 installer
@@ -138,6 +141,23 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/build-ubuntu-deb.sh
+      - name: Write immutable candidate manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, os
+          manifest={
+              "version": os.environ["ONEPANE_VERSION"],
+              "commit": os.environ["GITHUB_SHA"],
+              "workflow_run_id": os.environ["GITHUB_RUN_ID"],
+              "workflow_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "branch": os.environ["GITHUB_REF_NAME"],
+          }
+          Path("dist").mkdir(exist_ok=True)
+          Path("dist/candidate-manifest.json").write_text(json.dumps(manifest,indent=2)+"\n")
+          PY
       - uses: actions/upload-artifact@v4
         if: success()
         with:

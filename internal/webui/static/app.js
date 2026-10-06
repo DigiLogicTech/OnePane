@@ -264,10 +264,16 @@ async function a31RecoveryContent(){
   const empty=componentsReported&&tasksReported&&!compRows.length&&!failed.length?'<div class="empty-state compact">No degraded components or failed/blocked tasks require recovery.</div>':"";
   return `<section class="panel-card"><div class="card-header recovery-card-header"><div><div class="card-title">Recovery</div><div class="list-meta">Actionable degraded state only; OnePane does not reset healthy components.</div></div><button class="btn" id="a31RecoveryRefresh">Refresh health</button></div><div class="widget-body"><div class="recovery-list">${unavailable}${compRows.map(c=>`<div class="recovery-row"><div><strong>${escapeHtml(c.display_name||c.id)}</strong><div class="list-meta">${escapeHtml(c.last_error||c.state||"degraded")}</div></div><button class="btn" data-a31-repair-component="${escapeHtml(c.id)}">Repair</button></div>`).join("")}${failed.map(t=>`<div class="recovery-row"><div><strong>Task ${escapeHtml(t.id||"")}</strong><div class="list-meta">${escapeHtml(t.objective||t.state||"")}</div></div><button class="btn" data-route="tasks">Open Tasks</button></div>`).join("")}${empty}</div></div></section>`
 }
+let a31OperationsRefreshOnly=0;
+const a31RefreshOperationalDataBase=refreshOperationalDataQA;
+refreshOperationalDataQA=async function(force=false){
+  a31OperationsRefreshOnly++;
+  try{return await a31RefreshOperationalDataBase(force)}
+  finally{a31OperationsRefreshOnly=Math.max(0,a31OperationsRefreshOnly-1)}
+};
 function a31RefreshOperationsData(){
-  if(!a31RouteIs("operations"))return false;
-  if(a31OperationsView!=="overview"){renderOperations();return true}
-  const root=$("#operationsLayout");if(!root){renderOperations();return true}
+  if(!a31RouteIs("operations")||a31OperationsView!=="overview")return false;
+  const root=$("#operationsLayout");if(!root)return false;
   if(root.classList.contains("layout-interacting")||root.dataset.layoutSaving==="true"){root.dataset.layoutRefreshPending="true";return true}
   for(const w of state.operationsWidgets||[]){
     const card=$(`[data-op-widget="${CSS.escape(w.id)}"]`,root),content=card?.querySelector(".dashboard-widget-content");
@@ -276,6 +282,7 @@ function a31RefreshOperationsData(){
   bindViewActions(root);return true;
 }
 renderOperations=async function(){
+  if(a31OperationsRefreshOnly>0&&a31RefreshOperationsData())return;
   const actions=`<button class="btn ${state.operationsEdit?'primary':''}" id="editOperations">${state.operationsEdit?'Done':'Edit layout'}</button>${state.operationsEdit?'<button class="btn" id="addOperationsComponent">Add component</button><button class="btn" id="resetOperationsLayout">Reset layout</button>':""}`;
   $("#viewHost").innerHTML=`<section class="page">${pageHeader("Operations","System overview, activity, health and recovery",actions)}${a31OperationsTabs()}<div id="a31OperationsBody"></div></section>`;
   a31BindOperationsTabs();

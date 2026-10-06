@@ -34,7 +34,7 @@ function defaultState(){
   return {
     theme:'system', sidebar:'expanded', inspector:'open', inspectorWidth:360, drawer:'open', drawerHeight:210, approvalLevel:'medium',
     tabs:[{id:'tab-operations',route:'operations',title:'Operations',pinned:true,state:'active',lastActive:Date.now()}],
-    activeTab:'tab-operations', workspaceEdit:false, operationsEdit:false, controlChatCollapsed:false, operationsLayoutRevision:0,
+    activeTab:'tab-operations', workspaceEdit:false, operationsEdit:false, controlChatCollapsed:false,
     operationsWidgets:[
       {id:'op-metrics',title:'System metrics',type:'metrics',x:0,y:0,width:12,height:3,col:12,row:3},
       {id:'op-tasks',title:'Active Tasks',type:'tasks',x:0,y:3,width:6,height:5,col:6,row:5},
@@ -705,7 +705,7 @@ async function refreshOperationalDataQA(force=false){
     liveOps.providers=liveOps.reported.providers?(Array.isArray(providers)?providers:(providers?.providers||[])):[];
     liveOps.events=liveOps.reported.events&&Array.isArray(events)?events:[];
     liveOps.lastRefresh=Date.now();syncLiveNotifications();
-    if(currentTab()?.route==='operations'){if(typeof a31RefreshOperationsData==='function')a31RefreshOperationsData();else renderOperations();}
+    if(currentTab()?.route==='operations')renderOperations();
   })().finally(()=>{operationsRefreshInFlight=null;});
   return operationsRefreshInFlight;
 }

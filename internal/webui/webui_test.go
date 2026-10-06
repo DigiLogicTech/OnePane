@@ -54,7 +54,7 @@ func TestSPAFallbackServesShellWithoutRedirect(t *testing.T) {
 
 func TestStaticAssetsStillServed(t *testing.T) {
 	h := Handler()
-	for _, target := range []string{"/chat-commands.js", "/app-foundation.js", "/app.js", "/style.css", "/onepane-icon.svg"} {
+	for _, target := range []string{"/chat-commands.js", "/app-foundation.js", "/release-smoke.js", "/app.js", "/style.css", "/onepane-icon.svg"} {
 		t.Run(target, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, target, nil)
 			rr := httptest.NewRecorder()

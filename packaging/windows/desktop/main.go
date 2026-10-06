@@ -690,9 +690,13 @@ func comInvoke(this, result, object uintptr) uintptr {
 			desktopLogf("PutIsVisible failed: HRESULT 0x%08X", uint32(r))
 		}
 		resizeWebView()
-		uri, _ := syscall.UTF16PtrFromString(uiBaseURL + "/")
+		navigateURL := uiBaseURL + "/"
+		if os.Getenv("ONEPANE_UI_E2E") == "1" {
+			navigateURL += "?onepane_release_smoke=1"
+		}
+		uri, _ := syscall.UTF16PtrFromString(navigateURL)
 		hr = callCOM(web, 5, uintptr(unsafe.Pointer(uri))) // Navigate
-		desktopLogf("WebView2 Navigate(%s/) returned HRESULT 0x%08X", uiBaseURL, uint32(hr))
+		desktopLogf("WebView2 Navigate(%s) returned HRESULT 0x%08X", navigateURL, uint32(hr))
 		return hr
 	}
 	return 0
@@ -811,6 +815,16 @@ func handleWebMessage(message string) {
 		}
 		_ = os.MkdirAll(dir, 0o755)
 		_ = os.WriteFile(filepath.Join(dir, "ui-ready.txt"), []byte(message), 0o644)
+		return
+	}
+	if strings.HasPrefix(message, "onepane-ui-e2e|") {
+		desktopLogf("%s", message)
+		dir := filepath.Join(os.Getenv("LOCALAPPDATA"), "OnePane")
+		if os.Getenv("LOCALAPPDATA") == "" {
+			dir = filepath.Join(os.TempDir(), "OnePane")
+		}
+		_ = os.MkdirAll(dir, 0o755)
+		_ = os.WriteFile(filepath.Join(dir, "ui-e2e.txt"), []byte(message), 0o644)
 		return
 	}
 	if !strings.HasPrefix(message, "onepane-theme|") {

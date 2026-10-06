@@ -80,12 +80,14 @@ jobs:
           bash -n scripts/build-ubuntu-deb.sh scripts/install-ubuntu.sh
           node --check internal/webui/static/chat-commands.js
           node --check internal/webui/static/app-foundation.js
+          node --check internal/webui/static/release-smoke.js
           node --check internal/webui/static/app.js
           ! grep -F "type=\"module\"" internal/webui/static/index.html
           ! grep -F "from './chat-commands.js'" internal/webui/static/app.js
           ! grep -E '^export[[:space:]]+' internal/webui/static/chat-commands.js
           grep -F '<script src="/chat-commands.js"></script>' internal/webui/static/index.html
           grep -F '<script src="/app-foundation.js"></script>' internal/webui/static/index.html
+          grep -F '<script src="/release-smoke.js"></script>' internal/webui/static/index.html
           grep -F '<script src="/app.js"></script>' internal/webui/static/index.html
           test ! -d packaging/windows/desktop/static
           test ! -e internal/webui/static/app.js.orig
@@ -220,23 +222,32 @@ jobs:
           }
           function Assert-NativeUIReady {
             $marker = Join-Path $env:LOCALAPPDATA 'OnePane\ui-ready.txt'
-            Remove-Item -Force -ErrorAction SilentlyContinue $marker
+            $e2eMarker = Join-Path $env:LOCALAPPDATA 'OnePane\ui-e2e.txt'
+            Remove-Item -Force -ErrorAction SilentlyContinue $marker,$e2eMarker
+            $env:ONEPANE_UI_E2E = '1'
             $desktop = Start-Process -FilePath (Join-Path $install 'OnePane.Desktop.exe') -PassThru
             try {
-              $deadline = (Get-Date).AddSeconds(75)
+              $deadline = (Get-Date).AddSeconds(120)
+              $uiReady = $false
               while ((Get-Date) -lt $deadline) {
-                if (Test-Path $marker) {
+                if ((-not $uiReady) -and (Test-Path $marker)) {
                   $value = (Get-Content -Raw $marker).Trim()
-                  if ($value -eq "onepane-ui-ready|$env:ONEPANE_VERSION") { return }
-                  throw "Unexpected native UI-ready marker: $value"
+                  if ($value -ne "onepane-ui-ready|$env:ONEPANE_VERSION") { throw "Unexpected native UI-ready marker: $value" }
+                  $uiReady = $true
                 }
-                if ($desktop.HasExited) { throw "OnePane Desktop exited before UI-ready (exit $($desktop.ExitCode))" }
-                Start-Sleep -Milliseconds 750
+                if (Test-Path $e2eMarker) {
+                  $e2e = (Get-Content -Raw $e2eMarker).Trim()
+                  if (-not $e2e.StartsWith('onepane-ui-e2e|PASS|')) { throw "Installed UI acceptance failed: $e2e" }
+                  if ($uiReady) { return }
+                }
+                if ($desktop.HasExited) { throw "OnePane Desktop exited before installed UI acceptance completed (exit $($desktop.ExitCode))" }
+                Start-Sleep -Milliseconds 500
               }
               $log = Join-Path $env:LOCALAPPDATA 'OnePane\desktop.log'
-              if (Test-Path $log) { Get-Content $log -Tail 120 | Write-Host }
-              throw 'Native OnePane UI did not acknowledge JavaScript bootstrap'
+              if (Test-Path $log) { Get-Content $log -Tail 160 | Write-Host }
+              throw 'Native OnePane UI did not complete behavioural acceptance'
             } finally {
+              Remove-Item Env:ONEPANE_UI_E2E -ErrorAction SilentlyContinue
               Get-Process 'OnePane.Desktop' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
             }
           }

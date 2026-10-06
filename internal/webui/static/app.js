@@ -460,4 +460,4 @@ renderActiveView=async function(){
   const renderers={operations:renderOperations,tasks:renderTasks,projects:renderProjects,models:renderModels,nodes:renderNodes,agents:renderAgents,skills:renderSkills,settings:renderSettings,secrets:renderSecrets,evidence:()=>renderPlaceholder("Evidence / Audit","Event Ledger, Artifacts, Observations and Verifications.")};
   try{await Promise.resolve((renderers[route]||renderOperations)())}finally{const host=$("#viewHost");if(epoch===qa31ViewEpoch){if(host)host.dataset.renderedRoute=route;renderNav()}}
 };
-bootOnePane();
+bootOnePane().then(()=>window.onepaneReleaseSmoke?.()).catch(ex=>{try{window.chrome?.webview?.postMessage(`onepane-ui-e2e|FAIL|boot: ${String(ex?.message||ex)}`)}catch{}});

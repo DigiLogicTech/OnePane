@@ -49,6 +49,7 @@ ck("Tour launches from canonical overlay host", 'const root=$("#overlayRoot")' i
 ck("Windows desktop consumes the canonical backend WebUI", 'mux.Handle("/", proxy)' in desktop and "test ! -d packaging/windows/desktop/static" in workflow)
 ck("Windows and Ubuntu packages remain CI outputs", "Build Windows x64 installer" in workflow and "Build Ubuntu amd64 package" in workflow)
 ck("native Windows UI-ready smoke contract remains", "onepane-ui-ready|" in app and "ui-ready.txt" in desktop and "Assert-NativeUIReady" in workflow)
+ck("installed Windows UI exercises behavioural acceptance", "onepane-ui-e2e|" in desktop and "ui-e2e.txt" in desktop and "ONEPANE_UI_E2E" in workflow and "release-smoke.js" in workflow)
 ck("Windows setup remains noninteractive-test capable", all(x in setup for x in ["--silent","--no-launch","--skip-optional-runtime"]))
 ck("Windows upgrades retain and restore previous application payload on failed health", all(x in setup for x in ["capturePayloadRollback","rollback.Restore()","rollbackArmed","previous OnePane application payload restored"]) and "resp.StatusCode < 300" in setup)
 ck("Ubuntu upgrades retain previous binary and activate recovery override on failed health", all(x in debpre+debpost+debbuild for x in ["package-upgrade","PENDING_ROLLBACK","ROLLBACK_DROPIN","activate_previous_binary","packaging/debian/preinst"]))

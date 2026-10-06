@@ -68,6 +68,14 @@ func (s *Service) List(ctx context.Context, workspaceID string, limit int) ([]Ta
 	return s.repo.List(ctx, workspaceID, limit)
 }
 
+func (s *Service) ListArchived(ctx context.Context, workspaceID string, limit int) ([]Task, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return nil, fmt.Errorf("%w: workspace id is required", ErrInvalidCommand)
+	}
+	return s.repo.ListArchived(ctx, workspaceID, limit)
+}
+
 func (s *Service) Create(ctx context.Context, cmd CreateCommand) (Task, error) {
 	var created Task
 	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
@@ -121,14 +129,14 @@ func (s *Service) CreateInTransaction(ctx context.Context, tx storage.Tx, cmd Cr
 		return Task{}, err
 	}
 	now := s.clock.UnixMilli()
-	t := Task{ID: taskID, WorkspaceID: cmd.WorkspaceID, ProjectID: cmd.ProjectID,
+	t := Task{ID: taskID, WorkspaceID: cmd.WorkspaceID, ProjectID: cmd.ProjectID, ProjectWorkspaceID: cmd.ProjectWorkspaceID,
 		ArtifactSessionID: cmd.ArtifactSessionID, PlanID: cmd.PlanID, ParentTaskID: cmd.ParentTaskID,
 		Objective: strings.TrimSpace(cmd.Objective), State: StateCreated, SchedulingClass: cmd.SchedulingClass,
 		Priority: cmd.Priority, Completion: cloneJSON(cmd.Completion), Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := s.repo.Insert(ctx, tx, t); err != nil {
 		return Task{}, err
 	}
-	payload, _ := json.Marshal(map[string]any{"task_id": taskID, "objective": t.Objective, "state": t.State, "revision": t.Revision, "scheduling_class": t.SchedulingClass})
+	payload, _ := json.Marshal(map[string]any{"task_id": taskID, "objective": t.Objective, "state": t.State, "revision": t.Revision, "scheduling_class": t.SchedulingClass, "project_id": t.ProjectID, "project_workspace_id": t.ProjectWorkspaceID})
 	if err := s.events.Append(ctx, tx, event.Event{ID: eventID, WorkspaceID: &cmd.WorkspaceID, Type: "task.created", AggregateType: "task", AggregateID: taskID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID, Payload: payload, OccurredAt: now}); err != nil {
 		return Task{}, err
 	}
@@ -137,6 +145,61 @@ func (s *Service) CreateInTransaction(ctx context.Context, tx storage.Tx, cmd Cr
 		return Task{}, err
 	}
 	return t, nil
+}
+
+
+func (s *Service) Archive(ctx context.Context, cmd ArchiveCommand) (Task, error) {
+	return s.setArchived(ctx, cmd, true)
+}
+
+func (s *Service) Unarchive(ctx context.Context, cmd ArchiveCommand) (Task, error) {
+	return s.setArchived(ctx, cmd, false)
+}
+
+func (s *Service) setArchived(ctx context.Context, cmd ArchiveCommand, archived bool) (Task, error) {
+	if strings.TrimSpace(cmd.TaskID) == "" || cmd.ExpectedRevision < 1 {
+		return Task{}, fmt.Errorf("%w: task id and expected revision are required", ErrInvalidCommand)
+	}
+	eventID, err := s.ids.New("evt")
+	if err != nil {
+		return Task{}, err
+	}
+	now := s.clock.UnixMilli()
+	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		t, err := s.repo.GetForUpdate(ctx, tx, cmd.TaskID)
+		if err != nil {
+			return err
+		}
+		if t.Revision != cmd.ExpectedRevision {
+			return ErrRevisionConflict
+		}
+		if archived && t.ArchivedAt != nil {
+			return nil
+		}
+		if !archived && t.ArchivedAt == nil {
+			return nil
+		}
+		var at *int64
+		eventType := "task.unarchived"
+		if archived {
+			v := now
+			at = &v
+			eventType = "task.archived"
+		}
+		if err := s.repo.SetArchived(ctx, tx, t.ID, t.Revision, at, now); err != nil {
+			return err
+		}
+		payload, _ := json.Marshal(map[string]any{"task_id": t.ID, "archived": archived, "revision": t.Revision + 1})
+		return s.events.Append(ctx, tx, event.Event{
+			ID: eventID, WorkspaceID: &t.WorkspaceID, Type: eventType,
+			AggregateType: "task", AggregateID: t.ID, ActorPrincipalID: cmd.ActorPrincipalID,
+			RequestID: cmd.RequestID, TraceID: cmd.TraceID, Payload: payload, OccurredAt: now,
+		})
+	})
+	if err != nil {
+		return Task{}, err
+	}
+	return s.repo.Get(ctx, cmd.TaskID)
 }
 
 func (s *Service) MarkReady(ctx context.Context, cmd TransitionCommand) (Task, error) {

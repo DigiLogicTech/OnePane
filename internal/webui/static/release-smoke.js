@@ -152,33 +152,45 @@
     await route("operations");check(document.querySelector("#operationsLayout"),"Operations overview");await waitFor(()=>document.querySelector('[data-op-widget="op-nodes"]')?.textContent?.includes("RELEASE-PC (Local)"),"Operations Nodes component uses hostname");
     await waitFor(()=>innerWidth>700&&document.querySelector("#operationsLayout")?.getBoundingClientRect().width>100,"visible desktop Operations geometry",30000);
     check(innerWidth>700,"Installed acceptance is exercising desktop layout");
-    state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));a31NormalizeLayout(state.operationsWidgets);state.operationsEdit=true;a31RenderOperationsGrid();
+    state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));a31NormalizeLayout(state.operationsWidgets);a31PersistOperationsLayout();renderOperations();
+    const committedBeforeEdit=clone(state.operationsWidgets),storedBeforeEdit=clone((JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}").operationsWidgets)||[]);
+    check(document.querySelector("#editOperations"),"Operations edit control").click();await waitFor(()=>a31OperationsEditing()&&document.querySelector(".dashboard-edit-bar[data-op-drag]"),"Operations edit session");
     let opRoot=check(document.querySelector("#operationsLayout"),"Operations native layout root");
     await waitFor(()=>opRoot.getBoundingClientRect().width>100&&document.querySelector('[data-op-widget="op-metrics"]')?.getBoundingClientRect().width>0,"rendered Operations geometry",10000);
-    check(document.querySelector(".dashboard-edit-bar[data-op-drag]"),"Operations edit header is drag surface");
     check(document.querySelectorAll("[data-op-resize]").length>=56,"Operations exposes edge and corner resize handles");
-    const metricsCard=check(document.querySelector('[data-op-widget="op-metrics"]'),"Operations metrics card"),metricsRect=metricsCard.getBoundingClientRect(),rootRect=opRoot.getBoundingClientRect(),rootStyle=getComputedStyle(opRoot),metricsStyle=getComputedStyle(metricsCard);
+    const metricsCard=check(document.querySelector('[data-op-widget="op-metrics"]'),"Operations metrics card"),metricsRect=metricsCard.getBoundingClientRect(),rootRect=opRoot.getBoundingClientRect(),rootStyle=getComputedStyle(opRoot),metricsStyle=getComputedStyle(metricsCard),metricGrid=check(metricsCard.querySelector(".operations-metrics"),"Operations metrics grid"),metricGridRect=metricGrid.getBoundingClientRect(),metricTiles=[...metricGrid.querySelectorAll(".metric-card")];
     results.push(`ops-geometry inner=${innerWidth} root=${Math.round(rootRect.width)} card=${Math.round(metricsRect.width)} display=${rootStyle.display} columns=${rootStyle.gridTemplateColumns} start=${metricsStyle.gridColumnStart} end=${metricsStyle.gridColumnEnd} inline=${metricsCard.getAttribute("style")||""}`);
     check(metricsRect.width>rootRect.width*.9,"Operations default metrics component spans the dashboard");
+    const metricRows=new Map();for(const tile of metricTiles){const r=tile.getBoundingClientRect(),key=Math.round(r.top);if(!metricRows.has(key))metricRows.set(key,[]);metricRows.get(key).push(r)}
+    check(metricRows.size>0&&[...metricRows.values()].every(row=>Math.abs(Math.max(...row.map(r=>r.right))-metricGridRect.right)<3),"Operations metrics fill every rendered row");
 
     const resizeCard=check(document.querySelector('[data-op-widget="op-tasks"]'),"Operations resize card"),resizeEast=check(resizeCard.querySelector('[data-op-resize][data-resize-edge="e"]'),"Operations east resize handle"),resizeCardRect=resizeCard.getBoundingClientRect(),resizeEastRect=resizeEast.getBoundingClientRect();
     check(resizeEastRect.left>=resizeCardRect.left-1&&resizeEastRect.right<=resizeCardRect.right+1,"Operations resize hit target stays inside card");
-    const taskState=state.operationsWidgets.find(w=>w.id==="op-tasks"),taskWidthBefore=Number(taskState.width),opsStyle=getComputedStyle(opRoot),opsGap=parseFloat(opsStyle.columnGap)||0,opsCol=(opRoot.getBoundingClientRect().width-opsGap*(A31_LAYOUT_COLUMNS-1))/A31_LAYOUT_COLUMNS;
+    const draftItems=a31OperationsLayoutItems(),taskState=draftItems.find(w=>w.id==="op-tasks"),taskWidthBefore=Number(taskState.width),opsStyle=getComputedStyle(opRoot),opsGap=parseFloat(opsStyle.columnGap)||0,opsCol=(opRoot.getBoundingClientRect().width-opsGap*(A31_LAYOUT_COLUMNS-1))/A31_LAYOUT_COLUMNS;
     await gesture(resizeEast,opsCol+opsGap+3,0);
-    await waitFor(()=>Number(state.operationsWidgets.find(w=>w.id==="op-tasks")?.width)>taskWidthBefore&&!document.querySelector("#operationsLayout")?.dataset.layoutSaving,"Operations pointer resize committed");
-    check(noOverlap(state.operationsWidgets),"Operations pointer resize resolves overlap");
+    await waitFor(()=>Number(a31OperationsLayoutItems().find(w=>w.id==="op-tasks")?.width)>taskWidthBefore&&!document.querySelector("#operationsLayout")?.dataset.layoutSaving,"Operations pointer resize updates draft");
+    check(noOverlap(a31OperationsLayoutItems()),"Operations pointer resize resolves overlap in draft");
+    check(JSON.stringify(state.operationsWidgets)===JSON.stringify(committedBeforeEdit),"Operations edit does not mutate committed layout before Done");
+    check(JSON.stringify((JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}").operationsWidgets)||[])===JSON.stringify(storedBeforeEdit),"Operations draft is not persisted before Done");
 
     opRoot=check(document.querySelector("#operationsLayout"),"Operations root after resize");
-    const attentionDrag=check(opRoot.querySelector('[data-op-widget="op-attention"] .dashboard-edit-bar[data-op-drag]'),"Operations native drag surface"),attentionY=Number(state.operationsWidgets.find(w=>w.id==="op-attention")?.y),opRow=A31_LAYOUT_ROW_PX+(parseFloat(getComputedStyle(opRoot).rowGap)||0);
+    const attentionDrag=check(opRoot.querySelector('[data-op-widget="op-attention"] .dashboard-edit-bar[data-op-drag]'),"Operations native drag surface"),attentionY=Number(a31OperationsLayoutItems().find(w=>w.id==="op-attention")?.y),opRow=A31_LAYOUT_ROW_PX+(parseFloat(getComputedStyle(opRoot).rowGap)||0);
     await gesture(attentionDrag,0,opRow*2+3);
-    await waitFor(()=>Number(state.operationsWidgets.find(w=>w.id==="op-attention")?.y)>attentionY&&!document.querySelector("#operationsLayout")?.dataset.layoutSaving,"Operations pointer drag committed");
-    check(noOverlap(state.operationsWidgets),"Operations pointer drag resolves overlap");
+    await waitFor(()=>Number(a31OperationsLayoutItems().find(w=>w.id==="op-attention")?.y)>attentionY&&!document.querySelector("#operationsLayout")?.dataset.layoutSaving,"Operations pointer drag updates draft");
+    check(noOverlap(a31OperationsLayoutItems()),"Operations pointer drag resolves overlap in draft");
 
-    const custom=check(state.operationsWidgets.find(w=>w.id==="op-activity"),"Operations custom layout probe");custom.x=0;custom.y=24;custom.width=6;custom.height=5;custom.col=6;custom.row=5;a31ResolveLayout(state.operationsWidgets,custom.id);a31PersistOperationsLayout();a31ApplyLayout(opRoot,state.operationsWidgets,"data-op-widget");
-    const rootBeforeRefresh=check(document.querySelector("#operationsLayout"),"Operations layout before polling"),revisionBefore=Number(state.operationsLayoutRevision||0);await refreshOperationalDataQA(true);
+    await route("tasks");check(!a31OperationsEditing(),"Operations navigation cancels edit mode");check(JSON.stringify(state.operationsWidgets)===JSON.stringify(committedBeforeEdit),"Operations navigation discards draft changes");
+    await route("operations");check(!document.querySelector(".dashboard-widget.editable"),"Operations returns in view mode after cancelled edit");
+    const storedAfterCancel=(JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}").operationsWidgets)||[];check(JSON.stringify(storedAfterCancel)===JSON.stringify(storedBeforeEdit),"Operations cancelled edit leaves persisted layout unchanged");
+
+    check(document.querySelector("#editOperations"),"Operations second edit control").click();await waitFor(()=>a31OperationsEditing(),"Operations second edit session");
+    const custom=check(a31OperationsLayoutItems().find(w=>w.id==="op-activity"),"Operations custom layout probe");custom.x=0;custom.y=24;custom.width=6;custom.height=5;custom.col=6;custom.row=5;a31ResolveLayout(a31OperationsLayoutItems(),custom.id);a31RenderOperationsGrid();
+    check(document.querySelector("#editOperations"),"Operations Done control").click();await waitFor(()=>!a31OperationsEditing(),"Operations edit commit");
+    opRoot=check(document.querySelector("#operationsLayout"),"Operations layout after Done");
+    const rootBeforeRefresh=opRoot,revisionBefore=Number(state.operationsLayoutRevision||0);await refreshOperationalDataQA(true);
     check(document.querySelector("#operationsLayout")===rootBeforeRefresh,"Operations polling preserves layout DOM");
     const storedOps=JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}"),storedActivity=(storedOps.operationsWidgets||[]).find(w=>w.id==="op-activity");
-    check(Number(storedActivity?.y)===24&&Number(state.operationsWidgets.find(w=>w.id==="op-activity")?.y)===24,"Operations custom geometry survives polling and persistence");
+    check(Number(storedActivity?.y)===24&&Number(state.operationsWidgets.find(w=>w.id==="op-activity")?.y)===24,"Operations Done persists custom geometry");
     check(Number(state.operationsLayoutRevision||0)===revisionBefore,"Operations polling does not rewrite layout revision");
     check(noOverlap(state.operationsWidgets),"Operations persisted geometry remains collision free");
 

@@ -56,7 +56,19 @@ func (r *fakeRepo) Get(_ context.Context, id string) (Task, error) {
 func (r *fakeRepo) List(_ context.Context, workspaceID string, limit int) ([]Task, error) {
 	out := make([]Task, 0)
 	for _, t := range r.tasks {
-		if t.WorkspaceID == workspaceID {
+		if t.WorkspaceID == workspaceID && t.ArchivedAt == nil {
+			out = append(out, t)
+		}
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+func (r *fakeRepo) ListArchived(_ context.Context, workspaceID string, limit int) ([]Task, error) {
+	out := make([]Task, 0)
+	for _, t := range r.tasks {
+		if t.WorkspaceID == workspaceID && t.ArchivedAt != nil {
 			out = append(out, t)
 		}
 	}
@@ -70,6 +82,20 @@ func (r *fakeRepo) GetForUpdate(ctx context.Context, _ storage.Tx, id string) (T
 }
 func (r *fakeRepo) Insert(_ context.Context, _ storage.Tx, t Task) error {
 	r.tasks[t.ID] = t
+	return nil
+}
+func (r *fakeRepo) SetArchived(_ context.Context, _ storage.Tx, taskID string, expectedRevision int64, archivedAt *int64, updatedAt int64) error {
+	t, ok := r.tasks[taskID]
+	if !ok {
+		return sql.ErrNoRows
+	}
+	if t.Revision != expectedRevision {
+		return ErrRevisionConflict
+	}
+	t.ArchivedAt = archivedAt
+	t.Revision++
+	t.UpdatedAt = updatedAt
+	r.tasks[taskID] = t
 	return nil
 }
 func (r *fakeRepo) Transition(_ context.Context, _ storage.Tx, tr transitionRecord) error {
@@ -353,5 +379,45 @@ func TestAdmissionGuardBlocksReadyAndStart(t *testing.T) {
 	}
 	if len(r.attempts) != 0 {
 		t.Fatalf("guarded start created attempt: %d", len(r.attempts))
+	}
+}
+
+
+func TestArchiveLifecyclePreservesTaskHistoryAndScope(t *testing.T) {
+	s, r, ev, _ := newTestService(1_700_000_000_000)
+	projectID, projectWorkspaceID := "proj_test", "pws_test"
+	created, err := s.Create(context.Background(), CreateCommand{
+		WorkspaceID: "ws", ProjectID: &projectID, ProjectWorkspaceID: &projectWorkspaceID, Objective: "archive me",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived, err := s.Archive(context.Background(), ArchiveCommand{TaskID: created.ID, ExpectedRevision: created.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if archived.ArchivedAt == nil || archived.Revision != 2 || archived.ProjectWorkspaceID == nil || *archived.ProjectWorkspaceID != projectWorkspaceID {
+		t.Fatalf("archived task=%+v", archived)
+	}
+	active, _ := s.List(context.Background(), "ws", 10)
+	if len(active) != 0 {
+		t.Fatalf("active tasks=%d want 0", len(active))
+	}
+	archivedRows, _ := s.ListArchived(context.Background(), "ws", 10)
+	if len(archivedRows) != 1 || archivedRows[0].ID != created.ID {
+		t.Fatalf("archived rows=%+v", archivedRows)
+	}
+	restored, err := s.Unarchive(context.Background(), ArchiveCommand{TaskID: created.ID, ExpectedRevision: archived.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.ArchivedAt != nil || restored.Revision != 3 {
+		t.Fatalf("restored task=%+v", restored)
+	}
+	if got := r.tasks[created.ID]; got.ProjectID == nil || got.ProjectWorkspaceID == nil {
+		t.Fatalf("scope lost: %+v", got)
+	}
+	if len(ev.events) < 3 || ev.events[len(ev.events)-2].Type != "task.archived" || ev.events[len(ev.events)-1].Type != "task.unarchived" {
+		t.Fatalf("events=%+v", ev.events)
 	}
 }

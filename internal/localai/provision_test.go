@@ -77,6 +77,27 @@ func TestExtractRejectsEscapingSymlink(t *testing.T) {
 	}
 }
 
+func TestRuntimeArchiveExpandedBytesCountsFilesNotSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("tar symlink archive test is Unix-specific")
+	}
+	p := makeTarEntries(t, []*tar.Header{
+		{Name: "runtime/lib.so.1", Mode: 0o700, Size: 7, Typeflag: tar.TypeReg},
+		{Name: "runtime/lib.so", Mode: 0o777, Typeflag: tar.TypeSymlink, Linkname: "lib.so.1"},
+		{Name: "runtime/llama-server", Mode: 0o700, Size: 11, Typeflag: tar.TypeReg},
+	}, map[string][]byte{
+		"runtime/lib.so.1": []byte("1234567"),
+		"runtime/llama-server": []byte("12345678901"),
+	})
+	got, err := RuntimeArchiveExpandedBytes(p, "tar.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 18 {
+		t.Fatalf("expanded bytes=%d", got)
+	}
+}
+
 func TestExtractRejectsTraversal(t *testing.T) {
 	p := makeTar(t, "../../escape")
 	if err := ExtractRuntimeArchive(p, "tar.gz", t.TempDir()); err == nil {

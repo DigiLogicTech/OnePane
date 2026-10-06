@@ -319,6 +319,60 @@ func safeArchiveSymlinkTarget(root, linkPath, target string) error {
 	return nil
 }
 
+func RuntimeArchiveExpandedBytes(archivePath, format string) (int64, error) {
+	switch format {
+	case "binary":
+		st, err := os.Stat(archivePath)
+		if err != nil { return 0, err }
+		if st.IsDir() || st.Size() < 0 { return 0, errors.New("invalid runtime binary artifact") }
+		return st.Size(), nil
+	case "tar.gz":
+		f, err := os.Open(archivePath)
+		if err != nil { return 0, err }
+		defer f.Close()
+		gz, err := gzip.NewReader(f)
+		if err != nil { return 0, err }
+		defer gz.Close()
+		tr := tar.NewReader(gz)
+		var total int64
+		for {
+			h, err := tr.Next()
+			if err == io.EOF { break }
+			if err != nil { return 0, err }
+			switch h.Typeflag {
+			case tar.TypeDir, tar.TypeSymlink:
+				continue
+			case tar.TypeReg:
+				if h.Size < 0 { return 0, errors.New("negative runtime archive entry size") }
+				next := safeAddBytes(total, h.Size)
+				if next < total { return 0, errors.New("runtime archive expanded size overflow") }
+				total = next
+			default:
+				return 0, fmt.Errorf("unsupported archive entry type for %s", h.Name)
+			}
+		}
+		return total, nil
+	case "zip":
+		zr, err := zip.OpenReader(archivePath)
+		if err != nil { return 0, err }
+		defer zr.Close()
+		var total int64
+		for _, z := range zr.File {
+			if z.FileInfo().IsDir() { continue }
+			if z.Mode()&os.ModeSymlink != 0 {
+				return 0, fmt.Errorf("symlinks are not allowed in runtime archive")
+			}
+			if z.UncompressedSize64 > uint64(^uint64(0)>>1) {
+				return 0, errors.New("runtime archive expanded size overflow")
+			}
+			total = safeAddBytes(total, int64(z.UncompressedSize64))
+		}
+		return total, nil
+	default:
+		return 0, fmt.Errorf("unsupported archive format %q", format)
+	}
+}
+
 func ExtractRuntimeArchive(archivePath, format, destRoot string) error {
 	if err := os.MkdirAll(destRoot, 0o700); err != nil {
 		return err

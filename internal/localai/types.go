@@ -207,9 +207,12 @@ type Recommendation struct {
 	MemoryRequired     int64           `json:"memory_required_bytes"`
 	MemoryAvailable    int64           `json:"memory_available_bytes"`
 	UtilizationPct     float64         `json:"utilization_pct"`
-	DiskRequired       int64           `json:"disk_required_bytes"`
-	DownloadScratch    int64           `json:"download_scratch_bytes"`
-	Placement          PlacementPlan   `json:"placement"`
+	DiskRequired         int64           `json:"disk_required_bytes"`
+	DownloadScratch      int64           `json:"download_scratch_bytes"`
+	ModelArtifactBytes   int64           `json:"model_artifact_bytes,omitempty"`
+	RuntimeDownloadBytes int64           `json:"runtime_download_bytes,omitempty"`
+	RuntimeInstallReserve int64          `json:"runtime_install_reserve_bytes,omitempty"`
+	Placement            PlacementPlan   `json:"placement"`
 	LLMFit             *LLMFitAdvisory `json:"llmfit,omitempty"`
 	Score              int             `json:"score"`
 	Notes              []string        `json:"notes"`

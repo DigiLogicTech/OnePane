@@ -278,3 +278,5 @@ func appendUniqueWindows(items []string, value string) []string {
 	}
 	return append(items, value)
 }
+
+func currentStorage(path string) Storage { return readWindowsStorage(path) }

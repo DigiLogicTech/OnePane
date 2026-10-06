@@ -26,6 +26,7 @@ type RuntimeDependencyCatalogEntry struct {
 	SourceURL     string `json:"source_url"`
 	SHA256        string `json:"sha256"`
 	ArchiveFormat string `json:"archive_format"`
+	SizeBytes     int64  `json:"size_bytes,omitempty"`
 }
 
 type RuntimeCatalogEntry struct {
@@ -38,6 +39,7 @@ type RuntimeCatalogEntry struct {
 	SHA256        string                          `json:"sha256"`
 	ArchiveFormat string                          `json:"archive_format"`
 	ExecutableRel string                          `json:"executable_rel"`
+	SizeBytes     int64                           `json:"size_bytes,omitempty"`
 	Dependencies  []RuntimeDependencyCatalogEntry `json:"dependencies,omitempty"`
 }
 
@@ -137,7 +139,7 @@ func (c ArtifactCatalog) Validate(now int64) error {
 	seenRuntime := map[string]struct{}{}
 	for _, r := range c.Runtimes {
 		key := strings.ToLower(strings.Join([]string{r.Name, r.Version, r.OS, r.Architecture, r.Backend}, "|"))
-		if strings.TrimSpace(r.Name) == "" || strings.TrimSpace(r.Version) == "" || strings.TrimSpace(r.OS) == "" || strings.TrimSpace(r.Architecture) == "" || !strings.HasPrefix(strings.ToLower(r.SourceURL), "https://") || !validateSHA256(r.SHA256) || strings.TrimSpace(r.ExecutableRel) == "" {
+		if strings.TrimSpace(r.Name) == "" || strings.TrimSpace(r.Version) == "" || strings.TrimSpace(r.OS) == "" || strings.TrimSpace(r.Architecture) == "" || !strings.HasPrefix(strings.ToLower(r.SourceURL), "https://") || !validateSHA256(r.SHA256) || strings.TrimSpace(r.ExecutableRel) == "" || r.SizeBytes < 0 {
 			return fmt.Errorf("invalid runtime catalog entry %q", r.Name)
 		}
 		switch r.ArchiveFormat {
@@ -148,7 +150,7 @@ func (c ArtifactCatalog) Validate(now int64) error {
 		seenDependency := map[string]struct{}{}
 		for _, dep := range r.Dependencies {
 			name := strings.ToLower(strings.TrimSpace(dep.Name))
-			if name == "" || !strings.HasPrefix(strings.ToLower(dep.SourceURL), "https://") || !validateSHA256(dep.SHA256) {
+			if name == "" || !strings.HasPrefix(strings.ToLower(dep.SourceURL), "https://") || !validateSHA256(dep.SHA256) || dep.SizeBytes < 0 {
 				return fmt.Errorf("invalid runtime dependency for %q", r.Name)
 			}
 			switch dep.ArchiveFormat {

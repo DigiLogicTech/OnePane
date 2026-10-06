@@ -187,20 +187,291 @@ func (s *Service) DetectAndPersist(ctx context.Context, nodeID string) (Hardware
 	return p, err
 }
 
+func installableModelSpecifications(cat ArtifactCatalog) []ModelSpec {
+	allowed := map[string]map[string]bool{}
+	for _, artifact := range cat.Models {
+		key := strings.ToLower(strings.TrimSpace(artifact.ModelRef)) + "|" + strings.ToLower(strings.TrimSpace(artifact.RuntimeName))
+		if allowed[key] == nil {
+			allowed[key] = map[string]bool{}
+		}
+		allowed[key][strings.ToUpper(strings.TrimSpace(artifact.Quantization))] = true
+	}
+	out := make([]ModelSpec, 0, len(cat.ModelSpecs))
+	for _, spec := range cat.ModelSpecs {
+		key := strings.ToLower(strings.TrimSpace(spec.ModelRef)) + "|" + strings.ToLower(strings.TrimSpace(spec.Runtime))
+		var quantizations []string
+		for _, q := range spec.Quantizations {
+			q = strings.ToUpper(strings.TrimSpace(q))
+			if allowed[key][q] {
+				quantizations = append(quantizations, q)
+			}
+		}
+		if len(quantizations) == 0 {
+			continue
+		}
+		copy := spec
+		copy.Quantizations = quantizations
+		out = append(out, copy)
+	}
+	return out
+}
+
+func filterHardwareForCatalog(p HardwareProfile, cat ArtifactCatalog) HardwareProfile {
+	allowed := map[string]bool{"cpu": false}
+	for _, r := range cat.Runtimes {
+		if !strings.EqualFold(r.OS, p.OSName) || !strings.EqualFold(r.Architecture, p.Architecture) {
+			continue
+		}
+		backend := strings.ToLower(strings.TrimSpace(r.Backend))
+		if backend == "" {
+			backend = "cpu"
+		}
+		allowed[backend] = true
+	}
+	copy := p
+	copy.GPUs = append([]GPU(nil), p.GPUs...)
+	for i := range copy.GPUs {
+		var backends []string
+		for _, b := range gpuBackends(copy.GPUs[i]) {
+			if allowed[b] {
+				backends = append(backends, b)
+			}
+		}
+		copy.GPUs[i].Backends = backends
+		copy.GPUs[i].Backend = preferredBackend(backends)
+	}
+	return copy
+}
+
+func trustedModelArtifact(cat ArtifactCatalog, rec Recommendation) (ModelCatalogEntry, bool) {
+	for _, artifact := range cat.Models {
+		if strings.EqualFold(artifact.ModelRef, rec.Model.ModelRef) &&
+			strings.EqualFold(artifact.Quantization, rec.Quantization) &&
+			strings.EqualFold(artifact.RuntimeName, rec.Model.Runtime) {
+			return artifact, true
+		}
+	}
+	return ModelCatalogEntry{}, false
+}
+
+func trustedRuntimeArtifact(cat ArtifactCatalog, p HardwareProfile, rec Recommendation) (RuntimeCatalogEntry, bool) {
+	wanted := strings.ToLower(strings.TrimSpace(rec.Placement.Backend))
+	if wanted == "" {
+		wanted = "cpu"
+	}
+	var fallback *RuntimeCatalogEntry
+	for i := range cat.Runtimes {
+		entry := cat.Runtimes[i]
+		if !strings.EqualFold(entry.Name, rec.Model.Runtime) || !strings.EqualFold(entry.OS, p.OSName) || !strings.EqualFold(entry.Architecture, p.Architecture) {
+			continue
+		}
+		backend := strings.ToLower(strings.TrimSpace(entry.Backend))
+		if backend == wanted {
+			return entry, true
+		}
+		if backend == "" && fallback == nil {
+			copy := entry
+			fallback = &copy
+		}
+	}
+	if fallback != nil {
+		return *fallback, true
+	}
+	return RuntimeCatalogEntry{}, false
+}
+
+func storageProbePath(path string) string {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "" || path == "." {
+		return "."
+	}
+	for {
+		if st, err := os.Stat(path); err == nil && st.IsDir() {
+			return path
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return path
+		}
+		path = parent
+	}
+}
+
+func usableStorageBytes(available int64, headroomPct int) int64 {
+	if available <= 0 {
+		return 0
+	}
+	if headroomPct < 0 {
+		headroomPct = 0
+	}
+	if headroomPct > 90 {
+		headroomPct = 90
+	}
+	return int64(float64(available) * float64(100-headroomPct) / 100)
+}
+
+func safeAddBytes(values ...int64) int64 {
+	const maxInt64 = int64(^uint64(0) >> 1)
+	var total int64
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if total > maxInt64-value {
+			return maxInt64
+		}
+		total += value
+	}
+	return total
+}
+
+func runtimeDownloadBudget(entry RuntimeCatalogEntry) int64 {
+	const unknownMain = int64(256 << 20)
+	const unknownDependency = int64(512 << 20)
+	total := entry.SizeBytes
+	if total <= 0 {
+		total = unknownMain
+	}
+	for _, dep := range entry.Dependencies {
+		size := dep.SizeBytes
+		if size <= 0 {
+			size = unknownDependency
+		}
+		total = safeAddBytes(total, size)
+	}
+	return total
+}
+
+func runtimeInstallReserve(downloadBytes int64) int64 {
+	const minimum = int64(256 << 20)
+	if downloadBytes <= 0 {
+		return minimum
+	}
+	reserve := safeAddBytes(downloadBytes, downloadBytes, downloadBytes, downloadBytes)
+	if reserve < minimum {
+		return minimum
+	}
+	return reserve
+}
+
+func remainingArtifactBytes(dest string, expected int64) int64 {
+	if expected <= 0 {
+		return 0
+	}
+	if st, err := os.Stat(dest); err == nil && !st.IsDir() && st.Size() >= expected {
+		return 0
+	}
+	if st, err := os.Stat(dest + ".partial"); err == nil && !st.IsDir() && st.Size() > 0 && st.Size() < expected {
+		return expected - st.Size()
+	}
+	return expected
+}
+
+func pathWithin(root, path string) bool {
+	root = filepath.Clean(root)
+	path = filepath.Clean(path)
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func runtimeManifestFromCatalog(entry RuntimeCatalogEntry) RuntimeManifest {
+	return RuntimeManifest{
+		Name: entry.Name, Version: entry.Version, Backend: entry.Backend, OS: entry.OS, Architecture: entry.Architecture,
+		SourceURL: entry.SourceURL, SHA256: entry.SHA256, ArchiveFormat: entry.ArchiveFormat, ExecutableRel: entry.ExecutableRel,
+		Dependencies: runtimeDependenciesFromCatalog(entry.Dependencies),
+	}
+}
+
+func (s *Service) trustedRuntimeAlreadyInstalled(ctx context.Context, nodeID string, entry RuntimeCatalogEntry) bool {
+	manifest := runtimeManifestFromCatalog(entry)
+	inventoryName := manifest.Name
+	if backend := strings.ToLower(strings.TrimSpace(manifest.Backend)); backend != "" {
+		inventoryName += "@" + backend
+	}
+	var version, fingerprint, executable string
+	err := s.db.QueryRowContext(ctx, `SELECT runtime_version,source_sha256,executable_path FROM managed_local_runtimes WHERE node_id=? AND runtime_name=? AND status='ready'`, nodeID, inventoryName).Scan(&version, &fingerprint, &executable)
+	if err != nil || version != manifest.Version || !strings.EqualFold(fingerprint, runtimeInstallFingerprint(manifest)) {
+		return false
+	}
+	st, err := os.Stat(executable)
+	return err == nil && !st.IsDir()
+}
+
+func (s *Service) applyTrustedArtifactStorage(ctx context.Context, p HardwareProfile, cat ArtifactCatalog, req RecommendRequest, recs []Recommendation) []Recommendation {
+	modelStorage := currentStorage(storageProbePath(s.modelRoot))
+	runtimeStorage := currentStorage(storageProbePath(s.dataDir))
+	modelUsable := usableStorageBytes(modelStorage.AvailableBytes, req.StorageHeadroomPct)
+	runtimeUsable := usableStorageBytes(runtimeStorage.AvailableBytes, req.StorageHeadroomPct)
+	sameTree := pathWithin(s.dataDir, s.modelRoot)
+	var out []Recommendation
+	for _, rec := range recs {
+		model, ok := trustedModelArtifact(cat, rec)
+		if !ok || model.SizeBytes <= 0 {
+			continue
+		}
+		runtimeArtifact, ok := trustedRuntimeArtifact(cat, p, rec)
+		if !ok {
+			continue
+		}
+		runtimeDownload := runtimeDownloadBudget(runtimeArtifact)
+		runtimeReserve := runtimeInstallReserve(runtimeDownload)
+		if s.trustedRuntimeAlreadyInstalled(ctx, p.NodeID, runtimeArtifact) {
+			runtimeDownload = 0
+			runtimeReserve = 0
+		}
+		modelNeed := safeAddBytes(model.SizeBytes, model.SizeBytes)
+		runtimeNeed := safeAddBytes(runtimeDownload, runtimeReserve)
+		if sameTree {
+			available := modelUsable
+			if runtimeUsable > 0 && (available == 0 || runtimeUsable < available) {
+				available = runtimeUsable
+			}
+			if available <= 0 || safeAddBytes(modelNeed, runtimeNeed) > available {
+				continue
+			}
+		} else if modelUsable <= 0 || runtimeUsable <= 0 || modelNeed > modelUsable || runtimeNeed > runtimeUsable {
+			continue
+		}
+		rec.ModelArtifactBytes = model.SizeBytes
+		rec.RuntimeDownloadBytes = runtimeDownload
+		rec.RuntimeInstallReserve = runtimeReserve
+		rec.DiskRequired = safeAddBytes(model.SizeBytes, runtimeReserve)
+		rec.DownloadScratch = safeAddBytes(model.SizeBytes, runtimeDownload)
+		rec.Notes = append(rec.Notes, "storage budget includes the verified model artifact and managed runtime dependencies")
+		out = append(out, rec)
+	}
+	return out
+}
+
 func (s *Service) Recommendations(ctx context.Context, profileID string, req RecommendRequest) ([]Recommendation, error) {
 	p, err := s.hardwareProfile(ctx, profileID)
 	if err != nil {
 		return nil, err
 	}
 	catalog := BuiltinCatalog()
+	var artifacts *ArtifactCatalog
 	if s.catalog != nil {
-		if signed, err := s.catalog.ModelSpecifications(ctx); err == nil && len(signed) > 0 {
-			catalog = signed
+		if _, active, e := s.catalog.Active(ctx); e == nil {
+			if signed := installableModelSpecifications(active); len(signed) > 0 {
+				catalog = signed
+				artifacts = &active
+				p = filterHardwareForCatalog(p, active)
+			}
 		}
 	}
-	recs, err := Recommend(p, catalog, req)
+	baseReq := req
+	if len(catalog) > baseReq.Limit && len(catalog) <= 50 {
+		baseReq.Limit = len(catalog)
+	}
+	recs, err := Recommend(p, catalog, baseReq)
 	if err != nil {
 		return nil, err
+	}
+	if artifacts != nil {
+		recs = s.applyTrustedArtifactStorage(ctx, p, *artifacts, req, recs)
+		if len(recs) > req.Limit {
+			recs = recs[:req.Limit]
+		}
 	}
 	if s.llmfit != nil {
 		if advisory, e := s.llmfit.ModelAdvisories(ctx, req); e == nil {
@@ -379,6 +650,7 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 		runtimeRoot = filepath.Join(s.dataDir, "runtimes", runtime.Name, runtime.Version, backendDir+"-"+runtimeFingerprint[:16])
 	}
 	execPath := filepath.Join(runtimeRoot, runtime.ExecutableRel)
+	var runtimeDownloads []string
 	reuseRuntime := false
 	var installedVersion, installedSHA, installedExec string
 	runtimeInventoryName := runtime.Name
@@ -406,6 +678,7 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 			}
 			return inference.ModelDeployment{}, err
 		}
+		runtimeDownloads = append(runtimeDownloads, archive)
 		type runtimeDependencyDownload struct {
 			dependency RuntimeDependency
 			path       string
@@ -420,7 +693,29 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 				return inference.ModelDeployment{}, err
 			}
 			dependencyDownloads = append(dependencyDownloads, runtimeDependencyDownload{dependency: dependency, path: dependencyPath})
+			runtimeDownloads = append(runtimeDownloads, dependencyPath)
 		}
+
+		expandedBytes, err := RuntimeArchiveExpandedBytes(archive, runtime.ArchiveFormat)
+		if err != nil {
+			_ = s.failPlan(ctx, p, fmt.Sprintf("inspect runtime archive: %v", err))
+			return inference.ModelDeployment{}, err
+		}
+		for _, downloaded := range dependencyDownloads {
+			n, err := RuntimeArchiveExpandedBytes(downloaded.path, downloaded.dependency.ArchiveFormat)
+			if err != nil {
+				_ = s.failPlan(ctx, p, fmt.Sprintf("inspect runtime dependency %s: %v", downloaded.dependency.Name, err))
+				return inference.ModelDeployment{}, err
+			}
+			expandedBytes = safeAddBytes(expandedBytes, n)
+		}
+		const runtimeStorageSafety = int64(128 << 20)
+		runtimeStorage := currentStorage(storageProbePath(s.dataDir))
+		runtimeNeeded := safeAddBytes(expandedBytes, runtimeStorageSafety)
+		if runtimeStorage.AvailableBytes <= 0 || runtimeNeeded > runtimeStorage.AvailableBytes {
+			return inference.ModelDeployment{}, markResumableDownload(fmt.Errorf("insufficient storage to expand managed runtime: need %d bytes free, have %d", runtimeNeeded, runtimeStorage.AvailableBytes))
+		}
+
 		staging := runtimeRoot + ".installing"
 		_ = os.RemoveAll(staging)
 		if runtime.ArchiveFormat == "binary" {
@@ -462,6 +757,14 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 	if st, err := os.Stat(execPath); err != nil || st.IsDir() {
 		return inference.ModelDeployment{}, errors.New("runtime executable missing after install")
 	}
+	runtimeID, err := s.ensureManagedRuntime(ctx, p.NodeID, runtime, runtimeRoot, execPath)
+	if err != nil {
+		return inference.ModelDeployment{}, err
+	}
+	for _, downloaded := range runtimeDownloads {
+		_ = os.Remove(downloaded)
+	}
+
 	modelDir := s.modelRoot
 	if err := os.MkdirAll(modelDir, 0o700); err != nil {
 		return inference.ModelDeployment{}, err
@@ -474,6 +777,15 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 		filename = strings.ToLower(model.ExpectedSHA256[:16]) + "-" + filename
 	}
 	modelPath := filepath.Join(modelDir, filename)
+	if model.SizeBytes > 0 {
+		remaining := remainingArtifactBytes(modelPath, model.SizeBytes)
+		const modelStorageSafety = int64(128 << 20)
+		modelStorage := currentStorage(storageProbePath(modelDir))
+		needed := safeAddBytes(remaining, modelStorageSafety)
+		if modelStorage.AvailableBytes <= 0 || needed > modelStorage.AvailableBytes {
+			return inference.ModelDeployment{}, markResumableDownload(fmt.Errorf("insufficient storage for managed model download: need %d bytes free, have %d", needed, modelStorage.AvailableBytes))
+		}
+	}
 	dr, err := s.fetcher.Fetch(ctx, model.SourceURL, modelPath, model.ExpectedSHA256)
 	if err != nil {
 		if !isResumableDownloadError(err) {
@@ -496,10 +808,6 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 	_ = json.Unmarshal(p.PlanJSON, &rec)
 	cfg, _ := json.Marshal(map[string]any{"managed": true, "executable": execPath, "model_path": modelPath, "context_tokens": p.ContextTokens, "plan_id": p.ID, "placement": rec.Placement, "runtime_backend": runtime.Backend, "runtime_name": runtime.Name, "model_ref": p.ModelRef})
 	dep, err := s.findOrRegisterManagedDeployment(ctx, m.ID, p, rn, rv, cfg)
-	if err != nil {
-		return inference.ModelDeployment{}, err
-	}
-	runtimeID, err := s.ensureManagedRuntime(ctx, p.NodeID, runtime, runtimeRoot, execPath)
 	if err != nil {
 		return inference.ModelDeployment{}, err
 	}

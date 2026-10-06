@@ -327,3 +327,5 @@ func (d *Detector) detectRuntimes(ctx context.Context) []RuntimeProbe {
 	}
 	return out
 }
+
+func currentStorage(path string) Storage { return readStorageDarwin(path) }

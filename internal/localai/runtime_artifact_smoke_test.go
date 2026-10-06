@@ -85,11 +85,14 @@ func TestBundledCUDAEntriesCarryManagedCompanionArchives(t *testing.T) {
 		}
 		key := fmt.Sprintf("%s/%s", entry.OS, entry.Architecture)
 		seen[key] = true
+		if entry.SizeBytes <= 0 {
+			t.Fatalf("%s CUDA runtime has no pinned download size", key)
+		}
 		if len(entry.Dependencies) == 0 {
 			t.Fatalf("%s CUDA runtime has no managed companion archive", key)
 		}
 		for _, dep := range entry.Dependencies {
-			if !strings.HasPrefix(dep.SourceURL, "https://") || len(dep.SHA256) != 64 || (dep.ArchiveFormat != "zip" && dep.ArchiveFormat != "tar.gz") {
+			if !strings.HasPrefix(dep.SourceURL, "https://") || len(dep.SHA256) != 64 || dep.SizeBytes <= 0 || (dep.ArchiveFormat != "zip" && dep.ArchiveFormat != "tar.gz") {
 				t.Fatalf("%s dependency invalid: %+v", key, dep)
 			}
 		}
@@ -97,6 +100,14 @@ func TestBundledCUDAEntriesCarryManagedCompanionArchives(t *testing.T) {
 	for _, key := range []string{"windows/amd64", "linux/amd64"} {
 		if !seen[key] {
 			t.Fatalf("missing bundled CUDA runtime %s", key)
+		}
+	}
+}
+
+func TestBundledRuntimeEntriesCarryPinnedDownloadSizes(t *testing.T) {
+	for _, entry := range BundledArtifactCatalog().Runtimes {
+		if entry.SizeBytes <= 0 {
+			t.Fatalf("%s %s/%s %s has no pinned size", entry.Name, entry.OS, entry.Architecture, entry.Backend)
 		}
 	}
 }

@@ -63,6 +63,11 @@
   async function run(){
     await waitFor(()=>document.querySelector("#app")&&!document.querySelector("#app").classList.contains("hidden"),"application shell",30000);
     check(onepaneWorkspace==="workspace-release","mock workspace authenticated");
+    if(document.documentElement.dataset.productTour==="active"){
+      document.querySelector("#tourSkip")?.click();
+      await waitFor(()=>!document.documentElement.dataset.productTour,"welcome Tour cleanup");
+      check(!document.querySelector(".tour-target"),"welcome Tour target cleanup");
+    }
 
     await route("operations");check(document.querySelector("#operationsLayout"),"Operations overview");
     const ops=a31Array(state.operationsWidgets);for(let i=0;i<ops.length;i++)for(let j=i+1;j<ops.length;j++)check(!a31Overlap(ops[i],ops[j]),`Operations no overlap ${i}/${j}`);

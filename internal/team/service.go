@@ -108,7 +108,11 @@ func (s *Service) CreateTeam(ctx context.Context, c CreateTeamCommand) (Team, er
 }
 func (s *Service) Team(ctx context.Context, idv string) (Team, error) {
 	var t Team
-	err := s.db.QueryRowContext(ctx, `SELECT id,workspace_id,name,purpose,status,created_by,configuration_json,revision,created_at,updated_at FROM teams WHERE id=?`, idv).Scan(&t.ID, &t.WorkspaceID, &t.Name, &t.Purpose, &t.Status, &t.CreatedBy, &t.Configuration, &t.Revision, &t.CreatedAt, &t.UpdatedAt)
+	var cfg string
+	err := s.db.QueryRowContext(ctx, `SELECT id,workspace_id,name,purpose,status,created_by,configuration_json,revision,created_at,updated_at FROM teams WHERE id=?`, idv).Scan(&t.ID, &t.WorkspaceID, &t.Name, &t.Purpose, &t.Status, &t.CreatedBy, &cfg, &t.Revision, &t.CreatedAt, &t.UpdatedAt)
+	if err == nil {
+		t.Configuration = json.RawMessage(cfg)
+	}
 	return t, err
 }
 func (s *Service) ListTeams(ctx context.Context, ws string) ([]Team, error) {
@@ -120,9 +124,11 @@ func (s *Service) ListTeams(ctx context.Context, ws string) ([]Team, error) {
 	var out []Team
 	for rows.Next() {
 		var t Team
-		if err := rows.Scan(&t.ID, &t.WorkspaceID, &t.Name, &t.Purpose, &t.Status, &t.CreatedBy, &t.Configuration, &t.Revision, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		var cfg string
+		if err := rows.Scan(&t.ID, &t.WorkspaceID, &t.Name, &t.Purpose, &t.Status, &t.CreatedBy, &cfg, &t.Revision, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
+		t.Configuration = json.RawMessage(cfg)
 		out = append(out, t)
 	}
 	return out, rows.Err()

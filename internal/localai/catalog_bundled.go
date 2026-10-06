@@ -30,7 +30,7 @@ func BundledArtifactCatalog() ArtifactCatalog {
 		Models: []ModelCatalogEntry{
 			{ModelRef: "google/gemma-3-1b-it", Quantization: "Q4_K_M", RuntimeName: "llamacpp", SourceRef: "hf://google/gemma-3-1b-it", SourceURL: "https://huggingface.co/bartowski/google_gemma-3-1b-it-GGUF/resolve/main/google_gemma-3-1b-it-Q4_K_M.gguf", SHA256: "12bf0fff8815d5f73a3c9b586bd8fee8e7b248c935de70dec367679873d0f29d", Filename: "google_gemma-3-1b-it-Q4_K_M.gguf", SizeBytes: 845000000},
 			{ModelRef: "microsoft/Phi-4-mini-instruct", Quantization: "Q4_K_M", RuntimeName: "llamacpp", SourceRef: "hf://microsoft/Phi-4-mini-instruct", SourceURL: "https://huggingface.co/bartowski/microsoft_Phi-4-mini-instruct-GGUF/resolve/main/microsoft_Phi-4-mini-instruct-Q4_K_M.gguf", SHA256: "01999f17c39cc3074afae5e9c539bc82d45f2dd7faa3917c66cbef76fce8c0c2", Filename: "microsoft_Phi-4-mini-instruct-Q4_K_M.gguf", SizeBytes: 2490000000},
-			{ModelRef: "Qwen/Qwen2.5-Coder-7B-Instruct", Quantization: "Q4_K_M", RuntimeName: "llamacpp", SourceRef: "hf://Qwen/Qwen2.5-Coder-7B-Instruct", SourceURL: "https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf", SHA256: "1664fccab734674a50763490a8c6931b70e3f2f8ec10031b54806d30e5f956b6", Filename: "Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf", SizeBytes: 4680000000},
+			{ModelRef: "Qwen/Qwen2.5-Coder-7B-Instruct", Quantization: "Q4_K_M", RuntimeName: "llamacpp", SourceRef: "hf://Qwen/Qwen2.5-Coder-7B-Instruct", SourceURL: "https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf", SHA256: "0d10372614925f17c1fd0b9f987d9c542a6f9b1548f83621b70c3ce8e9d3c1d8", Filename: "Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf", SizeBytes: 4680000000},
 		},
 	}
 }

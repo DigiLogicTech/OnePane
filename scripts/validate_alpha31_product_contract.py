@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 ROOT=Path(__file__).resolve().parents[1]
 read=lambda p:(ROOT/p).read_text(encoding="utf-8")
-app=read("internal/webui/static/app.js"); html=read("internal/webui/static/index.html"); css=read("internal/webui/static/style.css")
+app=read("internal/webui/static/app-foundation.js")+"\n"+read("internal/webui/static/app.js"); html=read("internal/webui/static/index.html"); css=read("internal/webui/static/style.css")
 api=read("internal/api/server.go")+read("internal/api/team.go")+read("internal/api/assistant_orchestrator.go")+read("internal/api/provider_oauth.go")+read("internal/api/skills.go")+read("internal/api/local_ai_compute.go")
 boot=read("internal/bootstrap/bootstrap.go")
 assistant=read("internal/assistant/service.go"); orch=read("internal/projectorchestrator/service.go"); profiles=read("internal/agentprofile/service.go")
@@ -46,7 +46,7 @@ ck("Project and Operations layout commits are collision-aware and save-safe", al
 ck("component layout is pointer-resizable without mutation rerender", "a31BindLayout" in app and "data-pw-resize" in app and "data-op-resize" in app)
 ck("Tour uses isolated focus panes", "tour-pane-top" in app and "bottom-center" in app and ".tour-spotlight" in css)
 ck("Tour launches from canonical overlay host", 'const root=$("#overlayRoot")' in app and "qa31TourRoot" not in app and "qa31TourRoot" not in html)
-ck("Windows static assets remain canonical", "cmp internal/webui/static/app.js packaging/windows/desktop/static/app.js" in workflow)
+ck("Windows desktop consumes the canonical backend WebUI", 'mux.Handle("/", proxy)' in desktop and "test ! -d packaging/windows/desktop/static" in workflow)
 ck("Windows and Ubuntu packages remain CI outputs", "Build Windows x64 installer" in workflow and "Build Ubuntu amd64 package" in workflow)
 ck("native Windows UI-ready smoke contract remains", "onepane-ui-ready|" in app and "ui-ready.txt" in desktop and "Assert-NativeUIReady" in workflow)
 ck("Windows setup remains noninteractive-test capable", all(x in setup for x in ["--silent","--no-launch","--skip-optional-runtime"]))

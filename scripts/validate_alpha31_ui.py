@@ -47,7 +47,7 @@ ck("Single-element selector helper is never used as a collection", not single_se
 ck("Primary navigation exposes Nodes and Skills", '["nodes","⬡","Nodes"]' in app and '["skills","✦","Skills"]' in app)
 ck("Projects and Models have nested navigation", "project-nav-tree" in app and "model-nav-tree" in app and 'data-a31-model-view="local"' in app and 'data-a31-model-view="cloud"' in app)
 ck("Primary navigation survives sidebar rerenders", "nav.dataset.delegatedNav" in app and 'e.target.closest("[data-route]")' in app)
-ck("Nested navigation has a single active leaf", "const parentActive=route===r&&!hasLeaf" in app and "projectActive&&!qa4ProjectHub.activeWorkspaceID" in app)
+ck("Nested navigation has a single active leaf", "parentActive=route===r&&!hasLeaf" in app and "projectActive&&!qa4ProjectHub.activeWorkspaceID" in app)
 ck("Persistent Control Chat shell exists", 'id="controlChatLauncher"' in html and 'id="controlChatPanel"' in html and "a31RenderControlChat" in app)
 ck("Assistant and Project Orchestrator share persistent panel", 'id="controlChatAssistantTab"' in html and 'id="controlChatOrchestratorTab"' in html and "/orchestrator/turns" in app)
 ck("OnePane Chat can persistently collapse", 'id="controlChatToggle"' in html and "a31SetControlChatCollapsed" in app and 'data-collapsed="true"' in css)

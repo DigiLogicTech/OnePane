@@ -1839,7 +1839,7 @@ function a31RenderOperationsGrid(){
   if(state.operationsEdit){
     a31BindLayout(root,state.operationsWidgets,{attr:"data-op-widget",dragAttr:"data-op-drag",resizeAttr:"data-op-resize",persist:async()=>persist()});
     $$("[data-op-remove]",root).forEach(b=>b.onclick=async()=>{const el=b.closest("[data-op-widget]");if(el?.animate)await el.animate([{opacity:1,transform:"scale(1)"},{opacity:0,transform:"scale(.96)"}],{duration:130}).finished.catch(()=>{});state.operationsWidgets=state.operationsWidgets.filter(x=>x.id!==b.dataset.opRemove);a31NormalizeLayout(state.operationsWidgets);persist();a31RenderOperationsGrid()});
-    $("[data-op-preset]",root).forEach(sel=>sel.onchange=()=>{if(!sel.value)return;const item=state.operationsWidgets.find(x=>x.id===sel.dataset.opPreset);if(!item)return;const p=operationsSizePreset(sel.value,item);item.width=p.col;item.height=p.row;item.col=p.col;item.row=p.row;a31ResolveLayout(state.operationsWidgets,item.id);a31ApplyLayout(root,state.operationsWidgets,"data-op-widget",true);persist()});
+    $$("[data-op-preset]",root).forEach(sel=>sel.onchange=()=>{if(!sel.value)return;const item=state.operationsWidgets.find(x=>x.id===sel.dataset.opPreset);if(!item)return;const p=operationsSizePreset(sel.value,item);item.width=p.col;item.height=p.row;item.col=p.col;item.row=p.row;a31ResolveLayout(state.operationsWidgets,item.id);a31ApplyLayout(root,state.operationsWidgets,"data-op-widget",true);persist()});
   }
   bindViewActions(root);
 }
@@ -1894,7 +1894,7 @@ async function a31RefreshProjectGrid(project,workspace,animate=true){
 qa4BindWorkspaceEdit=function(project,workspace){
   if(!state.projectWorkspaceEdit)return;const root=$("#qa4WorkspaceGrid");if(!root)return;a31NormalizeLayout(workspace.widgets||[]);
   a31BindLayout(root,workspace.widgets||[],{attr:"data-pw-widget",dragAttr:"data-pw-drag",resizeAttr:"data-pw-resize",persist:async()=>{await qa4SaveProjectWorkspaces(project,qa4Workspaces(project))}});
-  $("[data-pw-preset]",root).forEach(sel=>sel.onchange=async()=>{if(!sel.value)return;const w=workspace.widgets.find(x=>x.id===sel.dataset.pwPreset);if(!w)return;const p=workspacePreset(sel.value,w);w.width=p.col;w.height=p.row;w.col=p.col;w.row=p.row;a31ResolveLayout(workspace.widgets,w.id);a31ApplyLayout(root,workspace.widgets,"data-pw-widget",true);a31LayoutSaveInFlight++;try{await qa4SaveProjectWorkspaces(project,qa4Workspaces(project))}finally{a31LayoutSaveInFlight=Math.max(0,a31LayoutSaveInFlight-1)}});
+  $$("[data-pw-preset]",root).forEach(sel=>sel.onchange=async()=>{if(!sel.value)return;const w=workspace.widgets.find(x=>x.id===sel.dataset.pwPreset);if(!w)return;const p=workspacePreset(sel.value,w);w.width=p.col;w.height=p.row;w.col=p.col;w.row=p.row;a31ResolveLayout(workspace.widgets,w.id);a31ApplyLayout(root,workspace.widgets,"data-pw-widget",true);a31LayoutSaveInFlight++;try{await qa4SaveProjectWorkspaces(project,qa4Workspaces(project))}finally{a31LayoutSaveInFlight=Math.max(0,a31LayoutSaveInFlight-1)}});
   $$("[data-pw-remove]",root).forEach(b=>b.onclick=async()=>{const el=b.closest("[data-pw-widget]");if(el?.animate)await el.animate([{opacity:1},{opacity:0,transform:"scale(.96)"}],{duration:130}).finished.catch(()=>{});workspace.widgets=workspace.widgets.filter(x=>x.id!==b.dataset.pwRemove);a31NormalizeLayout(workspace.widgets);await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));a31RefreshProjectGrid(project,workspace,true)});
 };
 qa4AddWorkspaceComponent=function(project,workspace){

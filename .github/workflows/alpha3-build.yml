@@ -1,12 +1,6 @@
 name: Alpha 3 Build and Package
 
 on:
-  push:
-    branches:
-      - alpha3-integration
-    paths:
-      - '.recovery/alpha3/source.patch.xz.b64'
-      - '.github/workflows/alpha3-build.yml'
   workflow_dispatch:
 
 permissions:

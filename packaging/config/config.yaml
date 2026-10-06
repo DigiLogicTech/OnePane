@@ -1,0 +1,7 @@
+server:
+  listen: "127.0.0.1:8080"
+  preview_listen: "127.0.0.1:8081"
+storage:
+  data_dir: "/var/lib/onepane"
+logging:
+  level: "info"

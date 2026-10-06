@@ -1,0 +1,106 @@
+--- a/internal/team/types.go
++++ b/internal/team/types.go
+@@ -64,9 +64,9 @@
+ 	Ordinal                                                                           int
+ }
+ type StartSessionCommand struct {
+-	TaskID, TeamID, CreatedBy string
+-	GatewayTargetID           *string
+-	Config                    json.RawMessage
++	TaskID, TeamID, CreatedBy, ExecutionMode string
++	GatewayTargetID                          *string
++	Config                                   json.RawMessage
+ }
+ type PostMessageCommand struct {
+ 	SessionID, AuthorPrincipalID, Kind string
+--- a/internal/team/service.go
++++ b/internal/team/service.go
+@@ -141,6 +141,10 @@
+ 	default:
+ 		return Member{}, ErrInvalid
+ 	}
++	var activeMembers int
++	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_members WHERE team_id=? AND status='active'`, t.ID).Scan(&activeMembers); err != nil || activeMembers >= 8 {
++		return Member{}, ErrInvalid
++	}
+ 	if strings.TrimSpace(c.DisplayName) == "" || strings.TrimSpace(c.RoleName) == "" {
+ 		return Member{}, ErrInvalid
+ 	}
+@@ -225,6 +229,13 @@
+ 	if taskRow.WorkspaceID != t.WorkspaceID || taskRow.State != task.StateCreated || !s.isHuman(ctx, c.CreatedBy) || !s.workspaceMember(ctx, t.WorkspaceID, c.CreatedBy) {
+ 		return Session{}, ErrInvalid
+ 	}
++	mode := strings.ToLower(strings.TrimSpace(c.ExecutionMode))
++	if mode == "" {
++		mode = "team"
++	}
++	if mode != "team" && mode != "council" {
++		return Session{}, ErrInvalid
++	}
+ 	cfg, err := canonical(c.Config)
+ 	if err != nil {
+ 		return Session{}, err
+@@ -242,11 +253,11 @@
+ 		if _, e := tx.ExecContext(ctx, `INSERT INTO team_sessions(id,workspace_id,team_id,task_id,status,accepted_plan_id,gateway_target_id,round_number,config_json,revision,created_by,created_at,updated_at) VALUES(?,?,?,?,?,NULL,?,0,?,1,?,?,?)`, ss.ID, ss.WorkspaceID, ss.TeamID, ss.TaskID, ss.Status, ss.GatewayTargetID, string(ss.Config), ss.CreatedBy, now, now); e != nil {
+ 			return e
+ 		}
+-		if _, e := tx.ExecContext(ctx, `INSERT INTO task_execution_profiles(task_id,workspace_id,execution_mode,team_id,team_session_id,config_json,created_by,created_at,updated_at) VALUES(?,?,'team',?,?,?, ?,?,?)`, ss.TaskID, ss.WorkspaceID, ss.TeamID, ss.ID, string(ss.Config), ss.CreatedBy, now, now); e != nil {
++		if _, e := tx.ExecContext(ctx, `INSERT INTO task_execution_profiles(task_id,workspace_id,execution_mode,team_id,team_session_id,config_json,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?, ?,?,?)`, ss.TaskID, ss.WorkspaceID, mode, ss.TeamID, ss.ID, string(ss.Config), ss.CreatedBy, now, now); e != nil {
+ 			return e
+ 		}
+ 		actor := c.CreatedBy
+-		return s.emit(ctx, tx, ss.WorkspaceID, "team.session_started", "team_session", ss.ID, &actor, map[string]any{"task_id": ss.TaskID, "team_id": ss.TeamID})
++		return s.emit(ctx, tx, ss.WorkspaceID, "team.session_started", "team_session", ss.ID, &actor, map[string]any{"task_id": ss.TaskID, "team_id": ss.TeamID, "execution_mode": mode})
+ 	})
+ 	return ss, err
+ }
+--- a/internal/api/team.go
++++ b/internal/api/team.go
+@@ -93,6 +93,7 @@
+ 		TeamID          string          `json:"team_id"`
+ 		GatewayTargetID *string         `json:"gateway_target_id"`
+ 		Config          json.RawMessage `json:"config"`
++		ExecutionMode   string          `json:"execution_mode"`
+ 	}
+ 	if !decodeJSON(w, r, &in) {
+ 		return
+@@ -105,7 +106,7 @@
+ 	if !s.authorize(w, r, i, t.WorkspaceID, "team.write") {
+ 		return
+ 	}
+-	out, err := s.team.StartSession(r.Context(), team.StartSessionCommand{TaskID: r.PathValue("taskID"), TeamID: in.TeamID, CreatedBy: i.PrincipalID, GatewayTargetID: in.GatewayTargetID, Config: in.Config})
++	out, err := s.team.StartSession(r.Context(), team.StartSessionCommand{TaskID: r.PathValue("taskID"), TeamID: in.TeamID, CreatedBy: i.PrincipalID, GatewayTargetID: in.GatewayTargetID, Config: in.Config, ExecutionMode: in.ExecutionMode})
+ 	respondDomain(w, out, err, 201)
+ }
+ func (s *Server) getTaskTeamSession(w http.ResponseWriter, r *http.Request) {
+--- a/internal/teamworker/service.go
++++ b/internal/teamworker/service.go
+@@ -175,12 +175,19 @@
+ 	if err := s.db.QueryRowContext(ctx, `SELECT objective FROM tasks WHERE id=?`, ss.TaskID).Scan(&taskObjective); err != nil {
+ 		return s.fail(ctx, res, err)
+ 	}
++	var executionMode string
++	if err := s.db.QueryRowContext(ctx, `SELECT execution_mode FROM task_execution_profiles WHERE task_id=?`, ss.TaskID).Scan(&executionMode); err != nil {
++		return s.fail(ctx, res, err)
++	}
++	if executionMode != "council" {
++		executionMode = "team"
++	}
+ 	msgs, err := s.teams.ListMessages(ctx, ss.ID, 200)
+ 	if err != nil {
+ 		return s.fail(ctx, res, err)
+ 	}
+ 	sections := []agentprotocol.ContextSection{}
+-	taskRaw, _ := json.Marshal(map[string]any{"task_id": ss.TaskID, "objective": taskObjective, "mode": "team_deliberation", "team_role": member.RoleName})
++	taskRaw, _ := json.Marshal(map[string]any{"task_id": ss.TaskID, "objective": taskObjective, "mode": executionMode + "_deliberation", "team_role": member.RoleName})
+ 	sections = append(sections, agentprotocol.ContextSection{ID: "task", Kind: "task", Trust: "USER_INSTRUCTION", Authoritative: true, Content: taskRaw})
+ 	used := len(taskRaw)
+ 	start := 0
+@@ -221,6 +228,9 @@
+ 		_, _ = s.db.ExecContext(ctx, `UPDATE team_turn_requests SET budget_reservation_id=? WHERE id=?`, reservationID, turnID)
+ 	}
+ 	objective := fmt.Sprintf("Participate in a pre-execution Team Mode deliberation as %s. Respond to the team's latest discussion, surface assumptions or objections, and help converge on a concrete plan. Do not execute tools or side effects. Task: %s", member.RoleName, taskObjective)
++	if executionMode == "council" {
++		objective = fmt.Sprintf("Participate independently in a pre-execution Council deliberation as %s. Produce your own assessment without converging on other members' conclusions; surface assumptions, objections, risks, and a recommended answer for later synthesis. Do not execute tools or side effects. Task: %s", member.RoleName, taskObjective)
++	}
+ 	areq := agentprotocol.Request{ProtocolVersion: agentprotocol.Version, RequestID: "", WorkspaceID: ws, TaskID: ss.TaskID, PrincipalID: WorkerPrincipal, Role: member.RoleName, Objective: objective, Constraints: json.RawMessage(`{"deliberation_only":true,"no_side_effects":true}`), Context: sections, ContextManifest: manifest, PermittedProposalTypes: []agentprotocol.ProposalType{agentprotocol.ProposalReplan, agentprotocol.ProposalHuman, agentprotocol.ProposalComplete, agentprotocol.ProposalWait, agentprotocol.ProposalFail}, ToolCallback: false}

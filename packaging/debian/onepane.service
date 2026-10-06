@@ -1,0 +1,42 @@
+[Unit]
+Description=OnePane local-first AI control plane
+Documentation=https://github.com/DigiLogicTech/OnePane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=onepane
+Group=onepane
+ExecStart=/usr/bin/onepane -config /etc/onepane/config.yaml
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+UMask=0077
+RuntimeDirectory=onepane
+RuntimeDirectoryMode=0700
+Environment=HOME=/var/lib/onepane
+Environment=XDG_CONFIG_HOME=/var/lib/onepane/.config
+Environment=XDG_DATA_HOME=/var/lib/onepane/.local/share
+Environment=XDG_RUNTIME_DIR=/run/onepane
+Delegate=yes
+NoNewPrivileges=no
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=no
+ProtectClock=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+RestrictRealtime=yes
+RestrictNamespaces=no
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID
+AmbientCapabilities=
+ReadWritePaths=/var/lib/onepane /run/onepane
+
+[Install]
+WantedBy=multi-user.target

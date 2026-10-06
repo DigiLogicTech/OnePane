@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import sys
+ROOT=Path(__file__).resolve().parents[1]
+read=lambda p:(ROOT/p).read_text(encoding="utf-8")
+app=read("internal/webui/static/app.js"); css=read("internal/webui/static/style.css"); setup=read("packaging/windows/setup/main.go")
+desktop=read("packaging/windows/desktop/main.go"); api=read("internal/api/server.go"); local=read("internal/localai/managed_deployments.go")
+components=read("internal/localai/components.go")+read("internal/localai/components_omniroute.go")
+catalog=read("internal/localai/catalog_bundled.go"); compute=read("internal/localai/compute_policy.go")
+boot=read("internal/bootstrap/bootstrap.go"); buildinfo=read("internal/buildinfo/buildinfo.go")
+oauth=read("internal/provideroauth/service.go"); skills=read("internal/skillcatalog/service.go")
+checks=[]
+def ck(n,c): checks.append((n,bool(c)))
+ck("centralized alpha.3.1 identity", 'var version = buildinfo.Version' in setup and 'Version   = "dev"' in buildinfo)
+ck("DigiLogic publisher", '"Publisher"' in setup and '"DigiLogic"' in setup)
+ck("independent Project and Model Pool locations", all(x in setup for x in ["project_root","model_pool_path","project-root","model-pool"]))
+ck("desktop singleton is version neutral", "OnePaneDesktop-v0.1.0-alpha.3" not in desktop)
+ck("optional runtimes remain harness managed", "Install optional OmniRoute now?" not in setup and "Install the optional Colibri Large Model runtime now?" not in setup)
+ck("Colibri lifecycle remains durable", '"colibri"' in components and "installed_disabled" in components and 'ColibriRuntimeVersion = "1.12.1"' in local)
+ck("OmniRoute lifecycle is managed locally", '"omniroute"' in components and "installOmniRoute" in components and "startOmniRoute" in components and "3.8.51" in components)
+ck("OmniRoute external provider path remains", "omniQA(false)" in app and "omniQA(true)" in app)
+ck("llama.cpp bootstrap has Windows and Ubuntu CPU GPU backends", all(x in catalog for x in ["win-cpu-x64","win-cuda","win-vulkan","ubuntu-x64","ubuntu-cuda","ubuntu-vulkan"]))
+ck("per-deployment compute policy exists", all(x in compute for x in ["require_gpu","require_cpu","hybrid","SetComputePolicy"]))
+ck("managed deployment inventory exposes current compute", all(x in local for x in ["ComputeMode","ComputeBackend","runtimeConfigJSON"]))
+ck("OAuth stores tokens behind Vault references", "CreateProviderCredential" in oauth and "oauth-refresh-token" in oauth and "access_secret_ref" in oauth)
+ck("Skills packages are quarantined and hash checked", all(x in skills for x in ["quarantined","package hash changed after quarantine","manifest.json"]))
+ck("Settings has canonical grouped IA", all(x in app for x in ["Models & Compute","Providers & Auth","Nodes & Federation","Agents & Research","Skills & Tools"]))
+ck("Nodes and Skills are first class", '["nodes","⬡","Nodes"]' in app and '["skills","✦","Skills"]' in app)
+ck("Agent Check remains available", "Agent Check" in app and "qa5AgentCheck" in app)
+ck("component harness API remains", "/v1/local-ai/components" in app and "/v1/local-ai/components" in api)
+ck("OAuth connect/revoke UI exists", "OAuth connected" in app and "data-a31-oauth-revoke" in app)
+ck("Operations actions are functional", "a31ToggleLogs" in app and "a31RecoveryContent" in app)
+ck("Control Chat includes Assistant and Orchestrator", "a31RenderControlChat" in app and "/orchestrator/turns" in app)
+failed=[n for n,o in checks if not o]
+for n,o in checks: print(f"[{'PASS' if o else 'FAIL'}] {n}")
+if failed:
+ print(f"\nWINDOWS QA5 SOURCE: {len(failed)} CHECK(S) FAILED",file=sys.stderr)
+ for n in failed: print(" - "+n,file=sys.stderr)
+ sys.exit(1)
+print(f"\nWINDOWS QA5 SOURCE: ALL {len(checks)} CHECKS PASSED")

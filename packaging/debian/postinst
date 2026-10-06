@@ -1,0 +1,72 @@
+#!/bin/sh
+set -eu
+
+DATA_DIR=/var/lib/onepane
+CONFIG_DIR=/etc/onepane
+MODEL_POOL="$DATA_DIR/models"
+
+if ! getent group onepane >/dev/null 2>&1; then
+  addgroup --system onepane >/dev/null
+fi
+if ! getent passwd onepane >/dev/null 2>&1; then
+  adduser --system --ingroup onepane --home "$DATA_DIR" --no-create-home --shell /usr/sbin/nologin onepane >/dev/null
+fi
+
+install -d -o onepane -g onepane -m 0700 \
+  "$DATA_DIR" "$DATA_DIR/data" "$MODEL_POOL" \
+  "$DATA_DIR/.config" "$DATA_DIR/.config/containers" \
+  "$DATA_DIR/.local" "$DATA_DIR/.local/share"
+install -d -o root -g onepane -m 0750 "$CONFIG_DIR"
+
+if ! grep -q '^onepane:' /etc/subuid 2>/dev/null; then
+  printf '%s\n' 'onepane:200000:65536' >> /etc/subuid
+fi
+if ! grep -q '^onepane:' /etc/subgid 2>/dev/null; then
+  printf '%s\n' 'onepane:200000:65536' >> /etc/subgid
+fi
+
+if [ ! -f "$CONFIG_DIR/config.yaml" ]; then
+  cat > "$CONFIG_DIR/config.yaml" <<CFG
+server:
+  listen: "127.0.0.1:8080"
+  preview_listen: "127.0.0.1:8081"
+storage:
+  data_dir: "$DATA_DIR/data"
+logging:
+  level: "info"
+local_ai:
+  model_pool_path: "$MODEL_POOL"
+  idle_unload_minutes: 15
+  residency_headroom_pct: 10
+node_federation:
+  enabled: true
+  listen: "0.0.0.0:18443"
+  discovery_enabled: true
+  discovery_multicast: "239.255.77.77:47777"
+  heartbeat_seconds: 10
+  stale_seconds: 35
+CFG
+  chown root:onepane "$CONFIG_DIR/config.yaml"
+  chmod 0640 "$CONFIG_DIR/config.yaml"
+fi
+
+cat > "$DATA_DIR/.config/containers/containers.conf" <<'CFG'
+[engine]
+cgroup_manager="cgroupfs"
+events_logger="file"
+
+[containers]
+netns="private"
+ipcns="private"
+utsns="private"
+CFG
+chown onepane:onepane "$DATA_DIR/.config/containers/containers.conf"
+chmod 0600 "$DATA_DIR/.config/containers/containers.conf"
+
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl daemon-reload
+  systemctl enable onepane.service >/dev/null 2>&1 || true
+  systemctl restart onepane.service
+fi
+
+exit 0

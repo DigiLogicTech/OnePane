@@ -1,0 +1,40 @@
+server:
+  listen: 127.0.0.1:8080
+  # Untrusted Project application content is served from a separate browser
+  # origin so it can never execute with OnePane control-plane origin rights.
+  preview_listen: 127.0.0.1:8081
+  # Required when listen is non-loopback. Terminate TLS at a trusted reverse proxy.
+  # public_origin: https://harness.home.arpa
+  # Required for remote/public control-plane use. This MUST be a different
+  # origin from public_origin and should reverse-proxy to preview_listen.
+  # preview_public_origin: https://preview.harness.home.arpa
+
+storage:
+  data_dir: /var/lib/onepane
+
+logging:
+  level: info
+
+# Local model artifact catalogs are signed. Release builds will ship a default
+# OnePane trust root; custom/offline deployments can pin their own Ed25519 key.
+local_ai:
+  idle_unload_minutes: 15
+  # Optional large/shared model pool. Defaults to <storage.data_dir>/models/managed.
+  # model_pool_path: /mnt/storage/onepane-model-pool
+  residency_headroom_pct: 10
+  # Optional advisory model-fit service. Loopback HTTP is allowed; remote endpoints require HTTPS.
+  # llmfit_url: http://127.0.0.1:8787
+  # catalog_url: https://updates.example.invalid/onepane/local-ai/catalog.json
+  # catalog_trust_keys:
+  #   release-2026: BASE64_ED25519_PUBLIC_KEY
+
+# Paired OnePane nodes share inference/model capacity. LAN discovery is automatic,
+# but trust is always explicit and pairing requires confirmation on both nodes.
+node_federation:
+  enabled: true
+  listen: "0.0.0.0:18443"
+  # advertise_url: "https://192.168.1.20:18443"  # optional; auto-detected when omitted
+  discovery_enabled: true
+  discovery_multicast: "239.255.77.77:47777"
+  heartbeat_seconds: 10
+  stale_seconds: 35

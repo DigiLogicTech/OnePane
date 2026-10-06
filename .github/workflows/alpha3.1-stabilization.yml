@@ -1,0 +1,285 @@
+name: Alpha 3.1 Source Native CI
+
+on:
+  push:
+    branches: [alpha3.1-orchestration]
+  workflow_dispatch:
+    inputs:
+      run_hosted_smoke:
+        description: "Also run destructive/native installed-product smoke tests on GitHub-hosted runners"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: alpha31-source-native-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ONEPANE_VERSION: 0.1.0-alpha.3.1
+
+jobs:
+  validate:
+    name: Validate and build on OnePane Ubuntu runner
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 45
+    steps:
+      - name: Runner preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "runner=$RUNNER_NAME"
+          echo "os=$RUNNER_OS"
+          echo "arch=$RUNNER_ARCH"
+          uname -a
+          command -v python3
+          python3 --version
+          command -v git
+          git --version
+          command -v dpkg-deb
+          dpkg-deb --version | head -n 1
+          df -h "$RUNNER_WORKSPACE"
+      - uses: actions/checkout@v4
+        with:
+          clean: true
+          fetch-depth: 1
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+      - name: Toolchain identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          go version
+          node --version
+          python3 --version
+          echo "commit=$GITHUB_SHA"
+      - name: Validate source contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/validate_alpha3_source.py
+          python3 scripts/validate_windows_qa_source.py
+          python3 scripts/validate_windows_qa4_source.py
+          python3 scripts/validate_windows_qa5_source.py
+          python3 scripts/validate_live_follow_workspace.py
+          python3 scripts/validate_workspace_components_v2.py
+          python3 scripts/validate_shell_polish.py
+          python3 scripts/validate_alpha31_ui.py
+          python3 scripts/validate_frontend_integrity.py
+          python3 scripts/validate_alpha31_product_contract.py
+          node --check internal/webui/static/chat-commands.js
+          node --check internal/webui/static/app.js
+          ! grep -F "type=\"module\"" internal/webui/static/index.html
+          ! grep -F "from './chat-commands.js'" internal/webui/static/app.js
+          ! grep -E '^export[[:space:]]+' internal/webui/static/chat-commands.js
+          grep -F '<script src="/chat-commands.js"></script>' internal/webui/static/index.html
+          grep -F '<script src="/app.js"></script>' internal/webui/static/index.html
+          cmp internal/webui/static/app.js packaging/windows/desktop/static/app.js
+          cmp internal/webui/static/index.html packaging/windows/desktop/static/index.html
+          cmp internal/webui/static/chat-commands.js packaging/windows/desktop/static/chat-commands.js
+          cmp internal/webui/static/style.css packaging/windows/desktop/static/style.css
+          ! grep -F 'data-route="settings">⚙ <span>Defaults</span>' internal/webui/static/index.html
+          ! grep -F "QA8_RELEASE" internal/webui/static/app.js
+          grep -F "apiRequest('/v1/about')" internal/webui/static/app.js
+      - name: Go tests
+        run: go test ./...
+      - name: Build Windows x64 installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf packaging/windows/setup/payload
+          mkdir -p dist/windows-x64 packaging/windows/setup/payload
+          export GOOS=windows GOARCH=amd64 CGO_ENABLED=0
+          BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          BUILD_LDFLAGS="-s -w -X github.com/DigiLogicTech/OnePane/internal/buildinfo.Version=$ONEPANE_VERSION -X github.com/DigiLogicTech/OnePane/internal/buildinfo.Revision=$GITHUB_SHA -X github.com/DigiLogicTech/OnePane/internal/buildinfo.BuildTime=$BUILD_TIME"
+          go build -trimpath -ldflags "$BUILD_LDFLAGS" -o packaging/windows/setup/payload/OnePane.Backend.exe ./cmd/harnessd
+          go build -trimpath -ldflags "$BUILD_LDFLAGS" -o packaging/windows/setup/payload/OnePane.Service.exe ./packaging/windows/service
+          go build -trimpath -ldflags "-H windowsgui $BUILD_LDFLAGS" -o packaging/windows/setup/payload/OnePane.Desktop.exe ./packaging/windows/desktop
+          cp packaging/windows/assets/OnePane.ico packaging/windows/setup/payload/OnePane.ico
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, re
+          setup = Path("packaging/windows/setup/main.go")
+          text = setup.read_text()
+          payload = Path("packaging/windows/setup/payload")
+          for name in ["OnePane.Backend.exe", "OnePane.Service.exe", "OnePane.Desktop.exe", "OnePane.ico"]:
+              digest = hashlib.sha256((payload / name).read_bytes()).hexdigest()
+              pattern = rf'("{re.escape(name)}"\s*:\s*")[0-9a-f]{{64}}(")'
+              text, n = re.subn(pattern, rf'\g<1>{digest}\2', text, count=1)
+              if n != 1:
+                  raise SystemExit(f"could not refresh payload hash for {name}")
+          setup.write_text(text)
+          PY
+          go build -trimpath -ldflags "-H windowsgui $BUILD_LDFLAGS" -o dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe ./packaging/windows/setup
+          (cd dist/windows-x64 && sha256sum "OnePane-$ONEPANE_VERSION-windows-x64-setup.exe" > "OnePane-$ONEPANE_VERSION-windows-x64-setup.exe.sha256")
+          test -s dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe
+          python3 - <<'PY'
+          from pathlib import Path
+          p=next(Path("dist/windows-x64").glob("*-setup.exe"))
+          if p.read_bytes()[:2] != b"MZ":
+              raise SystemExit("Windows installer is not a PE executable")
+          print(f"validated installer {p} ({p.stat().st_size} bytes)")
+          PY
+      - name: Build Ubuntu amd64 package
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/build-ubuntu-deb.sh
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: OnePane-alpha3.1-source-native-${{ github.sha }}
+          path: |
+            dist/**
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Clean self-hosted build workspace
+        if: always()
+        shell: bash
+        run: |
+          rm -rf dist packaging/windows/setup/payload
+
+  windows-installed-smoke:
+    name: Windows installed-product smoke (optional hosted)
+    needs: validate
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_hosted_smoke == true }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: OnePane-alpha3.1-source-native-${{ github.sha }}
+          path: artifact
+      - name: Install launch uninstall reinstall
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Get-ChildItem -Path artifact -Recurse -Filter '*-windows-x64-setup.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'Windows installer artifact not found' }
+
+          $root = Join-Path $env:RUNNER_TEMP 'OnePaneInstalledSmoke'
+          $install = Join-Path $root 'App'
+          $projects = Join-Path $root 'Projects'
+          $models = Join-Path $root 'Models'
+          New-Item -ItemType Directory -Force -Path $root,$projects,$models | Out-Null
+
+          function Invoke-OnePaneSetup([string[]]$SetupArgs) {
+            $proc = Start-Process -FilePath $installer.FullName -ArgumentList $SetupArgs -Wait -PassThru
+            if ($proc.ExitCode -ne 0) { throw "OnePane Setup failed with exit code $($proc.ExitCode): $($SetupArgs -join ' ')" }
+          }
+          function Wait-OnePaneHealth([int]$Seconds = 90) {
+            $deadline = (Get-Date).AddSeconds($Seconds)
+            while ((Get-Date) -lt $deadline) {
+              try {
+                $health = Invoke-RestMethod -Uri 'http://127.0.0.1:18181/v1/health' -TimeoutSec 2
+                if ($health.status -eq 'ok') { return }
+              } catch {}
+              Start-Sleep -Milliseconds 750
+            }
+            throw 'OnePane service did not become healthy'
+          }
+          function Assert-OnePaneVersion {
+            $about = Invoke-RestMethod -Uri 'http://127.0.0.1:18181/v1/about' -TimeoutSec 5
+            if ($about.version -ne $env:ONEPANE_VERSION) { throw "Backend version mismatch: $($about.version)" }
+            $reg = Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\OnePane'
+            if ($reg.DisplayVersion -ne $env:ONEPANE_VERSION) { throw "Installed Apps version mismatch: $($reg.DisplayVersion)" }
+          }
+          function Assert-NativeUIReady {
+            $marker = Join-Path $env:LOCALAPPDATA 'OnePane\ui-ready.txt'
+            Remove-Item -Force -ErrorAction SilentlyContinue $marker
+            $desktop = Start-Process -FilePath (Join-Path $install 'OnePane.Desktop.exe') -PassThru
+            try {
+              $deadline = (Get-Date).AddSeconds(75)
+              while ((Get-Date) -lt $deadline) {
+                if (Test-Path $marker) {
+                  $value = (Get-Content -Raw $marker).Trim()
+                  if ($value -eq "onepane-ui-ready|$env:ONEPANE_VERSION") { return }
+                  throw "Unexpected native UI-ready marker: $value"
+                }
+                if ($desktop.HasExited) { throw "OnePane Desktop exited before UI-ready (exit $($desktop.ExitCode))" }
+                Start-Sleep -Milliseconds 750
+              }
+              $log = Join-Path $env:LOCALAPPDATA 'OnePane\desktop.log'
+              if (Test-Path $log) { Get-Content $log -Tail 120 | Write-Host }
+              throw 'Native OnePane UI did not acknowledge JavaScript bootstrap'
+            } finally {
+              Get-Process 'OnePane.Desktop' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          try {
+            Invoke-OnePaneSetup @(
+              '--elevated','--silent','--no-launch','--skip-optional-runtime',
+              '--install-dir',$install,'--project-root',$projects,'--model-pool',$models
+            )
+            Wait-OnePaneHealth
+            Assert-OnePaneVersion
+            Assert-NativeUIReady
+
+            $sentinel = Join-Path $env:ProgramData 'OnePane\qa-preserve.txt'
+            Set-Content -Path $sentinel -Value 'preserve-alpha3.1' -NoNewline
+            Invoke-OnePaneSetup @('--elevated','--silent','--no-launch','--uninstall')
+
+            $deadline = (Get-Date).AddSeconds(30)
+            while ((Test-Path $install) -and ((Get-Date) -lt $deadline)) { Start-Sleep -Milliseconds 500 }
+            if (Test-Path $install) { throw 'Application install directory survived uninstall' }
+            if (-not (Test-Path $sentinel)) { throw 'Durable ProgramData content was deleted by uninstall' }
+
+            Invoke-OnePaneSetup @(
+              '--elevated','--silent','--no-launch','--skip-optional-runtime',
+              '--install-dir',$install,'--project-root',$projects,'--model-pool',$models
+            )
+            Wait-OnePaneHealth
+            Assert-OnePaneVersion
+            Assert-NativeUIReady
+            if ((Get-Content -Raw $sentinel).Trim() -ne 'preserve-alpha3.1') { throw 'Durable data changed across reinstall' }
+          } finally {
+            Get-Process 'OnePane.Desktop' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            try { Invoke-OnePaneSetup @('--elevated','--silent','--no-launch','--uninstall') } catch { Write-Warning $_ }
+          }
+
+  ubuntu-installed-smoke:
+    name: Ubuntu installed-package smoke (optional hosted)
+    needs: validate
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_hosted_smoke == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: OnePane-alpha3.1-source-native-${{ github.sha }}
+          path: artifact
+      - name: Install verify and preserve data
+        shell: bash
+        run: |
+          set -euo pipefail
+          deb="$(realpath "$(find artifact -type f -name 'onepane_*_amd64.deb' -print -quit)")"
+          test -n "$deb"
+          test "$(dpkg-deb -f "$deb" Version)" = "$ONEPANE_VERSION"
+          sudo apt-get update
+          sudo apt-get install -y "$deb"
+          test "$(dpkg-query -W -f='${Version}' onepane)" = "$ONEPANE_VERSION"
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8080/v1/health >/tmp/onepane-health.json; then break; fi
+            sleep 1
+          done
+          grep -q '"status":"ok"' /tmp/onepane-health.json
+          curl -fsS http://127.0.0.1:8080/v1/about >/tmp/onepane-about.json
+          python3 - <<'PY'
+          import json, os
+          data=json.load(open('/tmp/onepane-about.json'))
+          assert data['version']==os.environ['ONEPANE_VERSION'], data
+          PY
+          sudo systemctl is-active --quiet onepane.service
+          echo preserve-alpha3.1 | sudo tee /var/lib/onepane/qa-preserve.txt >/dev/null
+          sudo apt-get remove -y onepane
+          sudo test -f /var/lib/onepane/qa-preserve.txt
+          test "$(sudo cat /var/lib/onepane/qa-preserve.txt | tr -d '\n')" = "preserve-alpha3.1"

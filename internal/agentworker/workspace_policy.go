@@ -1,0 +1,98 @@
+package agentworker
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/DigiLogicTech/OnePane/internal/authority"
+)
+
+type workspaceAccessPolicy struct {
+	Mode               string `json:"mode"`
+	ProjectWorkspaceID string `json:"project_workspace_id"`
+	RemoteModels       *bool  `json:"remote_models,omitempty"`
+	Filesystem         string `json:"filesystem,omitempty"`
+	Internet           bool   `json:"internet"`
+	LAN                bool   `json:"lan"`
+	Browser            bool   `json:"browser"`
+	Computer           bool   `json:"computer"`
+	Secrets            string `json:"secrets,omitempty"`
+}
+
+type onePaneRoutingPolicy struct {
+	Enabled               *bool                 `json:"enabled,omitempty"`
+	CandidateID           string                `json:"candidate_id,omitempty"`
+	FallbackCandidateIDs  []string              `json:"fallback_candidate_ids,omitempty"`
+	AgentProfile          string                `json:"agent_profile,omitempty"`
+	FallbackAgentProfiles []string              `json:"fallback_agent_profiles,omitempty"`
+	ProjectWorkspaceID    string                `json:"project_workspace_id,omitempty"`
+	WorkspaceAccess       workspaceAccessPolicy `json:"workspace_access,omitempty"`
+}
+
+func routingPolicyFromCompletion(raw json.RawMessage) onePaneRoutingPolicy {
+	var envelope struct {
+		OnePaneRouting onePaneRoutingPolicy `json:"onepane_routing"`
+	}
+	_ = json.Unmarshal(raw, &envelope)
+	return envelope.OnePaneRouting
+}
+
+// inheritOnePaneRouting preserves the parent workspace routing/access envelope for
+// delegated child tasks. A delegated model may narrow its own completion contract,
+// but it cannot drop or widen the workspace security/routing policy.
+func inheritOnePaneRouting(parent, child json.RawMessage) json.RawMessage {
+	var parentEnvelope map[string]json.RawMessage
+	if json.Unmarshal(parent, &parentEnvelope) != nil {
+		return child
+	}
+	routing, ok := parentEnvelope["onepane_routing"]
+	if !ok || len(routing) == 0 {
+		return child
+	}
+	childEnvelope := map[string]json.RawMessage{}
+	if len(child) > 0 {
+		_ = json.Unmarshal(child, &childEnvelope)
+	}
+	childEnvelope["onepane_routing"] = routing
+	b, err := json.Marshal(childEnvelope)
+	if err != nil {
+		return child
+	}
+	return b
+}
+
+func workspaceToolAllowed(raw json.RawMessage, capabilityID string, mode authority.ActionMode, toolID, resourceRef string) error {
+	p := routingPolicyFromCompletion(raw).WorkspaceAccess
+	if strings.TrimSpace(p.Mode) == "" && strings.TrimSpace(p.ProjectWorkspaceID) == "" {
+		return nil // Legacy task without project-workspace policy.
+	}
+	if p.Mode != "brokered" {
+		return fmt.Errorf("workspace policy requires brokered access")
+	}
+	hay := strings.ToLower(strings.Join([]string{capabilityID, toolID, resourceRef}, " "))
+	if !p.Browser && strings.Contains(hay, "browser") {
+		return fmt.Errorf("browser capability is disabled for this workspace")
+	}
+	if !p.Computer && (strings.Contains(hay, "computer") || strings.Contains(hay, "desktop")) {
+		return fmt.Errorf("computer capability is disabled for this workspace")
+	}
+	if !p.Internet && mode == authority.ActionExternalSend {
+		return fmt.Errorf("external network sends are disabled for this workspace")
+	}
+	if !p.Internet && (strings.Contains(hay, "http://") || strings.Contains(hay, "https://") || strings.Contains(hay, "web.fetch") || strings.Contains(hay, "network.external")) {
+		return fmt.Errorf("internet access is disabled for this workspace")
+	}
+	if !p.LAN && (strings.Contains(hay, "network.lan") || strings.Contains(hay, "lan://")) {
+		return fmt.Errorf("LAN access is disabled for this workspace")
+	}
+	if p.Filesystem == "none" && (strings.Contains(hay, "file") || strings.Contains(hay, "filesystem") || strings.Contains(hay, "/workspace")) {
+		return fmt.Errorf("filesystem access is disabled for this workspace")
+	}
+	if p.Secrets == "none" && (strings.Contains(hay, "secret") || strings.Contains(hay, "vault") || strings.Contains(hay, "credential")) {
+		return fmt.Errorf("secret access is disabled for this workspace")
+	}
+	// workspace-only filesystem boundaries are additionally enforced by the
+	// CapabilityLease/resource scope. This policy can narrow access, never widen it.
+	return nil
+}

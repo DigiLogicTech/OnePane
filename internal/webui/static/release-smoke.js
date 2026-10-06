@@ -51,6 +51,8 @@
     await route("projects");check(document.querySelector("#qa4WorkspaceGrid"),"project workspace rendered");
     const edit=check(document.querySelector("#qa4EditWorkspace"),"workspace edit control");if(!state.projectWorkspaceEdit)edit.click();
     await waitFor(()=>document.querySelector("[data-pw-preset]"),"workspace preset");
+    check(document.querySelector(".dashboard-edit-bar[data-pw-drag]"),"Workspace edit header is drag surface");
+    check(document.querySelectorAll("[data-pw-resize]").length>=8,"Workspace exposes edge and corner resize handles");
     for(const size of ["wide","full"]){
       const sel=check(document.querySelector("[data-pw-preset]"),`preset:${size}`);sel.value=size;sel.dispatchEvent(new Event("change",{bubbles:true}));
       await waitFor(()=>!document.querySelector("#qa4WorkspaceGrid")?.dataset.layoutSaving,`save:${size}`,30000);await sleep(100);
@@ -79,6 +81,12 @@
     }
 
     await route("operations");check(document.querySelector("#operationsLayout"),"Operations overview");
+    state.operationsEdit=true;a31RenderOperationsGrid();
+    check(document.querySelector(".dashboard-edit-bar[data-op-drag]"),"Operations edit header is drag surface");
+    check(document.querySelectorAll("[data-op-resize]").length>=8,"Operations exposes edge and corner resize handles");
+    state.operationsEdit=false;a31RenderOperationsGrid();
+    const resolveProbe=[{id:"anchor",x:4,y:0,width:4,height:4},{id:"left",x:0,y:0,width:4,height:4},{id:"conflict",x:4,y:0,width:4,height:4}];a31ResolveLayout(resolveProbe,"anchor");
+    check(!resolveProbe.some((a,i)=>resolveProbe.slice(i+1).some(b=>a31Overlap(a,b))),"Shared layout resolves collisions only at commit");
     state.operationsWidgets=defaultState().operationsWidgets.map((x,i)=>({...x,x:i,y:0,width:3,col:3,height:3,row:3}));a31RenderOperationsGrid();
     check(!a31OperationsLayoutBroken(state.operationsWidgets),"Operations render repairs injected overlap");
     const ops=a31Array(state.operationsWidgets);for(let i=0;i<ops.length;i++)for(let j=i+1;j<ops.length;j++)check(!a31Overlap(ops[i],ops[j]),`Operations no overlap ${i}/${j}`);

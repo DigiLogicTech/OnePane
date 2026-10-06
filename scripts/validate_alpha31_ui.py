@@ -123,7 +123,7 @@ ck("Language remains changeable from Settings", 'id="a31Language"' in app and "q
 ck("Theme-aware sleek scrollbars use shared tokens", all(x in css for x in ["--scrollbar-thumb","--scrollbar-thumb-hover","--scrollbar-thumb-active","::-webkit-scrollbar-thumb","scrollbar-gutter:stable"]))
 ck("Theme accent contrast is tokenized", "--on-accent" in css and "color:var(--on-accent)" in css and 'data-theme="graphite"' in css)
 ck("Dark and Midnight are deliberately distinct", 'data-theme="dark"' in css and 'data-theme="midnight"' in css and "--app-gradient:linear-gradient" in css)
-ck("Workspace layout resolves collisions only at commit", "function a31ApplyItemLayout" in app and "requestAnimationFrame(render)" in app and "a31ResolveLayout(items,item.id)" in app and "const snapshot=items.map" in app and "Layout save failed:" in app)
+ck("Workspace layout resolves collisions only at commit", "card.style.transform" in app and "previewRect" in app and "a31ResolveLayout(items,item.id)" in app and "const snapshot=items.map" in app and "Layout save failed:" in app)
 ck("Desktop layout exposes edge and corner resize handles", "A31_RESIZE_EDGES" in app and "data-resize-edge" in app and all(x in css for x in [".resize-n",".resize-e",".resize-se",".resize-nw"]))
 
 ck("Research Integrity is visible from task Inspector", "A32_RESEARCH_INSPECTOR" in app and "/v1/tasks/" in app and "/team-session" in app and "/manifest" in app and "Research Integrity" in app and "Bound candidate" in app)
@@ -148,3 +148,6 @@ ck("Product tour is centred first and only repositions for focus collisions", 'c
 ck("Product tour reveals only after positioning and defaults to centre", 'visibility:hidden!important' in css and 'data-positioned="true"' in css and "Tour defaults to page centre" in smoke)
 
 ck("Product tour visibly isolates the active target", "9999px" in css and 'data-focus="target"' in css and "Tour target spotlight visible" in smoke and "proven surrounding focus shade" in smoke)
+
+ck("Operations and Workspaces share smooth pixel drag preview", 'data-op-drag=' in app and 'data-pw-drag=' in app and 'translate3d(' in app and 'card.style.willChange="transform,width,height"' in app)
+ck("Shared resize previews continuously then snaps once on release", "previewResize" in app and "a31ResizeRect(start,edge,dx,dy,constraints)" in app and "Object.assign(item,previewRect)" in app)

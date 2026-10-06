@@ -104,10 +104,11 @@ function a31ResolveLayout(items,anchorID){
   }
 }
 function a31GridStyle(item){return `grid-column:${Number(item.x)+1} / span ${item.width};grid-row:${Number(item.y)+1} / span ${item.height}`}
-function a31ApplyLayout(root,items,attr,animate=false){
+function a31ApplyLayout(root,items,attr,animate=false,beforeOverride=null){
   const before=new Map();if(animate)$$(`[${attr}]`,root).forEach(el=>before.set(el.getAttribute(attr),el.getBoundingClientRect()));
+  if(beforeOverride)for(const [id,rect] of beforeOverride)before.set(id,rect);
   for(const item of items){const el=$(`[${attr}="${CSS.escape(item.id)}"]`,root);if(!el)continue;el.style.gridColumn=`${item.x+1} / span ${item.width}`;el.style.gridRow=`${item.y+1} / span ${item.height}`}
-  if(animate&&Element.prototype.animate)requestAnimationFrame(()=>$$(`[${attr}]`,root).forEach(el=>{const old=before.get(el.getAttribute(attr));if(!old)return;const now=el.getBoundingClientRect(),dx=old.left-now.left,dy=old.top-now.top;if(Math.abs(dx)>1||Math.abs(dy)>1)el.animate([{transform:`translate(${dx}px,${dy}px)`},{transform:"translate(0,0)"}],{duration:170,easing:"ease-out"})}));
+  if(animate&&Element.prototype.animate)requestAnimationFrame(()=>$$(`[${attr}]`,root).forEach(el=>{const old=before.get(el.getAttribute(attr));if(!old)return;const now=el.getBoundingClientRect(),dx=old.left-now.left,dy=old.top-now.top,sx=old.width&&now.width?old.width/now.width:1,sy=old.height&&now.height?old.height/now.height:1;if(Math.abs(dx)>1||Math.abs(dy)>1||Math.abs(sx-1)>.015||Math.abs(sy-1)>.015)el.animate([{transform:`translate(${dx}px,${dy}px) scale(${sx},${sy})`,transformOrigin:"top left"},{transform:"translate(0,0) scale(1)",transformOrigin:"top left"}],{duration:180,easing:"cubic-bezier(.2,.7,.2,1)"})}));
 }
 function a31ApplyItemLayout(root,item,attr){
   const el=$(`[${attr}="${CSS.escape(item.id)}"]`,root);if(!el)return;
@@ -127,27 +128,63 @@ function a31ResizeRect(start,edge,dx,dy,c){
 }
 function a31BindLayout(root,items,{attr,dragAttr,resizeAttr,persist:save}){
   if(!root||isPhoneLayout())return;
+  const interactiveSelector='button,select,input,textarea,a,label,[contenteditable="true"]';
+  const spanPx=(cells,unit,gap)=>Math.max(1,cells*unit+Math.max(0,cells-1)*gap);
   const begin=(e,id,kind)=>{
-    if(e.button!==0||root.dataset.layoutSaving==='true')return;const item=items.find(x=>x.id===id);if(!item)return;
+    if(e.button!==0||root.dataset.layoutSaving==='true')return;
+    if(kind==='drag'&&e.target.closest(interactiveSelector))return;
+    const item=items.find(x=>x.id===id);if(!item)return;
+    const card=e.currentTarget.closest(`[${attr}]`)||e.currentTarget;if(!card)return;
     e.preventDefault();e.stopPropagation();
+
     const snapshot=items.map(x=>({...x})),generation=++a31LayoutGeneration;
-    const rect=root.getBoundingClientRect(),style=getComputedStyle(root),columnGap=parseFloat(style.columnGap)||0,rowGap=parseFloat(style.rowGap)||0;
-    const colW=Math.max(1,(rect.width-columnGap*(A31_LAYOUT_COLUMNS-1))/A31_LAYOUT_COLUMNS),colStep=colW+columnGap,rowStep=A31_LAYOUT_ROW_PX+rowGap;
+    const rootRect=root.getBoundingClientRect(),cardRect=card.getBoundingClientRect(),style=getComputedStyle(root),columnGap=parseFloat(style.columnGap)||0,rowGap=parseFloat(style.rowGap)||0;
+    const colW=Math.max(1,(rootRect.width-columnGap*(A31_LAYOUT_COLUMNS-1))/A31_LAYOUT_COLUMNS),colStep=colW+columnGap,rowStep=A31_LAYOUT_ROW_PX+rowGap;
     const start={x:e.clientX,y:e.clientY,itemX:item.x,itemY:item.y,w:item.width,h:item.height};
-    const target=e.currentTarget,card=target.closest(`[${attr}]`),edge=target.dataset.resizeEdge||'se';let raf=0,pending=null,finished=false;
-    target.setPointerCapture?.(e.pointerId);root.classList.add('layout-interacting');root.dataset.layoutGeneration=String(generation);if(card)card.dataset.layoutActive='true';
-    const render=()=>{raf=0;if(!pending)return;Object.assign(item,pending);item.col=item.width;item.row=item.height;pending=null;a31ApplyItemLayout(root,item,attr)};
-    const queue=next=>{pending=next;if(!raf)raf=requestAnimationFrame(render)};
-    const move=ev=>{const dx=Math.round((ev.clientX-start.x)/colStep),dy=Math.round((ev.clientY-start.y)/rowStep),c=a31Constraints(item);if(kind==='drag')queue({x:Math.max(0,Math.min(A31_LAYOUT_COLUMNS-item.width,start.itemX+dx)),y:Math.max(0,start.itemY+dy),width:item.width,height:item.height});else queue(a31ResizeRect(start,edge,dx,dy,c))};
-    const restore=()=>{if(String(root.dataset.layoutGeneration||'')!==String(generation))return false;for(const old of snapshot){const current=items.find(x=>x.id===old.id);if(current)Object.assign(current,old)}a31ApplyLayout(root,items,attr,true);return true};
-    const finish=async cancelled=>{if(finished)return;finished=true;if(raf){cancelAnimationFrame(raf);raf=0}if(cancelled)pending={x:start.itemX,y:start.itemY,width:start.w,height:start.h};if(pending)render();try{if(target.hasPointerCapture?.(e.pointerId))target.releasePointerCapture(e.pointerId)}catch{}target.removeEventListener('pointermove',move);target.removeEventListener('pointerup',up);target.removeEventListener('pointercancel',cancel);root.classList.remove('layout-interacting');if(card)delete card.dataset.layoutActive;
+    const target=e.currentTarget,edge=target.dataset.resizeEdge||'se',constraints=a31Constraints(item);
+    let raf=0,pending=null,finished=false,previewRect={x:item.x,y:item.y,width:item.width,height:item.height};
+
+    const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
+    const clearPreview=()=>{
+      card.style.removeProperty("transform");card.style.removeProperty("width");card.style.removeProperty("height");card.style.removeProperty("will-change");
+      delete card.dataset.layoutActive;delete card.dataset.layoutCollision;delete card.dataset.layoutKind;delete card.dataset.layoutPreview;
+    };
+    const updateCollision=()=>{card.dataset.layoutCollision=items.some(other=>other!==item&&a31Overlap(previewRect,other))?"true":"false"};
+    const previewDrag=(dxPx,dyPx)=>{
+      const pxX=clamp(dxPx,rootRect.left-cardRect.left,rootRect.right-cardRect.right),pxY=Math.max(rootRect.top-cardRect.top,dyPx);
+      const dx=Math.round(pxX/colStep),dy=Math.round(pxY/rowStep);
+      previewRect={x:clamp(start.itemX+dx,0,A31_LAYOUT_COLUMNS-start.w),y:Math.max(0,start.itemY+dy),width:start.w,height:start.h};
+      card.style.transform=`translate3d(${pxX}px,${pxY}px,0)`;card.style.removeProperty("width");card.style.removeProperty("height");
+    };
+    const previewResize=(dxPx,dyPx)=>{
+      const dx=Math.round(dxPx/colStep),dy=Math.round(dyPx/rowStep);previewRect=a31ResizeRect(start,edge,dx,dy,constraints);
+      const minW=spanPx(constraints.minW,colW,columnGap),maxWCells=edge.includes("w")?Math.min(constraints.maxW,start.itemX+start.w):Math.min(constraints.maxW,A31_LAYOUT_COLUMNS-start.itemX),maxW=spanPx(maxWCells,colW,columnGap);
+      const minH=spanPx(constraints.minH,A31_LAYOUT_ROW_PX,rowGap),maxHCells=edge.includes("n")?Math.min(constraints.maxH,start.itemY+start.h):constraints.maxH,maxH=spanPx(maxHCells,A31_LAYOUT_ROW_PX,rowGap);
+      let left=cardRect.left,right=cardRect.right,top=cardRect.top,bottom=cardRect.bottom;
+      if(edge.includes("e"))right=clamp(cardRect.right+dxPx,cardRect.left+minW,Math.min(rootRect.right,cardRect.left+maxW));
+      if(edge.includes("w"))left=clamp(cardRect.left+dxPx,Math.max(rootRect.left,cardRect.right-maxW),cardRect.right-minW);
+      if(edge.includes("s"))bottom=clamp(cardRect.bottom+dyPx,cardRect.top+minH,cardRect.top+maxH);
+      if(edge.includes("n"))top=clamp(cardRect.top+dyPx,Math.max(rootRect.top,cardRect.bottom-maxH),cardRect.bottom-minH);
+      card.style.transform=`translate3d(${left-cardRect.left}px,${top-cardRect.top}px,0)`;card.style.width=`${Math.max(1,right-left)}px`;card.style.height=`${Math.max(1,bottom-top)}px`;
+    };
+    const renderPreview=()=>{raf=0;if(!pending)return;const {dx,dy}=pending;pending=null;if(kind==="drag")previewDrag(dx,dy);else previewResize(dx,dy);card.dataset.layoutPreview=`${previewRect.x},${previewRect.y},${previewRect.width},${previewRect.height}`;updateCollision()};
+    const queue=(dx,dy)=>{pending={dx,dy};if(!raf)raf=requestAnimationFrame(renderPreview)};
+    const move=ev=>queue(ev.clientX-start.x,ev.clientY-start.y);
+    const restore=()=>{if(String(root.dataset.layoutGeneration||'')!==String(generation))return false;for(const old of snapshot){const current=items.find(x=>x.id===old.id);if(current)Object.assign(current,old)}clearPreview();a31ApplyLayout(root,items,attr,true);return true};
+    const finish=async cancelled=>{
+      if(finished)return;finished=true;if(raf){cancelAnimationFrame(raf);raf=0}if(pending)renderPreview();const livePreview=card.getBoundingClientRect();
+      try{if(target.hasPointerCapture?.(e.pointerId))target.releasePointerCapture(e.pointerId)}catch{}
+      target.removeEventListener('pointermove',move);target.removeEventListener('pointerup',up);target.removeEventListener('pointercancel',cancel);root.classList.remove('layout-interacting');delete root.dataset.layoutKind;
       if(cancelled){restore();return}
-      a31ResolveLayout(items,item.id);a31ApplyLayout(root,items,attr,true);root.dataset.layoutSaving='true';a31LayoutSaveInFlight++;
+      clearPreview();Object.assign(item,previewRect);item.col=item.width;item.row=item.height;a31ResolveLayout(items,item.id);a31ApplyLayout(root,items,attr,true,new Map([[item.id,livePreview]]));
+      root.dataset.layoutSaving='true';a31LayoutSaveInFlight++;
       try{await save?.();root.dataset.layoutSaved='true';setTimeout(()=>{if(root.isConnected)delete root.dataset.layoutSaved},900)}
       catch(ex){restore();notice('Layout save failed: '+ex.message,'bad')}
       finally{a31LayoutSaveInFlight=Math.max(0,a31LayoutSaveInFlight-1);delete root.dataset.layoutSaving}
     };
     const up=()=>finish(false),cancel=()=>finish(true);
+    try{target.setPointerCapture?.(e.pointerId)}catch{}
+    root.classList.add('layout-interacting');root.dataset.layoutGeneration=String(generation);root.dataset.layoutKind=kind;card.dataset.layoutActive='true';card.dataset.layoutKind=kind;card.style.willChange="transform,width,height";
     target.addEventListener('pointermove',move);target.addEventListener('pointerup',up);target.addEventListener('pointercancel',cancel);
   };
   $$('['+dragAttr+']',root).forEach(h=>h.onpointerdown=e=>begin(e,h.getAttribute(dragAttr),'drag'));
@@ -170,7 +207,7 @@ function a31ToggleLogs(){
   activeDrawerTab="logs";setDrawerOpen(true);renderDrawer();if(a31RouteIs("operations"))renderOperations();
 }
 function a31OpsWidget(w){
-  return `<section class="dashboard-widget a31-layout-item ${state.operationsEdit?'editable':''}" data-op-widget="${escapeHtml(w.id)}" style="${a31GridStyle(w)}"><div class="dashboard-edit-bar ${state.operationsEdit?'':'hidden'}"><button class="dashboard-drag" data-op-drag="${escapeHtml(w.id)}" title="Drag component">⋮⋮</button><strong>${escapeHtml(w.title)}</strong><span class="dashboard-edit-spacer"></span><select class="dashboard-size" data-op-preset="${escapeHtml(w.id)}"><option value="">Size…</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="wide">Wide</option><option value="full">Full</option></select><button class="tiny danger" data-op-remove="${escapeHtml(w.id)}">×</button></div><div class="dashboard-widget-content">${operationsComponentContent(w.type)}</div>${state.operationsEdit?a31ResizeHandles(w.id,"data-op-resize",w.title):""}</section>`
+  return `<section class="dashboard-widget a31-layout-item ${state.operationsEdit?'editable':''}" data-op-widget="${escapeHtml(w.id)}" style="${a31GridStyle(w)}"><div class="dashboard-edit-bar ${state.operationsEdit?'':'hidden'}" data-op-drag="${escapeHtml(w.id)}" title="Drag component"><span class="dashboard-drag" aria-hidden="true">⋮⋮</span><strong>${escapeHtml(w.title)}</strong><span class="dashboard-edit-spacer"></span><select class="dashboard-size" data-op-preset="${escapeHtml(w.id)}"><option value="">Size…</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="wide">Wide</option><option value="full">Full</option></select><button class="tiny danger" data-op-remove="${escapeHtml(w.id)}">×</button></div><div class="dashboard-widget-content">${operationsComponentContent(w.type)}</div>${state.operationsEdit?a31ResizeHandles(w.id,"data-op-resize",w.title):""}</section>`
 }
 function a31RenderOperationsGrid(){
   const root=$("#operationsLayout");if(!root)return;
@@ -226,7 +263,7 @@ renderOperations=async function(){
 qa4RenderWorkspaceWidget=function(w,project,workspace){
   a31NormalizeLayout(workspace.widgets||[]);
   const edit=!!state.projectWorkspaceEdit;
-  const controls=edit?`<div class="dashboard-edit-bar"><button class="dashboard-drag" data-pw-drag="${escapeHtml(w.id)}" title="Drag component">⋮⋮</button><strong>${escapeHtml(w.title||w.type)}</strong><span class="dashboard-edit-spacer"></span><select class="dashboard-size" data-pw-preset="${escapeHtml(w.id)}"><option value="">Size…</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="wide">Wide</option><option value="full">Full</option></select><button class="tiny danger" data-pw-remove="${escapeHtml(w.id)}">×</button></div>`:"";
+  const controls=edit?`<div class="dashboard-edit-bar" data-pw-drag="${escapeHtml(w.id)}" title="Drag component"><span class="dashboard-drag" aria-hidden="true">⋮⋮</span><strong>${escapeHtml(w.title||w.type)}</strong><span class="dashboard-edit-spacer"></span><select class="dashboard-size" data-pw-preset="${escapeHtml(w.id)}"><option value="">Size…</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="wide">Wide</option><option value="full">Full</option></select><button class="tiny danger" data-pw-remove="${escapeHtml(w.id)}">×</button></div>`:"";
   return `<section class="workspace-widget dashboard-widget a31-layout-item ${edit?'editable':''}" data-pw-widget="${escapeHtml(w.id)}" style="${a31GridStyle(w)}">${controls}<div class="dashboard-widget-content"><div class="widget-handle"><strong>${escapeHtml(w.title||w.type)}</strong></div>${qa6ComponentContent(w,project,workspace)}</div>${edit?a31ResizeHandles(w.id,"data-pw-resize",w.title||w.type):""}</section>`
 };
 async function a31RefreshProjectGrid(project,workspace,animate=true){

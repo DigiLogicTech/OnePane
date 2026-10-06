@@ -889,3 +889,17 @@ body { background:var(--app-gradient),var(--bg); }
 .tour-focus-mask,.tour-pane{display:none!important}
 .tour-spotlight{z-index:1302!important;border:2px solid color-mix(in srgb,var(--accent) 86%,white)!important;box-shadow:0 0 0 4px var(--accent-soft),0 0 0 9999px rgba(5,8,14,.72),0 18px 50px rgba(0,0,0,.26)!important}
 .tour-target{filter:none!important;backdrop-filter:none!important}
+
+
+/* Windows stabilization: shared smooth component drag/resize preview. */
+@media(min-width:701px){
+  .dashboard-edit-bar[data-op-drag],.dashboard-edit-bar[data-pw-drag]{cursor:grab;touch-action:none}
+  .dashboard-edit-bar[data-op-drag]:active,.dashboard-edit-bar[data-pw-drag]:active{cursor:grabbing}
+  .dashboard-edit-bar[data-op-drag] :is(button,select,input,textarea,a),
+  .dashboard-edit-bar[data-pw-drag] :is(button,select,input,textarea,a){cursor:auto;touch-action:auto}
+  .a31-layout-item[data-layout-active="true"]{z-index:40!important;outline:2px solid var(--accent)!important;outline-offset:2px;box-shadow:0 20px 48px rgba(0,0,0,.34),0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent);opacity:.98}
+  .a31-layout-item[data-layout-collision="true"]{outline-color:var(--warn)!important;box-shadow:0 20px 48px rgba(0,0,0,.34),0 0 0 3px color-mix(in srgb,var(--warn) 24%,transparent)}
+  .layout-interacting .a31-layout-item:not([data-layout-active="true"]){transition:none!important}
+  .layout-resize-handle{opacity:.68}
+  .a31-layout-item[data-layout-active="true"] .layout-resize-handle{opacity:1}
+}

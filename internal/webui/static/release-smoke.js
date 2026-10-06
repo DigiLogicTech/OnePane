@@ -79,6 +79,8 @@
     }
 
     await route("operations");check(document.querySelector("#operationsLayout"),"Operations overview");
+    state.operationsWidgets=defaultState().operationsWidgets.map((x,i)=>({...x,x:i,y:0,width:3,col:3,height:3,row:3}));a31RenderOperationsGrid();
+    check(!a31OperationsLayoutBroken(state.operationsWidgets),"Operations render repairs injected overlap");
     const ops=a31Array(state.operationsWidgets);for(let i=0;i<ops.length;i++)for(let j=i+1;j<ops.length;j++)check(!a31Overlap(ops[i],ops[j]),`Operations no overlap ${i}/${j}`);
 
     await route("tasks");check(!document.querySelector("#tasksBody .error"),"Tasks route");

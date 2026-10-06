@@ -173,7 +173,9 @@ function a31OpsWidget(w){
   return `<section class="dashboard-widget a31-layout-item ${state.operationsEdit?'editable':''}" data-op-widget="${escapeHtml(w.id)}" style="${a31GridStyle(w)}"><div class="dashboard-edit-bar ${state.operationsEdit?'':'hidden'}"><button class="dashboard-drag" data-op-drag="${escapeHtml(w.id)}" title="Drag component">⋮⋮</button><strong>${escapeHtml(w.title)}</strong><span class="dashboard-edit-spacer"></span><select class="dashboard-size" data-op-preset="${escapeHtml(w.id)}"><option value="">Size…</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="wide">Wide</option><option value="full">Full</option></select><button class="tiny danger" data-op-remove="${escapeHtml(w.id)}">×</button></div><div class="dashboard-widget-content">${operationsComponentContent(w.type)}</div>${state.operationsEdit?a31ResizeHandles(w.id,"data-op-resize",w.title):""}</section>`
 }
 function a31RenderOperationsGrid(){
-  const root=$("#operationsLayout");if(!root)return;a31NormalizeLayout(state.operationsWidgets);root.innerHTML=state.operationsWidgets.map(a31OpsWidget).join("");
+  const root=$("#operationsLayout");if(!root)return;
+  if(a31OperationsLayoutBroken(state.operationsWidgets)){state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));state.operationsLayoutVersion=A31_OPERATIONS_LAYOUT_VERSION;persist()}
+  a31NormalizeLayout(state.operationsWidgets);root.innerHTML=state.operationsWidgets.map(a31OpsWidget).join("");
   if(state.operationsEdit){
     a31BindLayout(root,state.operationsWidgets,{attr:"data-op-widget",dragAttr:"data-op-drag",resizeAttr:"data-op-resize",persist:async()=>persist()});
     $$("[data-op-remove]",root).forEach(b=>b.onclick=async()=>{const el=b.closest("[data-op-widget]");if(el?.animate)await el.animate([{opacity:1,transform:"scale(1)"},{opacity:0,transform:"scale(.96)"}],{duration:130}).finished.catch(()=>{});state.operationsWidgets=state.operationsWidgets.filter(x=>x.id!==b.dataset.opRemove);a31NormalizeLayout(state.operationsWidgets);persist();a31RenderOperationsGrid()});

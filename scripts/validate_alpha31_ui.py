@@ -141,3 +141,5 @@ print(f"\nALPHA 3.1 UI: ALL {len(checks)} CHECKS PASSED")
 ck("Inspector Overview is implicit rather than a permanent rail", 'root.dataset.tabMode=tabs.length>1?"multi":"single"' in app and 'inspector[data-tab-mode="single"]>.inspector-tabs' in css)
 
 ck("Product tour cannot create an invisible click-blocking overlay", "visibility:visible!important" in css and "Product tour failed" in app and "Tour card is visible" in smoke)
+
+ck("Operations render self-heals overlapping persisted geometry", "if(a31OperationsLayoutBroken(state.operationsWidgets))" in app and "Operations render repairs injected overlap" in smoke)

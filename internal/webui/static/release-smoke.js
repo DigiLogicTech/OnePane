@@ -236,6 +236,7 @@
 
     const archiveButton=check(document.querySelector('[data-task-archive="task-release"][data-task-restore="0"]'),"Task Archive action");archiveButton.click();
     await waitFor(()=>taskRows.length===0&&archivedTaskRows.some(t=>t.id==="task-release"),"Task archived without deletion");
+    await waitFor(()=>!document.querySelector('[data-task-archive="task-release"][data-task-restore="0"]')&&document.querySelector('[data-task-tab="archived"]'),"Task archive render settled");
     const archivedTab=check(document.querySelector('[data-task-tab="archived"]'),"Archived Tasks tab");archivedTab.click();
     const restoreButton=await waitFor(()=>document.querySelector('[data-task-archive="task-release"][data-task-restore="1"]'),"Task Restore action");restoreButton.click();
     await waitFor(()=>taskRows.some(t=>t.id==="task-release")&&!archivedTaskRows.some(t=>t.id==="task-release"),"Archived task restored");

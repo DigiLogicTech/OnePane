@@ -494,7 +494,7 @@ code,kbd { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
 .qa-modal-body { display:grid; gap:12px; }
 .qa-modal-footer { margin-top:14px; display:flex; justify-content:flex-end; gap:8px; }
 .qa-form { display:grid; gap:13px; }
-.modal-backdrop { align-items:flex-start; padding-top:8vh; }
+.modal-backdrop { z-index:1400; align-items:flex-start; padding-top:8vh; pointer-events:auto; }
 .toast { position:fixed; z-index:1500; right:20px; bottom:22px; max-width:460px; border:1px solid var(--border); border-left:3px solid var(--good); background:var(--panel); color:var(--text); box-shadow:var(--shadow); border-radius:10px; padding:12px 14px; }
 .toast.bad { border-left-color:var(--bad); }
 .muted-cell { padding:28px !important; text-align:center; color:var(--muted); }

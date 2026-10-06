@@ -499,7 +499,7 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 	if err != nil {
 		return inference.ModelDeployment{}, err
 	}
-	runtimeID, err := s.ensureManagedRuntime(ctx, p.NodeID, runtime, runtimeRoot, execPath, runtimeFingerprint)
+	runtimeID, err := s.ensureManagedRuntime(ctx, p.NodeID, runtime, runtimeRoot, execPath)
 	if err != nil {
 		return inference.ModelDeployment{}, err
 	}
@@ -580,7 +580,8 @@ func (s *Service) findOrRegisterManagedDeployment(ctx context.Context, modelID s
 	return s.inference.RegisterDeployment(ctx, inference.RegisterDeploymentCommand{ModelID: modelID, NodeID: &p.NodeID, RuntimeName: &rn, RuntimeVersion: &rv, RuntimeConfigJSON: cfg, ContextMaxReported: &p.ContextTokens, ActorPrincipalID: p.ApprovedBy})
 }
 
-func (s *Service) ensureManagedRuntime(ctx context.Context, nodeID string, manifest RuntimeManifest, installRoot, executable, installFingerprint string) (string, error) {
+func (s *Service) ensureManagedRuntime(ctx context.Context, nodeID string, manifest RuntimeManifest, installRoot, executable string) (string, error) {
+	installFingerprint := runtimeInstallFingerprint(manifest)
 	now := s.clock.UnixMilli()
 	runtimeInventoryName := manifest.Name
 	if b := strings.ToLower(strings.TrimSpace(manifest.Backend)); b != "" {

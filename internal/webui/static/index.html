@@ -18,27 +18,37 @@
     </div>
     <div id="setup" class="auth-stage hidden">
       <div class="auth-card">
-        <div class="auth-heading"><img src="/onepane-icon.svg" class="auth-logo" alt=""><div><div class="auth-brand">OnePane</div><div class="page-subtitle">Local-first autonomous AI control plane</div></div></div>
-        <h1>Set up your control plane</h1>
-        <p class="page-subtitle">Create the first local administrator. Credentials remain on this OnePane installation.</p>
-        <form id="setup-form" class="auth-form">
-          <label>Username<input name="username" autocomplete="username" required></label>
-          <label>Display name<input name="display_name" autocomplete="name" required></label>
-          <label>Workspace name<input name="workspace_name" value="Default" required></label>
-          <label>Password<input name="password" type="password" autocomplete="new-password" minlength="12" required></label>
-          <button class="btn primary" type="submit">Create administrator</button>
-          <div class="error" id="setup-error"></div>
-        </form>
+        <div class="auth-heading"><img src="/onepane-icon.svg" class="auth-logo" alt=""><div><div class="auth-brand">OnePane</div><div class="page-subtitle" data-auth-copy="product_tagline">Local-first autonomous AI control plane</div></div></div>
+        <div id="setup-language-step" class="setup-step">
+          <div class="setup-language-kicker">🌐 <span data-auth-copy="language">Language</span></div>
+          <h1 data-auth-copy="choose_language_title">Choose your language</h1>
+          <p class="page-subtitle" data-auth-copy="choose_language_body">Select the language to use in OnePane. You can change it later in Settings.</p>
+          <label><span data-auth-copy="language">Language</span><select id="setup-language" aria-label="Language"></select></label>
+          <button class="btn primary" id="setup-language-continue" type="button" data-auth-copy="continue">Continue</button>
+        </div>
+        <div id="setup-admin-step" class="setup-step hidden">
+          <div class="setup-step-toolbar"><button class="btn" id="setup-language-back" type="button">🌐 <span data-auth-copy="change_language">Change language</span></button></div>
+          <h1 data-auth-copy="setup_title">Set up your control plane</h1>
+          <p class="page-subtitle" data-auth-copy="setup_body">Create the first local administrator. Credentials remain on this OnePane installation.</p>
+          <form id="setup-form" class="auth-form">
+            <label><span data-auth-copy="username">Username</span><input name="username" autocomplete="username" required></label>
+            <label><span data-auth-copy="display_name">Display name</span><input name="display_name" autocomplete="name" required></label>
+            <label><span data-auth-copy="workspace_name">Workspace name</span><input name="workspace_name" value="Default" required></label>
+            <label><span data-auth-copy="password">Password</span><input name="password" type="password" autocomplete="new-password" minlength="12" required></label>
+            <button class="btn primary" type="submit" data-auth-copy="create_admin">Create administrator</button>
+            <div class="error" id="setup-error"></div>
+          </form>
+        </div>
       </div>
     </div>
-    <div id="login" class="auth-stage hidden">
+        <div id="login" class="auth-stage hidden">
       <div class="auth-card">
         <div class="auth-heading"><img src="/onepane-icon.svg" class="auth-logo" alt=""><div><div class="auth-brand">OnePane</div><div class="page-subtitle">Local-first autonomous AI control plane</div></div></div>
-        <h1>Sign in</h1>
+        <h1 data-auth-copy="sign_in">Sign in</h1>
         <form id="login-form" class="auth-form">
-          <label>Username<input name="username" autocomplete="username" required></label>
-          <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
-          <button class="btn primary" type="submit">Sign in</button>
+          <label><span data-auth-copy="username">Username</span><input name="username" autocomplete="username" required></label>
+          <label><span data-auth-copy="password">Password</span><input name="password" type="password" autocomplete="current-password" required></label>
+          <button class="btn primary" type="submit" data-auth-copy="sign_in">Sign in</button>
           <div class="error" id="login-error"></div>
         </form>
       </div>

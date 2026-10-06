@@ -678,6 +678,7 @@ function setAuthStage(id){
 }
 async function bootOnePane(){
   applyTheme(state.theme||'system');
+  qa5ApplyAuthLanguage(qa5SelectedLanguage());
   $('#setup-form')?.addEventListener('submit',async e=>{
     e.preventDefault(); const err=$('#setup-error'); err.textContent='';
     try{const f=Object.fromEntries(new FormData(e.currentTarget)); await apiRequest('/v1/setup/admin',{method:'POST',body:JSON.stringify(f)}); await enterOnePane();}
@@ -691,8 +692,8 @@ async function bootOnePane(){
   try{
     const setup=await apiRequest('/v1/setup/status');
     sendNativeReady();
-    if(setup?.required){setAuthStage('setup');return;}
-    try{await enterOnePane();}catch{setAuthStage('login');}
+    if(setup?.required){setAuthStage('setup');qa5PrepareFirstRunLanguage();return;}
+    try{await enterOnePane();}catch{qa5ApplyAuthLanguage(qa5SelectedLanguage());setAuthStage('login');}
   }catch(ex){const boot=$('#boot .page-subtitle');if(boot)boot.textContent=`Control plane unavailable: ${ex.message}`;}
 }
 async function enterOnePane(){
@@ -1264,6 +1265,7 @@ async function renderActiveView(){
 const QA5_PREFS_KEY='onepane:global-preferences:v1';
 const QA5_THEME_PACK_KEY='onepane:theme-packs:v1';
 const QA5_LANGUAGE_PACK_KEY='onepane:language-packs:v1';
+const QA5_SETUP_LANGUAGE_KEY='onepane:setup-language:v1';
 const QA5_CORE_SKILLS=[
   {id:'workspace-files',name:'Workspace files',detail:'Read/write files only inside the Project workspace or explicitly authorised mounts.'},
   {id:'web-research',name:'Web research',detail:'HTTP/web research through ToolGateway when Project network policy permits it.'},
@@ -1278,6 +1280,14 @@ const QA5_BUILTIN_LANGUAGES={
   'ja-JP':{name:'日本語',strings:{operations:'運用',projects:'プロジェクト',tasks:'タスク',models:'モデル',nodes:'ノード',agents:'エージェント',integrations:'連携',secrets:'シークレット',evidence:'証拠 / 監査',settings:'設定',assistant:'OnePane アシスタント',ask_onepane:'OnePane に質問またはコマンドを実行…',global_context:'グローバル',project_orchestrator:'プロジェクト・オーケストレーター',ask_project:'プロジェクトに質問…',profiles:'プロファイル',sessions:'セッション',teams:'チーム',councils:'カウンシル',direct:'ダイレクト',team:'チーム',council:'カウンシル',search:'OnePane に質問またはコマンドを実行…'}},
   'zh-CN':{name:'简体中文',strings:{operations:'运行',projects:'项目',tasks:'任务',models:'模型',nodes:'节点',agents:'智能体',integrations:'集成',secrets:'密钥',evidence:'证据 / 审计',settings:'设置',assistant:'OnePane 助手',ask_onepane:'询问 OnePane 或运行命令…',global_context:'全局',project_orchestrator:'项目编排器',ask_project:'询问项目…',profiles:'配置档',sessions:'会话',teams:'团队',councils:'评议组',direct:'直接',team:'团队',council:'评议组',search:'询问 OnePane 或运行命令…'}},
   'zh-TW':{name:'繁體中文',strings:{operations:'運行',projects:'專案',tasks:'任務',models:'模型',nodes:'節點',agents:'代理',integrations:'整合',secrets:'密鑰',evidence:'證據 / 稽核',settings:'設定',assistant:'OnePane 助手',ask_onepane:'詢問 OnePane 或執行命令…',global_context:'全域',project_orchestrator:'專案協調器',ask_project:'詢問專案…',profiles:'設定檔',sessions:'工作階段',teams:'團隊',councils:'評議組',direct:'直接',team:'團隊',council:'評議組',search:'詢問 OnePane 或執行命令…'}}
+};
+const QA5_AUTH_COPY={
+  'en-AU':{product_tagline:'Local-first autonomous AI control plane',choose_language_title:'Choose your language',choose_language_body:'Select the language to use in OnePane. You can change it later in Settings.',language:'Language',continue:'Continue',change_language:'Change language',setup_title:'Set up your control plane',setup_body:'Create the first local administrator. Credentials remain on this OnePane installation.',username:'Username',display_name:'Display name',workspace_name:'Workspace name',password:'Password',create_admin:'Create administrator',sign_in:'Sign in'},
+  'en-US':{product_tagline:'Local-first autonomous AI control plane',choose_language_title:'Choose your language',choose_language_body:'Select the language to use in OnePane. You can change it later in Settings.',language:'Language',continue:'Continue',change_language:'Change language',setup_title:'Set up your control plane',setup_body:'Create the first local administrator. Credentials remain on this OnePane installation.',username:'Username',display_name:'Display name',workspace_name:'Workspace name',password:'Password',create_admin:'Create administrator',sign_in:'Sign in'},
+  'it-IT':{product_tagline:'Piano di controllo AI autonomo, local-first',choose_language_title:'Scegli la lingua',choose_language_body:'Seleziona la lingua da usare in OnePane. Potrai cambiarla in seguito nelle Impostazioni.',language:'Lingua',continue:'Continua',change_language:'Cambia lingua',setup_title:'Configura il tuo piano di controllo',setup_body:'Crea il primo amministratore locale. Le credenziali restano su questa installazione di OnePane.',username:'Nome utente',display_name:'Nome visualizzato',workspace_name:'Nome area di lavoro',password:'Password',create_admin:'Crea amministratore',sign_in:'Accedi'},
+  'ja-JP':{product_tagline:'ローカルファーストの自律AIコントロールプレーン',choose_language_title:'言語を選択',choose_language_body:'OnePaneで使用する言語を選択してください。後で設定から変更できます。',language:'言語',continue:'続行',change_language:'言語を変更',setup_title:'コントロールプレーンを設定',setup_body:'最初のローカル管理者を作成します。認証情報はこのOnePaneインストール内に保持されます。',username:'ユーザー名',display_name:'表示名',workspace_name:'ワークスペース名',password:'パスワード',create_admin:'管理者を作成',sign_in:'サインイン'},
+  'zh-CN':{product_tagline:'本地优先的自主 AI 控制平面',choose_language_title:'选择语言',choose_language_body:'选择 OnePane 使用的语言。之后可在“设置”中更改。',language:'语言',continue:'继续',change_language:'更改语言',setup_title:'设置控制平面',setup_body:'创建第一个本地管理员。凭据仅保存在此 OnePane 安装中。',username:'用户名',display_name:'显示名称',workspace_name:'工作区名称',password:'密码',create_admin:'创建管理员',sign_in:'登录'},
+  'zh-TW':{product_tagline:'本機優先的自主 AI 控制平面',choose_language_title:'選擇語言',choose_language_body:'選擇 OnePane 使用的語言。之後可在「設定」中變更。',language:'語言',continue:'繼續',change_language:'變更語言',setup_title:'設定控制平面',setup_body:'建立第一個本機管理員。認證資訊只會保留在此 OnePane 安裝中。',username:'使用者名稱',display_name:'顯示名稱',workspace_name:'工作區名稱',password:'密碼',create_admin:'建立管理員',sign_in:'登入'}
 };
 Object.assign(THEME_PALETTES,{
   aurora:{mode:'dark',caption:'#0a1520',text:'#eefcff',border:'#24506a'},
@@ -1301,14 +1311,37 @@ function qa5LanguagePacks(){return qa5JSONStorage(QA5_LANGUAGE_PACK_KEY,{});}
 function qa5AllLanguages(){return {...QA5_BUILTIN_LANGUAGES,...qa5LanguagePacks()};}
 function qa5CurrentLanguage(){const p=qa5Prefs();return qa5AllLanguages()[p.language]||QA5_BUILTIN_LANGUAGES['en-AU'];}
 function qa5T(key,fallback=''){return qa5CurrentLanguage()?.strings?.[key]||fallback||key;}
+function qa5DetectedLanguage(){
+  const all=qa5AllLanguages(),ids=Object.keys(all),requested=[...(navigator.languages||[]),navigator.language].filter(Boolean);
+  for(const raw of requested){const exact=ids.find(id=>id.toLowerCase()===String(raw).toLowerCase());if(exact)return exact;const base=String(raw).split('-')[0].toLowerCase(),family=ids.find(id=>id.split('-')[0].toLowerCase()===base);if(family)return family}
+  return 'en-AU';
+}
+function qa5SelectedLanguage(){const all=qa5AllLanguages(),stored=qa5JSONStorage(QA5_PREFS_KEY,{});return stored.language&&all[stored.language]?stored.language:qa5DetectedLanguage()}
+function qa5ApplyAuthLanguage(id){
+  const all=qa5AllLanguages(),lang=all[id]?id:'en-AU',copy=QA5_AUTH_COPY[lang]||QA5_AUTH_COPY['en-AU'],pack=all[lang]||{};
+  document.documentElement.lang=lang;document.documentElement.dir=pack.direction==='rtl'?'rtl':'ltr';
+  $$('[data-auth-copy]').forEach(el=>{const key=el.dataset.authCopy;if(copy[key])el.textContent=copy[key]});
+  const select=$('#setup-language');if(select&&select.value!==lang)select.value=lang;
+}
+function qa5PrepareFirstRunLanguage(){
+  const select=$('#setup-language'),languageStep=$('#setup-language-step'),adminStep=$('#setup-admin-step');if(!select||!languageStep||!adminStep)return;
+  const all=qa5AllLanguages(),initial=qa5SelectedLanguage();
+  select.innerHTML=Object.entries(all).map(([id,x])=>'<option value="'+escapeHtml(id)+'">'+escapeHtml(x.name||id)+'</option>').join('');select.value=initial;qa5ApplyAuthLanguage(initial);
+  const showLanguage=()=>{languageStep.classList.remove('hidden');adminStep.classList.add('hidden');select.focus?.()};
+  const showAdmin=()=>{languageStep.classList.add('hidden');adminStep.classList.remove('hidden');adminStep.querySelector('input')?.focus?.()};
+  const confirmed=localStorage.getItem(QA5_SETUP_LANGUAGE_KEY);if(confirmed&&all[confirmed]){select.value=confirmed;qa5ApplyAuthLanguage(confirmed);showAdmin()}else showLanguage();
+  select.onchange=()=>qa5ApplyAuthLanguage(select.value);
+  $('#setup-language-continue').onclick=()=>{const language=select.value;qa5SavePrefs({language});localStorage.setItem(QA5_SETUP_LANGUAGE_KEY,language);qa5ApplyAuthLanguage(language);qa5RefreshShellLanguage();showAdmin()};
+  $('#setup-language-back').onclick=showLanguage;
+}
 function qa5ThemeName(id){return qa5ThemePacks()[id]?.name||titleCase(id);}
-function qa5ClearCustomTheme(){for(const k of ['--bg','--panel','--panel-2','--panel-3','--text','--muted','--border','--accent','--accent-soft','--good','--warn','--bad','--app-gradient'])document.documentElement.style.removeProperty(k);}
-function qa5ApplyCustomTheme(id){qa5ClearCustomTheme();const pack=qa5ThemePacks()[id];if(!pack)return false;const allowed=new Set(['--bg','--panel','--panel-2','--panel-3','--text','--muted','--border','--accent','--accent-soft','--good','--warn','--bad']);for(const [k,v] of Object.entries(pack.vars||{})){if(allowed.has(k)&&typeof v==='string'&&v.length<128)document.documentElement.style.setProperty(k,v);}if(typeof pack.gradient==='string'&&pack.gradient.length<256)document.documentElement.style.setProperty('--app-gradient',pack.gradient);return true;}
+function qa5ClearCustomTheme(){for(const k of ['--bg','--panel','--panel-2','--panel-3','--text','--muted','--border','--accent','--accent-soft','--good','--warn','--bad','--app-gradient','--scrollbar-size','--scrollbar-track','--scrollbar-thumb','--scrollbar-thumb-hover','--scrollbar-thumb-active'])document.documentElement.style.removeProperty(k);}
+function qa5ApplyCustomTheme(id){qa5ClearCustomTheme();const pack=qa5ThemePacks()[id];if(!pack)return false;const allowed=new Set(['--bg','--panel','--panel-2','--panel-3','--text','--muted','--border','--accent','--accent-soft','--good','--warn','--bad','--scrollbar-size','--scrollbar-track','--scrollbar-thumb','--scrollbar-thumb-hover','--scrollbar-thumb-active']);for(const [k,v] of Object.entries(pack.vars||{})){if(allowed.has(k)&&typeof v==='string'&&v.length<128)document.documentElement.style.setProperty(k,v);}if(typeof pack.gradient==='string'&&pack.gradient.length<256)document.documentElement.style.setProperty('--app-gradient',pack.gradient);return true;}
 function effectiveThemePalette(name=state.theme){const custom=qa5ThemePacks()[name];if(custom)return {mode:custom.mode==='light'?'light':'dark',caption:custom.caption||custom.vars?.['--panel']||'#0d1721',text:custom.caption_text||custom.vars?.['--text']||'#e7edf4',border:custom.border||custom.vars?.['--border']||'#203142'};if(name==='system'){if(matchMedia('(prefers-color-scheme: light)').matches)return {mode:'light',caption:'#e8edf2',text:'#263746',border:'#c5d0da'};return THEME_PALETTES.system;}return THEME_PALETTES[name]||THEME_PALETTES.dark;}
 function applyTheme(name){state.theme=name||'system';qa5ClearCustomTheme();if(qa5ThemePacks()[state.theme])qa5ApplyCustomTheme(state.theme);document.documentElement.dataset.theme=qa5ThemePacks()[state.theme]?'custom':state.theme;try{persist()}catch{}sendNativeTheme();}
 function qa5ThemeButtons(){const ids=[...Object.keys(THEME_PALETTES),...Object.keys(qa5ThemePacks())];return ids.filter((x,i,a)=>a.indexOf(x)===i).map(t=>`<button class="theme-choice ${state.theme===t?'active':''}" data-settings-theme="${escapeHtml(t)}">${escapeHtml(qa5ThemeName(t))}</button>`).join('');}
 async function qa5InstallThemePack(file){const raw=await file.text();const p=JSON.parse(raw);if(!p||typeof p.id!=='string'||!/^[a-z0-9][a-z0-9_-]{1,31}$/i.test(p.id)||typeof p.name!=='string'||!p.vars)throw new Error('Theme pack must include id, name and vars.');const packs=qa5ThemePacks();packs[p.id]={name:p.name,mode:p.mode==='light'?'light':'dark',vars:p.vars,gradient:p.gradient||'',caption:p.caption||'',caption_text:p.caption_text||'',border:p.border||''};qa5SaveStorage(QA5_THEME_PACK_KEY,packs);applyTheme(p.id);}
-async function qa5InstallLanguagePack(file){const p=JSON.parse(await file.text());if(!p||typeof p.id!=='string'||!/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/.test(p.id)||typeof p.name!=='string'||!p.strings||typeof p.strings!=='object')throw new Error('Language pack must include id, name and strings.');const packs=qa5LanguagePacks();packs[p.id]={name:p.name,strings:p.strings};qa5SaveStorage(QA5_LANGUAGE_PACK_KEY,packs);qa5SavePrefs({language:p.id});qa5RefreshShellLanguage();}
+async function qa5InstallLanguagePack(file){const p=JSON.parse(await file.text());if(!p||typeof p.id!=='string'||!/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/.test(p.id)||typeof p.name!=='string'||!p.strings||typeof p.strings!=='object')throw new Error('Language pack must include id, name and strings.');const packs=qa5LanguagePacks();packs[p.id]={name:p.name,englishName:p.englishName||'',direction:p.direction==='rtl'?'rtl':'ltr',strings:p.strings};qa5SaveStorage(QA5_LANGUAGE_PACK_KEY,packs);qa5SavePrefs({language:p.id});qa5RefreshShellLanguage();}
 function qa5RefreshShellLanguage(){const map={operations:'operations',projects:'projects',tasks:'tasks',models:'models',nodes:'nodes',agents:'agents',integrations:'integrations',secrets:'secrets',evidence:'evidence',settings:'settings'};for(const [route,key] of Object.entries(map)){if(pages[route])pages[route].title=qa5T(key,pages[route].title);}renderNav();renderTabs();renderMobileNav();const q=$('#commandButton');if(q){const txt=q.querySelector('span')||q;q.setAttribute('aria-label',qa5T('search','Search or run a command…'));}const search=$('#commandButton');if(search&&search.childNodes.length)search.childNodes[0].textContent=qa5T('search','Search or run a command…')+' ';}
 function renderNav(){const activeRoute=currentTab()?.route;$('#primaryNav').innerHTML=navItems.map(([route,icon,label])=>{const key=route==='agents'?'agents':route;const translated=qa5T(key,label);return `<button class="nav-item ${route===activeRoute?'active':''}" data-route="${route}" title="${escapeHtml(translated)}"><span class="nav-icon">${icon}</span><span class="nav-label">${escapeHtml(translated)}</span></button>`;}).join('');renderMobileNav();$$('[data-route]',$('#primaryNav')).forEach(b=>b.onclick=()=>openRoute(b.dataset.route));}
 function renderMobileNav(){const activeRoute=currentTab()?.route;$$('[data-mobile-route]',$('#mobileNav')).forEach(b=>b.classList.toggle('active',b.dataset.mobileRoute===activeRoute));const key=activeRoute==='agents'?'agents':activeRoute;$('#mobileTitle').textContent=qa5T(key,pages[activeRoute]?.title||'OnePane');}
@@ -1593,7 +1626,7 @@ function renderNav(){
   const route=currentTab()?.route||"operations",projects=a31Array(qa4ProjectHub?.projects);
   const projectTree=projects.length?`<div class="project-nav-tree">${projects.map(p=>{const active=p.id===qa4ProjectHub.activeProjectID,workspaces=typeof qa4Workspaces==="function"?qa4Workspaces(p):[];return `<div class="project-nav-node ${active?'active-project':''}"><button class="project-nav-project" data-a31-project-nav="${escapeHtml(p.id)}"><span>▢</span><span>${escapeHtml(p.name||"Project")}</span></button><div class="project-nav-workspaces">${workspaces.map(w=>`<button class="project-nav-workspace ${active&&w.id===qa4ProjectHub.activeWorkspaceID?'active':''}" data-a31-project-nav="${escapeHtml(p.id)}" data-a31-workspace-nav="${escapeHtml(w.id)}"><span class="project-nav-branch"></span><span>${escapeHtml(w.name||"Workspace")}</span></button>`).join("")}</div></div>`}).join("")}</div>`:"";
   const modelTree=`<div class="model-nav-tree"><button class="model-nav-child ${route==="models"&&a31ModelView==="local"?'active':''}" data-a31-model-view="local"><span>◈</span><span>Local Models</span></button><button class="model-nav-child ${route==="models"&&a31ModelView==="cloud"?'active':''}" data-a31-model-view="cloud"><span>☁</span><span>Cloud Models</span></button></div>`;
-  const html=navItems.map(([r,icon,label])=>{const row=`<button class="nav-item ${route===r?'active':''}" data-route="${r}" title="${escapeHtml(label)}"><span class="nav-icon">${icon}</span><span class="nav-label">${escapeHtml(label)}</span></button>`;if(r==="projects")return row+projectTree;if(r==="models")return row+modelTree;return row}).join("");
+  const html=navItems.map(([r,icon,label])=>{const translated=qa5T(r,label);const row=`<button class="nav-item ${route===r?'active':''}" data-route="${r}" title="${escapeHtml(translated)}"><span class="nav-icon">${icon}</span><span class="nav-label">${escapeHtml(translated)}</span></button>`;if(r==="projects")return row+projectTree;if(r==="models")return row+modelTree;return row}).join("");
   $("#primaryNav").innerHTML=html;
   $$("[data-a31-model-view]").forEach(b=>b.onclick=e=>{e.stopPropagation();openRoute("models");a31SetModelView(b.dataset.a31ModelView)});
   $$("[data-a31-project-nav]").forEach(b=>b.onclick=e=>{e.stopPropagation();qa4ProjectHub.activeProjectID=b.dataset.a31ProjectNav;if(b.dataset.a31WorkspaceNav)qa4ProjectHub.activeWorkspaceID=b.dataset.a31WorkspaceNav;else qa4ProjectHub.activeWorkspaceID="";openRoute("projects");renderNav()});
@@ -1619,7 +1652,6 @@ function a31NormalizeLayout(items){
     }else{item.x=Math.max(0,Math.min(A31_LAYOUT_COLUMNS-item.width,Number(item.x)));item.y=Math.max(0,Number(item.y))}
     item.col=item.width;item.row=item.height;
   }
-  a31ResolveLayout(items,null);
   return items;
 }
 function a31FirstFree(items,item,ignore){
@@ -1644,23 +1676,44 @@ function a31ApplyLayout(root,items,attr,animate=false){
   for(const item of items){const el=$(`[${attr}="${CSS.escape(item.id)}"]`,root);if(!el)continue;el.style.gridColumn=`${item.x+1} / span ${item.width}`;el.style.gridRow=`${item.y+1} / span ${item.height}`}
   if(animate&&Element.prototype.animate)requestAnimationFrame(()=>$$(`[${attr}]`,root).forEach(el=>{const old=before.get(el.getAttribute(attr));if(!old)return;const now=el.getBoundingClientRect(),dx=old.left-now.left,dy=old.top-now.top;if(Math.abs(dx)>1||Math.abs(dy)>1)el.animate([{transform:`translate(${dx}px,${dy}px)`},{transform:"translate(0,0)"}],{duration:170,easing:"ease-out"})}));
 }
+function a31ApplyItemLayout(root,item,attr){
+  const el=$(`[${attr}="${CSS.escape(item.id)}"]`,root);if(!el)return;
+  el.style.gridColumn=`${item.x+1} / span ${item.width}`;el.style.gridRow=`${item.y+1} / span ${item.height}`;
+}
+const A31_RESIZE_EDGES=['n','ne','e','se','s','sw','w','nw'];
+function a31ResizeHandles(id,attr,label='component'){
+  return A31_RESIZE_EDGES.map(edge=>`<button class="layout-resize-handle resize-${edge}" ${attr}="${escapeHtml(id)}" data-resize-edge="${edge}" title="Resize ${escapeHtml(label)}" aria-label="Resize ${escapeHtml(label)} ${edge}"></button>`).join('');
+}
+function a31ResizeRect(start,edge,dx,dy,c){
+  let x=start.itemX,y=start.itemY,w=start.w,h=start.h;
+  if(edge.includes('e'))w=Math.max(c.minW,Math.min(c.maxW,A31_LAYOUT_COLUMNS-x,start.w+dx));
+  if(edge.includes('s'))h=Math.max(c.minH,Math.min(c.maxH,start.h+dy));
+  if(edge.includes('w')){const shift=Math.max(-start.itemX,Math.min(start.w-c.minW,dx));x=start.itemX+shift;w=start.w-shift;if(w>c.maxW){x+=w-c.maxW;w=c.maxW}}
+  if(edge.includes('n')){const shift=Math.max(-start.itemY,Math.min(start.h-c.minH,dy));y=start.itemY+shift;h=start.h-shift;if(h>c.maxH){y+=h-c.maxH;h=c.maxH}}
+  return {x:Math.max(0,x),y:Math.max(0,y),width:w,height:h};
+}
 function a31BindLayout(root,items,{attr,dragAttr,resizeAttr,persist:save}){
   if(!root||isPhoneLayout())return;
   const begin=(e,id,kind)=>{
     if(e.button!==0)return;const item=items.find(x=>x.id===id);if(!item)return;
-    e.preventDefault();e.stopPropagation();const rect=root.getBoundingClientRect(),start={x:e.clientX,y:e.clientY,itemX:item.x,itemY:item.y,w:item.width,h:item.height};
-    const target=e.currentTarget;target.setPointerCapture?.(e.pointerId);root.classList.add("layout-interacting");
-    const move=ev=>{const colW=Math.max(1,rect.width/A31_LAYOUT_COLUMNS),dx=Math.round((ev.clientX-start.x)/colW),dy=Math.round((ev.clientY-start.y)/A31_LAYOUT_ROW_PX),c=a31Constraints(item);
-      if(kind==="drag"){item.x=Math.max(0,Math.min(A31_LAYOUT_COLUMNS-item.width,start.itemX+dx));item.y=Math.max(0,start.itemY+dy)}
-      else{item.width=Math.max(c.minW,Math.min(c.maxW,A31_LAYOUT_COLUMNS-item.x,start.w+dx));item.height=Math.max(c.minH,Math.min(c.maxH,start.h+dy));item.col=item.width;item.row=item.height}
-      a31ResolveLayout(items,item.id);a31ApplyLayout(root,items,attr,false);
-    };
-    const end=async ev=>{target.releasePointerCapture?.(e.pointerId);target.removeEventListener("pointermove",move);target.removeEventListener("pointerup",end);target.removeEventListener("pointercancel",end);root.classList.remove("layout-interacting");a31ApplyLayout(root,items,attr,true);try{await save?.()}catch(ex){notice(ex.message,"bad")}};
-    target.addEventListener("pointermove",move);target.addEventListener("pointerup",end);target.addEventListener("pointercancel",end);
+    e.preventDefault();e.stopPropagation();
+    const rect=root.getBoundingClientRect(),style=getComputedStyle(root),columnGap=parseFloat(style.columnGap)||0,rowGap=parseFloat(style.rowGap)||0;
+    const colW=Math.max(1,(rect.width-columnGap*(A31_LAYOUT_COLUMNS-1))/A31_LAYOUT_COLUMNS),colStep=colW+columnGap,rowStep=A31_LAYOUT_ROW_PX+rowGap;
+    const start={x:e.clientX,y:e.clientY,itemX:item.x,itemY:item.y,w:item.width,h:item.height};
+    const target=e.currentTarget,card=target.closest(`[${attr}]`),edge=target.dataset.resizeEdge||'se';let raf=0,pending=null,finished=false;
+    target.setPointerCapture?.(e.pointerId);root.classList.add('layout-interacting');if(card)card.dataset.layoutActive='true';
+    const render=()=>{raf=0;if(!pending)return;Object.assign(item,pending);item.col=item.width;item.row=item.height;pending=null;a31ApplyItemLayout(root,item,attr)};
+    const queue=next=>{pending=next;if(!raf)raf=requestAnimationFrame(render)};
+    const move=ev=>{const dx=Math.round((ev.clientX-start.x)/colStep),dy=Math.round((ev.clientY-start.y)/rowStep),c=a31Constraints(item);if(kind==='drag')queue({x:Math.max(0,Math.min(A31_LAYOUT_COLUMNS-item.width,start.itemX+dx)),y:Math.max(0,start.itemY+dy),width:item.width,height:item.height});else queue(a31ResizeRect(start,edge,dx,dy,c))};
+    const finish=async cancelled=>{if(finished)return;finished=true;if(raf){cancelAnimationFrame(raf);raf=0}if(cancelled)pending={x:start.itemX,y:start.itemY,width:start.w,height:start.h};if(pending)render();try{if(target.hasPointerCapture?.(e.pointerId))target.releasePointerCapture(e.pointerId)}catch{}target.removeEventListener('pointermove',move);target.removeEventListener('pointerup',up);target.removeEventListener('pointercancel',cancel);root.classList.remove('layout-interacting');if(card)delete card.dataset.layoutActive;try{if(!cancelled)await save?.()}catch(ex){notice(ex.message,'bad')}};
+    const up=()=>finish(false),cancel=()=>finish(true);
+    target.addEventListener('pointermove',move);target.addEventListener('pointerup',up);target.addEventListener('pointercancel',cancel);
   };
-  $$(`[${dragAttr}]`,root).forEach(h=>h.onpointerdown=e=>begin(e,h.getAttribute(dragAttr),"drag"));
-  $$(`[${resizeAttr}]`,root).forEach(h=>h.onpointerdown=e=>begin(e,h.getAttribute(resizeAttr),"resize"));
+  $$(`[${dragAttr}]`,root).forEach(h=>h.onpointerdown=e=>begin(e,h.getAttribute(dragAttr),'drag'));
+  $$(`[${resizeAttr}]`,root).forEach(h=>h.onpointerdown=e=>begin(e,h.getAttribute(resizeAttr),'resize'));
 }
+
+/* Operations */
 
 /* Operations */
 function a31OperationsTabs(){
@@ -1676,14 +1729,14 @@ function a31ToggleLogs(){
   activeDrawerTab="logs";setDrawerOpen(true);renderDrawer();if(a31RouteIs("operations"))renderOperations();
 }
 function a31OpsWidget(w){
-  return `<section class="dashboard-widget a31-layout-item ${state.operationsEdit?'editable':''}" data-op-widget="${escapeHtml(w.id)}" style="${a31GridStyle(w)}"><div class="dashboard-edit-bar ${state.operationsEdit?'':'hidden'}"><button class="dashboard-drag" data-op-drag="${escapeHtml(w.id)}" title="Drag component">⋮⋮</button><strong>${escapeHtml(w.title)}</strong><span class="dashboard-edit-spacer"></span><select class="dashboard-size" data-op-preset="${escapeHtml(w.id)}"><option value="">Size…</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="wide">Wide</option><option value="full">Full</option></select><button class="tiny danger" data-op-remove="${escapeHtml(w.id)}">×</button></div><div class="dashboard-widget-content">${operationsComponentContent(w.type)}</div>${state.operationsEdit?`<button class="layout-resize-handle" data-op-resize="${escapeHtml(w.id)}" title="Drag to resize" aria-label="Resize ${escapeHtml(w.title)}">◢</button>`:""}</section>`
+  return `<section class="dashboard-widget a31-layout-item ${state.operationsEdit?'editable':''}" data-op-widget="${escapeHtml(w.id)}" style="${a31GridStyle(w)}"><div class="dashboard-edit-bar ${state.operationsEdit?'':'hidden'}"><button class="dashboard-drag" data-op-drag="${escapeHtml(w.id)}" title="Drag component">⋮⋮</button><strong>${escapeHtml(w.title)}</strong><span class="dashboard-edit-spacer"></span><select class="dashboard-size" data-op-preset="${escapeHtml(w.id)}"><option value="">Size…</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="wide">Wide</option><option value="full">Full</option></select><button class="tiny danger" data-op-remove="${escapeHtml(w.id)}">×</button></div><div class="dashboard-widget-content">${operationsComponentContent(w.type)}</div>${state.operationsEdit?a31ResizeHandles(w.id,"data-op-resize",w.title):""}</section>`
 }
 function a31RenderOperationsGrid(){
   const root=$("#operationsLayout");if(!root)return;a31NormalizeLayout(state.operationsWidgets);root.innerHTML=state.operationsWidgets.map(a31OpsWidget).join("");
   if(state.operationsEdit){
     a31BindLayout(root,state.operationsWidgets,{attr:"data-op-widget",dragAttr:"data-op-drag",resizeAttr:"data-op-resize",persist:async()=>persist()});
     $$("[data-op-remove]",root).forEach(b=>b.onclick=async()=>{const el=b.closest("[data-op-widget]");if(el?.animate)await el.animate([{opacity:1,transform:"scale(1)"},{opacity:0,transform:"scale(.96)"}],{duration:130}).finished.catch(()=>{});state.operationsWidgets=state.operationsWidgets.filter(x=>x.id!==b.dataset.opRemove);a31NormalizeLayout(state.operationsWidgets);persist();a31RenderOperationsGrid()});
-    $$("[data-op-preset]",root).forEach(sel=>sel.onchange=()=>{if(!sel.value)return;const item=state.operationsWidgets.find(x=>x.id===sel.dataset.opPreset);if(!item)return;const p=operationsSizePreset(sel.value,item);item.width=p.col;item.height=p.row;item.col=p.col;item.row=p.row;a31ResolveLayout(state.operationsWidgets,item.id);a31ApplyLayout(root,state.operationsWidgets,"data-op-widget",true);persist()});
+    $$("[data-op-preset]",root).forEach(sel=>sel.onchange=()=>{if(!sel.value)return;const item=state.operationsWidgets.find(x=>x.id===sel.dataset.opPreset);if(!item)return;const p=operationsSizePreset(sel.value,item);item.width=p.col;item.height=p.row;item.col=p.col;item.row=p.row;a31ApplyItemLayout(root,item,"data-op-widget");persist()});
   }
   bindViewActions(root);
 }
@@ -1726,7 +1779,7 @@ qa4RenderWorkspaceWidget=function(w,project,workspace){
   a31NormalizeLayout(workspace.widgets||[]);
   const edit=!!state.projectWorkspaceEdit;
   const controls=edit?`<div class="dashboard-edit-bar"><button class="dashboard-drag" data-pw-drag="${escapeHtml(w.id)}" title="Drag component">⋮⋮</button><strong>${escapeHtml(w.title||w.type)}</strong><span class="dashboard-edit-spacer"></span><select class="dashboard-size" data-pw-preset="${escapeHtml(w.id)}"><option value="">Size…</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="wide">Wide</option><option value="full">Full</option></select><button class="tiny danger" data-pw-remove="${escapeHtml(w.id)}">×</button></div>`:"";
-  return `<section class="workspace-widget dashboard-widget a31-layout-item ${edit?'editable':''}" data-pw-widget="${escapeHtml(w.id)}" style="${a31GridStyle(w)}">${controls}<div class="dashboard-widget-content"><div class="widget-handle"><strong>${escapeHtml(w.title||w.type)}</strong></div>${qa6ComponentContent(w,project,workspace)}</div>${edit?`<button class="layout-resize-handle" data-pw-resize="${escapeHtml(w.id)}" title="Drag to resize">◢</button>`:""}</section>`
+  return `<section class="workspace-widget dashboard-widget a31-layout-item ${edit?'editable':''}" data-pw-widget="${escapeHtml(w.id)}" style="${a31GridStyle(w)}">${controls}<div class="dashboard-widget-content"><div class="widget-handle"><strong>${escapeHtml(w.title||w.type)}</strong></div>${qa6ComponentContent(w,project,workspace)}</div>${edit?a31ResizeHandles(w.id,"data-pw-resize",w.title||w.type):""}</section>`
 };
 async function a31RefreshProjectGrid(project,workspace,animate=true){
   const root=$("#qa4WorkspaceGrid");if(!root)return;a31NormalizeLayout(workspace.widgets||[]);
@@ -1738,7 +1791,7 @@ async function a31RefreshProjectGrid(project,workspace,animate=true){
 qa4BindWorkspaceEdit=function(project,workspace){
   if(!state.projectWorkspaceEdit)return;const root=$("#qa4WorkspaceGrid");if(!root)return;a31NormalizeLayout(workspace.widgets||[]);
   a31BindLayout(root,workspace.widgets||[],{attr:"data-pw-widget",dragAttr:"data-pw-drag",resizeAttr:"data-pw-resize",persist:async()=>{await qa4SaveProjectWorkspaces(project,qa4Workspaces(project))}});
-  $$("[data-pw-preset]",root).forEach(sel=>sel.onchange=async()=>{if(!sel.value)return;const w=workspace.widgets.find(x=>x.id===sel.dataset.pwPreset);if(!w)return;const p=workspacePreset(sel.value,w);w.width=p.col;w.height=p.row;w.col=p.col;w.row=p.row;a31ResolveLayout(workspace.widgets,w.id);a31ApplyLayout(root,workspace.widgets,"data-pw-widget",true);await qa4SaveProjectWorkspaces(project,qa4Workspaces(project))});
+  $$("[data-pw-preset]",root).forEach(sel=>sel.onchange=async()=>{if(!sel.value)return;const w=workspace.widgets.find(x=>x.id===sel.dataset.pwPreset);if(!w)return;const p=workspacePreset(sel.value,w);w.width=p.col;w.height=p.row;w.col=p.col;w.row=p.row;a31ApplyItemLayout(root,w,"data-pw-widget");await qa4SaveProjectWorkspaces(project,qa4Workspaces(project))});
   $$("[data-pw-remove]",root).forEach(b=>b.onclick=async()=>{const el=b.closest("[data-pw-widget]");if(el?.animate)await el.animate([{opacity:1},{opacity:0,transform:"scale(.96)"}],{duration:130}).finished.catch(()=>{});workspace.widgets=workspace.widgets.filter(x=>x.id!==b.dataset.pwRemove);a31NormalizeLayout(workspace.widgets);await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));a31RefreshProjectGrid(project,workspace,true)});
 };
 qa4AddWorkspaceComponent=function(project,workspace){
@@ -1904,7 +1957,7 @@ renderSettings=async function(){
   $("#a31SaveDefaults")?.addEventListener("click",()=>{qa5SavePrefs({workspace_defaults:{orchestration:$("#a31DefaultMode").value,seats:Number($("#a31DefaultSeats").value||2),model_routing:$("#a31DefaultRouting").checked,remote_models:$("#a31DefaultRemote").checked,browser:$("#a31DefaultBrowser").checked,computer:$("#a31DefaultComputer").checked}});notice("Defaults saved for newly created Workspaces.")});
   $("#a31SaveModelSettings")?.addEventListener("click",async()=>{try{await apiRequest("/v1/settings/local-ai",{method:"POST",body:JSON.stringify({model_pool_path:$("#a31ModelPool").value})});qa5SavePrefs({default_runtime:$("#a31Runtime").value,default_compute:$("#a31ComputeDefault").value});notice("Model defaults saved.")}catch(ex){notice(ex.message,"bad")}});
   $("#a31SaveAgentSettings")?.addEventListener("click",()=>{qa5SavePrefs({assistant_defaults:{...p.assistant_defaults,compute_preference:$("#a31AssistantCompute").value},research_default:$("#a31ResearchDefault").checked});notice("Agent and Research defaults saved.")});
-  $("#a31Language")?.addEventListener("change",e=>{qa5SavePrefs({language:e.target.value});qa5RefreshShellLanguage();renderSettings()});
+  $("#a31Language")?.addEventListener("change",e=>{qa5SavePrefs({language:e.target.value});qa5ApplyAuthLanguage(e.target.value);qa5RefreshShellLanguage();renderSettings()});
   $("#a31InstallTheme")?.addEventListener("click",()=>{const i=document.createElement("input");i.type="file";i.accept=".json";i.onchange=async()=>{try{await qa5InstallThemePack(i.files[0]);renderSettings()}catch(ex){notice(ex.message,"bad")}};i.click()});
   $("#a31OpenLogs")?.addEventListener("click",a31ToggleLogs);$("#a31AddOAuthConfig")?.addEventListener("click",()=>openModal("Configure OAuth provider",`<form id="a31OAuthConfigForm" class="qa-form"><label>Provider preset ID<input name="preset" required placeholder="provider-id"></label><label>Authorization URL<input name="auth" required placeholder="https://…/authorize"></label><label>Token URL<input name="token" required placeholder="https://…/token"></label><label>Public client ID<input name="client" required></label><label>Scopes<input name="scopes" placeholder="openid profile"></label><label class="inline-check"><input name="enabled" type="checkbox" checked> Enabled</label><button class="btn primary">Save OAuth configuration</button></form>`));setTimeout(()=>{const form=$("#a31OAuthConfigForm");if(form)form.onsubmit=async e=>{e.preventDefault();const fd=new FormData(form),preset=String(fd.get("preset")||"").trim();try{await apiRequest(`/v1/provider-oauth/configs/${encodeURIComponent(preset)}`,{method:"PUT",body:JSON.stringify({workspace_id:onepaneWorkspace,authorization_url:fd.get("auth"),token_url:fd.get("token"),client_id:fd.get("client"),scopes:String(fd.get("scopes")||"").split(/\s+/).filter(Boolean),enabled:!!fd.get("enabled")})});closeModal();renderSettings()}catch(ex){notice(ex.message,"bad")}}},0);
   bindViewActions($("#viewHost"));

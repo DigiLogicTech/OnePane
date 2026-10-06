@@ -1,8 +1,8 @@
-name: Alpha 3.1 Source Native CI
+name: Alpha 3.2 Integration CI
 
 on:
   push:
-    branches: [alpha3.1-orchestration]
+    branches: [alpha3.2-integration]
   workflow_dispatch:
     inputs:
       run_hosted_smoke:
@@ -12,14 +12,14 @@ on:
         default: false
 
 concurrency:
-  group: alpha31-source-native-${{ github.ref }}
+  group: alpha32-source-native-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 env:
-  ONEPANE_VERSION: 0.1.0-alpha.3.1
+  ONEPANE_VERSION: 0.1.0-alpha.3.2
 
 jobs:
   validate:

@@ -79,6 +79,12 @@ ck("All shell collapse controls use 42x26 geometry", "width:42px!important" in c
 ck("Collapsed sidebar hides brand icon", '.app-shell[data-sidebar="collapsed"] .brand-icon{display:none}' in css)
 ck("Models headers grow with wrapped copy", ".models-page .card-header.models-card-header" in css and "height:auto" in css)
 
+ck("First-run setup requires an explicit language choice", 'id="setup-language-step"' in html and 'id="setup-language"' in html and "qa5PrepareFirstRunLanguage" in app and "QA5_SETUP_LANGUAGE_KEY" in app)
+ck("Language remains changeable from Settings", 'id="a31Language"' in app and "qa5ApplyAuthLanguage(e.target.value)" in app)
+ck("Theme-aware sleek scrollbars use shared tokens", all(x in css for x in ["--scrollbar-thumb","--scrollbar-thumb-hover","--scrollbar-thumb-active","::-webkit-scrollbar-thumb","scrollbar-gutter:stable"]))
+ck("Workspace layout previews only the active component", "function a31ApplyItemLayout" in app and "requestAnimationFrame(render)" in app and "a31ResolveLayout(items,item.id)" not in app)
+ck("Desktop layout exposes edge and corner resize handles", "A31_RESIZE_EDGES" in app and "data-resize-edge" in app and all(x in css for x in [".resize-n",".resize-e",".resize-se",".resize-nw"]))
+
 failed=[n for n,o in checks if not o]
 for n,o in checks: print(f"[{'PASS' if o else 'FAIL'}] {n}")
 if failed:

@@ -86,7 +86,7 @@ ck("Skills expose first-class Tool Bundles view", 'data-a31-skills-tab="bundles"
 ck("Settings have canonical information architecture", all(x in app for x in ["General","Appearance","Defaults","Models & Compute","Providers & Auth","Nodes & Federation","Agents & Research","Skills & Tools","Security & Approvals","Updates & Diagnostics"]))
 ck("Settings preserve new Workspace default semantics", "Existing Workspaces are never changed here" in app)
 ck("Settings content is centered in remaining canvas", "#a31SettingsContent" in css and "justify-self:center" in css and "width:min(100%,1100px)" in css)
-ck("Tour uses four-pane focus and stable card anchors", "tour-pane-top" in app and "bottom-center" in app and ".a31-tour-card" in css and "backdrop-filter:blur(2px)" in css)
+ck("Tour uses four-pane focus with centred collision-aware placement", "tour-pane-top" in app and "const center=clamp" in app and "if(collides(pos)&&targetRect)" in app and 'card.dataset.positioned="true"' in app and ".a31-tour-card" in css and "backdrop-filter:blur(3px)" in css)
 ck("Tour target remains crisp and outlined", ".tour-spotlight" in css and ".tour-target" in css and "filter:none!important" in css)
 ck("Tour uses the canonical overlay root", 'const root=$("#overlayRoot")' in app and "qa31TourRoot" not in app and "qa31TourRoot" not in html)
 ck("Tour cleanup removes live highlights and restores shell state", 'document.querySelectorAll(".tour-target")' in app and 'removeEventListener("keydown",onKeyDown)' in app and 'setInspectorOpen(originalInspector==="open")' in app and 'setDrawerOpen(originalDrawer==="open")' in app and 'e.key==="Escape"' in app)

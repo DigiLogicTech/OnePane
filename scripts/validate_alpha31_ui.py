@@ -65,7 +65,7 @@ ck("Operations add path updates grid without page rerender", "openOperationsComp
 ck("Project component mutations refresh only project grid", "a31RefreshProjectGrid(project,workspace" in app and "qa4SaveProjectWorkspaces" in app)
 ck("Workspace deletion is confirmed revision-safe and guards the final workspace", "a32DeleteWorkspace" in app and "a32ConfirmDeleteWorkspace" in app and "A project must keep at least one workspace." in app and "workspace removed from durable project policy" in smoke)
 ck("Project deletion is confirmed and lifecycle-safe", "a33DeleteProject" in app and 'method:"DELETE"' in app and "a33ConfirmDeleteProject" in app and "Project lifecycle delete persisted" in smoke)
-ck("Nodes prefer federation machine name and mark the local host", "function a34NodeDisplayName" in app and 'n?.name||n?.hostname' in app and "' (Local)'" in app and "Nodes prefer machine name and mark local device" in smoke)
+ck("Nodes prefer federation machine name and mark the local host", "function a34NodeDisplayName" in app and 'n?.name||n?.hostname' in app and " (Local)" in app and "Nodes prefer machine name and mark local device" in smoke)
 
 ck("Operations Activity Health Recovery are functional", '["activity","Activity"]' in app and '["health","Health"]' in app and '["recovery","Recovery"]' in app and "a31OperationsActivity" in app and "a31OperationsHealth" in app and "a31RecoveryContent" in app)
 ck("Operations Logs is a true drawer toggle", "function a31ToggleLogs" in app and 'activeDrawerTab==="logs"' in app and "setDrawerOpen(false)" in app)

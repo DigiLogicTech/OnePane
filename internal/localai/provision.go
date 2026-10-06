@@ -217,7 +217,7 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, sourceURL, dest, expectedSHA st
 	return DownloadResult{Path: dest, SHA256: actual, Size: total}, nil
 }
 
-func safeArchivePathfunc safeArchivePath(root, name string) (string, error) {
+func safeArchivePath(root, name string) (string, error) {
 	name = strings.ReplaceAll(name, "\\", "/")
 	clean := filepath.Clean(name)
 	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {

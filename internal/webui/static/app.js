@@ -2082,6 +2082,7 @@ renderSettings=async function(){
 /* Product tour: crisp target, four-pane focus mask and stable anchored card. */
 startProductTour=function({replay=false,welcome=false}={}){
   if(replay)localStorage.removeItem(TOUR_KEY);const root=$("#overlayRoot");if(!root)return;document.documentElement.dataset.productTour="active";
+  const originalInspector=state.inspector,originalDrawer=state.drawer;
   const steps=[
     {title:"Welcome to OnePane",body:"OnePane coordinates Projects, Workspaces, models, Agents, Skills, Nodes and governed execution.",target:null},
     {title:"Navigation",body:"Primary management surfaces stay identifiable here, including Nodes and Skills.",target:".sidebar"},
@@ -2097,9 +2098,19 @@ startProductTour=function({replay=false,welcome=false}={}){
     {title:"Settings",body:"Application defaults are grouped here; Workspace-owned settings remain with each Workspace.",target:'[data-route="settings"]'},
     {title:"Ready",body:"The control plane is ready. You can replay this tour from Settings or Help / Tour.",target:null}
   ];
-  let i=0,lastAnchor="bottom-center";
-  const cleanup=()=>{delete document.documentElement.dataset.productTour;root.innerHTML="";window.removeEventListener("resize",position)};
+  let i=0,lastAnchor="bottom-center",ended=false;
+  const cleanup=()=>{
+    if(ended)return;ended=true;
+    delete document.documentElement.dataset.productTour;
+    document.querySelectorAll(".tour-target").forEach(x=>x.classList.remove("tour-target"));
+    root.innerHTML="";
+    window.removeEventListener("resize",position);
+    document.removeEventListener("keydown",onKeyDown);
+    if(state.inspector!==originalInspector)setInspectorOpen(originalInspector==="open");
+    if(state.drawer!==originalDrawer)setDrawerOpen(originalDrawer==="open");
+  };
   const finish=()=>{localStorage.setItem(TOUR_KEY,TOUR_COMPLETE_VALUE);cleanup()};
+  const onKeyDown=e=>{if(e.key==="Escape"){e.preventDefault();cleanup()}};
   function panes(rect,pad=8){const vw=innerWidth,vh=innerHeight,r=rect?{l:Math.max(0,rect.left-pad),t:Math.max(0,rect.top-pad),r:Math.min(vw,rect.right+pad),b:Math.min(vh,rect.bottom+pad)}:{l:vw/2,t:vh/2,r:vw/2,b:vh/2};return `<div class="tour-pane tour-pane-top" style="left:0;top:0;width:100%;height:${r.t}px"></div><div class="tour-pane tour-pane-left" style="left:0;top:${r.t}px;width:${r.l}px;height:${Math.max(0,r.b-r.t)}px"></div><div class="tour-pane tour-pane-right" style="left:${r.r}px;top:${r.t}px;width:${Math.max(0,vw-r.r)}px;height:${Math.max(0,r.b-r.t)}px"></div><div class="tour-pane tour-pane-bottom" style="left:0;top:${r.b}px;width:100%;height:${Math.max(0,vh-r.b)}px"></div>`}
   function position(){
     const s=steps[i],card=$("#tourCard",root),mask=$("#tourMask",root),target=s.target?$(s.target):null;if(!card||!mask)return;const tr=target?.getBoundingClientRect();mask.innerHTML=panes(tr,s.padding||8);if(target){target.classList.add("tour-target");const spot=$("#tourSpotlight",root);Object.assign(spot.style,{left:`${tr.left-7}px`,top:`${tr.top-7}px`,width:`${tr.width+14}px`,height:`${tr.height+14}px`});spot.hidden=false}else $("#tourSpotlight",root).hidden=true;
@@ -2109,9 +2120,9 @@ startProductTour=function({replay=false,welcome=false}={}){
     let pos=candidates[lastAnchor];if(!pos||collides(pos)){const found=Object.entries(candidates).find(([,p])=>!collides(p));if(found){lastAnchor=found[0];pos=found[1]}}Object.assign(card.style,{left:`${Math.max(margin,Math.min(innerWidth-cr.width-margin,pos.left))}px`,top:`${Math.max(margin,Math.min(innerHeight-cr.height-margin,pos.top))}px`});
   }
   async function draw(){
-    root.querySelectorAll(".tour-target").forEach(x=>x.classList.remove("tour-target"));const s=steps[i];if(s.prepare)await s.prepare();root.innerHTML=`<div class="tour-overlay"><div id="tourMask" class="tour-focus-mask"></div><div id="tourSpotlight" class="tour-spotlight" hidden></div><section id="tourCard" class="tour-card a31-tour-card"><div class="tour-progress"><span>${i+1} / ${steps.length}</span><span>${Math.round((i+1)/steps.length*100)}%</span></div><h2>${escapeHtml(s.title)}</h2><p>${escapeHtml(s.body)}</p><div class="tour-actions"><button class="btn" id="tourSkip">${i===steps.length-1?'Close':'Skip tour'}</button><span class="tour-spacer"></span>${i?'<button class="btn" id="tourBack">Back</button>':""}<button class="btn primary" id="tourNext">${i===steps.length-1?'Finish':'Next'}</button></div></section></div>`;$("#tourSkip").onclick=finish;$("#tourBack")?.addEventListener("click",()=>{i--;draw()});$("#tourNext").onclick=()=>{if(i===steps.length-1)return finish();i++;draw()};requestAnimationFrame(()=>requestAnimationFrame(position));
+    document.querySelectorAll(".tour-target").forEach(x=>x.classList.remove("tour-target"));const s=steps[i];if(s.prepare)await s.prepare();root.innerHTML=`<div class="tour-overlay"><div id="tourMask" class="tour-focus-mask"></div><div id="tourSpotlight" class="tour-spotlight" hidden></div><section id="tourCard" class="tour-card a31-tour-card"><div class="tour-progress"><span>${i+1} / ${steps.length}</span><span>${Math.round((i+1)/steps.length*100)}%</span></div><h2>${escapeHtml(s.title)}</h2><p>${escapeHtml(s.body)}</p><div class="tour-actions"><button class="btn" id="tourSkip">${i===steps.length-1?'Close':'Skip tour'}</button><span class="tour-spacer"></span>${i?'<button class="btn" id="tourBack">Back</button>':""}<button class="btn primary" id="tourNext">${i===steps.length-1?'Finish':'Next'}</button></div></section></div>`;$("#tourSkip").onclick=finish;$("#tourBack")?.addEventListener("click",()=>{i--;draw()});$("#tourNext").onclick=()=>{if(i===steps.length-1)return finish();i++;draw()};requestAnimationFrame(()=>requestAnimationFrame(position));
   }
-  window.addEventListener("resize",position);draw();
+  window.addEventListener("resize",position);document.addEventListener("keydown",onKeyDown);draw();
 };
 
 /* Shell bindings and final routing */

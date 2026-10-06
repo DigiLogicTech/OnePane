@@ -83,6 +83,7 @@ ck("Settings content is centered in remaining canvas", "#a31SettingsContent" in 
 ck("Tour uses four-pane focus and stable card anchors", "tour-pane-top" in app and "bottom-center" in app and ".a31-tour-card" in css and "backdrop-filter:blur(2px)" in css)
 ck("Tour target remains crisp and outlined", ".tour-spotlight" in css and ".tour-target" in css and "filter:none!important" in css)
 ck("Tour uses the canonical overlay root", 'const root=$("#overlayRoot")' in app and "qa31TourRoot" not in app and "qa31TourRoot" not in html)
+ck("Tour cleanup removes live highlights and restores shell state", 'document.querySelectorAll(".tour-target")' in app and 'removeEventListener("keydown",onKeyDown)' in app and 'setInspectorOpen(originalInspector==="open")' in app and 'setDrawerOpen(originalDrawer==="open")' in app and 'e.key==="Escape"' in app)
 
 ck("Shell collapse controls use orientation-aware geometry", ".drawer-edge-toggle,.drawer-restore" in css and "width:42px!important" in css and "height:26px!important" in css and ".inspector-restore" in css and "width:26px!important" in css and "height:54px!important" in css and ".panel-toggle-icon" in css and "stroke:currentColor" in css)
 ck("Collapsed sidebar hides brand icon", '.app-shell[data-sidebar="collapsed"] .brand-icon{display:none}' in css)

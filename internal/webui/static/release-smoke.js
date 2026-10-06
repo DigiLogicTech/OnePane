@@ -98,8 +98,10 @@
     const command=check(document.querySelector('[data-action="command-palette"]'),"command launcher");command.click();await waitFor(()=>document.querySelector("#paletteInput"),"command palette");
     check(document.querySelectorAll("[data-palette-index]").length>0,"command actions populated");document.querySelector("#paletteInput").dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}));await waitFor(()=>!document.querySelector("#paletteInput"),"command close");
 
-    const tour=check(document.querySelector('[data-action="product-tour"]'),"Tour launcher");tour.click();await waitFor(()=>document.querySelector("#tourCard"),"Tour open");document.querySelector("#tourSkip")?.click();
-    await waitFor(()=>!document.documentElement.dataset.productTour,"Tour cleanup");check(!document.querySelector(".tour-target"),"Tour target cleanup");
+    const tour=check(document.querySelector('[data-action="product-tour"]'),"Tour launcher");tour.click();const tourCard=await waitFor(()=>document.querySelector("#tourCard"),"Tour open");
+    const tourStyle=getComputedStyle(tourCard);check(tourStyle.visibility!=="hidden"&&tourStyle.display!=="none"&&Number(tourStyle.opacity||1)>0,"Tour card is visible");
+    check(document.elementFromPoint(Math.min(innerWidth-1,Math.max(1,tourCard.getBoundingClientRect().left+20)),Math.min(innerHeight-1,Math.max(1,tourCard.getBoundingClientRect().top+20)))?.closest("#tourCard"),"Tour card receives pointer input");
+    document.querySelector("#tourSkip")?.click();await waitFor(()=>!document.documentElement.dataset.productTour,"Tour cleanup");check(!document.querySelector(".tour-target"),"Tour target cleanup");check(!document.querySelector(".tour-overlay"),"Tour overlay removed");
 
     const launcher=check(document.querySelector("#controlChatLauncher"),"Chat launcher");launcher.click();await waitFor(()=>document.querySelector("#a31ControlChatForm"),"Assistant chat");
     const form=document.querySelector("#a31ControlChatForm");form.querySelector("textarea").value="hello";form.requestSubmit(form.querySelector('button:not([name="run"])'));

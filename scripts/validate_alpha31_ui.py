@@ -5,6 +5,7 @@ import sys
 ROOT=Path(__file__).resolve().parents[1]
 read=lambda p:(ROOT/p).read_text(encoding="utf-8")
 app=read("internal/webui/static/app-foundation.js")+"\n"+read("internal/webui/static/app.js")
+smoke=read("internal/webui/static/release-smoke.js")
 html=read("internal/webui/static/index.html")
 css=read("internal/webui/static/style.css")
 
@@ -138,3 +139,5 @@ if failed:
 print(f"\nALPHA 3.1 UI: ALL {len(checks)} CHECKS PASSED")
 
 ck("Inspector Overview is implicit rather than a permanent rail", 'root.dataset.tabMode=tabs.length>1?"multi":"single"' in app and 'inspector[data-tab-mode="single"]>.inspector-tabs' in css)
+
+ck("Product tour cannot create an invisible click-blocking overlay", "visibility:visible!important" in css and "Product tour failed" in app and "Tour card is visible" in smoke)

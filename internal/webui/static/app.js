@@ -463,7 +463,8 @@ startProductTour=function({replay=false,welcome=false}={}){
   async function draw(){
     document.querySelectorAll(".tour-target").forEach(x=>x.classList.remove("tour-target"));const s=steps[i];if(s.prepare)await s.prepare();root.innerHTML=`<div class="tour-overlay"><div id="tourMask" class="tour-focus-mask"></div><div id="tourSpotlight" class="tour-spotlight" hidden></div><section id="tourCard" class="tour-card a31-tour-card"><div class="tour-progress"><span>${i+1} / ${steps.length}</span><span>${Math.round((i+1)/steps.length*100)}%</span></div><h2>${escapeHtml(s.title)}</h2><p>${escapeHtml(s.body)}</p><div class="tour-actions"><button class="btn" id="tourSkip">${i===steps.length-1?'Close':'Skip tour'}</button><span class="tour-spacer"></span>${i?'<button class="btn" id="tourBack">Back</button>':""}<button class="btn primary" id="tourNext">${i===steps.length-1?'Finish':'Next'}</button></div></section></div>`;$("#tourSkip").onclick=finish;$("#tourBack")?.addEventListener("click",()=>{i--;draw()});$("#tourNext").onclick=()=>{if(i===steps.length-1)return finish();i++;draw()};requestAnimationFrame(()=>requestAnimationFrame(position));
   }
-  window.addEventListener("resize",position);document.addEventListener("keydown",onKeyDown);draw();
+  window.addEventListener("resize",position);document.addEventListener("keydown",onKeyDown);
+  Promise.resolve(draw()).catch(ex=>{console.error("Product tour failed",ex);cleanup();notice("Product tour could not start.","bad")});
 };
 
 /* Inspector: Overview is implicit; only show navigation when multiple views exist. */

@@ -118,8 +118,11 @@
     }
 
     await route("operations");check(document.querySelector("#operationsLayout"),"Operations overview");
+    await waitFor(()=>innerWidth>700&&document.querySelector("#operationsLayout")?.getBoundingClientRect().width>100,"visible desktop Operations geometry",30000);
+    check(innerWidth>700,"Installed acceptance is exercising desktop layout");
     state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));a31NormalizeLayout(state.operationsWidgets);state.operationsEdit=true;a31RenderOperationsGrid();
     let opRoot=check(document.querySelector("#operationsLayout"),"Operations native layout root");
+    await waitFor(()=>opRoot.getBoundingClientRect().width>100&&document.querySelector('[data-op-widget="op-metrics"]')?.getBoundingClientRect().width>0,"rendered Operations geometry",10000);
     check(document.querySelector(".dashboard-edit-bar[data-op-drag]"),"Operations edit header is drag surface");
     check(document.querySelectorAll("[data-op-resize]").length>=56,"Operations exposes edge and corner resize handles");
     const metricsRect=check(document.querySelector('[data-op-widget="op-metrics"]'),"Operations metrics card").getBoundingClientRect(),rootRect=opRoot.getBoundingClientRect();

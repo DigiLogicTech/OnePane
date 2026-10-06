@@ -24,17 +24,58 @@ type Session struct {
 	Config                                             json.RawMessage
 }
 type ResearchSettings struct {
-	PinModels               bool `json:"pin_models"`
-	DisableModelSubstitution bool `json:"disable_model_substitution"`
-	SameModelRetries         bool `json:"same_model_retries"`
-	PreserveFailedSeats      bool `json:"preserve_failed_seats"`
-	IndependentFirstPass     bool `json:"independent_first_pass"`
-	ScopedEvidence           bool `json:"scoped_evidence"`
-	RecordRawOutputs         bool `json:"record_raw_outputs"`
-	FullProvenance           bool `json:"full_provenance"`
-	RequireAllSeats          bool `json:"require_all_seats"`
-	AnonymizedCrossCritique  bool `json:"anonymized_cross_critique"`
-	SynthesisPass            bool `json:"synthesis_pass"`
+	PinModels                bool   `json:"pin_models"`
+	DisableModelSubstitution bool   `json:"disable_model_substitution"`
+	SameModelRetries         bool   `json:"same_model_retries"`
+	PreserveFailedSeats      bool   `json:"preserve_failed_seats"`
+	IndependentFirstPass     bool   `json:"independent_first_pass"`
+	ScopedEvidence           bool   `json:"scoped_evidence"`
+	RecordRawOutputs         bool   `json:"record_raw_outputs"`
+	FullProvenance           bool   `json:"full_provenance"`
+	RequireAllSeats          bool   `json:"require_all_seats"`
+	AnonymizedCrossCritique  bool   `json:"anonymized_cross_critique"`
+	SynthesisPass            bool   `json:"synthesis_pass"`
+	CritiqueRounds           int    `json:"critique_rounds"`
+	SynthesisMemberID        string `json:"synthesis_member_id,omitempty"`
+}
+
+const (
+	ResearchPhaseIndependent = "independent"
+	ResearchPhaseCritique    = "critique"
+	ResearchPhaseSynthesis   = "synthesis"
+)
+
+func NormalizeResearchSettings(in ResearchSettings) ResearchSettings {
+	if in.CritiqueRounds <= 0 {
+		in.CritiqueRounds = 2
+	}
+	if in.CritiqueRounds > 5 {
+		in.CritiqueRounds = 5
+	}
+	return in
+}
+
+func ResearchTotalRounds(in ResearchSettings) int64 {
+	in = NormalizeResearchSettings(in)
+	total := int64(1 + in.CritiqueRounds)
+	if in.SynthesisPass {
+		total++
+	}
+	return total
+}
+
+func ResearchPhaseForRound(in ResearchSettings, round int64) string {
+	in = NormalizeResearchSettings(in)
+	if round <= 1 {
+		return ResearchPhaseIndependent
+	}
+	if round <= int64(1+in.CritiqueRounds) {
+		return ResearchPhaseCritique
+	}
+	if in.SynthesisPass && round == int64(2+in.CritiqueRounds) {
+		return ResearchPhaseSynthesis
+	}
+	return ""
 }
 type SnapshotAgentProfile struct {
 	ID           string `json:"id"`
@@ -110,10 +151,10 @@ type Decision struct {
 	CreatedAt                                           int64
 }
 type TurnRequest struct {
-	ID, WorkspaceID, SessionID, MemberID, Status                                                                    string
+	ID, WorkspaceID, SessionID, MemberID, Status, ResearchPhase                                                     string
 	TriggerMessageID, SelectedCandidateKind, SelectedCandidateID, ResponseMessageID, BudgetReservationID, ErrorText *string
-	CreatedAt, UpdatedAt                                                                                            int64
-	CompletedAt                                                                                                     *int64
+	RoundNumber, AttemptCount, CreatedAt, UpdatedAt                                                                  int64
+	RetryAfter, CompletedAt                                                                                          *int64
 }
 
 type CreateTeamCommand struct{ WorkspaceID, Name, Purpose, CreatedBy string }
@@ -142,6 +183,18 @@ type RequestRoundCommand struct {
 	SessionID, RequestedByPrincipalID string
 	TriggerMessageID                  *string
 	MemberIDs                         []string
+	ExactMemberSelection              bool   `json:"-"`
+	ResearchPhase                     string `json:"-"`
+}
+
+type PauseResearchRoundCommand struct {
+	SessionID, TurnID, ActorPrincipalID, Reason string
+	RetryAfter                                  *int64
+}
+
+type RetryResearchRoundCommand struct {
+	SessionID, RequestedByPrincipalID string
+	Automatic                         bool `json:"-"`
 }
 type ProposePlanCommand struct {
 	SessionID, ProposedByPrincipalID string

@@ -205,6 +205,7 @@ type teamService interface {
 	ListObjections(context.Context, string) ([]team.Objection, error)
 	ListDecisions(context.Context, string) ([]team.Decision, error)
 	ListTurns(context.Context, string) ([]team.TurnRequest, error)
+	RetryResearchRound(context.Context, team.RetryResearchRoundCommand) (team.Session, error)
 	ReopenDeliberation(context.Context, team.ReopenCommand) (team.Session, error)
 }
 
@@ -397,6 +398,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/messages", s.listTeamMessages)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/messages", s.postTeamMessage)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/rounds", s.requestTeamRound)
+	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/research/retry", s.retryResearchRound)
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/turns", s.listTeamTurns)
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/plans", s.listTeamPlans)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/plans", s.proposeTeamPlan)

@@ -144,6 +144,18 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 	if err != nil {
 		return s.finishPreDispatchError(ctx, q.ID, err, cmd)
 	}
+	if p != nil && p.Status == ProviderRateLimited && p.RetryAfter != nil && *p.RetryAfter <= s.clock.UnixMilli() {
+		refreshed, refreshErr := s.SetProviderStatus(ctx, SetProviderStatusCommand{
+			ConnectionID: p.ID, ExpectedRevision: p.Revision, Status: ProviderConnected,
+			ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID,
+			Reason: "provider rate-limit window elapsed",
+		})
+		if refreshErr == nil {
+			p = &refreshed
+		} else if !errors.Is(refreshErr, ErrRevisionConflict) && !errors.Is(refreshErr, ErrInvalidTransition) {
+			return s.finishPreDispatchError(ctx, q.ID, fmt.Errorf("%w: provider rate-limit recovery: %v", ErrTransportUnavailable, refreshErr), cmd)
+		}
+	}
 	var runtimeLease RuntimeScheduleLease
 	if s.runtimeCoordinator != nil {
 		runtimeLease, err = s.runtimeCoordinator.Acquire(ctx, RuntimeScheduleRequest{
@@ -261,7 +273,11 @@ func (s *Service) resolveExecution(ctx context.Context, workspaceID, deploymentI
 		if err != nil {
 			return ModelDeployment{}, Model{}, nil, nil, policy.DataLabel{}, err
 		}
-		if pv.Status != ProviderConnected && pv.Status != ProviderDegraded {
+		if pv.Status == ProviderRateLimited {
+			if pv.RetryAfter == nil || *pv.RetryAfter > s.clock.UnixMilli() {
+				return ModelDeployment{}, Model{}, nil, nil, policy.DataLabel{}, fmt.Errorf("%w: provider status %s", ErrTransportUnavailable, pv.Status)
+			}
+		} else if pv.Status != ProviderConnected && pv.Status != ProviderDegraded {
 			return ModelDeployment{}, Model{}, nil, nil, policy.DataLabel{}, fmt.Errorf("%w: provider status %s", ErrTransportUnavailable, pv.Status)
 		}
 		pd, err := providerDataPolicy(pv.ConnectionJSON)

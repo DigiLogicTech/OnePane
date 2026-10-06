@@ -110,16 +110,26 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]Result, error) {
 	if limit <= 0 || limit > 64 {
 		limit = 16
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,workspace_id,session_id,member_id FROM team_turn_requests WHERE status='pending' ORDER BY created_at,id LIMIT ?`, limit)
+	if err := s.advanceResearchSessions(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT tr.id,tr.workspace_id,tr.session_id,tr.member_id,tr.round_number,tr.research_phase
+		FROM team_turn_requests tr
+		JOIN team_sessions ss ON ss.id=tr.session_id
+		WHERE tr.status='pending' AND ss.status='deliberating'
+		ORDER BY tr.created_at,tr.id LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	type q struct{ id, ws, session, member string }
+	type q struct {
+		id, ws, session, member, phase string
+		round int64
+	}
 	var qs []q
 	for rows.Next() {
 		var v q
-		if err := rows.Scan(&v.id, &v.ws, &v.session, &v.member); err != nil {
+		if err := rows.Scan(&v.id, &v.ws, &v.session, &v.member, &v.round, &v.phase); err != nil {
 			return nil, err
 		}
 		qs = append(qs, v)
@@ -129,16 +139,28 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]Result, error) {
 	}
 	out := make([]Result, 0, len(qs))
 	for _, v := range qs {
-		out = append(out, s.process(ctx, v.id, v.ws, v.session, v.member))
+		out = append(out, s.process(ctx, v.id, v.ws, v.session, v.member, v.round, v.phase))
+	}
+	if err := s.advanceResearchSessions(ctx); err != nil {
+		return out, err
 	}
 	_ = s.teams.SyncTaskStates(ctx)
 	return out, nil
 }
 
-func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID string) Result {
+func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID string, turnRound int64, researchPhase string) Result {
 	res := Result{TurnID: turnID, SessionID: sessionID, MemberID: memberID, Status: "failed"}
 	if err := s.ensureWorkspace(ctx, ws); err != nil {
 		res.Error = err.Error()
+		return res
+	}
+	ss, err := s.teams.Session(ctx, sessionID)
+	if err != nil {
+		return s.fail(ctx, res, err)
+	}
+	if ss.Status != "deliberating" {
+		res.Status = "paused"
+		res.Error = "team session is not dispatching"
 		return res
 	}
 	now := s.clock.UnixMilli()
@@ -151,10 +173,6 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 	if n != 1 {
 		res.Error = "turn already claimed"
 		return res
-	}
-	ss, err := s.teams.Session(ctx, sessionID)
-	if err != nil {
-		return s.fail(ctx, res, err)
 	}
 	if ss.WorkspaceID != ws {
 		return s.fail(ctx, res, team.ErrWorkspaceMismatch)
@@ -187,7 +205,7 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		taskObjective = snapshot.TaskObjective
 		executionMode = snapshot.ExecutionMode
 		researchMode = snapshot.ResearchMode && executionMode == "council"
-		research = snapshot.Research
+		research = team.NormalizeResearchSettings(snapshot.Research)
 	} else {
 		members, err := s.teams.ListMembers(ctx, ss.TeamID)
 		if err != nil {
@@ -243,14 +261,26 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		start = len(msgs) - 80
 	}
 	for _, m := range msgs[start:] {
-		if researchMode && research.IndependentFirstPass && ss.RoundNumber <= 1 && m.Kind == "agent" {
-			continue
+		if researchMode && m.Kind == "agent" {
+			// Same-round outputs are hidden even if another seat finished first.
+			if m.RoundNumber >= turnRound {
+				continue
+			}
+			if researchPhase == team.ResearchPhaseIndependent {
+				continue
+			}
 		}
 		trust := "UNVERIFIED_DERIVED"
 		if m.Kind == "human" {
 			trust = "USER_INSTRUCTION"
 		}
-		raw, _ := json.Marshal(map[string]any{"kind": m.Kind, "content": json.RawMessage(m.Content), "round": m.RoundNumber, "author_member_id": m.AuthorMemberID})
+		payload := map[string]any{"kind": m.Kind, "content": json.RawMessage(m.Content), "round": m.RoundNumber}
+		if m.Kind == "agent" && researchMode && research.AnonymizedCrossCritique && researchPhase != team.ResearchPhaseIndependent {
+			payload["author_alias"] = researchAuthorAlias(snapshot, m.AuthorMemberID)
+		} else {
+			payload["author_member_id"] = m.AuthorMemberID
+		}
+		raw, _ := json.Marshal(payload)
 		if used+len(raw) > 96<<10 {
 			continue
 		}
@@ -276,6 +306,9 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		if err == nil {
 			err = scheduler.ErrNoEligibleCandidate
 		}
+		if researchMode {
+			return s.pauseResearch(ctx, res, ss, turnID, err)
+		}
 		return s.block(ctx, res, err)
 	}
 	cand := decision.Selected.Candidate
@@ -291,6 +324,9 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 			decision, err = s.scheduler.Route(ctx, request)
 			if err != nil || decision.Selected == nil {
 				if err == nil { err = scheduler.ErrNoEligibleCandidate }
+				if researchMode {
+					return s.pauseResearch(ctx, res, ss, turnID, err)
+				}
 				return s.block(ctx, res, err)
 			}
 			cand = decision.Selected.Candidate
@@ -307,12 +343,21 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 	}
 	objective := fmt.Sprintf("Participate in a pre-execution Team Mode deliberation as %s. Respond to the team's latest discussion, surface assumptions or objections, and help converge on a concrete plan. Do not execute tools or side effects. Task: %s", member.RoleName, taskObjective)
 	if executionMode == "council" {
-		objective = fmt.Sprintf("Participate independently in a pre-execution Council deliberation as %s. Produce your own assessment without converging on other members' conclusions; surface assumptions, objections, risks, and a recommended answer for later synthesis. Do not execute tools or side effects. Task: %s", member.RoleName, taskObjective)
+		switch researchPhase {
+		case team.ResearchPhaseIndependent:
+			objective = fmt.Sprintf("Research Council independent pass as %s. Produce your own assessment without seeing or converging on other Council seats. Surface assumptions, evidence, objections, risks, uncertainty, and a recommended answer for later critique and synthesis. Do not execute tools or side effects. Task: %s", member.RoleName, taskObjective)
+		case team.ResearchPhaseCritique:
+			objective = fmt.Sprintf("Research Council anonymized cross-critique round %d of %d as %s. Critically evaluate prior-round assessments, identify contradictions, unsupported claims, evidence gaps and hidden assumptions, then revise your recommendation where warranted. Do not infer anonymous peer identities. Do not execute tools or side effects. Task: %s", turnRound-1, research.CritiqueRounds, member.RoleName, taskObjective)
+		case team.ResearchPhaseSynthesis:
+			objective = fmt.Sprintf("Research Council final synthesis as %s. Integrate independent assessments and critique rounds into one final answer. Preserve material disagreements, unresolved uncertainty and minority findings rather than forcing artificial consensus. Do not execute tools or side effects. Task: %s", member.RoleName, taskObjective)
+		default:
+			objective = fmt.Sprintf("Participate independently in a pre-execution Council deliberation as %s. Produce an evidence-aware assessment for later synthesis. Do not execute tools or side effects. Task: %s", member.RoleName, taskObjective)
+		}
 	}
 	sectionsRaw,_:=json.Marshal(sections)
 	contextSum:=sha256.Sum256(sectionsRaw)
 	contextHash:=hex.EncodeToString(contextSum[:])
-	manifestPayload:=map[string]any{"session_id":ss.ID,"message_count":len(sections)-1,"bytes":used,"round":ss.RoundNumber,"context_sha256":contextHash,"research_mode":researchMode,"candidate_id":cand.ID,"candidate_kind":cand.Kind,"profile_id":profileID,"profile_revision":profileRevision}
+	manifestPayload:=map[string]any{"session_id":ss.ID,"message_count":len(sections)-1,"bytes":used,"round":turnRound,"research_phase":researchPhase,"research_total_rounds":team.ResearchTotalRounds(research),"critique_rounds":research.CritiqueRounds,"context_sha256":contextHash,"research_mode":researchMode,"candidate_id":cand.ID,"candidate_kind":cand.Kind,"profile_id":profileID,"profile_revision":profileRevision}
 	if hasManifest { manifestPayload["session_manifest_sha256"]=manifestRecord.SnapshotSHA256 }
 	if seatBinding.CandidateID!="" { manifestPayload["seat_binding_candidate_id"]=seatBinding.CandidateID }
 	manifest,_:=json.Marshal(manifestPayload)
@@ -320,9 +365,12 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 	response, err := s.dispatch(ctx, areq, cand, label, reservationID)
 	if err != nil {
 		s.release(ctx, reservationID)
+		if researchMode {
+			return s.pauseResearch(ctx, res, ss, turnID, err)
+		}
 		return s.fail(ctx, res, err)
 	}
-	content, _ := json.Marshal(map[string]any{"text": response.Message, "proposal_type": response.ProposalType, "proposal": json.RawMessage(response.Proposal), "candidate_kind": kind, "candidate_id": cid})
+	content, _ := json.Marshal(map[string]any{"text": response.Message, "proposal_type": response.ProposalType, "proposal": json.RawMessage(response.Proposal), "candidate_kind": kind, "candidate_id": cid, "research_phase": researchPhase, "round": turnRound})
 	msg, err := s.teams.PostMessage(ctx, team.PostMessageCommand{SessionID: ss.ID, AuthorPrincipalID: WorkerPrincipal, AuthorMemberID: &member.ID, Kind: "agent", Content: content})
 	if err != nil {
 		return s.fail(ctx, res, err)
@@ -334,6 +382,172 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 	}
 	res.Status = "succeeded"
 	return res
+}
+
+
+func researchAuthorAlias(snapshot team.SessionSnapshot, memberID *string) string {
+	if memberID == nil || strings.TrimSpace(*memberID) == "" {
+		return "Anonymous source"
+	}
+	for i, m := range snapshot.Members {
+		if m.ID == *memberID {
+			return fmt.Sprintf("Source %d", i+1)
+		}
+	}
+	return "Anonymous source"
+}
+
+func researchSynthesisMember(snapshot team.SessionSnapshot, research team.ResearchSettings) string {
+	if strings.TrimSpace(research.SynthesisMemberID) != "" {
+		for _, m := range snapshot.Members {
+			if m.ID == research.SynthesisMemberID && m.Status == "active" && m.MemberKind != "human" {
+				return m.ID
+			}
+		}
+	}
+	for _, m := range snapshot.Members {
+		label := strings.ToLower(strings.Join([]string{m.DisplayName, m.RoleName}, " "))
+		if m.Profile != nil {
+			label += " " + strings.ToLower(m.Profile.Name+" "+m.Profile.Role)
+		}
+		if m.Status == "active" && m.MemberKind != "human" && strings.Contains(label, "synth") {
+			return m.ID
+		}
+	}
+	for _, m := range snapshot.Members {
+		if m.Status == "active" && m.MemberKind != "human" {
+			return m.ID
+		}
+	}
+	return ""
+}
+
+func retryAfterFromProviderError(err error) *int64 {
+	var te *inference.TransportError
+	if errors.As(err, &te) && te.RetryAfterMS != nil {
+		v := *te.RetryAfterMS
+		return &v
+	}
+	return nil
+}
+
+func (s *Service) pauseResearch(ctx context.Context, res Result, ss team.Session, turnID string, cause error) Result {
+	retryAfter := retryAfterFromProviderError(cause)
+	_, err := s.teams.PauseResearchRound(ctx, team.PauseResearchRoundCommand{
+		SessionID: ss.ID, TurnID: turnID, ActorPrincipalID: WorkerPrincipal,
+		Reason: cause.Error(), RetryAfter: retryAfter,
+	})
+	if err != nil {
+		return s.fail(ctx, res, fmt.Errorf("pause research round after provider failure: %w", err))
+	}
+	res.Status = "paused"
+	res.Error = cause.Error()
+	return res
+}
+
+func (s *Service) advanceResearchSessions(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT s.id,s.workspace_id,s.status,s.round_number,m.snapshot_json
+		FROM team_sessions s
+		JOIN team_session_manifests m ON m.session_id=s.id
+		WHERE m.research_mode=1 AND m.execution_mode='council'
+		AND s.status IN ('deliberating','paused_for_deliberation')
+		ORDER BY s.created_at,s.id LIMIT 64`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type candidate struct {
+		id, ws, status, raw string
+		round int64
+	}
+	var sessions []candidate
+	for rows.Next() {
+		var c candidate
+		if err := rows.Scan(&c.id, &c.ws, &c.status, &c.round, &c.raw); err != nil {
+			return err
+		}
+		sessions = append(sessions, c)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, c := range sessions {
+		if err := s.ensureWorkspace(ctx, c.ws); err != nil {
+			return err
+		}
+		var snapshot team.SessionSnapshot
+		if err := json.Unmarshal([]byte(c.raw), &snapshot); err != nil {
+			return fmt.Errorf("decode research workflow snapshot %s: %w", c.id, err)
+		}
+		research := team.NormalizeResearchSettings(snapshot.Research)
+		totalRounds := team.ResearchTotalRounds(research)
+
+		if c.status == "paused_for_deliberation" {
+			// Auto-resume only when the provider gave an explicit reset time.
+			// Otherwise this remains parked until the user presses Retry this round.
+			_, err := s.teams.RetryResearchRound(ctx, team.RetryResearchRoundCommand{
+				SessionID: c.id, RequestedByPrincipalID: WorkerPrincipal, Automatic: true,
+			})
+			if err != nil && !errors.Is(err, team.ErrSessionState) {
+				return err
+			}
+			continue
+		}
+
+		if c.round == 0 {
+			if _, err := s.teams.RequestRound(ctx, team.RequestRoundCommand{
+				SessionID: c.id, RequestedByPrincipalID: WorkerPrincipal,
+				ResearchPhase: team.ResearchPhaseIndependent,
+			}); err != nil && !errors.Is(err, team.ErrSessionState) {
+				return err
+			}
+			continue
+		}
+
+		var pending, running, blocked, failed, succeeded int
+		if err := s.db.QueryRowContext(ctx, `SELECT
+			COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0),
+			COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END),0),
+			COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END),0),
+			COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),0),
+			COALESCE(SUM(CASE WHEN status='succeeded' THEN 1 ELSE 0 END),0)
+			FROM team_turn_requests WHERE session_id=? AND round_number=?`,
+			c.id, c.round).Scan(&pending, &running, &blocked, &failed, &succeeded); err != nil {
+			return err
+		}
+		if pending > 0 || running > 0 || blocked > 0 || failed > 0 {
+			continue
+		}
+		if succeeded == 0 {
+			continue
+		}
+		if c.round >= totalRounds {
+			now := s.clock.UnixMilli()
+			_, err := s.db.ExecContext(ctx, `UPDATE team_sessions SET status='team_review',revision=revision+1,updated_at=? WHERE id=? AND status='deliberating'`, now, c.id)
+			if err != nil {
+				return err
+			}
+			continue
+		}
+
+		nextRound := c.round + 1
+		phase := team.ResearchPhaseForRound(research, nextRound)
+		cmd := team.RequestRoundCommand{
+			SessionID: c.id, RequestedByPrincipalID: WorkerPrincipal, ResearchPhase: phase,
+		}
+		if phase == team.ResearchPhaseSynthesis {
+			memberID := researchSynthesisMember(snapshot, research)
+			if memberID == "" {
+				return fmt.Errorf("research council %s has no eligible synthesis member", c.id)
+			}
+			cmd.MemberIDs = []string{memberID}
+			cmd.ExactMemberSelection = true
+		}
+		if _, err := s.teams.RequestRound(ctx, cmd); err != nil && !errors.Is(err, team.ErrSessionState) {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) dispatch(ctx context.Context, req agentprotocol.Request, c scheduler.Candidate, label policy.DataLabel, reservationID string) (agentprotocol.Response, error) {

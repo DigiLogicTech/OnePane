@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -140,10 +139,7 @@ func (t OpenAICompatibleTransport) Dispatch(ctx context.Context, req DispatchReq
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		te := &TransportError{Code: fmt.Sprintf("http_%d", resp.StatusCode), HTTPStatus: resp.StatusCode, OutcomeKnown: true}
 		if resp.StatusCode == http.StatusTooManyRequests {
-			if secs, err := strconv.ParseInt(strings.TrimSpace(resp.Header.Get("Retry-After")), 10, 64); err == nil {
-				v := time.Now().UTC().Add(time.Duration(secs) * time.Second).UnixMilli()
-				te.RetryAfterMS = &v
-			}
+			te.RetryAfterMS = retryAfterMillis(resp.Header)
 		}
 		return DispatchResult{}, te
 	}

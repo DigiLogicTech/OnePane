@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type SecretResolver interface {
@@ -51,6 +54,22 @@ func (e *TransportError) Unwrap() error {
 
 type Transport interface {
 	Dispatch(context.Context, DispatchRequest, SecretResolver) (DispatchResult, error)
+}
+
+func retryAfterMillis(h http.Header) *int64 {
+	raw := strings.TrimSpace(h.Get("Retry-After"))
+	if raw == "" {
+		return nil
+	}
+	if seconds, err := strconv.ParseInt(raw, 10, 64); err == nil && seconds >= 0 {
+		v := time.Now().UTC().Add(time.Duration(seconds) * time.Second).UnixMilli()
+		return &v
+	}
+	if at, err := http.ParseTime(raw); err == nil {
+		v := at.UTC().UnixMilli()
+		return &v
+	}
+	return nil
 }
 
 type TransportRegistry struct {

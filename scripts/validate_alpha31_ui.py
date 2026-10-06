@@ -86,6 +86,8 @@ ck("Workspace layout previews only the active component", "function a31ApplyItem
 ck("Desktop layout exposes edge and corner resize handles", "A31_RESIZE_EDGES" in app and "data-resize-edge" in app and all(x in css for x in [".resize-n",".resize-e",".resize-se",".resize-nw"]))
 
 ck("Research Integrity is visible from task Inspector", "A32_RESEARCH_INSPECTOR" in app and "/v1/tasks/" in app and "/team-session" in app and "/manifest" in app and "Research Integrity" in app and "Bound candidate" in app)
+ck("Research Council exposes automatic critique rounds", "a32CritiqueRounds" in app and "Automatic Research flow" in app and "critique_rounds" in app)
+ck("Paused Research rounds expose manual retry", "Research round paused" in app and "Retry this round" in app and "/research/retry" in app and "Automatic retry eligible" in app)
 ck("Team configuration loads members after resolving Team ID", "const teamID=team.id||team.ID" in app and app.index("const teamID=team.id||team.ID") < app.index("members=await apiRequest(`/v1/teams/${encodeURIComponent(teamID)}/members`)"))
 failed=[n for n,o in checks if not o]
 for n,o in checks: print(f"[{'PASS' if o else 'FAIL'}] {n}")

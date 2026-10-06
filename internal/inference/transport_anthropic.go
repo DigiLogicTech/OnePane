@@ -131,7 +131,11 @@ func (t AnthropicTransport) Dispatch(ctx context.Context, req DispatchRequest, s
 		return DispatchResult{}, &TransportError{Code: "response_too_large", HTTPStatus: resp.StatusCode, OutcomeKnown: true}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return DispatchResult{}, &TransportError{Code: fmt.Sprintf("http_%d", resp.StatusCode), HTTPStatus: resp.StatusCode, OutcomeKnown: true}
+		te := &TransportError{Code: fmt.Sprintf("http_%d", resp.StatusCode), HTTPStatus: resp.StatusCode, OutcomeKnown: true}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			te.RetryAfterMS = retryAfterMillis(resp.Header)
+		}
+		return DispatchResult{}, te
 	}
 	var env struct {
 		Content []struct {

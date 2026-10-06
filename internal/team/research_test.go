@@ -21,3 +21,29 @@ func TestProfileIDFromMemberConfigIsStable(t *testing.T) {
 		t.Fatalf("default profile id=%q", got)
 	}
 }
+
+func TestResearchDefaultsToAutomaticMultiRoundWorkflow(t *testing.T) {
+	cfg := NormalizeResearchSettings(ResearchSettings{SynthesisPass: true})
+	if cfg.CritiqueRounds != 2 {
+		t.Fatalf("default critique rounds=%d", cfg.CritiqueRounds)
+	}
+	if got := ResearchTotalRounds(cfg); got != 4 {
+		t.Fatalf("total rounds=%d", got)
+	}
+	want := []string{ResearchPhaseIndependent, ResearchPhaseCritique, ResearchPhaseCritique, ResearchPhaseSynthesis}
+	for i, phase := range want {
+		if got := ResearchPhaseForRound(cfg, int64(i+1)); got != phase {
+			t.Fatalf("round %d phase=%q want %q", i+1, got, phase)
+		}
+	}
+}
+
+func TestResearchCritiqueRoundsAreBounded(t *testing.T) {
+	cfg := NormalizeResearchSettings(ResearchSettings{CritiqueRounds: 99, SynthesisPass: true})
+	if cfg.CritiqueRounds != 5 {
+		t.Fatalf("critique rounds=%d", cfg.CritiqueRounds)
+	}
+	if got := ResearchTotalRounds(cfg); got != 7 {
+		t.Fatalf("total rounds=%d", got)
+	}
+}

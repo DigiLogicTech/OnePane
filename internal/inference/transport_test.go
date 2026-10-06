@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 type staticSecrets map[string]string
@@ -148,5 +149,19 @@ func TestOpenAICompatibleRawAPIKeyAndHostPin(t *testing.T) {
 	provider.ConnectionJSON = json.RawMessage(`{"base_url":"https://evil.example/v1","allowed_host_suffixes":["api.openai.com"]}`)
 	if _, err := (OpenAICompatibleTransport{}).Dispatch(context.Background(), DispatchRequest{Model: Model{ModelRef: "x"}, Deployment: ModelDeployment{RuntimeConfigJSON: json.RawMessage(`{}`)}, Provider: &provider, RequestJSON: json.RawMessage(`{"messages":[]}`)}, staticSecrets{"vault:key": "abc"}); err == nil {
 		t.Fatal("expected credential destination pinning")
+	}
+}
+
+func TestRetryAfterMillisAcceptsHTTPDate(t *testing.T) {
+	h := http.Header{}
+	target := time.Now().UTC().Add(3 * time.Hour).Truncate(time.Second)
+	h.Set("Retry-After", target.Format(http.TimeFormat))
+	got := retryAfterMillis(h)
+	if got == nil {
+		t.Fatal("missing retry-after")
+	}
+	delta := time.UnixMilli(*got).Sub(target)
+	if delta < -time.Second || delta > time.Second {
+		t.Fatalf("retry-after=%v target=%v", time.UnixMilli(*got), target)
 	}
 }

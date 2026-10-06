@@ -210,6 +210,17 @@ func (s *Server) listTeamTurns(w http.ResponseWriter, r *http.Request) {
 	out, err := s.team.ListTurns(r.Context(), ss.ID)
 	respondDomain(w, out, err, 200)
 }
+
+func (s *Server) retryResearchRound(w http.ResponseWriter, r *http.Request) {
+	i, ss, ok := s.sessionFor(w, r, "team.write")
+	if !ok {
+		return
+	}
+	out, err := s.team.RetryResearchRound(r.Context(), team.RetryResearchRoundCommand{
+		SessionID: ss.ID, RequestedByPrincipalID: i.PrincipalID, Automatic: false,
+	})
+	respondDomain(w, out, err, http.StatusOK)
+}
 func (s *Server) listTeamPlans(w http.ResponseWriter, r *http.Request) {
 	_, ss, ok := s.sessionFor(w, r, "team.read")
 	if !ok {

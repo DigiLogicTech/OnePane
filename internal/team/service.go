@@ -295,6 +295,9 @@ func researchConfiguration(raw json.RawMessage) (bool, ResearchSettings) {
 		Research     ResearchSettings `json:"research"`
 	}
 	_ = json.Unmarshal(raw, &cfg)
+	if cfg.ResearchMode {
+		cfg.Research = NormalizeResearchSettings(cfg.Research)
+	}
 	return cfg.ResearchMode, cfg.Research
 }
 
@@ -562,7 +565,7 @@ func (s *Service) RequestRound(ctx context.Context, c RequestRoundCommand) ([]Tu
 		return nil, manifestErr
 	}
 	want := map[string]bool{}
-	if !(researchMode && research.RequireAllSeats) {
+	if !(researchMode && research.RequireAllSeats) || c.ExactMemberSelection {
 		for _, v := range c.MemberIDs {
 			want[v] = true
 		}
@@ -579,6 +582,18 @@ func (s *Service) RequestRound(ctx context.Context, c RequestRoundCommand) ([]Tu
 			return ErrSessionState
 		}
 		round := ss.RoundNumber + 1
+		phase := strings.TrimSpace(c.ResearchPhase)
+		if researchMode {
+			expectedPhase := ResearchPhaseForRound(research, round)
+			if phase == "" {
+				phase = expectedPhase
+			}
+			if expectedPhase == "" || phase != expectedPhase {
+				return ErrSessionState
+			}
+		} else {
+			phase = ""
+		}
 		for _, m := range members {
 			if m.Status != "active" || m.MemberKind == "human" {
 				continue
@@ -587,14 +602,14 @@ func (s *Service) RequestRound(ctx context.Context, c RequestRoundCommand) ([]Tu
 				continue
 			}
 			idv, _ := s.ids.New("tturn")
-			tr := TurnRequest{ID: idv, WorkspaceID: ss.WorkspaceID, SessionID: ss.ID, MemberID: m.ID, Status: "pending", TriggerMessageID: c.TriggerMessageID, CreatedAt: now, UpdatedAt: now}
-			if _, e := tx.ExecContext(ctx, `INSERT INTO team_turn_requests(id,workspace_id,session_id,member_id,trigger_message_id,status,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?)`, tr.ID, tr.WorkspaceID, tr.SessionID, tr.MemberID, tr.TriggerMessageID, now, now); e != nil {
+			tr := TurnRequest{ID: idv, WorkspaceID: ss.WorkspaceID, SessionID: ss.ID, MemberID: m.ID, Status: "pending", TriggerMessageID: c.TriggerMessageID, RoundNumber: round, ResearchPhase: phase, CreatedAt: now, UpdatedAt: now}
+			if _, e := tx.ExecContext(ctx, `INSERT INTO team_turn_requests(id,workspace_id,session_id,member_id,trigger_message_id,status,round_number,research_phase,attempt_count,retry_after,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?,0,NULL,?,?)`, tr.ID, tr.WorkspaceID, tr.SessionID, tr.MemberID, tr.TriggerMessageID, tr.RoundNumber, tr.ResearchPhase, now, now); e != nil {
 				return e
 			}
 			out = append(out, tr)
 		}
 		actor := c.RequestedByPrincipalID
-		return s.emit(ctx, tx, ss.WorkspaceID, "team.round_requested", "team_session", ss.ID, &actor, map[string]any{"round": round, "turns": len(out), "research_mode": researchMode, "require_all_seats": researchMode && research.RequireAllSeats})
+		return s.emit(ctx, tx, ss.WorkspaceID, "team.round_requested", "team_session", ss.ID, &actor, map[string]any{"round": round, "phase": phase, "turns": len(out), "research_mode": researchMode, "require_all_seats": researchMode && research.RequireAllSeats})
 	})
 	return out, err
 }
@@ -798,6 +813,115 @@ func (s *Service) AcceptPlan(ctx context.Context, c AcceptPlanCommand) (Session,
 	}
 	return s.Session(ctx, ss.ID)
 }
+
+func (s *Service) PauseResearchRound(ctx context.Context, c PauseResearchRoundCommand) (Session, error) {
+	ss, err := s.Session(ctx, c.SessionID)
+	if err != nil {
+		return Session{}, err
+	}
+	if ss.Status != "deliberating" || ss.RoundNumber <= 0 || strings.TrimSpace(c.TurnID) == "" || strings.TrimSpace(c.ActorPrincipalID) == "" {
+		return Session{}, ErrSessionState
+	}
+	manifest, err := s.SessionManifest(ctx, ss.ID)
+	if err != nil || !manifest.ResearchMode || manifest.ExecutionMode != "council" {
+		return Session{}, ErrSessionState
+	}
+	if !s.workspaceMember(ctx, ss.WorkspaceID, c.ActorPrincipalID) {
+		return Session{}, ErrInvalid
+	}
+	now := s.clock.UnixMilli()
+	reason := strings.TrimSpace(c.Reason)
+	if reason == "" {
+		reason = "research provider unavailable"
+	}
+	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		res, e := tx.ExecContext(ctx, `UPDATE team_turn_requests
+			SET status='blocked',error_text=?,attempt_count=attempt_count+1,retry_after=?,updated_at=?,completed_at=?
+			WHERE id=? AND session_id=? AND round_number=? AND status='running' AND response_message_id IS NULL`,
+			reason, c.RetryAfter, now, now, c.TurnID, ss.ID, ss.RoundNumber)
+		if e != nil {
+			return e
+		}
+		n, _ := res.RowsAffected()
+		if n != 1 {
+			return ErrSessionState
+		}
+		res, e = tx.ExecContext(ctx, `UPDATE team_sessions SET status='paused_for_deliberation',revision=revision+1,updated_at=? WHERE id=? AND status='deliberating'`, now, ss.ID)
+		if e != nil {
+			return e
+		}
+		n, _ = res.RowsAffected()
+		if n != 1 {
+			return ErrSessionState
+		}
+		actor := c.ActorPrincipalID
+		return s.emit(ctx, tx, ss.WorkspaceID, "team.research_round_paused", "team_session", ss.ID, &actor, map[string]any{
+			"round": ss.RoundNumber, "reason": reason, "retry_after": c.RetryAfter, "turn_id": c.TurnID,
+		})
+	})
+	if err != nil {
+		return Session{}, err
+	}
+	return s.Session(ctx, ss.ID)
+}
+
+func (s *Service) RetryResearchRound(ctx context.Context, c RetryResearchRoundCommand) (Session, error) {
+	ss, err := s.Session(ctx, c.SessionID)
+	if err != nil {
+		return Session{}, err
+	}
+	if ss.Status != "paused_for_deliberation" || ss.RoundNumber <= 0 {
+		return Session{}, ErrSessionState
+	}
+	manifest, err := s.SessionManifest(ctx, ss.ID)
+	if err != nil || !manifest.ResearchMode || manifest.ExecutionMode != "council" {
+		return Session{}, ErrSessionState
+	}
+	if strings.TrimSpace(c.RequestedByPrincipalID) == "" || !s.workspaceMember(ctx, ss.WorkspaceID, c.RequestedByPrincipalID) {
+		return Session{}, ErrInvalid
+	}
+	if !c.Automatic && !s.isHuman(ctx, c.RequestedByPrincipalID) {
+		return Session{}, ErrHumanRequired
+	}
+	now := s.clock.UnixMilli()
+	if c.Automatic {
+		var eligible int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_turn_requests
+			WHERE session_id=? AND round_number=? AND response_message_id IS NULL
+			AND status IN ('blocked','failed') AND retry_after IS NOT NULL AND retry_after<=?`,
+			ss.ID, ss.RoundNumber, now).Scan(&eligible); err != nil {
+			return Session{}, err
+		}
+		if eligible == 0 {
+			return Session{}, ErrSessionState
+		}
+	}
+	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		if _, e := tx.ExecContext(ctx, `UPDATE team_turn_requests
+			SET status='pending',error_text=NULL,retry_after=NULL,completed_at=NULL,updated_at=?
+			WHERE session_id=? AND round_number=? AND response_message_id IS NULL
+			AND status IN ('pending','blocked','failed')`, now, ss.ID, ss.RoundNumber); e != nil {
+			return e
+		}
+		res, e := tx.ExecContext(ctx, `UPDATE team_sessions SET status='deliberating',revision=revision+1,updated_at=? WHERE id=? AND status='paused_for_deliberation'`, now, ss.ID)
+		if e != nil {
+			return e
+		}
+		n, _ := res.RowsAffected()
+		if n != 1 {
+			return ErrSessionState
+		}
+		actor := c.RequestedByPrincipalID
+		return s.emit(ctx, tx, ss.WorkspaceID, "team.research_round_retried", "team_session", ss.ID, &actor, map[string]any{
+			"round": ss.RoundNumber, "automatic": c.Automatic,
+		})
+	})
+	if err != nil {
+		return Session{}, err
+	}
+	return s.Session(ctx, ss.ID)
+}
+
 func (s *Service) ReopenDeliberation(ctx context.Context, c ReopenCommand) (Session, error) {
 	ss, err := s.Session(ctx, c.SessionID)
 	if err != nil {
@@ -967,7 +1091,7 @@ func (s *Service) ListDecisions(ctx context.Context, sessionID string) ([]Decisi
 	return out, rows.Err()
 }
 func (s *Service) ListTurns(ctx context.Context, sessionID string) ([]TurnRequest, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,workspace_id,session_id,member_id,trigger_message_id,status,selected_candidate_kind,selected_candidate_id,response_message_id,budget_reservation_id,error_text,created_at,updated_at,completed_at FROM team_turn_requests WHERE session_id=? ORDER BY created_at,id`, sessionID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,workspace_id,session_id,member_id,trigger_message_id,status,selected_candidate_kind,selected_candidate_id,response_message_id,budget_reservation_id,error_text,round_number,research_phase,attempt_count,retry_after,created_at,updated_at,completed_at FROM team_turn_requests WHERE session_id=? ORDER BY round_number,created_at,id`, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -976,8 +1100,8 @@ func (s *Service) ListTurns(ctx context.Context, sessionID string) ([]TurnReques
 	for rows.Next() {
 		var t TurnRequest
 		var trig, kind, cid, msg, bres, et sql.NullString
-		var done sql.NullInt64
-		if err := rows.Scan(&t.ID, &t.WorkspaceID, &t.SessionID, &t.MemberID, &trig, &t.Status, &kind, &cid, &msg, &bres, &et, &t.CreatedAt, &t.UpdatedAt, &done); err != nil {
+		var retry, done sql.NullInt64
+		if err := rows.Scan(&t.ID, &t.WorkspaceID, &t.SessionID, &t.MemberID, &trig, &t.Status, &kind, &cid, &msg, &bres, &et, &t.RoundNumber, &t.ResearchPhase, &t.AttemptCount, &retry, &t.CreatedAt, &t.UpdatedAt, &done); err != nil {
 			return nil, err
 		}
 		if trig.Valid {
@@ -997,6 +1121,9 @@ func (s *Service) ListTurns(ctx context.Context, sessionID string) ([]TurnReques
 		}
 		if et.Valid {
 			t.ErrorText = &et.String
+		}
+		if retry.Valid {
+			t.RetryAfter = &retry.Int64
 		}
 		if done.Valid {
 			t.CompletedAt = &done.Int64

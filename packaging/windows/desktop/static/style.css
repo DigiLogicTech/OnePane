@@ -767,6 +767,8 @@ body { background:var(--app-gradient),var(--bg); }
 .team-member-row span{color:var(--muted)}
 .research-toggle{font-weight:700;padding:9px;border:1px solid color-mix(in srgb,var(--accent) 45%,var(--border));border-radius:8px;background:var(--accent-soft)}
 .research-options{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;padding:10px;border:1px solid var(--border);border-radius:8px}
+.research-pause-panel{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin:12px 0;padding:12px 14px;border:1px solid color-mix(in srgb,var(--warn) 42%,var(--border));border-radius:10px;background:color-mix(in srgb,var(--warn) 8%,var(--panel-2))}
+.research-pause-panel .btn{flex:0 0 auto}
 
 /* Skills */
 .skill-card .card-header{min-height:54px}

@@ -952,7 +952,16 @@ body { background:var(--app-gradient),var(--bg); }
 .app-shell[data-sidebar="collapsed"] .nav-parent-row{grid-template-columns:1fr}
 .app-shell[data-sidebar="collapsed"] .nav-disclosure{display:none}
 
-select{color-scheme:inherit;background-color:var(--panel-2);color:var(--text)}
-select option,select optgroup{background-color:var(--panel);color:var(--text)}
-:root[data-theme="dark"],:root[data-theme="graphite"],:root[data-theme="midnight"],:root[data-theme="forest"],:root[data-theme="aurora"],:root[data-theme="cobalt"],:root[data-theme="dusk"],:root[data-theme="custom"]{color-scheme:dark}
-:root[data-theme="light"]{color-scheme:light}
+select{background-color:var(--panel-2);color:var(--text)}
+select option,select optgroup{background-color:var(--panel-2);color:var(--text)}
+:root[data-theme="dark"] select,
+:root[data-theme="graphite"] select,
+:root[data-theme="midnight"] select,
+:root[data-theme="forest"] select,
+:root[data-theme="aurora"] select,
+:root[data-theme="cobalt"] select,
+:root[data-theme="dusk"] select,
+:root[data-theme="custom"] select{color-scheme:dark}
+:root[data-theme="light"] select{color-scheme:light}
+@media(prefers-color-scheme:dark){:root[data-theme="system"] select{color-scheme:dark}}
+@media(prefers-color-scheme:light){:root[data-theme="system"] select{color-scheme:light}}

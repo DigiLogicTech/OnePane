@@ -196,7 +196,10 @@
     document.querySelector('[data-a31-settings="appearance"]')?.click();await waitFor(()=>a31SettingsView==="appearance","Appearance settings");check(document.querySelector("[data-settings-theme]"),"Themes rendered");
 
     await testProjectLayout();
-    const workspaceThemeSelect=check(document.querySelector(".qa7-workspace-settings select"),"Workspace settings themed select");check(getComputedStyle(workspaceThemeSelect).colorScheme.includes("dark"),"Workspace settings selects inherit dark color scheme");
+    const workspaceThemeSelect=check(document.querySelector(".qa7-workspace-settings select"),"Workspace settings themed select"),themeBefore=document.documentElement.dataset.theme;
+    document.documentElement.dataset.theme="dark";await sleep(60);
+    const workspaceSelectStyle=getComputedStyle(workspaceThemeSelect);check(workspaceSelectStyle.colorScheme.includes("dark"),"Workspace settings selects use dark native color scheme");check(workspaceSelectStyle.backgroundColor!=="rgba(0, 0, 0, 0)","Workspace settings selects keep themed background");
+    document.documentElement.dataset.theme=themeBefore||"system";
 
     const command=check(document.querySelector('[data-action="command-palette"]'),"command launcher");command.click();await waitFor(()=>document.querySelector("#paletteInput"),"command palette");
     check(document.querySelectorAll("[data-palette-index]").length>0,"command actions populated");document.querySelector("#paletteInput").dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}));await waitFor(()=>!document.querySelector("#paletteInput"),"command close");

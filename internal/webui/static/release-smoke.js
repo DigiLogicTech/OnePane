@@ -105,8 +105,10 @@
     const hostRect=document.querySelector("#viewHost").getBoundingClientRect(),cardRect=tourCard.getBoundingClientRect(),hostCx=(hostRect.left+hostRect.right)/2,hostCy=(hostRect.top+hostRect.bottom)/2,cardCx=(cardRect.left+cardRect.right)/2,cardCy=(cardRect.top+cardRect.bottom)/2;
     check(Math.abs(hostCx-cardCx)<40&&Math.abs(hostCy-cardCy)<40,"Tour defaults to page centre");
     const pane=document.querySelector(".tour-pane"),paneStyle=getComputedStyle(pane);check(pane&&paneStyle.backgroundColor!=="rgba(0, 0, 0, 0)"&&paneStyle.backgroundColor!=="transparent","Tour focus mask dims background");
+    check((parseFloat(paneStyle.backdropFilter?.match(/blur\(([^p]+)/)?.[1]||"0")||0)>=4,"Tour focus mask blurs background");
     check(document.elementFromPoint(Math.min(innerWidth-1,Math.max(1,cardRect.left+20)),Math.min(innerHeight-1,Math.max(1,cardRect.top+20)))?.closest("#tourCard"),"Tour card receives pointer input");
     document.querySelector("#tourNext")?.click();await waitFor(()=>document.querySelector('#tourCard[data-positioned="true"]')?.querySelector("h2")?.textContent==="Navigation","Tour next step positioned");
+    const spotlight=check(document.querySelector("#tourSpotlight:not([hidden])"),"Tour target spotlight visible"),spotStyle=getComputedStyle(spotlight);check(spotStyle.boxShadow.includes("9999px"),"Tour target has surrounding focus shade");
     document.querySelector("#tourSkip")?.click();await waitFor(()=>!document.documentElement.dataset.productTour,"Tour cleanup");check(!document.querySelector(".tour-target"),"Tour target cleanup");check(!document.querySelector(".tour-overlay"),"Tour overlay removed");
 
     const launcher=check(document.querySelector("#controlChatLauncher"),"Chat launcher");launcher.click();await waitFor(()=>document.querySelector("#a31ControlChatForm"),"Assistant chat");

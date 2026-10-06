@@ -146,3 +146,5 @@ ck("Operations render self-heals overlapping persisted geometry", "if(a31Operati
 
 ck("Product tour is centred first and only repositions for focus collisions", 'const center=clamp' in app and 'if(collides(pos)&&targetRect)' in app and 'card.dataset.positioned="true"' in app)
 ck("Product tour reveals only after positioning and visibly focuses the background", 'visibility:hidden!important' in css and 'data-positioned="true"' in css and 'rgba(3,8,13,.58)' in css and "Tour defaults to page centre" in smoke)
+
+ck("Product tour visibly isolates the active target", "z-index:1;pointer-events:none" in css and "blur(5px)" in css and "9999px" in css and "Tour target spotlight visible" in smoke)

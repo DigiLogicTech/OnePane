@@ -69,7 +69,7 @@ legacy_duplicate_budget={
     'resourceCard': 2,
     'taskCard': 2
 }
-critical=["renderNav","renderOperations","renderProjects","renderModels","renderNodes","renderAgents","renderSkills","renderSettings","startProductTour","bindShell","renderActiveView","qa4BindWorkspaceEdit","qa4AddWorkspaceComponent"]
+critical=["renderNav","renderOperations","renderProjects","renderModels","renderNodes","renderAgents","renderSkills","renderSettings","renderInspector","startProductTour","bindShell","renderActiveView","qa4BindWorkspaceEdit","qa4AddWorkspaceComponent"]
 
 failed=[]
 def fail(msg): failed.append(msg); print("[FAIL] "+msg)

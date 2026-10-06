@@ -50,7 +50,7 @@ ck("Single-element selector helper is never used as a collection", not single_se
 
 ck("Primary navigation exposes Nodes and Skills", '["nodes","⬡","Nodes"]' in app and '["skills","✦","Skills"]' in app)
 ck("Projects and Models have nested navigation", "project-nav-tree" in app and "model-nav-tree" in app and 'data-a31-model-view="local"' in app and 'data-a31-model-view="cloud"' in app)
-ck("Primary navigation survives sidebar rerenders", "nav.dataset.delegatedNav" in app and 'e.target.closest("[data-route]")' in app)
+ck("Primary navigation survives sidebar rerenders", 'nav.innerHTML=html' in app and '$(":scope > [data-route]",nav).forEach' in app and '$("[data-a31-model-view]",nav).forEach' in app)
 ck("Nested navigation has a single active leaf", "parentActive=route===r&&!hasLeaf" in app and "projectActive&&!qa4ProjectHub.activeWorkspaceID" in app)
 ck("Persistent Control Chat shell exists", 'id="controlChatLauncher"' in html and 'id="controlChatPanel"' in html and "a31RenderControlChat" in app)
 ck("Assistant and Project Orchestrator share persistent panel", 'id="controlChatAssistantTab"' in html and 'id="controlChatOrchestratorTab"' in html and "/orchestrator/turns" in app)
@@ -63,7 +63,7 @@ ck("Project component mutations refresh only project grid", "a31RefreshProjectGr
 
 ck("Operations Activity Health Recovery are functional", '["activity","Activity"]' in app and '["health","Health"]' in app and '["recovery","Recovery"]' in app and "a31OperationsActivity" in app and "a31OperationsHealth" in app and "a31RecoveryContent" in app)
 ck("Operations Logs is a true drawer toggle", "function a31ToggleLogs" in app and 'activeDrawerTab==="logs"' in app and "setDrawerOpen(false)" in app)
-ck("Operations default layout is meaningful and collision-aware", "x:0,y:0,width:12,height:3" in app and "a31ResolveLayout(state.operationsWidgets,item.id)" in app)
+ck("Operations default layout is meaningful and collision-aware", "x:0,y:0,width:12,height:3" in app and "a31ResolveLayout(state.operationsWidgets,item.id)" in app and "a31RepairPersistedUIState()" in app and "a31OperationsLayoutBroken" in app)
 ck("Recovery header preserves action spacing", "recovery-card-header" in app and ".recovery-card-header" in css)
 
 ck("Local Models distinguish trusted installability", "installable_quantizations" not in app or "model.installable" in app)
@@ -136,3 +136,5 @@ if failed:
     for n in failed: print(" - "+n,file=sys.stderr)
     sys.exit(1)
 print(f"\nALPHA 3.1 UI: ALL {len(checks)} CHECKS PASSED")
+
+ck("Inspector Overview is implicit rather than a permanent rail", 'root.dataset.tabMode=tabs.length>1?"multi":"single"' in app and 'inspector[data-tab-mode="single"]>.inspector-tabs' in css)

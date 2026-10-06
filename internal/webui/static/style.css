@@ -866,3 +866,19 @@ body { background:var(--app-gradient),var(--bg); }
 }
 
 .status-button.health-unknown,.mobile-health.health-unknown{color:var(--muted)}
+
+
+/* Alpha 3.2 QA: Inspector overview is implicit; optional views stay inside the Inspector. */
+.inspector{display:block!important}
+.inspector>.inspector-header,
+.inspector>.inspector-header + .inspector-section,
+.inspector>.inspector-tabs,
+.inspector>.inspector-tabs + .inspector-section{grid-column:auto!important;grid-row:auto!important}
+.inspector>.inspector-tabs{display:flex;flex-direction:row;align-items:center;gap:4px;padding:6px 8px;border-right:0;border-bottom:1px solid var(--border);overflow-x:auto;overflow-y:hidden}
+.inspector[data-tab-mode="single"]>.inspector-tabs{display:none}
+.inspector-tabs button{width:auto;text-align:left;white-space:nowrap}
+.qa4-inspector-tab-wrap{display:inline-flex;align-items:center;gap:2px}
+.qa4-inspector-tab-tools{display:inline-flex;align-items:center;padding:0}
+.inspector-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.inspector-header-add{width:28px!important;min-width:28px;height:28px;padding:0!important;text-align:center!important;border:1px solid var(--border)!important;border-radius:7px!important;background:var(--panel-2)!important;color:var(--muted)!important}
+.inspector-header-add:hover{color:var(--text)!important;border-color:var(--accent)!important}

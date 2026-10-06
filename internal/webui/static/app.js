@@ -19,6 +19,30 @@ navItems.splice(0,navItems.length,
   ["models","◇","Models"],["nodes","⬡","Nodes"],["agents","♙","Agents"],["skills","✦","Skills"]
 );
 
+const A31_OPERATIONS_LAYOUT_VERSION=3;
+function a31OperationsLayoutBroken(rows){
+  if(!Array.isArray(rows)||rows.length<4)return true;
+  const normalized=rows.map(x=>({...x}));a31NormalizeLayout(normalized);
+  const oneRow=normalized.every(w=>Number(w.y||0)===0);
+  const mostlyMinimum=normalized.filter(w=>Number(w.width||0)<=3).length>=Math.ceil(normalized.length/2);
+  const overlaps=normalized.some((a,i)=>normalized.slice(i+1).some(b=>a31Overlap(a,b)));
+  const invalid=normalized.some(w=>!Number.isFinite(w.x)||!Number.isFinite(w.y)||w.x<0||w.y<0||w.width<3||w.width>12||w.x+w.width>12);
+  return oneRow||mostlyMinimum||overlaps||invalid;
+}
+function a31RepairPersistedUIState(){
+  let changed=false;
+  if(a31OperationsLayoutBroken(state.operationsWidgets)){
+    state.operationsWidgets=defaultState().operationsWidgets.map(x=>({...x}));
+    changed=true;
+  }
+  if(Number(state.operationsLayoutVersion||0)!==A31_OPERATIONS_LAYOUT_VERSION){
+    state.operationsLayoutVersion=A31_OPERATIONS_LAYOUT_VERSION;changed=true;
+  }
+  if(changed)persist();
+  return changed;
+}
+a31RepairPersistedUIState();
+
 function a31Array(v){return Array.isArray(v)?v:[]}
 function a31Object(v){return v&&typeof v==="object"&&!Array.isArray(v)?v:{}}
 function a31JSON(v,fallback={}){if(v&&typeof v==="object")return v;try{return JSON.parse(v||"{}")}catch{return fallback}}
@@ -32,11 +56,14 @@ function a31CurrentProject(){return typeof qa4ActiveProject==="function"?qa4Acti
 function a31CurrentWorkspace(){return typeof qa4ActiveWorkspace==="function"?qa4ActiveWorkspace():null}
 
 function renderNav(){
-  const route=currentTab()?.route||"operations",projects=a31Array(qa4ProjectHub?.projects);
+  const route=currentTab()?.route||"operations",projects=a31Array(qa4ProjectHub?.projects),nav=$("#primaryNav");if(!nav)return;
   const projectTree=projects.length?`<div class="project-nav-tree">${projects.map(p=>{const projectActive=route==="projects"&&p.id===qa4ProjectHub.activeProjectID,workspaces=typeof qa4Workspaces==="function"?qa4Workspaces(p):[];return `<div class="project-nav-node ${projectActive&&!qa4ProjectHub.activeWorkspaceID?'active-project':''}"><button class="project-nav-project ${projectActive&&!qa4ProjectHub.activeWorkspaceID?'active':''}" data-a31-project-nav="${escapeHtml(p.id)}"><span>▢</span><span>${escapeHtml(p.name||"Project")}</span></button><div class="project-nav-workspaces">${workspaces.map(w=>`<button class="project-nav-workspace ${projectActive&&w.id===qa4ProjectHub.activeWorkspaceID?'active':''}" data-a31-project-nav="${escapeHtml(p.id)}" data-a31-workspace-nav="${escapeHtml(w.id)}"><span class="project-nav-branch"></span><span>${escapeHtml(w.name||"Workspace")}</span></button>`).join("")}</div></div>`}).join("")}</div>`:"";
   const modelTree=`<div class="model-nav-tree"><button class="model-nav-child ${route==="models"&&a31ModelView==="local"?'active':''}" data-a31-model-view="local"><span>◈</span><span>Local Models</span></button><button class="model-nav-child ${route==="models"&&a31ModelView==="cloud"?'active':''}" data-a31-model-view="cloud"><span>☁</span><span>Cloud Models</span></button></div>`;
   const html=navItems.map(([r,icon,label])=>{const translated=qa5T(r,label),hasLeaf=(r==="models"||r==="projects"),parentActive=route===r&&!hasLeaf;const row=`<button class="nav-item ${parentActive?'active':''}" data-route="${r}" title="${escapeHtml(translated)}"><span class="nav-icon">${icon}</span><span class="nav-label">${escapeHtml(translated)}</span></button>`;if(r==="projects")return row+projectTree;if(r==="models")return row+modelTree;return row}).join("");
-  $("#primaryNav").innerHTML=html;
+  nav.innerHTML=html;
+  $("[data-a31-model-view]",nav).forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();openRoute("models");a31SetModelView(b.dataset.a31ModelView)});
+  $("[data-a31-project-nav]",nav).forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();qa4ProjectHub.activeProjectID=b.dataset.a31ProjectNav;qa4ProjectHub.activeWorkspaceID=b.dataset.a31WorkspaceNav||"";openRoute("projects")});
+  $(":scope > [data-route]",nav).forEach(b=>b.onclick=e=>{e.preventDefault();openRoute(b.dataset.route)});
 }
 
 /* Shared deterministic component layout. */
@@ -440,19 +467,21 @@ startProductTour=function({replay=false,welcome=false}={}){
   window.addEventListener("resize",position);document.addEventListener("keydown",onKeyDown);draw();
 };
 
+/* Inspector: Overview is implicit; only show navigation when multiple views exist. */
+const a31RenderInspectorBase=renderInspector;
+renderInspector=function(){
+  a31RenderInspectorBase();
+  const root=$("#inspector");if(!root)return;
+  const tabs=typeof qa4InspectorTabs==="function"?qa4InspectorTabs():["overview"];
+  root.dataset.tabMode=tabs.length>1?"multi":"single";
+  const add=$("#qa4InspectorAddTab"),header=root.querySelector(".inspector-header");
+  if(add&&header){add.classList.add("inspector-header-add");add.title="Add Inspector view";header.appendChild(add)}
+};
+
 /* Shell bindings and final routing */
 const a31BindShellBase=bindShell;
 bindShell=function(){
   a31BindShellBase();
-  const nav=$("#primaryNav");
-  if(nav&&!nav.dataset.delegatedNav){
-    nav.dataset.delegatedNav="1";
-    nav.addEventListener("click",e=>{
-      const model=e.target.closest("[data-a31-model-view]");if(model){e.preventDefault();e.stopPropagation();openRoute("models");a31SetModelView(model.dataset.a31ModelView);return}
-      const project=e.target.closest("[data-a31-project-nav]");if(project){e.preventDefault();e.stopPropagation();qa4ProjectHub.activeProjectID=project.dataset.a31ProjectNav;qa4ProjectHub.activeWorkspaceID=project.dataset.a31WorkspaceNav||"";openRoute("projects");renderNav();return}
-      const route=e.target.closest("[data-route]");if(route){e.preventDefault();openRoute(route.dataset.route)}
-    });
-  }
   $("#controlChatLauncher")?.addEventListener("click",()=>a31OpenControlChat());$("#controlChatClose")?.addEventListener("click",e=>{e.stopPropagation();a31CloseControlChat()});$("#controlChatToggle")?.addEventListener("click",()=>a31SetControlChatCollapsed(!state.controlChatCollapsed));$("#controlChatAssistantTab")?.addEventListener("click",()=>a31OpenControlChat("assistant"));$("#controlChatOrchestratorTab")?.addEventListener("click",()=>a31OpenControlChat("orchestrator"));
 };
 renderActiveView=async function(){

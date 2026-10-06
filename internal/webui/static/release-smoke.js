@@ -62,8 +62,16 @@
 
   async function run(){
     localStorage.setItem(TOUR_KEY,TOUR_COMPLETE_VALUE);
+    state.operationsWidgets=defaultState().operationsWidgets.map((x,i)=>({...x,x:i,y:0,width:2,height:3,col:2,row:3}));
+    state.operationsLayoutVersion=2;
+    persist();
+    check(a31RepairPersistedUIState(),"broken persisted Operations layout repaired");
+    check(!a31OperationsLayoutBroken(state.operationsWidgets),"repaired Operations layout is valid");
     await waitFor(()=>document.querySelector("#app")&&!document.querySelector("#app").classList.contains("hidden"),"application shell",30000);
     check(onepaneWorkspace==="workspace-release","mock workspace authenticated");
+    renderInspector();
+    check(document.querySelector("#inspector")?.dataset.tabMode==="single","Inspector Overview is implicit");
+    check(getComputedStyle(document.querySelector("#inspector .inspector-tabs")).display==="none","single Inspector Overview rail is hidden");
     if(document.documentElement.dataset.productTour==="active"){
       document.querySelector("#tourSkip")?.click();
       await waitFor(()=>!document.documentElement.dataset.productTour,"welcome Tour cleanup");

@@ -87,6 +87,12 @@ async function a38PollManagedInstalls(){
      const j=await apiRequest(`/v1/local-ai/component-jobs/${encodeURIComponent(c.active_job_id)}`);
      c._stage=j.stage||j.status;
      const status=$("#a31-"+id+"-status");if(status)status.textContent=titleCase(String(c._stage).replaceAll("_"," "));
+     // Keep the current tile accurate immediately, not only after a page
+     // revisit. Existing installers remain owned by their durable job ID.
+     $('[data-a31-component]').filter(b=>b.dataset.a31Component===id+":install").forEach(b=>{
+      b.removeAttribute("data-a31-component");b.dataset.a38ViewComponent=id;
+      b.textContent="View progress";b.onclick=()=>a38ViewComponent(id)
+     });
     }catch{}
    }else if(previous[id]?.active_job_id){
     if(c.state==="failed")notice(a31ComponentName(id)+" install failed: "+(c.last_error||"unknown error"),"bad");

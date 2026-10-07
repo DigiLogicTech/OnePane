@@ -77,6 +77,7 @@ jobs:
           python3 scripts/validate_frontend_integrity.py
           python3 scripts/validate_alpha31_product_contract.py
           python3 scripts/validate_ui_design_system.py
+          python3 scripts/validate_attention_drawer.py
           python3 scripts/validate_release_candidate.py
           python3 scripts/validate_release_process.py
           sh -n packaging/debian/preinst packaging/debian/postinst packaging/debian/prerm packaging/debian/postrm

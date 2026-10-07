@@ -46,7 +46,7 @@ async function a36LlamaBackendManager(){
  let rows=[];
  try{rows=a31Array(await apiRequest("/v1/local-ai/llama-runtimes"))}
  catch(ex){return notice(ex.message,"bad")}
- openModal("Manage llama.cpp backends",`<div class="widget-body qa-form"><p class="page-subtitle">CPU, CUDA and Vulkan are managed independently. Model weights are preserved. Stop and migrate dependent deployments before removing their backend.</p><div class="runtime-backend-list">${rows.map(x=>{const used=Number(x.active_instances||0),deps=Number(x.dependent_models||0),blocked=used>0||deps>0;return `<div class="runtime-backend-row"><div><strong>${escapeHtml(String(x.backend||"").toUpperCase())}</strong><div class="list-meta">${escapeHtml(x.reason||"Optional backend")}</div><div class="list-meta">${deps} dependent model(s) · ${used} active instance(s)</div></div><div class="toolbar"><span class="pill ${x.installed?"good":""}">${x.installed?"Installed":"Not installed"}</span>${x.installed?`<button class="btn danger" data-a36-remove-backend="${escapeHtml(x.backend)}" ${blocked?"disabled":""}>Uninstall</button>`:""}</div></div>`}).join("")}</div><div id="a36BackendStatus" class="page-subtitle"></div></div>`);
+ openModal("Manage llama.cpp backends",`<div class="widget-body qa-form"><p class="page-subtitle">CPU, CUDA and Vulkan are managed independently. Model weights are preserved. Active runtimes will be stopped where safe. Associated deployments become unavailable until a compatible backend is restored; downloaded model weights and registrations remain intact.</p><div class="runtime-backend-list">${rows.map(x=>{const used=Number(x.active_instances||0),deps=Number(x.dependent_models||0);return `<div class="runtime-backend-row"><div><strong>${escapeHtml(String(x.backend||"").toUpperCase())}</strong><div class="list-meta">${escapeHtml(x.reason||"Optional backend")}</div><div class="list-meta">${deps} dependent model(s) · ${used} active instance(s)</div></div><div class="toolbar"><span class="pill ${x.installed?"good":""}">${x.installed?"Installed":"Not installed"}</span>${x.installed?`<button class="btn danger" data-a36-remove-backend="${escapeHtml(x.backend)}" >Uninstall</button>`:""}</div></div>`}).join("")}</div><div id="a36BackendStatus" class="page-subtitle"></div></div>`);
  $$("[data-a36-remove-backend]").forEach(button=>button.onclick=async()=>{
   const backend=button.dataset.a36RemoveBackend;
   button.disabled=true;$("#a36BackendStatus").textContent=`Removing ${backend} backend…`;
@@ -71,8 +71,14 @@ async function a36BindLLMFitCard(){
  try{
   const st=await apiRequest(`/v1/local-ai/llmfit?workspace_id=${encodeURIComponent(onepaneWorkspace)}`);
   if(!grid.isConnected)return;
-  $("#a36LLMFitCard")?.remove();
-  const slot=document.createElement("div");slot.id="a36LLMFitCard";slot.innerHTML=a36ManagedLLMFitCard(st);grid.appendChild(slot);
+  let slot=$("#a36LLMFitCard");
+  if(!slot){slot=document.createElement("div");slot.id="a36LLMFitCard";grid.appendChild(slot)}
+  // The combined tab owns this element after initial render. Keep its
+  // identity and location stable across start/stop/install updates.
+  slot.innerHTML=a36ManagedLLMFitCard(st);
+  const tab=$('[data-runtime-tab="llmfit"]');
+  if(tab){const state=slot.querySelector(".pill")?.textContent||"Not installed";const badge=tab.querySelector(".pill");if(badge){badge.textContent=state;badge.classList.toggle("good",!!st.installed||!!st.running)}}
+ 
   $$("[data-a36-llmfit]",slot).forEach(b=>b.onclick=async()=>{
    const action=b.dataset.a36Llmfit;b.disabled=true;$("#a36LLMFitStatus").textContent=`${titleCase(action)} in progress…`;
    try{
@@ -80,7 +86,7 @@ async function a36BindLLMFitCard(){
     notice(`llmfit ${action} complete.`);await a36BindLLMFitCard()
    }catch(ex){b.disabled=false;$("#a36LLMFitStatus").innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`}
   })
- }catch(ex){if(grid.isConnected){const slot=document.createElement("div");slot.className="panel-card";slot.innerHTML=`<div class="widget-body error">${escapeHtml("llmfit: "+ex.message)}</div>`;grid.appendChild(slot)}}
+ }catch(ex){if(grid.isConnected){let slot=$("#a36LLMFitCard");if(!slot){slot=document.createElement("div");slot.id="a36LLMFitCard";grid.appendChild(slot)}slot.innerHTML=`<div class="widget-body error">${escapeHtml("llmfit: "+ex.message)}</div>`}}
 }
 const a36RenderLocalBase=a31RenderLocalModels;
 a31RenderLocalModels=async function(){await a36RenderLocalBase();await a36BindLLMFitCard()};

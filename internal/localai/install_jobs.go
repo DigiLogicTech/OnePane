@@ -48,6 +48,9 @@ type InstallJob struct {
 	BytesTotal         int64            `json:"bytes_total,omitempty"`
 	CurrentArtifact    string           `json:"current_artifact,omitempty"`
 	Resumable          bool             `json:"resumable,omitempty"`
+	ModelRef           string           `json:"model_ref,omitempty"`
+	Quantization       string           `json:"quantization,omitempty"`
+	NodeID             string           `json:"node_id,omitempty"`
 }
 
 type OneClickInstallRequest struct {
@@ -150,6 +153,11 @@ func (s *Service) QueueOneClickInstall(ctx context.Context, req OneClickInstallR
 	profile, err := s.hardwareProfile(ctx, req.HardwareProfileID)
 	if err != nil {
 		return InstallJob{}, err
+	}
+	if existing, err := s.findExistingInstall(ctx, req.WorkspaceID, profile.NodeID, req.ModelRef, req.Quantization); err != nil {
+		return InstallJob{}, err
+	} else if existing != nil {
+		return *existing, nil
 	}
 	preference := normalizeComputePreference(req.ComputePreference)
 	preferGPU := req.PreferGPU
@@ -277,6 +285,7 @@ const installJobSelect = `SELECT id,workspace_id,plan_id,catalog_id,deployment_i
 func (s *Service) InstallJob(ctx context.Context, idv string) (InstallJob, error) {
 	j, err := scanInstallJob(s.db.QueryRowContext(ctx, installJobSelect, idv))
 	if err != nil { return j, err }
+	s.enrichInstallJobIdentity(ctx, &j)
 	s.enrichInstallJobProgress(ctx, &j)
 	return j, nil
 }

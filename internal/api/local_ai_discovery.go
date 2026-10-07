@@ -77,21 +77,21 @@ func hfLicense(tags []string) string {
 }
 
 func discoverHuggingFace(ctx context.Context,q string,limit int)([]discoveredModel,error){
-	u,_:=url.Parse("https://huggingface.co/api/models");v:=u.Query();v.Set("filter","gguf");v.Set("sort","downloads");v.Set("direction","-1");v.Set("limit",strconv.Itoa(limit));if q!=""{v.Set("search",q)};u.RawQuery=v.Encode()
+	u,_:=url.Parse("https://huggingface.co/api/models");v:=u.Query();v.Set("sort","downloads");v.Set("direction","-1");v.Set("limit",strconv.Itoa(limit));if q!=""{v.Set("search",q)};u.RawQuery=v.Encode()
 	var rows []struct{ID string `json:"id"`;Author string `json:"author"`;Downloads int64 `json:"downloads"`;Likes int64 `json:"likes"`;LastModified string `json:"lastModified"`;PipelineTag string `json:"pipeline_tag"`;Tags []string `json:"tags"`;Gated any `json:"gated"`}
 	if err:=fetchDiscoveryJSON(ctx,u.String(),&rows);err!=nil{return nil,err}
 	out:=make([]discoveredModel,0,len(rows))
 	for _,r:=range rows{if r.ID==""||hfGated(r.Gated){continue};name:=r.ID;if i:=strings.LastIndex(name,"/");i>=0{name=name[i+1:]}
-		out=append(out,discoveredModel{Source:"huggingface",ID:r.ID,DisplayName:name,Author:r.Author,Category:r.PipelineTag,SourceURL:"https://huggingface.co/"+r.ID,Trust:"upstream-metadata",Verified:false,Downloads:r.Downloads,Likes:r.Likes,License:hfLicense(r.Tags),Tags:r.Tags,Installable:false,InstallReason:"Inspect and pin a GGUF artifact digest before OnePane can install this external model."})}
+		out=append(out,discoveredModel{Source:"huggingface",ID:r.ID,DisplayName:name,Author:r.Author,Category:r.PipelineTag,SourceURL:"https://huggingface.co/"+r.ID,Trust:"upstream-metadata",Verified:false,Downloads:r.Downloads,Likes:r.Likes,License:hfLicense(r.Tags),Tags:r.Tags,Installable:false,InstallReason:"Browse the full upstream model catalogue. Verify & install will resolve a compatible GGUF artifact when one is available."})}
 	return out,nil
 }
 
 func discoverHuggingBay(ctx context.Context,q string,limit int)([]discoveredModel,error){
-	u,_:=url.Parse("https://thehuggingbay.io/api/torrents");v:=u.Query();v.Set("cat","llm");v.Set("sort","seeds");v.Set("limit",strconv.Itoa(limit));if q!=""{v.Set("q",q)};u.RawQuery=v.Encode()
+	u,_:=url.Parse("https://thehuggingbay.io/api/torrents");v:=u.Query();v.Set("sort","seeds");v.Set("limit",strconv.Itoa(limit));if q!=""{v.Set("q",q)};u.RawQuery=v.Encode()
 	var rows []struct{Infohash string `json:"infohash"`;Name string `json:"name"`;Category string `json:"category"`;SizeBytes int64 `json:"size_bytes"`;Seeds int64 `json:"seeds"`;License string `json:"license"`;SourceURL string `json:"source_url"`;Verified int `json:"verified"`}
 	if err:=fetchDiscoveryJSON(ctx,u.String(),&rows);err!=nil{return nil,err}
 	out:=make([]discoveredModel,0,len(rows))
-	for _,r:=range rows{trust:="community-unverified";verified:=false;if r.Verified>=2{trust="captain-verified";verified=true}else if r.Verified==1{trust="community-verified";verified=true};out=append(out,discoveredModel{Source:"huggingbay",ID:r.Infohash,DisplayName:r.Name,Category:r.Category,SourceURL:r.SourceURL,Trust:trust,Verified:verified,SizeBytes:r.SizeBytes,Seeds:r.Seeds,License:r.License,Installable:false,InstallReason:"Torrent/webseed installation is not yet registered as a managed OnePane artifact."})}
+	for _,r:=range rows{trust:="community-unverified";verified:=false;if r.Verified>=2{trust="captain-verified";verified=true}else if r.Verified==1{trust="community-verified";verified=true};out=append(out,discoveredModel{Source:"huggingbay",ID:r.Infohash,DisplayName:r.Name,Category:r.Category,SourceURL:r.SourceURL,Trust:trust,Verified:verified,SizeBytes:r.SizeBytes,Seeds:r.Seeds,License:r.License,Installable:false,InstallReason:"Browse the full Hugging Bay catalogue. Verify & install will use an upstream digest-pinned artifact when available."})}
 	return out,nil
 }
 

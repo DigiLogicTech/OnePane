@@ -38,6 +38,7 @@ func (s *Service) omniRouteRuntimeRoot() string { return filepath.Join(s.dataDir
 func (s *Service) omniRouteDataRoot() string { return filepath.Join(s.dataDir, "components", "omniroute-data") }
 
 func (s *Service) installOmniRoute(ctx context.Context, jobID string) error {
+	if goruntime.GOOS=="windows" && goruntime.GOARCH=="amd64" { return s.installOmniRouteCLIWindows(ctx,jobID) }
 	a, err := omniRouteArtifact()
 	if err != nil { return err }
 	_ = s.stopOmniRoute(ctx)
@@ -126,20 +127,37 @@ func (s *Service) startOmniRoute(ctx context.Context) error {
 	if pid, err := s.omniRoutePID(ctx); err == nil && pid > 0 {
 		if p, err := os.FindProcess(pid); err == nil { _ = p.Kill() }
 	}
-	exe, err := s.omniRouteExecutable()
+	var exe string
+	var args []string
+	var err error
+	if goruntime.GOOS=="windows" {
+		exe,args,err=s.omniRouteCLICommand()
+	} else {
+		exe,err=s.omniRouteExecutable()
+		args=[]string{"--no-open","--non-interactive","--port","20128"}
+	}
 	if err != nil { return err }
 	if err := os.MkdirAll(s.omniRouteDataRoot(), 0o700); err != nil { return err }
 	logDir := filepath.Join(s.dataDir, "components", "logs")
 	if err := os.MkdirAll(logDir, 0o700); err != nil { return err }
-	logf, err := os.OpenFile(filepath.Join(logDir, "omniroute.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	logf, err := os.OpenFile(filepath.Join(logDir, "omniroute.log"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil { return err }
 
-	cmd := exec.Command(exe, "--no-open", "--non-interactive", "--port", "20128")
+	cmd := exec.Command(exe, args...)
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.Env = append(os.Environ(),
 		"HOME="+s.omniRouteDataRoot(),
+		"USERPROFILE="+s.omniRouteDataRoot(),
 		"APPDATA="+s.omniRouteDataRoot(),
 		"XDG_CONFIG_HOME="+s.omniRouteDataRoot(),
+		"DATA_DIR="+s.omniRouteDataRoot(),
+		"OMNIROUTE_DATA_DIR="+s.omniRouteDataRoot(),
+		"OMNIROUTE_SERVER_HOST=127.0.0.1",
+		"OMNIROUTE_PORT=20128",
+		"PORT=20128",
+		"REQUIRE_API_KEY=false",
+		"NODE_ENV=production",
+		"APP_LOG_TO_FILE=false",
 		"APPIMAGE_EXTRACT_AND_RUN=1",
 	)
 	if err := cmd.Start(); err != nil { _ = logf.Close(); return err }

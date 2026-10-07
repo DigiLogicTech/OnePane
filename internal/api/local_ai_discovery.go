@@ -158,7 +158,7 @@ func (s *Server) discoverLLMFit(ctx context.Context,q string,limit int)([]discov
 	if s.localAI==nil{return nil,nil}
 	provider,ok:=s.localAI.(interface{ DiscoverLLMFit(context.Context,string,int)([]localai.LLMFitAdvisory,error) });if !ok{return nil,nil}
 	rows,err:=provider.DiscoverLLMFit(ctx,q,limit);if err!=nil{return nil,err};out:=make([]discoveredModel,0,len(rows))
-	for _,r:=range rows{ctxv:=int64(0);if r.UsableContext!=nil{ctxv=*r.UsableContext}else if r.NativeContext!=nil{ctxv=*r.NativeContext};out=append(out,discoveredModel{Source:"llmfit",ID:r.ModelRef,DisplayName:r.ModelRef,Trust:"advisory",Verified:false,License:r.License,FitLevel:r.FitLevel,RunMode:r.RunMode,Quantization:r.BestQuant,Runtime:r.Runtime,ContextTokens:ctxv,Tags:r.Capabilities,Installable:false,InstallReason:"llmfit is an advisory catalogue; OnePane still requires a verified artifact source before install."})}
+	for _,r:=range rows{ctxv:=int64(0);if r.UsableContext!=nil{ctxv=*r.UsableContext}else if r.NativeContext!=nil{ctxv=*r.NativeContext};speed:=float64(0);if r.EstimatedTPS!=nil{speed=*r.EstimatedTPS};memory:=float64(0);if r.MemoryRequiredGB!=nil{memory=*r.MemoryRequiredGB};out=append(out,discoveredModel{EstimatedTPS:speed,MemoryRequiredGB:memory,Source:"llmfit",ID:r.ModelRef,DisplayName:r.ModelRef,Trust:"advisory",Verified:false,License:r.License,FitLevel:r.FitLevel,RunMode:r.RunMode,Quantization:r.BestQuant,Runtime:r.Runtime,ContextTokens:ctxv,Tags:r.Capabilities,Installable:false,InstallReason:"llmfit is an advisory catalogue; OnePane still requires a verified artifact source before install."})}
 	return out,nil
 }
 

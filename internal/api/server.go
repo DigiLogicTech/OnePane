@@ -350,6 +350,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/local-ai/llama-runtimes", s.listLlamaRuntimes)
 	s.mux.HandleFunc("POST /v1/local-ai/llama-runtimes/{backend}/remove", s.removeLlamaBackend)
 	s.mux.HandleFunc("GET /v1/local-ai/llmfit", s.managedLLMFitRequest)
+	s.mux.HandleFunc("GET /v1/local-ai/storage", s.managedStorageRequest)
+	s.mux.HandleFunc("POST /v1/local-ai/storage/cleanup", s.managedStorageRequest)
 	s.mux.HandleFunc("POST /v1/local-ai/llmfit/{action}", s.managedLLMFitRequest)
 	s.mux.HandleFunc("GET /v1/local-ai/discovery/inspect", s.inspectExternalModel)
 	s.mux.HandleFunc("POST /v1/local-ai/discovery/adopt", s.adoptExternalModel)

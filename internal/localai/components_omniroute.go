@@ -103,6 +103,24 @@ func (s *Service) omniRouteHealthy() bool {
 	defer resp.Body.Close()
 	return resp.StatusCode >= 200 && resp.StatusCode < 500
 }
+func (s *Service) omniRouteLogTail(limit int64) string {
+	if limit <= 0 { limit = 4096 }
+	path := filepath.Join(s.dataDir, "components", "logs", "omniroute.log")
+	f, err := os.Open(path)
+	if err != nil { return "" }
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil { return "" }
+	start := st.Size() - limit
+	if start < 0 { start = 0 }
+	if _, err := f.Seek(start, 0); err != nil { return "" }
+	buf := make([]byte, st.Size()-start)
+	n, _ := f.Read(buf)
+	text := strings.TrimSpace(string(buf[:n]))
+	if text == "" { return "" }
+	if len(text) > 1200 { text = text[len(text)-1200:] }
+	return ": " + text
+}
 func (s *Service) startOmniRoute(ctx context.Context) error {
 	if s.omniRouteHealthy() { return nil }
 	if pid, err := s.omniRoutePID(ctx); err == nil && pid > 0 {
@@ -116,7 +134,7 @@ func (s *Service) startOmniRoute(ctx context.Context) error {
 	logf, err := os.OpenFile(filepath.Join(logDir, "omniroute.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil { return err }
 
-	cmd := exec.Command(exe, "serve", "--no-open", "--non-interactive", "--port", "20128")
+	cmd := exec.Command(exe, "--no-open", "--non-interactive", "--port", "20128")
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.Env = append(os.Environ(),
 		"HOME="+s.omniRouteDataRoot(),
@@ -126,6 +144,8 @@ func (s *Service) startOmniRoute(ctx context.Context) error {
 	)
 	if err := cmd.Start(); err != nil { _ = logf.Close(); return err }
 	_ = logf.Close()
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
 
 	healthy := false
 	for i := 0; i < 60; i++ {
@@ -133,11 +153,19 @@ func (s *Service) startOmniRoute(ctx context.Context) error {
 		case <-ctx.Done():
 			_ = cmd.Process.Kill()
 			return ctx.Err()
+		case err := <-waitCh:
+			tail := s.omniRouteLogTail(4096)
+			if err == nil { err = errors.New("process exited before becoming healthy") }
+			return fmt.Errorf("managed OmniRoute exited during startup: %v%s", err, tail)
 		case <-time.After(time.Second):
 		}
 		if s.omniRouteHealthy() { healthy = true; break }
 	}
-	if !healthy { _ = cmd.Process.Kill(); return errors.New("managed OmniRoute did not become healthy on 127.0.0.1:20128") }
+	if !healthy {
+		_ = cmd.Process.Kill()
+		tail := s.omniRouteLogTail(4096)
+		return fmt.Errorf("managed OmniRoute did not become healthy on 127.0.0.1:20128%s", tail)
+	}
 
 	var raw string
 	_ = s.db.QueryRowContext(ctx, `SELECT metadata_json FROM managed_component_states WHERE component_id='omniroute'`).Scan(&raw)

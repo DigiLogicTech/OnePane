@@ -453,6 +453,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/local-ai/recommendations", s.recommendLocalAI)
 	s.mux.HandleFunc("POST /v1/local-ai/catalogs/import", s.importLocalAICatalog)
 	s.mux.HandleFunc("POST /v1/local-ai/install-jobs", s.queueLocalAIInstall)
+	s.mux.HandleFunc("GET /v1/local-ai/install-jobs", s.listLocalAIInstallJobs)
 	s.mux.HandleFunc("GET /v1/local-ai/install-jobs/{jobID}", s.getLocalAIInstallJob)
 	s.mux.HandleFunc("GET /v1/model-deployments/{deploymentID}/spec-sheet", s.getModelSpecSheet)
 	s.mux.HandleFunc("POST /v1/model-deployments/{deploymentID}/testbed/sessions", s.startModelTestbed)

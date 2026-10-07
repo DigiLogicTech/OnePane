@@ -128,7 +128,6 @@ func (c *LLMFitClient) SearchModels(ctx context.Context, query string, limit int
 	u.Path = basePath
 	q := u.Query()
 	q.Set("limit", strconv.Itoa(limit))
-	q.Set("runtime", "llamacpp")
 	q.Set("sort", "score")
 	u.RawQuery = q.Encode()
 	httpReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)

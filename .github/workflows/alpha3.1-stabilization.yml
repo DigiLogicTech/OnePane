@@ -91,6 +91,9 @@ jobs:
           node --check internal/webui/static/models-followup-jobs.js
           node --check internal/webui/static/models-followup-discover.js
           node --check internal/webui/static/ui-consistency.js
+          node --check internal/webui/static/attention-inspector.js
+          node --check internal/webui/static/drawer-usability.js
+          node --check internal/webui/static/compact-themes.js
           ! grep -F "type=\"module\"" internal/webui/static/index.html
           ! grep -F "from './chat-commands.js'" internal/webui/static/app.js
           ! grep -E '^export[[:space:]]+' internal/webui/static/chat-commands.js

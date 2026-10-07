@@ -100,7 +100,12 @@ func (s *Service) installLlamaRuntimeEntry(ctx context.Context, entry RuntimeCat
 	if st,err:=os.Stat(execPath); err!=nil || st.IsDir() { _=os.RemoveAll(staging); return errors.New("llama.cpp executable missing after install") }
 	if goruntime.GOOS!="windows" { _=os.Chmod(execPath,0o700) }
 	if err:=os.Rename(staging,root); err!=nil { _=os.RemoveAll(staging); return err }
-	_,err:=s.ensureManagedRuntime(ctx,p.NodeID,manifest,root,filepath.Join(root,manifest.ExecutableRel)); return err
+	runtimeID,err:=s.ensureManagedRuntime(ctx,p.NodeID,manifest,root,filepath.Join(root,manifest.ExecutableRel))
+ if err!=nil{return err}
+ // Restored runtimes may reactivate preserved, previously unavailable
+ // deployments without requiring another download of their model weights.
+ _,err=s.db.ExecContext(ctx,"UPDATE model_deployments SET status='ready',revision=revision+1,updated_at=? WHERE status='unavailable' AND id IN (SELECT deployment_id FROM managed_local_models WHERE runtime_id=? AND status='ready')",s.clock.UnixMilli(),runtimeID)
+ return err
 }
 
 func (s *Service) llamaRuntimeStatus(ctx context.Context) ([]LlamaRuntimeBackendStatus,error) {
@@ -166,13 +171,27 @@ func (s *Service) RemoveLlamaBackend(ctx context.Context, backend string) error 
  var models,active int
  if err=s.db.QueryRowContext(ctx,"SELECT COUNT(*) FROM managed_local_models WHERE runtime_id=? AND status NOT IN ('removed','failed')",id).Scan(&models);err!=nil{return err}
  if err=s.db.QueryRowContext(ctx,"SELECT COUNT(*) FROM local_runtime_instances WHERE runtime_id=? AND status IN ('starting','healthy','busy','draining')",id).Scan(&active);err!=nil{return err}
- if active>0{return fmt.Errorf("backend has %d active model instance(s); stop or unload them first",active)}
- if models>0{return fmt.Errorf("backend has %d managed model deployment(s); migrate or remove these deployments before uninstalling the backend (weights will be preserved)",models)}
+ // Stop any active instance through the identity-verified supervisor,
+ // and retain all model weights and deployment registrations.
+ if active>0 {
+   rows,e:=s.db.QueryContext(ctx,"SELECT DISTINCT deployment_id FROM local_runtime_instances WHERE runtime_id=? AND status IN ('starting','healthy','busy','draining')",id)
+   if e!=nil{return e}
+   var deps []string
+   for rows.Next(){var v string;if e:=rows.Scan(&v);e!=nil{rows.Close();return e};deps=append(deps,v)}
+   e=rows.Err();rows.Close();if e!=nil{return e}
+   for _,deploymentID:=range deps{
+     if e:=s.supervisor.Stop(ctx,deploymentID);e!=nil{return fmt.Errorf("cannot safely stop deployment %s: %w",deploymentID,e)}
+   }
+ }
  // Only remove paths within the managed llmfit-independent llama.cpp root.
  trustedRoot:=filepath.Clean(filepath.Join(s.dataDir,"runtimes","llamacpp"))
  clean:=filepath.Clean(root)
  if !strings.HasPrefix(strings.ToLower(clean),strings.ToLower(trustedRoot)+string(os.PathSeparator)){return errors.New("runtime install path is outside the managed llama.cpp root")}
  if err=os.RemoveAll(clean);err!=nil{return err}
- _,err=s.db.ExecContext(ctx,"UPDATE managed_local_runtimes SET status='disabled',revision=revision+1,updated_at=? WHERE id=?",s.clock.UnixMilli(),id)
- return err
+ now:=s.clock.UnixMilli()
+ tx,err:=s.db.BeginTx(ctx,nil);if err!=nil{return err}
+ defer tx.Rollback()
+ if _,err=tx.ExecContext(ctx,"UPDATE model_deployments SET status='unavailable',residency_state='stopped',revision=revision+1,updated_at=? WHERE id IN (SELECT deployment_id FROM managed_local_models WHERE runtime_id=?)",now,id);err!=nil{return err}
+ if _,err=tx.ExecContext(ctx,"UPDATE managed_local_runtimes SET status='disabled',revision=revision+1,updated_at=? WHERE id=?",now,id);err!=nil{return err}
+ return tx.Commit()
 }

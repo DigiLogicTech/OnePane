@@ -319,7 +319,7 @@ const a35BindProjectComponentsBase=qa6BindProjectComponents;
 qa6BindProjectComponents=function(project,workspace){
   a35BindProjectComponentsBase(project,workspace);
   const supported=a35RefreshInspectorRegistry(),root=$("#qa4WorkspaceGrid")||document;
-  $("[data-qa6-inspector]",root).forEach(button=>{
+  $$("[data-qa6-inspector]",root).forEach(button=>{
     const widget=(workspace.widgets||[]).find(x=>x.id===button.dataset.qa6Inspector),target=widget?a35InspectorType(widget.type):"";
     if(!supported.has(target)){button.remove();return}
     button.dataset.qa6InspectorTarget=target;

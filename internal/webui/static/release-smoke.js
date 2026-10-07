@@ -108,6 +108,17 @@
     check(!document.querySelector('[data-a35-delete-project],#a33DeleteProject'),"Workspace surface has no Project delete action");
     check(!document.querySelector(".project-rail"),"Workspace surface has no duplicate Project rail");
 
+    const inspectorTypes=a35InspectorComponentTypes(),fixtureWidgets=workspace.widgets;
+    check(inspectorTypes.every(type=>fixtureWidgets.some(w=>a35InspectorType(w.type)===type)),"Inspector smoke covers every registered Workspace widget");
+    check(fixtureWidgets.some(w=>w.type==="modelstack"),"Inspector smoke includes legacy Model Stack alias");
+    for(const widget of fixtureWidgets){
+      const target=a35InspectorType(widget.type),button=check(document.querySelector(`[data-pw-widget="${widget.id}"] [data-qa6-inspector="${widget.id}"]`),`Send to Inspector button: ${widget.type}`);
+      check(button.dataset.qa6InspectorTarget===target,`Inspector button target registered: ${widget.type} -> ${target}`);
+      button.click();
+      await waitFor(()=>qa4Inspector.kind==="workspace"&&qa4InspectorTab===target&&document.querySelector(`[data-qa6-inspector-tab="${target}"].active`),`Inspector opens exact component tab: ${widget.type} -> ${target}`,30000);
+      check(qa4InspectorTab!=="overview",`Inspector does not fall back to Overview: ${widget.type}`);
+    }
+
     let ws=check(a31CurrentWorkspace(),"workspace active for native layout"),committedBefore=clone(ws.widgets);
     const edit=check(document.querySelector("#qa4EditWorkspace"),"workspace edit control");edit.click();
     await waitFor(()=>a35WorkspaceEditing()&&document.querySelector('[data-pw-resize][data-resize-edge="e"]'),"workspace native resize handle");

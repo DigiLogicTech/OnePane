@@ -263,6 +263,70 @@ renderActiveView=async function(){
   finally{const host=$("#viewHost");if(epoch===qa31ViewEpoch){if(host)host.dataset.renderedRoute="workspaces";renderNav()}}
 };
 
+const A35_INSPECTOR_TYPE_ALIASES={modelstack:"models"};
+function a35InspectorType(type){
+  const raw=String(type||"").trim().toLowerCase();
+  return A35_INSPECTOR_TYPE_ALIASES[raw]||raw;
+}
+function a35InspectorComponentTypes(){
+  return [...new Set(Object.keys(QA6_COMPONENTS).map(a35InspectorType).filter(Boolean))];
+}
+function a35RefreshInspectorRegistry(){
+  const types=a35InspectorComponentTypes();
+  QA6_INSPECTOR_COMPONENTS.splice(0,QA6_INSPECTOR_COMPONENTS.length,...types);
+  return new Set(types);
+}
+function a35CanInspectWorkspaceType(type){
+  return a35RefreshInspectorRegistry().has(a35InspectorType(type));
+}
+a35RefreshInspectorRegistry();
+
+const a35InspectorTabsBase=qa6InspectorTabs;
+qa6InspectorTabs=function(){
+  const d=typeof qa6WorkspaceInspectorContext==="function"?qa6WorkspaceInspectorContext():null;
+  if(!d)return a35InspectorTabsBase();
+  const cfg=qa6InspectorConfig(d.workspace),supported=a35RefreshInspectorRegistry(),normalized=[];
+  for(const raw of cfg.tabs||[]){
+    const type=a35InspectorType(raw);
+    if(supported.has(type)&&!normalized.includes(type))normalized.push(type);
+  }
+  cfg.tabs.splice(0,cfg.tabs.length,...normalized);
+  return ["overview",...normalized,...(cfg.tiles.length?["panels"]:[])].filter((x,i,a)=>a.indexOf(x)===i);
+};
+
+qa6OpenInInspector=async function(project,workspace,type){
+  const target=a35InspectorType(type),supported=a35RefreshInspectorRegistry();
+  if(!supported.has(target)){
+    notice(`Inspector is not available for ${qa6Meta(type).title||titleCase(type)}.`,"bad");
+    return false;
+  }
+  const cfg=qa6InspectorConfig(workspace),normalized=[];
+  for(const raw of cfg.tabs||[]){
+    const item=a35InspectorType(raw);
+    if(supported.has(item)&&!normalized.includes(item))normalized.push(item);
+  }
+  cfg.tabs.splice(0,cfg.tabs.length,...normalized);
+  if(!cfg.tabs.includes(target))cfg.tabs.push(target);
+  await qa6SaveInspector(project,workspace);
+  qa4Inspector={kind:"workspace",id:workspace.id,title:`${project.name} / ${workspace.name}`,data:{project,workspace}};
+  qa4InspectorTab=target;
+  setInspectorOpen(true);
+  renderInspector();
+  return qa4InspectorTab===target;
+};
+
+const a35BindProjectComponentsBase=qa6BindProjectComponents;
+qa6BindProjectComponents=function(project,workspace){
+  a35BindProjectComponentsBase(project,workspace);
+  const supported=a35RefreshInspectorRegistry(),root=$("#qa4WorkspaceGrid")||document;
+  $("[data-qa6-inspector]",root).forEach(button=>{
+    const widget=(workspace.widgets||[]).find(x=>x.id===button.dataset.qa6Inspector),target=widget?a35InspectorType(widget.type):"";
+    if(!supported.has(target)){button.remove();return}
+    button.dataset.qa6InspectorTarget=target;
+    button.title=`Open ${qa6Meta(target).title} in Inspector`;
+  });
+};
+
 function a35InspectorContext(){
   const d=typeof qa6WorkspaceInspectorContext==="function"?qa6WorkspaceInspectorContext():null;
   if(!d)return null;return {d,cfg:qa6InspectorConfig(d.workspace)};

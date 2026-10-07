@@ -20,7 +20,7 @@ ck("Colibri lifecycle remains durable", '"colibri"' in components and "installed
 ck("OmniRoute lifecycle is managed locally", '"omniroute"' in components and "installOmniRouteCLIWindows" in components and "startOmniRoute" in components and "3.8.51" in components)
 ck("llama.cpp managed lifecycle is exposed", "installLlamaCpp" in components and "removeLlamaCpp" in components and "a31LlamaRuntimeCard" in app)
 ck("Models background downloads are globally visible", "a31StartDownloadMonitor" in app and "modelDownloadButton" in app+read("internal/webui/static/index.html"))
-ck("Discover exposes full source catalogues", "Hugging Face" in app and "Hugging Bay" in app and "llmfit" in app and "Verify & install" in app)
+ck("Discover exposes full source catalogues", "Hugging Face" in app and "Hugging Bay" in app and "llmfit" in app and all(label in app for label in ("Verify artifact","Find compatible GGUF","Manifest verification required")))
 ck("OmniRoute routing target is selectable", "gateway:omniroute" in app and "fallback_gateway_targets" in app)
 ck("OmniRoute external provider path remains", "omniQA(false)" in app and "omniQA(true)" in app)
 ck("llama.cpp bootstrap has Windows and Ubuntu CPU GPU backends", all(x in catalog for x in ["win-cpu-x64","win-cuda","win-vulkan","ubuntu-x64","ubuntu-cuda","ubuntu-vulkan"]))

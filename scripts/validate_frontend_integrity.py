@@ -4,7 +4,8 @@ import sys
 ROOT=Path(__file__).resolve().parents[1]
 foundation=(ROOT/"internal/webui/static/app-foundation.js").read_text(encoding="utf-8")
 canonical=(ROOT/"internal/webui/static/app.js").read_text(encoding="utf-8")
-ui=foundation+"\n"+canonical
+models=(ROOT/"internal/webui/static/models-page.js").read_text(encoding="utf-8")
+ui=foundation+"\n"+canonical+"\n"+models
 groups={
  "tasks/schedules":["Recurring / Scheduled","/v1/routines"],
  "project workspaces":["workspace-tabs","qa4SaveProjectWorkspaces","a31RefreshProjectGrid"],

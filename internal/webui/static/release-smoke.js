@@ -162,6 +162,8 @@
     ws=check(a31CurrentWorkspace(),"workspace persisted reload");
     check(Number(ws.widgets.find(w=>w.id==="pw-release-settings")?.y)===Number(expectedSettings.y),"Workspace dragged geometry survives route reload");
     check(noOverlap(ws.widgets),"Workspace persisted geometry remains collision free");
+    const preservedInspectorTabs=qa6InspectorConfig(ws).tabs;
+    check(a35InspectorComponentTypes().every(type=>preservedInspectorTabs.includes(type)),"Workspace layout save preserves Inspector component tabs");
 
     const settingsButton=check(document.querySelector("#qa4WorkspaceSettings"),"Workspace settings action");settingsButton.click();
     await waitFor(()=>document.querySelector('.inspector-tab-draggable [data-qa6-inspector-tab="follow"]'),"draggable Inspector tabs",30000);

@@ -42,6 +42,13 @@ func TestManagedComponentLifecycleIsDurableAndHarnessOwned(t *testing.T) {
 	if omni.Installed || omni.Enabled || omni.State != "not_installed" {
 		t.Fatalf("OmniRoute must remain optional by default: %+v", omni)
 	}
+	llama, ok := all["llamacpp"]
+	if !ok {
+		t.Fatal("llama.cpp managed runtime lifecycle must be present")
+	}
+	if llama.Installed || llama.Enabled || llama.State != "not_installed" {
+		t.Fatalf("llama.cpp must remain optional by default: %+v", llama)
+	}
 
 	// Installation itself is covered by archive/fetcher tests and release-manifest
 	// contract checks. Seed the durable installed state here so this unit test can

@@ -43,6 +43,11 @@ type InstallJob struct {
 	Revision           int64            `json:"revision"`
 	CreatedAt          int64            `json:"created_at"`
 	UpdatedAt          int64            `json:"updated_at"`
+	ProgressPct        float64          `json:"progress_pct,omitempty"`
+	BytesDownloaded    int64            `json:"bytes_downloaded,omitempty"`
+	BytesTotal         int64            `json:"bytes_total,omitempty"`
+	CurrentArtifact    string           `json:"current_artifact,omitempty"`
+	Resumable          bool             `json:"resumable,omitempty"`
 }
 
 type OneClickInstallRequest struct {
@@ -270,7 +275,10 @@ func scanInstallJob(row interface{ Scan(...any) error }) (InstallJob, error) {
 const installJobSelect = `SELECT id,workspace_id,plan_id,catalog_id,deployment_id,qualification_run_id,status,attempt_count,failure_reason,requested_by,started_at,completed_at,revision,created_at,updated_at FROM local_ai_install_jobs WHERE id=?`
 
 func (s *Service) InstallJob(ctx context.Context, idv string) (InstallJob, error) {
-	return scanInstallJob(s.db.QueryRowContext(ctx, installJobSelect, idv))
+	j, err := scanInstallJob(s.db.QueryRowContext(ctx, installJobSelect, idv))
+	if err != nil { return j, err }
+	s.enrichInstallJobProgress(ctx, &j)
+	return j, nil
 }
 
 func (s *Service) RecoverInstallJobs(ctx context.Context) error {

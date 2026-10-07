@@ -74,6 +74,7 @@
         <button class="mobile-brand-button" data-route="operations" aria-label="Open Operations">OnePane</button>
         <div class="mobile-title" id="mobileTitle">Operations</div>
         <button class="mobile-health health-ok" id="mobileHealthButton" data-action="health-popover" aria-label="System health"><span class="status-dot"></span></button>
+        <button class="icon-button model-download-mobile hidden" id="mobileModelDownloadButton" type="button" aria-label="Background model downloads">↓<span class="badge" id="mobileModelDownloadBadge">0</span></button>
         <button class="icon-button notification" id="mobileAttentionButton" data-action="attention" aria-label="Notifications"><span>◔</span><span class="badge hidden" data-notification-badge>0</span></button>
         <button class="icon-button" id="mobileHeaderMore" data-action="mobile-more" aria-label="More">⋯</button>
       </header>
@@ -85,6 +86,7 @@
         <div class="topbar-spacer"></div>
         <button id="commandButton" class="command-button" data-action="command-palette">Search or run a command… <kbd>Ctrl+K</kbd></button>
         <button id="healthButton" class="status-button health-ok" data-action="health-popover"><span class="status-dot"></span><span>Healthy</span></button>
+        <button id="modelDownloadButton" class="status-button model-download-button hidden" type="button" aria-label="Background model downloads" title="Background model downloads"><span aria-hidden="true">↓</span><span id="modelDownloadLabel">Downloads</span><span class="badge" id="modelDownloadBadge">0</span></button>
         <button id="attentionButton" class="icon-button notification" data-action="attention" aria-label="Notifications"><span>◔</span><span class="badge hidden" data-notification-badge>0</span></button>
         <button id="themeButton" class="icon-button" data-action="theme" aria-label="Theme">◐</button>
         <button id="userButton" class="avatar-button" aria-label="User menu">OP</button>

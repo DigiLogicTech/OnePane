@@ -364,12 +364,15 @@ function a35BindInspectorTabs(){
   const ctx=a35InspectorContext();if(!ctx)return;
   $$(".qa4-inspector-tab-wrap",$("#inspector")).forEach(wrap=>{
     const button=$("[data-qa6-inspector-tab]",wrap),type=button?.dataset.qa6InspectorTab;if(!type||!ctx.cfg.tabs.includes(type))return;
-    $(".qa4-inspector-tab-tools",wrap)?.remove();wrap.classList.add("inspector-tab-draggable");wrap.title="Drag to reorder · right-click to remove";
+    $(".qa4-inspector-tab-tools",wrap)?.remove();
+    const tools=document.createElement("span");tools.className="qa4-inspector-tab-tools inspector-tab-close-tools";tools.innerHTML='<button type="button" data-a35-inspector-close title="Remove tab" aria-label="Remove tab">×</button>';wrap.appendChild(tools);
+    const closeButton=$("[data-a35-inspector-close]",tools);closeButton.onclick=e=>{e.preventDefault();e.stopPropagation();a35RemoveInspectorTab(type)};
+    wrap.classList.add("inspector-tab-draggable");wrap.title="Drag to reorder";
     let active=false,moved=false,startX=0,width=0,dx=0;
     const move=e=>{if(!active)return;dx=e.clientX-startX;if(Math.abs(dx)>6)moved=true;if(!moved)return;e.preventDefault();wrap.style.transform=`translate3d(${dx}px,0,0)`;wrap.classList.add("dragging")};
     const finish=async()=>{if(!active)return;active=false;window.removeEventListener("pointermove",move);window.removeEventListener("pointerup",finish);window.removeEventListener("pointercancel",cancel);wrap.style.removeProperty("transform");wrap.classList.remove("dragging");if(moved){wrap.dataset.inspectorDragged="true";const steps=Math.max(1,Math.round(Math.abs(dx)/Math.max(1,width)))*(dx<0?-1:1);await a35ReorderInspectorTab(type,steps);setTimeout(()=>{if(wrap.isConnected)delete wrap.dataset.inspectorDragged},0)}};
     const cancel=()=>{active=false;window.removeEventListener("pointermove",move);window.removeEventListener("pointerup",finish);window.removeEventListener("pointercancel",cancel);wrap.style.removeProperty("transform");wrap.classList.remove("dragging")};
-    wrap.onpointerdown=e=>{if(e.button!==0)return;active=true;moved=false;dx=0;startX=e.clientX;width=wrap.getBoundingClientRect().width+4;window.addEventListener("pointermove",move,{passive:false});window.addEventListener("pointerup",finish,{once:true});window.addEventListener("pointercancel",cancel,{once:true})};
+    wrap.onpointerdown=e=>{if(e.button!==0||e.target.closest?.("[data-a35-inspector-close]"))return;active=true;moved=false;dx=0;startX=e.clientX;width=wrap.getBoundingClientRect().width+4;window.addEventListener("pointermove",move,{passive:false});window.addEventListener("pointerup",finish,{once:true});window.addEventListener("pointercancel",cancel,{once:true})};
     wrap.addEventListener("click",e=>{if(wrap.dataset.inspectorDragged==="true"){e.preventDefault();e.stopImmediatePropagation();delete wrap.dataset.inspectorDragged}},true);
     wrap.oncontextmenu=e=>{e.preventDefault();a35RemoveInspectorTab(type)};
   });

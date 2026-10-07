@@ -20,6 +20,8 @@ type LlamaRuntimeBackendStatus struct {
 	Recommended bool `json:"recommended"`
 	Reason string `json:"reason,omitempty"`
 	DriverVersion string `json:"driver_version,omitempty"`
+	ActiveInstances int `json:"active_instances"`
+	DependentModels int `json:"dependent_models"`
 }
 
 func (s *Service) latestHardwareProfile(ctx context.Context) (HardwareProfile, error) {
@@ -111,7 +113,10 @@ func (s *Service) llamaRuntimeStatus(ctx context.Context) ([]LlamaRuntimeBackend
 		installed:=err==nil; if err!=nil && err!=sql.ErrNoRows{return nil,err}
 		reason,rec:=recommended[strings.ToLower(strings.TrimSpace(entry.Backend))]; driver:=""
 		if strings.EqualFold(entry.Backend,"cuda") { for _,g:=range p.GPUs { if strings.EqualFold(g.Vendor,"nvidia"){driver=g.DriverVersion;break} } }
-		rows=append(rows,LlamaRuntimeBackendStatus{Backend:entry.Backend,Version:entry.Version,Installed:installed,Recommended:rec,Reason:reason,DriverVersion:driver})
+		var instances,models int
+		_ = s.db.QueryRowContext(ctx,"SELECT COUNT(*) FROM local_runtime_instances i JOIN managed_local_runtimes r ON r.id=i.runtime_id WHERE r.node_id=? AND r.runtime_name=? AND i.status IN ('starting','healthy','busy','draining')",p.NodeID,inventory).Scan(&instances)
+		_ = s.db.QueryRowContext(ctx,"SELECT COUNT(*) FROM managed_local_models m JOIN managed_local_runtimes r ON r.id=m.runtime_id WHERE r.node_id=? AND r.runtime_name=? AND m.status NOT IN ('removed','failed')",p.NodeID,inventory).Scan(&models)
+		rows=append(rows,LlamaRuntimeBackendStatus{Backend:entry.Backend,Version:entry.Version,Installed:installed,Recommended:rec,Reason:reason,DriverVersion:driver,ActiveInstances:instances,DependentModels:models})
 	}
 	return rows,nil
 }
@@ -144,4 +149,30 @@ func (s *Service) removeLlamaCpp(ctx context.Context) error {
 	if err:=os.RemoveAll(filepath.Join(s.dataDir,"runtimes","llamacpp")); err!=nil{return err}
 	now:=s.clock.UnixMilli(); _,err=s.db.ExecContext(ctx,"UPDATE managed_component_states SET installed_version=NULL,desired_state='removed',observed_state='removed',last_error=NULL,metadata_json='{}',revision=revision+1,updated_at=? WHERE component_id='llamacpp'",now)
 	return err
+}
+
+
+// RemoveLlamaBackend removes one unused inference backend while preserving
+// model-weight files and historical model/runtime provenance.
+func (s *Service) RemoveLlamaBackend(ctx context.Context, backend string) error {
+ backend=strings.ToLower(strings.TrimSpace(backend))
+ if backend!="cpu"&&backend!="cuda"&&backend!="vulkan"{return errors.New("unsupported llama.cpp backend")}
+ p,err:=s.latestHardwareProfile(ctx);if err!=nil{return err}
+ name:="llamacpp@"+backend
+ var id,root string
+ err=s.db.QueryRowContext(ctx,"SELECT id,install_root FROM managed_local_runtimes WHERE node_id=? AND runtime_name=? AND status='ready'",p.NodeID,name).Scan(&id,&root)
+ if err==sql.ErrNoRows{return errors.New("llama.cpp backend is not installed")}
+ if err!=nil{return err}
+ var models,active int
+ if err=s.db.QueryRowContext(ctx,"SELECT COUNT(*) FROM managed_local_models WHERE runtime_id=? AND status NOT IN ('removed','failed')",id).Scan(&models);err!=nil{return err}
+ if err=s.db.QueryRowContext(ctx,"SELECT COUNT(*) FROM local_runtime_instances WHERE runtime_id=? AND status IN ('starting','healthy','busy','draining')",id).Scan(&active);err!=nil{return err}
+ if active>0{return fmt.Errorf("backend has %d active model instance(s); stop or unload them first",active)}
+ if models>0{return fmt.Errorf("backend has %d managed model deployment(s); migrate or remove these deployments before uninstalling the backend (weights will be preserved)",models)}
+ // Only remove paths within the managed llmfit-independent llama.cpp root.
+ trustedRoot:=filepath.Clean(filepath.Join(s.dataDir,"runtimes","llamacpp"))
+ clean:=filepath.Clean(root)
+ if !strings.HasPrefix(strings.ToLower(clean),strings.ToLower(trustedRoot)+string(os.PathSeparator)){return errors.New("runtime install path is outside the managed llama.cpp root")}
+ if err=os.RemoveAll(clean);err!=nil{return err}
+ _,err=s.db.ExecContext(ctx,"UPDATE managed_local_runtimes SET status='disabled',revision=revision+1,updated_at=? WHERE id=?",s.clock.UnixMilli(),id)
+ return err
 }

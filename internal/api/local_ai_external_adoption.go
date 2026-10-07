@@ -3,12 +3,10 @@ package api
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"path"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/DigiLogicTech/OnePane/internal/localai"
@@ -59,63 +57,94 @@ func safeHFRepoPath(repo string) (string, error) {
 	return url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1]), nil
 }
 
-func inspectHuggingFace(ctx context.Context, repo string) (externalArtifactInspection, error) {
+func inspectHuggingFaceRepo(ctx context.Context, repo string) (externalArtifactInspection, error) {
 	var out externalArtifactInspection
 	repoPath, err := safeHFRepoPath(repo)
-	if err != nil {
-		return out, err
-	}
+	if err != nil { return out, err }
 	endpoint := "https://huggingface.co/api/models/" + repoPath + "?blobs=true"
 	var meta struct {
-		ID       string `json:"id"`
-		Author   string `json:"author"`
-		Gated    any    `json:"gated"`
+		ID string `json:"id"`
+		Author string `json:"author"`
+		Gated any `json:"gated"`
 		Siblings []struct {
 			Filename string `json:"rfilename"`
-			Size     int64  `json:"size"`
-			LFS      *struct {
-				Size   int64  `json:"size"`
+			Size int64 `json:"size"`
+			LFS *struct {
+				Size int64 `json:"size"`
 				SHA256 string `json:"sha256"`
 			} `json:"lfs"`
 		} `json:"siblings"`
 	}
-	if err := fetchDiscoveryJSON(ctx, endpoint, &meta); err != nil {
-		return out, err
-	}
-	if meta.ID == "" {
-		meta.ID = repo
-	}
-	if hfGated(meta.Gated) {
-		return out, errors.New("gated Hugging Face repositories require an authenticated download flow and cannot be adopted by this public verifier")
-	}
+	if err := fetchDiscoveryJSON(ctx, endpoint, &meta); err != nil { return out, err }
+	if meta.ID == "" { meta.ID = repo }
+	if hfGated(meta.Gated) { return out, errors.New("gated Hugging Face repositories require an authenticated download flow and cannot be adopted by this public verifier") }
 	name := meta.ID
-	if i := strings.LastIndex(name, "/"); i >= 0 {
-		name = name[i+1:]
-	}
+	if i := strings.LastIndex(name, "/"); i >= 0 { name = name[i+1:] }
 	out = externalArtifactInspection{Source:"huggingface",ModelRef:meta.ID,DisplayName:name,Provider:meta.Author,SourceURL:"https://huggingface.co/"+meta.ID,Trust:"huggingface-lfs-sha256",Artifacts:[]externalArtifact{}}
 	for _, s := range meta.Siblings {
-		if !strings.HasSuffix(strings.ToLower(s.Filename), ".gguf") || s.LFS == nil || !localSHA256(s.LFS.SHA256) {
-			continue
-		}
+		if !strings.HasSuffix(strings.ToLower(s.Filename), ".gguf") || s.LFS == nil || !localSHA256(s.LFS.SHA256) { continue }
 		size := s.Size
-		if s.LFS.Size > 0 {
-			size = s.LFS.Size
-		}
-		if size <= 0 {
-			continue
-		}
+		if s.LFS.Size > 0 { size = s.LFS.Size }
+		if size <= 0 { continue }
 		segments := strings.Split(s.Filename, "/")
-		for i := range segments {
-			segments[i] = url.PathEscape(segments[i])
-		}
+		for i := range segments { segments[i] = url.PathEscape(segments[i]) }
 		artifactURL := "https://huggingface.co/" + repoPath + "/resolve/main/" + strings.Join(segments, "/")
 		out.Artifacts = append(out.Artifacts, externalArtifact{Filename:s.Filename,SizeBytes:size,SHA256:strings.ToLower(s.LFS.SHA256),Quantization:inferGGUFQuantization(s.Filename),SourceURL:artifactURL,VerifiedBy:"Hugging Face LFS SHA-256"})
 	}
 	out.CanAdopt = len(out.Artifacts) > 0
-	if !out.CanAdopt {
-		out.Message = "No public GGUF artifact with SHA-256 metadata was found in this repository."
-	}
 	return out, nil
+}
+
+func inspectHuggingFace(ctx context.Context, repo string) (externalArtifactInspection, error) {
+	base, err := inspectHuggingFaceRepo(ctx, repo)
+	if err != nil { return base, err }
+	if base.CanAdopt { return base, nil }
+
+	// The full Hugging Face catalogue includes base model repositories that do
+	// not host GGUF files themselves. Resolve popular GGUF derivatives while
+	// preserving the user's selected base model as the canonical identity.
+	u, _ := url.Parse("https://huggingface.co/api/models")
+	q := u.Query()
+	q.Set("search", strings.TrimSpace(repo)+" GGUF")
+	q.Set("sort", "downloads")
+	q.Set("direction", "-1")
+	q.Set("limit", "8")
+	u.RawQuery = q.Encode()
+	var candidates []struct {
+		ID string `json:"id"`
+		Gated any `json:"gated"`
+		Tags []string `json:"tags"`
+	}
+	if err := fetchDiscoveryJSON(ctx, u.String(), &candidates); err != nil {
+		base.Message = "No GGUF artifact exists in the selected repository, and compatible-artifact discovery failed: " + err.Error()
+		return base, nil
+	}
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		if candidate.ID == "" || strings.EqualFold(candidate.ID, repo) || hfGated(candidate.Gated) { continue }
+		isGGUF := strings.Contains(strings.ToLower(candidate.ID), "gguf")
+		for _, tag := range candidate.Tags { if strings.EqualFold(tag, "gguf") { isGGUF = true; break } }
+		if !isGGUF { continue }
+		inspected, err := inspectHuggingFaceRepo(ctx, candidate.ID)
+		if err != nil { continue }
+		for _, artifact := range inspected.Artifacts {
+			key := strings.ToLower(artifact.SourceURL)
+			if seen[key] { continue }
+			seen[key] = true
+			artifact.VerifiedBy = "Hugging Face LFS SHA-256 · " + candidate.ID
+			base.Artifacts = append(base.Artifacts, artifact)
+			if len(base.Artifacts) >= 30 { break }
+		}
+		if len(base.Artifacts) >= 30 { break }
+	}
+	base.CanAdopt = len(base.Artifacts) > 0
+	if base.CanAdopt {
+		base.Message = "The selected model has no GGUF in its base repository. OnePane found compatible public GGUF derivatives and will pin the selected artifact's Hugging Face LFS SHA-256."
+		base.Trust = "huggingface-derived-gguf-lfs-sha256"
+	} else {
+		base.Message = "No public GGUF artifact with SHA-256 metadata was found for this model or its discoverable GGUF derivatives."
+	}
+	return base, nil
 }
 
 func localSHA256(v string) bool {
@@ -251,12 +280,3 @@ func (s *Server) adoptExternalModel(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"artifact":artifact,"model":spec,"verification":"digest pinned; download will re-verify SHA-256"})
 }
-
-func parseLimit(v string, def int) int {
-	n, _ := strconv.Atoi(v)
-	if n <= 0 { return def }
-	if n > 100 { return 100 }
-	return n
-}
-
-var _ = fmt.Sprintf

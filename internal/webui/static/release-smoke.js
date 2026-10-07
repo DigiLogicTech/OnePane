@@ -176,6 +176,15 @@
     await waitFor(()=>projectPatchCount>patchesBeforeInspectorDrag&&qa6InspectorConfig(a31CurrentWorkspace()).tabs[0]!==tabBefore[0],"Inspector tab drag persists order",30000);
     check(document.querySelectorAll(".qa4-inspector-tab-tools").length===qa6InspectorConfig(a31CurrentWorkspace()).tabs.length,"Inspector draggable tabs expose one compact close control each");
 
+    const attentionWrap=check(document.querySelector('.inspector-tab-draggable [data-qa6-inspector-tab="attention"]')?.closest(".inspector-tab-draggable"),"Inspector Attention removable tab"),attentionClose=check(attentionWrap.querySelector("[data-a35-inspector-close]"),"Inspector Attention close control"),patchesBeforeClose=projectPatchCount;
+    attentionClose.click();const confirmAttentionClose=await waitFor(()=>document.querySelector("#a35ConfirmInspectorRemove"),"Inspector Attention close confirmation");confirmAttentionClose.click();
+    await waitFor(()=>projectPatchCount>patchesBeforeClose&&!qa6InspectorConfig(a31CurrentWorkspace()).tabs.includes("attention")&&!document.querySelector('[data-qa6-inspector-tab="attention"]'),"Inspector confirmed close persists without stale rerender",30000);
+    check(!document.querySelector("[data-qa6-tab-move]")&&!document.querySelector("[data-qa6-tab-remove]"),"Legacy Inspector arrow controls do not reappear after close");
+    const attentionWidgetButton=check(document.querySelector('[data-pw-widget="pw-release-attention"] [data-qa6-inspector="pw-release-attention"]'),"Attention widget Send to Inspector after close");attentionWidgetButton.click();
+    await waitFor(()=>qa4InspectorTab==="attention"&&document.querySelector('[data-qa6-inspector-tab="attention"].active'),"Closed Inspector tab reopens in current implementation",30000);
+    const reopenedAttention=check(document.querySelector('[data-qa6-inspector-tab="attention"]')?.closest(".inspector-tab-draggable"),"Reopened Attention draggable tab");
+    check(!!reopenedAttention.querySelector("[data-a35-inspector-close]")&&!reopenedAttention.querySelector("[data-qa6-tab-move],[data-qa6-tab-remove]"),"Reopened Inspector tab uses only compact close chrome");
+
     const disposable=check(document.querySelector('[data-a35-workspace="pws-release-2"]'),"second workspace available for deletion");disposable.click();
     await waitFor(()=>a31CurrentWorkspace()?.id==="pws-release-2"&&document.querySelector("#a32DeleteWorkspace"),"second workspace rendered with delete action");
     const deleteButton=check(document.querySelector("#a32DeleteWorkspace"),"workspace delete action");check(!deleteButton.disabled,"workspace delete enabled when alternatives exist");const patchBeforeDelete=projectPatchCount;deleteButton.click();

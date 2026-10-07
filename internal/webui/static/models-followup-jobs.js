@@ -38,7 +38,7 @@ a31BindComponentButtons=function(root=document,components={}){
  $$("[data-a38-view-component]",root).forEach(b=>b.onclick=()=>a38ViewComponent(b.dataset.a38ViewComponent))
 };
 function a38InstallRows(rows){
- return rows.map(x=>`<div class="model-download-row"><div class="model-download-head"><strong>${escapeHtml(x.name||x.id)}</strong><span class="pill">${escapeHtml(x.stage||x.status||"Queued")}</span></div>${x.error?`<div class="error">${escapeHtml(x.error)}</div>`:""}<div class="page-subtitle">Stage-based progress · transfer percentages appear only when measured.</div></div>`).join("")
+ return rows.map(x=>`<div class="model-download-row"><div class="model-download-head"><strong>${escapeHtml(x.name||x.id)}</strong><span class="pill">${escapeHtml(x.stage||x.status||"Queued")}</span></div>${uiProgressMarkup({label:x.name||x.id,stage:x.stage||x.status||"Working",percent:x.progress_pct??null,done:x.bytes_downloaded||0,total:x.bytes_total||0})}${x.error?`<div class="error">${escapeHtml(x.error)}</div>`:""}</div>`).join("")
 }
 async function a38ViewComponent(id){
  const state=a38Components[id];if(!state?.active_job_id){notice("No active installation for "+id);return}
@@ -48,7 +48,7 @@ async function a38ViewComponent(id){
   const box=$("#a38JobProgress");if(!box)return;
   try{
    const job=await apiRequest(`/v1/local-ai/component-jobs/${encodeURIComponent(jobID)}`);
-   box.innerHTML=a38InstallRows([{id,name:a31ComponentName(id),stage:job.stage||job.status,error:job.failure_reason}]);
+   box.innerHTML=a38InstallRows([{id,name:a31ComponentName(id),stage:job.stage||job.status,error:job.failure_reason,progress_pct:job.progress_pct,bytes_downloaded:job.bytes_downloaded,bytes_total:job.bytes_total}]);
    if(["succeeded","failed","interrupted"].includes(job.status))return
   }catch(e){box.innerHTML=`<div class="error">${escapeHtml(e.message)}</div>`;return}
   setTimeout(poll,1200)

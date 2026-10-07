@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -45,6 +46,8 @@ type discoverySourceStatus struct {
 }
 type discoveryEnvelope struct {
 	Models []discoveredModel `json:"models"`
+	NextCursor string `json:"next_cursor,omitempty"`
+	HasMore bool `json:"has_more"`
 	Errors map[string]string `json:"source_errors,omitempty"`
 	Sources map[string]discoverySourceStatus `json:"sources,omitempty"`
 }
@@ -76,23 +79,76 @@ func hfLicense(tags []string) string {
 	return ""
 }
 
-func discoverHuggingFace(ctx context.Context,q string,limit int)([]discoveredModel,error){
-	u,_:=url.Parse("https://huggingface.co/api/models");v:=u.Query();v.Set("sort","downloads");v.Set("direction","-1");v.Set("limit",strconv.Itoa(limit));if q!=""{v.Set("search",q)};u.RawQuery=v.Encode()
-	var rows []struct{ID string `json:"id"`;Author string `json:"author"`;Downloads int64 `json:"downloads"`;Likes int64 `json:"likes"`;LastModified string `json:"lastModified"`;PipelineTag string `json:"pipeline_tag"`;Tags []string `json:"tags"`;Gated any `json:"gated"`}
-	if err:=fetchDiscoveryJSON(ctx,u.String(),&rows);err!=nil{return nil,err}
-	out:=make([]discoveredModel,0,len(rows))
-	for _,r:=range rows{if r.ID==""||hfGated(r.Gated){continue};name:=r.ID;if i:=strings.LastIndex(name,"/");i>=0{name=name[i+1:]}
-		out=append(out,discoveredModel{Source:"huggingface",ID:r.ID,DisplayName:name,Author:r.Author,Category:r.PipelineTag,SourceURL:"https://huggingface.co/"+r.ID,Trust:"upstream-metadata",Verified:false,Downloads:r.Downloads,Likes:r.Likes,License:hfLicense(r.Tags),Tags:r.Tags,Installable:false,InstallReason:"Browse the full upstream model catalogue. Verify & install will resolve a compatible GGUF artifact when one is available."})}
-	return out,nil
-}
 
+func fetchDiscoveryPage(ctx context.Context, raw string, target any) (http.Header,error) {
+    req,err:=http.NewRequestWithContext(ctx,http.MethodGet,raw,nil);if err!=nil{return nil,err}
+    req.Header.Set("User-Agent","OnePane/alpha3.2 model-discovery")
+    resp,err:=discoveryClient().Do(req);if err!=nil{return nil,err}
+    defer resp.Body.Close()
+    if resp.StatusCode<200||resp.StatusCode>=300{return nil,fmt.Errorf("upstream HTTP %d",resp.StatusCode)}
+    body,err:=io.ReadAll(io.LimitReader(resp.Body,8<<20));if err!=nil{return nil,err}
+    if err:=json.Unmarshal(body,target);err!=nil{return nil,fmt.Errorf("unexpected upstream response: %w",err)}
+    return resp.Header,nil
+}
+func nextHFCursor(header http.Header) string {
+    for _,link:=range strings.Split(header.Get("Link"),","){
+        if !strings.Contains(link,"rel=\"next\""){continue}
+        i,j:=strings.Index(link,"<"),strings.Index(link,">")
+        if i<0||j<=i{continue}
+        u,err:=url.Parse(strings.TrimSpace(link[i+1:j]))
+        if err==nil&&u.Scheme=="https"&&u.Hostname()=="huggingface.co"{
+            return u.Query().Get("cursor")
+        }
+    }
+    return ""
+}
+// The Hub returns an opaque next cursor in its Link header. Never construct one
+// from repo IDs or assume that one response covers the full Hub inventory.
+func discoverHuggingFacePage(ctx context.Context,q string,limit int,cursor string)([]discoveredModel,string,error){
+    u,_:=url.Parse("https://huggingface.co/api/models")
+    v:=u.Query();v.Set("sort","downloads");v.Set("direction","-1");v.Set("limit",strconv.Itoa(limit))
+    if q!=""{v.Set("search",q)}
+    if cursor!=""{v.Set("cursor",cursor)}
+    u.RawQuery=v.Encode()
+    var rows []struct{ID string `json:"id"`;Author string `json:"author"`;Downloads int64 `json:"downloads"`;Likes int64 `json:"likes"`;PipelineTag string `json:"pipeline_tag"`;Tags []string `json:"tags"`;Gated any `json:"gated"`}
+    header,err:=fetchDiscoveryPage(ctx,u.String(),&rows);if err!=nil{return nil,"",err}
+    out:=make([]discoveredModel,0,len(rows))
+    for _,r:=range rows{
+        if r.ID==""{continue}
+        name:=r.ID;if i:=strings.LastIndex(name,"/");i>=0{name=name[i+1:]}
+        reason:="Verify an upstream artifact and resolve a compatible runtime before install."
+        trust:="upstream-metadata"
+        if hfGated(r.Gated){trust="gated";reason="Access requires approval/authentication from the model publisher."}
+        out=append(out,discoveredModel{Source:"huggingface",ID:r.ID,DisplayName:name,Author:r.Author,Category:r.PipelineTag,SourceURL:"https://huggingface.co/"+r.ID,Trust:trust,Verified:false,Downloads:r.Downloads,Likes:r.Likes,License:hfLicense(r.Tags),Tags:r.Tags,Installable:false,InstallReason:reason})
+    }
+    return out,nextHFCursor(header),nil
+}
+func discoverHuggingFace(ctx context.Context,q string,limit int)([]discoveredModel,error){
+    rows,_,err:=discoverHuggingFacePage(ctx,q,limit,"");return rows,err
+}
+// Hugging Bay documents a maximum limit of 500 but no pagination parameter.
+// Fetch that complete supported window once, then paginate locally. Do not
+// silently imply completeness if the source reports exactly the ceiling.
+func discoverHuggingBayPage(ctx context.Context,q string,limit,offset int)([]discoveredModel,string,error){
+    u,_:=url.Parse("https://thehuggingbay.io/api/torrents")
+    v:=u.Query();v.Set("sort","seeds");v.Set("limit","500")
+    if q!=""{v.Set("q",q)}
+    u.RawQuery=v.Encode()
+    var rows []struct{Infohash string `json:"infohash"`;Name string `json:"name"`;Category string `json:"category"`;SizeBytes int64 `json:"size_bytes"`;Seeds int64 `json:"seeds"`;License string `json:"license"`;SourceURL string `json:"source_url"`;Verified int `json:"verified"`}
+    if _,err:=fetchDiscoveryPage(ctx,u.String(),&rows);err!=nil{return nil,"",err}
+    if offset>len(rows){offset=len(rows)}
+    end:=offset+limit;if end>len(rows){end=len(rows)}
+    out:=make([]discoveredModel,0,end-offset)
+    for _,r:=range rows[offset:end]{
+        trust:="community-unverified";verified:=false
+        if r.Verified>=2{trust="captain-verified";verified=true}else if r.Verified==1{trust="community-verified";verified=true}
+        out=append(out,discoveredModel{Source:"huggingbay",ID:r.Infohash,DisplayName:r.Name,Category:r.Category,SourceURL:r.SourceURL,Trust:trust,Verified:verified,SizeBytes:r.SizeBytes,Seeds:r.Seeds,License:r.License,Installable:false,InstallReason:"Inspect a manifest and verify its SHA-256 before installing."})
+    }
+    next:="";if end<len(rows){next=strconv.Itoa(end)}
+    return out,next,nil
+}
 func discoverHuggingBay(ctx context.Context,q string,limit int)([]discoveredModel,error){
-	u,_:=url.Parse("https://thehuggingbay.io/api/torrents");v:=u.Query();v.Set("sort","seeds");v.Set("limit",strconv.Itoa(limit));if q!=""{v.Set("q",q)};u.RawQuery=v.Encode()
-	var rows []struct{Infohash string `json:"infohash"`;Name string `json:"name"`;Category string `json:"category"`;SizeBytes int64 `json:"size_bytes"`;Seeds int64 `json:"seeds"`;License string `json:"license"`;SourceURL string `json:"source_url"`;Verified int `json:"verified"`}
-	if err:=fetchDiscoveryJSON(ctx,u.String(),&rows);err!=nil{return nil,err}
-	out:=make([]discoveredModel,0,len(rows))
-	for _,r:=range rows{trust:="community-unverified";verified:=false;if r.Verified>=2{trust="captain-verified";verified=true}else if r.Verified==1{trust="community-verified";verified=true};out=append(out,discoveredModel{Source:"huggingbay",ID:r.Infohash,DisplayName:r.Name,Category:r.Category,SourceURL:r.SourceURL,Trust:trust,Verified:verified,SizeBytes:r.SizeBytes,Seeds:r.Seeds,License:r.License,Installable:false,InstallReason:"Browse the full Hugging Bay catalogue. Verify & install will use an upstream digest-pinned artifact when available."})}
-	return out,nil
+    rows,_,err:=discoverHuggingBayPage(ctx,q,limit,0);return rows,err
 }
 
 func (s *Server) discoverLLMFit(ctx context.Context,q string,limit int)([]discoveredModel,error){
@@ -103,33 +159,98 @@ func (s *Server) discoverLLMFit(ctx context.Context,q string,limit int)([]discov
 	return out,nil
 }
 
+
+func (s *Server) discoverLLMFitPage(ctx context.Context,q string,limit,offset int)([]discoveredModel,string,error){
+    // llmfit does not document an offset parameter. Request its full fit
+    // inventory (up to a transparent safety ceiling) and slice locally.
+    const maxLLMFitRows=10000
+    rows,err:=s.discoverLLMFit(ctx,q,maxLLMFitRows)
+    if err!=nil{return nil,"",err}
+    if offset>len(rows){offset=len(rows)}
+    end:=offset+limit;if end>len(rows){end=len(rows)}
+    next:="";if end<len(rows){next=strconv.Itoa(end)}
+    return rows[offset:end],next,nil
+}
+func discoveryOffset(token string)(int,error){
+    if token==""{return 0,nil}
+    n,err:=strconv.Atoi(token)
+    if err!=nil||n<0||n>1000000{return 0,fmt.Errorf("invalid discovery offset")}
+    return n,nil
+}
+func decodeDiscoveryCursor(raw string)(map[string]string,error){
+    state:=map[string]string{}
+    if raw==""{return state,nil}
+    if len(raw)>8192{return nil,fmt.Errorf("discovery cursor too long")}
+    b,err:=base64.RawURLEncoding.DecodeString(raw)
+    if err!=nil{return nil,fmt.Errorf("invalid discovery cursor")}
+    if err:=json.Unmarshal(b,&state);err!=nil{return nil,fmt.Errorf("invalid discovery cursor")}
+    return state,nil
+}
+func encodeDiscoveryCursor(v map[string]string)string{
+    b,_:=json.Marshal(v)
+    return base64.RawURLEncoding.EncodeToString(b)
+}
 func (s *Server) discoverLocalAIModels(w http.ResponseWriter,r *http.Request){
-	if _,ok:=s.authenticate(w,r);!ok{return}
-	source:=strings.ToLower(strings.TrimSpace(r.URL.Query().Get("source")));if source==""{source="all"}
-	q:=strings.TrimSpace(r.URL.Query().Get("q"));limit,_:=strconv.Atoi(r.URL.Query().Get("limit"));if limit<=0{limit=30};if limit>60{limit=60}
-	wanted:=map[string]bool{};if source=="all"{wanted["huggingface"]=true;wanted["huggingbay"]=true;wanted["llmfit"]=true}else{wanted[source]=true}
-	type result struct{name string;rows []discoveredModel;err error};ch:=make(chan result,3);var wg sync.WaitGroup
-	launch:=func(name string,fn func()( []discoveredModel,error)){wg.Add(1);go func(){defer wg.Done();rows,err:=fn();ch<-result{name:name,rows:rows,err:err}}()}
-	if wanted["huggingface"]{launch("huggingface",func()([]discoveredModel,error){return discoverHuggingFace(r.Context(),q,limit)})}
-	if wanted["huggingbay"]{launch("huggingbay",func()([]discoveredModel,error){return discoverHuggingBay(r.Context(),q,limit)})}
-	if wanted["llmfit"]{launch("llmfit",func()([]discoveredModel,error){return s.discoverLLMFit(r.Context(),q,limit)})}
-	go func(){wg.Wait();close(ch)}()
-	out:=discoveryEnvelope{Models:[]discoveredModel{},Errors:map[string]string{},Sources:map[string]discoverySourceStatus{}}
-	for x:=range ch{
-		if x.err!=nil{
-			out.Errors[x.name]=x.err.Error()
-			out.Sources[x.name]=discoverySourceStatus{Status:"unavailable",Message:x.err.Error(),Count:0}
-			continue
-		}
-		out.Models=append(out.Models,x.rows...)
-		if len(x.rows)==0{
-			msg:="Source is reachable but returned no matching model entries."
-			if x.name=="huggingbay"{msg="Hugging Bay is reachable but currently returned no matching LLM torrents."}
-			out.Sources[x.name]=discoverySourceStatus{Status:"connected_empty",Message:msg,Count:0}
-		}else{
-			out.Sources[x.name]=discoverySourceStatus{Status:"connected",Message:"Source connected.",Count:len(x.rows)}
-		}
-	}
-	if len(out.Errors)==0{out.Errors=nil}
-	writeJSON(w,http.StatusOK,out)
+    if _,ok:=s.authenticate(w,r);!ok{return}
+    source:=strings.ToLower(strings.TrimSpace(r.URL.Query().Get("source")))
+    if source==""{source="all"}
+    if source!="all"&&source!="huggingface"&&source!="huggingbay"&&source!="llmfit"{
+        writeError(w,http.StatusBadRequest,"unsupported discovery source");return
+    }
+    q:=strings.TrimSpace(r.URL.Query().Get("q"))
+    if len(q)>256{writeError(w,http.StatusBadRequest,"search query too long");return}
+    limit,_:=strconv.Atoi(r.URL.Query().Get("limit"))
+    if limit<=0{limit=40};if limit>100{limit=100}
+    cursor,err:=decodeDiscoveryCursor(r.URL.Query().Get("cursor"))
+    if err!=nil{writeError(w,http.StatusBadRequest,err.Error());return}
+    names:=[]string{"huggingface","huggingbay","llmfit"}
+    if source!="all"{names=[]string{source}}
+    type result struct{name string;rows []discoveredModel;next string;err error}
+    ch:=make(chan result,len(names))
+    var wg sync.WaitGroup
+    for _,name:=range names{
+        token,seen:=cursor[name]
+        if seen&&token=="-" {continue}
+        wg.Add(1)
+        go func(name,token string){
+            defer wg.Done()
+            var rows []discoveredModel;var next string;var err error
+            switch name{
+            case "huggingface":
+                rows,next,err=discoverHuggingFacePage(r.Context(),q,limit,token)
+            case "huggingbay":
+                var offset int;offset,err=discoveryOffset(token)
+                if err==nil{rows,next,err=discoverHuggingBayPage(r.Context(),q,limit,offset)}
+            case "llmfit":
+                var offset int;offset,err=discoveryOffset(token)
+                if err==nil{rows,next,err=s.discoverLLMFitPage(r.Context(),q,limit,offset)}
+            }
+            ch<-result{name:name,rows:rows,next:next,err:err}
+        }(name,token)
+    }
+    go func(){wg.Wait();close(ch)}()
+    out:=discoveryEnvelope{Models:[]discoveredModel{},Errors:map[string]string{},Sources:map[string]discoverySourceStatus{}}
+    nextState:=map[string]string{}
+    for k,v:=range cursor{nextState[k]=v}
+    for x:=range ch{
+        if x.err!=nil{
+            out.Errors[x.name]=x.err.Error()
+            out.Sources[x.name]=discoverySourceStatus{Status:"unavailable",Message:x.err.Error()}
+            // Don't repeatedly fetch a failed source on Load more. Searching
+            // again restarts the source and allows explicit retry.
+            nextState[x.name]="-"
+            continue
+        }
+        out.Models=append(out.Models,x.rows...)
+        nextState[x.name]="-"
+        if x.next!=""{nextState[x.name]=x.next;out.HasMore=true}
+        status:="connected";message:="More models available with Load more."
+        if len(x.rows)==0{status="connected_empty";message="No matching entries returned by this source."}
+        if x.next==""{message="End of the source's published API results."}
+        if x.name=="huggingbay"&&x.next==""&&len(x.rows)>=500{message="Reached the Hugging Bay API maximum of 500 listings; this endpoint does not document further pagination."}
+        out.Sources[x.name]=discoverySourceStatus{Status:status,Message:message,Count:len(x.rows)}
+    }
+    if len(out.Errors)==0{out.Errors=nil}
+    if out.HasMore{out.NextCursor=encodeDiscoveryCursor(nextState)}
+    writeJSON(w,http.StatusOK,out)
 }

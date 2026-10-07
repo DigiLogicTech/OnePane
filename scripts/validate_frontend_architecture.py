@@ -5,6 +5,8 @@ import hashlib, re, sys
 ROOT=Path(__file__).resolve().parents[1]
 foundation=(ROOT/"internal/webui/static/app-foundation.js").read_text(encoding="utf-8")
 canonical=(ROOT/"internal/webui/static/app.js").read_text(encoding="utf-8")
+models=(ROOT/"internal/webui/static/models-page.js").read_text(encoding="utf-8")
+product=canonical+"\n"+models
 html=(ROOT/"internal/webui/static/index.html").read_text(encoding="utf-8")
 
 def definitions(src):
@@ -17,12 +19,12 @@ def definitions(src):
             out.setdefault(match.group(1),[]).append(line_no)
     return out
 
-expected_foundation_blob="8bb6eec38da56b85e6bd6a460fce0e286b9d3543"
+expected_foundation_blob="efb5b160f92bae2cf9afe4efb800cb6b325d6e20"
 foundation_bytes=foundation.encode("utf-8")
 actual_foundation_blob=hashlib.sha1(b"blob "+str(len(foundation_bytes)).encode("ascii")+b"\0"+foundation_bytes).hexdigest()
 
 foundation_defs=definitions(foundation)
-canonical_defs=definitions(canonical)
+canonical_defs=definitions(product)
 legacy_duplicate_budget={
     'activityCard': 2,
     'applyTheme': 2,
@@ -109,19 +111,25 @@ else: ok("canonical runtime marker is unique")
 boot_call=re.compile(r"(?<!function )\bbootOnePane\s*\(\s*\)")
 foundation_boots=len(boot_call.findall(foundation))
 canonical_boots=len(boot_call.findall(canonical))
+models_boots=len(boot_call.findall(models))
 if foundation_boots: fail(f"compatibility foundation must not boot the application; found {foundation_boots} call(s)")
 else: ok("only canonical runtime may boot the application")
 if canonical_boots!=1: fail(f"canonical runtime must boot exactly once; found {canonical_boots}")
 else: ok("canonical runtime boots exactly once")
+if models_boots: fail(f"Models feature layer must not boot the application; found {models_boots} call(s)")
+else: ok("Models feature layer does not own application boot")
 
 foundation_tag='<script src="/app-foundation.js"></script>'
 canonical_tag='<script src="/app.js"></script>'
-if foundation_tag not in html or canonical_tag not in html or html.index(foundation_tag)>html.index(canonical_tag):
-    fail("index.html must load compatibility foundation before canonical runtime")
+models_tag='<script src="/models-page.js"></script>'
+if foundation_tag not in html or canonical_tag not in html or models_tag not in html or not (html.index(foundation_tag)<html.index(canonical_tag)<html.index(models_tag)):
+    fail("index.html must load foundation then canonical runtime then Models feature")
 else: ok("script load order is deterministic")
 
 if len(canonical.splitlines())>800: fail("canonical runtime exceeded 800-line review budget; split features before adding more")
 else: ok(f"canonical runtime remains reviewable at {len(canonical.splitlines())} lines")
+if len(models.splitlines())>400: fail("Models feature layer exceeded 400-line review budget; split it further")
+else: ok(f"Models feature layer remains reviewable at {len(models.splitlines())} lines")
 
 if failed:
     print(f"\nFRONTEND ARCHITECTURE: {len(failed)} CHECK(S) FAILED",file=sys.stderr)

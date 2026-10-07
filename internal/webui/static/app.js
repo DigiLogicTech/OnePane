@@ -719,7 +719,7 @@ function a33BindControlChatDrag(){
 function a33ToggleControlChatCollapsed(){const handle=$("#controlChatToggle");if(handle?.dataset.chatDragged==="true"){delete handle.dataset.chatDragged;return}a31SetControlChatCollapsed(!state.controlChatCollapsed)}
 const a31BindShellBase=bindShell;
 bindShell=function(){
-  a31BindShellBase();a32BindPanelToggleMovement();a33BindControlChatDrag();window.addEventListener("resize",a33ApplyControlChatPosition);
+  a31BindShellBase();a32BindPanelToggleMovement();a33BindControlChatDrag();if(typeof a31StartDownloadMonitor==="function")a31StartDownloadMonitor();window.addEventListener("resize",a33ApplyControlChatPosition);
   $("#controlChatLauncher")?.addEventListener("click",()=>a33ToggleControlChatPanel());$("#controlChatClose")?.addEventListener("click",e=>{e.stopPropagation();a31CloseControlChat()});$("#controlChatToggle")?.addEventListener("click",()=>a33ToggleControlChatCollapsed());$("#controlChatAssistantTab")?.addEventListener("click",()=>a31OpenControlChat("assistant"));$("#controlChatOrchestratorTab")?.addEventListener("click",()=>a31OpenControlChat("orchestrator"));
 };
 renderActiveView=async function(){

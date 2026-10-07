@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 ROOT=Path(__file__).resolve().parents[1]
 read=lambda p:(ROOT/p).read_text(encoding="utf-8")
-app=read("internal/webui/static/app-foundation.js")+"\n"+read("internal/webui/static/app.js"); html=read("internal/webui/static/index.html"); css=read("internal/webui/static/style.css")
+app=read("internal/webui/static/app-foundation.js")+"\n"+read("internal/webui/static/app.js")+"\n"+read("internal/webui/static/models-page.js"); html=read("internal/webui/static/index.html"); css=read("internal/webui/static/style.css")
 api=read("internal/api/server.go")+read("internal/api/team.go")+read("internal/api/assistant_orchestrator.go")+read("internal/api/provider_oauth.go")+read("internal/api/skills.go")+read("internal/api/local_ai_compute.go")
 boot=read("internal/bootstrap/bootstrap.go")
 assistant=read("internal/assistant/service.go"); orch=read("internal/projectorchestrator/service.go"); profiles=read("internal/agentprofile/service.go")

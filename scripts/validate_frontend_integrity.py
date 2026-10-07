@@ -20,7 +20,7 @@ groups={
  "skills":["a31UploadSkill","/v1/skills/packages","Assignments","Packages"],
  "nodes":["renderNodes=async function","/v1/nodes"],
  "settings":["Defaults for new Workspaces","Providers & Auth","Nodes & Federation","/v1/about"],
- "managed components":["/v1/local-ai/component-jobs/",'a31RuntimeCard("colibri"','a31RuntimeCard("omniroute"'],
+ "managed components":["/v1/local-ai/component-jobs/",'a31RuntimeCard("colibri"','a31RuntimeCard("omniroute"',"a31LlamaRuntimeCard"],
  "operations":["a31OperationsActivity","a31OperationsHealth","a31RecoveryContent","a31ToggleLogs"],
 }
 failed=[]

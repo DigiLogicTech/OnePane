@@ -55,11 +55,27 @@ func (s *Service) installOmniRouteCLIWindows(ctx context.Context,jobID string) e
 	logDir:=filepath.Join(s.dataDir,"components","logs");_ = os.MkdirAll(logDir,0o700)
 	logf,e:=os.OpenFile(filepath.Join(logDir,"omniroute-install.log"),os.O_CREATE|os.O_TRUNC|os.O_WRONLY,0o600);if e!=nil{_ = os.RemoveAll(staging);return e}
 	cmd.Stdout,cmd.Stderr=logf,logf
-	nodeDir:=filepath.Dir(node);cmd.Env=append(os.Environ(),"PATH="+nodeDir+string(os.PathListSeparator)+os.Getenv("PATH"),"npm_config_update_notifier=false","npm_config_fund=false","npm_config_audit=false")
+	// npm runs under the OnePane Windows service account. Without a scoped
+	// cache it writes to systemprofile\\AppData\\Local\\npm-cache and every
+	// retry can accumulate another archive tree on the system drive.
+	// Keep the ephemeral npm cache and Node compile cache inside an owned path.
+	cacheRoot:=filepath.Join(s.dataDir,"components","install-cache","omniroute")
+	if err:=os.MkdirAll(cacheRoot,0o700);err!=nil{_ = logf.Close();_ = os.RemoveAll(staging);return err}
+	defer os.RemoveAll(cacheRoot)
+	nodeDir:=filepath.Dir(node)
+	cmd.Env=append(os.Environ(),
+		"PATH="+nodeDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"npm_config_cache="+filepath.Join(cacheRoot,"npm"),
+		"NODE_COMPILE_CACHE="+filepath.Join(cacheRoot,"node-compile"),
+		"TEMP="+cacheRoot,"TMP="+cacheRoot,
+		"npm_config_update_notifier=false","npm_config_fund=false","npm_config_audit=false")
 	err=cmd.Run();_ = logf.Close();if err!=nil{tail:=s.omniRouteInstallLogTail(4096);_ = os.RemoveAll(staging);return fmt.Errorf("install OmniRoute CLI 3.8.51: %v%s",err,tail)}
 	cli:=s.omniRouteCLIEntryPath(staging);if st,err:=os.Stat(cli);err!=nil||st.IsDir(){_ = os.RemoveAll(staging);return errors.New("OmniRoute CLI entry is missing after npm install")}
 	backup:=root+".previous";_ = os.RemoveAll(backup);if _,err:=os.Stat(root);err==nil{if err:=os.Rename(root,backup);err!=nil{_ = os.RemoveAll(staging);return err}}
 	if err:=os.Rename(staging,root);err!=nil{if _,e:=os.Stat(backup);e==nil{_ = os.Rename(backup,root)};return err};_ = os.RemoveAll(backup)
+	// The verified Node ZIP is no longer needed after successful extraction.
+	// Interrupted transfers retain the .partial file via HTTPFetcher.
+	_ = os.Remove(archive)
 	meta:=fmt.Sprintf(`{"runtime_kind":"node-cli","node_version":"%s","package":"omniroute@3.8.51","endpoint":"http://127.0.0.1:20128/v1","data_root":%q}`,a.Version,s.omniRouteDataRoot())
 	now:=s.clock.UnixMilli();_,err=s.db.ExecContext(ctx,"UPDATE managed_component_states SET installed_version='3.8.51',available_version='3.8.51',desired_state='disabled',observed_state='installed_disabled',last_error=NULL,metadata_json=?,revision=revision+1,updated_at=? WHERE component_id='omniroute'",meta,now)
 	return err

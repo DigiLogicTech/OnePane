@@ -47,13 +47,14 @@ async function a36LlamaBackendManager(){
  try{rows=a31Array(await apiRequest("/v1/local-ai/llama-runtimes"))}
  catch(ex){return notice(ex.message,"bad")}
  openModal("Manage llama.cpp backends",`<div class="widget-body qa-form"><p class="page-subtitle">CPU, CUDA and Vulkan are managed independently. Model weights are preserved. Active runtimes will be stopped where safe. Associated deployments become unavailable until a compatible backend is restored; downloaded model weights and registrations remain intact.</p><div class="runtime-backend-list">${rows.map(x=>{const used=Number(x.active_instances||0),deps=Number(x.dependent_models||0);return `<div class="runtime-backend-row"><div><strong>${escapeHtml(String(x.backend||"").toUpperCase())}</strong><div class="list-meta">${escapeHtml(x.reason||"Optional backend")}</div><div class="list-meta">${deps} dependent model(s) · ${used} active instance(s)</div></div><div class="toolbar"><span class="pill ${x.installed?"good":""}">${x.installed?"Installed":"Not installed"}</span>${x.installed?`<button class="btn danger" data-a36-remove-backend="${escapeHtml(x.backend)}" >Uninstall</button>`:""}</div></div>`}).join("")}</div><div id="a36BackendStatus" class="page-subtitle"></div></div>`);
- $$("[data-a36-remove-backend]").forEach(button=>button.onclick=async()=>{
+ $("[data-a36-remove-backend]").forEach(button=>button.onclick=()=>{
   const backend=button.dataset.a36RemoveBackend;
-  button.disabled=true;$("#a36BackendStatus").textContent=`Removing ${backend} backend…`;
-  try{
-   await apiRequest(`/v1/local-ai/llama-runtimes/${encodeURIComponent(backend)}/remove`,{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace})});
-   notice(`${backend.toUpperCase()} backend removed; weights preserved.`);await a36LlamaBackendManager();if(a31RouteIs("models"))renderModels()
-  }catch(ex){button.disabled=false;$("#a36BackendStatus").innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`}
+  a31ConfirmAction("Uninstall "+backend.toUpperCase()+" backend?",
+   "OnePane will stop affected runtimes where safe. Models remain in the pool, but deployments using this backend will be unavailable until restored.",
+   "Uninstall backend",async()=>{
+     await apiRequest(`/v1/local-ai/llama-runtimes/${encodeURIComponent(backend)}/remove`,{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace})});
+     notice(backend.toUpperCase()+" backend removed. Model weights retained.");if(a31RouteIs("models"))renderModels()
+   })
  })
 }
 const a36BindComponentsBase=a31BindComponentButtons;

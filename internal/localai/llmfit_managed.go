@@ -60,26 +60,7 @@ func (s *Service) InstallManagedLLMFit(ctx context.Context)error{
  dl:=filepath.Join(s.dataDir,"components","downloads","llmfit-"+llmfitManagedVersion+".zip")
  if _,err:=s.fetcher.Fetch(ctx,llmfitManagedURL,dl,llmfitManagedSHA);err!=nil{return fmt.Errorf("download verified llmfit: %w",err)}
  if err:=ExtractRuntimeArchive(dl,"zip",staging);err!=nil{return err}
- // Upstream ZIP nests llmfit.exe in llmfit-vX.Y.Z-windows-target/.
- // Never execute by untrusted path: relocate a single regular executable
- // from the already digest-verified and safely extracted archive.
- var candidate string
- err=filepath.WalkDir(staging,func(path string,d os.DirEntry,e error)error{
-  if e!=nil{return e}
-  if d.IsDir(){return nil}
-  if strings.EqualFold(d.Name(),"llmfit.exe"){
-   if d.Type()&os.ModeSymlink!=0{return errors.New("llmfit executable must not be a symlink")}
-   if candidate!=""{return errors.New("verified archive contains multiple llmfit executables")}
-   candidate=path
-  }
-  return nil
- })
- if err!=nil{return err}
- if candidate==""{return errors.New("llmfit.exe missing from verified archive")}
- if stat,err:=os.Stat(candidate);err!=nil||!stat.Mode().IsRegular(){return errors.New("invalid llmfit executable in verified archive")}
- if candidate!=filepath.Join(staging,"llmfit.exe"){
-  if err:=os.Rename(candidate,filepath.Join(staging,"llmfit.exe"));err!=nil{return err}
- }
+ if err:=normalizeLLMFitExecutable(staging);err!=nil{return err}
  if err:=os.MkdirAll(filepath.Dir(root),0o700);err!=nil{return err}
  if err:=os.Rename(staging,root);err!=nil{return err}
  _=os.Remove(dl)
@@ -136,5 +117,29 @@ func (s *Service) RemoveManagedLLMFit(ctx context.Context)error{
  if !strings.HasPrefix(filepath.Clean(root),filepath.Clean(s.dataDir)+string(os.PathSeparator)){return errors.New("managed llmfit path is outside OnePane storage")}
  if err:=os.RemoveAll(root);err!=nil{return err}
  s.llmfit=nil
+ return nil
+}
+
+func normalizeLLMFitExecutable(staging string)error{
+ // Upstream ZIP nests llmfit.exe in llmfit-vX.Y.Z-windows-target/.
+ // Never execute by untrusted path: relocate a single regular executable
+ // from the already digest-verified and safely extracted archive.
+ var candidate string
+ err=filepath.WalkDir(staging,func(path string,d os.DirEntry,e error)error{
+  if e!=nil{return e}
+  if d.IsDir(){return nil}
+  if strings.EqualFold(d.Name(),"llmfit.exe"){
+   if d.Type()&os.ModeSymlink!=0{return errors.New("llmfit executable must not be a symlink")}
+   if candidate!=""{return errors.New("verified archive contains multiple llmfit executables")}
+   candidate=path
+  }
+  return nil
+ })
+ if err!=nil{return err}
+ if candidate==""{return errors.New("llmfit.exe missing from verified archive")}
+ if stat,err:=os.Stat(candidate);err!=nil||!stat.Mode().IsRegular(){return errors.New("invalid llmfit executable in verified archive")}
+ if candidate!=filepath.Join(staging,"llmfit.exe"){
+  if err:=os.Rename(candidate,filepath.Join(staging,"llmfit.exe"));err!=nil{return err}
+ }
  return nil
 }

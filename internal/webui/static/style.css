@@ -1068,3 +1068,8 @@ html[data-theme="light"] .models-discover-controls input,html[data-theme="light"
 .model-download-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
 .model-download-progress{height:7px;border:1px solid var(--border);border-radius:999px;overflow:hidden;background:var(--panel)}
 .model-download-progress>span{display:block;height:100%;background:var(--accent)}
+
+/* Models discovery pagination */
+.discover-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-top:1px solid var(--border)}
+.discover-pagination [hidden]{display:none!important}
+.discover-pagination .btn{margin-left:auto}

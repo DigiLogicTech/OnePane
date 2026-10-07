@@ -7,6 +7,13 @@ let a35WorkspaceEditSession=null;
 function a35Clone(value){
   try{return JSON.parse(JSON.stringify(value))}catch{return value}
 }
+function a35LatestProject(project){
+  return qa4ProjectHub.projects.find(x=>x.id===project?.id)||project;
+}
+function a35LatestWorkspace(project,workspace){
+  const latestProject=a35LatestProject(project),rows=latestProject?qa4Workspaces(latestProject):[];
+  return {project:latestProject,workspace:rows.find(x=>x.id===workspace?.id)||workspace};
+}
 function a35WorkspaceEditing(){return !!a35WorkspaceEditSession}
 function a35WorkspaceSessionMatches(project,workspace){
   return !!a35WorkspaceEditSession&&a35WorkspaceEditSession.projectID===project?.id&&a35WorkspaceEditSession.workspaceID===workspace?.id;
@@ -34,9 +41,10 @@ async function a35CommitWorkspaceEdit(project,workspace){
     notice("Workspace layout contains invalid geometry.","bad");
     return;
   }
-  const next=qa4Workspaces(project).map(w=>w.id===workspace.id?{...a35Clone(w),widgets}:a35Clone(w));
+  const latest=a35LatestWorkspace(project,workspace),baseProject=latest.project,baseWorkspace=latest.workspace;
+  const next=qa4Workspaces(baseProject).map(w=>w.id===baseWorkspace.id?{...a35Clone(w),widgets}:a35Clone(w));
   try{
-    await qa4SaveProjectWorkspaces(project,next);
+    await qa4SaveProjectWorkspaces(baseProject,next);
     a35CancelWorkspaceEdit();
     notice("Workspace layout saved.");
   }catch(ex){
@@ -143,11 +151,13 @@ function a35BindWorkspaceEdit(project,workspace){
 qa4BindWorkspaceEdit=a35BindWorkspaceEdit;
 
 qa6ToggleMaximize=async function(project,workspace,id){
+  const latest=a35LatestWorkspace(project,workspace);project=latest.project;workspace=latest.workspace;
   workspace.maximized_widget_id=workspace.maximized_widget_id===id?"":id;
   await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));
   if(currentTab()?.route==="workspaces")await renderWorkspaces();else await renderProjects();
 };
 qa6PromoteInspectorComponent=async function(project,workspace,type){
+  const latest=a35LatestWorkspace(project,workspace);project=latest.project;workspace=latest.workspace;
   const m=qa6Meta(type),size=qa6SizeFor(type);
   workspace.widgets=workspace.widgets||[];
   workspace.widgets.push({id:`pw-${type}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,5)}`,type,title:m.title,col:size.col,row:size.row,config:type==="follow"?{task_id:"auto"}:{}});
@@ -300,15 +310,19 @@ qa6OpenInInspector=async function(project,workspace,type){
     notice(`Inspector is not available for ${qa6Meta(type).title||titleCase(type)}.`,"bad");
     return false;
   }
+  let latest=a35LatestWorkspace(project,workspace);
+  project=latest.project;workspace=latest.workspace;
   const cfg=qa6InspectorConfig(workspace),normalized=[];
   for(const raw of cfg.tabs||[]){
     const item=a35InspectorType(raw);
     if(supported.has(item)&&!normalized.includes(item))normalized.push(item);
   }
+  const before=JSON.stringify(cfg.tabs||[]);
   cfg.tabs.splice(0,cfg.tabs.length,...normalized);
   if(!cfg.tabs.includes(target))cfg.tabs.push(target);
-  await qa6SaveInspector(project,workspace);
-  qa4Inspector={kind:"workspace",id:workspace.id,title:`${project.name} / ${workspace.name}`,data:{project,workspace}};
+  if(JSON.stringify(cfg.tabs)!==before)await qa6SaveInspector(project,workspace);
+  latest=a35LatestWorkspace(project,workspace);
+  qa4Inspector={kind:"workspace",id:latest.workspace.id,title:`${latest.project.name} / ${latest.workspace.name}`,data:{project:latest.project,workspace:latest.workspace}};
   qa4InspectorTab=target;
   setInspectorOpen(true);
   renderInspector();
@@ -329,7 +343,9 @@ qa6BindProjectComponents=function(project,workspace){
 
 function a35InspectorContext(){
   const d=typeof qa6WorkspaceInspectorContext==="function"?qa6WorkspaceInspectorContext():null;
-  if(!d)return null;return {d,cfg:qa6InspectorConfig(d.workspace)};
+  if(!d)return null;
+  const latest=a35LatestWorkspace(d.project,d.workspace),fresh={project:latest.project,workspace:latest.workspace};
+  return {d:fresh,cfg:qa6InspectorConfig(fresh.workspace)};
 }
 function a35RemoveInspectorTab(type){
   const ctx=a35InspectorContext();if(!ctx)return;

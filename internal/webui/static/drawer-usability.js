@@ -55,6 +55,7 @@ function a10Fill(){
  const host=$("#a10Rows");if(host){host.innerHTML=a10ListMarkup();a10BindRows();if(a10Following&&!a10Paused)host.scrollTop=0}
 }
 renderDrawer=function(){
+ const hadSearch=document.activeElement?.id==="a10Search",selection=hadSearch?document.activeElement.selectionStart:null;
  a10DrawBase();
  const c=$("#drawerContent");if(!c)return;
  if(["logs","events"].includes(activeDrawerTab)){
@@ -69,7 +70,7 @@ renderDrawer=function(){
     <button class="btn tiny" id="a10Follow" aria-pressed="${a10Following}">${a10Following?"Follow: On":"Follow: Off"}</button>
     <button class="btn tiny" id="a10Copy">Copy</button><button class="btn tiny" id="a10Export">Export CSV</button>
    </div><div id="a10Rows" class="drawer-log-results">${a10ListMarkup()}</div></div>`;
-  a10Bind();return;
+  a10Bind();if(hadSearch){const input=$("#a10Search");input?.focus({preventScroll:true});if(selection!==null)input?.setSelectionRange(selection,selection)}return;
  }
  if(activeDrawerTab==="watchdog"){
   const updated=liveOps.lastRefresh?new Date(liveOps.lastRefresh).toLocaleString():"Not yet checked";

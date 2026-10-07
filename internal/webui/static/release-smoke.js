@@ -8,9 +8,19 @@
   const json=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json"}});
   const workspace={id:"pws-release",name:"Main workspace",widgets:[
     {id:"pw-release-follow",type:"follow",title:"Follow",col:4,row:5},
-    {id:"pw-release-modelstack",type:"modelstack",title:"Model Stack",col:4,row:5},
+    {id:"pw-release-activity",type:"activity",title:"Activity",col:4,row:4},
+    {id:"pw-release-logs",type:"logs",title:"Logs",col:4,row:5},
+    {id:"pw-release-agents",type:"agents",title:"Agents",col:4,row:4},
+    {id:"pw-release-terminal",type:"terminal",title:"Terminal",col:4,row:5},
+    {id:"pw-release-verification",type:"verification",title:"Verification",col:4,row:4},
+    {id:"pw-release-checkpoints",type:"checkpoints",title:"Checkpoints",col:4,row:4},
     {id:"pw-release-chat",type:"chat",title:"Workspace chat",col:4,row:5},
     {id:"pw-release-tasks",type:"tasks",title:"Tasks",col:6,row:4},
+    {id:"pw-release-scheduled",type:"scheduled",title:"Scheduled tasks",col:6,row:4},
+    {id:"pw-release-models",type:"models",title:"Model routing",col:4,row:5},
+    {id:"pw-release-modelstack",type:"modelstack",title:"Legacy Model Stack",col:4,row:5},
+    {id:"pw-release-nodes",type:"nodes",title:"Nodes",col:4,row:4},
+    {id:"pw-release-attention",type:"attention",title:"Attention",col:4,row:4},
     {id:"pw-release-notes",type:"notes",title:"Notes",col:6,row:4},
     {id:"pw-release-settings",type:"settings",title:"Workspace settings",col:6,row:5}
   ],inspector:{tabs:["follow","notes"],tiles:[],tab_config:{}},orchestration:{mode:"direct",supervisor:{model:"auto",agent:"onepane-default"},team:{model:"auto",agent:"onepane-default",count:2},council:{model:"auto",agent:"onepane-default",count:2}}};

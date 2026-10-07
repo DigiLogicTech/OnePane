@@ -19,7 +19,7 @@ def definitions(src):
             out.setdefault(match.group(1),[]).append(line_no)
     return out
 
-expected_foundation_blob="efb5b160f92bae2cf9afe4efb800cb6b325d6e20"
+expected_foundation_blob="2484c9e8d60086785ffbbeb6aae099453411bd89"
 foundation_bytes=foundation.encode("utf-8")
 actual_foundation_blob=hashlib.sha1(b"blob "+str(len(foundation_bytes)).encode("ascii")+b"\0"+foundation_bytes).hexdigest()
 

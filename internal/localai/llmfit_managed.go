@@ -125,7 +125,7 @@ func normalizeLLMFitExecutable(staging string)error{
  // Never execute by untrusted path: relocate a single regular executable
  // from the already digest-verified and safely extracted archive.
  var candidate string
- err=filepath.WalkDir(staging,func(path string,d os.DirEntry,e error)error{
+ err:=filepath.WalkDir(staging,func(path string,d os.DirEntry,e error)error{
   if e!=nil{return e}
   if d.IsDir(){return nil}
   if strings.EqualFold(d.Name(),"llmfit.exe"){

@@ -14,12 +14,12 @@ import (
 )
 
 type LlamaRuntimeBackendStatus struct {
-	Backend string
-	Version string
-	Installed bool
-	Recommended bool
-	Reason string
-	DriverVersion string
+	Backend string `json:"backend"`
+	Version string `json:"version"`
+	Installed bool `json:"installed"`
+	Recommended bool `json:"recommended"`
+	Reason string `json:"reason,omitempty"`
+	DriverVersion string `json:"driver_version,omitempty"`
 }
 
 func (s *Service) latestHardwareProfile(ctx context.Context) (HardwareProfile, error) {
@@ -114,6 +114,10 @@ func (s *Service) llamaRuntimeStatus(ctx context.Context) ([]LlamaRuntimeBackend
 		rows=append(rows,LlamaRuntimeBackendStatus{Backend:entry.Backend,Version:entry.Version,Installed:installed,Recommended:rec,Reason:reason,DriverVersion:driver})
 	}
 	return rows,nil
+}
+
+func (s *Service) LlamaRuntimeStatus(ctx context.Context) ([]LlamaRuntimeBackendStatus,error) {
+	return s.llamaRuntimeStatus(ctx)
 }
 
 func (s *Service) installLlamaCpp(ctx context.Context,jobID string) error {

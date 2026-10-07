@@ -85,7 +85,7 @@ func (s *Service) omniRouteCLICommand() (string,[]string,error) {
 	if goruntime.GOOS!="windows" { return " ",nil,errors.New("managed OmniRoute CLI command is not available on this platform") }
 	root:=s.omniRouteRuntimeRoot();node:=s.omniRouteCLINodePath(root);cli:=s.omniRouteCLIEntryPath(root)
 	for _,p:=range []string{node,cli}{if st,err:=os.Stat(p);err!=nil||st.IsDir(){return "",nil,errors.New("managed OmniRoute uses the retired desktop artifact; click Update to install the headless CLI runtime")}}
-	return node,[]string{cli,"--no-open","--non-interactive","--port","20128"},nil
+	return node,[]string{cli,"--no-open","--port","20128"},nil
 }
 
 func (s *Service) omniRouteInstallLogTail(limit int64) string {

@@ -31,6 +31,10 @@ const (
 	PresetNebius            PresetID = "nebius"
 	PresetKimi              PresetID = "moonshot_kimi"
 	PresetMiniMax           PresetID = "minimax"
+	PresetNousPortal        PresetID = "nous_portal"
+	PresetQwenOAuth         PresetID = "qwen_oauth"
+	PresetMiniMaxOAuth      PresetID = "minimax_oauth"
+	PresetXAIOAuth          PresetID = "xai_oauth"
 	PresetCustomOpenAI      PresetID = "custom_openai_compatible"
 )
 
@@ -45,6 +49,8 @@ type Preset struct {
 	EndpointEditable           bool     `json:"endpoint_editable"`
 	AllowedHostSuffixes        []string `json:"allowed_host_suffixes,omitempty"`
 	AuthType                   string   `json:"auth_type"`
+	AuthMethods                []string `json:"auth_methods,omitempty"`
+	OAuthMode                  string   `json:"oauth_mode,omitempty"`
 	AuthHeader                 string   `json:"auth_header,omitempty"`
 	AuthPrefix                 string   `json:"auth_prefix,omitempty"`
 	AuthRaw                    bool     `json:"auth_raw,omitempty"`
@@ -66,7 +72,7 @@ func openAICompatible(id PresetID, name, endpoint, provider string, suffixes ...
 		Description: "Direct cloud inference through an OpenAI-compatible API while OnePane retains routing, budgets, policy and verification.",
 		AccessMode:  "direct_api", Transport: "openai-compatible", DefaultEndpoint: endpoint,
 		EndpointEditable: endpoint == "", AllowedHostSuffixes: suffixes,
-		AuthType: "bearer", AuthHeader: "Authorization", AuthPrefix: "Bearer", CredentialProvider: provider,
+		AuthType: "bearer", AuthMethods: []string{"api_key"}, AuthHeader: "Authorization", AuthPrefix: "Bearer", CredentialProvider: provider,
 		ProbePath: "/models", Automated: true, CostHint: "paid_or_provider_managed", UsagePool: "direct_provider",
 		RequiresExplicitUsageOptIn: true,
 		InstallSteps:               []string{"Create/store the provider credential in OnePane Vault", "Select a model", "Probe the provider when model discovery is available", "Enable an explicit paid/subscription budget policy before autonomous use"},
@@ -88,7 +94,7 @@ func Builtins() []Preset {
 			ID: PresetOpenAIChatGPTPlan, DisplayName: "ChatGPT plan (optional fallback)",
 			Description: "Official Sign in with ChatGPT account-backed inference. Requests consume the user's included Work/Codex allowance and are never scheduler-eligible without explicit opt-in.",
 			AccessMode:  "oauth_plan_usage", Transport: "openai-chatgpt-plan", DefaultEndpoint: "https://api.openai.com/v1", EndpointEditable: false,
-			AllowedHostSuffixes: []string{"api.openai.com"}, AuthType: "oauth2-pkce", CredentialProvider: "openai-chatgpt-plan",
+			AllowedHostSuffixes: []string{"api.openai.com"}, AuthType: "oauth2-pkce", AuthMethods: []string{"oauth_pkce"}, OAuthMode: "browser_pkce", CredentialProvider: "openai-chatgpt-plan",
 			CostHint: "included_subscription", UsagePool: "chatgpt_work_codex", RecommendedForFirstRun: false,
 			DefaultZeroCostOnly: false, RequiresExplicitUsageOptIn: true,
 			InstallSteps: []string{"Continue with ChatGPT", "Authorize ChatGPT plan usage", "Store OAuth credentials in the local credential store", "Discover account-visible models", "Register selected models as protected fallback deployments"},
@@ -98,7 +104,7 @@ func Builtins() []Preset {
 			ID: PresetAnthropic, DisplayName: "Anthropic Claude API",
 			Description: "Direct Anthropic Messages API with response normalization into OnePane's inference envelope.",
 			AccessMode:  "direct_api", Transport: "anthropic", DefaultEndpoint: "https://api.anthropic.com", EndpointEditable: false,
-			AllowedHostSuffixes: []string{"api.anthropic.com"}, AuthType: "api_key", AuthHeader: "x-api-key", CredentialProvider: "anthropic", ProbePath: "/v1/models",
+			AllowedHostSuffixes: []string{"api.anthropic.com"}, AuthType: "api_key", AuthMethods: []string{"api_key","oauth_external"}, OAuthMode: "claude_subscription_external", AuthHeader: "x-api-key", CredentialProvider: "anthropic", ProbePath: "/v1/models",
 			Automated: true, CostHint: "paid_or_provider_managed", UsagePool: "direct_provider", RequiresExplicitUsageOptIn: true,
 			InstallSteps: []string{"Create/store an Anthropic API key", "Select a Claude model", "Probe the Models API", "Enable an explicit spend budget before autonomous use"},
 		},
@@ -107,7 +113,7 @@ func Builtins() []Preset {
 			ID: PresetVertexAI, DisplayName: "Google Vertex AI",
 			Description: "Google Cloud Vertex AI OpenAI-compatible endpoint using a Google Cloud access token.",
 			AccessMode:  "cloud_identity", Transport: "openai-compatible", EndpointTemplate: "https://aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/endpoints/openapi", EndpointEditable: true,
-			AllowedHostSuffixes: []string{"aiplatform.googleapis.com"}, AuthType: "bearer", AuthHeader: "Authorization", AuthPrefix: "Bearer", CredentialProvider: "google-vertex-ai",
+			AllowedHostSuffixes: []string{"aiplatform.googleapis.com"}, AuthType: "bearer", AuthMethods: []string{"oauth2","adc","service_account"}, OAuthMode: "google_cloud_identity", AuthHeader: "Authorization", AuthPrefix: "Bearer", CredentialProvider: "google-vertex-ai",
 			Automated: true, CostHint: "paid_or_provider_managed", UsagePool: "direct_provider", RequiresExplicitUsageOptIn: true,
 			InstallSteps: []string{"Obtain a short-lived Google Cloud access token or brokered identity", "Enter project/location endpoint", "Select a Vertex model", "Enable an explicit spend budget"},
 			Notes:        []string{"OnePane stores only the supplied token reference; automatic ADC/service-account refresh is a later credential-broker extension."},
@@ -124,12 +130,44 @@ func Builtins() []Preset {
 			ID: PresetBedrock, DisplayName: "Amazon Bedrock",
 			Description: "Amazon Bedrock OpenAI-compatible runtime using a Bedrock API key.",
 			AccessMode:  "cloud_identity", Transport: "openai-compatible", EndpointTemplate: "https://bedrock-runtime.{region}.amazonaws.com/openai/v1", EndpointEditable: true,
-			AllowedHostSuffixes: []string{".amazonaws.com", ".api.aws"}, AuthType: "bearer", AuthHeader: "Authorization", AuthPrefix: "Bearer", CredentialProvider: "amazon-bedrock",
+			AllowedHostSuffixes: []string{".amazonaws.com", ".api.aws"}, AuthType: "bearer", AuthMethods: []string{"api_key","aws_credentials"}, AuthHeader: "Authorization", AuthPrefix: "Bearer", CredentialProvider: "amazon-bedrock",
 			Automated: true, CostHint: "paid_or_provider_managed", UsagePool: "direct_provider", RequiresExplicitUsageOptIn: true,
 			InstallSteps: []string{"Generate/store a short-term Bedrock API key", "Choose a regional Bedrock OpenAI endpoint", "Select an inference profile/model", "Enable an explicit spend budget"},
 			Notes:        []string{"The recommended bedrock-runtime endpoint does not expose OpenAI GET /models; model selection is explicit."},
 		},
 	}
+
+	ps = append(ps,
+		Preset{
+			ID: PresetNousPortal, DisplayName: "Nous Portal (OAuth)",
+			Description: "Nous Research subscription gateway with one OAuth login and a broad frontier-model catalogue.",
+			AccessMode: "oauth_subscription", Transport: "openai-compatible", DefaultEndpoint: "https://inference-api.nousresearch.com/v1", EndpointEditable: false,
+			AllowedHostSuffixes: []string{"inference-api.nousresearch.com"}, AuthType: "oauth_external", AuthMethods: []string{"oauth_device_code","oauth_pkce"}, OAuthMode: "nous_portal", CredentialProvider: "nous-portal",
+			ProbePath: "/models", Automated: true, CostHint: "included_subscription", UsagePool: "nous_subscription", RequiresExplicitUsageOptIn: true,
+			InstallSteps: []string{"Continue with Nous Research", "Authorize the Portal subscription", "Discover account-visible models", "Register selected models as protected provider routes"},
+		},
+		Preset{
+			ID: PresetQwenOAuth, DisplayName: "Qwen Portal (OAuth)",
+			Description: "Consumer Qwen Portal access using browser OAuth rather than a DashScope API key.",
+			AccessMode: "oauth_subscription", Transport: "openai-compatible", DefaultEndpoint: "https://portal.qwen.ai/v1", EndpointEditable: false,
+			AllowedHostSuffixes: []string{"portal.qwen.ai"}, AuthType: "oauth_external", AuthMethods: []string{"oauth_pkce"}, OAuthMode: "qwen_portal", CredentialProvider: "qwen-oauth",
+			ProbePath: "/models", Automated: true, CostHint: "included_subscription", UsagePool: "qwen_portal", RequiresExplicitUsageOptIn: true,
+		},
+		Preset{
+			ID: PresetMiniMaxOAuth, DisplayName: "MiniMax Portal (OAuth)",
+			Description: "MiniMax subscription access using the portal OAuth flow.",
+			AccessMode: "oauth_subscription", Transport: "anthropic", DefaultEndpoint: "https://api.minimax.io/anthropic", EndpointEditable: false,
+			AllowedHostSuffixes: []string{"api.minimax.io"}, AuthType: "oauth_external", AuthMethods: []string{"oauth_device_code","oauth_pkce"}, OAuthMode: "minimax_portal", CredentialProvider: "minimax-oauth",
+			Automated: true, CostHint: "included_subscription", UsagePool: "minimax_portal", RequiresExplicitUsageOptIn: true,
+		},
+		Preset{
+			ID: PresetXAIOAuth, DisplayName: "xAI Grok (OAuth)",
+			Description: "SuperGrok / X Premium+ OAuth route, separate from xAI API-key billing.",
+			AccessMode: "oauth_subscription", Transport: "openai-compatible", DefaultEndpoint: "https://api.x.ai/v1", EndpointEditable: false,
+			AllowedHostSuffixes: []string{"api.x.ai"}, AuthType: "oauth_external", AuthMethods: []string{"oauth_device_code"}, OAuthMode: "xai_device_code", CredentialProvider: "xai-oauth",
+			ProbePath: "/models", Automated: true, CostHint: "included_subscription", UsagePool: "xai_subscription", RequiresExplicitUsageOptIn: true,
+		},
+	)
 
 	for _, p := range []Preset{
 		openAICompatible(PresetXAI, "xAI", "https://api.x.ai/v1", "xai", "api.x.ai"),

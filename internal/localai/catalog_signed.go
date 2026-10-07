@@ -340,11 +340,25 @@ func (s *CatalogService) ModelSpecifications(ctx context.Context) ([]ModelSpec, 
 	if err != nil {
 		return nil, err
 	}
-	if len(cat.ModelSpecs) == 0 {
-		return nil, errors.New("active catalog does not contain model specifications")
-	}
 	out := make([]ModelSpec, len(cat.ModelSpecs))
 	copy(out, cat.ModelSpecs)
+	adopted, err := s.adoptedModelSpecs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	for _, x := range out {
+		seen[strings.ToLower(x.ModelRef)] = true
+	}
+	for _, x := range adopted {
+		if !seen[strings.ToLower(x.ModelRef)] {
+			out = append(out, x)
+			seen[strings.ToLower(x.ModelRef)] = true
+		}
+	}
+	if len(out) == 0 {
+		return nil, errors.New("active catalog does not contain model specifications")
+	}
 	return out, nil
 }
 
@@ -411,6 +425,13 @@ func (s *CatalogService) ResolvePlanWithCatalog(ctx context.Context, catalogID s
 			}
 			model = ModelArtifact{ModelRef: m.ModelRef, SourceURL: m.SourceURL, ExpectedSHA256: m.SHA256, Filename: m.Filename, SizeBytes: m.SizeBytes}
 			break
+		}
+	}
+	if model.ModelRef == "" {
+		if adopted, ok, err := s.adoptedArtifact(ctx, plan.ModelRef, plan.Quantization, plan.RuntimeName, plan.SourceRef); err != nil {
+			return catalogRec, runtime, model, err
+		} else if ok {
+			model = adopted
 		}
 	}
 	if model.ModelRef == "" {

@@ -438,6 +438,7 @@ code,kbd { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
   .approval-profile-grid { grid-template-columns:1fr; }
   .palette { width:calc(100vw - 16px); max-height:76dvh; border-radius:16px; }
   .overlay { align-items:flex-end; padding:0 8px calc(var(--mobile-nav) + env(safe-area-inset-bottom) + 8px); }
+  .modal-backdrop { align-items:center; padding:12px 8px calc(var(--mobile-nav) + env(safe-area-inset-bottom) + 12px); }
   .theme-grid { grid-template-columns:1fr 1fr; }
   .tour-overlay { padding:0; }
   .tour-card { width:min(430px,calc(100vw - 20px)); border-radius:18px; padding:18px; }
@@ -490,11 +491,11 @@ code,kbd { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
 .warn { color:var(--warn); }
 .good { color:var(--good); }
 .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-.qa-modal { width:min(680px,calc(100vw - 28px)); max-height:82dvh; overflow:auto; border:1px solid var(--border); background:var(--panel); border-radius:16px; box-shadow:0 28px 90px rgba(0,0,0,.42); padding:16px; }
+.qa-modal { width:min(680px,calc(100vw - 28px)); max-height:82dvh; overflow:auto; border:2px solid color-mix(in srgb,var(--accent) 58%,var(--border)); background:var(--panel); border-radius:16px; box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 28%,transparent),0 0 28px color-mix(in srgb,var(--accent) 22%,transparent),0 28px 90px rgba(0,0,0,.58); padding:16px; }
 .qa-modal-body { display:grid; gap:12px; }
 .qa-modal-footer { margin-top:14px; display:flex; justify-content:flex-end; gap:8px; }
 .qa-form { display:grid; gap:13px; }
-.modal-backdrop { z-index:1400; align-items:flex-start; padding-top:8vh; pointer-events:auto; }
+.modal-backdrop { z-index:1400; align-items:center; justify-content:center; padding:24px; pointer-events:auto; }
 .toast { position:fixed; z-index:1500; right:20px; bottom:22px; max-width:460px; border:1px solid var(--border); border-left:3px solid var(--good); background:var(--panel); color:var(--text); box-shadow:var(--shadow); border-radius:10px; padding:12px 14px; }
 .toast.bad { border-left-color:var(--bad); }
 .muted-cell { padding:28px !important; text-align:center; color:var(--muted); }

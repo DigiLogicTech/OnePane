@@ -462,7 +462,7 @@ renderProjects=async function(){
   qa4BindWorkspaceEdit(project,workspace);qa6BindProjectComponents(project,workspace);qa7BindWorkspaceControls(project,workspace,$("#qa4WorkspaceGrid")||document);qa6StartEventStream();renderNav();
 };
 
-/* Models feature is loaded from /models-page.js after this canonical runtime. */
+/* Models feature is defined by /models-page.js before this canonical runtime boots. */
 
 /* Nodes */
 function a34NodeDisplayName(n){

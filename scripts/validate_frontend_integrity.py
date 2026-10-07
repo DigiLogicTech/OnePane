@@ -13,7 +13,7 @@ groups={
  "routing":["/v1/scheduler/candidates?workspace_id=","onepane_routing","gateway:omniroute","fallback_gateway_targets"],
  "sandbox policy":["mode:'external'","mode:'deny_by_default'","no_new_privileges:true"],
  "local model install":["/v1/local-ai/install-jobs","Download & Install","model.installable","a31StartDownloadMonitor","a31RescanInstalledModels"],
- "model discovery":["Hugging Face","Hugging Bay","llmfit","Verify & install","/v1/local-ai/discovery"],
+ "model discovery":["Hugging Face","Hugging Bay","llmfit","Verify artifact","Find compatible GGUF","Manifest verification required","/v1/local-ai/discovery"],
  "compute placement":["a31OpenCompute","Require GPU","Require CPU","Hybrid / CPU + GPU"],
  "inspector":["qa4InspectorChatForm","qa4RemoveInspectorTab","qa4MoveInspectorTab","qa4SendInspectorChat"],
  "assistant/orchestrator":["a31RenderControlChat","/v1/assistant/threads/","/orchestrator/turns"],

@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 ROOT=Path(__file__).resolve().parents[1]
 read=lambda p:(ROOT/p).read_text(encoding="utf-8")
-app=read("internal/webui/static/app-foundation.js")+"\n"+read("internal/webui/static/app.js"); css=read("internal/webui/static/style.css"); setup=read("packaging/windows/setup/main.go")
+app=read("internal/webui/static/app-foundation.js")+"\n"+read("internal/webui/static/app.js")+"\n"+read("internal/webui/static/models-page.js"); css=read("internal/webui/static/style.css"); setup=read("packaging/windows/setup/main.go")
 desktop=read("packaging/windows/desktop/main.go"); api=read("internal/api/server.go"); local=read("internal/localai/managed_deployments.go")
 components=read("internal/localai/components.go")+read("internal/localai/components_omniroute.go")
 catalog=read("internal/localai/catalog_bundled.go"); compute=read("internal/localai/compute_policy.go")

@@ -4,7 +4,7 @@ import sys
 
 ROOT=Path(__file__).resolve().parents[1]
 read=lambda p:(ROOT/p).read_text(encoding="utf-8")
-app=read("internal/webui/static/app-foundation.js")+"\n"+read("internal/webui/static/tasks-page.js")+"\n"+read("internal/webui/static/app.js")+"\n"+read("internal/webui/static/project-workspace-page.js")
+app=read("internal/webui/static/app-foundation.js")+"\n"+read("internal/webui/static/tasks-page.js")+"\n"+read("internal/webui/static/app.js")+"\n"+read("internal/webui/static/models-page.js")+"\n"+read("internal/webui/static/project-workspace-page.js")
 smoke=read("internal/webui/static/release-smoke.js")
 html=read("internal/webui/static/index.html")
 css=read("internal/webui/static/style.css")

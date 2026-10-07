@@ -84,3 +84,28 @@ async function a36BindLLMFitCard(){
 }
 const a36RenderLocalBase=a31RenderLocalModels;
 a31RenderLocalModels=async function(){await a36RenderLocalBase();await a36BindLLMFitCard()};
+
+const a36SettingsBase=renderSettings;
+renderSettings=async function(){
+ await a36SettingsBase();
+ if(a31SettingsView!=="updates")return;
+ const host=$("#a31SettingsContent");if(!host)return;
+ const section=document.createElement("section");
+ section.className="settings-section storage-settings-panel";
+ section.innerHTML=`<h2>Storage and cleanup</h2><p class="page-subtitle">Inspect models, managed runtimes, caches and downloads across the configured OnePane storage locations. Cleanup never deletes Project data, model weights, resumable downloads or shared Windows temporary folders.</p><div id="a36StorageBody">Scanning OnePane storage…</div><div class="toolbar"><button class="btn" id="a36RefreshStorage">Refresh usage</button><button class="btn danger" id="a36CleanupStorage">Clean up safe temporary files</button></div>`;
+ host.appendChild(section);
+ const load=async()=>{
+  try{
+   const report=await apiRequest(`/v1/local-ai/storage?workspace_id=${encodeURIComponent(onepaneWorkspace)}`);
+   if(!section.isConnected)return;
+   $("#a36StorageBody").innerHTML=`<div class="storage-usage-table">${a31Array(report.areas).map(a=>`<div class="storage-usage-row"><strong>${escapeHtml(a.name)}</strong><span>${bytesQA(a.bytes||0)}</span><div class="page-subtitle">${escapeHtml(a.path||"")}</div></div>`).join("")}</div><p class="page-subtitle">${escapeHtml(report.warning||"")}</p>`;
+  }catch(ex){if(section.isConnected)$("#a36StorageBody").innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`}
+ };
+ $("#a36RefreshStorage").onclick=load;
+ $("#a36CleanupStorage").onclick=()=>a31ConfirmAction("Clean up OnePane storage?","Remove orphaned OnePane-owned staging and completed component caches? Projects, model weights, active/resumable downloads and Windows SYSTEM caches are preserved.","Clean up",async()=>{
+  const res=await apiRequest("/v1/local-ai/storage/cleanup",{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace})});
+  notice(`Reclaimed ${bytesQA(res.reclaimed_bytes||0)} from OnePane-owned temporary files.`);
+  await load();
+ });
+ load();
+};

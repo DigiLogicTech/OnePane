@@ -1088,3 +1088,11 @@ html[data-theme="light"] .models-discover-controls input,html[data-theme="light"
 .spec-technical-details { border:1px solid var(--border); border-radius:10px; padding:12px; }
 .spec-technical-details summary { cursor:pointer; color:var(--accent); font-weight:600; }
 .spec-technical-details .spec-sheet-json { max-width:100%; overflow:auto; max-height:45vh; white-space:pre-wrap; overflow-wrap:anywhere; }
+
+/* Managed storage reporting */
+.storage-settings-panel { margin-top:16px; }
+.storage-usage-table { border:1px solid var(--border);border-radius:10px;overflow:hidden;margin:12px 0; }
+.storage-usage-row { display:grid;grid-template-columns:minmax(90px,1fr) auto;gap:2px 12px;padding:11px 13px;border-bottom:1px solid var(--border);align-items:center;background:var(--panel-2); }
+.storage-usage-row:last-child { border-bottom:0; }
+.storage-usage-row .page-subtitle { grid-column:1/-1;overflow-wrap:anywhere;font-size:11px; }
+.models-discover-controls select#a31DiscoverSort { min-width:140px; }

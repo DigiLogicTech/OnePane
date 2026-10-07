@@ -207,7 +207,7 @@ func runBackend() error {
 		return err
 	}
 	logPath := filepath.Join(logDir, "onepane.log")
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logFile, err := openBoundedLogWriter(logPath)
 	if err != nil {
 		return err
 	}

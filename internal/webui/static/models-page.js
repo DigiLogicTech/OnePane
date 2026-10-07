@@ -34,9 +34,16 @@ function a31ComponentButtons(id,c){
   const running=st==="running";
   return `<button class="btn" data-a31-component="${id}:${running?'disable':'enable'}">${running?'Stop':'Start'}</button><button class="btn" data-a31-component="${id}:update">Update</button><button class="btn danger" data-a31-component="${id}:remove">Uninstall</button><button class="btn" data-a31-component-settings="${id}">Settings</button>`
 }
-function a31OpenComponentSettings(id,c){
+async function a31OpenComponentSettings(id,c){
   const installed=c?.installed_version||"Not installed",available=c?.available_version||"Unknown",state=titleCase(String(c?.state||"not installed").replaceAll("_"," "));
-  openModal(`${a31ComponentName(id)} settings`,`<div class="widget-body managed-runtime-settings"><dl class="definition-grid"><dt>Installed version</dt><dd>${escapeHtml(installed)}</dd><dt>Available version</dt><dd>${escapeHtml(available)}</dd><dt>State</dt><dd>${escapeHtml(state)}</dd><dt>Runtime scope</dt><dd>This OnePane node</dd></dl>${c?.last_error?`<div class="error">${escapeHtml(c.last_error)}</div>`:""}<div class="toolbar">${c?.installed?`<button class="btn" data-a31-settings-repair="${id}">Repair runtime</button>`:""}${id==="colibri"&&c?.installed?'<button class="btn" id="a31SettingsRegisterColibri">Register model folder</button>':""}${id==="omniroute"?'<button class="btn" id="a31SettingsOmniCredentials">Manage credentials</button>':""}</div></div>`);
+  let extra="";
+  if(id==="llamacpp"){
+    try{
+      const rows=a31Array(await apiRequest("/v1/local-ai/llama-runtimes"));
+      extra=`<div class="runtime-backend-list">${rows.map(x=>`<div class="runtime-backend-row"><div><strong>${escapeHtml(String(x.backend||"").toUpperCase())}</strong><div class="list-meta">${escapeHtml(x.reason||"Optional backend")}${x.driver_version?` · NVIDIA driver ${escapeHtml(x.driver_version)}`:""}</div></div><span class="pill ${x.installed?'good':''}">${x.installed?'Installed':x.recommended?'Recommended':'Optional'}</span></div>`).join("")}</div>`
+    }catch(ex){extra=`<div class="page-subtitle">Detect hardware to calculate the recommended llama.cpp backend stack.</div>`}
+  }
+  openModal(`${a31ComponentName(id)} settings`,`<div class="widget-body managed-runtime-settings"><dl class="definition-grid"><dt>Installed version</dt><dd>${escapeHtml(installed)}</dd><dt>Available version</dt><dd>${escapeHtml(available)}</dd><dt>State</dt><dd>${escapeHtml(state)}</dd><dt>Runtime scope</dt><dd>This OnePane node</dd></dl>${extra}${c?.last_error?`<div class="error">${escapeHtml(c.last_error)}</div>`:""}<div class="toolbar">${c?.installed?`<button class="btn" data-a31-settings-repair="${id}">Repair runtime</button>`:""}${id==="colibri"&&c?.installed?'<button class="btn" id="a31SettingsRegisterColibri">Register model folder</button>':""}${id==="omniroute"?'<button class="btn" id="a31SettingsOmniCredentials">Manage credentials</button>':""}</div></div>`);
   $("[data-a31-settings-repair]")?.addEventListener("click",()=>{closeModal();a31ComponentAction(id,"repair",`#a31-${id}-status`)});
   $("#a31SettingsRegisterColibri")?.addEventListener("click",()=>{closeModal();qa5RegisterColibri()});
   $("#a31SettingsOmniCredentials")?.addEventListener("click",()=>{closeModal();a31CloudConsumerFilter="omniroute";a31SetModelView("cloud")});

@@ -1057,3 +1057,14 @@ html[data-theme="light"] .models-discover-controls input,html[data-theme="light"
 @media(max-width:1200px){.local-runtime-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.hardware-card{grid-column:1/-1}}
 @media(max-width:900px){.local-runtime-grid{grid-template-columns:1fr}.hardware-card{grid-column:auto}.models-discover-controls{grid-template-columns:1fr}.models-header-action{margin-left:auto}}
 @media(max-width:700px){.models-header-action{margin-left:0}}
+
+
+/* Background model install status */
+.model-download-button{display:inline-flex;align-items:center;gap:6px}
+.model-download-button.hidden,.model-download-mobile.hidden{display:none!important}
+.model-download-button .badge,.model-download-mobile .badge{position:static;min-width:18px;height:18px;padding:0 5px;border-radius:999px;display:inline-grid;place-items:center;background:var(--accent-soft);color:var(--text);font-size:10px}
+.model-download-list{display:grid;gap:10px}
+.model-download-row{display:grid;gap:7px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--panel-2)}
+.model-download-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.model-download-progress{height:7px;border:1px solid var(--border);border-radius:999px;overflow:hidden;background:var(--panel)}
+.model-download-progress>span{display:block;height:100%;background:var(--accent)}

@@ -142,12 +142,12 @@
     check(Number(ws.widgets.find(w=>w.id==="pw-release-settings")?.y)===Number(expectedSettings.y),"Workspace dragged geometry survives route reload");
     check(noOverlap(ws.widgets),"Workspace persisted geometry remains collision free");
 
-    const settingsButton=check(document.querySelector("#qa4WorkspaceSettings"),"Workspace settings action");const patchesBeforeInspector=projectPatchCount;settingsButton.click();
+    const settingsButton=check(document.querySelector("#qa4WorkspaceSettings"),"Workspace settings action");settingsButton.click();
     await waitFor(()=>document.querySelector('.inspector-tab-draggable [data-qa6-inspector-tab="follow"]'),"draggable Inspector tabs",30000);
     check(!document.querySelector("[data-qa6-tab-move]")&&!document.querySelector("[data-qa6-tab-remove]"),"Inspector tab arrow and close chrome removed");
-    const tabBefore=clone(qa6InspectorConfig(a31CurrentWorkspace()).tabs),followTab=check(document.querySelector('.inspector-tab-draggable [data-qa6-inspector-tab="follow"]')?.closest(".inspector-tab-draggable"),"Inspector Follow drag target"),tabWidth=followTab.getBoundingClientRect().width;
+    const patchesBeforeInspectorDrag=projectPatchCount,tabBefore=clone(qa6InspectorConfig(a31CurrentWorkspace()).tabs),followTab=check(document.querySelector('.inspector-tab-draggable [data-qa6-inspector-tab="follow"]')?.closest(".inspector-tab-draggable"),"Inspector Follow drag target"),tabWidth=followTab.getBoundingClientRect().width;
     await gesture(followTab,tabWidth+12,0);
-    await waitFor(()=>projectPatchCount>patchesBeforeInspector&&qa6InspectorConfig(a31CurrentWorkspace()).tabs[0]!==tabBefore[0],"Inspector tab drag persists order",30000);
+    await waitFor(()=>projectPatchCount>patchesBeforeInspectorDrag&&qa6InspectorConfig(a31CurrentWorkspace()).tabs[0]!==tabBefore[0],"Inspector tab drag persists order",30000);
     check(!document.querySelector(".qa4-inspector-tab-tools"),"Inspector draggable tabs reclaim tool space");
 
     const disposable=check(document.querySelector('[data-a35-workspace="pws-release-2"]'),"second workspace available for deletion");disposable.click();

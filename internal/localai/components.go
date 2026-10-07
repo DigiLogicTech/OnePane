@@ -89,6 +89,8 @@ func componentDefinition(id string) (ManagedComponent, bool) {
 		return ManagedComponent{ID:"colibri",DisplayName:"Colibri Large Model",AvailableVersion:"1.12.1",Sandbox:"managed_component",GPU:true,ModelPool:true,Internet:true,TrustedNodes:true,Inbound:false},true
 	case "omniroute":
 		return ManagedComponent{ID:"omniroute",DisplayName:"OmniRoute",AvailableVersion:"3.8.51",Sandbox:"managed_component",GPU:false,ModelPool:false,Internet:true,TrustedNodes:false,Inbound:false},true
+	case "llamacpp":
+		return ManagedComponent{ID:"llamacpp",DisplayName:"llama.cpp",AvailableVersion:"b11430",Sandbox:"managed_component",GPU:true,ModelPool:true,Internet:true,TrustedNodes:true,Inbound:false},true
 	default:
 		return ManagedComponent{}, false
 	}
@@ -122,10 +124,10 @@ func scanComponentJob(row interface{Scan(...any) error})(ComponentJob,error){
 
 func (s *Service) ManagedComponents(ctx context.Context) (map[string]ManagedComponent,error) {
 	now:=s.clock.UnixMilli()
-	for _, d := range []struct{id,version string}{{"colibri","1.12.1"},{"omniroute","3.8.51"}} {
+	for _, d := range []struct{id,version string}{{"colibri","1.12.1"},{"omniroute","3.8.51"},{"llamacpp","b11430"}} {
 		_,_ = s.db.ExecContext(ctx,`INSERT OR IGNORE INTO managed_component_states(component_id,available_version,desired_state,observed_state,metadata_json,revision,updated_at) VALUES(?,?, 'disabled','not_installed','{}',1,?)`,d.id,d.version,now)
 	}
-	rows,err:=s.db.QueryContext(ctx,`SELECT component_id,installed_version,COALESCE(available_version,''),desired_state,observed_state,last_error,active_job_id,metadata_json,revision,updated_at FROM managed_component_states WHERE component_id IN ('colibri','omniroute') ORDER BY component_id`)
+	rows,err:=s.db.QueryContext(ctx,`SELECT component_id,installed_version,COALESCE(available_version,''),desired_state,observed_state,last_error,active_job_id,metadata_json,revision,updated_at FROM managed_component_states WHERE component_id IN ('colibri','omniroute','llamacpp') ORDER BY component_id`)
 	if err!=nil{return nil,err}
 	defer rows.Close()
 	out:=map[string]ManagedComponent{}

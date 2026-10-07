@@ -29,7 +29,8 @@ async function a35CommitWorkspaceEdit(project,workspace){
   const widgets=a35Clone(a35WorkspaceEditSession.widgets||[]);
   a31NormalizeLayout(widgets);
   a31ResolveLayout(widgets,null);
-  if(a31OperationsLayoutBroken?.(widgets)){
+  const invalid=widgets.some(w=>![w.x,w.y,w.width,w.height].every(v=>Number.isFinite(Number(v)))||Number(w.width)<1||Number(w.height)<1)||widgets.some((a,i)=>widgets.slice(i+1).some(b=>a31Overlap(a,b)));
+  if(invalid){
     notice("Workspace layout contains invalid geometry.","bad");
     return;
   }
@@ -121,7 +122,7 @@ function a35RenderWorkspaceGrid(project,workspace){
   root.innerHTML=items.map(w=>a35WorkspaceWidget(w,project,workspace)).join("");
   a31ApplyLayout(root,items,"data-pw-widget");
   a35BindWorkspaceEdit(project,workspace);
-  qa6BindProjectComponents(project,workspace);
+  if(!a35WorkspaceSessionMatches(project,workspace))qa6BindProjectComponents(project,workspace);
   qa7BindWorkspaceControls(project,workspace,root);
   qa4BindProjectNotes(root);
 }
@@ -140,6 +141,19 @@ function a35BindWorkspaceEdit(project,workspace){
   });
 }
 qa4BindWorkspaceEdit=a35BindWorkspaceEdit;
+
+qa6ToggleMaximize=async function(project,workspace,id){
+  workspace.maximized_widget_id=workspace.maximized_widget_id===id?"":id;
+  await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));
+  if(currentTab()?.route==="workspaces")await renderWorkspaces();else await renderProjects();
+};
+qa6PromoteInspectorComponent=async function(project,workspace,type){
+  const m=qa6Meta(type),size=qa6SizeFor(type);
+  workspace.widgets=workspace.widgets||[];
+  workspace.widgets.push({id:`pw-${type}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,5)}`,type,title:m.title,col:size.col,row:size.row,config:type==="follow"?{task_id:"auto"}:{}});
+  await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));
+  if(currentTab()?.route==="workspaces")await renderWorkspaces();else await renderProjects();
+};
 
 qa4AddWorkspaceComponent=function(project,workspace){
   if(!a35WorkspaceSessionMatches(project,workspace))return notice("Enter Edit layout before adding components.","bad");

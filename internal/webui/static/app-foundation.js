@@ -905,6 +905,9 @@ function openPluginCredential(p){
 async function renderSecrets(){
   $('#viewHost').innerHTML=`<section class="page">${pageHeader('Secrets','Preconfigured provider credentials stored in the canonical OnePane Vault','<button class="btn" id="refreshSecrets">Refresh</button>')}<div class="secret-toolbar"><input id="secretFilter" placeholder="Filter providers…"><select id="secretScope"><option value="all">All scopes</option><option value="provider">Direct provider</option><option value="omniroute">OmniRoute</option></select><select id="secretStatus"><option value="all">All statuses</option><option value="stored">Stored</option><option value="missing">Not configured</option></select></div><div id="secretCatalogue" class="secret-catalogue"><div class="widget-body">Loading Vault catalogue…</div></div><div class="page-subtitle" style="margin-top:10px">Stored secret values are write-only. Show/Hide applies only to text you are currently entering; OnePane never reveals a stored credential.</div></section>`;
   $('#refreshSecrets').onclick=renderSecrets;
+  const requestedScope=sessionStorage.getItem('onepane:secrets-scope')||'all';
+  if(['all','provider','omniroute'].includes(requestedScope))$('#secretScope').value=requestedScope;
+  sessionStorage.removeItem('onepane:secrets-scope');
   try{
     const [presets,storedRaw]=await Promise.all([providerPresetsQA(),apiRequest('/v1/vault/provider-credentials?workspace_id='+encodeURIComponent(onepaneWorkspace)).catch(()=>[])]);
     const stored=Array.isArray(storedRaw)?storedRaw:[];
@@ -1490,7 +1493,7 @@ async function qa5InspectModel(dep){let spec={};try{spec=await apiRequest(`/v1/m
 async function qa5AgentCheck(dep){notice(`Starting Agent Check for ${dep.display_name||dep.model_ref}…`);try{const sess=await apiRequest(`/v1/model-deployments/${encodeURIComponent(dep.deployment_id)}/testbed/sessions`,{method:'POST',body:JSON.stringify({notes:'OnePane alpha.3 manual Agent Check'})});const sid=sess.id;const probes=[{prompt:'Reply with exactly: ONEPANE_OK',max_tokens:32},{prompt:'Return a compact JSON object with keys status and number, where status is ok and number is 7.',max_tokens:96},{prompt:'Call the synthetic onepane_test_probe tool with value agent-check if tools are supported; otherwise state that tool calling is unavailable.',synthetic_tool_probe:true,max_tokens:128}];for(const probe of probes)await apiRequest(`/v1/model-testbed/${encodeURIComponent(sid)}/turns`,{method:'POST',body:JSON.stringify(probe)});await apiRequest(`/v1/model-testbed/${encodeURIComponent(sid)}/complete`,{method:'POST',body:'{}'});notice('Agent Check completed; spec sheet updated.');await qa5LoadManagedDeployments();const fresh=qa5ManagedDeployments.find(x=>x.deployment_id===dep.deployment_id)||dep;await qa5InspectModel(fresh);if(currentTab()?.route==='models')renderModels();}catch(ex){notice(`Agent Check failed: ${ex.message}`,'bad');}}
 async function qa5RegisterColibri(){let path='';try{const out=await apiRequest('/desktop/folder-picker',{method:'POST',body:JSON.stringify({title:'Select a Colibri model folder inside the OnePane model pool'})});path=out.path||'';}catch{}if(!path){path=prompt('Enter the absolute Colibri model folder path inside your OnePane model pool:','')||'';}if(!path)return;const ref=(prompt('Model reference/name:',path.split(/[\\/]/).filter(Boolean).pop()||'colibri-model')||'').trim();if(!ref)return;try{if(!localProfileQA)localProfileQA=await apiRequest('/v1/local-ai/detect',{method:'POST',body:JSON.stringify({workspace_id:onepaneWorkspace})});const dep=await apiRequest('/v1/local-ai/colibri/register',{method:'POST',body:JSON.stringify({workspace_id:onepaneWorkspace,model_path:path,model_ref:ref,display_name:ref,context_tokens:8192})});notice('Colibri model registered in qualifying state. Run Agent Check before admission.');await qa5LoadManagedDeployments();await qa5InspectModel(qa5ManagedDeployments.find(x=>x.deployment_id===dep.id)||{deployment_id:dep.id,model_ref:ref,display_name:ref,runtime_name:'colibri'});renderModels();}catch(ex){notice(ex.message,'bad');}}
 async function qa5ComponentStatus(){
-  const out=await apiRequest('/v1/local-ai/components?workspace_id='+encodeURIComponent(onepaneWorkspace));
+  const out=await apiRequest('/v1/local-ai/components');
   if(Array.isArray(out))return Object.fromEntries(out.filter(Boolean).map(x=>[x.id,x]));
   return out&&typeof out==='object'?out:{};
 }
@@ -1613,7 +1616,11 @@ function qa7WorkspaceDefaults(){
   const d=qa5Prefs().workspace_defaults||{},external=!!d.external_network;
   return {sandbox:{network:external,internet:external,lan:false,browser:!!d.browser,computer:!!d.computer,host_files:'workspace-only',secrets:'selected'},routing:{enabled:d.model_routing!==false},remote:{enabled:d.remote_models!==false,access_mode:'brokered'}};
 }
-function qa7NormalizeRole(x={},fallbackAgent='onepane-default'){return {model:x.model||'auto',agent:x.agent||fallbackAgent,fallback_model:x.fallback_model||'auto',fallback_agent:x.fallback_agent||'',count:Number(x.count||2)};}
+function qa7NormalizeRole(x={},fallbackAgent='onepane-default'){
+  const configured=Array.isArray(x.fallback_models)?x.fallback_models.map(v=>String(v||'').trim()).filter(v=>v&&v!=='auto'):[],legacy=String(x.fallback_model||'').trim();
+  const fallbackModels=[...new Set([...configured,...(legacy&&legacy!=='auto'?[legacy]:[])])];
+  return {model:x.model||'auto',agent:x.agent||fallbackAgent,fallback_model:legacy||fallbackModels[0]||'auto',fallback_models:fallbackModels,fallback_agent:x.fallback_agent||'',count:Number(x.count||2)};
+}
 function qa7NormalizeWorkspace(project,workspace){
   if(!workspace||typeof workspace!=='object')return workspace;
   const defaults=qa7WorkspaceDefaults(),legacy=qa4ProjectUI(project).sandbox||{};
@@ -1645,8 +1652,8 @@ function qa7WorkspaceSandbox(project,workspace){return qa7NormalizeWorkspace(pro
 qa4ProjectSandbox=function(project,workspace){const ws=workspace||qa4ActiveWorkspace?.();return ws?qa7WorkspaceSandbox(project,ws):{...qa7WorkspaceDefaults().sandbox,...(qa4ProjectUI(project).sandbox||{})};};
 
 function qa7RouteFallback(workspace,role='supervisor'){
-  const r=workspace?.orchestration?.[role]||{},ids=[],profiles=[];
-  for(const raw of [r.fallback_model,r.fallback_agent]){const v=String(raw||'').trim();if(v.startsWith('candidate:'))ids.push(v.slice('candidate:'.length));else if(v&&v!=='auto'&&!profiles.includes(v))profiles.push(v);}
+  const r=workspace?.orchestration?.[role]||{},ids=[],profiles=[],modelFallbacks=Array.isArray(r.fallback_models)?r.fallback_models:[];
+  for(const raw of [...modelFallbacks,r.fallback_model,r.fallback_agent]){const v=String(raw||'').trim();if(v.startsWith('candidate:'))ids.push(v.slice('candidate:'.length));else if(v&&v!=='auto'&&!profiles.includes(v))profiles.push(v);}
   return {candidate_ids:[...new Set(ids)],agent_profiles:profiles};
 }
 function qa7WorkspaceAccess(workspace){
@@ -1692,7 +1699,7 @@ function qa7FindComponent(workspace,id){const widget=(workspace.widgets||[]).fin
 async function qa7SaveWorkspaceSettings(project,workspace,root){
   workspace.name=$('[data-qa7-workspace-name]',root)?.value.trim()||workspace.name;workspace.routing={enabled:!!$('[data-qa7-routing]',root)?.checked};workspace.remote={enabled:!!$('[data-qa7-remote]',root)?.checked,access_mode:'brokered'};workspace.sandbox=workspace.sandbox||qa7WorkspaceDefaults().sandbox;
   $$('[data-qa7-sandbox]',root).forEach(x=>workspace.sandbox[x.dataset.qa7Sandbox]=x.checked);workspace.sandbox.network=workspace.sandbox.internet||workspace.sandbox.lan;workspace.sandbox.host_files=$('[data-qa7-host-files]',root)?.value||'workspace-only';workspace.sandbox.secrets=$('[data-qa7-secrets]',root)?.value||'selected';workspace.orchestration=workspace.orchestration||{};workspace.orchestration.mode=$('[data-qa7-default-mode]',root)?.value||'supervisor';
-  for(const key of ['supervisor','workers','team','council']){const role=workspace.orchestration[key]=workspace.orchestration[key]||{};role.model=$(`[data-qa7-role-model="${key}"]`,root)?.value||'auto';role.agent=$(`[data-qa7-role-agent="${key}"]`,root)?.value||(key==='supervisor'?'agent.md':'onepane-default');role.fallback_model=$(`[data-qa7-role-fallback-model="${key}"]`,root)?.value||'auto';role.fallback_agent=$(`[data-qa7-role-fallback-agent="${key}"]`,root)?.value||'';}
+  for(const key of ['supervisor','workers','team','council']){const role=workspace.orchestration[key]=workspace.orchestration[key]||{};role.model=$(`[data-qa7-role-model="${key}"]`,root)?.value||'auto';role.agent=$(`[data-qa7-role-agent="${key}"]`,root)?.value||(key==='supervisor'?'agent.md':'onepane-default');role.fallback_model=$(`[data-qa7-role-fallback-model="${key}"]`,root)?.value||'auto';role.fallback_models=[...new Set([role.fallback_model,...(Array.isArray(role.fallback_models)?role.fallback_models:[])].filter(v=>v&&v!=='auto'))];role.fallback_agent=$(`[data-qa7-role-fallback-agent="${key}"]`,root)?.value||'';}
   workspace.orchestration.workers.count=Number($('[data-qa7-worker-count]',root)?.value||2);const status=$('[data-qa7-settings-status]',root);
   try{const updated=await qa4SaveProjectWorkspaces(project,qa4Workspaces(project));qa4Inspector.data.project=updated;if(status)status.innerHTML='<span class="good">Saved for this workspace only.</span>';notice('Workspace settings saved.');}catch(ex){if(status)status.innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`;}
 }

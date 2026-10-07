@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,8 @@ type discoveredModel struct {
 	Downloads int64 `json:"downloads,omitempty"`
 	Likes int64 `json:"likes,omitempty"`
 	SizeBytes int64 `json:"size_bytes,omitempty"`
+	EstimatedTPS float64 `json:"estimated_tps,omitempty"`
+	MemoryRequiredGB float64 `json:"memory_required_gb,omitempty"`
 	Seeds int64 `json:"seeds,omitempty"`
 	License string `json:"license,omitempty"`
 	FitLevel string `json:"fit_level,omitempty"`
@@ -104,9 +107,9 @@ func nextHFCursor(header http.Header) string {
 }
 // The Hub returns an opaque next cursor in its Link header. Never construct one
 // from repo IDs or assume that one response covers the full Hub inventory.
-func discoverHuggingFacePage(ctx context.Context,q string,limit int,cursor string)([]discoveredModel,string,error){
+func discoverHuggingFacePage(ctx context.Context,q string,limit int,cursor,order string)([]discoveredModel,string,error){
     u,_:=url.Parse("https://huggingface.co/api/models")
-    v:=u.Query();v.Set("sort","downloads");v.Set("direction","-1");v.Set("limit",strconv.Itoa(limit))
+    v:=u.Query();v.Set("sort",order);v.Set("direction","-1");v.Set("limit",strconv.Itoa(limit))
     if q!=""{v.Set("search",q)}
     if cursor!=""{v.Set("cursor",cursor)}
     u.RawQuery=v.Encode()
@@ -124,7 +127,7 @@ func discoverHuggingFacePage(ctx context.Context,q string,limit int,cursor strin
     return out,nextHFCursor(header),nil
 }
 func discoverHuggingFace(ctx context.Context,q string,limit int)([]discoveredModel,error){
-    rows,_,err:=discoverHuggingFacePage(ctx,q,limit,"");return rows,err
+    rows,_,err:=discoverHuggingFacePage(ctx,q,limit,"","downloads");return rows,err
 }
 // Hugging Bay documents a maximum limit of 500 but no pagination parameter.
 // Fetch that complete supported window once, then paginate locally. Do not
@@ -160,12 +163,15 @@ func (s *Server) discoverLLMFit(ctx context.Context,q string,limit int)([]discov
 }
 
 
-func (s *Server) discoverLLMFitPage(ctx context.Context,q string,limit,offset int)([]discoveredModel,string,error){
+func (s *Server) discoverLLMFitPage(ctx context.Context,q string,limit,offset int,order string)([]discoveredModel,string,error){
     // llmfit does not document an offset parameter. Request its full fit
     // inventory (up to a transparent safety ceiling) and slice locally.
     const maxLLMFitRows=10000
     rows,err:=s.discoverLLMFit(ctx,q,maxLLMFitRows)
     if err!=nil{return nil,"",err}
+    if order=="name"{sort.SliceStable(rows,func(i,j int)bool{return strings.ToLower(rows[i].DisplayName)<strings.ToLower(rows[j].DisplayName)})}
+    if order=="memory"{sort.SliceStable(rows,func(i,j int)bool{return rows[i].MemoryRequiredGB<rows[j].MemoryRequiredGB})}
+    if order=="speed"{sort.SliceStable(rows,func(i,j int)bool{return rows[i].EstimatedTPS>rows[j].EstimatedTPS})}
     if offset>len(rows){offset=len(rows)}
     end:=offset+limit;if end>len(rows){end=len(rows)}
     next:="";if end<len(rows){next=strconv.Itoa(end)}
@@ -201,8 +207,22 @@ func (s *Server) discoverLocalAIModels(w http.ResponseWriter,r *http.Request){
     if len(q)>256{writeError(w,http.StatusBadRequest,"search query too long");return}
     limit,_:=strconv.Atoi(r.URL.Query().Get("limit"))
     if limit<=0{limit=40};if limit>100{limit=100}
+    requestedSort:=strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sort")))
+    if requestedSort==""{requestedSort="popular"}
+    allowed:=map[string]map[string]bool{
+      "all":{"popular":true},
+      "huggingface":{"popular":true,"trending":true,"downloads":true,"likes":true,"newest":true,"updated":true},
+      "huggingbay":{"popular":true,"seeds":true},
+      "llmfit":{"popular":true,"fit":true,"speed":true,"memory":true,"name":true},
+    }
+    if !allowed[source][requestedSort]{writeError(w,http.StatusBadRequest,"sort not supported by this source");return}
     cursor,err:=decodeDiscoveryCursor(r.URL.Query().Get("cursor"))
     if err!=nil{writeError(w,http.StatusBadRequest,err.Error());return}
+    // Bind continuation cursors to the source/query/sort. A cursor from a
+    // different filter cannot accidentally mix results from two inventories.
+    if len(cursor)>0 && (cursor["__source"]!=source||cursor["__query"]!=q||cursor["__sort"]!=requestedSort) {
+       writeError(w,http.StatusBadRequest,"discovery cursor does not match active filters");return
+    }
     names:=[]string{"huggingface","huggingbay","llmfit"}
     if source!="all"{names=[]string{source}}
     type result struct{name string;rows []discoveredModel;next string;err error}
@@ -217,13 +237,15 @@ func (s *Server) discoverLocalAIModels(w http.ResponseWriter,r *http.Request){
             var rows []discoveredModel;var next string;var err error
             switch name{
             case "huggingface":
-                rows,next,err=discoverHuggingFacePage(r.Context(),q,limit,token)
+                hfSort:="downloads"
+                switch requestedSort{case "trending":hfSort="likes7d";case "likes":hfSort="likes";case "newest":hfSort="createdAt";case "updated":hfSort="lastModified"}
+                rows,next,err=discoverHuggingFacePage(r.Context(),q,limit,token,hfSort)
             case "huggingbay":
                 var offset int;offset,err=discoveryOffset(token)
                 if err==nil{rows,next,err=discoverHuggingBayPage(r.Context(),q,limit,offset)}
             case "llmfit":
                 var offset int;offset,err=discoveryOffset(token)
-                if err==nil{rows,next,err=s.discoverLLMFitPage(r.Context(),q,limit,offset)}
+                if err==nil{rows,next,err=s.discoverLLMFitPage(r.Context(),q,limit,offset,requestedSort)}
             }
             ch<-result{name:name,rows:rows,next:next,err:err}
         }(name,token)
@@ -232,6 +254,7 @@ func (s *Server) discoverLocalAIModels(w http.ResponseWriter,r *http.Request){
     out:=discoveryEnvelope{Models:[]discoveredModel{},Errors:map[string]string{},Sources:map[string]discoverySourceStatus{}}
     nextState:=map[string]string{}
     for k,v:=range cursor{nextState[k]=v}
+    nextState["__source"]=source;nextState["__query"]=q;nextState["__sort"]=requestedSort
     for x:=range ch{
         if x.err!=nil{
             out.Errors[x.name]=x.err.Error()

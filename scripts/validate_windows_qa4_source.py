@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 ROOT=Path(__file__).resolve().parents[1]
 read=lambda p:(ROOT/p).read_text(encoding="utf-8")
-ui=read("internal/webui/static/app-foundation.js")+"\n"+read("internal/webui/static/app.js"); css=read("internal/webui/static/style.css"); api=read("internal/api/server.go")
+ui=read("internal/webui/static/app-foundation.js")+"\n"+read("internal/webui/static/app.js")+"\n"+read("internal/webui/static/models-page.js"); css=read("internal/webui/static/style.css"); api=read("internal/api/server.go")
 projects=read("internal/projectworkspace/service.go")+read("internal/projectworkspace/repository_sql.go")
 sched=read("internal/scheduler/types.go")+read("internal/scheduler/service.go")+read("internal/scheduler/catalog.go")
 worker=read("internal/agentworker/service.go")+read("internal/agentworker/execution.go")

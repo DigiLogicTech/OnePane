@@ -4,7 +4,7 @@ import sys
 
 ROOT=Path(__file__).resolve().parents[1]
 read=lambda p:(ROOT/p).read_text(encoding="utf-8")
-app=read("internal/webui/static/app-foundation.js")+"\n"+read("internal/webui/static/tasks-page.js")+"\n"+read("internal/webui/static/app.js")
+app=read("internal/webui/static/app-foundation.js")+"\n"+read("internal/webui/static/tasks-page.js")+"\n"+read("internal/webui/static/app.js")+"\n"+read("internal/webui/static/project-workspace-page.js")
 smoke=read("internal/webui/static/release-smoke.js")
 html=read("internal/webui/static/index.html")
 css=read("internal/webui/static/style.css")
@@ -51,6 +51,8 @@ ck("Single-element selector helper is never used as a collection", not single_se
 
 ck("Primary navigation exposes Nodes and Skills", '["nodes","⬡","Nodes"]' in app and '["skills","✦","Skills"]' in app)
 ck("Projects and Models have nested navigation", "project-nav-tree" in app and "model-nav-tree" in app and 'data-a31-model-view="local"' in app and 'data-a31-model-view="cloud"' in app)
+ck("Nested Project and Workspace leaves open the dedicated workspace route", 'openRoute("workspaces")' in app and 'route==="workspaces"' in app and "Project opens dedicated Workspace route" in smoke and "nested Workspace opens dedicated route" in smoke)
+ck("Inspector optional tabs use drag reordering without permanent arrow close chrome", "inspector-tab-draggable" in app and "a35ReorderInspectorTab" in app and "a35RemoveInspectorTab" in app and "Inspector tab arrow and close chrome removed" in smoke and "Inspector tab drag persists order" in smoke)
 ck("Primary navigation survives sidebar rerenders", 'nav.innerHTML=html' in app and '$("[data-route]",nav).forEach' in app and '$("[data-a34-nav-toggle]",nav).forEach' in app and '$("[data-a31-model-view]",nav).forEach' in app and '$("[data-a31-project-nav]",nav).forEach' in app)
 ck("Nested navigation has a single active leaf", "parentActive=route===r&&!expandable" in app and "projectActive&&!qa4ProjectHub.activeWorkspaceID" in app and "projectActive&&w.id===qa4ProjectHub.activeWorkspaceID" in app)
 ck("Persistent Control Chat shell exists", 'id="controlChatLauncher"' in html and 'id="controlChatPanel"' in html and "a31RenderControlChat" in app)
@@ -62,9 +64,9 @@ ck("Shared layout placement is CSP-safe", "function a31SetGridPlacement" in app 
 ck("Layout normalization rejects non-finite persisted geometry", "a31FiniteLayoutNumber" in app and "Number.isFinite(n)" in app and "a31FallbackLayoutSize" in app and "Math.round(rawW??fallback.width)" in app)
 ck("Desktop components have real pointer resize handles", "function a31BindLayout" in app and 'data-op-resize' in app and 'data-pw-resize' in app and ".layout-resize-handle" in css)
 ck("Operations add path updates grid without page rerender", "openOperationsComponentPicker=function" in app and "closeModal();a31RenderOperationsGrid()" in app)
-ck("Project component mutations refresh only project grid", "a31RefreshProjectGrid(project,workspace" in app and "qa4SaveProjectWorkspaces" in app)
-ck("Workspace deletion is confirmed revision-safe and guards the final workspace", "a32DeleteWorkspace" in app and "a32ConfirmDeleteWorkspace" in app and "A project must keep at least one workspace." in app and "workspace removed from durable project policy" in smoke)
-ck("Project deletion is confirmed and lifecycle-safe", "a33DeleteProject" in app and 'method:"DELETE"' in app and "a33ConfirmDeleteProject" in app and "Project lifecycle delete persisted" in smoke)
+ck("Projects page is a tile management surface", "project-overview-grid" in app and "project-overview-card" in app and 'data-a35-delete-project=' in app and "Workspace page no longer duplicates Project list" in smoke)
+ck("Workspace deletion is confirmed and guards the final workspace", "a35DeleteWorkspace" in app and "a35ConfirmDeleteWorkspace" in app and "A project must keep at least one workspace." in app and "workspace removed from durable project policy" in smoke)
+ck("Project deletion is confined to the Projects management surface", "a33DeleteProject" in app and 'method:"DELETE"' in app and "a33ConfirmDeleteProject" in app and "Project delete exists only on Project tile" in smoke and "Workspace surface has no Project delete action" in smoke)
 ck("Nodes prefer federation machine name and mark the local host", "function a34NodeDisplayName" in app and 'n?.name||n?.hostname' in app and " (Local)" in app and "Nodes prefer machine name and mark local device" in smoke)
 
 ck("Operations Activity Health Recovery are functional", '["activity","Activity"]' in app and '["health","Health"]' in app and '["recovery","Recovery"]' in app and "a31OperationsActivity" in app and "a31OperationsHealth" in app and "a31RecoveryContent" in app)
@@ -114,14 +116,14 @@ ck("Successful management fetches promote telemetry report state", "liveOps.repo
 effective_cards=last_segment(app, "function qa4ScheduledCard()", "function bindViewActions")
 effective_nodes=last_segment(app, "renderNodes=async function(){", "/* Agents, Teams, Research */")
 effective_ops=last_segment(app, "function a31OperationsActivity()", "renderOperations=async function(){")
-effective_project_layout=last_segment(app, "qa4BindWorkspaceEdit=function(project,workspace){", "const a31ProjectRenderBase=qa6RenderProjectsBase;")
+effective_project_layout=last_segment(app, "function a35BindWorkspaceEdit(project,workspace){", "qa4BindWorkspaceEdit=a35BindWorkspaceEdit;")
 effective_palette=last_segment(app, "function openCommandPalette(){", "/* QA hardening: Vault-backed provider selection")
 project_saves=last_segment(app, "const qa4ProjectSaveQueues=new Map();", "async function qa4EnsureProjectRuntime")
 ck("Effective Operations cards preserve unknown telemetry", all(x in effective_cards for x in ["liveOpsReported('routines')","liveOpsReported('tasks')","liveOpsReported('nodes')","liveOpsReported('events')","liveOpsAttentionReported()","liveOpsReported('providers')"]))
 ck("Effective Operations Activity and Recovery preserve unknown telemetry", "Event feed not reported." in effective_ops and "componentsReported=false" in effective_ops and "Task recovery status not reported" in effective_ops)
 ck("Final Nodes renderer consumes API envelope and launches pairing", "a31Array(out?.nodes)" in effective_nodes and '$("#a31AddNode").onclick=openPairNode' in effective_nodes)
 ck("Project policy saves are serialized against latest revision", "qa4ProjectSaveQueues" in project_saves and "const current=qa4ProjectHub.projects.find" in project_saves and "expected_revision:Number(current.revision||1)" in project_saves)
-ck("Project layout mutations rollback and refresh from saved revision", "refreshSaved" in effective_project_layout and "workspace.widgets.splice(0,workspace.widgets.length,...snapshot)" in effective_project_layout and "workspace.widgets=snapshot" in effective_project_layout and 'root.dataset.layoutSaving==="true"' in effective_project_layout)
+ck("Workspace layout editing is transactional", "a35WorkspaceEditSession" in app and "a35BeginWorkspaceEdit" in app and "a35CommitWorkspaceEdit" in app and "a35CancelWorkspaceEdit" in app and "Workspace draft resize does not persist before Done" in smoke and "Workspace navigation discards draft geometry" in smoke)
 ck("Operations telemetry refresh preserves the active layout DOM", "a31RefreshOperationsData" in app and "layoutRefreshPending" in app and "typeof a31RefreshOperationsData==='function'" in app)
 ck("Operations geometry has explicit durable revisioning", "operationsLayoutRevision" in app and "a31PersistOperationsLayout" in app)
 ck("Resize hit targets stay inside clipped dashboard cards", ".layout-resize-handle.resize-e{right:0}" in css and ".layout-resize-handle.resize-w{left:0}" in css and ".layout-resize-handle.resize-n{top:0}" in css and ".layout-resize-handle.resize-s{bottom:0}" in css)
@@ -137,7 +139,7 @@ ck("Language remains changeable from Settings", 'id="a31Language"' in app and "q
 ck("Theme-aware sleek scrollbars use shared tokens", all(x in css for x in ["--scrollbar-thumb","--scrollbar-thumb-hover","--scrollbar-thumb-active","::-webkit-scrollbar-thumb","scrollbar-gutter:stable"]))
 ck("Theme accent contrast is tokenized", "--on-accent" in css and "color:var(--on-accent)" in css and 'data-theme="graphite"' in css)
 ck("Dark and Midnight are deliberately distinct", 'data-theme="dark"' in css and 'data-theme="midnight"' in css and "--app-gradient:linear-gradient" in css)
-ck("Workspace layout resolves collisions only at commit", "card.style.transform" in app and "previewRect" in app and "a31ResolveLayout(items,item.id)" in app and "const snapshot=items.map" in app and "Layout save failed:" in app)
+ck("Workspace drag resize uses preview then one commit", "card.style.transform" in app and "previewRect" in app and "a31BindLayout(root,items" in effective_project_layout and "persist:async()=>{}" in effective_project_layout and "Workspace Done persists layout" in smoke)
 ck("Desktop layout exposes edge and corner resize handles", "A31_RESIZE_EDGES" in app and "data-resize-edge" in app and all(x in css for x in [".resize-n",".resize-e",".resize-se",".resize-nw"]))
 
 ck("Research Integrity is visible from task Inspector", "A32_RESEARCH_INSPECTOR" in app and "/v1/tasks/" in app and "/team-session" in app and "/manifest" in app and "Research Integrity" in app and "Bound candidate" in app)
@@ -165,7 +167,7 @@ ck("Product tour visibly isolates the active target", "9999px" in css and 'data-
 
 ck("Operations and Workspaces share smooth pixel drag preview", 'data-op-drag=' in app and 'data-pw-drag=' in app and 'translate3d(' in app and 'card.style.willChange="transform,width,height"' in app)
 ck("Shared resize previews continuously then snaps once on release", "previewResize" in app and "a31ResizeRect(start,edge,dx,dy,constraints)" in app and "Object.assign(item,previewRect)" in app)
-ck("Installed smoke performs real pointer drag and resize", 'const gesture=async' in smoke and "Operations pointer resize committed" in smoke and "Workspace pointer drag changes geometry" in smoke and "Workspace resized geometry survives project reload" in smoke)
+ck("Installed smoke performs real pointer drag and resize", 'const gesture=async' in smoke and "Operations pointer resize committed" in smoke and "Workspace pointer drag changes draft geometry" in smoke and "Workspace dragged geometry survives route reload" in smoke)
 
 ck("Tour spotlight owns top stacking layer", ".tour-overlay{z-index:2000!important" in css and ".tour-target{z-index:auto!important}" in css and "Tour spotlight owns top stacking layer" in smoke)
 ck("OnePane Chat launcher toggles and panel moves vertically", "a33ToggleControlChatPanel" in app and "a33BindControlChatDrag" in app and "controlChatVerticalPosition" in app and "Chat moves vertically" in smoke and "Chat launcher closes open chat" in smoke)

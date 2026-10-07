@@ -1137,3 +1137,19 @@ html[data-theme="light"] .models-discover-controls input,html[data-theme="light"
  .models-page{height:auto;overflow:visible}
  .models-page #a31DiscoverCatalog{max-height:50dvh}
 }
+
+/* One card, three runtime tabs; no nested card chrome. */
+.managed-runtimes-combined{min-width:0;overflow:hidden;align-self:stretch}
+.managed-runtimes-combined .runtime-panel>.panel-card,
+.managed-runtimes-combined .runtime-panel>#a36LLMFitCard>.panel-card{
+ border:0;box-shadow:none;background:transparent;border-radius:0;
+ margin:0;min-height:0;height:auto
+}
+.managed-runtimes-combined .runtime-panel .card-header{display:none}
+.managed-runtimes-combined .runtime-panel .widget-body{padding:14px}
+.managed-runtimes-combined .runtime-panel #a36LLMFitCard{min-width:0}
+.managed-runtimes-combined .runtime-tabs{flex:0 0 auto;min-width:0}
+.managed-runtimes-combined .runtime-tab-panels{min-width:0}
+.llmfit-discover-recovery{padding:10px 14px;border-bottom:1px solid var(--border);display:grid;gap:8px}
+.llmfit-discover-recovery[hidden]{display:none!important}
+.llmfit-discover-recovery .toolbar{justify-content:flex-start}

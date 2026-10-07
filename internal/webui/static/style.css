@@ -1030,3 +1030,29 @@ html[data-theme="light"] .models-filter-row input,html[data-theme="light"] .mode
   .routing-profile-grid{grid-template-columns:1fr}
   .routing-apply{grid-template-columns:1fr}
 }
+
+
+/* Alpha 3.2 Models remediation */
+.models-header-action{margin-left:auto}
+.local-runtime-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.runtime-backend-pills{display:flex;gap:6px;flex-wrap:wrap}
+.runtime-backend-list{display:grid;gap:7px}
+.runtime-backend-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)}
+.runtime-backend-row:last-child{border-bottom:0}
+.confirm-stack{display:grid;gap:14px}
+.confirm-actions{justify-content:flex-end}
+.install-progress-track{height:8px;border:1px solid var(--border);background:var(--panel-2);border-radius:999px;overflow:hidden}
+.install-progress-track>span{display:block;height:100%;background:var(--accent);transition:width 160ms ease}
+.install-progress-meta{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px}
+.models-discover-controls{display:grid;grid-template-columns:minmax(260px,1.4fr) minmax(150px,.6fr) minmax(170px,.7fr) auto;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border)}
+.models-discover-controls input,.models-discover-controls select{width:100%;border:1px solid var(--border);border-radius:8px;background:var(--panel-2);color:var(--text);padding:9px 10px;outline:none;color-scheme:dark}
+html[data-theme="light"] .models-discover-controls input,html[data-theme="light"] .models-discover-controls select{color-scheme:light}
+.models-discover-controls input:focus,.models-discover-controls select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.discover-source-status{padding:8px 12px 0}
+.model-source-line{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:5px}
+.routing-profile-card .btn.tiny{border:1px solid var(--border);background:var(--panel);color:var(--text)}
+.routing-profile-card .btn.tiny:hover{border-color:var(--accent);background:var(--hover)}
+.routing-profile-card .btn.tiny.danger{color:var(--bad)}
+@media(max-width:1200px){.local-runtime-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.hardware-card{grid-column:1/-1}}
+@media(max-width:900px){.local-runtime-grid{grid-template-columns:1fr}.hardware-card{grid-column:auto}.models-discover-controls{grid-template-columns:1fr}.models-header-action{margin-left:auto}}
+@media(max-width:700px){.models-header-action{margin-left:0}}

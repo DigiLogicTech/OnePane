@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 ROOT=Path(__file__).resolve().parents[1]
 read=lambda p:(ROOT/p).read_text(encoding="utf-8")
-app=read("internal/webui/static/app-foundation.js")+"\n"+read("internal/webui/static/app.js")+"\n"+read("internal/webui/static/models-page.js"); html=read("internal/webui/static/index.html"); css=read("internal/webui/static/style.css")
+app=read("internal/webui/static/app-foundation.js")+"\n"+read("internal/webui/static/app.js")+"\n"+read("internal/webui/static/models-page.js")+"\n"+read("internal/webui/static/model-qa-remediation.js"); html=read("internal/webui/static/index.html"); css=read("internal/webui/static/style.css")
 api=read("internal/api/server.go")+read("internal/api/team.go")+read("internal/api/assistant_orchestrator.go")+read("internal/api/provider_oauth.go")+read("internal/api/skills.go")+read("internal/api/local_ai_compute.go")+read("internal/api/local_ai_discovery.go")+read("internal/api/local_ai_external_adoption.go")+read("internal/api/local_ai_install_jobs_list.go")+read("internal/api/local_ai_reconcile.go")
 boot=read("internal/bootstrap/bootstrap.go")
 assistant=read("internal/assistant/service.go"); orch=read("internal/projectorchestrator/service.go"); profiles=read("internal/agentprofile/service.go")
@@ -13,6 +13,11 @@ compute=read("internal/localai/compute_policy.go"); oauth=read("internal/provide
 setup=read("packaging/windows/setup/main.go"); desktop=read("packaging/windows/desktop/main.go"); workflow=read(".github/workflows/alpha3.1-stabilization.yml"); debpre=read("packaging/debian/preinst"); debpost=read("packaging/debian/postinst"); debbuild=read("scripts/build-ubuntu-deb.sh")
 migration=read("migrations/0023_alpha31_assistant_orchestrator.sql")+read("migrations/0024_alpha31_agents_components.sql")+read("migrations/0025_alpha31_refinement.sql")+read("migrations/0026_alpha32_reliability.sql")+read("migrations/0027_alpha32_research_rounds.sql")+read("migrations/0029_alpha32_models_remediation.sql")+read("migrations/0030_alpha32_models_followup.sql")
 reliability=read("internal/storage/sqlite/migrate.go"); provision=read("internal/localai/provision.go"); installjobs=read("internal/localai/install_jobs.go")+read("internal/localai/install_jobs_query.go")+read("internal/localai/install_progress.go"); localsvc=read("internal/localai/service.go"); teamsvc=read("internal/team/service.go"); teamtypes=read("internal/team/types.go"); teamworker=read("internal/teamworker/service.go"); infertransport=read("internal/inference/transport.go")+read("internal/inference/transport_openai.go")+read("internal/inference/transport_anthropic.go"); taskrepo=read("internal/task/repository_sql.go"); taskrepotest=read("internal/task/repository_sql_test.go")
+storage=read("internal/localai/storage_lifecycle.go")
+llmfitmanaged=read("internal/localai/llmfit_managed.go")
+storageapi=read("internal/api/local_ai_storage.go")
+llmfitapi=read("internal/api/local_ai_llmfit.go")
+servicewriter=read("packaging/windows/service/logrotate.go")+read("packaging/windows/service/main.go")
 checks=[]
 def ck(n,c): checks.append((n,bool(c)))
 ck("Assistant and Project Orchestrator remain durable", "assistant_threads" in migration and "project_orchestrators" in migration and "type Service struct" in assistant and "type Service struct" in orch)
@@ -75,6 +80,13 @@ ck("Research rate limits preserve provider retry time", "retryAfterMillis" in in
 ck("Research manifest provenance is readable", "/v1/team-sessions/{sessionID}/manifest" in api and "getTeamSessionManifest" in api)
 ck("Research provenance is presented in Inspector", all(x in app for x in ["A32_RESEARCH_INSPECTOR","Research Integrity","Bound candidate","Manifest SHA-256","/team-session","/manifest"]))
 ck("Research Team configuration member fetch is ordered safely", app.index("const teamID=team.id||team.ID") < app.index("members=await apiRequest(`/v1/teams/${encodeURIComponent(teamID)}/members`)"))
+ck("OmniRoute npm cache is scoped and removed", all(x in components for x in ["npm_config_cache=","NODE_COMPILE_CACHE=","defer os.RemoveAll(cacheRoot)"]))
+ck("Windows service rotates persistent logs", "onePaneLogMaxBytes" in servicewriter and "openBoundedLogWriter" in servicewriter)
+ck("managed llmfit lifecycle uses pinned SHA-256", all(x in llmfitmanaged for x in ["llmfitManagedSHA","InstallManagedLLMFit","StartManagedLLMFit","StopManagedLLMFit","RemoveManagedLLMFit"]) and "model.write" in llmfitapi)
+ck("llama backend uninstall preserves model weights", "RemoveLlamaBackend" in components and "dependent_models" in components and "a36LlamaBackendManager" in app)
+ck("readable model spec retains advanced provenance", "spec-readable-section" in app and "Advanced details and raw JSON" in app)
+ck("storage cleanup excludes model pool and external caches", "CleanupOwnedStorage" in storage and "modelRoot" not in storage.split("func (s *Service) CleanupOwnedStorage")[1].split("return report,nil")[0] and "model.write" in storageapi)
+ck("Discover source sorts and cursor integrity", all(x in api for x in ["requestedSort","__sort","likes7d","sort not supported by this source"]) and "a31DiscoverSort" in app)
 failed=[n for n,o in checks if not o]
 for n,o in checks: print(f"[{'PASS' if o else 'FAIL'}] {n}")
 if failed:

@@ -117,25 +117,28 @@ func (c *LLMFitClient) ModelAdvisories(ctx context.Context, req RecommendRequest
 	return out, nil
 }
 
+// SearchModels retrieves the full inventory exposed by the connected llmfit
+// service, including models that do not fit the node. This is catalogue
+// browsing; installation remains subject to OnePane's trust checks.
 func (c *LLMFitClient) SearchModels(ctx context.Context, query string, limit int) ([]LLMFitAdvisory, error) {
-	if c == nil || c.base == nil { return nil, nil }
-	if limit <= 0 { limit = 30 }
-	if limit > 100 { limit = 100 }
+	if c == nil || c.base == nil { return nil, errors.New("llmfit is not configured") }
+	if limit <= 0 { limit = 10000 }
+	if limit > 10000 { limit = 10000 }
 	u := *c.base
-	basePath := strings.TrimRight(u.Path, "/") + "/api/v1/models"
-	query = strings.TrimSpace(query)
-	if query != "" { basePath += "/" + url.PathEscape(query) }
-	u.Path = basePath
+	u.Path = strings.TrimRight(u.Path, "/") + "/api/v1/models"
 	q := u.Query()
 	q.Set("limit", strconv.Itoa(limit))
+	q.Set("runtime", "any")
+	q.Set("include_too_tight", "true")
 	q.Set("sort", "score")
+	if query = strings.TrimSpace(query); query != "" { q.Set("search", query) }
 	u.RawQuery = q.Encode()
 	httpReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	resp, err := c.client.Do(httpReq)
-	if err != nil { return nil, err }
+	if err != nil { return nil, fmt.Errorf("llmfit model catalogue unavailable: %w",err) }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK { return nil, fmt.Errorf("llmfit returned HTTP %d", resp.StatusCode) }
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 24<<20))
 	if err != nil { return nil, err }
 	var root any
 	if err := json.Unmarshal(body, &root); err != nil { return nil, err }

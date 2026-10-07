@@ -17,14 +17,13 @@ function uiThemeSwatch(id){
 }
 function uiPreviewTheme(id){
  const s=uiThemeSwatch(id),active=state.theme===id;
- const style=`--preview-bg:${s.bg};--preview-panel:${s.panel};--preview-accent:${s.accent};--preview-text:${s.text}`;
- return `<button class="theme-choice theme-preview ${active?"active":""}" type="button" data-settings-theme="${escapeHtml(id)}" aria-pressed="${active}" aria-label="Use ${escapeHtml(s.name)} theme" title="${escapeHtml(s.description)}">
-  <span class="theme-preview-stage" style="${escapeHtml(style)}" aria-hidden="true">
-   <span class="theme-preview-rail"></span><span class="theme-preview-work">
-    <span class="theme-preview-title"></span><span class="theme-preview-row"></span>
-    <span class="theme-preview-row"></span><span class="theme-preview-action"></span>
-   </span>
-  </span><span class="theme-preview-footer"><strong>${escapeHtml(s.name)}</strong><small>${escapeHtml(s.description)}</small></span></button>`;
+ const title=String(s.name||id).replace(/^./,ch=>ch.toLocaleUpperCase());
+ const palette=[["Background",s.bg],["Panel",s.panel],["Raised panel",s.panel],["Accent",s.accent],["Text",s.text]];
+ const swatches=palette.map(([name,hex])=>`<span class="theme-palette-chip" style="background:${escapeHtml(hex)}" title="${escapeHtml(name)}: ${escapeHtml(hex)}" aria-label="${escapeHtml(name)} ${escapeHtml(hex)}"></span>`).join("");
+ return `<button class="theme-choice theme-preview theme-preview-compact ${active?"active":""}" type="button" data-settings-theme="${escapeHtml(id)}" aria-pressed="${active}" aria-label="Use ${escapeHtml(title)} theme" title="${escapeHtml(s.description)}">
+  <span class="theme-compact-head"><strong>${escapeHtml(title)}</strong><span aria-hidden="true">${active?"✓":""}</span></span>
+  <span class="theme-palette-strip" aria-label="Theme palette">${swatches}</span>
+ </button>`;
 }
 qa5ThemeButtons=function(){
  const ids=[...Object.keys(THEME_PALETTES),...Object.keys(qa5ThemePacks())];

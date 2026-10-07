@@ -237,6 +237,16 @@ func (s *Service) runComponentJob(ctx context.Context,jobID string){
 			_ = s.updateComponentProgress(ctx,jobID,"running","removing","removing",nil,false)
 			runErr=s.removeOmniRoute(ctx)
 		}
+	case "llamacpp":
+		switch action {
+		case "install","update","repair":
+			runErr=s.installLlamaCpp(ctx,jobID)
+		case "remove":
+			_ = s.updateComponentProgress(ctx,jobID,"running","removing","removing",nil,false)
+			runErr=s.removeLlamaCpp(ctx)
+		default:
+			runErr=errors.New("llama.cpp runtime package does not have a start/stop lifecycle")
+		}
 	default:
 		runErr=errors.New("unsupported managed component")
 	}

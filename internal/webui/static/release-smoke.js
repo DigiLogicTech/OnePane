@@ -167,11 +167,14 @@
 
     const settingsButton=check(document.querySelector("#qa4WorkspaceSettings"),"Workspace settings action");settingsButton.click();
     await waitFor(()=>document.querySelector('.inspector-tab-draggable [data-qa6-inspector-tab="follow"]'),"draggable Inspector tabs",30000);
-    check(!document.querySelector("[data-qa6-tab-move]")&&!document.querySelector("[data-qa6-tab-remove]"),"Inspector tab arrow and close chrome removed");
-    const patchesBeforeInspectorDrag=projectPatchCount,tabBefore=clone(qa6InspectorConfig(a31CurrentWorkspace()).tabs),followTab=check(document.querySelector('.inspector-tab-draggable [data-qa6-inspector-tab="follow"]')?.closest(".inspector-tab-draggable"),"Inspector Follow drag target"),tabWidth=followTab.getBoundingClientRect().width;
+    check(!document.querySelector("[data-qa6-tab-move]")&&!document.querySelector("[data-qa6-tab-remove]"),"Inspector tab movement arrows remain removed");
+    const followTab=check(document.querySelector('.inspector-tab-draggable [data-qa6-inspector-tab="follow"]')?.closest(".inspector-tab-draggable"),"Inspector Follow drag target"),closeTab=check(followTab.querySelector("[data-a35-inspector-close]"),"Inspector tab compact close control");
+    closeTab.click();await waitFor(()=>document.querySelector("#a35CancelInspectorRemove"),"Inspector close confirmation");document.querySelector("#a35CancelInspectorRemove").click();
+    check(!document.querySelector("#a35ConfirmInspectorRemove"),"Inspector close can be cancelled");
+    const patchesBeforeInspectorDrag=projectPatchCount,tabBefore=clone(qa6InspectorConfig(a31CurrentWorkspace()).tabs),tabWidth=followTab.getBoundingClientRect().width;
     await gesture(followTab,tabWidth+12,0);
     await waitFor(()=>projectPatchCount>patchesBeforeInspectorDrag&&qa6InspectorConfig(a31CurrentWorkspace()).tabs[0]!==tabBefore[0],"Inspector tab drag persists order",30000);
-    check(!document.querySelector(".qa4-inspector-tab-tools"),"Inspector draggable tabs reclaim tool space");
+    check(document.querySelectorAll(".qa4-inspector-tab-tools").length===qa6InspectorConfig(a31CurrentWorkspace()).tabs.length,"Inspector draggable tabs expose one compact close control each");
 
     const disposable=check(document.querySelector('[data-a35-workspace="pws-release-2"]'),"second workspace available for deletion");disposable.click();
     await waitFor(()=>a31CurrentWorkspace()?.id==="pws-release-2"&&document.querySelector("#a32DeleteWorkspace"),"second workspace rendered with delete action");

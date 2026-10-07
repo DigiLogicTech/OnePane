@@ -90,6 +90,10 @@ func (s *Service) StartManagedLLMFit(ctx context.Context)error{
  cmd.Stdout=log;cmd.Stderr=log
  if err:=cmd.Start();err!=nil{_ = log.Close();return err}
  _=log.Close()
+ if err:=recordOwnedLLMFit(s.managedLLMFitRoot(),s.managedLLMFitExe(),cmd.Process.Pid);err!=nil{
+  _=cmd.Process.Kill();_ = cmd.Wait()
+  return fmt.Errorf("cannot verify or persist managed llmfit process identity: %w",err)
+ }
  managedLLMFitProcesses.Lock();managedLLMFitProcesses.process=cmd.Process;managedLLMFitProcesses.Unlock()
  go func(){_ = cmd.Wait();managedLLMFitProcesses.Lock();if managedLLMFitProcesses.process==cmd.Process{managedLLMFitProcesses.process=nil};managedLLMFitProcesses.Unlock()}()
  for i:=0;i<30;i++{
@@ -101,12 +105,12 @@ func (s *Service) StartManagedLLMFit(ctx context.Context)error{
 }
 func (s *Service) StopManagedLLMFit(ctx context.Context)error{
  llmfitManagedLock.Lock();defer llmfitManagedLock.Unlock()
- managedLLMFitProcesses.Lock()
- p:=managedLLMFitProcesses.process
- managedLLMFitProcesses.process=nil
- managedLLMFitProcesses.Unlock()
- if p==nil&&llmfitHealth(ctx){return errors.New("llmfit is running outside the current OnePane service; stop the external process before uninstall")}
- if p!=nil{if err:=p.Kill();err!=nil{return err}}
+ // Verify PID, full executable path and process creation time before
+ // terminating a process that survived a OnePane service restart.
+ killed,err:=terminateOwnedLLMFit(s.managedLLMFitRoot(),s.managedLLMFitExe())
+ if err!=nil{return err}
+ managedLLMFitProcesses.Lock();managedLLMFitProcesses.process=nil;managedLLMFitProcesses.Unlock()
+ if !killed&&llmfitHealth(ctx){return errors.New("llmfit appears to be external or unverified; refusing to stop an unrelated process")}
  s.llmfit=nil
  return nil
 }

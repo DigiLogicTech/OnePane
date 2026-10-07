@@ -293,7 +293,7 @@ a35RefreshInspectorRegistry();
 
 const a35InspectorTabsBase=qa6InspectorTabs;
 qa6InspectorTabs=function(){
-  const d=typeof qa6WorkspaceInspectorContext==="function"?qa6WorkspaceInspectorContext():null;
+  const d=a35SyncInspectorContext()||(typeof qa6WorkspaceInspectorContext==="function"?qa6WorkspaceInspectorContext():null);
   if(!d)return a35InspectorTabsBase();
   const cfg=qa6InspectorConfig(d.workspace),supported=a35RefreshInspectorRegistry(),normalized=[];
   for(const raw of cfg.tabs||[]){
@@ -341,24 +341,38 @@ qa6BindProjectComponents=function(project,workspace){
   });
 };
 
+function a35SyncInspectorContext(){
+  if(qa4Inspector?.kind!=="workspace")return null;
+  const d=qa4Inspector.data||{};
+  if(!d.project||!d.workspace)return null;
+  const latest=a35LatestWorkspace(d.project,d.workspace);
+  if(!latest.project||!latest.workspace)return null;
+  qa4Inspector={
+    ...qa4Inspector,
+    id:latest.workspace.id,
+    title:`${latest.project.name} / ${latest.workspace.name}`,
+    data:{project:latest.project,workspace:latest.workspace}
+  };
+  return qa4Inspector.data;
+}
 function a35InspectorContext(){
-  const d=typeof qa6WorkspaceInspectorContext==="function"?qa6WorkspaceInspectorContext():null;
+  const synced=a35SyncInspectorContext();
+  const d=synced||(typeof qa6WorkspaceInspectorContext==="function"?qa6WorkspaceInspectorContext():null);
   if(!d)return null;
-  const latest=a35LatestWorkspace(d.project,d.workspace),fresh={project:latest.project,workspace:latest.workspace};
-  return {d:fresh,cfg:qa6InspectorConfig(fresh.workspace)};
+  return {d,cfg:qa6InspectorConfig(d.workspace)};
 }
 function a35RemoveInspectorTab(type){
   const ctx=a35InspectorContext();if(!ctx)return;
   openModal("Remove Inspector tab",`<div class="widget-body"><strong>Remove ${escapeHtml(titleCase(type))}?</strong><p>The tab configuration is removed from this Workspace. The underlying component data is unchanged.</p></div>`,'<button class="btn" id="a35CancelInspectorRemove">Cancel</button><button class="btn danger" id="a35ConfirmInspectorRemove">Remove tab</button>');
   $("#a35CancelInspectorRemove").onclick=closeModal;
-  $("#a35ConfirmInspectorRemove").onclick=async()=>{ctx.cfg.tabs=ctx.cfg.tabs.filter(x=>x!==type);if(qa4InspectorTab===type)qa4InspectorTab="overview";await qa6SaveInspector(ctx.d.project,ctx.d.workspace);closeModal();renderInspector()};
+  $("#a35ConfirmInspectorRemove").onclick=async()=>{ctx.cfg.tabs=ctx.cfg.tabs.filter(x=>x!==type);if(qa4InspectorTab===type)qa4InspectorTab="overview";await qa6SaveInspector(ctx.d.project,ctx.d.workspace);a35SyncInspectorContext();closeModal();renderInspector()};
 }
 async function a35ReorderInspectorTab(type,delta){
   const ctx=a35InspectorContext();if(!ctx)return false;
   const i=ctx.cfg.tabs.indexOf(type);if(i<0)return false;
   const j=Math.max(0,Math.min(ctx.cfg.tabs.length-1,i+delta));if(i===j)return false;
   const [tab]=ctx.cfg.tabs.splice(i,1);ctx.cfg.tabs.splice(j,0,tab);
-  await qa6SaveInspector(ctx.d.project,ctx.d.workspace);renderInspector();return true;
+  await qa6SaveInspector(ctx.d.project,ctx.d.workspace);a35SyncInspectorContext();renderInspector();return true;
 }
 function a35BindInspectorTabs(){
   const ctx=a35InspectorContext();if(!ctx)return;
@@ -378,6 +392,6 @@ function a35BindInspectorTabs(){
   });
 }
 const a35RenderInspectorBase=renderInspector;
-renderInspector=function(){a35RenderInspectorBase();a35BindInspectorTabs()};
+renderInspector=function(){a35SyncInspectorContext();a35RenderInspectorBase();a35BindInspectorTabs()};
 
 if(state.projectWorkspaceEdit){state.projectWorkspaceEdit=false;persist()}

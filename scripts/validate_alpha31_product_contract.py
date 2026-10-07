@@ -36,7 +36,7 @@ ck("Linux runtime archives allow only in-root relative symlinks", "safeArchiveSy
 ck("per-deployment compute policy is real", "deployment_compute_policies" in migration and "SetComputePolicy" in compute and "supervisor.Stop" in compute and "supervisor.Start" in compute)
 ck("managed OmniRoute and external OmniRoute coexist", "installOmniRoute" in components and "startOmniRoute" in components and "omniQA(false)" in app and "omniQA(true)" in app)
 ck("llama.cpp is first-class managed runtime", "installLlamaCpp" in components and "removeLlamaCpp" in components and "\'llamacpp\'" in migration and "a31LlamaRuntimeCard" in app)
-ck("Discover federates external catalogues without bypassing trust", "/v1/local-ai/discovery" in api and "Hugging Face" in app and "Hugging Bay" in app and "Verify before install" in app)
+ck("Discover federates external catalogues without bypassing trust", "/v1/local-ai/discovery" in api and "Hugging Face" in app and "Hugging Bay" in app and "Verify & install" in app and "/v1/local-ai/discovery/inspect" in app and "/v1/local-ai/discovery/adopt" in app)
 ck("Install progress consumes real ready state", "progress_pct" in app and 'status==="ready"' in app and "bytes_downloaded" in app)
 ck("Models IA separates Local Cloud Routing Discover", all(x in app for x in ["a31RenderLocalModels","a31RenderCloudModels","a31RenderRoutingModels","a31RenderDiscoverModels"]))
 ck("multi fallback routes reach the real task envelope", "fallback_models" in app and "fallback_candidate_ids" in app and "qa7RoutingEnvelope" in app)

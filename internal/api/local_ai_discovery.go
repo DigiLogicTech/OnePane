@@ -75,7 +75,7 @@ func discoverHuggingFace(ctx context.Context,q string,limit int)([]discoveredMod
 	if err:=fetchDiscoveryJSON(ctx,u.String(),&rows);err!=nil{return nil,err}
 	out:=make([]discoveredModel,0,len(rows))
 	for _,r:=range rows{if r.ID==""||hfGated(r.Gated){continue};name:=r.ID;if i:=strings.LastIndex(name,"/");i>=0{name=name[i+1:]}
-		out=append(out,discoveredModel{Source:"huggingface",ID:r.ID,DisplayName:name,Author:r.Author,Category:r.PipelineTag,SourceURL:"https://huggingface.co/"+r.ID,Trust:"upstream",Verified:true,Downloads:r.Downloads,Likes:r.Likes,License:hfLicense(r.Tags),Tags:r.Tags,Installable:false,InstallReason:"Inspect and pin a GGUF artifact digest before OnePane can install this external model."})}
+		out=append(out,discoveredModel{Source:"huggingface",ID:r.ID,DisplayName:name,Author:r.Author,Category:r.PipelineTag,SourceURL:"https://huggingface.co/"+r.ID,Trust:"upstream-metadata",Verified:false,Downloads:r.Downloads,Likes:r.Likes,License:hfLicense(r.Tags),Tags:r.Tags,Installable:false,InstallReason:"Inspect and pin a GGUF artifact digest before OnePane can install this external model."})}
 	return out,nil
 }
 

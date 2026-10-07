@@ -76,7 +76,13 @@ func (s *Service) installLlamaRuntimeEntry(ctx context.Context, entry RuntimeCat
 	fingerprint := runtimeInstallFingerprint(manifest)
 	root := filepath.Join(s.dataDir,"runtimes",manifest.Name,manifest.Version,backend)
 	if len(manifest.Dependencies)>0 { root=filepath.Join(s.dataDir,"runtimes",manifest.Name,manifest.Version,backend+"-"+fingerprint[:16]) }
-	if st,err:=os.Stat(root); err==nil && st.IsDir() { _=os.RemoveAll(root) }
+	// Never replace a directory that Windows may have open DLL handles for.
+	// Install into a new generation, then atomically update the runtime registry.
+	oldRoot:=""
+	if st,err:=os.Stat(root);err==nil&&st.IsDir(){
+		oldRoot=root
+		root=fmt.Sprintf("%s.rev-%d",root,s.clock.UnixMilli())
+	}
 	downloads := filepath.Join(s.dataDir,"components","downloads"); if err:=os.MkdirAll(downloads,0o700); err!=nil{return err}
 	archive := filepath.Join(downloads,fmt.Sprintf("llamacpp-%s-%s",manifest.Version,backend))
 	if _,err:=s.fetcher.Fetch(ctx,manifest.SourceURL,archive,manifest.SHA256); err!=nil{return err}
@@ -102,6 +108,9 @@ func (s *Service) installLlamaRuntimeEntry(ctx context.Context, entry RuntimeCat
 	if err:=os.Rename(staging,root); err!=nil { _=os.RemoveAll(staging); return err }
 	runtimeID,err:=s.ensureManagedRuntime(ctx,p.NodeID,manifest,root,filepath.Join(root,manifest.ExecutableRel))
  if err!=nil{return err}
+ // Old generation cleanup is best effort. Locked DLL files can be removed
+ // later after processes have exited; they never block the new install.
+ if oldRoot!=""{_ = os.RemoveAll(oldRoot)}
  // Restored runtimes may reactivate preserved, previously unavailable
  // deployments without requiring another download of their model weights.
  _,err=s.db.ExecContext(ctx,"UPDATE model_deployments SET status='ready',revision=revision+1,updated_at=? WHERE status='unavailable' AND id IN (SELECT deployment_id FROM managed_local_models WHERE runtime_id=? AND status='ready')",s.clock.UnixMilli(),runtimeID)
@@ -187,11 +196,15 @@ func (s *Service) RemoveLlamaBackend(ctx context.Context, backend string) error 
  trustedRoot:=filepath.Clean(filepath.Join(s.dataDir,"runtimes","llamacpp"))
  clean:=filepath.Clean(root)
  if !strings.HasPrefix(strings.ToLower(clean),strings.ToLower(trustedRoot)+string(os.PathSeparator)){return errors.New("runtime install path is outside the managed llama.cpp root")}
- if err=os.RemoveAll(clean);err!=nil{return err}
+ // Disable the registered backend before cleaning up physical files.
+ // If Windows retains a transient DLL lock, model deployments remain safe and
+ // the disabled backend cannot be scheduled; cleanup can be retried later.
  now:=s.clock.UnixMilli()
  tx,err:=s.db.BeginTx(ctx,nil);if err!=nil{return err}
  defer tx.Rollback()
  if _,err=tx.ExecContext(ctx,"UPDATE model_deployments SET status='unavailable',residency_state='stopped',revision=revision+1,updated_at=? WHERE id IN (SELECT deployment_id FROM managed_local_models WHERE runtime_id=?)",now,id);err!=nil{return err}
  if _,err=tx.ExecContext(ctx,"UPDATE managed_local_runtimes SET status='disabled',revision=revision+1,updated_at=? WHERE id=?",now,id);err!=nil{return err}
- return tx.Commit()
+ if err:=tx.Commit();err!=nil{return err}
+ _ = os.RemoveAll(clean)
+ return nil
 }

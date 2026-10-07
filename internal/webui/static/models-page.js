@@ -21,22 +21,29 @@ async function a31ComponentAction(id,action,statusSelector){
     notice(ex.message,"bad")
   }
 }
+function a31ComponentName(id){return id==="colibri"?"Colibri":id==="omniroute"?"OmniRoute":id==="llamacpp"?"llama.cpp":titleCase(id)}
+function a31ConfirmAction(title,message,confirmLabel,onConfirm){
+  openModal(title,`<div class="widget-body confirm-stack"><p>${escapeHtml(message)}</p><div class="toolbar confirm-actions"><button class="btn" id="a31ConfirmCancel">Cancel</button><button class="btn danger" id="a31ConfirmAccept">${escapeHtml(confirmLabel)}</button></div></div>`);
+  $("#a31ConfirmCancel").onclick=closeModal;
+  $("#a31ConfirmAccept").onclick=async()=>{const b=$("#a31ConfirmAccept");b.disabled=true;try{await onConfirm();closeModal()}catch(ex){b.disabled=false;notice(ex.message,"bad")}}
+}
 function a31ComponentButtons(id,c){
   const st=String(c?.state||"not_installed"),installed=!!c?.installed;
   if(!installed)return `<button class="btn primary" data-a31-component="${id}:install">Install</button>`;
+  if(id==="llamacpp")return `<button class="btn" data-a31-component="${id}:update">Update</button><button class="btn danger" data-a31-component="${id}:remove">Uninstall</button><button class="btn" data-a31-component-settings="${id}">Settings</button>`;
   const running=st==="running";
   return `<button class="btn" data-a31-component="${id}:${running?'disable':'enable'}">${running?'Stop':'Start'}</button><button class="btn" data-a31-component="${id}:update">Update</button><button class="btn danger" data-a31-component="${id}:remove">Uninstall</button><button class="btn" data-a31-component-settings="${id}">Settings</button>`
 }
 function a31OpenComponentSettings(id,c){
   const installed=c?.installed_version||"Not installed",available=c?.available_version||"Unknown",state=titleCase(String(c?.state||"not installed").replaceAll("_"," "));
-  openModal(`${id==="colibri"?"Colibri":"OmniRoute"} settings`,`<div class="widget-body managed-runtime-settings"><dl class="definition-grid"><dt>Installed version</dt><dd>${escapeHtml(installed)}</dd><dt>Available version</dt><dd>${escapeHtml(available)}</dd><dt>State</dt><dd>${escapeHtml(state)}</dd><dt>Runtime scope</dt><dd>This OnePane node</dd></dl>${c?.last_error?`<div class="error">${escapeHtml(c.last_error)}</div>`:""}<div class="toolbar">${c?.installed?`<button class="btn" data-a31-settings-repair="${id}">Repair runtime</button>`:""}${id==="colibri"&&c?.installed?'<button class="btn" id="a31SettingsRegisterColibri">Register model folder</button>':""}${id==="omniroute"?'<button class="btn" id="a31SettingsOmniCredentials">Manage credentials</button>':""}</div></div>`);
+  openModal(`${a31ComponentName(id)} settings`,`<div class="widget-body managed-runtime-settings"><dl class="definition-grid"><dt>Installed version</dt><dd>${escapeHtml(installed)}</dd><dt>Available version</dt><dd>${escapeHtml(available)}</dd><dt>State</dt><dd>${escapeHtml(state)}</dd><dt>Runtime scope</dt><dd>This OnePane node</dd></dl>${c?.last_error?`<div class="error">${escapeHtml(c.last_error)}</div>`:""}<div class="toolbar">${c?.installed?`<button class="btn" data-a31-settings-repair="${id}">Repair runtime</button>`:""}${id==="colibri"&&c?.installed?'<button class="btn" id="a31SettingsRegisterColibri">Register model folder</button>':""}${id==="omniroute"?'<button class="btn" id="a31SettingsOmniCredentials">Manage credentials</button>':""}</div></div>`);
   $("[data-a31-settings-repair]")?.addEventListener("click",()=>{closeModal();a31ComponentAction(id,"repair",`#a31-${id}-status`)});
   $("#a31SettingsRegisterColibri")?.addEventListener("click",()=>{closeModal();qa5RegisterColibri()});
   $("#a31SettingsOmniCredentials")?.addEventListener("click",()=>{closeModal();a31CloudConsumerFilter="omniroute";a31SetModelView("cloud")});
 }
 function a31BindComponentButtons(root=document,components={}){
-  $$("[data-a31-component]",root).forEach(b=>b.onclick=()=>{const [id,action]=b.dataset.a31Component.split(":");if(action==="remove"&&!confirm(`Uninstall ${id==="colibri"?"Colibri":"OmniRoute"} from this node?`))return;a31ComponentAction(id,action,`#a31-${id}-status`)});
-  $$("[data-a31-component-settings]",root).forEach(b=>b.onclick=()=>a31OpenComponentSettings(b.dataset.a31ComponentSettings,components[b.dataset.a31ComponentSettings]||{}))
+  $("[data-a31-component]",root).forEach(b=>b.onclick=()=>{const [id,action]=b.dataset.a31Component.split(":");if(action==="remove"){a31ConfirmAction(`Uninstall ${a31ComponentName(id)}?`,`Remove ${a31ComponentName(id)} from this OnePane node? Existing data/configuration is preserved where supported.`,"Uninstall",()=>a31ComponentAction(id,action,`#a31-${id}-status`));return}a31ComponentAction(id,action,`#a31-${id}-status`)});
+  $("[data-a31-component-settings]",root).forEach(b=>b.onclick=()=>a31OpenComponentSettings(b.dataset.a31ComponentSettings,components[b.dataset.a31ComponentSettings]||{}))
 }
 
 // Models

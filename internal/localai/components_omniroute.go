@@ -138,6 +138,8 @@ func (s *Service) startOmniRoute(ctx context.Context) error {
 	}
 	if err != nil { return err }
 	if err := os.MkdirAll(s.omniRouteDataRoot(), 0o700); err != nil { return err }
+	cacheDir:=filepath.Join(s.omniRouteDataRoot(),"cache")
+	if err:=os.MkdirAll(cacheDir,0o700);err!=nil{return err}
 	logDir := filepath.Join(s.dataDir, "components", "logs")
 	if err := os.MkdirAll(logDir, 0o700); err != nil { return err }
 	logf, err := os.OpenFile(filepath.Join(logDir, "omniroute.log"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
@@ -150,6 +152,10 @@ func (s *Service) startOmniRoute(ctx context.Context) error {
 		"USERPROFILE="+s.omniRouteDataRoot(),
 		"APPDATA="+s.omniRouteDataRoot(),
 		"XDG_CONFIG_HOME="+s.omniRouteDataRoot(),
+		"XDG_CACHE_HOME="+cacheDir,
+		"NODE_COMPILE_CACHE="+filepath.Join(cacheDir,"node-compile"),
+		"OMNIROUTE_CLI_SKIP_REPO_ENV=1",
+		"OMNIROUTE_NO_UPDATE_NOTIFIER=1",
 		"DATA_DIR="+s.omniRouteDataRoot(),
 		"OMNIROUTE_DATA_DIR="+s.omniRouteDataRoot(),
 		"OMNIROUTE_SERVER_HOST=127.0.0.1",

@@ -312,7 +312,7 @@ async function a31RenderDiscoverModels(){
   const root=$("#a31ModelsRoot");let catalog=[],recommendations=[],external=[],sourceErrors={},nextCursor="",loadingExternal=false,requestEpoch=0;
   try{catalog=await apiRequest("/v1/local-ai/catalog");if(localProfileQA)recommendations=await a31RecommendedModels(50).catch(()=>[])}catch(ex){root.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;return}
   const fits=new Map(recommendations.map(x=>[String(x.model?.model_ref||"").toLowerCase(),{fit:x.fit_level,mode:x.run_mode}]));
-  root.innerHTML=`<div class="models-single-column"><section class="panel-card"><div class="card-header models-card-header"><div><div class="card-title">Discover Models</div><div class="list-meta">OnePane Verified installs remain digest-pinned; external catalogues expand discovery without weakening the trust boundary.</div></div><button class="btn models-header-action" id="a31DiscoverDetect">${localProfileQA?"Refresh hardware fit":"Detect hardware"}</button></div><div class="models-discover-controls"><input id="a31DiscoverFilter" class="catalogue-filter" placeholder="Search model, capability, quantization…"><select id="a31DiscoverSource"><option value="all">All sources</option><option value="onepane">OnePane Verified</option><option value="huggingface">Hugging Face</option><option value="huggingbay">Hugging Bay</option><option value="llmfit">llmfit</option></select><select id="a31DiscoverAvailability"><option value="all">All models</option><option value="installable">Installable now</option><option value="recommended">Recommended for this hardware</option></select><button class="btn primary" id="a31DiscoverSearch">Search catalogues</button></div><div id="a31DiscoverSourceStatus" class="page-subtitle discover-source-status"></div><div id="a31DiscoverCatalog" class="model-tile-scroll"></div><div class="discover-pagination"><span id="a31DiscoverCount" class="page-subtitle"></span><button class="btn" id="a31DiscoverMore" hidden>Load more models</button></div></section></div>`;
+  root.innerHTML=`<div class="models-single-column"><section class="panel-card"><div class="card-header models-card-header"><div><div class="card-title">Discover Models</div><div class="list-meta">OnePane Verified installs remain digest-pinned; external catalogues expand discovery without weakening the trust boundary.</div></div><button class="btn models-header-action" id="a31DiscoverDetect">${localProfileQA?"Refresh hardware fit":"Detect hardware"}</button></div><div class="models-discover-controls"><input id="a31DiscoverFilter" class="catalogue-filter" placeholder="Search model, capability, quantization…"><select id="a31DiscoverSource"><option value="all">All sources</option><option value="onepane">OnePane Verified</option><option value="huggingface">Hugging Face</option><option value="huggingbay">Hugging Bay</option><option value="llmfit">llmfit</option></select><select id="a31DiscoverAvailability"><option value="all">All models</option><option value="installable">Installable now</option><option value="recommended">Recommended for this hardware</option></select><select id="a31DiscoverSort" aria-label="Sort models"><option value="popular">Most popular</option></select><button class="btn primary" id="a31DiscoverSearch">Search catalogues</button></div><div id="a31DiscoverSourceStatus" class="page-subtitle discover-source-status"></div><div id="a31DiscoverCatalog" class="model-tile-scroll"></div><div class="discover-pagination"><span id="a31DiscoverCount" class="page-subtitle"></span><button class="btn" id="a31DiscoverMore" hidden>Load more models</button></div></section></div>`;
   const localRows=()=>a31Array(catalog).map(m=>{const f=fits.get(String(m.model_ref||"").toLowerCase());return {...m,_source:"onepane",_fit:f}});
   const externalRows=()=>external.map(x=>({...x,_source:x.source||"external",_fit:x.fit_level?{fit:x.fit_level,mode:x.run_mode}:null}));
   const draw=()=>{
@@ -343,8 +343,8 @@ async function a31RenderDiscoverModels(){
     loadingExternal=true;button.disabled=true;moreButton.disabled=true;
     status.textContent=more?"Loading next catalogue page…":"Querying model catalogues…";
     try{
-      const cursor=more?`&cursor=${encodeURIComponent(nextCursor)}`:"";
-      const out=await apiRequest(`/v1/local-ai/discovery?source=${encodeURIComponent(source)}&q=${encodeURIComponent(q)}&limit=40${cursor}`);
+      const cursor=more?`&cursor=${encodeURIComponent(nextCursor)}`:"",order=$("#a31DiscoverSort").value;
+      const out=await apiRequest(`/v1/local-ai/discovery?source=${encodeURIComponent(source)}&q=${encodeURIComponent(q)}&sort=${encodeURIComponent(order)}&limit=40${cursor}`);
       if(epoch!==requestEpoch||!$("#a31DiscoverCatalog"))return;
       const incoming=a31Array(out?.models);
       const keys=new Set((more?external:[]).map(m=>`${m.source}:${m.id}`));
@@ -361,10 +361,20 @@ async function a31RenderDiscoverModels(){
   };
   $("#a31DiscoverFilter").oninput=draw;
   $("#a31DiscoverAvailability").onchange=draw;
-  $("#a31DiscoverSource").onchange=()=>{nextCursor="";fetchExternal(false)};
+  const updateSort=()=>{
+    const source=$("#a31DiscoverSource").value,sort=$("#a31DiscoverSort"),prior=sort.value;
+    const choices=source==="huggingface"?[["popular","Most popular"],["trending","Trending this week"],["downloads","Most downloads"],["likes","Most liked"],["newest","Newest"],["updated","Recently updated"]]:
+      source==="huggingbay"?[["popular","Most popular (seeds)"],["seeds","Most seeded"]]:
+      source==="llmfit"?[["popular","Best hardware fit"],["fit","Best fit"],["speed","Fastest estimate"],["memory","Lowest memory"],["name","Name"]]:
+      [["popular","Most popular per source"]];
+    sort.innerHTML=choices.map(([id,title])=>`<option value="${id}">${title}</option>`).join("");
+    if(choices.some(([id])=>id===prior))sort.value=prior;
+  };
+  $("#a31DiscoverSource").onchange=()=>{nextCursor="";updateSort();fetchExternal(false)};
+  $("#a31DiscoverSort").onchange=()=>{nextCursor="";fetchExternal(false)};
   $("#a31DiscoverSearch").onclick=()=>{nextCursor="";fetchExternal(false)};
   $("#a31DiscoverMore").onclick=()=>fetchExternal(true);
-  draw();fetchExternal(false);
+  updateSort();draw();fetchExternal(false);
   $("#a31DiscoverDetect").onclick=async()=>{try{await a31DetectHardware();renderModels()}catch(ex){notice(ex.message,"bad")}}
 }
 renderModels=async function(){

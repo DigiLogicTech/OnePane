@@ -13,7 +13,7 @@
     {id:"pw-release-tasks",type:"tasks",title:"Tasks",col:6,row:4},
     {id:"pw-release-notes",type:"notes",title:"Notes",col:6,row:4},
     {id:"pw-release-settings",type:"settings",title:"Workspace settings",col:6,row:5}
-  ],orchestration:{mode:"direct",supervisor:{model:"auto",agent:"onepane-default"},team:{model:"auto",agent:"onepane-default",count:2},council:{model:"auto",agent:"onepane-default",count:2}}};
+  ],inspector:{tabs:["follow","notes"],tiles:[],tab_config:{}},orchestration:{mode:"direct",supervisor:{model:"auto",agent:"onepane-default"},team:{model:"auto",agent:"onepane-default",count:2},council:{model:"auto",agent:"onepane-default",count:2}}};
   const workspace2={id:"pws-release-2",name:"Disposable workspace",widgets:[{id:"pw-release-2-notes",type:"notes",title:"Notes",col:6,row:4}],orchestration:{mode:"direct",supervisor:{model:"auto",agent:"onepane-default"},team:{model:"auto",agent:"onepane-default",count:2},council:{model:"auto",agent:"onepane-default",count:2}}};
   let project={id:"project-release",workspace_id:"workspace-release",name:"Release QA Project",description:"Installed behavioural acceptance",status:"active",revision:1,project_policy:{onepane_ui:{workspaces:[workspace,workspace2]}}};
   let taskRows=[{id:"task-release",workspace_id:"workspace-release",project_id:"project-release",project_workspace_id:"pws-release",objective:"Release task",state:"complete",scheduling_class:"user_interactive",priority:0,revision:1,created_at:1700000000000,updated_at:1700000000000}],archivedTaskRows=[],routineRows=[],lastRoutinePayload=null;
@@ -86,40 +86,74 @@
   };
 
   async function testProjectLayout(){
-    await route("projects");check(document.querySelector("#qa4WorkspaceGrid"),"project workspace rendered");
-    const edit=check(document.querySelector("#qa4EditWorkspace"),"workspace edit control");if(!state.projectWorkspaceEdit)edit.click();
-    await waitFor(()=>document.querySelector('[data-pw-resize][data-resize-edge="e"]'),"workspace native resize handle");
+    await route("projects");
+    check(document.querySelector("#a35ProjectGrid"),"Projects overview tile grid");
+    check(document.querySelector('[data-a35-project-card="project-release"]'),"Project management tile");
+    check(!document.querySelector(".project-rail"),"Workspace page no longer duplicates Project list");
+    check(document.querySelector('[data-a35-delete-project="project-release"]'),"Project delete exists only on Project tile");
+
+    const openProject=check(document.querySelector('.project-overview-actions [data-a35-open-project="project-release"]'),"Open Project workspace action");
+    openProject.click();
+    await waitFor(()=>currentTab()?.route==="workspaces"&&document.querySelector("#qa4WorkspaceGrid"),"Project opens dedicated Workspace route",30000);
+    check(!document.querySelector('[data-a35-delete-project],#a33DeleteProject'),"Workspace surface has no Project delete action");
+    check(!document.querySelector(".project-rail"),"Workspace surface has no duplicate Project rail");
+
+    let ws=check(a31CurrentWorkspace(),"workspace active for native layout"),committedBefore=clone(ws.widgets);
+    const edit=check(document.querySelector("#qa4EditWorkspace"),"workspace edit control");edit.click();
+    await waitFor(()=>a35WorkspaceEditing()&&document.querySelector('[data-pw-resize][data-resize-edge="e"]'),"workspace native resize handle");
     check(document.querySelector(".dashboard-edit-bar[data-pw-drag]"),"Workspace edit header is drag surface");
     check(document.querySelectorAll("[data-pw-resize]").length>=48,"Workspace exposes edge and corner resize handles for multiple components");
 
-    let ws=check(a31CurrentWorkspace(),"workspace active for native layout");
-    const follow=check(ws.widgets.find(w=>w.id==="pw-release-follow"),"workspace resize state"),beforeW=Number(follow.width);
+    let draft=a35WorkspaceItems(a31CurrentProject(),a31CurrentWorkspace()),follow=check(draft.find(w=>w.id==="pw-release-follow"),"workspace draft resize state"),beforeW=Number(follow.width);
     let root=check(document.querySelector("#qa4WorkspaceGrid"),"workspace layout root"),handle=check(document.querySelector('[data-pw-widget="pw-release-follow"] [data-pw-resize][data-resize-edge="e"]'),"workspace east resize handle");
-    const rs=getComputedStyle(root),gap=parseFloat(rs.columnGap)||0,colW=(root.getBoundingClientRect().width-gap*(A31_LAYOUT_COLUMNS-1))/A31_LAYOUT_COLUMNS;
-    const patchesBeforeResize=projectPatchCount;await gesture(handle,colW+gap+3,0);
-    await waitFor(()=>projectPatchCount>patchesBeforeResize&&!document.querySelector("#qa4WorkspaceGrid")?.dataset.layoutSaving,"workspace pointer resize saved",30000);
-    ws=check(a31CurrentWorkspace(),"workspace after pointer resize");check(Number(ws.widgets.find(w=>w.id==="pw-release-follow")?.width)>beforeW,"Workspace pointer resize changes geometry");
-    check(noOverlap(ws.widgets),"Workspace pointer resize resolves overlap");
+    const rs=getComputedStyle(root),gap=parseFloat(rs.columnGap)||0,colW=(root.getBoundingClientRect().width-gap*(A31_LAYOUT_COLUMNS-1))/A31_LAYOUT_COLUMNS,patchesBeforeDraft=projectPatchCount;
+    await gesture(handle,colW+gap+3,0);
+    await waitFor(()=>Number(a35WorkspaceItems(a31CurrentProject(),a31CurrentWorkspace()).find(w=>w.id==="pw-release-follow")?.width)>beforeW,"workspace pointer resize updates draft");
+    check(projectPatchCount===patchesBeforeDraft,"Workspace draft resize does not persist before Done");
+    check(JSON.stringify(a31CurrentWorkspace().widgets)===JSON.stringify(committedBefore),"Workspace draft does not mutate committed geometry");
+    check(noOverlap(a35WorkspaceItems(a31CurrentProject(),a31CurrentWorkspace())),"Workspace draft resize resolves overlap");
 
-    root=check(document.querySelector("#qa4WorkspaceGrid"),"workspace root after resize");
-    const drag=check(root.querySelector('[data-pw-widget="pw-release-settings"] .dashboard-edit-bar[data-pw-drag]'),"workspace native drag surface"),dragBefore=Number(ws.widgets.find(w=>w.id==="pw-release-settings")?.y),rowStep=A31_LAYOUT_ROW_PX+(parseFloat(getComputedStyle(root).rowGap)||0),patchesBeforeDrag=projectPatchCount;
+    await route("operations");
+    check(!a35WorkspaceEditing(),"Workspace navigation cancels edit mode");
+    check(JSON.stringify(a31CurrentWorkspace().widgets)===JSON.stringify(committedBefore),"Workspace navigation discards draft geometry");
+    const nestedWorkspace=await waitFor(()=>document.querySelector('[data-a31-project-nav="project-release"][data-a31-workspace-nav="pws-release"]'),"nested Workspace navigation");
+    nestedWorkspace.click();
+    await waitFor(()=>currentTab()?.route==="workspaces"&&document.querySelector("#qa4WorkspaceGrid"),"nested Workspace opens dedicated route",30000);
+    check(document.querySelector("#qa4EditWorkspace")?.textContent==="Edit layout","Workspace returns outside edit mode");
+
+    ws=check(a31CurrentWorkspace(),"workspace before committed layout edit");const settingsBefore=clone(ws.widgets.find(w=>w.id==="pw-release-settings")),patchesBeforeCommit=projectPatchCount;
+    check(document.querySelector("#qa4EditWorkspace"),"workspace second edit control").click();
+    await waitFor(()=>a35WorkspaceEditing()&&document.querySelector('[data-pw-widget="pw-release-settings"] [data-pw-drag]'),"workspace second edit session");
+    root=check(document.querySelector("#qa4WorkspaceGrid"),"workspace root for committed drag");
+    const drag=check(root.querySelector('[data-pw-widget="pw-release-settings"] .dashboard-edit-bar[data-pw-drag]'),"workspace native drag surface"),rowStep=A31_LAYOUT_ROW_PX+(parseFloat(getComputedStyle(root).rowGap)||0);
     await gesture(drag,0,rowStep*2+3);
-    await waitFor(()=>projectPatchCount>patchesBeforeDrag&&!document.querySelector("#qa4WorkspaceGrid")?.dataset.layoutSaving,"workspace pointer drag saved",30000);
-    ws=check(a31CurrentWorkspace(),"workspace after pointer drag");check(Number(ws.widgets.find(w=>w.id==="pw-release-settings")?.y)>dragBefore,"Workspace pointer drag changes geometry");
-    check(noOverlap(ws.widgets),"Workspace pointer drag resolves overlap");
-    const expectedFollow=clone(ws.widgets.find(w=>w.id==="pw-release-follow")),expectedSettings=clone(ws.widgets.find(w=>w.id==="pw-release-settings"));
+    await waitFor(()=>Number(a35WorkspaceItems(a31CurrentProject(),a31CurrentWorkspace()).find(w=>w.id==="pw-release-settings")?.y)>Number(settingsBefore.y),"Workspace pointer drag changes draft geometry");
+    check(projectPatchCount===patchesBeforeCommit,"Workspace drag remains provisional before Done");
+    check(noOverlap(a35WorkspaceItems(a31CurrentProject(),a31CurrentWorkspace())),"Workspace pointer drag resolves overlap");
+    check(document.querySelector("#qa4EditWorkspace"),"Workspace Done control").click();
+    await waitFor(()=>projectPatchCount>patchesBeforeCommit&&!a35WorkspaceEditing(),"Workspace Done persists layout",30000);
+    ws=check(a31CurrentWorkspace(),"workspace after Done");const expectedSettings=clone(ws.widgets.find(w=>w.id==="pw-release-settings"));
+    check(Number(expectedSettings.y)>Number(settingsBefore.y),"Workspace committed drag changes geometry");
 
-    await route("operations");await route("projects");
-    ws=check(a31CurrentWorkspace(),"workspace reload");
-    const reloadedFollow=ws.widgets.find(w=>w.id==="pw-release-follow"),reloadedSettings=ws.widgets.find(w=>w.id==="pw-release-settings");
-    check(Number(reloadedFollow?.width)===Number(expectedFollow.width)&&Number(reloadedFollow?.x)===Number(expectedFollow.x)&&Number(reloadedFollow?.y)===Number(expectedFollow.y),"Workspace resized geometry survives project reload");
-    check(Number(reloadedSettings?.x)===Number(expectedSettings.x)&&Number(reloadedSettings?.y)===Number(expectedSettings.y),"Workspace dragged geometry survives project reload");
+    await route("operations");
+    const nestedReload=await waitFor(()=>document.querySelector('[data-a31-project-nav="project-release"][data-a31-workspace-nav="pws-release"]'),"nested Workspace reload navigation");nestedReload.click();
+    await waitFor(()=>currentTab()?.route==="workspaces"&&document.querySelector("#qa4WorkspaceGrid"),"workspace reload");
+    ws=check(a31CurrentWorkspace(),"workspace persisted reload");
+    check(Number(ws.widgets.find(w=>w.id==="pw-release-settings")?.y)===Number(expectedSettings.y),"Workspace dragged geometry survives route reload");
     check(noOverlap(ws.widgets),"Workspace persisted geometry remains collision free");
 
-    const disposable=check(document.querySelector('[data-qa4-workspace="pws-release-2"]'),"second workspace available for deletion");disposable.click();
+    const settingsButton=check(document.querySelector("#qa4WorkspaceSettings"),"Workspace settings action");const patchesBeforeInspector=projectPatchCount;settingsButton.click();
+    await waitFor(()=>document.querySelector('.inspector-tab-draggable [data-qa6-inspector-tab="follow"]'),"draggable Inspector tabs",30000);
+    check(!document.querySelector("[data-qa6-tab-move]")&&!document.querySelector("[data-qa6-tab-remove]"),"Inspector tab arrow and close chrome removed");
+    const tabBefore=clone(qa6InspectorConfig(a31CurrentWorkspace()).tabs),followTab=check(document.querySelector('.inspector-tab-draggable [data-qa6-inspector-tab="follow"]')?.closest(".inspector-tab-draggable"),"Inspector Follow drag target"),tabWidth=followTab.getBoundingClientRect().width;
+    await gesture(followTab,tabWidth+12,0);
+    await waitFor(()=>projectPatchCount>patchesBeforeInspector&&qa6InspectorConfig(a31CurrentWorkspace()).tabs[0]!==tabBefore[0],"Inspector tab drag persists order",30000);
+    check(!document.querySelector(".qa4-inspector-tab-tools"),"Inspector draggable tabs reclaim tool space");
+
+    const disposable=check(document.querySelector('[data-a35-workspace="pws-release-2"]'),"second workspace available for deletion");disposable.click();
     await waitFor(()=>a31CurrentWorkspace()?.id==="pws-release-2"&&document.querySelector("#a32DeleteWorkspace"),"second workspace rendered with delete action");
     const deleteButton=check(document.querySelector("#a32DeleteWorkspace"),"workspace delete action");check(!deleteButton.disabled,"workspace delete enabled when alternatives exist");const patchBeforeDelete=projectPatchCount;deleteButton.click();
-    const confirmDelete=await waitFor(()=>document.querySelector("#a32ConfirmDeleteWorkspace"),"workspace delete confirmation");confirmDelete.click();
+    const confirmDelete=await waitFor(()=>document.querySelector("#a35ConfirmDeleteWorkspace"),"workspace delete confirmation");confirmDelete.click();
     await waitFor(()=>projectPatchCount>patchBeforeDelete&&a31CurrentWorkspace()?.id==="pws-release","workspace delete saved",30000);
     check(!qa4Workspaces(a31CurrentProject()).some(x=>x.id==="pws-release-2"),"workspace removed from durable project policy");
     check(document.querySelector("#a32DeleteWorkspace")?.disabled===true,"last workspace delete is guarded");
@@ -280,7 +314,7 @@
     const expandedTransform=getComputedStyle(panel.querySelector(".control-chat-chevron")).transform;chatToggle.click();check(panel.dataset.collapsed==="true","Chat collapses from header");await sleep(220);const collapsedTransform=getComputedStyle(panel.querySelector(".control-chat-chevron")).transform;check(expandedTransform!=="none"&&collapsedTransform==="none","Chat chevron direction matches collapse state");chatToggle.click();check(panel.dataset.collapsed==="false","Chat expands from header");await sleep(220);
     launcher.click();check(!a33ControlChatOpen(),"Chat launcher closes open chat");launcher.click();await waitFor(()=>a33ControlChatOpen(),"Chat launcher reopens closed chat");a31CloseControlChat();
 
-    await route("projects");const projectDelete=await waitFor(()=>document.querySelector("#a33DeleteProject"),"Delete project action",10000);projectDelete.click();const confirmProjectDelete=await waitFor(()=>document.querySelector("#a33ConfirmDeleteProject"),"Delete project confirmation");confirmProjectDelete.click();await waitFor(()=>project.status==="archived"&&!qa4ProjectHub.projects.some(x=>x.id==="project-release"),"Project lifecycle delete persisted",30000);check(document.querySelector(".empty-state")?.textContent?.includes("No projects yet"),"Deleted project leaves active Projects list");
+    await route("projects");const projectDelete=await waitFor(()=>document.querySelector('[data-a35-delete-project="project-release"]'),"Delete project action",10000);projectDelete.click();const confirmProjectDelete=await waitFor(()=>document.querySelector("#a33ConfirmDeleteProject"),"Delete project confirmation");confirmProjectDelete.click();await waitFor(()=>project.status==="archived"&&!qa4ProjectHub.projects.some(x=>x.id==="project-release"),"Project lifecycle delete persisted",30000);check(document.querySelector(".empty-state")?.textContent?.includes("No projects yet"),"Deleted project leaves active Projects list");
 
     results.push("installed behavioural acceptance complete");post("PASS");
   }

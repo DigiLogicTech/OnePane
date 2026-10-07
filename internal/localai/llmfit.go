@@ -153,7 +153,7 @@ func (c *LLMFitClient) SearchModels(ctx context.Context, query string, limit int
 }
 
 func (s *Service) DiscoverLLMFit(ctx context.Context, query string, limit int) ([]LLMFitAdvisory, error) {
-	if s == nil || s.llmfit == nil { return nil, nil }
+	if s == nil || s.llmfit == nil { return nil, errors.New("llmfit service is not configured; start llmfit serve on the configured loopback endpoint") }
 	return s.llmfit.SearchModels(ctx, query, limit)
 }
 

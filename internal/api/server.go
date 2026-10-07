@@ -101,6 +101,7 @@ type localAIService interface {
 	DetectAndPersist(context.Context, string) (localai.HardwareProfile, error)
 	Recommendations(context.Context, string, localai.RecommendRequest) ([]localai.Recommendation, error)
 	DiscoverLLMFit(context.Context, string, int) ([]localai.LLMFitAdvisory, error)
+	LlamaRuntimeStatus(context.Context) ([]localai.LlamaRuntimeBackendStatus, error)
 	QueueOneClickInstall(context.Context, localai.OneClickInstallRequest) (localai.InstallJob, error)
 	InstallJob(context.Context, string) (localai.InstallJob, error)
 	Catalog() *localai.CatalogService
@@ -348,6 +349,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/settings/local-ai", s.setLocalAISettings)
 	s.mux.HandleFunc("GET /v1/local-ai/catalog", s.listLocalAICatalog)
 	s.mux.HandleFunc("GET /v1/local-ai/discovery", s.discoverLocalAIModels)
+	s.mux.HandleFunc("GET /v1/local-ai/llama-runtimes", s.listLlamaRuntimes)
 	s.mux.HandleFunc("GET /v1/local-ai/components", s.listManagedComponents)
 	s.mux.HandleFunc("POST /v1/local-ai/components/{componentID}/{action}", s.manageComponent)
 	s.mux.HandleFunc("GET /v1/local-ai/component-jobs/{jobID}", s.getComponentJob)
@@ -1708,6 +1710,14 @@ func (s *Server) setLocalAISettings(w http.ResponseWriter, r *http.Request) {
 	}
 	s.modelPoolPath = path
 	writeJSON(w, http.StatusOK, map[string]any{"model_pool_path": path, "restart_required": false})
+}
+
+func (s *Server) listLlamaRuntimes(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.authenticate(w, r); !ok { return }
+	if s.localAI == nil { writeError(w, http.StatusServiceUnavailable, "local AI unavailable"); return }
+	rows, err := s.localAI.LlamaRuntimeStatus(r.Context())
+	if err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
+	writeJSON(w, http.StatusOK, rows)
 }
 
 func (s *Server) listLocalAICatalog(w http.ResponseWriter, r *http.Request) {

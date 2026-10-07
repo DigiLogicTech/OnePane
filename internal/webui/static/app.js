@@ -498,7 +498,7 @@ function a31OpenComponentSettings(id,c){
   $("#a31SettingsOmniCredentials")?.addEventListener("click",()=>{closeModal();a31CloudConsumerFilter="omniroute";a31SetModelView("cloud")});
 }
 function a31BindComponentButtons(root=document,components={}){
-  $$("[data-a31-component]",root).forEach(b=>b.onclick=()=>{const [id,action]=b.dataset.a31Component.split(":");a31ComponentAction(id,action,`#a31-${id}-status`)});
+  $("[data-a31-component]",root).forEach(b=>b.onclick=()=>{const [id,action]=b.dataset.a31Component.split(":");if(action==="remove"&&!confirm(`Uninstall ${id==="colibri"?"Colibri":"OmniRoute"} from this node?`))return;a31ComponentAction(id,action,`#a31-${id}-status`)});
   $$("[data-a31-component-settings]",root).forEach(b=>b.onclick=()=>a31OpenComponentSettings(b.dataset.a31ComponentSettings,components[b.dataset.a31ComponentSettings]||{}))
 }
 

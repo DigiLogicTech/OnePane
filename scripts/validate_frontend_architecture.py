@@ -122,8 +122,8 @@ else: ok("Models feature layer does not own application boot")
 foundation_tag='<script src="/app-foundation.js"></script>'
 canonical_tag='<script src="/app.js"></script>'
 models_tag='<script src="/models-page.js"></script>'
-if foundation_tag not in html or canonical_tag not in html or models_tag not in html or not (html.index(foundation_tag)<html.index(canonical_tag)<html.index(models_tag)):
-    fail("index.html must load foundation then canonical runtime then Models feature")
+if foundation_tag not in html or canonical_tag not in html or models_tag not in html or not (html.index(foundation_tag)<html.index(models_tag)<html.index(canonical_tag)):
+    fail("index.html must load foundation then Models feature then canonical boot runtime")
 else: ok("script load order is deterministic")
 
 if len(canonical.splitlines())>800: fail("canonical runtime exceeded 800-line review budget; split features before adding more")

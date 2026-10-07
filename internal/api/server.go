@@ -239,6 +239,7 @@ type gatewayService interface {
 
 type Server struct {
 	mux             *http.ServeMux
+	attentionDB     *sql.DB
 	projects        projectService
 	events          eventReader
 	auth            Authorizer
@@ -278,6 +279,7 @@ func NewServer(projects projectService, events eventReader, auth Authorizer) *Se
 	s.routes()
 	return s
 }
+func (s *Server) SetAttentionDB(db *sql.DB) { s.attentionDB = db }
 func (s *Server) SetPreviewSessions(m previewSessionMinter) { s.previewSessions = m }
 func (s *Server) SetWebAuth(a *webauth.Service, secureCookies bool) {
 	s.webAuth = a
@@ -494,6 +496,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/routine-bindings", s.listRoutineBindings)
 	s.mux.HandleFunc("POST /v1/verifications/{verificationID}/acceptance", s.acceptVerification)
 	s.mux.HandleFunc("GET /v1/events", s.listEvents)
+	s.mux.HandleFunc("GET /v1/ui/attention", s.attentionDispositions)
+	s.mux.HandleFunc("POST /v1/ui/attention", s.attentionDispositions)
 	s.mux.HandleFunc("GET /v1/events/stream", s.streamEvents)
 	s.mux.HandleFunc("GET /", s.serveWebUI)
 }

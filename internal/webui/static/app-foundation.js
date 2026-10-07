@@ -1195,7 +1195,7 @@ async function qa4ApplyProjectSandboxRuntime(project,sandbox){
   return apiRequest(`/v1/project-runtimes/${encodeURIComponent(runtime.id)}/policy`,{method:'PATCH',body:JSON.stringify({expected_revision:Number(runtime.revision||1),network_policy:networkPolicy,filesystem_policy:filesystemPolicy})});
 }
 function qa4ModelOptions(){
-  const opts=[['auto','Automatic / scheduler selected']];
+  const opts=[['auto','Automatic / scheduler selected'],['gateway:omniroute','OmniRoute · gateway routing']];
   for(const c of qa4ProjectHub.candidates.filter(x=>x.kind==='model_deployment'&&x.schedulable)){opts.push([`candidate:${c.id}`,`${c.local?'Local':'Cloud'} · ${c.display_name||c.provider||c.id}${c.qualification?` · ${c.qualification}`:''}`]);}
   return opts;
 }
@@ -1652,9 +1652,14 @@ function qa7WorkspaceSandbox(project,workspace){return qa7NormalizeWorkspace(pro
 qa4ProjectSandbox=function(project,workspace){const ws=workspace||qa4ActiveWorkspace?.();return ws?qa7WorkspaceSandbox(project,ws):{...qa7WorkspaceDefaults().sandbox,...(qa4ProjectUI(project).sandbox||{})};};
 
 function qa7RouteFallback(workspace,role='supervisor'){
-  const r=workspace?.orchestration?.[role]||{},ids=[],profiles=[],modelFallbacks=Array.isArray(r.fallback_models)?r.fallback_models:[];
-  for(const raw of [...modelFallbacks,r.fallback_model,r.fallback_agent]){const v=String(raw||'').trim();if(v.startsWith('candidate:'))ids.push(v.slice('candidate:'.length));else if(v&&v!=='auto'&&!profiles.includes(v))profiles.push(v);}
-  return {candidate_ids:[...new Set(ids)],agent_profiles:profiles};
+  const r=workspace?.orchestration?.[role]||{},ids=[],profiles=[],gateways=[],modelFallbacks=Array.isArray(r.fallback_models)?r.fallback_models:[];
+  for(const raw of [...modelFallbacks,r.fallback_model,r.fallback_agent]){
+    const v=String(raw||'').trim();
+    if(v.startsWith('candidate:'))ids.push(v.slice('candidate:'.length));
+    else if(v.startsWith('gateway:'))gateways.push(v.slice('gateway:'.length));
+    else if(v&&v!=='auto'&&!profiles.includes(v))profiles.push(v);
+  }
+  return {candidate_ids:[...new Set(ids)],agent_profiles:profiles,gateway_targets:[...new Set(gateways)]};
 }
 function qa7WorkspaceAccess(workspace){
   const s=workspace.sandbox||qa7WorkspaceDefaults().sandbox;
@@ -1662,8 +1667,8 @@ function qa7WorkspaceAccess(workspace){
 }
 function qa7EffectiveChatMode(workspace,requested='default'){let mode=requested==='default'?(workspace.orchestration?.mode||'supervisor'):requested;if(workspace.routing?.enabled===false&&['workers','team','council'].includes(mode))mode='supervisor';return mode;}
 function qa7RoutingEnvelope(workspace,requested='default'){
-  const enabled=workspace.routing?.enabled!==false,mode=qa7EffectiveChatMode(workspace,requested),role=mode==='direct'?'supervisor':mode,selected=qa4RouteSelection(workspace,role),fallback=qa7RouteFallback(workspace,role);
-  return {enabled,mode,role,candidate_id:selected.candidate_id,agent_profile:selected.agent_profile,fallback_candidate_ids:enabled?fallback.candidate_ids:[],fallback_agent_profiles:enabled?fallback.agent_profiles:[],project_workspace_id:workspace.id,workspace_access:qa7WorkspaceAccess(workspace)};
+  const enabled=workspace.routing?.enabled!==false,mode=qa7EffectiveChatMode(workspace,requested),role=mode==='direct'?'supervisor':mode,selected=qa4RouteSelection(workspace,role),fallback=qa7RouteFallback(workspace,role),primaryModel=String(workspace?.orchestration?.[role]?.model||'auto'),gatewayTarget=primaryModel.startsWith('gateway:')?primaryModel.slice('gateway:'.length):'';
+  return {enabled,mode,role,candidate_id:selected.candidate_id,agent_profile:selected.agent_profile,gateway_target:gatewayTarget,fallback_candidate_ids:enabled?fallback.candidate_ids:[],fallback_gateway_targets:enabled?fallback.gateway_targets:[],fallback_agent_profiles:enabled?fallback.agent_profiles:[],project_workspace_id:workspace.id,workspace_access:qa7WorkspaceAccess(workspace)};
 }
 
 function qa7SettingsRole(key,label,o){

@@ -100,8 +100,6 @@ type ingressRouteResolver interface {
 type localAIService interface {
 	DetectAndPersist(context.Context, string) (localai.HardwareProfile, error)
 	Recommendations(context.Context, string, localai.RecommendRequest) ([]localai.Recommendation, error)
-	DiscoverLLMFit(context.Context, string, int) ([]localai.LLMFitAdvisory, error)
-	LlamaRuntimeStatus(context.Context) ([]localai.LlamaRuntimeBackendStatus, error)
 	QueueOneClickInstall(context.Context, localai.OneClickInstallRequest) (localai.InstallJob, error)
 	InstallJob(context.Context, string) (localai.InstallJob, error)
 	Catalog() *localai.CatalogService
@@ -1715,7 +1713,9 @@ func (s *Server) setLocalAISettings(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listLlamaRuntimes(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authenticate(w, r); !ok { return }
 	if s.localAI == nil { writeError(w, http.StatusServiceUnavailable, "local AI unavailable"); return }
-	rows, err := s.localAI.LlamaRuntimeStatus(r.Context())
+	provider, ok := s.localAI.(interface{ LlamaRuntimeStatus(context.Context) ([]localai.LlamaRuntimeBackendStatus, error) })
+	if !ok { writeError(w, http.StatusNotImplemented, "llama.cpp runtime management unavailable"); return }
+	rows, err := provider.LlamaRuntimeStatus(r.Context())
 	if err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
 	writeJSON(w, http.StatusOK, rows)
 }

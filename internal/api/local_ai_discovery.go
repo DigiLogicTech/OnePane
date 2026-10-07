@@ -38,9 +38,15 @@ type discoveredModel struct {
 	InstallReason string `json:"install_reason,omitempty"`
 }
 
+type discoverySourceStatus struct {
+	Status string `json:"status"`
+	Message string `json:"message,omitempty"`
+	Count int `json:"count"`
+}
 type discoveryEnvelope struct {
 	Models []discoveredModel `json:"models"`
 	Errors map[string]string `json:"source_errors,omitempty"`
+	Sources map[string]discoverySourceStatus `json:"sources,omitempty"`
 }
 
 func discoveryClient() *http.Client {
@@ -108,7 +114,22 @@ func (s *Server) discoverLocalAIModels(w http.ResponseWriter,r *http.Request){
 	if wanted["huggingbay"]{launch("huggingbay",func()([]discoveredModel,error){return discoverHuggingBay(r.Context(),q,limit)})}
 	if wanted["llmfit"]{launch("llmfit",func()([]discoveredModel,error){return s.discoverLLMFit(r.Context(),q,limit)})}
 	go func(){wg.Wait();close(ch)}()
-	out:=discoveryEnvelope{Models:[]discoveredModel{},Errors:map[string]string{}}
-	for x:=range ch{if x.err!=nil{out.Errors[x.name]=x.err.Error();continue};out.Models=append(out.Models,x.rows...)}
-	if len(out.Errors)==0{out.Errors=nil};writeJSON(w,http.StatusOK,out)
+	out:=discoveryEnvelope{Models:[]discoveredModel{},Errors:map[string]string{},Sources:map[string]discoverySourceStatus{}}
+	for x:=range ch{
+		if x.err!=nil{
+			out.Errors[x.name]=x.err.Error()
+			out.Sources[x.name]=discoverySourceStatus{Status:"unavailable",Message:x.err.Error(),Count:0}
+			continue
+		}
+		out.Models=append(out.Models,x.rows...)
+		if len(x.rows)==0{
+			msg:="Source is reachable but returned no matching model entries."
+			if x.name=="huggingbay"{msg="Hugging Bay is reachable but currently returned no matching LLM torrents."}
+			out.Sources[x.name]=discoverySourceStatus{Status:"connected_empty",Message:msg,Count:0}
+		}else{
+			out.Sources[x.name]=discoverySourceStatus{Status:"connected",Message:"Source connected.",Count:len(x.rows)}
+		}
+	}
+	if len(out.Errors)==0{out.Errors=nil}
+	writeJSON(w,http.StatusOK,out)
 }

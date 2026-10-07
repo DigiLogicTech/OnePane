@@ -134,7 +134,7 @@ func (s *Service) startOmniRoute(ctx context.Context) error {
 		exe,args,err=s.omniRouteCLICommand()
 	} else {
 		exe,err=s.omniRouteExecutable()
-		args=[]string{"--no-open","--non-interactive","--port","20128"}
+		args=[]string{"--no-open","--port","20128"}
 	}
 	if err != nil { return err }
 	if err := os.MkdirAll(s.omniRouteDataRoot(), 0o700); err != nil { return err }

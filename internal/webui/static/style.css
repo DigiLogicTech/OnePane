@@ -967,3 +967,30 @@ select option,select optgroup{background-color:var(--panel-2);color:var(--text)}
 :root[data-theme="light"] select{color-scheme:light}
 @media(prefers-color-scheme:dark){:root[data-theme="system"] select{color-scheme:dark}}
 @media(prefers-color-scheme:light){:root[data-theme="system"] select{color-scheme:light}}
+
+
+/* Alpha 3.2 Project / Workspace separation */
+.project-overview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;align-items:start}
+.project-overview-card{display:flex;flex-direction:column;gap:14px;min-width:0;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--panel)}
+.project-overview-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.project-overview-card-head h2{margin:0 0 4px;font-size:18px}
+.project-overview-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.project-overview-metrics>div{display:flex;flex-direction:column;gap:3px;min-width:0;padding:10px;border:1px solid var(--border);border-radius:9px;background:var(--panel-2)}
+.project-overview-metrics strong{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.project-overview-metrics span{font-size:12px;color:var(--muted)}
+.project-overview-workspaces{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-height:30px}
+.project-workspace-chip{border:1px solid var(--border);border-radius:999px;background:var(--panel-2);color:var(--text);padding:5px 9px;cursor:pointer}
+.project-workspace-chip:hover{border-color:var(--accent)}
+.project-overview-actions{margin-top:auto}
+.workspace-page .workspace-tabs{margin-bottom:10px}
+.workspace-page .workspace-context-bar{margin-bottom:10px}
+.workspace-drag-bar{cursor:grab;touch-action:none}
+.workspace-drag-bar:active{cursor:grabbing}
+.workspace-drag-bar :is(button,select,input,textarea,a,label){cursor:auto;touch-action:auto}
+.inspector-tab-draggable{cursor:grab;touch-action:none;will-change:transform}
+.inspector-tab-draggable.dragging{cursor:grabbing;z-index:3;opacity:.92}
+.inspector-tab-draggable>.active,.inspector-tab-draggable>button{max-width:180px;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:900px){
+  .project-overview-grid{grid-template-columns:1fr}
+  .project-overview-metrics{grid-template-columns:1fr}
+}

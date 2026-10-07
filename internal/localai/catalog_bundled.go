@@ -91,5 +91,6 @@ func (s *CatalogService) Installability(ctx context.Context) (map[string]map[str
 		if q == nil { q = map[string]bool{}; out[m.ModelRef] = q }
 		q[m.Quantization] = true
 	}
+	if err := s.adoptedInstallability(ctx, out); err != nil { return nil, err }
 	return out, nil
 }

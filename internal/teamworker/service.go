@@ -287,6 +287,22 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		used += len(raw)
 		sections = append(sections, agentprotocol.ContextSection{ID: "msg-" + m.ID, Kind: "team_message", Trust: trust, Authoritative: m.Kind == "human", Content: raw})
 	}
+	// Web Chat seats are human-mediated. They never call an inference API,
+	// consume a scheduled provider candidate or acquire tool permissions.
+	// Snapshot config and evidence filtering above still govern their prompt.
+	if manual, ok := manualWebSeatFromConfig(member.Config); ok {
+		if executionMode != "council" {
+			return s.fail(ctx, res, fmt.Errorf("manual Web Chat seats require Council execution mode"))
+		}
+		prompt := buildManualWebCouncilPrompt(ss.ID, member.RoleName, taskObjective, turnRound, researchPhase, research, sections)
+		_, err := s.teams.QueueManualWebTurn(ctx, team.QueueManualWebTurnCommand{
+			TurnID: turnID, SessionID: ss.ID, WorkspaceID: ws, MemberID: member.ID,
+			ProviderID: manual.ProviderID, ModelLabel: manual.ModelLabel, Prompt: prompt,
+		})
+		if err != nil { return s.fail(ctx, res, fmt.Errorf("queue manual Web Chat Council turn: %w", err)) }
+		res.Status = "awaiting_manual_input"
+		return res
+	}
 	rp := routePolicy{PreferZeroIncrementalCost: true, AllowMediated: true, AllowDegraded: true}
 	_ = json.Unmarshal(member.RoutePolicy, &rp)
 	label := policy.DataLabel{WorkspaceID: ws, Confidentiality: policy.ConfidentialityInternal, Residency: policy.ResidencyAny, Trust: policy.TrustUserInstruction}

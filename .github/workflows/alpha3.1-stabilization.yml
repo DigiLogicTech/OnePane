@@ -1,8 +1,8 @@
-name: Alpha 3.2 Integration CI
+name: Alpha 3.3 Consolidated QA Release Candidate
 
 on:
   push:
-    branches: [alpha3.2-integration, alpha3.2-windows-stabilization, alpha3.2-qa-round2-remediation, alpha3.2-qa-round3-remediation, alpha3.2-next-release-remediation, feature/colibri-tiered-inference]
+    branches: [alpha3.2-integration, alpha3.2-windows-stabilization, alpha3.2-qa-round2-remediation, alpha3.2-qa-round3-remediation, alpha3.2-next-release-remediation, feature/colibri-tiered-inference, release/alpha3.3-consolidated-qa]
   workflow_dispatch:
     inputs:
       run_hosted_smoke:
@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 env:
-  ONEPANE_VERSION: 0.1.0-alpha.3.2
+  ONEPANE_VERSION: 0.1.0-alpha.3.3-rc.1
 
 jobs:
   validate:
@@ -121,6 +121,19 @@ jobs:
           ! grep -F "QA8_RELEASE" internal/webui/static/app-foundation.js internal/webui/static/app.js
           grep -F "apiRequest('/v1/about')" internal/webui/static/app-foundation.js
           git diff --exit-code
+      - name: Consolidated feature and tour validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          for asset in web-chat-page.js web-chat-session-tabs.js web-chat-council-launch.js web-chat-chair.js colibri-tiered-ui.js colibri-spec-sheet.js; do
+            node --check "internal/webui/static/$asset"
+          done
+          node --check internal/webui/static/app.js
+          node scripts/validate_web_chat_sessions.js
+          node scripts/validate_web_only_council.js
+          node scripts/validate_web_chair.js
+          node scripts/validate_colibri_spec_tour.js
+          go test ./internal/storage/sqlite -run TestManualWebChairMigrationCreatesAuditableTurnSchema -count=1
       - name: Go tests
         run: go test ./...
       - name: Build Windows x64 installer
@@ -186,11 +199,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: OnePane-alpha3.2-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc1-source-native-${{ github.sha }}
           path: |
             dist/**
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 14
       - name: Clean self-hosted build workspace
         if: always()
         shell: bash
@@ -229,7 +242,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.2-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc1-source-native-${{ github.sha }}
           path: artifact
       - name: Install launch uninstall reinstall
         shell: pwsh
@@ -350,7 +363,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.2-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc1-source-native-${{ github.sha }}
           path: artifact
       - name: Install verify and preserve data
         shell: bash

@@ -123,6 +123,8 @@ type localAIService interface {
 }
 
 type nodeFederationService interface {
+	ComputePolicy(context.Context, string) (nodefederation.ComputePolicy, error)
+	SetComputePolicy(context.Context, nodefederation.SetComputePolicyCommand) (nodefederation.ComputePolicy, error)
 	Nodes(context.Context) ([]nodefederation.NodeView, error)
 	Pairings(context.Context) ([]nodefederation.Pairing, error)
 	BeginPair(context.Context, string) (nodefederation.Pairing, string, error)
@@ -446,6 +448,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/pair/confirm", s.confirmNodePair)
 	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/revoke", s.revokeNode)
 	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/capabilities", s.nodeCapabilities)
+	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/compute-policy", s.getNodeComputePolicy)
+	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/compute-policy", s.setNodeComputePolicy)
 	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/model-management", s.getNodeModelManagement)
 	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/model-management", s.setNodeModelManagement)
 	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/remote-model-management", s.getRemoteNodeModelManagement)
@@ -2815,6 +2819,42 @@ func (s *Server) revokeNode(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"revoked": true})
 }
+// Node-scoped scheduling policy is administered independently from global
+// Model Routing. No remote install permission is implied by a compute grant.
+func (s *Server) getNodeComputePolicy(w http.ResponseWriter, r *http.Request) {
+ if _,ok:=s.requireNodeOperator(w,r);!ok{return}
+ p,err:=s.federation.ComputePolicy(r.Context(),strings.TrimSpace(r.PathValue("nodeID")))
+ if errors.Is(err,sql.ErrNoRows){
+  writeJSON(w,200,map[string]any{"node_id":r.PathValue("nodeID"),"enabled":false,"idle_only":true,"allow_model_downloads":false,"runtime_installation":"confirm","project_scope":"selected","allowed_projects":[]string{}})
+  return
+ }
+ if err!=nil{writeError(w,500,err.Error());return}
+ writeJSON(w,200,p)
+}
+func (s *Server) setNodeComputePolicy(w http.ResponseWriter, r *http.Request) {
+ actor,ok:=s.requireNodeOperator(w,r);if !ok{return}
+ var in struct{
+  Enabled bool `json:"enabled"`
+  IdleOnly bool `json:"idle_only"`
+  AllowModelDownloads bool `json:"allow_model_downloads"`
+  RuntimeInstallation string `json:"runtime_installation"`
+  ProjectScope string `json:"project_scope"`
+  Availability json.RawMessage `json:"availability"`
+  Limits json.RawMessage `json:"limits"`
+  AllowedProjects json.RawMessage `json:"allowed_projects"`
+ }
+ if !decodeJSON(w,r,&in){return}
+ nodeID:=strings.TrimSpace(r.PathValue("nodeID"))
+ p,err:=s.federation.SetComputePolicy(r.Context(),nodefederation.SetComputePolicyCommand{
+  NodeID:nodeID,Actor:actor.PrincipalID,Enabled:in.Enabled,IdleOnly:in.IdleOnly,
+  AllowModelDownloads:in.AllowModelDownloads,RuntimeInstallation:in.RuntimeInstallation,
+  ProjectScope:in.ProjectScope,AvailabilityJSON:in.Availability,LimitsJSON:in.Limits,
+  AllowedProjectsJSON:in.AllowedProjects,
+ })
+ if err!=nil{writeError(w,http.StatusConflict,err.Error());return}
+ writeJSON(w,200,p)
+}
+
 func (s *Server) nodeCapabilities(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireNodeOperator(w, r); !ok {
 		return

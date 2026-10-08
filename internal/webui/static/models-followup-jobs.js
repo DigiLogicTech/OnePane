@@ -2,30 +2,7 @@ const A38_REMOTE_STORAGE="onepane_remote_model_jobs_v1";
 let a38RemoteJobs=[];
 try{a38RemoteJobs=JSON.parse(localStorage.getItem(A38_REMOTE_STORAGE)||"[]");if(!Array.isArray(a38RemoteJobs))a38RemoteJobs=[]}catch{a38RemoteJobs=[]}
 function a38SaveRemoteJobs(){localStorage.setItem(A38_REMOTE_STORAGE,JSON.stringify(a38RemoteJobs.slice(-50)))}
-const a38InstallLocal=a31InstallModel;
-a31InstallModel=async function(model){
- if(!model?.installable)return a38InstallLocal(model);
- let nodes=[];
- try{const r=await apiRequest("/v1/nodes");nodes=a31Array(r?.nodes||r).filter(n=>!n.local&&["paired","trusted"].includes(String(n.trust_state||"").toLowerCase()))}
- catch(e){notice("Node inventory unavailable: "+e.message,"bad");return}
- const qs=a31Array(model.installable_quantizations);if(!qs.length)return a38InstallLocal(model);
- openModal("Choose installation node",`<form id="a38InstallTarget" class="qa-form"><strong>${escapeHtml(model.display_name||model.model_ref)}</strong><p class="page-subtitle">This node or a trusted enrolled peer. OnePane validates the selected target's model catalogue, permissions, hardware and storage before installing.</p><label>Target<select name="target"><option value="local">This node</option>${nodes.length?'<option value="remote">Another managed node</option>':""}</select></label><label id="a38NodeSelectRow" hidden>Managed node<select name="node">${nodes.map(n=>`<option value="${escapeHtml(n.id||n.node_id)}">${escapeHtml(n.name||n.id||n.node_id)}</option>`).join("")}</select></label><label>Quantization<select name="quantization">${qs.map(q=>`<option value="${escapeHtml(q)}">${escapeHtml(q)}</option>`).join("")}</select></label><div class="page-subtitle">${nodes.length?`${nodes.length} trusted peer node(s).`:"No paired peers. Pair a node from Nodes first; arbitrary remote agent bootstrap is not enabled."}</div><div class="error" id="a38TargetError"></div><div class="toolbar"><button type="button" class="btn" id="a38CancelInstall">Cancel</button><button type="submit" class="btn primary">Continue</button></div></form>`);
- const form=$("#a38InstallTarget");
- $("#a38CancelInstall").onclick=closeModal;
- form.elements.target.onchange=()=>{$("#a38NodeSelectRow").hidden=form.elements.target.value!=="remote"};
- form.onsubmit=async event=>{
-  event.preventDefault();
-  if(form.elements.target.value==="local"){closeModal();return a38InstallLocal(model)}
-  const id=form.elements.node?.value;if(!id)return;
-  const b=form.querySelector('button[type="submit"]');b.disabled=true;$("#a38TargetError").textContent="Authorising and queuing remote installation…";
-  try{
-   const payload={model_ref:model.model_ref,quantization:form.elements.quantization.value,use_case:"general",context_tokens:8192,role_name:"local-managed",prefer_gpu:true};
-   const job=await apiRequest(`/v1/nodes/${encodeURIComponent(id)}/models/install`,{method:"POST",body:JSON.stringify(payload)});
-   a38RemoteJobs.push({node_id:id,job_id:job.id,model_ref:model.model_ref,status:job.status||"queued"});
-   a38SaveRemoteJobs();closeModal();notice("Remote model install queued on "+id);a38OpenAllInstallProgress()
-  }catch(err){b.disabled=false;$("#a38TargetError").textContent=err.message}
- }
-};
+// Node selection, quantization and compute now share the primary Download & Install modal.
 let a38Components={},a38MonitorRunning=false;
 const a38BaseComponentButtons=a31ComponentButtons;
 a31ComponentButtons=function(id,c){

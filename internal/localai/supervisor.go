@@ -832,6 +832,35 @@ func (s *RuntimeSupervisor) VerifyIdentity(ctx context.Context, inst RuntimeInst
 	return nil
 }
 
+// StopIfIdle releases CPU/GPU memory after an Agent Check without evicting a
+// runtime used by concurrent inference. Both locks are held through Stop:
+// Acquire takes residencyMu then SetBusy (activityMu), so a new inference
+// cannot enter between the safety check and process termination.
+func (s *RuntimeSupervisor) StopIfIdle(ctx context.Context, deploymentID string) (bool, error) {
+ if s==nil {return false,nil}
+ deploymentID=strings.TrimSpace(deploymentID)
+ if deploymentID=="" {return false,errors.New("deployment id required")}
+ s.residencyMu.Lock()
+ defer s.residencyMu.Unlock()
+ s.activityMu.Lock()
+ defer s.activityMu.Unlock()
+ if s.activeRequests[deploymentID]>0 {return false,nil}
+ inst,err:=s.Instance(ctx,deploymentID)
+ if errors.Is(err,sql.ErrNoRows){return false,nil}
+ if err!=nil{return false,err}
+ switch inst.Status {
+ case RuntimeHealthy,RuntimeStarting:
+  if err:=s.Stop(ctx,deploymentID);err!=nil{return false,err}
+  return true,nil
+ case RuntimeBusy:
+  // A stale busy marker is not proof that no other process owns the model.
+  return false,nil
+ default:
+  // Already stopped, failed or orphaned: never signal an unknown process.
+  return false,nil
+ }
+}
+
 func (s *RuntimeSupervisor) Stop(ctx context.Context, deploymentID string) error {
 	inst, err := s.Instance(ctx, deploymentID)
 	if err != nil {

@@ -26,7 +26,7 @@ func TestCouncilChairUsesDistinctFrozenModelAndNoApiInference(t *testing.T){
  service:=&Service{}
  prompt,err:=service.chairPrompt(context.Background(),snap,"agenda",0)
  if err!=nil{t.Fatal(err)}
- for _,word:=range []string{"Compare candidate architectures","agenda","hypotheses","independent","Do not invent evidence","approval"}{
+ for _,word:=range []string{"Compare candidate architectures","agenda","hypothesis","independent","Do not invent evidence","approval"}{
   if !strings.Contains(prompt,word){t.Fatalf("Chair agenda prompt missing %q",word)}
  }
  if strings.Contains(prompt,"agent-candidate-id") {t.Fatal("Chair must never carry an inferred scheduler seat")}

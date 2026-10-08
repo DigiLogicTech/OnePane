@@ -597,7 +597,7 @@ startProductTour=function({replay=false,welcome=false}={}){
   const originalInspector=state.inspector,originalDrawer=state.drawer;
   const steps=[
     {title:"Welcome to OnePane",body:"DigiLogic OnePane brings Projects, Workspaces, Tasks, Agents, local and cloud models, Nodes, Skills, Councils and observability into one control plane.",target:null},
-    {title:"Navigation and pages",body:"Use the left menu to navigate Projects, expandable Workspaces, Local/Cloud Models, Nodes, Agents, Skills, Tasks and Operations.",target:".sidebar",padding:0},
+    {title:"Navigation",body:"Use the left menu to navigate Projects, expandable Workspaces, Local/Cloud Models, Nodes, Agents, Skills, Tasks and Operations.",target:".sidebar",padding:0},
     {title:"OnePane Chat",body:"Assistant and Project Orchestrator are two separate chat tabs. Select the Assistant model and change projects in the Orchestrator without leaving your page.",target:"#controlChatLauncher"},
     {title:"Web Chat is a separate workspace",body:"Web Chat uses the provider's own website and subscription, with individual OnePane conversation tabs. You can keep several ChatGPT, Claude, Gemini and other manual consultations open independently.",target:"#webChatLauncher",prepare:()=>{if(typeof openRoute==="function")openRoute("webchat")}},
     {title:"Start Web-only Research Council",body:"Start a Council here: enter a research objective, choose 2–8 consultation seats (or 2–7 plus a Chair), models, roles and critique rounds. OnePane manages prompts, queues and immutable research evidence; cloud websites stay external.",target:"#a41StartCouncil",prepare:async()=>{openRoute("webchat");if(typeof renderWebChat==="function")await renderWebChat()}},

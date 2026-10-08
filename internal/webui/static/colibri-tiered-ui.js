@@ -1,3 +1,26 @@
+// Explicit activation warms the selected Colibri model. Subsequent chat
+// requests also activate it on demand via the shared supervisor.
+// This does not change which model OnePane Chat routes to.
+async function a42SwapColibri(deployment,button=null) {
+  const id=String(deployment?.deployment_id||"");
+  if(!id)return notice("Select a registered Colibri model.","bad");
+  const old=button?.textContent;
+  if(button){button.disabled=true;button.textContent="Switching…"}
+  try {
+    const data=await apiRequest(`/v1/local-ai/deployments/${encodeURIComponent(id)}/colibri-swap`,{
+      method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace})
+    });
+    notice(`Colibri model resident · ${String(deployment.display_name||deployment.model_ref||"model")}. Other idle Colibri models were released.`);
+    if(button){button.textContent="Resident"}
+    if(typeof renderModels==="function")await renderModels();
+    return data;
+  }catch(ex){
+    notice(ex.message,"bad");
+    if(button){button.disabled=false;button.textContent=old}
+    return null;
+  }
+}
+
 // Colibri model-specific hot/warm/cold memory controls.
 // Registered only for Colibri deployments; llama.cpp Compute remains separate.
 async function a42OpenColibriTier(deployment) {
@@ -39,6 +62,7 @@ async function a42OpenColibriTier(deployment) {
       <div class="toolbar">
         <button class="btn primary" type="submit" id="a42ColibriSave">Save tier settings</button>
         <button class="btn" type="button" id="a42ColibriPlan" ${state?.plan_available?"":"disabled"}>View residency plan</button>
+        <button class="btn" type="button" id="a42ColibriSwap">Hot swap now</button>
       </div>
       <div class="page-subtitle" id="a42ColibriTierStatus" role="status">${escapeHtml(state?.plan_note||"Placement can be inspected without loading a model into inference.")}</div>
       <pre id="a42ColibriPlanOutput" style="max-height:320px;overflow:auto;white-space:pre-wrap;" hidden></pre>
@@ -58,6 +82,15 @@ async function a42OpenColibriTier(deployment) {
   form.elements.backend.onchange=refresh;
   refresh();
   const status=form.querySelector("#a42ColibriTierStatus");
+  // This status is the *whole Colibri model*, not the internal expert cache.
+  try {
+    const residency=await apiRequest(`${url}/colibri-swap?workspace_id=${ws}`);
+    const active=Array.isArray(residency.active_deployment_ids)?residency.active_deployment_ids:[];
+    const message=active.includes(id)?"This model is resident.":"This model is unloaded; Hot swap now will activate it.";
+    const note=form.querySelector("#a42ColibriTierStatus");
+    if(note)note.textContent=message+(active.length>0?` · ${active.length} Colibri runtime(s) currently resident on node.`:"");
+  }catch{}
+
   form.onsubmit=async event=>{
     event.preventDefault();
     const btn=form.querySelector("#a42ColibriSave");
@@ -76,6 +109,11 @@ async function a42OpenColibriTier(deployment) {
       closeModal();notice("Colibri tier configuration saved. It will apply at the next model launch.");
       renderModels();
     }catch(ex){status.textContent=ex.message;btn.disabled=false}
+  };
+  form.querySelector("#a42ColibriSwap").onclick=async ()=>{
+    const btn=form.querySelector("#a42ColibriSwap");
+    const data=await a42SwapColibri(deployment,btn);
+    if(data){const note=form.querySelector("#a42ColibriTierStatus");if(note)note.textContent="Resident model activated. Chat routing has not been changed."}
   };
   form.querySelector("#a42ColibriPlan").onclick=async ()=>{
     const button=form.querySelector("#a42ColibriPlan");

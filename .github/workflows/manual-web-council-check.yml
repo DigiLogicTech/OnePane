@@ -35,7 +35,7 @@ jobs:
           node --check internal/webui/static/app-foundation.js
       - name: Test Council and API packages
         run: |
-          go test ./internal/team ./internal/teamworker ./internal/api
+          go test ./internal/team ./internal/teamworker ./internal/api ./internal/storage/sqlite
       - name: Windows cross-compilation
         run: |
           GOOS=windows GOARCH=amd64 go build -o /tmp/onepane-webchat-check.exe ./cmd/harnessd

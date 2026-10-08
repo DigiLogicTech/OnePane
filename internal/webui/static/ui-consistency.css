@@ -397,3 +397,9 @@
  .a36-settings-panel-body>.settings-section{grid-template-columns:1fr}
  .a36-settings-preview-grid{grid-template-columns:1fr}
 }
+
+/* The generic qa-form input sizing must never stretch checkbox hitboxes
+   across an entire row. Keep a small, theme-aware, accessible control. */
+.qa-form label.install-override-option{display:flex;align-items:flex-start;gap:10px;cursor:pointer;color:var(--text);font-size:13px;line-height:1.5}
+.qa-form .install-override-option input[type="checkbox"]{box-sizing:border-box;appearance:auto;flex:0 0 18px;width:18px!important;min-width:18px;height:18px;margin:1px 0 0;padding:0;border:1px solid var(--border);border-radius:4px;accent-color:var(--accent);box-shadow:none!important;outline:none}
+.qa-form .install-override-option input[type="checkbox"]:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px;box-shadow:none!important}

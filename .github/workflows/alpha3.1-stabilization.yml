@@ -2,7 +2,7 @@ name: Alpha 3.3 RC2 Models QA Remediation
 
 on:
   push:
-    branches: [alpha3.2-integration, alpha3.2-windows-stabilization, alpha3.2-qa-round2-remediation, alpha3.2-qa-round3-remediation, alpha3.2-next-release-remediation, feature/colibri-tiered-inference, release/alpha3.3-consolidated-qa, fix/alpha3.3-qa-models-rc2, fix/alpha3.3-upgrade-startup-diagnostics, fix/alpha3.3-model-install-colibri-ux, fix/alpha3.3-qa-consolidated-rc3, fix/alpha3.3-rc4-migration-upgrade, feature/alpha3.3-rc5-approved-ux]
+    branches: [alpha3.2-integration, alpha3.2-windows-stabilization, alpha3.2-qa-round2-remediation, alpha3.2-qa-round3-remediation, alpha3.2-next-release-remediation, feature/colibri-tiered-inference, release/alpha3.3-consolidated-qa, fix/alpha3.3-qa-models-rc2, fix/alpha3.3-upgrade-startup-diagnostics, fix/alpha3.3-model-install-colibri-ux, fix/alpha3.3-qa-consolidated-rc3, fix/alpha3.3-rc4-migration-upgrade, feature/alpha3.3-rc5-approved-ux, release/alpha3.3-rc6-approved-ux]
   workflow_dispatch:
     inputs:
       run_hosted_smoke:
@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 env:
-  ONEPANE_VERSION: 0.1.0-alpha.3.3-rc.5
+  ONEPANE_VERSION: 0.1.0-alpha.3.3-rc.6
 
 jobs:
   validate:
@@ -203,7 +203,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: OnePane-alpha3.3-rc5-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc6-source-native-${{ github.sha }}
           path: |
             dist/**
           if-no-files-found: warn
@@ -246,7 +246,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.3-rc5-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc6-source-native-${{ github.sha }}
           path: artifact
       - name: Install launch uninstall reinstall
         shell: pwsh
@@ -406,7 +406,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.3-rc5-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc6-source-native-${{ github.sha }}
           path: artifact
       - name: Install verify and preserve data
         shell: bash
@@ -437,9 +437,9 @@ jobs:
 
 
   qa-prerelease:
-    name: Publish Alpha 3.3 RC5 for operator QA
+    name: Publish Alpha 3.3 RC6 for operator QA
     needs: [validate, runtime_artifact_smoke, windows-installed-smoke, ubuntu-installed-smoke]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feature/alpha3.3-rc5-approved-ux' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release/alpha3.3-rc6-approved-ux' }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     permissions:
@@ -448,7 +448,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.3-rc5-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc6-source-native-${{ github.sha }}
           path: artifacts
       - name: Verify manifest and publish immutable QA prerelease
         shell: bash
@@ -474,6 +474,6 @@ jobs:
           fi
           gh release create "$tag" prerelease-assets/* \
             --target "$GITHUB_SHA" \
-            --title "OnePane Alpha 3.3 RC5 — approved UX remediation" \
+            --title "OnePane Alpha 3.3 RC6 — approved UX remediation" \
             --prerelease \
-            --notes "Alpha 3.3 RC5 adds integrated isolated native WebView2 provider workspace on Windows with external browser fallback, 65/35 provider/Prompt-and-Reply layout, refreshed Operations live metrics/navigation, Project/Workspace task surfaces, responsive Workspace selection and layout-only presets, and an explicit compute review before manual Agent Check. RC4 migration recovery remains unchanged and is the supported upgrade baseline. The Windows installer and Ubuntu package passed automated CI; the embedded provider sign-in/overlay/focus behaviour still requires hands-on Windows QA before promotion."
+            --notes "Alpha 3.3 RC6 consolidates the completed RC5 UX development changes and adds integrated isolated native WebView2 provider workspace on Windows with external browser fallback, 65/35 provider/Prompt-and-Reply layout, refreshed Operations live metrics/navigation, Project/Workspace task surfaces, responsive Workspace selection and layout-only presets, and an explicit compute review before manual Agent Check. RC4 migration recovery remains unchanged and is the supported upgrade baseline. The Windows installer and Ubuntu package passed automated CI; the embedded provider sign-in/overlay/focus behaviour still requires hands-on Windows QA before promotion."

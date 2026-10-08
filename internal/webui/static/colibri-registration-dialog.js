@@ -1,85 +1,85 @@
-/* OnePane native Colibri registration — without native browser dialogs.
- * A Colibri model must already exist in the managed pool and contain config.json.
+/* Colibri registration from the configured managed model pool.
+ * Initial context is a model-declared provisional ceiling (capped by the
+ * backend), never a verified context until Agent Check records evidence.
  */
 qa5RegisterColibri=async function(){
- const hint="Select the directory containing the actual Colibri model (config.json), not the parent Models folder. Model registration does not download or convert weights.";
  openModal("Register Colibri model",`<form id="a44ColibriRegister" class="qa-form">
-  <p class="page-subtitle">${escapeHtml(hint)}</p>
-  <label>Colibri model directory
-    <div class="toolbar">
-      <input name="model_path" type="text" autocomplete="off" required placeholder="e.g. D:\\OnePane\\Models\\MyColibriModel" aria-label="Absolute Colibri model folder path">
-      <button type="button" class="btn" id="a44ColibriBrowse">Browse folders</button>
-    </div>
+  <p class="page-subtitle">Select a compatible model folder already in your OnePane model pool. Only folders containing config.json are shown.</p>
+  <label>Available models
+    <select name="model_path" id="a44ColibriModel" required><option value="">Scanning model pool…</option></select>
   </label>
-  <label>Model reference/name
-    <input name="model_ref" type="text" maxlength="180" required placeholder="e.g. Qwen-MoE-local" autocomplete="off">
+  <div class="list-meta" id="a44ColibriModelDetails"></div>
+  <label>Display name <span class="list-meta">(optional)</span>
+    <input name="display_name" type="text" maxlength="180" placeholder="Use model folder name" autocomplete="off">
   </label>
-  <label>Display name
-    <input name="display_name" type="text" maxlength="180" placeholder="Name shown in OnePane">
-  </label>
-  <label>Requested context tokens
-    <select name="context_tokens">
-      <option value="4096">4,096</option>
-      <option value="8192" selected>8,192</option>
-      <option value="16384">16,384</option>
-      <option value="32768">32,768</option>
-    </select>
-  </label>
-  <p class="page-subtitle">Requirements: the directory must be inside your configured OnePane model pool, contain config.json, and be compatible with Colibri. The model remains unqualified until Agent Check.</p>
+  <p class="page-subtitle">Context: Automatic. OnePane reads the model's declared maximum, applies a safe initial cap and marks it unverified until Agent Check. The model is not qualified for use simply by registering it.</p>
   <div class="toolbar">
-    <button class="btn primary" type="submit" id="a44ColibriRegisterSubmit">Register model</button>
+    <button class="btn primary" type="submit" id="a44ColibriRegisterSubmit" disabled>Register model</button>
+    <button class="btn" type="button" id="a44ColibriRegisterRefresh">Refresh list</button>
     <button class="btn" type="button" id="a44ColibriRegisterCancel">Cancel</button>
   </div>
   <div id="a44ColibriRegisterStatus" role="status" aria-live="polite"></div>
  </form>`);
  const form=$("#a44ColibriRegister");if(!form)return;
- const feedback=$("#a44ColibriRegisterStatus"),submit=$("#a44ColibriRegisterSubmit");
+ const select=form.elements.model_path,submit=$("#a44ColibriRegisterSubmit"),
+       detail=$("#a44ColibriModelDetails"),feedback=$("#a44ColibriRegisterStatus");
+ let candidates=[];
  $("#a44ColibriRegisterCancel").onclick=closeModal;
- const deriveName=()=>{
-  const pieces=String(form.elements.model_path.value||"").replace(/[\\/]+$/,"").split(/[\\/]/);
-  const name=pieces[pieces.length-1]||"";
-  if(name && !["models","managed","model-pool"].includes(name.toLowerCase())){
-   if(!form.elements.model_ref.value.trim())form.elements.model_ref.value=name;
-   if(!form.elements.display_name.value.trim())form.elements.display_name.value=name;
-  }
+ const selected=()=>candidates.find(x=>x.model_path===select.value);
+ const formatTokens=n=>Number(n||0)>0?Number(n).toLocaleString()+" tokens":"Not declared";
+ const sync=()=>{
+  const candidate=selected(), valid=!!candidate&&!candidate.registered;
+  submit.disabled=!valid;
+  if(!candidate){detail.textContent="Select an available model to preview its settings.";return}
+  detail.textContent=candidate.registered?"Already registered. Open it from Installed Models.":
+    "Declared context: "+formatTokens(candidate.reported_context_tokens)+
+    " · Provisional initial limit: "+formatTokens(candidate.initial_context_tokens)+
+    " · Agent Check required for qualification.";
  };
- form.elements.model_path.addEventListener("change",deriveName);
- $("#a44ColibriBrowse").onclick=async()=>{
-  const b=$("#a44ColibriBrowse");b.disabled=true;
-  feedback.textContent="Opening the folder picker…";
+ select.onchange=sync;
+ const load=async()=>{
+  submit.disabled=true;
+  select.disabled=true;
+  detail.textContent="Inspecting model directories…";
+  feedback.textContent="";
   try{
-   const picked=await apiRequest("/desktop/folder-picker",{method:"POST",body:JSON.stringify({title:"Choose a Colibri model directory containing config.json"})});
-   if(picked?.path){
-    form.elements.model_path.value=String(picked.path);
-    deriveName();feedback.textContent="Folder selected. Confirm it is the model folder containing config.json.";
-   }else{feedback.textContent="No folder selected."}
-  }catch(ex){feedback.innerHTML=`<div class="error">${escapeHtml(ex.message||"Folder picker unavailable. Enter an absolute path instead.")}</div>`}
-  finally{b.disabled=false}
- };
- form.onsubmit=async ev=>{
-  ev.preventDefault();
-  const path=String(form.elements.model_path.value||"").trim();
-  const modelRef=String(form.elements.model_ref.value||"").trim();
-  const display=String(form.elements.display_name.value||"").trim()||modelRef;
-  const tail=path.replace(/[\\/]+$/,"").split(/[\\/]/).pop()?.toLowerCase();
-  if(!path||!modelRef||["models","managed","model-pool"].includes(tail)){
-   feedback.innerHTML='<div class="error">Choose a specific Colibri model folder, and provide its model reference. Do not select the Models pool root.</div>';
-   return
+   const data=await apiRequest("/v1/local-ai/colibri/pool-models?workspace_id="+encodeURIComponent(onepaneWorkspace));
+   candidates=a31Array(data);
+   select.innerHTML='<option value="">Select a model in the pool</option>'+
+    candidates.map((x,i)=>`<option value="${escapeHtml(x.model_path)}" ${x.registered?"disabled":""}>${escapeHtml(x.display_name||x.model_ref||"Model "+(i+1))}${x.registered?" — registered":""}</option>`).join("");
+   if(!candidates.length)feedback.textContent="No compatible model folder found. A Colibri model must be placed in a subdirectory of your configured model pool and contain a valid config.json.";
+   select.disabled=!candidates.some(x=>!x.registered);
+   sync();
+  }catch(ex){
+   candidates=[];select.innerHTML='<option value="">Unable to read model pool</option>';
+   feedback.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;
+   detail.textContent="";
   }
-  submit.disabled=true;feedback.textContent="Validating the model folder and registering the deployment…";
+ };
+ $("#a44ColibriRegisterRefresh").onclick=load;
+ form.onsubmit=async event=>{
+  event.preventDefault();
+  const candidate=selected();
+  if(!candidate||candidate.registered){feedback.textContent="Select a model that has not already been registered.";return}
+  submit.disabled=true;feedback.textContent="Registering selected model with automatic provisional context…";
   try{
    if(!localProfileQA)await a31DetectHardware();
+   const modelRef=String(candidate.model_ref||candidate.display_name||"").trim();
+   const display=String(form.elements.display_name.value||"").trim()||String(candidate.display_name||modelRef);
    const dep=await apiRequest("/v1/local-ai/colibri/register",{
-    method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace,model_path:path,model_ref:modelRef,
-      display_name:display,context_tokens:Number(form.elements.context_tokens.value)})
+     method:"POST",body:JSON.stringify({
+       workspace_id:onepaneWorkspace,model_path:candidate.model_path,model_ref:modelRef,
+       display_name:display,context_tokens:0
+     })
    });
    closeModal();
-   notice("Colibri model registered. Run Agent Check to qualify its actual capabilities.");
+   notice("Colibri model registered as unqualified. Run Agent Check before using it.");
    const deployments=await qa5LoadManagedDeployments();
    const id=String(dep.deployment_id||dep.id||"");
-   const found=deployments.find(d=>d.deployment_id===id||d.model_ref===modelRef);
+   const found=deployments.find(x=>x.deployment_id===id||(x.model_ref===modelRef&&String(x.runtime_name).toLowerCase()==="colibri"));
    if(found)await qa5InspectModel(found);
    if(typeof renderModels==="function"&&currentTab()?.route==="models")await renderModels();
   }catch(ex){feedback.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;submit.disabled=false}
  };
+ await load();
 };

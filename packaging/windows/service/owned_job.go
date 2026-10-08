@@ -52,7 +52,7 @@ func newOwnedBackendJob()(*ownedBackendJob,error){
 }
 func (job *ownedBackendJob) Assign(pid int)error{
  if pid<=1{return fmt.Errorf("invalid managed process PID")}
- h,err:=syscall.OpenProcess(syscall.PROCESS_SET_QUOTA|syscall.PROCESS_TERMINATE|syscall.PROCESS_QUERY_INFORMATION,false,uint32(pid))
+ h,err:=syscall.OpenProcess(0x0100|syscall.PROCESS_TERMINATE|syscall.PROCESS_QUERY_INFORMATION,false,uint32(pid))
  if err!=nil{return err}
  defer syscall.CloseHandle(h)
  ok,_,callErr:=assignProcessToJobObject.Call(uintptr(job.handle),uintptr(h))

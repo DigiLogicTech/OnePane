@@ -142,14 +142,14 @@ function a31InstalledModelsMarkup(deployments){
 }
 function a31LlamaRuntimeCard(c,rows){
   const recommended=a31Array(rows).filter(x=>x.recommended),installed=a31Array(rows).filter(x=>x.installed);
-  const summary=recommended.length?recommended.map(x=>String(x.backend||"").toUpperCase()).join(" + "):"Detect hardware";
+  const summary=recommended.length?recommended.map(x=>String(x.backend||"").toUpperCase()).join(" + "):(installed.length?"Detect hardware for recommendations":"Detect hardware");
   return `<section class="panel-card managed-runtime-card"><div class="card-header models-card-header"><div><div class="card-title">llama.cpp</div><div class="list-meta">Managed inference runtime backends selected from detected hardware.</div></div><span class="pill ${installed.length?'good':''}">${installed.length?`${installed.length} backend${installed.length===1?"":"s"} installed`:"Not installed"}</span></div><div class="widget-body"><div class="runtime-version">Recommended: ${escapeHtml(summary)}</div><div class="runtime-backend-pills">${a31Array(rows).map(x=>`<span class="pill ${x.installed?'good':''}">${escapeHtml(String(x.backend||"").toUpperCase())} · ${x.installed?'installed':x.recommended?'recommended':'optional'}</span>`).join("")}</div><div class="toolbar runtime-actions">${a31ComponentButtons("llamacpp",c)}</div><div id="a31-llamacpp-status" class="page-subtitle">${escapeHtml(c?.last_error||"")}</div></div></section>`
 }
 async function a31RenderLocalModels(){
   const root=$("#a31ModelsRoot");let deployments=[],components={},recommendations=[],catalog=[],llamaRows=[];
   try{
     [deployments,components,catalog]=await Promise.all([qa5LoadManagedDeployments(),qa5ModelComponents().catch(()=>({})),apiRequest("/v1/local-ai/catalog").catch(()=>[])]);
-    if(localProfileQA){llamaRows=await apiRequest("/v1/local-ai/llama-runtimes").catch(()=>[])}
+    llamaRows=await apiRequest("/v1/local-ai/llama-runtimes").catch(()=>[])
   }catch(ex){root.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;return}
   const installByRef=new Map(a31Array(catalog).map(m=>[String(m.model_ref||"").toLowerCase(),m]));
 

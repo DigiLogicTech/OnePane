@@ -185,10 +185,18 @@ qa4AddWorkspaceComponent=function(project,workspace){
 
 function a35AddWorkspace(project){
   a35CancelWorkspaceEdit();
-  openModal("Add workspace",`<form id="a35AddWorkspaceForm" class="qa-form"><label>Name<input name="name" required placeholder="Development"></label><div class="page-subtitle">The workspace inherits secure defaults and can then override sandbox, routing, models and agents.</div><button class="btn primary">Create workspace</button></form>`);
+  openModal("Add workspace",`<form id="a35AddWorkspaceForm" class="qa-form"><label>Name<input name="name" required placeholder="Development"></label><label>Initial layout<select name="layout_preset"><option value="general">General</option><option value="development">Development</option><option value="research">Research</option><option value="monitoring">Monitoring</option></select></label><div class="page-subtitle">The workspace inherits secure defaults and can then override sandbox, routing, models and agents.</div><button class="btn primary">Create workspace</button></form>`);
   $("#a35AddWorkspaceForm").onsubmit=async e=>{
     e.preventDefault();const name=new FormData(e.currentTarget).get("name").trim();if(!name)return;
     const rows=qa4Workspaces(project),ws=qa4DefaultWorkspace(project,name);
+    const preset=String(new FormData(e.currentTarget).get("layout_preset")||"general");
+    const spec=A43_WORKSPACE_PRESETS[preset]||A43_WORKSPACE_PRESETS.general;
+    const labels=new Map(qa4WorkspaceCatalogue().map(([type,title])=>[type,title]));
+    ws.widgets=spec.filter(([type])=>labels.has(type)).map(([type,width,height],i)=>({
+      id:"pw-"+type+"-"+Date.now()+"-"+i,type,title:labels.get(type),
+      width,height,col:width,row:height
+    }));
+    a31NormalizeLayout(ws.widgets);a31ResolveLayout(ws.widgets,null);
     try{await qa4SaveProjectWorkspaces(project,[...rows,ws]);qa4ProjectHub.activeProjectID=project.id;qa4ProjectHub.activeWorkspaceID=ws.id;closeModal();await renderWorkspaces();notice("Workspace created.");}
     catch(ex){notice(ex.message,"bad")}
   };
@@ -211,6 +219,36 @@ async function a35DeleteWorkspace(project,workspace){
 }
 a32DeleteWorkspace=a35DeleteWorkspace;
 
+
+/* Presets change visible widget geometry only, never sandbox or routing. */
+const A43_WORKSPACE_PRESETS={
+ general:[["chat",8,6],["tasks",4,4],["attention",4,3],["notes",8,4]],
+ development:[["chat",8,6],["tasks",4,4],["activity",4,4],["notes",8,4]],
+ research:[["chat",8,6],["models",4,4],["notes",4,4],["attention",4,4]],
+ monitoring:[["attention",4,3],["tasks",4,4],["nodes",4,4],["activity",6,5],["models",6,5]]
+};
+function a43WorkspaceApplyPreset(project,workspace,name){
+ if(!a35WorkspaceSessionMatches(project,workspace))return;
+ const preset=A43_WORKSPACE_PRESETS[name];if(!preset)return;
+ if(!confirm("Apply "+name+" layout to this edit session? Existing widget positions will be replaced, but project data and policies remain unchanged."))return;
+ const catalogue=new Map(qa4WorkspaceCatalogue().map(([id,title])=>[id,title]));
+ const items=preset.filter(([type])=>catalogue.has(type)).map(([type,width,height],i)=>({
+  id:"pw-"+type+"-"+Date.now()+"-"+i,type,title:catalogue.get(type),
+  width,height,col:width,row:height
+ }));
+ a31NormalizeLayout(items);a31ResolveLayout(items,null);
+ a35WorkspaceEditSession.widgets=items;
+ a35RenderWorkspaceGrid(project,workspace);
+ notice("Preset applied to draft. Choose Save layout to keep it.");
+}
+function a43WorkspaceContext(workspace){
+ const cfg=workspace.orchestration||{},mode=String(cfg.mode||"direct");
+ const role=mode==="council"?cfg.council:mode==="team"?cfg.team:cfg.supervisor;
+ const values=[["Mode",titleCase(mode)],["Model",String(role?.model||"auto")],
+  ["Routing",workspace.routing?.enabled===false?"Off":"On"],
+  ["Sandbox",workspace.sandbox?.internet?"Internet allowed":"Restricted"]];
+ return `<div class="a43-workspace-context">${values.map(([name,value])=>`<span class="a43-context-chip"><small>${escapeHtml(name)}</small><strong>${escapeHtml(value)}</strong></span>`).join("")}</div>`;
+}
 async function renderWorkspaces(){
   await qa4LoadProjectHub(false);
   const project=qa4ActiveProject();
@@ -224,14 +262,16 @@ async function renderWorkspaces(){
   qa7NormalizeWorkspace(project,workspace);
   if(a35WorkspaceEditing()&&!a35WorkspaceSessionMatches(project,workspace))a35CancelWorkspaceEdit();
   const edit=a35WorkspaceSessionMatches(project,workspace);
-  const actions=`<button class="btn" id="a35AddWorkspace">Add workspace</button><button class="btn ${edit?"primary":""}" id="qa4EditWorkspace">${edit?"Save layout":"Edit layout"}</button>${edit?'<button class="btn" id="a35CancelWorkspaceLayout">Cancel</button><button class="btn" id="qa4AddComponent">Add component</button><button class="btn" id="a35ResetWorkspaceLayout">Reset layout</button>':""}`;
-  $("#viewHost").innerHTML=`<section class="page workspace-page">${pageHeader(project.name||"Workspace",project.description||"Project workspace",actions)}
-    <div class="workspace-tabs">${rows.map(w=>`<button class="workspace-tab ${w.id===workspace.id?"active":""}" data-a35-workspace="${escapeHtml(w.id)}">${escapeHtml(w.name||"Workspace")}</button>`).join("")}</div>
-    <div class="workspace-context-bar"><div><strong>${escapeHtml(workspace.name)}</strong><span class="list-meta"> · workspace sandbox ${workspace.sandbox?.internet?"internet allowed":"internet blocked"} · ${workspace.routing?.enabled!==false?"routing enabled":"single-path"} · ${escapeHtml(titleCase(workspace.orchestration?.mode||"direct"))}</span></div><div class="toolbar compact a32-workspace-actions"><button class="btn" id="qa4WorkspaceSettings">Workspace settings</button><button class="btn danger" id="a32DeleteWorkspace" ${rows.length<=1?"disabled":""}>Delete workspace</button></div></div>
+  const actions=`<button class="btn" id="a35AddWorkspace">Add workspace</button><button class="btn ${edit?"primary":""}" id="qa4EditWorkspace">${edit?"Save layout":"Edit layout"}</button>${edit?'<button class="btn" id="a35CancelWorkspaceLayout">Cancel</button><button class="btn" id="qa4AddComponent">Add component</button><select id="a43WorkspacePreset" aria-label="Apply layout preset"><option value="">Layout preset…</option><option value="general">General</option><option value="development">Development</option><option value="research">Research</option><option value="monitoring">Monitoring</option></select><button class="btn" id="a35ResetWorkspaceLayout">Reset layout</button>':""}`;
+  $("#viewHost").innerHTML=`<section class="page workspace-page">${pageHeader(workspace.name||"Workspace","Projects / "+escapeHtml(project.name||"Project")+" / "+escapeHtml(workspace.name||"Workspace"),actions)}
+    <div class="workspace-tabs">${rows.length<=5?rows.map(w=>`<button class="workspace-tab ${w.id===workspace.id?"active":""}" data-a35-workspace="${escapeHtml(w.id)}">${escapeHtml(w.name||"Workspace")}</button>`).join(""):`<label class="a43-workspace-switch">Workspace <select id="a43WorkspaceSelect">${rows.map(w=>`<option value="${escapeHtml(w.id)}" ${w.id===workspace.id?"selected":""}>${escapeHtml(w.name||"Workspace")}</option>`).join("")}</select></label>`}</div>
+    <div class="workspace-context-bar">${a43WorkspaceContext(workspace)}<div class="toolbar compact a32-workspace-actions"><button class="btn" id="qa4WorkspaceSettings">Workspace settings</button><details class="project-card-actions"><summary>Workspace actions ▾</summary><button class="btn danger" id="a32DeleteWorkspace" ${rows.length<=1?"disabled":""}>Delete workspace</button></details></div></div>
     <div class="workspace-grid ${edit?"editing":""}" id="qa4WorkspaceGrid"></div>
   </section>`;
   a35RenderWorkspaceGrid(project,workspace);
   $$("[data-a35-workspace]").forEach(b=>b.onclick=()=>{a35CancelWorkspaceEdit();qa4ProjectHub.activeWorkspaceID=b.dataset.a35Workspace;localStorage.setItem("onepane:last-workspace:"+project.id,b.dataset.a35Workspace);renderWorkspaces();renderNav()});
+  $("#a43WorkspacePreset")?.addEventListener("change",e=>{const value=e.target.value;e.target.value="";a43WorkspaceApplyPreset(project,workspace,value)});
+  $("#a43WorkspaceSelect")?.addEventListener("change",e=>{qa4ProjectHub.activeWorkspaceID=e.target.value;localStorage.setItem("onepane:last-workspace:"+project.id,e.target.value);renderWorkspaces();renderNav()});
   $("#a35AddWorkspace").onclick=()=>a35AddWorkspace(project);
   $("#qa4WorkspaceSettings").onclick=()=>qa6OpenInInspector(project,workspace,"settings");
   $("#a32DeleteWorkspace").onclick=()=>a35DeleteWorkspace(project,workspace);

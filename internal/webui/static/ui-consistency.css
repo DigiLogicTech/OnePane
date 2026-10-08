@@ -452,3 +452,18 @@
 .a43-workspace-switch select,#a43WorkspacePreset{color:var(--text);background:var(--panel-2);border:1px solid var(--border);padding:8px;border-radius:8px;max-width:100%}
 @media(max-width:850px){.operations-pulse{grid-template-columns:repeat(2,minmax(0,1fr))}.workspace-page .workspace-context-bar{align-items:flex-start;flex-direction:column}}
 @media(max-width:480px){.operations-pulse{grid-template-columns:1fr 1fr}.operations-shortcuts{margin-left:0}.a43-context-chip{width:auto}}
+
+/* RC8: Nodes must scroll within the shell remaining after Logs and Inspector. */
+@media(min-width:701px){
+ .view-host > .page.nodes-page{display:block;overflow-y:auto!important;overflow-x:hidden!important;overscroll-behavior:contain;height:100%;min-height:0;scrollbar-width:thin}
+ .nodes-page #a31Nodes{display:block;min-height:0;height:auto;overflow:visible}
+ .nodes-page #nextNodeRoot{display:block;min-height:0;height:auto;overflow:visible;padding-bottom:24px}
+ .nodes-page #nextNodeRoot>.next-node-manager{height:auto;overflow:visible}
+}
+.next-node-tabs{display:flex;align-items:center;min-width:0;gap:4px;flex-wrap:wrap}
+.next-node-tabs .next-node-local-models{margin-left:auto;flex:0 0 auto}
+@media(max-width:700px){.next-node-tabs .next-node-local-models{width:100%;margin:4px 0 0}}
+/* Consistent link-button presentation across all theme tokens. */
+.a40-browser-bar a.btn,.a40-external-browser a.btn{color:var(--text)!important;text-decoration:none!important;background:var(--panel-2);border:1px solid var(--border);border-radius:var(--radius);display:inline-flex;align-items:center;justify-content:center}
+.a40-browser-bar a.btn:hover,.a40-external-browser a.btn:hover{background:var(--panel-3);color:var(--text)!important}
+.a40-browser-bar a.btn:focus-visible,.a40-external-browser a.btn:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}

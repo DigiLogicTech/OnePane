@@ -6,8 +6,14 @@ The new **Web Chat** sidebar button opens a dedicated, full-width page. It is
 separate from **OnePane Chat** (Assistant / Project Orchestrator) and available
 from the mobile More menu.
 
-The page has provider tabs for ChatGPT, Claude, Gemini, Perplexity, and Grok,
-plus any additional provider identifiers encountered in Council seats. It uses
+The page has **one tab per manual Web Chat conversation**, including several
+simultaneous conversations with the same cloud provider (for example, ChatGPT 1
+and ChatGPT 2), as well as separate Claude, Gemini, Perplexity and Grok tabs.
+The **+ New Web Chat** action selects a provider and an optional tab label.
+Each tab independently remembers its provider, selected Council turn,
+conversation generation and tab label. Tab metadata is saved per Workspace,
+while unsent prompt/response scratchpads remain memory-only for privacy;
+closing or reloading the browser discards those drafts. It uses
 the normal external websites in a new browser tab/window rather than embedding
 login pages or scraping browser output. This is an operator-mediated workflow,
 not an API, proxy, OAuth or unofficial browser bridge dependency.
@@ -31,6 +37,24 @@ budget reservation, remote inference and tool calls entirely.
 The Council turn enters blocked while its manual prompt is pending. Other
 independent Council turns can run, but the round cannot advance until all
 required turns succeed. No polling or provider usage occurs during the wait.
+
+## Multi-chat tabs and side-by-side provider use
+
+- Select a Web Chat tab to work on its Council handoff. Tab switching does not
+  change another tab's Council selection or unsent response draft.
+- **+ New Web Chat** can create multiple conversations for the same provider.
+  A tab can be used independently without attaching a Council turn.
+- **Close tab** hides that conversation workbench; its queued Council work
+  remains in the server-side queue, and can be selected from another tab.
+- **New Conversation** inside a tab starts a fresh provider-site conversation.
+  For an attached pending Council turn, the server increments the attempt
+  generation and keeps the immutable prompt and Council round unchanged.
+- The provider website opens in a separate browser tab. Provider sites may
+  reject iframe embedding, and this release does not include a native WebView
+  runtime. The OnePane tabs manage handoffs, **not live embedded provider UI**.
+- Operators can arrange actual cloud-provider browser windows side by side
+  using the operating system. A future native WebView or draggable multi-panel
+  canvas would need separate compatibility, authentication and security QA.
 
 ## Operator handoff
 

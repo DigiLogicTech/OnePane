@@ -1,0 +1,19 @@
+/* Dedicated multi-provider Web Chat: normal page layout, drawer/Inspector aware. */
+.a39-webchat-page{max-width:100%;min-width:0}
+.a39-webchat-summary{display:flex;flex-wrap:wrap;align-items:center;gap:.65rem;margin:0 0 1rem}
+.a39-webchat-provider-tabs{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:1rem}
+.a39-webchat-provider-tabs .pill{margin-left:.4rem}
+.a39-webchat-layout{display:grid;grid-template-columns:minmax(235px, min(34%, 360px)) minmax(0,1fr);gap:1rem;min-width:0;align-items:start}
+.a39-webchat-provider-card,.a39-webchat-handoff-card{min-width:0;overflow:hidden}
+.a39-webchat-provider-card .widget-body,.a39-webchat-handoff-card .widget-body{display:flex;flex-direction:column;gap:.75rem;min-width:0}
+.a39-webchat-queue{display:flex;flex-direction:column;gap:.4rem;margin-top:.4rem;max-height:420px;overflow-y:auto}
+.a39-webchat-queue h3{margin:.25rem 0}
+.a39-webchat-turn{display:flex;flex-direction:column;gap:.3rem;width:100%;text-align:left;border:1px solid var(--border,rgba(128,128,128,.25));border-radius:.5rem;padding:.7rem;background:transparent;color:inherit;cursor:pointer}
+.a39-webchat-turn:hover,.a39-webchat-turn.selected{border-color:var(--accent,var(--primary,#6d7ff5));background:var(--surface-2,rgba(120,120,120,.1))}
+.a39-webchat-turn strong{overflow-wrap:anywhere}
+.a39-webchat-meta{font-size:.86rem;overflow-wrap:anywhere}
+.a39-webchat-label{font-weight:600;margin-bottom:-.4rem}
+.a39-webchat-textarea{display:block;box-sizing:border-box;resize:vertical;width:100%;min-height:150px;max-height:45vh;white-space:pre-wrap;overflow:auto;font:inherit;line-height:1.45}
+.a39-webchat-textarea[readonly]{opacity:.92}
+.a39-webchat-handoff-content .toolbar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
+@media(max-width:1000px){.a39-webchat-layout{grid-template-columns:1fr}}

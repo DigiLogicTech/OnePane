@@ -1,0 +1,41 @@
+name: Manual Web Council Feature Checks
+
+on:
+  push:
+    branches: [feature/manual-web-council]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Go, frontend and Windows checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+      - name: Check Web Chat syntax
+        run: |
+          node --check internal/webui/static/web-chat-page.js
+          node --check internal/webui/static/web-chat-session-tabs.js
+          node --check internal/webui/static/web-chat-council-launch.js
+          node --check internal/webui/static/web-chat-chair.js
+          node scripts/validate_web_chair.js
+          node scripts/validate_web_only_council.js
+          node scripts/validate_web_chat_sessions.js
+          node --check internal/webui/static/app.js
+          node --check internal/webui/static/app-foundation.js
+      - name: Test Council and API packages
+        run: |
+          go test ./internal/team ./internal/teamworker ./internal/api ./internal/storage/sqlite
+      - name: Windows cross-compilation
+        run: |
+          GOOS=windows GOARCH=amd64 go build -o /tmp/onepane-webchat-check.exe ./cmd/harnessd

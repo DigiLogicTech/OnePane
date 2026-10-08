@@ -298,9 +298,11 @@ func (s *RuntimeSupervisor) resolve(ctx context.Context, deploymentID string) (r
 	if st, err := os.Stat(exe); err != nil || st.IsDir() || (runtime.GOOS != "windows" && st.Mode()&0111 == 0) {
 		return cfg, refs, "", errors.New("managed runtime executable unavailable")
 	}
-	if st, err := os.Stat(modelPath); err != nil || (st.IsDir() && !strings.EqualFold(cfg.RuntimeBackend, "colibri")) {
-		return cfg, refs, "", errors.New("managed model unavailable")
-	}
+	if st, err := os.Stat(modelPath); err != nil {
+        return cfg, refs, "", fmt.Errorf("managed model file missing or inaccessible at %s: %w",modelPath,err)
+    } else if st.IsDir() && !strings.EqualFold(cfg.RuntimeBackend, "colibri") {
+        return cfg, refs, "", fmt.Errorf("managed model path is not a file: %s",modelPath)
+    }
 	if strings.EqualFold(cfg.RuntimeBackend, "colibri") {
 		if strings.TrimSpace(cfg.EnginePath) == "" {
 			engineName := "colibri"

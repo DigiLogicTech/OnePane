@@ -735,14 +735,16 @@ renderActiveView=async function(){
   const renderers={operations:renderOperations,tasks:renderTasks,projects:renderProjects,models:renderModels,nodes:renderNodes,agents:renderAgents,skills:renderSkills,settings:renderSettings,secrets:renderSecrets,evidence:()=>renderPlaceholder("Evidence / Audit","Event Ledger, Artifacts, Observations and Verifications.")};
   try{await Promise.resolve((renderers[route]||renderOperations)())}finally{const host=$("#viewHost");if(epoch===qa31ViewEpoch){if(host)host.dataset.renderedRoute=route;renderNav()}}
 };
-bootOnePane().then(()=>{
-  // Existing workspace/tab sessions take precedence. Honour a configured
-  // landing page only when the shell contains its initial Operations tab.
-  if(new URLSearchParams(location.search).get("onepane_release_smoke")!=="1"){
-    const landing=qa5Prefs().landing||"operations",active=currentTab();
-    if(["projects","tasks"].includes(landing)&&state.tabs.length===1&&active?.route==="operations"){
-      openRoute(landing);
-    }
-  }
-  window.onepaneReleaseSmoke?.();
-}).catch(ex=>{try{window.chrome?.webview?.postMessage(`onepane-ui-e2e|FAIL|boot: ${String(ex?.message||ex)}`)}catch{}});
+// Apply the preferred landing page before boot renders the first view.
+ // This avoids racing the initial asynchronous Operations renderer, and
+ // leaves restored multi-tab sessions untouched.
+(function a36ApplyStartupLanding(){
+  if(new URLSearchParams(location.search).get("onepane_release_smoke")==="1")return;
+  const landing=qa5Prefs().landing||"operations",tab=currentTab();
+  if(!["projects","tasks"].includes(landing)||state.tabs.length!==1||tab?.route!=="operations")return;
+  const now=Date.now(),id="tab-"+landing+"-startup";
+  tab.state="background";tab.backgroundAt=now;
+  state.tabs.push({id,route:landing,title:pages[landing]?.title||landing,pinned:false,state:"active",lastActive:now});
+  state.activeTab=id;persist();
+})();
+bootOnePane().then(()=>window.onepaneReleaseSmoke?.()).catch(ex=>{try{window.chrome?.webview?.postMessage(`onepane-ui-e2e|FAIL|boot: ${String(ex?.message||ex)}`)}catch{}});

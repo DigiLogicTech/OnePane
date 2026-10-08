@@ -108,3 +108,25 @@
  .models-routing-header{flex-wrap:wrap}
  .models-routing-header > .models-routing-actions{flex-wrap:wrap;justify-content:flex-end;width:100%}
 }
+
+
+/* Keep first-party provenance badges at the far right of each card header.
+ * Scope to Agents > Profiles and Skills > Installed/Catalogue only. */
+.agent-profile-card > .card-header,
+.skill-card > .card-header {
+  height:auto;
+  min-height:54px;
+  padding:8px 12px;
+  gap:12px;
+}
+.agent-profile-card > .card-header > div:first-child,
+.skill-card > .card-header > div:first-child {
+  flex:1 1 auto;
+  min-width:0;
+}
+.agent-profile-card > .card-header > .pill,
+.skill-card > .card-header > .pill {
+  margin-left:auto;
+  flex:0 0 auto;
+  white-space:nowrap;
+}

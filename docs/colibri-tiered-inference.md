@@ -14,6 +14,45 @@ The default backend is **auto**. Explicit CPU disables both GPU paths. Explicit 
 
 **Important**: Colibri's expert weight files live on storage and can stream from SSD, but latency depends on hit rate, expert selection, disk throughput, and model family. A tiered model is not guaranteed to perform better than a smaller llama.cpp model.
 
+## Whole-model hot swapping
+
+OnePane adds **Hot swap** next to **Tiering** for each registered Colibri model.
+The former selects the resident Colibri deployment; the latter configures how
+that single model uses hot GPU VRAM, warm system RAM and cold model files.
+
+- **Automatic:** Ordinary inference acquisition for a different Colibri model
+  uses the same node-scoped hot-swap admission path as the button.
+- **Explicit:** Hot swap activates a chosen model ahead of a chat request;
+  it does **not** silently change the OnePane Chat assistant's routed model.
+- **Memory:** At most one Colibri model remains resident per node in this
+  initial release. The model files remain on SSD after eviction. Launching a
+  new model still incurs initialization and cache warmup latency.
+- **Busy protection:** No currently serving Colibri model is interrupted.
+  Active requests, startup, shutdown and orphaned process states block a
+  conflicting activation before any other model is evicted.
+- **Rollback:** If the new model cannot become healthy, OnePane first attempts
+  to drain the failed replacement and then restore the most-recently-used
+  previously healthy resident. If safe teardown cannot be confirmed, rollback
+  is withheld to prevent overcommitting VRAM.
+- **Windows shutdown:** Managed Python launchers may own heavyweight child
+  inference engines. The supervisor terminates the verified process tree
+  rather than just the parent executable; acceptance testing still needs to
+  prove GPU and RAM are actually released after each switch.
+
+The one-active-Colibri policy is deliberately conservative for systems such
+as the Alienware GTX 1060 / 16 GB RAM. It does not evict other inference
+engines, such as llama.cpp, or manage arbitrary third-party GPU processes.
+Cross-runtime GPU admission and warm preloading of more than one large model
+require separate resource accounting and validation.
+
+**API:**
+```text
+GET  /v1/local-ai/deployments/{id}/colibri-swap?workspace_id=...
+POST /v1/local-ai/deployments/{id}/colibri-swap
+```
+POST body: `{"workspace_id":"..."}`. Requests require the deployment's own
+workspace authorization and model-write capability.
+
 ## Lifecycle, ownership and security
 
 Tier settings are persisted under `model_deployments.runtime_config_json.colibri_tier`; no database migration is required. Existing deployments without that key retain their previous process-launch behaviour until the operator saves a tier profile. New registered Colibri models default to automatic mode.
@@ -45,7 +84,8 @@ The read-only plan endpoint requires the `coli` Python launcher to be present. W
 4. Start with Automatic, 4K–8K context, and do not override system RAM unless Colibri's plan indicates there is adequate headroom.
 5. Run `coli plan --json` where present, then Agent Check; verify launch identity, health, and release of idle memory.
 6. Record first-token latency, decode tokens/s, peak RSS/VRAM, disk reads, cache hit rate and failure logs; compare with the current llama.cpp model.
-7. Exercise busy-update refusal, unsupported-backend startup error, restart and settings persistence. Keep Linux package CI green.
+7. Exercise busy-update refusal, unsupported-backend startup error, restart and settings persistence.
+8. Activate two Colibri models consecutively and confirm the first process **and its child engine** release RAM/VRAM. Attempt a hot swap during active inference and verify a conflict without eviction; test rollback after a failed replacement. Keep Linux package CI green.
 
 Colibri's `coli tune` profiling and a model download/format-conversion wizard are **separate future integration tasks**, not implied by this feature. Do not report the tier as tuned until a measured profile exists.
 

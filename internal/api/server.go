@@ -314,6 +314,7 @@ func (s *Server) SetRuntimeConfig(path, modelPoolPath string) {
 func (s *Server) Handler() http.Handler { return s.securityHeaders(s.mux) }
 
 func (s *Server) routes() {
+	s.mux.HandleFunc("GET /v1/system/metrics", s.hostMetricsRequest)
 	s.mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 	})

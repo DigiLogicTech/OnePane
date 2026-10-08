@@ -611,6 +611,15 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 	if err != nil {
 		return RuntimeInstance{}, err
 	}
+	// Colibri is memory-tiered internally, so its registered model's one-byte
+	// placeholder is not a meaningful host-memory admission estimate. Limit
+	// this node to one resident Colibri model unless another is still serving.
+	// This is shared by explicit hot swap AND ordinary inference acquisition.
+	if strings.EqualFold(cfg.RuntimeBackend, "colibri") {
+		if _, err := s.prepareColibriSwapLocked(ctx, nodeID, deploymentID); err != nil {
+			return RuntimeInstance{}, err
+		}
+	}
 	var existing *RuntimeInstance
 	if old, err := s.Instance(ctx, deploymentID); err == nil {
 		existing = &old

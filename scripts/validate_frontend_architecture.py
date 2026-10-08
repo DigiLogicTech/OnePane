@@ -19,8 +19,8 @@ def definitions(src):
             out.setdefault(match.group(1),[]).append(line_no)
     return out
 
-# Reviewed change: Web Chat quick action and route in the mobile navigation sheet.
-expected_foundation_blob="80600c5556674945a1b19eff8a6a6508e09f3c00"
+# Reviewed RC3 change: authenticated username profile menu and identity initials.
+expected_foundation_blob="af2aea1be2dec189f464bb2ff6685798d7a56244"
 foundation_bytes=foundation.encode("utf-8")
 actual_foundation_blob=hashlib.sha1(b"blob "+str(len(foundation_bytes)).encode("ascii")+b"\0"+foundation_bytes).hexdigest()
 

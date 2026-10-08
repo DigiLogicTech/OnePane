@@ -40,6 +40,8 @@ func (s *Service) installOmniRouteCLIWindows(ctx context.Context,jobID string) e
 	if goruntime.GOOS!="windows" || goruntime.GOARCH!="amd64" { return errors.New("managed OmniRoute CLI install is unsupported on this platform") }
 	a,err:=omniRouteManagedNodeArtifact();if err!=nil{return err}
 	if err:=s.updateComponentProgress(ctx,jobID,"running","downloading-node","downloading",nil,false);err!=nil{return err}
+	// Node, the verified CLI packages and npm staging can exceed 3 GiB.
+	if err:=checkRuntimeDiskBudget(filepath.Join(s.dataDir,"runtimes"),6<<30);err!=nil{return err}
 	dlDir:=filepath.Join(s.dataDir,"components","downloads");if err:=os.MkdirAll(dlDir,0o700);err!=nil{return err}
 	archive:=filepath.Join(dlDir,"node-v"+a.Version+"-win-x64.zip")
 	if _,err:=s.fetcher.Fetch(ctx,a.SourceURL,archive,a.SHA256);err!=nil{return fmt.Errorf("download managed Node runtime: %w",err)}

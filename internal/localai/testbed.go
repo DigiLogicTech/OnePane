@@ -183,6 +183,39 @@ func (s *Service) SpecSheet(ctx context.Context, deploymentID string) (ModelSpec
 	return x, nil
 }
 
+// ensurePendingManualTestbedSpec repairs only a missing pending sheet
+// for a registered managed model. It never invents qualification evidence,
+// changes admission, or revives an uninstalled deployment.
+func (s *Service) ensurePendingManualTestbedSpec(ctx context.Context, deploymentID string) error {
+	var modelID, hardwareID, planJSON string
+	var claims sql.NullString
+	err := s.db.QueryRowContext(ctx,`SELECT mm.model_id,p.hardware_profile_id,p.plan_json,m.static_metadata_json
+FROM managed_local_models mm
+JOIN local_model_install_plans p ON p.id=mm.plan_id
+JOIN model_deployments d ON d.id=mm.deployment_id
+JOIN models m ON m.id=mm.model_id
+WHERE mm.deployment_id=? AND mm.status NOT IN ('removed','failed')`,
+		deploymentID).Scan(&modelID,&hardwareID,&planJSON,&claims)
+	if errors.Is(err,sql.ErrNoRows) {
+		return errors.New("model deployment no longer exists; rescan installed models before retrying")
+	}
+	if err!=nil{return err}
+	var rec Recommendation
+	if err=json.Unmarshal([]byte(planJSON),&rec);err!=nil{return fmt.Errorf("invalid model installation plan: %w",err)}
+	if rec.Placement.Mode==""{return errors.New("model placement is not configured; choose Compute before Agent Check")}
+	placement,err:=json.Marshal(rec.Placement);if err!=nil{return err}
+	source:="{}"
+	if claims.Valid&&json.Valid([]byte(claims.String)){source=claims.String}
+	now:=s.clock.UnixMilli()
+	_,err=s.db.ExecContext(ctx,`INSERT INTO model_spec_sheets(
+ deployment_id,model_id,hardware_profile_id,placement_json,catalog_claims_json,
+ llmfit_json,qualification_json,restrictions_json,admission_status,revision,created_at,updated_at)
+ VALUES(?,?,?,?,?,'{}','{"status":"pending_manual_agent_check"}','{}','pending',1,?,?)
+ ON CONFLICT(deployment_id) DO NOTHING`,
+ deploymentID,modelID,hardwareID,string(placement),source,now,now)
+	return err
+}
+
 func (s *Service) StartTestbed(ctx context.Context, deploymentID string, actor *string, notes string) (TestbedSession, error) {
 	var out TestbedSession
 	if actor != nil && *actor == FederatedModelManagerPrincipal {
@@ -191,8 +224,17 @@ func (s *Service) StartTestbed(ctx context.Context, deploymentID string, actor *
 		}
 	}
 	sheet, err := s.SpecSheet(ctx, deploymentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		// An interrupted qualification can leave an otherwise valid managed
+		// model without its first spec sheet. Manual Agent Check must be able
+		// to qualify a still-registered model with pending admission.
+		if repairErr := s.ensurePendingManualTestbedSpec(ctx, deploymentID); repairErr != nil {
+			return out, fmt.Errorf("cannot prepare Agent Check for deployment %s: %w", deploymentID, repairErr)
+		}
+		sheet, err = s.SpecSheet(ctx, deploymentID)
+	}
 	if err != nil {
-		return out, err
+		return out, fmt.Errorf("cannot load deployment %s for Agent Check: %w", deploymentID, err)
 	}
 	idv, err := s.ids.New("tb")
 	if err != nil {

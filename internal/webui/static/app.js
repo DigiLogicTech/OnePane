@@ -735,4 +735,14 @@ renderActiveView=async function(){
   const renderers={operations:renderOperations,tasks:renderTasks,projects:renderProjects,models:renderModels,nodes:renderNodes,agents:renderAgents,skills:renderSkills,settings:renderSettings,secrets:renderSecrets,evidence:()=>renderPlaceholder("Evidence / Audit","Event Ledger, Artifacts, Observations and Verifications.")};
   try{await Promise.resolve((renderers[route]||renderOperations)())}finally{const host=$("#viewHost");if(epoch===qa31ViewEpoch){if(host)host.dataset.renderedRoute=route;renderNav()}}
 };
-bootOnePane().then(()=>window.onepaneReleaseSmoke?.()).catch(ex=>{try{window.chrome?.webview?.postMessage(`onepane-ui-e2e|FAIL|boot: ${String(ex?.message||ex)}`)}catch{}});
+bootOnePane().then(()=>{
+  // Existing workspace/tab sessions take precedence. Honour a configured
+  // landing page only when the shell contains its initial Operations tab.
+  if(new URLSearchParams(location.search).get("onepane_release_smoke")!=="1"){
+    const landing=qa5Prefs().landing||"operations",active=currentTab();
+    if(["projects","tasks"].includes(landing)&&state.tabs.length===1&&active?.route==="operations"){
+      openRoute(landing);
+    }
+  }
+  window.onepaneReleaseSmoke?.();
+}).catch(ex=>{try{window.chrome?.webview?.postMessage(`onepane-ui-e2e|FAIL|boot: ${String(ex?.message||ex)}`)}catch{}});

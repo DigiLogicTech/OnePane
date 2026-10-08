@@ -643,8 +643,29 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 		if strings.EqualFold(filepath.Base(py), "py.exe") {
 			args = append(args, "-3")
 		}
-		args = append(args, cfg.Executable, "--model", cfg.ModelPath, "--engine", cfg.EnginePath, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "--model-id", firstNonEmpty(cfg.ModelRef, "onepane-colibri"))
-		args = append(args, colibriTierCapArgs(cfg.ColibriTier)...)
+				// Preserve legacy installations until the operator explicitly enables
+		// a tier profile. The coli launcher supplies --auto-tier and model-aware
+		// planning; openai_server.py remains a supported compatibility fallback.
+		launcher := ""
+		if cfg.ColibriTier.Mode != "" { launcher = colibriLauncher(filepath.Dir(cfg.Executable)) }
+		if launcher != "" {
+			args = append(args, launcher, "serve", "--model", cfg.ModelPath,
+				"--host", "127.0.0.1", "--port", strconv.Itoa(port),
+				"--model-id", firstNonEmpty(cfg.ModelRef, "onepane-colibri"),
+				"--ctx", strconv.FormatInt(cfg.ContextTokens, 10))
+			if cfg.ColibriTier.Mode == "automatic" || cfg.ColibriTier.Mode == "balanced" {
+				args = append(args, "--auto-tier")
+			}
+			if cfg.ColibriTier.Mode == "balanced" { args = append(args, "--policy", "balanced") }
+			if cfg.ColibriTier.Mode == "manual" {
+				if cfg.ColibriTier.RAMGB > 0 { args = append(args, "--ram", strconv.Itoa(cfg.ColibriTier.RAMGB)) }
+				if cfg.ColibriTier.RepinTokens > 0 { args = append(args, "--repin", strconv.Itoa(cfg.ColibriTier.RepinTokens)) }
+			}
+			args = append(args, colibriTierCapArgs(cfg.ColibriTier)...)
+		} else {
+			args = append(args, cfg.Executable, "--model", cfg.ModelPath, "--engine", cfg.EnginePath, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "--model-id", firstNonEmpty(cfg.ModelRef, "onepane-colibri"))
+			args = append(args, colibriTierCapArgs(cfg.ColibriTier)...)
+		}
 	} else {
         // Embedding models use a pooled-vector endpoint, not chat completions.
         // Preserve the model's declared use case from its approved install plan.
@@ -818,11 +839,20 @@ func (s *RuntimeSupervisor) VerifyIdentity(ctx context.Context, inst RuntimeInst
 			return err
 		}
 		serverFound := false
-		for _, a := range ident.Args {
-			if filepath.Clean(a) == filepath.Clean(cfg.Executable) {
-				serverFound = true
-				break
+		allowed := []string{cfg.Executable}
+		if cfg.ColibriTier.Mode != "" {
+			if launcher := colibriLauncher(filepath.Dir(cfg.Executable)); launcher != "" {
+				allowed = append(allowed, launcher)
 			}
+		}
+		for _, a := range ident.Args {
+			for _, expected := range allowed {
+				if filepath.Clean(a) == filepath.Clean(expected) {
+					serverFound = true
+					break
+				}
+			}
+			if serverFound { break }
 		}
 		if filepath.Clean(ident.Executable) != filepath.Clean(py) || !serverFound || !argsContainPair(ident.Args, "--model", cfg.ModelPath) || !argsContainPair(ident.Args, "--host", "127.0.0.1") || !argsContainPair(ident.Args, "--port", strconv.Itoa(inst.Port)) {
 			return errors.New("Colibri runtime process identity mismatch")

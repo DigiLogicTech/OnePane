@@ -27,7 +27,7 @@
   const workspace2={id:"pws-release-2",name:"Disposable workspace",widgets:[{id:"pw-release-2-notes",type:"notes",title:"Notes",col:6,row:4}],orchestration:{mode:"direct",supervisor:{model:"auto",agent:"onepane-default"},team:{model:"auto",agent:"onepane-default",count:2},council:{model:"auto",agent:"onepane-default",count:2}}};
   let project={id:"project-release",workspace_id:"workspace-release",name:"Release QA Project",description:"Installed behavioural acceptance",status:"active",revision:1,project_policy:{onepane_ui:{workspaces:[workspace,workspace2]}}};
   let taskRows=[{id:"task-release",workspace_id:"workspace-release",project_id:"project-release",project_workspace_id:"pws-release",objective:"Release task",state:"complete",scheduling_class:"user_interactive",priority:0,revision:1,created_at:1700000000000,updated_at:1700000000000}],archivedTaskRows=[],routineRows=[],lastRoutinePayload=null;
-  let projectPatchCount=0,turns=[],discoverInstalledFixture=false;
+  let projectPatchCount=0,turns=[],discoverInstalledFixture=false,assistantModelChoice=null;
   const originalFetch=window.fetch.bind(window);
   window.EventSource=class{addEventListener(){}close(){}};
 
@@ -51,7 +51,12 @@
       project={...project,revision:project.revision+1,project_policy:clone(body.project_policy||project.project_policy)};projectPatchCount++;return json(clone(project));
     }
     if(path==="/v1/skills/tool-bundles")return json([{id:"bundle-release",name:"Release Tools",tools:["read"]}]);
-    if(path==="/v1/assistant/threads"&&method==="GET")return json([{id:"thread-release",title:"Release Assistant"}]);
+    if(path==="/v1/assistant/threads"&&method==="GET")return json([{id:"thread-release",title:"Release Assistant",preferred_model_deployment_id:assistantModelChoice}]);
+    if(path==="/v1/assistant/threads/thread-release/model"&&method==="PUT"){
+      const selection=JSON.parse(opts.body||"{}");assistantModelChoice=selection.deployment_id||null;
+      return json({id:"thread-release",preferred_model_deployment_id:assistantModelChoice});
+    }
+    if(path==="/v1/scheduler/candidates")return json([{id:"dep-test-gpu",kind:"model_deployment",display_name:"Test GPU Model",provider:"local",local:true,cost_class:"local",schedulable:true,status:"ready",qualification:"verified"}]);
     if(path==="/v1/assistant/threads/thread-release/turns"&&method==="GET")return json(clone(turns));
     if(path==="/v1/assistant/threads/thread-release/turns"&&method==="POST"){
       const body=JSON.parse(opts.body||"{}");turns.push({role:"user",content:body.content||""},{role:"assistant",content:"No eligible reasoning model is configured. Configure a model to run reasoning."});return json(turns.at(-1),201);
@@ -373,6 +378,15 @@
     const launcher=check(document.querySelector("#controlChatLauncher"),"Chat launcher");launcher.click();await waitFor(()=>document.querySelector("#a31ControlChatForm"),"Assistant chat");
     const panel=check(document.querySelector("#controlChatPanel"),"Chat panel"),chatToggle=check(document.querySelector("#controlChatToggle"),"Chat header toggle"),chatPosBefore=a33ControlChatPosition();
     await gesture(chatToggle,0,-90);check(a33ControlChatPosition()!==chatPosBefore,"Chat moves vertically");check(a33ControlChatOpen(),"Chat drag keeps panel open");
+    const assistantSelector=check(document.querySelector("#a31AssistantModel"),"Assistant model selector is visible");
+    check(assistantSelector.value==="","Assistant defaults to automatic routing");
+    assistantSelector.value="dep-test-gpu";
+    assistantSelector.dispatchEvent(new Event("change",{bubbles:true}));
+    await waitFor(()=>document.querySelector("#a31AssistantModel")?.value==="dep-test-gpu"&&assistantModelChoice==="dep-test-gpu","Assistant model selection persists");
+    check(document.querySelector("#a31AssistantModel")?.options[document.querySelector("#a31AssistantModel")?.selectedIndex]?.textContent?.includes("Test GPU Model"),"Assistant selected model remains visible");
+    document.querySelector("#a31AssistantModel").value="";
+    document.querySelector("#a31AssistantModel").dispatchEvent(new Event("change",{bubbles:true}));
+    await waitFor(()=>assistantModelChoice===null&&document.querySelector("#a31AssistantModel")?.value==="","Assistant Auto selection restores routing");
     const form=document.querySelector("#a31ControlChatForm");form.querySelector("textarea").value="hello";form.requestSubmit(form.querySelector('button:not([name="run"])'));
     await waitFor(()=>document.querySelector("#controlChatBody")?.textContent?.includes("No eligible reasoning model is configured."),"no-model Assistant response",30000);
     const expandedTransform=getComputedStyle(panel.querySelector(".control-chat-chevron")).transform;chatToggle.click();check(panel.dataset.collapsed==="true","Chat collapses from header");await sleep(220);const collapsedTransform=getComputedStyle(panel.querySelector(".control-chat-chevron")).transform;check(expandedTransform!=="none"&&collapsedTransform==="none","Chat chevron direction matches collapse state");chatToggle.click();check(panel.dataset.collapsed==="false","Chat expands from header");await sleep(220);

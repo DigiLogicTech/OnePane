@@ -7,6 +7,7 @@ import (
  "syscall"
  "unsafe"
  "strings"
+ "path/filepath"
  "sync"
 )
 var winKernel=syscall.NewLazyDLL("kernel32.dll")

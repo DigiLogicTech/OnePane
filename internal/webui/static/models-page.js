@@ -112,7 +112,7 @@ async function a31OpenInstallProgress(jobID){
     const box=$("#a31BackgroundJobProgress");if(!box)return;
     try{
       const j=await apiRequest(`/v1/local-ai/install-jobs/${encodeURIComponent(jobID)}`);box.innerHTML=a31InstallJobProgressMarkup(j);
-      if(["ready","failed","cancelled"].includes(String(j.status)))return
+      if(["ready","failed","cancelled","interrupted"].includes(String(j.status)))return
     }catch(ex){box.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;return}
     setTimeout(poll,900)
   };setTimeout(poll,900)
@@ -142,7 +142,7 @@ function a31StartDownloadMonitor(){
 
 async function a31InstallModel(model){
   // Reopen an active durable job instead of creating a second runtime install.
-  const active=(await a31LoadActiveInstallJobs().catch(()=>[])).find(j=>String(j.model_ref||"").toLowerCase()===String(model?.model_ref||"").toLowerCase());
+  const active=(await a31LoadActiveInstallJobs().catch(()=>[])).find(j=>String(j.status||"")!=="interrupted"&&String(j.model_ref||"").toLowerCase()===String(model?.model_ref||"").toLowerCase());
   if(active){a31OpenInstallProgress(active.id);return}
   if(!model?.installable){notice(model?.install_reason||"This model is advisory only; no verified artifact is available.","bad");return}
   if(!localProfileQA){try{await a31DetectHardware()}catch(ex){notice(ex.message,"bad");return}}
@@ -151,7 +151,7 @@ async function a31InstallModel(model){
   const form=$("#a31InstallModelForm");form.elements.quantization.value=defaultQ;
   form.onsubmit=async e=>{
     e.preventDefault();const box=$("#a31InstallProgress"),submit=$("#a31InstallSubmit");submit.disabled=true;
-    const active=(await a31LoadActiveInstallJobs().catch(()=>[])).find(j=>String(j.model_ref||"").toLowerCase()===String(model.model_ref||"").toLowerCase()&&String(j.quantization||"").toLowerCase()===String(form.elements.quantization.value||"").toLowerCase());
+    const active=(await a31LoadActiveInstallJobs().catch(()=>[])).find(j=>String(j.status||"")!=="interrupted"&&String(j.model_ref||"").toLowerCase()===String(model.model_ref||"").toLowerCase()&&String(j.quantization||"").toLowerCase()===String(form.elements.quantization.value||"").toLowerCase());
     if(active){a31OpenInstallProgress(active.id);return}
 
     box.innerHTML='<div class="install-step active">Resolving trusted catalogue…</div>';

@@ -1,3 +1,17 @@
+// Toasts must be detached from modal/popover content. The compatibility
+// foundation remains immutable; this enhancement owns the dedicated toast root.
+let a9ToastSerial=0;
+notice=function(text,kind="good"){
+ let root=document.querySelector("#noticeRoot");
+ if(!root){
+  root=document.createElement("div");root.id="noticeRoot";
+  root.setAttribute("role","status");root.setAttribute("aria-live","polite");
+  document.body.appendChild(root);
+ }
+ const serial=++a9ToastSerial;
+ root.innerHTML=`<div class="toast ${kind}">${escapeHtml(text)}</div>`;
+ setTimeout(()=>{if(serial===a9ToastSerial)root.innerHTML="";},2600);
+};
 let a9All=[],a9Statuses=new Map(),a9Filter="active",a9Workspace="",a9LastRead=0,a9Loading=null;
 function a9Status(id){return a9Statuses.get(String(id))||"active"}
 function a9RefreshState(){

@@ -375,6 +375,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/local-ai/deployments/{deploymentID}/colibri-tier", s.getColibriTier)
 	s.mux.HandleFunc("PATCH /v1/local-ai/deployments/{deploymentID}/colibri-tier", s.setColibriTier)
 	s.mux.HandleFunc("GET /v1/local-ai/deployments/{deploymentID}/colibri-plan", s.planColibriTier)
+	s.mux.HandleFunc("GET /v1/local-ai/deployments/{deploymentID}/colibri-swap", s.getColibriSwap)
+	s.mux.HandleFunc("POST /v1/local-ai/deployments/{deploymentID}/colibri-swap", s.activateColibriSwap)
 	s.mux.HandleFunc("GET /v1/vault/provider-credentials", s.listProviderCredentials)
 	s.mux.HandleFunc("POST /v1/vault/provider-credentials", s.createProviderCredential)
 	s.mux.HandleFunc("GET /v1/provider-presets", s.providerPresets)

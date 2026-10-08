@@ -43,7 +43,10 @@ for token in ("--hover","--input","--surface","--surface-2","--focus-ring","--pr
 assert "prefers-reduced-motion:reduce" in css
 assert "aria-valuetext" in js and 'role="progressbar"' in js
 assert "uiProgressMarkup(" in jobs and "onepane-progress-track" in css
-assert "theme-preview-stage" in js and "theme-preview-stage" in css
+compact = (ROOT/"internal/webui/static/compact-themes.js").read_text()
+compactcss = (ROOT/"internal/webui/static/attention-drawer.css").read_text()
+assert 'theme-compact-swatches' in compact and 'theme-compact-swatches' in compactcss
+assert 'toLocaleUpperCase' in compact and 'a11ThemeColors' in compact
 assert 'ui-consistency.css' in html and 'ui-consistency.js' in html
 assert html.index('models-followup-jobs.js') < html.index('ui-consistency.js')
 assert 'Installable now' not in models

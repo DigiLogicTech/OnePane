@@ -115,9 +115,6 @@ type localAIService interface {
 	ComputePolicy(context.Context, string) (localai.ComputePolicy, error)
 	SetComputePolicy(context.Context, localai.ComputePolicyCommand) (localai.ComputePolicy, error)
 	RegisterColibriFolder(context.Context, localai.RegisterColibriCommand) (inference.ModelDeployment, error)
-	ColibriTier(context.Context, string) (localai.ColibriTierState, error)
-	SetColibriTier(context.Context, localai.ColibriTierCommand) (localai.ColibriTierState, error)
-	ColibriPlan(context.Context, string) (json.RawMessage, error)
 	ConfigureModelPool(string) error
 	ManagedComponents(context.Context) (map[string]localai.ManagedComponent, error)
 	RequestComponentAction(context.Context, string, string, *string) (localai.ComponentJob, error)

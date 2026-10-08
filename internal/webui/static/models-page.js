@@ -302,7 +302,7 @@ async function a31RenderDiscoverModels(){
     $("#a31DiscoverCount").textContent=`${rows.length} visible · ${confirmed} external downloadable confirmed · ${checked}/${external.length} checked`;
     if(["downloadable","verification","unavailable"].includes(mode))for(const m of external){const s=m.source||"external",id=m.id||m.model_ref||"";if(id)a40QueueAvailability(s,id,availabilityChanged)}
     if(mode==="downloadable"&&nextCursor&&checked===external.length&&rows.length<8&&!loadingExternal&&autoPages<5){autoPages++;Promise.resolve().then(()=>fetchExternal(true))}
-    $("[data-a31-discover-install-ref]:not(:disabled)").forEach(b=>b.onclick=async()=>{
+    $$("[data-a31-discover-install-ref]:not(:disabled)").forEach(b=>b.onclick=async()=>{
       const model=catalog.find(x=>String(x.model_ref)===b.dataset.a31DiscoverInstallRef);
       if(!model)return;
       const current=await apiRequest("/v1/local-ai/deployments?workspace_id="+encodeURIComponent(onepaneWorkspace)).catch(()=>null);
@@ -312,7 +312,7 @@ async function a31RenderDiscoverModels(){
       a31InstallModel(model)
     });
     $$("[data-a31-source-url]").forEach(b=>b.onclick=()=>a31OpenModelSource(b.dataset.a31SourceUrl));
-    $("[data-a31-verify-source]:not(:disabled)").forEach(b=>b.onclick=()=>{const m=external.find(x=>String(x.source||"")===b.dataset.a31VerifySource&&String(x.id||x.model_ref||"")===b.dataset.a31VerifyId);if(m&&!isInstalled(m))a31VerifyExternalModel({...m,_source:m.source})})
+    $$("[data-a31-verify-source]:not(:disabled)").forEach(b=>b.onclick=()=>{const m=external.find(x=>String(x.source||"")===b.dataset.a31VerifySource&&String(x.id||x.model_ref||"")===b.dataset.a31VerifyId);if(m&&!isInstalled(m))a31VerifyExternalModel({...m,_source:m.source})})
     if(typeof a40ScheduleAvailabilityChecks==="function")a40ScheduleAvailabilityChecks();
   };
 

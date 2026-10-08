@@ -7,6 +7,7 @@ import (
  "strconv"
  "fmt"
  "syscall"
+ "path/filepath"
 )
 
 func readCPU()(idle,total uint64,err error){
@@ -49,4 +50,27 @@ func readProcessRSS()(uint64,error){
   f:=strings.Fields(line);if len(f)>1 {v,e:=strconv.ParseUint(f[1],10,64);return v*1024,e}
  }}
  return 0,fmt.Errorf("process RSS unavailable")
+}
+
+func readDiskAt(path string)(diskStats,error){
+ dir:=filepath.Clean(path)
+ // Resolve the nearest existing ancestor, then walk to the mount boundary.
+ for {
+  if st,e:=os.Stat(dir);e==nil&&st.IsDir(){break}
+  parent:=filepath.Dir(dir)
+  if parent==dir{return diskStats{},fmt.Errorf("no accessible storage path for %q",path)}
+  dir=parent
+ }
+ if real,e:=filepath.EvalSymlinks(dir);e==nil{dir=real}
+ var fs syscall.Statfs_t
+ if e:=syscall.Statfs(dir,&fs);e!=nil{return diskStats{},e}
+ mount:=dir
+ st,e:=os.Stat(dir);if e!=nil{return diskStats{},e}
+ dev:=st.Sys().(*syscall.Stat_t).Dev
+ for {
+  parent:=filepath.Dir(mount);if parent==mount{break}
+  info,e:=os.Stat(parent);if e!=nil||info.Sys().(*syscall.Stat_t).Dev!=dev{break}
+  mount=parent
+ }
+ return diskStats{path:mount,total:fs.Blocks*uint64(fs.Bsize),free:fs.Bavail*uint64(fs.Bsize)},nil
 }

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"sync"
 
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/event"
@@ -71,6 +72,10 @@ type Service struct {
 	catalog      *CatalogService
 	catalogTrust *CatalogTrustStore
 	llmfit       *LLMFitClient
+	// A single node can service concurrent UI/remote install requests. Serialize
+	// shared runtime provisioning, without serializing entire model downloads.
+	runtimeInstallMu sync.Mutex
+	installQueueMu   sync.Mutex
 }
 
 func NewService(db *sql.DB, tx storage.Transactor, clk clock.Clock, inf *inference.Service, dataDir string, trust *CatalogTrustStore) *Service {
@@ -624,6 +629,11 @@ func (s *Service) Plan(ctx context.Context, id string) (InstallPlan, error) {
 // ProvisionApprovedPlan installs a managed runtime/model from trusted resolved artifacts.
 // It deliberately stops at QUALIFYING: empirical qualification must prove the deployment before scheduling it.
 func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runtime RuntimeManifest, model ModelArtifact) (inference.ModelDeployment, error) {
+	// Two models may request the same runtime concurrently. Prevent one job
+	// from seeing the other's newly renamed but not-yet-inventoried runtime.
+	s.runtimeInstallMu.Lock()
+	runtimeLocked := true
+	defer func() { if runtimeLocked { s.runtimeInstallMu.Unlock() } }()
 	p, err := s.Plan(ctx, planID)
 	if err != nil {
 		return inference.ModelDeployment{}, err
@@ -761,6 +771,8 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 	if err != nil {
 		return inference.ModelDeployment{}, err
 	}
+	s.runtimeInstallMu.Unlock()
+	runtimeLocked = false
 	for _, downloaded := range runtimeDownloads {
 		_ = os.Remove(downloaded)
 	}

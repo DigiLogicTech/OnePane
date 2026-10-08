@@ -522,6 +522,41 @@ func llamaPlacementArgs(plan PlacementPlan) []string {
 	}
 }
 
+// Validate accelerator identity against the selected runtime build. A detected
+// CUDA0 GPU is not proof that a Vulkan-only executable can address CUDA0.
+func validateLlamaPlacementDevices(executable,backend string,plan PlacementPlan) error {
+ args:=llamaPlacementArgs(plan)
+ var selected string
+ for i:=0;i+1<len(args);i++{if args[i]=="--device"{selected=args[i+1];break}}
+ if selected==""||selected=="none"{return nil}
+ for _,name:=range strings.Split(selected,","){
+  name=strings.TrimSpace(name)
+  if strings.EqualFold(backend,"vulkan")&&strings.HasPrefix(strings.ToLower(name),"cuda")||
+    strings.EqualFold(backend,"cuda")&&strings.HasPrefix(strings.ToLower(name),"vulkan")||
+    strings.EqualFold(backend,"cpu") {
+    return fmt.Errorf("runtime backend %s cannot address device %s; change Compute placement or repair the matching llama.cpp backend",backend,name)
+  }
+ }
+ ctx,cancel:=context.WithTimeout(context.Background(),8*time.Second)
+ defer cancel()
+ out,err:=exec.CommandContext(ctx,executable,"--list-devices").CombinedOutput()
+ if err!=nil{return fmt.Errorf("list devices from managed %s backend: %w: %s",backend,err,strings.TrimSpace(string(out)))}
+ known:=map[string]bool{}
+ for _,line:=range strings.Split(string(out),"\n"){
+  fields:=strings.Fields(strings.TrimSpace(line));if len(fields)==0{continue}
+  candidate:=strings.TrimRight(fields[0],":,")
+  if strings.HasPrefix(strings.ToLower(candidate),"cuda")||strings.HasPrefix(strings.ToLower(candidate),"vulkan"){
+   known[strings.ToLower(candidate)]=true
+  }
+ }
+ for _,name:=range strings.Split(selected,","){
+  if !known[strings.ToLower(strings.TrimSpace(name))]{
+   return fmt.Errorf("selected runtime %s does not advertise %s in --list-devices; re-detect hardware or change Compute placement",backend,name)
+  }
+ }
+ return nil
+}
+
 func reserveLoopbackPort() (int, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -577,6 +612,9 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 		if old.Status == RuntimeStarting && s.processes.Alive(old.PID) {
 			return s.waitHealthy(ctx, old.ID, 120*time.Second)
 		}
+	}
+	if !strings.EqualFold(cfg.RuntimeBackend,"colibri"){
+		if err:=validateLlamaPlacementDevices(cfg.Executable,cfg.RuntimeBackend,cfg.Placement);err!=nil{return RuntimeInstance{},err}
 	}
 	if err := s.ensureCapacity(ctx, deploymentID, nodeID); err != nil {
 		return RuntimeInstance{}, err

@@ -1,16 +1,65 @@
 /* OnePane federated Nodes control plane — backed by node-scoped APIs.
  * A selected node is never inferred from the operator's browser location. */
-var nextNodeUI={nodes:[],selected:"",tab:"overview",manifest:null,grant:null,policy:null,capError:"",jobs:[]};
+var nextNodeUI={nodes:[],selected:"",tab:"overview",manifest:null,grant:null,policy:null,capError:"",jobs:[],localMetrics:null,localHardware:null,localModels:[],localModelsAvailable:false};
 function nextNodeEsc(v){return escapeHtml(String(v==null?"":v));}
 function nextNodeID(n){return String(n.id||n.node_id||"");}
 function nextNodeName(n){return n.name||n.hostname||n.display_name||nextNodeID(n)||"Node";}
 function nextNodeState(n){return n.local?"local":(n.status||n.state||n.trust_state||"unknown");}
 function nextNodeArray(v){return Array.isArray(v)?v:[];}
+function nextNodeWhen(value){
+ if(value==null||value==="")return "Not reported";
+ const n=Number(value);if(!Number.isFinite(n)||n<=0)return "Not reported";
+ const ms=n<1e11?n*1000:n;
+ return new Date(ms).toLocaleString();
+}
+function nextNodeNumber(v){return v==null||!Number.isFinite(Number(v))?null:Number(v);}
+function nextNodeCount(v){return v==null?"—":String(v);}
+function nextNodeMetricBytes(value){return nextNodeNumber(value)==null?"Not reported":bytesQA(Number(value));}
+function nextNodeLocalManifest(hardware,metrics,models,modelsAvailable){
+ const total=nextNodeNumber(metrics?.memory_total_bytes)??nextNodeNumber(hardware?.memory?.total_bytes);
+ const available=nextNodeNumber(metrics?.memory_available_bytes)??nextNodeNumber(hardware?.memory?.available_bytes);
+ const free=nextNodeNumber(metrics?.storage_volumes?.find(v=>nextNodeArray(v.roles).includes("Models"))?.free_bytes)
+  ??nextNodeNumber(hardware?.storage?.available_bytes)??nextNodeNumber(metrics?.disk_free_bytes);
+ const gpus=nextNodeArray(hardware?.gpus).length?hardware.gpus:nextNodeArray(metrics?.gpus);
+ const pools=nextNodeArray(hardware?.gpus).length||nextNodeArray(metrics?.gpus).length?
+  gpus.map((g,i)=>({id:g.device_id||String(i),kind:"gpu",name:g.name||"GPU "+i,backend:g.backend||nextNodeArray(g.backends).join(", ")||"Auto",capacity_bytes:g.vram_bytes??g.vram_total_bytes??0,available_bytes:g.free_vram_bytes??null,utilization_pct:g.usage_percent??null})):null;
+ return {protocol:"local",node_id:hardware?.node_id||"",models:modelsAvailable?models:null,
+  compute:{status:"local",cpu_usage_pct:metrics?.cpu_percent??null,
+   memory_total_bytes:total,memory_available_bytes:available,
+   storage_available_bytes:free,pools:pools,cpu_name:hardware?.cpu?.name||null},
+  source:"local Metrics and Local Models; no federation manifest required"};
+}
+async function nextNodeLoadLocal(id){
+ const node=nextNodeUI.nodes.find(n=>nextNodeID(n)===id);
+ if(!node?.local)return;
+ const tasks=[
+  apiRequest("/v1/system/metrics?workspace_id="+encodeURIComponent(onepaneWorkspace||"")),
+  onepaneWorkspace?apiRequest("/v1/local-ai/deployments?workspace_id="+encodeURIComponent(onepaneWorkspace)):Promise.reject(Error("No active workspace")),
+  (typeof localProfileQA!=="undefined"&&localProfileQA)?Promise.resolve(localProfileQA):
+   nextNodeUI.localHardware?Promise.resolve(nextNodeUI.localHardware):
+   onepaneWorkspace?apiRequest("/v1/local-ai/detect",{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace})}):
+   Promise.reject(Error("Select a Workspace to detect hardware"))
+ ];
+ const results=await Promise.allSettled(tasks);
+ if(nextNodeUI.selected!==id)return;
+ const metrics=results[0].status==="fulfilled"?results[0].value:null;
+ const dep=results[1].status==="fulfilled"?results[1].value:null;
+ const hardware=results[2].status==="fulfilled"?results[2].value:null;
+ nextNodeUI.localMetrics=metrics;
+ if(hardware?.cpu||nextNodeArray(hardware?.gpus).length)nextNodeUI.localHardware=hardware;
+ const modelRows=Array.isArray(dep)?dep:dep?.deployments;
+ nextNodeUI.localModelsAvailable=Array.isArray(modelRows);
+ nextNodeUI.localModels=nextNodeArray(modelRows);
+ nextNodeUI.manifest=nextNodeLocalManifest(nextNodeUI.localHardware,metrics,nextNodeUI.localModels,nextNodeUI.localModelsAvailable);
+ nextNodeUI.capError=results[0].status==="rejected"&&results[1].status==="rejected"?
+   "Local telemetry and model inventory unavailable; check your session permissions.":"";
+}
 function nextNodeRows(){
  var rows=nextNodeUI.nodes,online=rows.filter(function(n){return n.local||n.trust_state==="paired";}).length;
- var gpu=nextNodeArray(nextNodeUI.manifest&&nextNodeUI.manifest.compute&&nextNodeUI.manifest.compute.pools).filter(function(p){return p.kind==="gpu";}).length;
+ var manifest=nextNodeUI.manifest,pools=manifest?.compute?.pools,models=manifest?.models;
+ var gpu=Array.isArray(pools)?pools.filter(p=>p.kind==="gpu").length:null;
  return '<div class="host-metrics-grid node-summary-grid">'+
-  [['Nodes',rows.length],['Trusted / local',online],['Selected GPU pools',gpu],['Remote models',nextNodeArray(nextNodeUI.manifest&&nextNodeUI.manifest.models).length]]
+  [['Nodes',rows.length],['Trusted / local',online],['Selected GPU pools',nextNodeCount(gpu)],['Selected models',nextNodeCount(Array.isArray(models)?models.length:null)]]
   .map(function(row){return '<section class="host-metric-tile"><strong>'+nextNodeEsc(row[0])+'</strong><div class="host-metric-value">'+nextNodeEsc(row[1])+'</div></section>';}).join("")+'</div>';
 }
 function nextNodeJobKey(id){return "onepane:nodes:jobs:"+id;}
@@ -37,11 +86,14 @@ async function renderNodes(){
 async function nextNodeLoadDetail(id){
  nextNodeUI.manifest=null;nextNodeUI.grant=null;nextNodeUI.policy=null;nextNodeUI.capError="";
  nextNodeUI.jobs=nextNodeReadJobs(id);
+ const node=nextNodeUI.nodes.find(n=>nextNodeID(n)===id);
+ if(node?.local){await nextNodeLoadLocal(id);return}
  var checks=await Promise.allSettled([
   apiRequest("/v1/nodes/"+encodeURIComponent(id)+"/capabilities"),
   apiRequest("/v1/nodes/"+encodeURIComponent(id)+"/model-management"),
   apiRequest("/v1/nodes/"+encodeURIComponent(id)+"/compute-policy")
  ]);
+ if(nextNodeUI.selected!==id)return;
  if(checks[0].status==="fulfilled")nextNodeUI.manifest=checks[0].value;
  else nextNodeUI.capError=String(checks[0].reason&&checks[0].reason.message||"Capabilities unavailable");
  if(checks[1].status==="fulfilled")nextNodeUI.grant=checks[1].value;
@@ -53,7 +105,7 @@ function nextNodeDraw(){
  var top=nextNodeRows();
  var list='<div class="node-grid">'+nextNodeUI.nodes.map(function(n){
   var id=nextNodeID(n),selected=id===nextNodeUI.selected,st=nextNodeState(n);
-  return '<article class="panel-card node-card'+(selected?' next-node-selected':'')+'" data-a31-node="'+nextNodeEsc(id)+'"><div class="card-header"><div><div class="card-title">'+nextNodeEsc(nextNodeName(n))+(n.local?' (Local)':'')+'</div><div class="list-meta">'+nextNodeEsc(id)+'</div></div><span class="pill">'+nextNodeEsc(st)+'</span></div><div class="widget-body"><div class="list-meta">'+nextNodeEsc(n.last_seen_at||"No heartbeat reported")+'</div><button class="btn'+(selected?' primary':'')+'" data-next-node="'+nextNodeEsc(id)+'">Manage node</button></div></article>';
+  return '<article class="panel-card node-card'+(selected?' next-node-selected':'')+'" data-a31-node="'+nextNodeEsc(id)+'"><div class="card-header"><div><div class="card-title">'+nextNodeEsc(nextNodeName(n))+(n.local?' (Local)':'')+'</div><div class="list-meta">'+nextNodeEsc(id)+'</div></div><span class="pill">'+nextNodeEsc(st)+'</span></div><div class="widget-body"><div class="list-meta">'+(n.local?'Local machine · live metrics':"Last seen: "+nextNodeEsc(nextNodeWhen(n.last_seen_at)))+'</div><button class="btn'+(selected?' primary':'')+'" data-next-node="'+nextNodeEsc(id)+'">Manage node</button></div></article>';
  }).join("")+'</div>';
  var detail=node?nextNodeDetail(node):'<section class="panel-card"><div class="widget-body">No enrolled nodes. Select Add Node to begin a mutually confirmed pairing.</div></section>';
  root.innerHTML=top+list+detail;
@@ -68,8 +120,16 @@ function nextNodeDraw(){
  $("#nextNodeGrant")?.addEventListener("click",nextNodeToggleGrant);
  $("#nextNodeRevoke")?.addEventListener("click",nextNodeRevoke);
  $$("[data-next-node-job]",root).forEach(function(b){b.onclick=function(){nextNodeInspectJob(b.dataset.nextNodeJob);};});
- $$("[data-next-node-spec]",root).forEach(function(b){b.onclick=function(){nextNodeShowSpec(b.dataset.nextNodeSpec);};});
- $$("[data-next-node-check]",root).forEach(function(b){b.onclick=function(){nextNodeAgentCheck(b.dataset.nextNodeCheck);};});
+ $("[data-next-node-spec]",root).forEach(function(b){b.onclick=function(){
+  const dep=b.dataset.nextNodeSpec,local=nextNodeUI.nodes.find(n=>nextNodeID(n)===nextNodeUI.selected)?.local;
+  if(local){const model=nextNodeUI.localModels.find(m=>m.deployment_id===dep);if(model)qa5InspectModel(model);else notice("Local deployment unavailable","bad");}
+  else nextNodeShowSpec(dep);
+ };});
+ $("[data-next-node-check]",root).forEach(function(b){b.onclick=function(){
+  const dep=b.dataset.nextNodeCheck,local=nextNodeUI.nodes.find(n=>nextNodeID(n)===nextNodeUI.selected)?.local;
+  if(local){const model=nextNodeUI.localModels.find(m=>m.deployment_id===dep);if(model)qa5AgentCheck(model);else notice("Local deployment unavailable","bad");}
+  else nextNodeAgentCheck(dep);
+ };});
 }
 function nextNodeDetail(n){
  var tabs=[["overview","Overview"],["models","Models"],["compute","Compute"],["access","Access & Policy"],["activity","Activity"]];
@@ -79,17 +139,23 @@ function nextNodeDetail(n){
  return '<section class="panel-card next-node-manager">'+header+nav+'<div class="widget-body">'+body+'</div></section>';
 }
 function nextNodeOverview(n){
- var manifest=nextNodeUI.manifest||{},compute=manifest.compute||{},pools=nextNodeArray(compute.pools);
- var rows=[["Name",nextNodeName(n)],["Node identity",nextNodeID(n)],["Trust",n.trust_state],["Endpoint",JSON.stringify(n.endpoint||{})],["Compute state",compute.status],["CPU usage",compute.cpu_usage_pct==null?"Unavailable":compute.cpu_usage_pct+"%"],["Available RAM",compute.memory_available_bytes?bytesQA(compute.memory_available_bytes):"Not reported"],["Available storage",compute.storage_available_bytes?bytesQA(compute.storage_available_bytes):"Not reported"],["Last seen",n.last_seen_at||"Not reported"]];
+ var manifest=nextNodeUI.manifest||{},compute=manifest.compute||{},pools=compute.pools;
+ var rows=[["Name",nextNodeName(n)],["Node identity",nextNodeID(n)],["Trust",n.trust_state],
+ ["Endpoint",n.local?"Local management; no remote endpoint":(n.endpoint?JSON.stringify(n.endpoint):"Not advertised")],
+ ["Compute state",compute.status||"Not reported"],["CPU",compute.cpu_name||"Not reported"],
+ ["CPU usage",compute.cpu_usage_pct==null?"Collecting samples…":Number(compute.cpu_usage_pct).toFixed(1)+"%"],
+ ["Available RAM",nextNodeMetricBytes(compute.memory_available_bytes)],
+ ["Available storage",nextNodeMetricBytes(compute.storage_available_bytes)],
+ ["Last seen",n.local?"Local (active session)":nextNodeWhen(n.last_seen_at)]];
  return (nextNodeUI.capError?'<p class="error">'+nextNodeEsc(nextNodeUI.capError)+'</p>':'')+
-  '<dl class="definition-grid">'+rows.map(function(r){return '<dt>'+nextNodeEsc(r[0])+'</dt><dd>'+nextNodeEsc(r[1]||"—")+'</dd>';}).join("")+'</dl>'+
-  '<h3>Compute pools</h3>'+(pools.length?pools.map(function(p){return '<div class="list-row"><div class="list-main"><strong>'+nextNodeEsc(p.name||p.kind)+'</strong><div class="list-meta">'+nextNodeEsc(p.backend||p.kind)+' · '+nextNodeEsc(p.available_bytes?bytesQA(p.available_bytes)+" available":"Capacity not reported")+'</div></div></div>';}).join(""):'<p class="page-subtitle">No active compute pools advertised.</p>');
+  '<dl class="definition-grid">'+rows.map(function(r){return '<dt>'+nextNodeEsc(r[0])+'</dt><dd>'+nextNodeEsc(r[1]??"—")+'</dd>';}).join("")+'</dl>'+
+  '<h3>Compute pools</h3>'+(Array.isArray(pools)?(pools.length?pools.map(function(p){return '<div class="list-row"><div class="list-main"><strong>'+nextNodeEsc(p.name||p.kind)+'</strong><div class="list-meta">'+nextNodeEsc(p.backend||p.kind)+' · '+(p.capacity_bytes?nextNodeEsc(bytesQA(p.capacity_bytes))+" capacity":"Capacity not reported")+(p.utilization_pct==null?"":" · "+Number(p.utilization_pct).toFixed(1)+"% utilisation")+'</div></div></div>';}).join(""):'<p class="page-subtitle">No accelerator pools detected.</p>'):'<p class="page-subtitle">Compute inventory not yet reported.</p>');
 }
 function nextNodeModels(n){
  var models=nextNodeArray(nextNodeUI.manifest&&nextNodeUI.manifest.models);
  var toolbar=n.local?'<button class="btn primary" id="nextNodeOpenModels">Manage local models</button>':'<button class="btn" id="nextNodeRecommendations">Recommendations</button> <button class="btn primary" id="nextNodeInstall">Install on this node</button>';
  return '<p class="page-subtitle">Model weights, runtimes and inference are hosted on the selected node. Local and remote model installations use the same trusted catalogue.</p><div class="toolbar">'+toolbar+'</div>'+
- (models.length?'<div class="table-shell"><table class="data-table"><thead><tr><th>Model</th><th>Runtime</th><th>Qualification</th><th>Actions</th></tr></thead><tbody>'+models.map(function(m){var id=m.deployment_id||"";return '<tr><td><strong>'+nextNodeEsc(m.model_ref)+'</strong><div class="list-meta">'+nextNodeEsc(m.quantization||"")+'</div></td><td>'+nextNodeEsc(m.runtime_name||"—")+'</td><td>'+nextNodeEsc(m.qualification||"Unknown")+'</td><td><button class="btn tiny" data-next-node-spec="'+nextNodeEsc(id)+'">Spec Sheet</button> <button class="btn tiny" data-next-node-check="'+nextNodeEsc(id)+'">Agent Check</button></td></tr>';}).join("")+'</tbody></table></div>':'<div class="empty-state compact">No remote deployments advertised by this node.</div>');
+ (models.length?'<div class="table-shell"><table class="data-table"><thead><tr><th>Model</th><th>Runtime</th><th>Status</th><th>Actions</th></tr></thead><tbody>'+models.map(function(m){var id=m.deployment_id||"";return '<tr><td><strong>'+nextNodeEsc(m.model_ref)+'</strong><div class="list-meta">'+nextNodeEsc(m.quantization||"")+'</div></td><td>'+nextNodeEsc(m.runtime_name||"—")+'</td><td>'+nextNodeEsc(m.qualification||m.status||"Unknown")+'</td><td><button class="btn tiny" data-next-node-spec="'+nextNodeEsc(id)+'">Spec Sheet</button> <button class="btn tiny" data-next-node-check="'+nextNodeEsc(id)+'">Agent Check</button></td></tr>';}).join("")+'</tbody></table></div>':(nextNodeUI.manifest?.models==null?'<div class="empty-state compact">Model inventory not reported.</div>':'<div class="empty-state compact">No managed deployments reported on this node.</div>'));
 }
 function nextNodeCompute(n){
  var p=nextNodeUI.policy||{};
@@ -191,3 +257,18 @@ async function nextNodeRevoke(){
  try{await apiRequest("/v1/nodes/"+encodeURIComponent(id)+"/revoke",{method:"POST",body:"{}"});nextNodeUI.selected="";await renderNodes();notice("Node pairing revoked.");}
  catch(e){notice(e.message,"bad");}
 }
+
+// Live local node telemetry: refresh the active Overview without disturbing
+// Compute / Policy forms, preserving user input during edits.
+setInterval(async function(){
+ if(!a31RouteIs("nodes")||nextNodeUI.tab!=="overview")return;
+ const selected=nextNodeUI.selected,node=nextNodeUI.nodes.find(n=>nextNodeID(n)===selected);
+ if(!node?.local||!document.querySelector("#nextNodeRoot"))return;
+ try{
+  const fresh=await apiRequest("/v1/system/metrics?workspace_id="+encodeURIComponent(onepaneWorkspace||""));
+  if(nextNodeUI.selected!==selected||nextNodeUI.tab!=="overview"||!a31RouteIs("nodes"))return;
+  nextNodeUI.localMetrics=fresh;
+  nextNodeUI.manifest=nextNodeLocalManifest(nextNodeUI.localHardware,fresh,nextNodeUI.localModels,nextNodeUI.localModelsAvailable);
+  nextNodeDraw();
+ }catch{}
+},5000);

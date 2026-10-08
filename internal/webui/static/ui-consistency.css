@@ -148,3 +148,50 @@
  .control-chat-model-row{flex-wrap:wrap}
  .control-chat-model-row select{flex-basis:100%}
 }
+
+
+/* The Logs drawer and Inspector own shell space; content pages must never
+ * compute their height from the full window. Keep one scroll owner per page.
+ * Tablet/phone use the mobile overlay drawer instead of the desktop grid. */
+@media (min-width:701px) {
+  .app-shell,.main-shell{min-height:0}
+  .main-shell{
+    height:100%;
+    overflow:hidden;
+    grid-template-rows:52px minmax(0,1fr) minmax(0,var(--drawer));
+  }
+  .view-host{height:100%;min-width:0;min-height:0;overflow:auto;overscroll-behavior:contain}
+  .view-host > .page{
+    height:100%;min-height:0;min-width:0;max-width:100%;
+    box-sizing:border-box;
+    display:flex;flex-direction:column;overflow:hidden;
+  }
+  .view-host > .page > :is(.page-heading,.subtabs,.models-section-tabs,.secret-toolbar){
+    flex:0 0 auto;
+  }
+  /* The page heading/tabs remain visible while the content independently
+   * scrolls; this applies to every primary view, not just Nodes/Models. */
+  .view-host > .page > :is(
+    #a31OperationsBody,#tasksBody,.project-hub,
+    #a31AgentsBody,#a31SkillsBody,.settings-shell,#secretCatalogue
+  ){
+    flex:1 1 0;min-height:0;min-width:0;max-width:100%;
+    overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
+  }
+  .view-host > .page > .project-hub{
+    height:auto;min-height:0;align-content:start;
+  }
+  .view-host > .page > .settings-shell{align-content:start}
+  .view-host > .page > #secretCatalogue{max-height:none}
+  /* Do not clip a legacy/secondary page whose body is not one of the above
+   * bounded containers. Those pages scroll at their own root. */
+  .view-host > .page:not(:has(
+    #a31OperationsBody,#tasksBody,.project-hub,#a31ModelsRoot,#nextNodeRoot,
+    #a31AgentsBody,#a31SkillsBody,.settings-shell,#secretCatalogue
+  )){overflow-y:auto}
+  .view-host > .page :is(
+    .table-shell,.agent-profile-grid,.skill-grid,.models-single-column,
+    .workspace-grid,.operations-layout-grid,.settings-section
+  ){min-width:0;max-width:100%}
+  .view-host > .page .table-shell{overflow-x:auto}
+}

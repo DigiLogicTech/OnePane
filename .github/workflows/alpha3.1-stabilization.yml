@@ -101,6 +101,7 @@ jobs:
           node --check internal/webui/static/qa-round2-discovery-logs.js
           node --check internal/webui/static/host-metrics.js
           node --check internal/webui/static/nodes-management.js
+          node scripts/test_nodes_local_data.js
           node --check internal/webui/static/model-qa-remediation.js
           ! grep -F "type=\"module\"" internal/webui/static/index.html
           ! grep -F "from './chat-commands.js'" internal/webui/static/app.js

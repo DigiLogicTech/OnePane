@@ -287,6 +287,13 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		used += len(raw)
 		sections = append(sections, agentprotocol.ContextSection{ID: "msg-" + m.ID, Kind: "team_message", Trust: trust, Authoritative: m.Kind == "human", Content: raw})
 	}
+	// Operator-approved Chair agenda and follow-up questions are visible only
+	// to subsequent rounds. Unapproved proposals never enter seat evidence.
+	if researchMode && research.ChairMode=="manual" {
+		chairEvidence,err:=s.chairApprovedContext(ctx,ss.ID,turnRound)
+		if err!=nil{return s.fail(ctx,res,err)}
+		sections=append(sections,chairEvidence...)
+	}
 	// Web Chat seats are human-mediated. They never call an inference API,
 	// consume a scheduled provider candidate or acquire tool permissions.
 	// Snapshot config and evidence filtering above still govern their prompt.
@@ -513,6 +520,11 @@ func (s *Service) advanceResearchSessions(ctx context.Context) error {
 		}
 
 		if c.round == 0 {
+			if research.ChairMode=="manual" {
+				approved,err:=s.ensureManualChair(ctx,snapshot,c.ws,"agenda",0)
+				if err!=nil{return err}
+				if !approved {continue} // Never start independent research before the Chair agenda gate.
+			}
 			if _, err := s.teams.RequestRound(ctx, team.RequestRoundCommand{
 				SessionID: c.id, RequestedByPrincipalID: WorkerPrincipal,
 				ResearchPhase: team.ResearchPhaseIndependent,
@@ -548,6 +560,11 @@ func (s *Service) advanceResearchSessions(ctx context.Context) error {
 			continue
 		}
 
+		if research.ChairMode=="manual" {
+			approved,err:=s.ensureManualChair(ctx,snapshot,c.ws,"review",c.round)
+			if err!=nil{return err}
+			if !approved {continue} // Await Chair critique proposal and optional human approval.
+		}
 		nextRound := c.round + 1
 		phase := team.ResearchPhaseForRound(research, nextRound)
 		cmd := team.RequestRoundCommand{

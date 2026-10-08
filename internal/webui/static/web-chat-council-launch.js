@@ -70,6 +70,9 @@ async function a41CreateWebOnlyCouncil(workspace,draft,existing=null,options={})
   // after a partially successful request.
   if(existing && JSON.stringify(state0.draft)!==JSON.stringify(normalized))
     throw Error("A partial Council launch must be resumed with its original configuration.");
+  // Save the launch checkpoint before awaiting any network operation. On
+  // failure the caller can retry from this exact resource stage.
+  a41WebCouncilLaunch=state0;
   if(!state0.team_id){
     progress("Creating dedicated Web Research Team…");
     const record=await send("/v1/teams",{method:"POST",body:JSON.stringify({

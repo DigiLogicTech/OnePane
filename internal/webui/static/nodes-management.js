@@ -124,12 +124,12 @@ function nextNodeDraw(){
  $("#nextNodeGrant")?.addEventListener("click",nextNodeToggleGrant);
  $("#nextNodeRevoke")?.addEventListener("click",nextNodeRevoke);
  $$("[data-next-node-job]",root).forEach(function(b){b.onclick=function(){nextNodeInspectJob(b.dataset.nextNodeJob);};});
- $("[data-next-node-spec]",root).forEach(function(b){b.onclick=function(){
+ $$("[data-next-node-spec]",root).forEach(function(b){b.onclick=function(){
   const dep=b.dataset.nextNodeSpec,local=nextNodeUI.nodes.find(n=>nextNodeID(n)===nextNodeUI.selected)?.local;
   if(local){const model=nextNodeUI.localModels.find(m=>m.deployment_id===dep);if(model)qa5InspectModel(model);else notice("Local deployment unavailable","bad");}
   else nextNodeShowSpec(dep);
  };});
- $("[data-next-node-check]",root).forEach(function(b){b.onclick=function(){
+ $$("[data-next-node-check]",root).forEach(function(b){b.onclick=function(){
   const dep=b.dataset.nextNodeCheck,local=nextNodeUI.nodes.find(n=>nextNodeID(n)===nextNodeUI.selected)?.local;
   if(local){const model=nextNodeUI.localModels.find(m=>m.deployment_id===dep);if(model)qa5AgentCheck(model);else notice("Local deployment unavailable","bad");}
   else nextNodeAgentCheck(dep);

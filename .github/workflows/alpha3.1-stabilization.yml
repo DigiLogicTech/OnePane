@@ -2,7 +2,7 @@ name: Alpha 3.3 RC2 Models QA Remediation
 
 on:
   push:
-    branches: [alpha3.2-integration, alpha3.2-windows-stabilization, alpha3.2-qa-round2-remediation, alpha3.2-qa-round3-remediation, alpha3.2-next-release-remediation, feature/colibri-tiered-inference, release/alpha3.3-consolidated-qa, fix/alpha3.3-qa-models-rc2, fix/alpha3.3-upgrade-startup-diagnostics, fix/alpha3.3-model-install-colibri-ux]
+    branches: [alpha3.2-integration, alpha3.2-windows-stabilization, alpha3.2-qa-round2-remediation, alpha3.2-qa-round3-remediation, alpha3.2-next-release-remediation, feature/colibri-tiered-inference, release/alpha3.3-consolidated-qa, fix/alpha3.3-qa-models-rc2, fix/alpha3.3-upgrade-startup-diagnostics, fix/alpha3.3-model-install-colibri-ux, fix/alpha3.3-qa-consolidated-rc3]
   workflow_dispatch:
     inputs:
       run_hosted_smoke:

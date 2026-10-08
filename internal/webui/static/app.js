@@ -293,7 +293,7 @@ function a31BindOperationsTabs(){
 function a31ToggleLogs(){
   const drawer=$("#bottomDrawer");if(!drawer)return;
   if(drawer.dataset.state==="open"&&activeDrawerTab==="logs"){setDrawerOpen(false);return}
-  activeDrawerTab="logs";setDrawerOpen(true);renderDrawer();if(a31RouteIs("operations"))renderOperations();
+  activeDrawerTab="logs";setDrawerOpen(true); // CSS resizes the page; do not rerender Operations or reset its scroll.
 }
 function a31OpsWidget(w){
   const edit=a31OperationsEditing();

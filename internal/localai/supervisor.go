@@ -671,6 +671,19 @@ func (s *RuntimeSupervisor) Release(ctx context.Context, deploymentID string) er
 	return s.SetBusy(ctx, deploymentID, false)
 }
 
+// Diagnoses failures without exposing arbitrary large runtime output to clients.
+func (s *RuntimeSupervisor) runtimeStartLogTail(idv string) string {
+ path:=filepath.Join(s.dataDir,"components","logs","local-runtime-"+idv+".log")
+ f,err:=os.Open(path);if err!=nil{return ""}
+ defer f.Close()
+ st,err:=f.Stat();if err!=nil{return ""}
+ start:=st.Size()-900;if start<0{start=0}
+ if _,err=f.Seek(start,io.SeekStart);err!=nil{return ""}
+ buf,err:=io.ReadAll(io.LimitReader(f,900));if err!=nil{return ""}
+ tail:=strings.TrimSpace(string(buf))
+ if tail==""{return ""}
+ return " · runtime log tail: "+tail
+}
 func (s *RuntimeSupervisor) waitHealthy(ctx context.Context, idv string, timeout time.Duration) (RuntimeInstance, error) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -679,8 +692,9 @@ func (s *RuntimeSupervisor) waitHealthy(ctx context.Context, idv string, timeout
 			return inst, err
 		}
 		if !s.processes.Alive(inst.PID) {
-			_ = s.markFailed(ctx, idv, "runtime process exited before health check")
-			return RuntimeInstance{}, errors.New("runtime exited before becoming healthy")
+			reason:="runtime exited before becoming healthy"+s.runtimeStartLogTail(idv)
+   _ = s.markFailed(ctx,idv,reason)
+   return RuntimeInstance{}, errors.New(reason)
 		}
 		health, err := s.Health(ctx, inst)
 		if err == nil {
@@ -697,8 +711,9 @@ func (s *RuntimeSupervisor) waitHealthy(ctx context.Context, idv string, timeout
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
-	_ = s.markFailed(ctx, idv, "health check timed out")
-	return RuntimeInstance{}, errors.New("managed runtime health check timed out")
+	reason:="managed runtime health check timed out"+s.runtimeStartLogTail(idv)
+ _ = s.markFailed(ctx,idv,reason)
+ return RuntimeInstance{}, errors.New(reason)
 }
 
 func (s *RuntimeSupervisor) Health(ctx context.Context, inst RuntimeInstance) (map[string]any, error) {

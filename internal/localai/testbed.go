@@ -282,6 +282,15 @@ func (s *Service) TestbedSession(ctx context.Context, idv string) (TestbedSessio
 	return x, nil
 }
 
+// Keep the latest diagnostic on the model Spec Sheet when no inference can run.
+// An unsuccessful run never changes admission or invents a benchmark.
+func (s *Service) markManualAgentCheckFailed(ctx context.Context, sess TestbedSession, failure error) {
+ if failure==nil{return}
+ msg:=strings.TrimSpace(failure.Error())
+ if len(msg)>500{msg=msg[:500]+"…"}
+ raw,_:=json.Marshal(map[string]any{"status":"failed","profile_version":"onepane.manual-agent-check/v2","evidence":map[string]any{"errors":[]string{msg},"plain_ok":false,"plain_tested":true},"session_id":sess.ID})
+ _,_=s.db.ExecContext(ctx,`UPDATE model_spec_sheets SET qualification_json=?,updated_at=?,revision=revision+1 WHERE deployment_id=? AND hardware_profile_id=?`,string(raw),s.clock.UnixMilli(),sess.DeploymentID,sess.HardwareProfileID)
+}
 func (s *Service) RunTestbedTurn(ctx context.Context, sessionID string, cmd TestbedTurnCommand) (TestbedTurn, error) {
 	var out TestbedTurn
 	sess, err := s.TestbedSession(ctx, sessionID)
@@ -317,7 +326,8 @@ func (s *Service) RunTestbedTurn(ctx context.Context, sessionID string, cmd Test
 	// qualifying state; normal scheduler dispatch remains gated by admission.
 	if s.supervisor != nil {
 		if _, err := s.supervisor.Start(ctx, sess.DeploymentID); err != nil {
-			return out, fmt.Errorf("start managed runtime for testbed: %w", err)
+			s.markManualAgentCheckFailed(ctx,sess,err)
+   return out, fmt.Errorf("start managed runtime for testbed: %w", err)
 		}
 	}
 	dep, err := s.inference.Deployment(ctx, sess.DeploymentID)
@@ -332,9 +342,7 @@ func (s *Service) RunTestbedTurn(ctx context.Context, sessionID string, cmd Test
 	start := time.Now()
 	transport := inference.LocalOpenAITransport{Resolver: s}
 	result, err := transport.Dispatch(ctx, inference.DispatchRequest{RequestID: rid, Model: model, Deployment: dep, RequestJSON: req}, nil)
-	if err != nil {
-		return out, err
-	}
+ if err!=nil{s.markManualAgentCheckFailed(ctx,sess,err);return out,err}
 	elapsed := time.Since(start)
 	metrics, _ := json.Marshal(map[string]any{"elapsed_ms": elapsed.Milliseconds(), "placement": sess.Placement, "synthetic_tool_probe": cmd.SyntheticToolProbe})
 	usage := result.UsageJSON

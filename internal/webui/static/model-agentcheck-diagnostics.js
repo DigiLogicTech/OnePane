@@ -39,6 +39,7 @@ qa5AgentCheck=async function(dep){
  }catch(ex){
   const prefix=`Agent Check ${stage} failed: ${ex.message}`;
   const msg=/not found/i.test(ex.message)?" Verify this deployment still exists and its runtime is available.":""; 
+  if(sessionID){try{await qa5InspectModel(dep)}catch{}}
   notice(prefix+msg+(sessionID?" · Session: "+sessionID:""),"bad");
  }
 };

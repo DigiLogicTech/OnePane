@@ -467,3 +467,10 @@
 .a40-browser-bar a.btn,.a40-external-browser a.btn{color:var(--text)!important;text-decoration:none!important;background:var(--panel-2);border:1px solid var(--border);border-radius:var(--radius);display:inline-flex;align-items:center;justify-content:center}
 .a40-browser-bar a.btn:hover,.a40-external-browser a.btn:hover{background:var(--panel-3);color:var(--text)!important}
 .a40-browser-bar a.btn:focus-visible,.a40-external-browser a.btn:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+
+/* RC8 custom theme editor: compact colour controls and editable HEX values. */
+.qa8-theme-colors{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;max-height:40vh;overflow:auto;padding:6px}
+.qa8-theme-field{display:grid;grid-template-columns:minmax(0,1fr) 48px 92px;align-items:center;gap:8px;background:var(--panel-2);border:1px solid var(--border);padding:8px;border-radius:8px}
+.qa8-theme-field>span{font-size:12px;overflow-wrap:anywhere}
+.qa8-theme-field input[type=color]{width:48px;height:32px;min-width:0;padding:2px;border:1px solid var(--border);background:var(--panel)}
+.qa8-theme-field input[type=text]{width:92px;min-width:0;font-family:monospace}

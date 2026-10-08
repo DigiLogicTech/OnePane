@@ -66,7 +66,8 @@ const queued=[
 vm.runInContext("a42BindChairQueue",ctx)(queued);
 assert.equal(tabs[2].chair_turn_id,"agenda-1");
 assert.equal(tabs[0].chair_turn_id,undefined);
-ctx.a42ChairTurns=queued;
+ctx.chairTestRows=queued;
+vm.runInContext("a42ChairTurns=chairTestRows",ctx);
 const get=vm.runInContext("a42ChairActive",ctx);
 assert.equal(get(tabs[2])?.id,"agenda-1");
 async function test(){

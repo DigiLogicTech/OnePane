@@ -103,10 +103,14 @@ func (s *Service) omniRouteHealthy() bool {
 	resp, err := client.Get("http://127.0.0.1:20128/healthz")
 	if err != nil { return false }
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK { return false }
- var health struct { Status string `json:"status"` }
- if json.NewDecoder(io.LimitReader(resp.Body,4096)).Decode(&health)!=nil {return false}
- return health.Status=="ok"
+	return omniRouteHealthResponse(resp)
+}
+// OmniRoute 3.8.51 /healthz returns a plain-text lifecycle token, not JSON.
+// HTTP 200 + "ok" is ready; "starting" and "stopping" are deliberately not ready.
+func omniRouteHealthResponse(resp *http.Response) bool {
+ if resp==nil || resp.StatusCode!=http.StatusOK {return false}
+ body,err:=io.ReadAll(io.LimitReader(resp.Body,256));if err!=nil{return false}
+ return strings.EqualFold(strings.TrimSpace(string(body)),"ok")
 }
 func (s *Service) omniRouteLogTail(limit int64) string {
 	if limit <= 0 { limit = 4096 }

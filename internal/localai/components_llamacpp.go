@@ -76,13 +76,28 @@ func (s *Service) installLlamaRuntimeEntry(ctx context.Context, entry RuntimeCat
 	fingerprint := runtimeInstallFingerprint(manifest)
 	root := filepath.Join(s.dataDir,"runtimes",manifest.Name,manifest.Version,backend)
 	if len(manifest.Dependencies)>0 { root=filepath.Join(s.dataDir,"runtimes",manifest.Name,manifest.Version,backend+"-"+fingerprint[:16]) }
-	// Never replace a directory that Windows may have open DLL handles for.
-	// Install into a new generation, then atomically update the runtime registry.
+	// Record the currently registered generation, not merely the default
+	// destination: a previous update may already have moved it to .rev-N.
+	// Never discard model weights; stop only runtime processes using this backend.
+	name:=manifest.Name+"@"+backend
 	oldRoot:=""
-	if st,err:=os.Stat(root);err==nil&&st.IsDir(){
-		oldRoot=root
-		root=fmt.Sprintf("%s.rev-%d",root,s.clock.UnixMilli())
+	err:=s.db.QueryRowContext(ctx,"SELECT install_root FROM managed_local_runtimes WHERE node_id=? AND runtime_name=? AND status='ready'",p.NodeID,name).Scan(&oldRoot)
+	if err!=nil&&err!=sql.ErrNoRows{return err}
+	if err:=s.drainLlamaBackend(ctx,p.NodeID,name);err!=nil{return err}
+	base:=root
+	if st,e:=os.Stat(root);e==nil&&st.IsDir(){
+		root=fmt.Sprintf("%s.rev-%d",base,s.clock.UnixMilli())
+	} else if e!=nil&&!os.IsNotExist(e){return e}
+	// Refuse an endless sequence of generations when a previous Windows DLL
+	// lock prevented cleanup; the operator can drain/clean the old runtimes.
+	entries,e:=os.ReadDir(filepath.Dir(base))
+	if e!=nil&&!os.IsNotExist(e){return e}
+	stale:=0
+	for _,entry:=range entries{
+		if entry.IsDir()&&strings.HasPrefix(entry.Name(),filepath.Base(base)+".rev-")&&
+			!strings.EqualFold(filepath.Join(filepath.Dir(base),entry.Name()),oldRoot){stale++}
 	}
+	if stale>=2{return fmt.Errorf("llama.cpp %s update blocked: %d obsolete runtime generations require storage cleanup",backend,stale)}
 	downloads := filepath.Join(s.dataDir,"components","downloads"); if err:=os.MkdirAll(downloads,0o700); err!=nil{return err}
 	archive := filepath.Join(downloads,fmt.Sprintf("llamacpp-%s-%s",manifest.Version,backend))
 	if _,err:=s.fetcher.Fetch(ctx,manifest.SourceURL,archive,manifest.SHA256); err!=nil{return err}
@@ -110,11 +125,35 @@ func (s *Service) installLlamaRuntimeEntry(ctx context.Context, entry RuntimeCat
  if err!=nil{return err}
  // Old generation cleanup is best effort. Locked DLL files can be removed
  // later after processes have exited; they never block the new install.
- if oldRoot!=""{_ = os.RemoveAll(oldRoot)}
+ if oldRoot!=""&&!strings.EqualFold(filepath.Clean(oldRoot),filepath.Clean(root)){
+   managed:=filepath.Clean(filepath.Join(s.dataDir,"runtimes","llamacpp"))
+   clean:=filepath.Clean(oldRoot)
+   if strings.HasPrefix(strings.ToLower(clean),strings.ToLower(managed)+string(os.PathSeparator)){
+     if err:=os.RemoveAll(clean);err!=nil{
+       // Keep the new, registered generation. A later guarded storage
+       // cleanup can reclaim the old folder after Windows releases locks.
+       fmt.Printf("llama.cpp obsolete generation cleanup deferred (%s): %v\\n",clean,err)
+     }
+   }
+ }
  // Restored runtimes may reactivate preserved, previously unavailable
  // deployments without requiring another download of their model weights.
  _,err=s.db.ExecContext(ctx,"UPDATE model_deployments SET status='ready',revision=revision+1,updated_at=? WHERE status='unavailable' AND id IN (SELECT deployment_id FROM managed_local_models WHERE runtime_id=? AND status='ready')",s.clock.UnixMilli(),runtimeID)
  return err
+}
+
+func (s *Service) drainLlamaBackend(ctx context.Context,nodeID,name string)error{
+ rows,err:=s.db.QueryContext(ctx,`SELECT DISTINCT i.deployment_id
+ FROM local_runtime_instances i JOIN managed_local_runtimes r ON r.id=i.runtime_id
+ WHERE r.node_id=? AND r.runtime_name=? AND i.status IN ('starting','healthy','busy','draining')`,nodeID,name)
+ if err!=nil{return err}
+ var ids []string
+ for rows.Next(){var id string;if err:=rows.Scan(&id);err!=nil{rows.Close();return err};ids=append(ids,id)}
+ err=rows.Err();rows.Close();if err!=nil{return err}
+ for _,id:=range ids{
+  if err:=s.supervisor.Stop(ctx,id);err!=nil{return fmt.Errorf("cannot update %s while deployment %s is active: %w",name,id,err)}
+ }
+ return nil
 }
 
 func (s *Service) llamaRuntimeStatus(ctx context.Context) ([]LlamaRuntimeBackendStatus,error) {

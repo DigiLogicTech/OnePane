@@ -86,3 +86,14 @@
  #nextNodeRoot .node-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
  #nextNodeRoot .node-card .widget-body{flex-wrap:wrap}
 }
+
+/* Stable right-aligned page actions without disturbing title wrapping. */
+.models-routing-header > .models-routing-actions{margin-left:auto;margin-top:0;flex:0 0 auto}
+.models-routing-header > div:first-child{flex:1 1 auto;min-width:0}
+#nextNodeRoot .next-node-manager > .card-header{gap:12px}
+#nextNodeRoot .next-node-manager > .card-header > div:first-child{flex:1 1 auto;min-width:0}
+#nextNodeRoot .next-node-manager > .card-header > #nextNodeRefresh{margin-left:auto;flex:0 0 auto}
+@media(max-width:620px){
+ .models-routing-header{flex-wrap:wrap}
+ .models-routing-header > .models-routing-actions{flex-wrap:wrap;justify-content:flex-end;width:100%}
+}

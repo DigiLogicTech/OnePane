@@ -17,3 +17,16 @@
 .a40-webchat-layout .a39-webchat-provider-card,.a40-webchat-layout .a39-webchat-handoff-card{min-width:0}
 .a40-webchat-layout .a39-webchat-provider-card .widget-body p{overflow-wrap:anywhere}
 @media(max-width:1000px){.a40-chat-tabs{width:100%}}
+
+/* Guided creation of an entirely manual multi-provider Research Council. */
+.a41-council-form{max-width:min(860px,96vw);max-height:min(74vh,770px);overflow-y:auto;padding-right:.3rem}
+.a41-council-settings{display:grid;grid-template-columns:minmax(150px,1fr) minmax(180px,1fr);align-items:center;gap:1rem}
+.a41-council-seats-title{display:flex;justify-content:space-between;align-items:center;gap:.7rem;flex-wrap:wrap}
+.a41-council-seats{display:flex;flex-direction:column;gap:.65rem}
+.a41-council-seat{border:1px solid var(--border,rgba(120,120,120,.3));background:var(--panel-2,rgba(125,125,125,.06));padding:.75rem;border-radius:.7rem;min-width:0}
+.a41-council-seat-head{display:flex;justify-content:space-between;align-items:center;gap:.5rem;margin-bottom:.45rem}
+.a41-council-seat-fields{display:grid;grid-template-columns:minmax(120px,.8fr) minmax(150px,1fr) minmax(150px,1.2fr);align-items:end;gap:.6rem}
+.a41-council-seat-fields label{min-width:0}
+.a41-council-seat-fields select,.a41-council-seat-fields input{width:100%;max-width:100%}
+#a41CouncilProgress:not(:empty){padding:.4rem 0}
+@media(max-width:850px){.a41-council-seat-fields{grid-template-columns:1fr}.a41-council-settings{grid-template-columns:1fr}}

@@ -137,7 +137,7 @@ function nextNodeDraw(){
 }
 function nextNodeDetail(n){
  var tabs=[["overview","Overview"],["models","Models"],["compute","Compute"],["access","Access & Policy"],["activity","Activity"]];
- var nav='<div class="subtabs">'+tabs.map(function(t){return '<button class="subtab'+(nextNodeUI.tab===t[0]?' active':'')+'" data-next-node-tab="'+t[0]+'">'+t[1]+'</button>';}).join("")+'</div>';
+ var nav='<div class="subtabs next-node-tabs">'+tabs.map(function(t){return '<button class="subtab'+(nextNodeUI.tab===t[0]?' active':'')+'" data-next-node-tab="'+t[0]+'">'+t[1]+'</button>';}).join("")+(n.local?'<button class="btn next-node-local-models" id="nextNodeOpenModels" type="button">Manage local models</button>':'')+'</div>';
  var header='<div class="card-header"><div><div class="card-title">'+nextNodeEsc(nextNodeName(n))+' · Management</div><div class="list-meta">'+nextNodeEsc(n.trust_state||"Local node")+' · '+nextNodeEsc(n.id)+'</div></div><button class="btn" id="nextNodeRefresh">Refresh</button></div>';
  var body=nextNodeUI.tab==="models"?nextNodeModels(n):nextNodeUI.tab==="compute"?nextNodeCompute(n):nextNodeUI.tab==="access"?nextNodeAccess(n):nextNodeUI.tab==="activity"?nextNodeActivity(n):nextNodeOverview(n);
  return '<section class="panel-card next-node-manager">'+header+nav+'<div class="widget-body">'+body+'</div></section>';
@@ -157,7 +157,7 @@ function nextNodeOverview(n){
 }
 function nextNodeModels(n){
  var models=nextNodeArray(nextNodeUI.manifest&&nextNodeUI.manifest.models);
- var toolbar=n.local?'<button class="btn primary" id="nextNodeOpenModels">Manage local models</button>':'<button class="btn" id="nextNodeRecommendations">Recommendations</button> <button class="btn primary" id="nextNodeInstall">Install on this node</button>';
+ var toolbar=n.local?'':'<button class="btn" id="nextNodeRecommendations">Recommendations</button> <button class="btn primary" id="nextNodeInstall">Install on this node</button>';
  return '<p class="page-subtitle">Model weights, runtimes and inference are hosted on the selected node. Local and remote model installations use the same trusted catalogue.</p><div class="toolbar node-model-actions">'+toolbar+'</div>'+
  (models.length?'<div class="table-shell"><table class="data-table"><thead><tr><th>Model</th><th>Runtime</th><th>Status</th><th>Actions</th></tr></thead><tbody>'+models.map(function(m){var id=m.deployment_id||"";return '<tr><td><strong>'+nextNodeEsc(m.model_ref)+'</strong><div class="list-meta">'+nextNodeEsc(m.quantization||"")+'</div></td><td>'+nextNodeEsc(m.runtime_name||"—")+'</td><td>'+nextNodeEsc(m.qualification||m.status||"Unknown")+'</td><td><button class="btn tiny" data-next-node-spec="'+nextNodeEsc(id)+'">Spec Sheet</button> <button class="btn tiny" data-next-node-check="'+nextNodeEsc(id)+'">Agent Check</button></td></tr>';}).join("")+'</tbody></table></div>':(nextNodeUI.manifest?.models==null?'<div class="empty-state compact">Model inventory not reported.</div>':'<div class="empty-state compact">No managed deployments reported on this node.</div>'));
 }

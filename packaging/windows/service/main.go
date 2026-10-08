@@ -240,8 +240,18 @@ func runBackend() error {
 		childMu.Unlock()
 	}()
 
+	job,err:=newOwnedBackendJob()
+	if err!=nil{return fmt.Errorf("create managed process job: %w",err)}
+	defer job.Close()
 	if err := cmd.Start(); err != nil {
 		return err
+	}
+	if err:=job.Assign(cmd.Process.Pid);err!=nil{
+		// Never leave an unowned daemon running. On Windows 8+ nested jobs
+		// are supported; an inability to enroll fails closed.
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return fmt.Errorf("enroll harness in Windows child-process job: %w",err)
 	}
 	return cmd.Wait()
 }

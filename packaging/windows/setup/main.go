@@ -434,6 +434,9 @@ func installWebView2() error {
 	if err := os.MkdirAll(tempDir, 0o755); err != nil {
 		return err
 	}
+	// This folder is owned by this Setup run only. Remove abandoned installer
+	// downloads when Setup succeeds or fails; never touch shared Windows caches.
+	defer os.RemoveAll(tempDir)
 	// Microsoft recommends the tiny Evergreen bootstrapper for online clients.
 	// It downloads only the matching architecture and keeps the OnePane setup
 	// package small. Offline packaging can still embed the standalone runtime.
@@ -562,6 +565,9 @@ func offerOllamaInstall() error {
 	if err := os.MkdirAll(tempDir, 0o755); err != nil {
 		return err
 	}
+	// This folder is owned by this Setup run only. Remove abandoned installer
+	// downloads when Setup succeeds or fails; never touch shared Windows caches.
+	defer os.RemoveAll(tempDir)
 	installer := filepath.Join(tempDir, "OllamaSetup.exe")
 	if err := downloadFile("https://ollama.com/download/OllamaSetup.exe", installer); err != nil {
 		return fmt.Errorf("download Ollama: %w", err)

@@ -37,6 +37,9 @@ type ResearchSettings struct {
 	SynthesisPass            bool   `json:"synthesis_pass"`
 	CritiqueRounds           int    `json:"critique_rounds"`
 	SynthesisMemberID        string `json:"synthesis_member_id,omitempty"`
+	ChairMode string `json:"chair_mode,omitempty"`
+	ChairMemberID string `json:"chair_member_id,omitempty"`
+	ChairRequireApproval bool `json:"chair_require_approval"`
 }
 
 const (

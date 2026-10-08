@@ -70,3 +70,19 @@
 
 /* Palette colours use SVG presentation attributes instead of CSP-blocked inline CSS. */
 .theme-compact-swatches>span>svg{display:block;width:100%;height:100%;overflow:hidden}
+
+/* Nodes fleet management: keep the selected machine visually anchored. */
+#nextNodeRoot{display:grid;gap:14px;min-width:0}
+#nextNodeRoot .node-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+#nextNodeRoot .node-card{min-height:128px}
+#nextNodeRoot .node-card .widget-body{display:flex;align-items:center;justify-content:space-between;gap:12px}
+#nextNodeRoot .next-node-selected{border-color:var(--accent)}
+#nextNodeRoot .next-node-manager{min-height:380px;min-width:0}
+#nextNodeRoot .next-node-manager>.subtabs{margin:0 12px;border-radius:8px}
+#nextNodeRoot .next-node-manager>.widget-body{overflow:auto;min-width:0}
+#nextNodeRoot .next-node-manager .definition-grid{max-width:880px}
+#nextNodeRoot .next-node-manager .table-shell{overflow-x:auto}
+@media(max-width:900px){
+ #nextNodeRoot .node-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ #nextNodeRoot .node-card .widget-body{flex-wrap:wrap}
+}

@@ -204,7 +204,7 @@ func (s *Service) RegisterColibriFolder(ctx context.Context, cmd RegisterColibri
 	runtimeName := "colibri"
 	runtimeVersion := ColibriRuntimeVersion
 	placement := PlacementPlan{Mode: PlacementCPUOffload, Backend: "colibri", Notes: []string{"Colibri manages VRAM/RAM/NVMe expert placement; OnePane remains scheduler and admission authority."}}
-	cfg, _ := json.Marshal(map[string]any{"managed": true, "executable": serverPath, "engine_path": enginePath, "model_path": cmd.ModelPath, "model_ref": cmd.ModelRef, "context_tokens": cmd.ContextTokens, "runtime_backend": "colibri", "placement": placement})
+	cfg, _ := json.Marshal(map[string]any{"managed": true, "executable": serverPath, "engine_path": enginePath, "model_path": cmd.ModelPath, "model_ref": cmd.ModelRef, "context_tokens": cmd.ContextTokens, "runtime_backend": "colibri", "placement": placement, "colibri_tier": defaultColibriTier()})
 	dep, err := s.inference.RegisterDeployment(ctx, inference.RegisterDeploymentCommand{ModelID: model.ID, NodeID: &nodeID, RuntimeName: &runtimeName, RuntimeVersion: &runtimeVersion, RuntimeConfigJSON: cfg, ContextMaxReported: &cmd.ContextTokens, ActorPrincipalID: &cmd.ActorPrincipalID})
 	if err != nil {
 		return out, err

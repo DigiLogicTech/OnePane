@@ -70,6 +70,10 @@ func (s *Service) llamaManagedModels(ctx context.Context) int {
 }
 
 func (s *Service) installLlamaRuntimeEntry(ctx context.Context, entry RuntimeCatalogEntry, p HardwareProfile) error {
+	// Component repairs and one-click model installs share the same runtime
+	// catalogue destination. Never permit concurrent staging/registration.
+	s.runtimeInstallMu.Lock()
+	defer s.runtimeInstallMu.Unlock()
 	manifest := runtimeManifestFromCatalog(entry)
 	if s.trustedRuntimeAlreadyInstalled(ctx,p.NodeID,entry) { return nil }
 	backend := strings.ToLower(strings.TrimSpace(entry.Backend)); if backend=="" { backend="generic" }

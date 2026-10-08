@@ -804,6 +804,13 @@ func handleProviderViewMessage(message string) {
         resizeProviderWebView()
         return
     }
+    if cmd.Op=="new"{
+        if !approvedProviderURL(cmd.URL){return}
+        providerNavigatedURL=""
+        providerDesiredURL=cmd.URL
+        if providerObject!=0{navigateProvider(cmd.URL)}
+        return
+    }
     if cmd.Op!="show"||!approvedProviderURL(cmd.URL){return}
     if cmd.ViewportWidth<160||cmd.ViewportHeight<160||cmd.ViewportWidth>100000||cmd.ViewportHeight>100000 ||
         cmd.Rect.Width<120||cmd.Rect.Height<120 || cmd.Rect.Left<0 || cmd.Rect.Top<0 ||

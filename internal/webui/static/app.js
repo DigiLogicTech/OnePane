@@ -15,6 +15,7 @@ let a31AssistantThreadWorkspace="";
 let a31InstallPoll=null;
 
 pages.skills={title:"Skills",icon:"✦"};
+pages.webchat={title:"Web Chat",icon:"☁"};
 pages.nodes={title:"Nodes",icon:"⬡"};
 pages.secrets=pages.secrets||{title:"Secrets",icon:"⌑"};
 navItems.splice(0,navItems.length,
@@ -728,11 +729,11 @@ function a33ToggleControlChatCollapsed(){const handle=$("#controlChatToggle");if
 const a31BindShellBase=bindShell;
 bindShell=function(){
   a31BindShellBase();a32BindPanelToggleMovement();a33BindControlChatDrag();if(typeof a31StartDownloadMonitor==="function")a31StartDownloadMonitor();window.addEventListener("resize",a33ApplyControlChatPosition);
-  $("#controlChatLauncher")?.addEventListener("click",()=>a33ToggleControlChatPanel());$("#controlChatClose")?.addEventListener("click",e=>{e.stopPropagation();a31CloseControlChat()});$("#controlChatToggle")?.addEventListener("click",()=>a33ToggleControlChatCollapsed());$("#controlChatAssistantTab")?.addEventListener("click",()=>a31OpenControlChat("assistant"));$("#controlChatOrchestratorTab")?.addEventListener("click",()=>a31OpenControlChat("orchestrator"));
+  $("#controlChatLauncher")?.addEventListener("click",()=>a33ToggleControlChatPanel());$("#webChatLauncher")?.addEventListener("click",()=>openRoute("webchat"));$("#controlChatClose")?.addEventListener("click",e=>{e.stopPropagation();a31CloseControlChat()});$("#controlChatToggle")?.addEventListener("click",()=>a33ToggleControlChatCollapsed());$("#controlChatAssistantTab")?.addEventListener("click",()=>a31OpenControlChat("assistant"));$("#controlChatOrchestratorTab")?.addEventListener("click",()=>a31OpenControlChat("orchestrator"));
 };
 renderActiveView=async function(){
   const epoch=++qa31ViewEpoch,t=currentTab();if(!t)return;if(t.state==="suspended")t.state="active";const route=t.route;
-  const renderers={operations:renderOperations,tasks:renderTasks,projects:renderProjects,models:renderModels,nodes:renderNodes,agents:renderAgents,skills:renderSkills,settings:renderSettings,secrets:renderSecrets,evidence:()=>renderPlaceholder("Evidence / Audit","Event Ledger, Artifacts, Observations and Verifications.")};
+  const renderers={operations:renderOperations,tasks:renderTasks,projects:renderProjects,models:renderModels,nodes:renderNodes,agents:renderAgents,skills:renderSkills,settings:renderSettings,secrets:renderSecrets,webchat:renderWebChat,evidence:()=>renderPlaceholder("Evidence / Audit","Event Ledger, Artifacts, Observations and Verifications.")};
   try{await Promise.resolve((renderers[route]||renderOperations)())}finally{const host=$("#viewHost");if(epoch===qa31ViewEpoch){if(host)host.dataset.renderedRoute=route;renderNav()}}
 };
 // Apply the preferred landing page before boot renders the first view.

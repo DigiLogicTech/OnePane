@@ -78,6 +78,7 @@ jobs:
           python3 scripts/validate_alpha31_product_contract.py
           python3 scripts/validate_ui_design_system.py
           python3 scripts/validate_attention_drawer.py
+          python3 scripts/validate_alpha32_qa_hotfix.py
           python3 scripts/validate_release_candidate.py
           python3 scripts/validate_release_process.py
           sh -n packaging/debian/preinst packaging/debian/postinst packaging/debian/prerm packaging/debian/postrm
@@ -96,6 +97,7 @@ jobs:
           node --check internal/webui/static/drawer-usability.js
           node --check internal/webui/static/compact-themes.js
           node --check internal/webui/static/model-agentcheck-diagnostics.js
+          node --check internal/webui/static/model-qa-remediation.js
           ! grep -F "type=\"module\"" internal/webui/static/index.html
           ! grep -F "from './chat-commands.js'" internal/webui/static/app.js
           ! grep -E '^export[[:space:]]+' internal/webui/static/chat-commands.js

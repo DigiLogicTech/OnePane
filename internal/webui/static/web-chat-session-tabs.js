@@ -291,7 +291,7 @@ async function a40RenderWebChat(){
             ${chairTurn?.status==="awaiting_input"?'<button class="btn primary" data-a42-chair-submit type="button">Submit Chair proposal</button>':
               chairTurn?.status==="awaiting_approval"?'<button class="btn primary" data-a42-chair-approve type="button">Approve agenda / questions</button>':
               selected?`<button class="btn primary" data-a40-submit type="button" ${selected.status!=="awaiting_input"?"disabled":""}>Submit to Council</button>`:
-               !attached?'<button class="btn primary" id="a40SaveResponse" type="button">Save Response</button>':""
+               !attached?'<button class="btn primary" id="a40SaveResponse" type="button">Save Response</button>':""}
             <span class="list-meta">${chairTurn?"Chair proposals only · operator-approved guidance · no executable authority":attached?"Manual consultation only · no tools or task authority":"Independent responses stay in this session only; they are not sent to providers or Council."}</span>
           </div>
           ${!attached&&savedResponses.length?`<div class="a40-saved-responses"><strong>Saved responses · ${savedResponses.length}</strong>${savedResponses.map((entry,i)=>`<details><summary>Response ${i+1} · ${safe(entry.provider)} · ${safe(entry.created_at)}</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${safe(entry.text)}</pre></details>`).join("")}</div>`:""}

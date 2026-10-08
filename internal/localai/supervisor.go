@@ -247,6 +247,7 @@ type runtimeConfig struct {
 	RuntimeBackend string        `json:"runtime_backend,omitempty"`
 	EnginePath     string        `json:"engine_path,omitempty"`
 	ModelRef       string        `json:"model_ref,omitempty"`
+	ColibriTier    ColibriTierSettings `json:"colibri_tier,omitempty"`
 }
 
 type managedRefs struct{ RuntimeID, ModelID string }
@@ -643,6 +644,7 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 			args = append(args, "-3")
 		}
 		args = append(args, cfg.Executable, "--model", cfg.ModelPath, "--engine", cfg.EnginePath, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "--model-id", firstNonEmpty(cfg.ModelRef, "onepane-colibri"))
+		args = append(args, colibriTierCapArgs(cfg.ColibriTier)...)
 	} else {
         // Embedding models use a pooled-vector endpoint, not chat completions.
         // Preserve the model's declared use case from its approved install plan.
@@ -694,6 +696,7 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 	}
 	if strings.EqualFold(cfg.RuntimeBackend, "colibri") {
 		env = append(env, "COLI_MODEL="+cfg.ModelPath, "COLI_MODEL_ID="+firstNonEmpty(cfg.ModelRef, "onepane-colibri"))
+		env = append(env, colibriTierEnv(cfg.ColibriTier)...)
 	}
 	pid, err := s.processes.Start(context.Background(), LaunchSpec{Executable: executable, Args: args, Env: env, Dir: filepath.Dir(cfg.Executable),LogPath: filepath.Join(s.dataDir,"components","logs","local-runtime-"+inst.ID+".log")})
 	if err != nil {

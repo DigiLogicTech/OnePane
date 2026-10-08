@@ -473,6 +473,8 @@ func (s *Service) CompleteTestbed(ctx context.Context, sessionID string) error {
 
 // AbortTestbed closes a failed manual Agent Check and frees model residency.
 // Sessions are not allowed to manufacture a successful qualification on abort.
+// The DB permits active/completed/cancelled: a failed infrastructure probe is
+// captured in qualification evidence while the testbed lifecycle is cancelled.
 func (s *Service) AbortTestbed(ctx context.Context, sessionID string, cause string) error {
  sess,err:=s.TestbedSession(ctx,strings.TrimSpace(sessionID));if err!=nil{return err}
  if sess.Status=="completed" {
@@ -485,7 +487,7 @@ func (s *Service) AbortTestbed(ctx context.Context, sessionID string, cause stri
  if len(cause)>500{cause=cause[:500]}
  if cause==""{cause="Agent Check interrupted"}
  now:=s.clock.UnixMilli()
- res,err:=s.db.ExecContext(ctx,`UPDATE model_testbed_sessions SET status='failed',completed_at=?,updated_at=?,revision=revision+1 WHERE id=? AND status='active'`,now,now,sessionID)
+ res,err:=s.db.ExecContext(ctx,`UPDATE model_testbed_sessions SET status='cancelled',completed_at=?,updated_at=?,revision=revision+1 WHERE id=? AND status='active'`,now,now,sessionID)
  if err!=nil{return err}
  n,err:=res.RowsAffected();if err!=nil{return err}
  if n!=1{return errors.New("Agent Check session was already finalized")}

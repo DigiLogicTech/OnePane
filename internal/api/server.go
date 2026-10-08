@@ -2481,7 +2481,15 @@ func (s *Server) runModelTestbedTurn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x, err := s.localAI.RunTestbedTurn(r.Context(), sid, in)
-	respondDomain(w, x, err, http.StatusOK)
+ if err!=nil{
+  // This privileged diagnostic endpoint must not collapse local runtime failures
+  // into the generic "request failed" message used for other domain APIs.
+  detail:=strings.TrimSpace(err.Error())
+  if len(detail)>800{detail=detail[:800]+"…"}
+  writeError(w,http.StatusBadGateway,"Agent Check inference: "+detail)
+  return
+ }
+ writeJSON(w,http.StatusOK,x)
 }
 func (s *Server) completeModelTestbed(w http.ResponseWriter, r *http.Request) {
 	i, ok := s.authenticate(w, r)
@@ -2498,9 +2506,9 @@ func (s *Server) completeModelTestbed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.localAI.CompleteTestbed(r.Context(), sid); err != nil {
-		respondDomain(w, nil, err, 0)
-		return
-	}
+  writeError(w,http.StatusUnprocessableEntity,err.Error())
+  return
+ }
 	writeJSON(w, http.StatusOK, map[string]any{"completed": true})
 }
 func (s *Server) admitModelDeployment(w http.ResponseWriter, r *http.Request) {

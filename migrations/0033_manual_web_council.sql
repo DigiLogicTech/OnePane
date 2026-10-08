@@ -6,6 +6,7 @@ CREATE TABLE manual_web_council_turns (
     workspace_id TEXT NOT NULL REFERENCES workspaces(id),
     member_id TEXT NOT NULL REFERENCES team_members(id),
     model_label TEXT NOT NULL,
+    conversation_generation INTEGER NOT NULL DEFAULT 1 CHECK(conversation_generation >= 1),
     prompt_text TEXT NOT NULL,
     prompt_sha256 TEXT NOT NULL,
     status TEXT NOT NULL CHECK(status IN ('awaiting_input','submitted')),

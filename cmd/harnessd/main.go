@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"flag"
 	"fmt"
@@ -98,6 +99,23 @@ func main() {
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      0, // SSE responses are intentionally long-lived.
 		IdleTimeout:       60 * time.Second,
+	}
+	// The Windows SCM wrapper cannot send POSIX SIGTERM to its hidden
+	// subprocess. It provides an ephemeral per-launch token and requests a
+	// loopback-only graceful stop before any forced process-tree termination.
+	// No shutdown endpoint exists when running without that token.
+	if token := os.Getenv("ONEPANE_SERVICE_SHUTDOWN_TOKEN"); len(token) >= 32 {
+		base := httpServer.Handler
+		httpServer.Handler = http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+			if r.URL.Path != "/__onepane/service/shutdown" {base.ServeHTTP(w,r);return}
+			host,_,err:=net.SplitHostPort(r.RemoteAddr)
+			if err!=nil||!net.ParseIP(host).IsLoopback()||r.Method!=http.MethodPost||
+				subtle.ConstantTimeCompare([]byte(r.Header.Get("X-OnePane-Service-Token")),[]byte(token))!=1 {
+				http.Error(w,"not found",http.StatusNotFound);return
+			}
+			w.WriteHeader(http.StatusAccepted)
+			go cancel()
+		})
 	}
 	previewHTTPServer := &http.Server{
 		Addr:              cfg.Server.PreviewListen,
@@ -473,7 +491,7 @@ func main() {
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 48*time.Second)
 		defer shutdownCancel()
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			log.Printf("http shutdown: %v", err)
@@ -489,6 +507,9 @@ func main() {
 		if err := runtime.LocalAI.ShutdownManagedRuntimes(shutdownCtx); err != nil {
 			log.Printf("managed local AI shutdown: %v", err)
 		}
+		if err := runtime.LocalAI.StopManagedLLMFit(shutdownCtx); err != nil {
+			log.Printf("managed llmfit shutdown: %v", err)
+		}
 		for i := 0; i < serverCount; i++ {
 			<-serverErr
 		}
@@ -501,6 +522,8 @@ func main() {
 			if federationHTTPServer != nil {
 				_ = federationHTTPServer.Shutdown(shutdownCtx)
 			}
+			_ = runtime.LocalAI.ShutdownManagedRuntimes(shutdownCtx)
+			_ = runtime.LocalAI.StopManagedLLMFit(shutdownCtx)
 			log.Fatalf("%s http server: %v", result.name, result.err)
 		}
 	}

@@ -101,6 +101,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /federation/v1/models/testbed/turns", s.remoteModelTestbedTurns)
 	s.mux.HandleFunc("POST /federation/v1/models/testbed/turn", s.remoteModelTestbedTurn)
 	s.mux.HandleFunc("POST /federation/v1/models/testbed/complete", s.remoteModelTestbedComplete)
+	s.mux.HandleFunc("POST /federation/v1/models/testbed/abort", s.remoteModelTestbedAbort)
 	s.mux.HandleFunc("POST /federation/v1/models/admit", s.remoteModelAdmit)
 }
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -369,6 +370,18 @@ func (s *Server) remoteModelTestbedComplete(w http.ResponseWriter, r *http.Reque
 	}
 	writeJSON(w, 200, map[string]any{"completed": true})
 }
+// Aborting a failed remote Agent Check does not affect other workloads.
+func (s *Server) remoteModelTestbedAbort(w http.ResponseWriter, r *http.Request) {
+ if _,ok:=s.authorizeModelManagement(w,r);!ok{return}
+ var in struct{SessionID string `json:"session_id"`;Reason string `json:"reason"`}
+ if !decode(w,r,&in){return}
+ manager,ok:=s.models.(interface{AbortTestbed(context.Context,string,string) error})
+ if !ok{writeJSON(w,503,map[string]string{"error":"testbed abort unavailable"});return}
+ if err:=manager.AbortTestbed(r.Context(),strings.TrimSpace(in.SessionID),in.Reason);err!=nil{
+  writeJSON(w,409,map[string]string{"error":err.Error()});return
+ }
+ writeJSON(w,200,map[string]any{"aborted":true})
+}
 func (s *Server) remoteModelAdmit(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorizeModelManagement(w, r); !ok {
 		return
@@ -604,6 +617,11 @@ func (s *Service) RemoteRunModelTestbedTurn(ctx context.Context, peer, sessionID
 	var out localai.TestbedTurn
 	err = postJSON(ctx, s.pinnedClient(fp, true), endpoint+"/federation/v1/models/testbed/turn", map[string]any{"session_id": sessionID, "command": cmd}, &out)
 	return out, err
+}
+func (s *Service) RemoteAbortModelTestbed(ctx context.Context, peer, sessionID, reason string) error {
+ endpoint,fp,err:=s.pairedEndpoint(ctx,peer);if err!=nil{return err}
+ var out any
+ return postJSON(ctx,s.pinnedClient(fp,true),endpoint+"/federation/v1/models/testbed/abort",map[string]string{"session_id":sessionID,"reason":reason},&out)
 }
 func (s *Service) RemoteCompleteModelTestbed(ctx context.Context, peer, sessionID string) error {
 	endpoint, fp, err := s.pairedEndpoint(ctx, peer)

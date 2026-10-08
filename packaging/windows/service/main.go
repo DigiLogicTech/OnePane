@@ -4,6 +4,9 @@ package main
 
 import (
 	"fmt"
+	"crypto/rand"
+	"encoding/hex"
+	"strconv"
 	"net/http"
 	"os"
 	"os/exec"
@@ -59,6 +62,7 @@ var (
 	stopCh       = make(chan struct{})
 	childMu      sync.Mutex
 	child        *exec.Cmd
+	backendShutdownToken string
 )
 
 func main() {
@@ -114,14 +118,14 @@ func serviceMain(argc uint32, argv **uint16) uintptr {
 	var exitCode uint32
 	select {
 	case <-stopCh:
-		setStatus(serviceStopPending, 0, 1, 15000, 0)
+		setStatus(serviceStopPending, 0, 1, 55000, 0)
 		stopBackend()
 		select {
 		case <-done:
 			// A forced child termination during an explicit SCM stop is a
 			// successful service stop, not a crash/recovery condition.
 			exitCode = 0
-		case <-time.After(12 * time.Second):
+		case <-time.After(52 * time.Second):
 			killBackend()
 		}
 	case err := <-done:
@@ -220,6 +224,11 @@ func runBackend() error {
 	cmd.Dir = installDir
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
+// One token per Windows service launch, never persisted on disk.
+	seed:=make([]byte,32);if _,err:=rand.Read(seed);err!=nil{return err}
+	token:=hex.EncodeToString(seed)
+	cmd.Env=append(os.Environ(),"ONEPANE_SERVICE_SHUTDOWN_TOKEN="+token)
+	backendShutdownToken=token
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000} // CREATE_NO_WINDOW
 
 	childMu.Lock()
@@ -237,23 +246,30 @@ func runBackend() error {
 	return cmd.Wait()
 }
 
+// Give harnessd an authenticated, loopback-only opportunity to unload
+// managed inference processes and remove its own child process records.
 func stopBackend() {
-	childMu.Lock()
-	cmd := child
-	childMu.Unlock()
-	if cmd == nil || cmd.Process == nil {
-		return
-	}
-	// The backend handles SIGTERM on Unix, but Windows os.Process.Signal has
-	// limited semantics. Give it a short natural-exit window before forcing it.
-	time.Sleep(1200 * time.Millisecond)
-	_ = cmd.Process.Kill()
+	childMu.Lock(); cmd:=child; token:=backendShutdownToken; childMu.Unlock()
+	if cmd==nil||cmd.Process==nil||token==""{return}
+	req,err:=http.NewRequest(http.MethodPost,"http://127.0.0.1:18181/__onepane/service/shutdown",nil)
+	if err!=nil{return}
+	req.Header.Set("X-OnePane-Service-Token",token)
+	client:=&http.Client{Timeout:3*time.Second}
+	resp,err:=client.Do(req)
+	if err!=nil{fmt.Fprintln(os.Stderr,"OnePane graceful stop request failed:",err);return}
+	_ = resp.Body.Close()
+	if resp.StatusCode!=http.StatusAccepted{fmt.Fprintln(os.Stderr,"OnePane graceful stop rejected:",resp.StatusCode)}
 }
 
+// A forced service stop must terminate the entire harnessd child tree; simply
+// killing harnessd leaks llama-server and llmfit processes and locks CUDA DLLs.
 func killBackend() {
-	childMu.Lock()
-	defer childMu.Unlock()
-	if child != nil && child.Process != nil {
-		_ = child.Process.Kill()
+	childMu.Lock(); cmd:=child; childMu.Unlock()
+	if cmd==nil||cmd.Process==nil{return}
+	pid:=strconv.Itoa(cmd.Process.Pid)
+	killer:=exec.Command("taskkill.exe","/PID",pid,"/T","/F")
+	if out,err:=killer.CombinedOutput();err!=nil{
+		fmt.Fprintf(os.Stderr,"OnePane managed process tree cleanup failed: %v (%s)\\n",err,string(out))
+		_ = cmd.Process.Kill()
 	}
 }

@@ -340,11 +340,7 @@ async function a31RenderDiscoverModels(){
     const checked=external.filter(m=>a40DownloadCache.has((m.source||"external")+":"+(m.id||m.model_ref||""))).length;
     const confirmed=external.filter(m=>a40DownloadCache.get((m.source||"external")+":"+(m.id||m.model_ref||""))?.state==="yes").length;
     $("#a31DiscoverCount").textContent=`${rows.length} visible · ${confirmed} external downloadable confirmed · ${checked}/${external.length} checked`;
-    if(mode==="downloadable"||mode==="verification"||mode==="unavailable"){
-      for(const m of external){const s=m.source||"external",id=m.id||m.model_ref||"";
-        if(id)a40QueueAvailability(s,id,()=>{if($("#a31DiscoverCatalog"))draw()});
-      }
-    }
+    if(["downloadable","verification","unavailable"].includes(mode))for(const m of external){const s=m.source||"external",id=m.id||m.model_ref||"";if(id)a40QueueAvailability(s,id,()=>{if($("#a31DiscoverCatalog"))draw()})}
     $$("[data-a31-discover-install-ref]").forEach(b=>b.onclick=()=>a31InstallModel(catalog.find(x=>String(x.model_ref)===b.dataset.a31DiscoverInstallRef)));
     $$("[data-a31-source-url]").forEach(b=>b.onclick=()=>a31OpenModelSource(b.dataset.a31SourceUrl));
     $$("[data-a31-verify-source]").forEach(b=>b.onclick=()=>{const m=external.find(x=>String(x.source||"")===b.dataset.a31VerifySource&&String(x.id||x.model_ref||"")===b.dataset.a31VerifyId);if(m)a31VerifyExternalModel({...m,_source:m.source})})

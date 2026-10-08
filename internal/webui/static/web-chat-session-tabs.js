@@ -172,10 +172,14 @@ async function a40RenderWebChat(){
     $("#a40WebRoot").innerHTML='<div class="empty-state compact">Select a Workspace to manage Web Chat conversations.</div>';
     return;
   }
-  let rows;
+  let rows,chairRows;
   try{
-    const data=await apiRequest(`/v1/manual-web/turns?workspace_id=${encodeURIComponent(workspace)}`);
+    const [data,chairs]=await Promise.all([
+      apiRequest(`/v1/manual-web/turns?workspace_id=${encodeURIComponent(workspace)}`),
+      apiRequest(`/v1/manual-web/chair-turns?workspace_id=${encodeURIComponent(workspace)}`)
+    ]);
     rows=a31Array(data);
+    chairRows=a31Array(chairs);
   }catch(ex){
     const element=$("#a40WebRoot");
     if(element&&epoch===a40WebRenderingEpoch)element.innerHTML=`<div class="error">Council handoffs unavailable: ${escapeHtml(ex.message)}</div>`;
@@ -183,8 +187,10 @@ async function a40RenderWebChat(){
   }
   if(epoch!==a40WebRenderingEpoch || currentTab()?.route!=="webchat")return;
   a39WebTurns=rows;
-  a41RememberWebQueue(workspace,rows);
+  a42ChairTurns=chairRows;
+  a41RememberWebQueue(workspace,rows,chairRows);
   a41AutoBindWebCouncilHandoffs(rows);
+  a42BindChairQueue(chairRows);
   const active=a40WebEnsureSession(rows);
   if(!active)return;
   // Distinct session IDs let ChatGPT #1 and ChatGPT #2 retain independent
@@ -193,13 +199,19 @@ async function a40RenderWebChat(){
   const provider=a40WebProvider(active.provider_id);
   const associated=rows.filter(t=>t.provider_id===active.provider_id);
   const selected=associated.find(t=>t.turn_id===active.turn_id)||null;
-  const pendingCount=rows.filter(t=>t.status==="awaiting_input").length;
+  const chairTurn=a42ChairActive(active);
+  const pendingCount=rows.filter(t=>t.status==="awaiting_input").length+chairRows.filter(a42ChairPending).length;
   const originalDraft=a40WebDrafts.get(active.id)||{prompt:"",response:""};
-  const attached=!!selected;
-  const draft=selected?selected.prompt_text:originalDraft.prompt;
-  const response=originalDraft.response;
-  const title=selected?"Council handoff":"Independent Web Chat";
-  const status=selected?(selected.status==="awaiting_input"?"Awaiting your response":"Submitted"):"Not linked to a Council turn";
+  const attached=!!selected||!!chairTurn;
+  const draft=chairTurn?chairTurn.prompt_text:(selected?selected.prompt_text:originalDraft.prompt);
+  const response=chairTurn?.status==="awaiting_approval"?(chairTurn.response_text||""):
+    chairTurn?.status==="approved"?(chairTurn.approved_text||""):(originalDraft.response||"");
+  const title=chairTurn?"AI Council Chair · "+(chairTurn.stage==="agenda"?"Research agenda":"Round review"):
+    selected?"Council handoff":active.council_chair?"AI Council Chair":"Independent Web Chat";
+  const status=chairTurn?(chairTurn.status==="awaiting_input"?"Waiting for Chair model":
+    chairTurn.status==="awaiting_approval"?"Awaiting your approval":"Chair guidance approved"):
+    selected?(selected.status==="awaiting_input"?"Awaiting your response":"Submitted"):
+    active.council_chair?"Awaiting Chair stage":"Not linked to a Council turn";
   const safe=escapeHtml;
   $("#a40WebRoot").innerHTML=`
     <div class="a39-webchat-summary">
@@ -212,7 +224,7 @@ async function a40RenderWebChat(){
           <button type="button" role="tab" aria-selected="${s.id===active.id}" data-a40-switch="${safe(s.id)}" title="${safe(s.title)}">
             <span class="a40-provider-mark" aria-hidden="true">☁</span>
             <span class="a40-tab-label">${safe(s.title)}</span>
-            ${rows.some(t=>t.turn_id===s.turn_id && t.status==="awaiting_input")?'<span class="a40-tab-pending" title="Council input required">•</span>':""}
+            ${(rows.some(t=>t.turn_id===s.turn_id && t.status==="awaiting_input") || chairRows.some(t=>t.id===s.chair_turn_id && a42ChairPending(t)))?'<span class="a40-tab-pending" title="Council input required">•</span>':""}
           </button>
           <button class="a40-tab-close" type="button" data-a40-close="${safe(s.id)}" title="Close Web Chat tab" aria-label="Close ${safe(s.title)}">×</button>
         </div>`).join("")}
@@ -233,7 +245,7 @@ async function a40RenderWebChat(){
           <p class="list-meta">Review prompts before sharing project information with a third-party cloud service.</p>
           <h3>Available Council handoffs</h3>
           <div class="a39-webchat-queue">
-            ${associated.filter(t=>t.status==="awaiting_input"||t.turn_id===active.turn_id).map(t=>`
+            ${(active.council_chair?[]:associated.filter(t=>t.status==="awaiting_input"||t.turn_id===active.turn_id)).map(t=>`
               <button class="a39-webchat-turn ${selected?.turn_id===t.turn_id?"selected":""}" data-a40-assign="${safe(t.turn_id)}" type="button">
                 <strong>${safe(t.model_label)} · ${safe(t.member_id)}</strong>
                 <span class="list-meta">${safe(t.status==="awaiting_input"?"Awaiting response":"Submitted")} · Conversation ${Number(t.conversation_generation)||1}</span>
@@ -250,17 +262,19 @@ async function a40RenderWebChat(){
           </div>
         </div>
         <div class="widget-body a39-webchat-handoff-content">
-          <label class="a39-webchat-label" for="a40Prompt">${attached?"Prepared Council prompt":"Prompt scratchpad (local, not submitted to Council)"}</label>
+          <label class="a39-webchat-label" for="a40Prompt">${chairTurn?"Chair model prompt":attached?"Prepared Council prompt":"Prompt scratchpad (local, not submitted to Council)"}</label>
           <textarea class="a39-webchat-textarea" id="a40Prompt" rows="11" ${attached?"readonly":""} placeholder="Write or paste a prompt for this web conversation.">${safe(draft)}</textarea>
           <div class="toolbar">
             <button class="btn primary" id="a40CopyPrompt" type="button">Copy Prompt</button>
             ${provider.url?`<a class="btn" href="${safe(provider.url)}" target="_blank" rel="noopener noreferrer">Open Provider</a>`:""}
           </div>
-          <label class="a39-webchat-label" for="a40Response">${attached?"Paste provider response":"Response scratchpad"}</label>
-          <textarea class="a39-webchat-textarea" id="a40Response" rows="10" ${selected?.status==="submitted"?"disabled":""} placeholder="Paste the provider's response here.">${safe(response)}</textarea>
+          <label class="a39-webchat-label" for="a40Response">${chairTurn?.status==="awaiting_approval"?"Review/edit Chair proposal before approval":chairTurn?"Chair proposal":attached?"Paste provider response":"Response scratchpad"}</label>
+          <textarea class="a39-webchat-textarea" id="a40Response" rows="10" ${(selected?.status==="submitted"||chairTurn?.status==="approved")?"disabled":""} placeholder="Paste the provider's response here.">${safe(response)}</textarea>
           <div class="toolbar">
-            ${attached?`<button class="btn primary" data-a40-submit type="button" ${selected.status!=="awaiting_input"?"disabled":""}>Submit to Council</button>`:""}
-            <span class="list-meta">${attached?"Manual consultation only · no tools or task authority":"Text in an unlinked scratchpad is not automatically saved or routed to a Council."}</span>
+            ${chairTurn?.status==="awaiting_input"?'<button class="btn primary" data-a42-chair-submit type="button">Submit Chair proposal</button>':
+              chairTurn?.status==="awaiting_approval"?'<button class="btn primary" data-a42-chair-approve type="button">Approve agenda / questions</button>':
+              selected?`<button class="btn primary" data-a40-submit type="button" ${selected.status!=="awaiting_input"?"disabled":""}>Submit to Council</button>`:""}
+            <span class="list-meta">${chairTurn?"Chair proposals only · operator-approved guidance · no executable authority":attached?"Manual consultation only · no tools or task authority":"Text in an unlinked scratchpad is not automatically saved or routed to a Council."}</span>
           </div>
         </div>
       </section>
@@ -289,7 +303,9 @@ async function a40RenderWebChat(){
       notice("Web Chat prompt copied to clipboard.");
     }catch(ex){notice(ex.message,"bad")}
   };
-  if(attached) $("[data-a40-submit]").onclick=()=>a40WebSubmit(active,selected);
+  if(selected) $("[data-a40-submit]").onclick=()=>a40WebSubmit(active,selected);
+  if(chairTurn?.status==="awaiting_input")$("[data-a42-chair-submit]").onclick=()=>a42ChairSubmit(active,chairTurn);
+  if(chairTurn?.status==="awaiting_approval")$("[data-a42-chair-approve]").onclick=()=>a42ChairApprove(active,chairTurn);
 }
 // OnePane's route renderer calls this symbol. Keep the original provider
 // picker code as a compatibility fallback for older browser caches.

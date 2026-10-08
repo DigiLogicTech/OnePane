@@ -261,7 +261,7 @@ const A41_WEB_MODEL_CHOICES={chatgpt:["GPT-6","GPT-5.6","GPT-5.5"],claude:["Clau
 const A41_WEB_ROLE_CHOICES=["Independent researcher","Critical analyst","Alternative researcher","Technical specialist","Domain expert","Evidence reviewer","Devil's advocate","Methodology reviewer","Synthesis specialist"];
 function a41SeatOptions(values,selected,custom=false){return `<option value="">Select…</option>${values.map(v=>`<option value="${escapeHtml(v)}" ${v===selected?"selected":""}>${escapeHtml(v)}</option>`).join("")}<option value="__custom" ${custom?"selected":""}>Other / Custom…</option>`;}
 function a41BindSeatEditors(form){
- $("[data-a41-seat]",form).forEach(row=>{
+ $$("[data-a41-seat]",form).forEach(row=>{
   const provider=row.querySelector('[name="provider_id"]'),model=row.querySelector('[name="model_choice"]'),name=row.querySelector('[name="model_label"]');
   const role=row.querySelector('[name="role_choice"]'),roleName=row.querySelector('[name="role_name"]');
   if(model?.dataset.bound==="yes")return;

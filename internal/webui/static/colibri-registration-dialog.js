@@ -1,4 +1,4 @@
-/* OnePane native Colibri registration — no browser prompt().
+/* OnePane native Colibri registration — without native browser dialogs.
  * A Colibri model must already exist in the managed pool and contain config.json.
  */
 qa5RegisterColibri=async function(){

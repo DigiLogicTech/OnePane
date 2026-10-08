@@ -1,3 +1,48 @@
+// Configure an optional operator-mediated seat without granting provider
+// credentials, inference routing or task execution to the remote website.
+async function a39AddManualWebSeat(team){
+  const id=String(team.id||team.ID||"");
+  if(!id)return notice("Create a Team first.","bad");
+  openModal("Add Manual Web Council Seat",`
+    <form id="a39AddManualSeat" class="qa-form">
+      <p class="page-subtitle">This seat pauses for copy/paste in Web Chat. OnePane never signs into or automates the provider's website.</p>
+      <label>Provider<select name="provider_id">
+        ${A39_WEB_PROVIDERS.map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("")}
+      </select></label>
+      <label>Model label<input name="model_label" required maxlength="128" placeholder="e.g. GPT-6 High, Claude Sonnet" value="GPT-6 High"></label>
+      <label>Seat name<input name="display_name" required maxlength="120" value="Web Research Consultant"></label>
+      <label>Research role<input name="role_name" required maxlength="120" value="Independent researcher"></label>
+      <button class="btn primary" type="submit">Add consultation-only seat</button>
+    </form>`);
+  const form=$("#a39AddManualSeat");
+  if(!form)return;
+  form.onsubmit=async e=>{
+    e.preventDefault();
+    const fd=new FormData(form);
+    const provider_id=String(fd.get("provider_id")||"");
+    const model_label=String(fd.get("model_label")||"").trim();
+    const display_name=String(fd.get("display_name")||"").trim();
+    const role_name=String(fd.get("role_name")||"").trim();
+    if(!provider_id||!model_label||!display_name||!role_name)return;
+    const btn=form.querySelector('button[type="submit"]');
+    btn.disabled=true;
+    try{
+      await apiRequest(`/v1/teams/${encodeURIComponent(id)}/members`,{
+        method:"POST",
+        body:JSON.stringify({
+          member_kind:"agent",display_name,role_name,capability_id:"inference.general",
+          protocol_level:"L0",route_policy:{},
+          config:{manual_web:{enabled:true,provider_id,model_label}},
+          ordinal:7
+        })
+      });
+      closeModal();
+      notice("Manual Web Council seat added. Configure a Council session to use it.");
+      if(typeof renderAgents==="function")await renderAgents();
+    }catch(ex){notice(ex.message,"bad");btn.disabled=false}
+  };
+}
+
 /* Web Chat is a separate OnePane page, not the floating Assistant chat.
    External provider authentication and conversation UI stay on their sites.
    We deliberately never iframe or scrape a provider login/session. */
@@ -26,8 +71,7 @@ function a39WebClipboard(text){
 }
 function a39WebOpen(url){
   if(!url)return notice("This provider has no registered website. Open it manually.","bad");
-  const windowRef=window.open(url,"_blank","noopener,noreferrer");
-  if(!windowRef)notice("Browser blocked the new tab. Use the provider's website link instead.","bad");
+  window.open(url,"_blank","noopener,noreferrer");
 }
 async function a39WebNewConversation(turn) {
   const site=a39WebProviderInfo(turn?.provider_id||a39WebProvider);

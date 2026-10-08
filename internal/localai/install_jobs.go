@@ -142,6 +142,9 @@ func (s *Service) QueueFederatedInstall(ctx context.Context, nodeID string, req 
 }
 
 func (s *Service) QueueOneClickInstall(ctx context.Context, req OneClickInstallRequest) (InstallJob, error) {
+	// Deduplicate a rapid second click before the first job's DB row exists.
+	s.installQueueMu.Lock()
+	defer s.installQueueMu.Unlock()
 	if s == nil || s.catalog == nil {
 		return InstallJob{}, errors.New("local AI catalog unavailable")
 	}

@@ -83,7 +83,7 @@ ck("Local Models expose top-level hardware detection", "hardware-card" in app an
 ck("Per-deployment compute placement is exposed", "a31OpenCompute" in app and "Require GPU" in app and "Require CPU" in app and "Hybrid / CPU + GPU" in app)
 ck("Managed local installs provision verified runtime dependencies", "managed llama.cpp runtime" in app and "/v1/local-ai/install-jobs" in app)
 ck("Models component telemetry is host scoped", "async function qa5ComponentStatus()" in app and "apiRequest('/v1/local-ai/components')" in app and "/v1/local-ai/components?workspace_id=" not in app and "qa5ModelComponents().catch(()=>({}))" in app)
-ck("Colibri and OmniRoute share compact managed lifecycle controls", 'a31RuntimeCard("colibri"' in app and 'a31RuntimeCard("omniroute"' in app and all(x in app for x in ["Install","Uninstall","Update","Settings"]))
+ck("Colibri and OmniRoute share compact managed lifecycle controls", 'a31RuntimeCard("colibri"' in app and 'omni-unified-card' in app and 'a31ComponentButtons("omniroute",omni)' in app and all(x in app for x in ["Install","Uninstall","Update","Settings"]))
 ck("External OmniRoute provider lifecycle remains", "omniQA(false)" in app and "omniQA(true)" in app)
 ck("Models expose Local Cloud Routing Discover", all(x in app for x in ['data-a31-model-tab="local"','data-a31-model-tab="cloud"','data-a31-model-tab="routing"','data-a31-model-tab="discover"']))
 ck("Model Routing supports ordered multi fallback", "fallback_models" in app and "a31RenderRoutingModels" in app and "fallback_candidate_ids" in app)

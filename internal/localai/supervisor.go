@@ -55,6 +55,7 @@ type LaunchSpec struct {
 	Args       []string
 	Env        []string
 	Dir        string
+ LogPath string
 }
 
 type ProcessBackend interface {
@@ -87,7 +88,13 @@ func (b *OSProcessBackend) Start(ctx context.Context, spec LaunchSpec) (int, err
 	if spec.Dir != "" {
 		cmd.Dir = spec.Dir
 	}
-	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	// Preserve bounded startup diagnostics; the process owns no global stdout.
+ if spec.LogPath != "" {
+  if err:=os.MkdirAll(filepath.Dir(spec.LogPath),0o700);err!=nil{return 0,err}
+  if st,err:=os.Stat(spec.LogPath);err==nil&&st.Size()>4<<20{_ = os.Rename(spec.LogPath,spec.LogPath+".previous")}
+  logFile,err:=os.OpenFile(spec.LogPath,os.O_CREATE|os.O_TRUNC|os.O_WRONLY,0o600);if err!=nil{return 0,err}
+  defer logFile.Close();cmd.Stdout,cmd.Stderr=logFile,logFile
+ } else {cmd.Stdout, cmd.Stderr = io.Discard, io.Discard}
 	if err := cmd.Start(); err != nil {
 		return 0, err
 	}
@@ -566,7 +573,7 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 			return old, nil
 		}
 		if old.Status == RuntimeStarting && s.processes.Alive(old.PID) {
-			return s.waitHealthy(ctx, old.ID, 30*time.Second)
+			return s.waitHealthy(ctx, old.ID, 120*time.Second)
 		}
 	}
 	if err := s.ensureCapacity(ctx, deploymentID, nodeID); err != nil {
@@ -634,7 +641,7 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 	if strings.EqualFold(cfg.RuntimeBackend, "colibri") {
 		env = append(env, "COLI_MODEL="+cfg.ModelPath, "COLI_MODEL_ID="+firstNonEmpty(cfg.ModelRef, "onepane-colibri"))
 	}
-	pid, err := s.processes.Start(context.Background(), LaunchSpec{Executable: executable, Args: args, Env: env, Dir: filepath.Dir(cfg.Executable)})
+	pid, err := s.processes.Start(context.Background(), LaunchSpec{Executable: executable, Args: args, Env: env, Dir: filepath.Dir(cfg.Executable),LogPath: filepath.Join(s.dataDir,"components","logs","local-runtime-"+inst.ID+".log")})
 	if err != nil {
 		_ = s.markFailed(context.Background(), inst.ID, err.Error())
 		return RuntimeInstance{}, err
@@ -644,7 +651,7 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 		_ = s.processes.Signal(pid, syscall.SIGTERM)
 		return RuntimeInstance{}, err
 	}
-	return s.waitHealthy(ctx, inst.ID, 30*time.Second)
+	return s.waitHealthy(ctx, inst.ID, 120*time.Second)
 }
 
 func (s *RuntimeSupervisor) Acquire(ctx context.Context, deploymentID string) (RuntimeInstance, error) {
@@ -664,6 +671,19 @@ func (s *RuntimeSupervisor) Release(ctx context.Context, deploymentID string) er
 	return s.SetBusy(ctx, deploymentID, false)
 }
 
+// Diagnoses failures without exposing arbitrary large runtime output to clients.
+func (s *RuntimeSupervisor) runtimeStartLogTail(idv string) string {
+ path:=filepath.Join(s.dataDir,"components","logs","local-runtime-"+idv+".log")
+ f,err:=os.Open(path);if err!=nil{return ""}
+ defer f.Close()
+ st,err:=f.Stat();if err!=nil{return ""}
+ start:=st.Size()-900;if start<0{start=0}
+ if _,err=f.Seek(start,io.SeekStart);err!=nil{return ""}
+ buf,err:=io.ReadAll(io.LimitReader(f,900));if err!=nil{return ""}
+ tail:=strings.TrimSpace(string(buf))
+ if tail==""{return ""}
+ return " · runtime log tail: "+tail
+}
 func (s *RuntimeSupervisor) waitHealthy(ctx context.Context, idv string, timeout time.Duration) (RuntimeInstance, error) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -672,8 +692,9 @@ func (s *RuntimeSupervisor) waitHealthy(ctx context.Context, idv string, timeout
 			return inst, err
 		}
 		if !s.processes.Alive(inst.PID) {
-			_ = s.markFailed(ctx, idv, "runtime process exited before health check")
-			return RuntimeInstance{}, errors.New("runtime exited before becoming healthy")
+			reason:="runtime exited before becoming healthy"+s.runtimeStartLogTail(idv)
+   _ = s.markFailed(ctx,idv,reason)
+   return RuntimeInstance{}, errors.New(reason)
 		}
 		health, err := s.Health(ctx, inst)
 		if err == nil {
@@ -690,8 +711,9 @@ func (s *RuntimeSupervisor) waitHealthy(ctx context.Context, idv string, timeout
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
-	_ = s.markFailed(ctx, idv, "health check timed out")
-	return RuntimeInstance{}, errors.New("managed runtime health check timed out")
+	reason:="managed runtime health check timed out"+s.runtimeStartLogTail(idv)
+ _ = s.markFailed(ctx,idv,reason)
+ return RuntimeInstance{}, errors.New(reason)
 }
 
 func (s *RuntimeSupervisor) Health(ctx context.Context, inst RuntimeInstance) (map[string]any, error) {

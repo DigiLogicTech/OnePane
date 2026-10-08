@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+ "io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -99,10 +100,13 @@ func (s *Service) omniRoutePID(ctx context.Context) (int, error) {
 }
 func (s *Service) omniRouteHealthy() bool {
 	client := &http.Client{Timeout: 1500 * time.Millisecond}
-	resp, err := client.Get("http://127.0.0.1:20128/v1/models")
+	resp, err := client.Get("http://127.0.0.1:20128/healthz")
 	if err != nil { return false }
 	defer resp.Body.Close()
-	return resp.StatusCode >= 200 && resp.StatusCode < 500
+	if resp.StatusCode != http.StatusOK { return false }
+ var health struct { Status string `json:"status"` }
+ if json.NewDecoder(io.LimitReader(resp.Body,4096)).Decode(&health)!=nil {return false}
+ return health.Status=="ok"
 }
 func (s *Service) omniRouteLogTail(limit int64) string {
 	if limit <= 0 { limit = 4096 }
@@ -159,6 +163,8 @@ func (s *Service) startOmniRoute(ctx context.Context) error {
 		"DATA_DIR="+s.omniRouteDataRoot(),
 		"OMNIROUTE_DATA_DIR="+s.omniRouteDataRoot(),
 		"OMNIROUTE_SERVER_HOST=127.0.0.1",
+  "APP_BIND_HOST=127.0.0.1",
+  "HOST=127.0.0.1",
 		"OMNIROUTE_PORT=20128",
 		"PORT=20128",
 		"REQUIRE_API_KEY=false",
@@ -172,7 +178,7 @@ func (s *Service) startOmniRoute(ctx context.Context) error {
 	go func() { waitCh <- cmd.Wait() }()
 
 	healthy := false
-	for i := 0; i < 60; i++ {
+	for i := 0; i < 120; i++ {
 		select {
 		case <-ctx.Done():
 			_ = cmd.Process.Kill()
@@ -188,7 +194,7 @@ func (s *Service) startOmniRoute(ctx context.Context) error {
 	if !healthy {
 		_ = cmd.Process.Kill()
 		tail := s.omniRouteLogTail(4096)
-		return fmt.Errorf("managed OmniRoute did not become healthy on 127.0.0.1:20128%s", tail)
+		return fmt.Errorf("managed OmniRoute readiness /healthz did not report status ok at 127.0.0.1:20128 within 120s; inspect component logs%s", tail)
 	}
 
 	var raw string

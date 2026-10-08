@@ -16,11 +16,18 @@ qa5AgentCheck=async function(dep){
    {label:"JSON response",payload:{prompt:"Return a compact JSON object with keys status and number, where status is ok and number is 7.",max_tokens:96}},
    {label:"Tool calling",payload:{prompt:"Call the synthetic onepane_test_probe tool with value agent-check if supported; otherwise state tool calling is unavailable.",synthetic_tool_probe:true,max_tokens:128}}
   ];
+  let completedProbes=0;
   for(const item of probes){
    stage=item.label;
-   try{await apiRequest(`/v1/model-testbed/${encodeURIComponent(sessionID)}/turns`,{method:"POST",body:JSON.stringify(item.payload)})}
-   catch(ex){failures.push(item.label+": "+ex.message)}
+   try{await apiRequest(`/v1/model-testbed/${encodeURIComponent(sessionID)}/turns`,{method:"POST",body:JSON.stringify(item.payload)});completedProbes++}
+   catch(ex){
+    failures.push(item.label+": "+ex.message);
+    // A failed first inference commonly means the runtime never started. Avoid
+    // three identical failing launches and do not manufacture qualification.
+    if(!completedProbes)break;
+   }
   }
+  if(!completedProbes)throw Error("No inference probe succeeded. "+failures.join(" · ")+"; testbed remains unqualified");
   stage="saving qualification";
   await apiRequest(`/v1/model-testbed/${encodeURIComponent(sessionID)}/complete`,{method:"POST",body:"{}"});
   await qa5LoadManagedDeployments();
@@ -32,6 +39,7 @@ qa5AgentCheck=async function(dep){
  }catch(ex){
   const prefix=`Agent Check ${stage} failed: ${ex.message}`;
   const msg=/not found/i.test(ex.message)?" Verify this deployment still exists and its runtime is available.":""; 
+  if(sessionID){try{await qa5InspectModel(dep)}catch{}}
   notice(prefix+msg+(sessionID?" · Session: "+sessionID:""),"bad");
  }
 };

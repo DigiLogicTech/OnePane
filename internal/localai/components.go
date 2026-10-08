@@ -280,3 +280,17 @@ func (s *Service) ManageComponent(ctx context.Context,idv,action string)(Managed
 	for time.Now().Before(deadline){j,e:=s.ComponentJob(ctx,job.ID);if e!=nil{return ManagedComponent{},e};if j.Status=="succeeded"||j.Status=="failed"||j.Status=="interrupted"{all,e:=s.ManagedComponents(ctx);if e!=nil{return ManagedComponent{},e};if j.Status!="succeeded"{if j.FailureReason!=nil{return all[idv],errors.New(*j.FailureReason)};return all[idv],errors.New("component lifecycle failed")};return all[idv],nil};select{case<-ctx.Done():return ManagedComponent{},ctx.Err();case<-time.After(50*time.Millisecond):}}
 	return ManagedComponent{},errors.New("component lifecycle timed out")
 }
+
+// Recent managed component operations are durable even after transient toasts.
+// Return newest first; callers must apply the host-level model.read policy.
+func (s *Service) RecentComponentJobs(ctx context.Context, limit int) ([]ComponentJob, error) {
+ if limit <= 0 || limit > 100 { limit = 60 }
+ rows, err := s.db.QueryContext(ctx, `SELECT id FROM managed_component_jobs ORDER BY created_at DESC LIMIT ?`, limit)
+ if err != nil { return nil, err }
+ var ids []string
+ for rows.Next() { var id string; if err := rows.Scan(&id); err != nil { _ = rows.Close(); return nil, err }; ids = append(ids, id) }
+ err = rows.Err(); _ = rows.Close(); if err != nil { return nil, err }
+ out := make([]ComponentJob, 0, len(ids))
+ for _, id := range ids { job, err := s.ComponentJob(ctx, id); if err != nil { return nil, err }; out = append(out, job) }
+ return out, nil
+}

@@ -22,7 +22,7 @@ ck("Models expose Local Cloud Routing Discover", all(x in ui for x in ['data-a31
 ck("local models require trusted installability", "model.installable" in ui and "installable_quantizations" in api)
 ck("cloud providers use durable provider records", "/v1/providers?workspace_id=" in ui and "GET /v1/providers" in api)
 ck("OAuth is real PKCE infrastructure", "/v1/provider-oauth/{presetID}/start" in api and "/v1/provider-oauth/callback" in api and "a31StartOAuth" in ui)
-ck("OmniRoute exposes managed and external modes", 'a31RuntimeCard("omniroute"' in ui and "omniQA(false)" in ui and "omniQA(true)" in ui)
+ck("OmniRoute exposes managed and external modes", 'omni-unified-card' in ui and 'a31ComponentButtons("omniroute",omni)' in ui and "omniQA(false)" in ui and "omniQA(true)" in ui)
 ck("Operations has functional Activity Health Recovery", all(x in ui for x in ["a31OperationsActivity","a31OperationsHealth","a31RecoveryContent"]))
 ck("Inspector governed chat remains", "qa4SendInspectorChat" in ui and "scheduling_class:'user_interactive'" in ui)
 failed=[n for n,o in checks if not o]

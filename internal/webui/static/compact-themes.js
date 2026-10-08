@@ -10,7 +10,7 @@ function a11ThemeTile(id){
  const names=["Background","Panel","Elevated","Accent","Text"];
  return `<button type="button" class="theme-choice theme-compact ${selected?"active":""}" data-settings-theme="${escapeHtml(id)}" aria-pressed="${selected}" aria-label="Select ${escapeHtml(displayName)} theme">
    <span class="theme-compact-header"><strong>${escapeHtml(displayName)}</strong><span aria-hidden="true">${selected?"✓":""}</span></span>
-   <span class="theme-compact-swatches" aria-label="Theme colour palette">${colors.map((c,i)=>`<span title="${names[i]}: ${escapeHtml(c)}" style="background-color:${escapeHtml(c)}!important"></span>`).join("")}</span>
+   <span class="theme-compact-swatches" aria-label="Theme colour palette">${colors.map((c,i)=>`<span title="${names[i]}: ${escapeHtml(c)}"><svg viewBox="0 0 100 17" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect x="0" y="0" width="100" height="17" rx="3" fill="${escapeHtml(c)}"></rect></svg></span>`).join("")}</span>
   </button>`
 }
 qa5ThemeButtons=function(){

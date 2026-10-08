@@ -325,6 +325,24 @@
     check(nodeRoot&&!nodeError,"Nodes envelope"+(nodeError?": "+nodeError:""));
     document.querySelector("#a31AddNode")?.click();await waitFor(()=>document.querySelector("#pairNodeForm"),"pairing modal");check(document.querySelector("#pairNodeForm"),"Add Node pairing flow");closeModal();
     await route("nodes");await waitFor(()=>document.querySelector('[data-a31-node="node-release"]'),"Node card");check(document.querySelector('[data-a31-node="node-release"] .card-title')?.textContent==="RELEASE-PC (Local)","Nodes prefer machine name and mark local device");check(document.querySelector('[data-a31-node="node-release"] .list-meta')?.textContent?.includes("node-release"),"Node ID remains secondary metadata");
+    // Nodes must track the available shell viewport as the Logs drawer
+    // expands, rather than extending behind the drawer.
+    const nodeScrollPane=check(document.querySelector(".nodes-page #nextNodeRoot"),"Nodes own scrolling viewport");
+    check(getComputedStyle(nodeScrollPane).overflowY==="auto","Nodes scroll content within the page");
+    const drawerInitiallyOpen=state.drawer==="open",initialDrawerHeight=state.drawerHeight;
+    setDrawerOpen(true);
+    state.drawerHeight=150;document.documentElement.style.setProperty("--drawer","150px");
+    await sleep(240);
+    const nodesHostHeightBefore=document.querySelector("#viewHost").getBoundingClientRect().height;
+    state.drawerHeight=360;document.documentElement.style.setProperty("--drawer","360px");
+    await sleep(240);
+    const nodesHost=document.querySelector("#viewHost").getBoundingClientRect();
+    const nodeViewport=nodeScrollPane.getBoundingClientRect();
+    check(nodesHostHeightBefore-nodesHost.height>150,"Nodes shell area shrinks when Logs expands");
+    check(nodeViewport.bottom<=nodesHost.bottom+3,"Nodes stay above the expanded Logs drawer");
+    state.drawerHeight=initialDrawerHeight;
+    document.documentElement.style.setProperty("--drawer",initialDrawerHeight+"px");
+    setDrawerOpen(drawerInitiallyOpen);
     await route("agents");check(!document.querySelector("#viewHost .error"),"Agents route");
 
     await route("skills");const bundles=check(document.querySelector('[data-a31-skills-tab="bundles"]'),"Tool Bundles tab");bundles.click();

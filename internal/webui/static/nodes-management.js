@@ -23,8 +23,8 @@ function nextNodeAddJob(id,job){
 }
 async function renderNodes(){
  var host=$("#viewHost");
- host.innerHTML='<section class="page">'+pageHeader("Nodes","Central management for local and paired Windows/Ubuntu compute nodes.",'<button class="btn primary" id="nextNodePair">Add Node</button>')+'<div id="nextNodeRoot"><div class="widget-body">Loading registered nodes…</div></div></section>';
- $("#nextNodePair").onclick=openPairNode;
+ host.innerHTML='<section class="page">'+pageHeader("Nodes","Central management for local and paired Windows/Ubuntu compute nodes.",'<button class="btn primary" id="a31AddNode">Add Node</button>')+'<div id="a31Nodes"><div id="nextNodeRoot"><div class="widget-body">Loading registered nodes…</div></div></div></section>';
+ $("#a31AddNode").onclick=openPairNode;
  try{
   var result=await apiRequest("/v1/nodes"),rows=nextNodeArray(Array.isArray(result)?result:result.nodes);
   nextNodeUI.nodes=rows;liveOps.nodes=rows;liveOps.reported.nodes=true;
@@ -53,7 +53,7 @@ function nextNodeDraw(){
  var top=nextNodeRows();
  var list='<div class="node-grid">'+nextNodeUI.nodes.map(function(n){
   var id=nextNodeID(n),selected=id===nextNodeUI.selected,st=nextNodeState(n);
-  return '<article class="panel-card node-card'+(selected?' next-node-selected':'')+'"><div class="card-header"><div><div class="card-title">'+nextNodeEsc(nextNodeName(n))+(n.local?' (Local)':'')+'</div><div class="list-meta">'+nextNodeEsc(id)+'</div></div><span class="pill">'+nextNodeEsc(st)+'</span></div><div class="widget-body"><div class="list-meta">'+nextNodeEsc(n.last_seen_at||"No heartbeat reported")+'</div><button class="btn'+(selected?' primary':'')+'" data-next-node="'+nextNodeEsc(id)+'">Manage node</button></div></article>';
+  return '<article class="panel-card node-card'+(selected?' next-node-selected':'')+'" data-a31-node="'+nextNodeEsc(id)+'"><div class="card-header"><div><div class="card-title">'+nextNodeEsc(nextNodeName(n))+(n.local?' (Local)':'')+'</div><div class="list-meta">'+nextNodeEsc(id)+'</div></div><span class="pill">'+nextNodeEsc(st)+'</span></div><div class="widget-body"><div class="list-meta">'+nextNodeEsc(n.last_seen_at||"No heartbeat reported")+'</div><button class="btn'+(selected?' primary':'')+'" data-next-node="'+nextNodeEsc(id)+'">Manage node</button></div></article>';
  }).join("")+'</div>';
  var detail=node?nextNodeDetail(node):'<section class="panel-card"><div class="widget-body">No enrolled nodes. Select Add Node to begin a mutually confirmed pairing.</div></section>';
  root.innerHTML=top+list+detail;

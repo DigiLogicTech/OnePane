@@ -105,6 +105,71 @@
     check(currentTab()?.route===name,`active:${name}`);
   };
 
+  // Every desktop route must use only the shell's remaining height when
+  // the Logs drawer expands. Exercise primary pages and meaningful subviews
+  // against live layout geometry (not source-string assertions).
+  async function testAllDrawerAwarePages(){
+    if(innerWidth<=700)return; // mobile Logs is an overlay
+    const main=check(document.querySelector(".main-shell"),"Drawer layout shell");
+    const previous={drawer:state.drawer,height:state.drawerHeight,transition:main.style.transition,
+      operations:a31OperationsView,models:a31ModelView,agents:a31AgentView,
+      skills:a31SkillsView,settings:a31SettingsView};
+    const root=document.documentElement,host=check(document.querySelector("#viewHost"),"Drawer page host");
+    const frame=async(height)=>{
+      state.drawerHeight=height;root.style.setProperty("--drawer",height+"px");
+      await new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)));
+      return host.getBoundingClientRect();
+    };
+    const verify=async(label)=>{
+      const small=await frame(145),page=check(host.querySelector(":scope > .page"),label+" page container");
+      const large=await frame(355),rect=host.getBoundingClientRect(),bounds=page.getBoundingClientRect();
+      check(small.height-large.height>175,label+" shrinks with expanded Logs");
+      check(bounds.top>=rect.top-3&&bounds.bottom<=rect.bottom+3,label+" remains within the shell viewport");
+      const scroller=page.querySelector("#nextNodeRoot")||
+        page.querySelector(":scope > :is(#a31OperationsBody,#tasksBody,.project-hub,#a31AgentsBody,#a31SkillsBody,.settings-shell,#secretCatalogue,#a31ModelsRoot)");
+      const overflow=getComputedStyle(scroller||page).overflowY;
+      check(overflow==="auto"||overflow==="scroll",label+" has a reachable vertical scroller");
+    };
+    try{
+      main.style.transition="none";
+      state.drawerHeight=145;setDrawerOpen(true);
+      for(const routeName of ["operations","tasks","projects","models","nodes","agents","skills","settings","secrets"]){
+        await route(routeName);
+        await verify(routeName);
+        const modes={
+          operations:["overview","activity","health","recovery"],
+          models:["local","cloud","routing","discover"],
+          agents:["profiles","teams","sessions","councils"],
+          skills:["installed","catalogue","assignments","matrix","packages","bundles"],
+          settings:["general","appearance","defaults","models","providers","nodes","agents","skills","security","updates"]
+        }[routeName]||[];
+        for(const mode of modes){
+          if(routeName==="operations"){a31OperationsView=mode;await renderOperations()}
+          if(routeName==="models"){a31ModelView=mode;await renderModels()}
+          if(routeName==="agents"){a31AgentView=mode;await renderAgents()}
+          if(routeName==="skills"){a31SkillsView=mode;await renderSkills()}
+          if(routeName==="settings"){a31SettingsView=mode;await renderSettings()}
+          await verify(routeName+" / "+mode);
+        }
+      }
+      // Workspaces are a distinct nested route reached from the Project tile.
+      await route("projects");
+      const open=check(document.querySelector('[data-a35-open-project="project-release"]'),"Workspace route entry for Logs audit");
+      open.click();
+      await waitFor(()=>currentTab()?.route==="workspaces"&&document.querySelector("#qa4WorkspaceGrid"),"Workspaces Logs audit entry");
+      await verify("workspaces");
+      results.push("All primary desktop pages and subviews resize with Logs");
+    } finally {
+      a31OperationsView=previous.operations;a31ModelView=previous.models;
+      a31AgentView=previous.agents;a31SkillsView=previous.skills;
+      a31SettingsView=previous.settings;
+      state.drawerHeight=previous.height;
+      setDrawerOpen(previous.drawer==="open");
+      root.style.setProperty("--drawer",previous.drawer==="open"?previous.height+"px":"0px");
+      main.style.transition=previous.transition;
+    }
+  }
+
   async function testProjectLayout(){
     await route("projects");
     check(document.querySelector("#a35ProjectGrid"),"Projects overview tile grid");
@@ -392,6 +457,7 @@
     const expandedTransform=getComputedStyle(panel.querySelector(".control-chat-chevron")).transform;chatToggle.click();check(panel.dataset.collapsed==="true","Chat collapses from header");await sleep(220);const collapsedTransform=getComputedStyle(panel.querySelector(".control-chat-chevron")).transform;check(expandedTransform!=="none"&&collapsedTransform==="none","Chat chevron direction matches collapse state");chatToggle.click();check(panel.dataset.collapsed==="false","Chat expands from header");await sleep(220);
     launcher.click();check(!a33ControlChatOpen(),"Chat launcher closes open chat");launcher.click();await waitFor(()=>a33ControlChatOpen(),"Chat launcher reopens closed chat");a31CloseControlChat();
 
+    await testAllDrawerAwarePages();
     await route("projects");const projectDelete=await waitFor(()=>document.querySelector('[data-a35-delete-project="project-release"]'),"Delete project action",10000);projectDelete.click();const confirmProjectDelete=await waitFor(()=>document.querySelector("#a33ConfirmDeleteProject"),"Delete project confirmation");confirmProjectDelete.click();await waitFor(()=>project.status==="archived"&&!qa4ProjectHub.projects.some(x=>x.id==="project-release"),"Project lifecycle delete persisted",30000);check(document.querySelector(".empty-state")?.textContent?.includes("No projects yet"),"Deleted project leaves active Projects list");
 
     results.push("installed behavioural acceptance complete");post("PASS");

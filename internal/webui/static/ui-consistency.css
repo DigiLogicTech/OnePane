@@ -130,3 +130,21 @@
   flex:0 0 auto;
   white-space:nowrap;
 }
+
+/* Per-thread model choice for the global OnePane Assistant only. */
+.control-chat-model-row{
+ display:flex;align-items:center;gap:9px;padding:9px 12px 3px;
+ min-width:0;
+}
+.control-chat-model-row label{flex:0 0 auto;font-size:12px;font-weight:650;color:var(--muted)}
+.control-chat-model-row select{
+ flex:1 1 auto;min-width:0;width:100%;max-width:100%;
+ padding:7px 9px;border:1px solid var(--border);border-radius:8px;
+ background:var(--panel-2);color:var(--text);color-scheme:inherit;
+}
+.control-chat-model-row select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.control-chat-model-status{padding:0 12px 8px;font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+@media(max-width:440px){
+ .control-chat-model-row{flex-wrap:wrap}
+ .control-chat-model-row select{flex-basis:100%}
+}

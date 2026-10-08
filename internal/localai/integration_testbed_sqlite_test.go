@@ -62,6 +62,14 @@ func TestSQLiteManualTestbedRequiredForProductionAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Seed one recorded mock inference response into the SQLite fixture.
+	// Production completion still rejects sessions with zero successful turns;
+	// these tests verify database semantics without requiring a GPU runtime.
+	if _,err:=db.SQL().ExecContext(ctx,`INSERT INTO model_testbed_turns
+	 (id,session_id,sequence_no,request_json,response_json,usage_json,metrics_json,synthetic_tool_probe,created_at)
+	 VALUES('test-turn',?,1,'{"prompt":"Reply with exactly ONEPANE_OK"}',
+	 '{"choices":[{"message":{"content":"ONEPANE_OK"}}]}','{}','{}',0,?)`,
+	 session.ID,now);err!=nil{t.Fatal(err)}
 	if err := svc.CompleteTestbed(ctx, session.ID); err != nil {
 		t.Fatal(err)
 	}

@@ -185,10 +185,18 @@ qa4AddWorkspaceComponent=function(project,workspace){
 
 function a35AddWorkspace(project){
   a35CancelWorkspaceEdit();
-  openModal("Add workspace",`<form id="a35AddWorkspaceForm" class="qa-form"><label>Name<input name="name" required placeholder="Development"></label><div class="page-subtitle">The workspace inherits secure defaults and can then override sandbox, routing, models and agents.</div><button class="btn primary">Create workspace</button></form>`);
+  openModal("Add workspace",`<form id="a35AddWorkspaceForm" class="qa-form"><label>Name<input name="name" required placeholder="Development"></label><label>Initial layout<select name="layout_preset"><option value="general">General</option><option value="development">Development</option><option value="research">Research</option><option value="monitoring">Monitoring</option></select></label><div class="page-subtitle">The workspace inherits secure defaults and can then override sandbox, routing, models and agents.</div><button class="btn primary">Create workspace</button></form>`);
   $("#a35AddWorkspaceForm").onsubmit=async e=>{
     e.preventDefault();const name=new FormData(e.currentTarget).get("name").trim();if(!name)return;
     const rows=qa4Workspaces(project),ws=qa4DefaultWorkspace(project,name);
+    const preset=String(new FormData(e.currentTarget).get("layout_preset")||"general");
+    const spec=A43_WORKSPACE_PRESETS[preset]||A43_WORKSPACE_PRESETS.general;
+    const labels=new Map(qa4WorkspaceCatalogue().map(([type,title])=>[type,title]));
+    ws.widgets=spec.filter(([type])=>labels.has(type)).map(([type,width,height],i)=>({
+      id:"pw-"+type+"-"+Date.now()+"-"+i,type,title:labels.get(type),
+      width,height,col:width,row:height
+    }));
+    a31NormalizeLayout(ws.widgets);a31ResolveLayout(ws.widgets,null);
     try{await qa4SaveProjectWorkspaces(project,[...rows,ws]);qa4ProjectHub.activeProjectID=project.id;qa4ProjectHub.activeWorkspaceID=ws.id;closeModal();await renderWorkspaces();notice("Workspace created.");}
     catch(ex){notice(ex.message,"bad")}
   };

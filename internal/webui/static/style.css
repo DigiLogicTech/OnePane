@@ -1153,3 +1153,10 @@ html[data-theme="light"] .models-discover-controls input,html[data-theme="light"
 .llmfit-discover-recovery{padding:10px 14px;border-bottom:1px solid var(--border);display:grid;gap:8px}
 .llmfit-discover-recovery[hidden]{display:none!important}
 .llmfit-discover-recovery .toolbar{justify-content:flex-start}
+
+/* Alpha 3.3 consolidated QA: normal-sized Secrets filters and node actions. */
+.secret-toolbar{display:grid;grid-template-columns:minmax(180px,1fr) minmax(140px,190px) minmax(150px,190px);gap:10px;min-width:0}
+.secret-toolbar input,.secret-toolbar select{width:100%;min-width:0;box-sizing:border-box}
+.node-model-actions{display:flex;justify-content:flex-end;margin:4px 0 12px;min-width:0}
+@media(max-width:900px){.secret-toolbar{grid-template-columns:minmax(180px,1fr) minmax(120px,160px)}.secret-toolbar select:last-child{grid-column:2}}
+@media(max-width:640px){.secret-toolbar{display:flex;flex-direction:column}.node-model-actions{flex-wrap:wrap;justify-content:flex-end}}

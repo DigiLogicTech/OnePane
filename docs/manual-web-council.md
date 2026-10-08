@@ -20,6 +20,45 @@ not an API, proxy, OAuth or unofficial browser bridge dependency.
 
 No provider browser cookies, access tokens or messages are extracted by OnePane.
 
+## Start a Web-only Council (guided flow)
+
+The **Start Web-only Council** button on Web Chat opens a wizard; the user does
+not have to build a Team manually beforehand. The wizard supports:
+
+- A research objective and friendly Council name.
+- Two to eight manual-only seats, each with an explicitly chosen provider,
+  model label and research role. The same provider may appear multiple times.
+- One to five configured independent cross-critique rounds and optional final
+  synthesis, with Research integrity enabled automatically.
+
+After confirmation, OnePane creates the canonical Team, registers L0
+consultation-only members, saves the Research configuration, creates an
+operator-review Task, and starts a Council session. It never requests an
+inference deployment or tools for these manual seats.
+
+One Web Chat conversation tab is provisioned for each seat when there is
+capacity (16 tabs per Workspace). Tabs are pinned to their originating
+Council session and member. Pending turns are **matched by both session and
+member ID**, avoiding cross-talk between two different ChatGPT seats. Later
+research rounds automatically appear in the same matching tabs. Existing
+pending drafts are preserved until the operator acts.
+
+The queue checks periodically while Web Chat is active and **updates the
+display only after new or changed turns appear**. No provider pages are
+loaded in the background. If automatic refresh is unavailable, the
+operator can select **Refresh**.
+
+If a network error occurs after creating a Team or adding seats, the wizard
+retains acknowledged resource IDs in memory and supports *Resume Council
+launch* without intentionally creating those resources again. If a request
+succeeded on the server but its response was lost, the user should inspect
+the partial Team/Task state before retrying. The draft process is not a
+single all-or-nothing backend transaction.
+
+An operator must still open each external web provider, paste the prompt,
+and paste the complete response back. Subscriptions are subject to each
+provider's separate account limits.
+
 ## Configure a Council seat
 
 1. Open **Agents → Teams → Configure** on the Team to use for Council work.

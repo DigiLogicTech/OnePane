@@ -979,15 +979,26 @@ func (s *Service) AllowReady(ctx context.Context, t task.Task) error {
 func (s *Service) AllowStart(ctx context.Context, t task.Task) error {
 	return s.allowAdmission(ctx, t.ID)
 }
+func manualWebCouncilExecutionDisabled(mode string, cfg json.RawMessage) bool {
+	if mode != "council" { return false }
+	var policy struct {
+		ManualWebOnly bool `json:"manual_web_only"`
+	}
+	if json.Unmarshal(cfg, &policy) != nil { return true } // fail closed on corrupt Council profile
+	return policy.ManualWebOnly
+}
 func (s *Service) allowAdmission(ctx context.Context, taskID string) error {
-	var mode string
+	var mode, cfg string
 	var session sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT execution_mode,team_session_id FROM task_execution_profiles WHERE task_id=?`, taskID).Scan(&mode, &session)
+	err := s.db.QueryRowContext(ctx, `SELECT execution_mode,team_session_id,config_json FROM task_execution_profiles WHERE task_id=?`, taskID).Scan(&mode, &session, &cfg)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return err
+	}
+	if manualWebCouncilExecutionDisabled(mode, json.RawMessage(cfg)) {
+		return ErrManualWebCouncilExecution
 	}
 	if mode != "team" {
 		return nil

@@ -169,9 +169,17 @@ func (s *Service) llamaRuntimeStatus(ctx context.Context) ([]LlamaRuntimeBackend
 	recommended:=llamaRecommendedBackends(p); rows:=make([]LlamaRuntimeBackendStatus,0,len(entries))
 	for _,entry:=range entries {
 		inventory:=entry.Name+"@"+strings.ToLower(strings.TrimSpace(entry.Backend)); var version string
-		err:=s.db.QueryRowContext(ctx,"SELECT runtime_version FROM managed_local_runtimes WHERE node_id=? AND runtime_name=? AND status='ready'",p.NodeID,inventory).Scan(&version)
+		var registeredExecutable string
+		err:=s.db.QueryRowContext(ctx,"SELECT runtime_version,executable_path FROM managed_local_runtimes WHERE node_id=? AND runtime_name=? AND status='ready'",p.NodeID,inventory).Scan(&version,&registeredExecutable)
 		installed:=err==nil; if err!=nil && err!=sql.ErrNoRows{return nil,err}
-		reason,rec:=recommended[strings.ToLower(strings.TrimSpace(entry.Backend))]; driver:=""
+		reason,rec:=recommended[strings.ToLower(strings.TrimSpace(entry.Backend))]
+		if installed{
+			if st,e:=os.Stat(registeredExecutable);e!=nil||st.IsDir(){
+				installed=false
+				reason=strings.TrimSpace(reason+" · Registered executable missing; use Repair runtime in llama.cpp Settings")
+			}
+		}
+		driver:=""
 		if strings.EqualFold(entry.Backend,"cuda") { for _,g:=range p.GPUs { if strings.EqualFold(g.Vendor,"nvidia"){driver=g.DriverVersion;break} } }
 		var instances,models int
 		_ = s.db.QueryRowContext(ctx,"SELECT COUNT(*) FROM local_runtime_instances i JOIN managed_local_runtimes r ON r.id=i.runtime_id WHERE r.node_id=? AND r.runtime_name=? AND i.status IN ('starting','healthy','busy','draining')",p.NodeID,inventory).Scan(&instances)

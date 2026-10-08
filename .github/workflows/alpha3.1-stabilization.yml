@@ -97,6 +97,7 @@ jobs:
           node --check internal/webui/static/drawer-usability.js
           node --check internal/webui/static/compact-themes.js
           node --check internal/webui/static/model-agentcheck-diagnostics.js
+          node --check internal/webui/static/qa-round2-discovery-logs.js
           node --check internal/webui/static/model-qa-remediation.js
           ! grep -F "type=\"module\"" internal/webui/static/index.html
           ! grep -F "from './chat-commands.js'" internal/webui/static/app.js

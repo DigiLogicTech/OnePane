@@ -144,8 +144,8 @@ async function a31RenderLocalModels(){
   $("#a31RescanInstalledModels").onclick=async()=>{const b=$("#a31RescanInstalledModels");b.disabled=true;b.textContent="Scanning…";try{const r=await apiRequest("/v1/local-ai/deployments/reconcile",{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace})});notice(`Model rescan complete · ${r.kept||0} kept · ${r.removed_stale||0} stale removed · ${r.removed_duplicates||0} duplicate${Number(r.removed_duplicates||0)===1?"":"s"} removed.`);await renderModels()}catch(ex){b.disabled=false;b.textContent="Rescan models";notice(ex.message,"bad")}};
   $$("[data-a31-recommend-install]").forEach(b=>b.onclick=()=>a31InstallModel(recommendations[Number(b.dataset.a31RecommendInstall)]?.model));
   a31BindComponentButtons(root,components);
-  $("[data-a31-compute]").forEach(b=>b.onclick=()=>a31OpenCompute(deployments.find(d=>d.deployment_id===b.dataset.a31Compute)));
-  $("[data-a42-colibri-tier]").forEach(b=>b.onclick=()=>a42OpenColibriTier(deployments.find(d=>d.deployment_id===b.dataset.a42ColibriTier)));
+  $$("[data-a31-compute]").forEach(b=>b.onclick=()=>a31OpenCompute(deployments.find(d=>d.deployment_id===b.dataset.a31Compute)));
+  $$("[data-a42-colibri-tier]").forEach(b=>b.onclick=()=>a42OpenColibriTier(deployments.find(d=>d.deployment_id===b.dataset.a42ColibriTier)));
   $$("[data-a31-model-spec]").forEach(b=>b.onclick=()=>qa5InspectModel(deployments.find(d=>d.deployment_id===b.dataset.a31ModelSpec)));
   $$("[data-a31-agent-check]").forEach(b=>b.onclick=()=>qa5AgentCheck(deployments.find(d=>d.deployment_id===b.dataset.a31AgentCheck)))
 }

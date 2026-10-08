@@ -237,9 +237,16 @@ async function nextNodeAgentCheck(dep){
   for(var i=0;i<probes.length;i++){try{await apiRequest("/v1/nodes/"+encodeURIComponent(id)+"/model-testbed/"+encodeURIComponent(session)+"/turns",{method:"POST",body:JSON.stringify(probes[i])});success++;}catch(ex){if(!success)throw ex;break;}}
   if(!success)throw Error("No successful inference probes; testbed not qualified");
   await apiRequest("/v1/nodes/"+encodeURIComponent(id)+"/model-testbed/"+encodeURIComponent(session)+"/complete",{method:"POST",body:"{}"});
-  notice("Remote Agent Check completed; review qualification.");
+  notice("Remote Agent Check completed; idle model unloaded on target node.");
   nextNodeShowSpec(dep);
- }catch(e){notice("Remote Agent Check failed: "+e.message+(session?" · Session "+session:""),"bad");}
+ }catch(e){
+  let cleanup="";
+  if(session){
+   try{await apiRequest("/v1/nodes/"+encodeURIComponent(id)+"/model-testbed/"+encodeURIComponent(session)+"/abort",{method:"POST",body:JSON.stringify({reason:"Remote Agent Check failed: "+e.message})});}
+   catch(err){cleanup=" · Cleanup: "+err.message}
+  }
+  notice("Remote Agent Check failed: "+e.message+(session?" · Session "+session:"")+cleanup,"bad");
+ }
 }
 async function nextNodeToggleGrant(){
  var id=nextNodeUI.selected,enabled=!(nextNodeUI.grant&&nextNodeUI.grant.enabled);

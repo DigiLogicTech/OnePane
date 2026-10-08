@@ -67,3 +67,6 @@
 .omni-unified-card .omni-runtime-overview{display:grid;gap:8px;border-bottom:1px solid var(--border)}
 .omni-unified-card .omni-runtime-overview .runtime-actions{flex-wrap:wrap}
 .omni-unified-card .omni-provider-layout{width:100%;box-sizing:border-box}
+
+/* Palette colours use SVG presentation attributes instead of CSP-blocked inline CSS. */
+.theme-compact-swatches>span>svg{display:block;width:100%;height:100%;overflow:hidden}

@@ -65,13 +65,11 @@ func (s *Service) selectOneClickModel(ctx context.Context, detected HardwareProf
   required:=weightBytes(selected.ParamsB,quant)+contextOverhead(selected.ParamsB,contextTokens)
   pp,mode,available,fit:=bestPlacement(detected,required,placement)
   if pp.Mode=="" {
-   if placement!=PlacementCPUOnly && placement!="" {
-    return zero,"",errors.New("required GPU/hybrid placement is not available; choose Auto or Require CPU for an experimental CPU attempt")
-   }
-   pp=PlacementPlan{Mode:PlacementCPUOnly,Backend:"cpu",Experimental:true,
-    Devices:[]PlacementDevice{{Kind:"cpu",Name:detected.CPU.Name,Backend:"cpu",CapacityBytes:detected.Memory.AvailableBytes,AllocatedBytes:required}}}
-   mode=RunCPU
-   available=detected.Memory.AvailableBytes
+   // Estimated memory can be exceeded only by explicit operator override.
+   // Missing hardware/backend capabilities remain hard failures.
+   var overrideErr error
+   pp,mode,available,overrideErr=experimentalPlacement(detected,required,placement)
+   if overrideErr!=nil{return zero,"",overrideErr}
    fit=FitTooTight
   }
   pp.Experimental=true
@@ -113,4 +111,37 @@ func (s *Service) selectOneClickModel(ctx context.Context, detected HardwareProf
  if !supported{rec.Notes=append(rec.Notes,fmt.Sprintf("Model is classified as %s; installation is permitted despite requested %s use case",useCase,req.UseCase))}
  rec.Notes=append(rec.Notes,"Selected exact quantization resolved against a digest-pinned artifact")
  return rec,useCase,nil
+}
+
+// experimentalPlacement is allowed ONLY for explicitly overridden memory
+// estimates. It does not create missing GPUs, cross incompatible backends or
+// override verified artifact and physical disk requirements.
+func experimentalPlacement(p HardwareProfile, required int64, preference PlacementMode) (PlacementPlan, RunMode, int64, error) {
+    ram := p.Memory.AvailableBytes
+    backend, accelerators := chooseGroup(groupByBackend(p))
+    var gpu GPU
+    hasGPU := false
+    for _, g := range accelerators {
+        if !hasGPU || g.VRAMBytes > gpu.VRAMBytes {gpu=g;hasGPU=true}
+    }
+    if preference==PlacementSingleDevice {
+        if !hasGPU {return PlacementPlan{},"",0,errors.New("GPU-only placement requested but no compatible GPU backend is available; override cannot invent hardware")}
+        return PlacementPlan{Mode:PlacementSingleDevice,Backend:backend,Experimental:true,Devices:[]PlacementDevice{accelDevice(gpu,backend,required)}},RunGPU,gpu.VRAMBytes,nil
+    }
+    if preference==PlacementCPUOffload || (preference=="" && hasGPU && ram>0) {
+        if !hasGPU || ram<=0 {return PlacementPlan{},"",0,errors.New("hybrid placement requires compatible GPU and CPU memory; override cannot invent hardware")}
+        gpuBytes:=required
+        if gpuBytes>gpu.VRAMBytes {gpuBytes=gpu.VRAMBytes}
+        if gpuBytes<0 {gpuBytes=0}
+        return PlacementPlan{Mode:PlacementCPUOffload,Backend:backend,Experimental:true,
+            Devices:[]PlacementDevice{accelDevice(gpu,backend,gpuBytes),
+                {Kind:"cpu",Name:p.CPU.Name,Backend:"cpu",CapacityBytes:ram,AllocatedBytes:required-gpuBytes}}},
+            RunCPUGPU,gpu.VRAMBytes+ram,nil
+    }
+    if preference!="" && preference!=PlacementCPUOnly {
+        return PlacementPlan{},"",0,errors.New("requested accelerator placement is unsupported for an experimental override")
+    }
+    if ram<=0{return PlacementPlan{},"",0,errors.New("CPU memory unavailable for experimental placement")}
+    return PlacementPlan{Mode:PlacementCPUOnly,Backend:"cpu",Experimental:true,
+        Devices:[]PlacementDevice{{Kind:"cpu",Name:p.CPU.Name,Backend:"cpu",CapacityBytes:ram,AllocatedBytes:required}}},RunCPU,ram,nil
 }

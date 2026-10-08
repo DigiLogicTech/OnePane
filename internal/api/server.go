@@ -115,6 +115,7 @@ type localAIService interface {
 	ComputePolicy(context.Context, string) (localai.ComputePolicy, error)
 	SetComputePolicy(context.Context, localai.ComputePolicyCommand) (localai.ComputePolicy, error)
 	RegisterColibriFolder(context.Context, localai.RegisterColibriCommand) (inference.ModelDeployment, error)
+	ColibriPoolModels(context.Context) ([]localai.ColibriPoolModel, error)
 	ConfigureModelPool(string) error
 	ManagedComponents(context.Context) (map[string]localai.ManagedComponent, error)
 	RequestComponentAction(context.Context, string, string, *string) (localai.ComponentJob, error)
@@ -371,6 +372,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/local-ai/deployments/reconcile", s.reconcileManagedLocalDeployments)
 	s.mux.HandleFunc("GET /v1/local-ai/deployments/{deploymentID}/compute-policy", s.getDeploymentComputePolicy)
 	s.mux.HandleFunc("PATCH /v1/local-ai/deployments/{deploymentID}/compute-policy", s.setDeploymentComputePolicy)
+	s.mux.HandleFunc("GET /v1/local-ai/colibri/pool-models", s.listColibriPoolModels)
 	s.mux.HandleFunc("POST /v1/local-ai/colibri/register", s.registerColibriFolder)
 	s.mux.HandleFunc("GET /v1/manual-web/turns", s.listManualWebTurns)
 	s.mux.HandleFunc("GET /v1/manual-web/chair-turns", s.listManualChairTurns)

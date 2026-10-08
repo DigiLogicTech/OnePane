@@ -368,6 +368,17 @@ func placementKey(d PlacementDevice) string {
 	return fmt.Sprintf("%s:%d", strings.ToLower(d.Backend), d.DeviceIndex)
 }
 
+// isOperatorMemoryOverride cannot be triggered merely by an experimental
+// runtime feature. Only a too-tight estimate with an explicit opt-in marker
+// allows an attempt beyond the normal hardware memory budget.
+func isOperatorMemoryOverride(rec Recommendation) bool {
+ if !rec.Placement.Experimental || rec.FitLevel!=FitTooTight {return false}
+ for _, note := range rec.Placement.Notes {
+  if note=="explicit operator override of estimated resource fit" {return true}
+ }
+ return false
+}
+
 // ensureCapacity performs per-device pressure-aware hot swapping. It never
 // treats heterogeneous accelerators as one fictional VRAM pool. Only healthy,
 // idle runtimes are evicted; busy runtimes are protected by the runtime lease.
@@ -410,8 +421,9 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 			target[placementKey(d)] += d.AllocatedBytes
 		}
 	}
+	operatorOverride := isOperatorMemoryOverride(targetRec)
 	for k, n := range target {
-		if capacity[k] <= 0 || n > capacity[k] {
+		if capacity[k] <= 0 || (n > capacity[k] && !operatorOverride) {
 			return fmt.Errorf("managed placement requires %d bytes on %s but usable device memory is %d", n, k, capacity[k])
 		}
 	}
@@ -474,6 +486,17 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 		if fits() {
 			return nil
 		}
+	}
+	// A genuine explicit memory override may attempt an out-of-budget launch
+	// ONLY when no other resident uses its selected accelerators. This never
+	// evicts a busy inference request or implies that physical VRAM will fit.
+	if operatorOverride {
+		for k := range target {
+			if used[k] > 0 {
+				return fmt.Errorf("experimental model launch refused: accelerator %s is occupied by another model; stop it first", k)
+			}
+		}
+		return nil
 	}
 	return fmt.Errorf("insufficient evictable accelerator memory for managed placement")
 }

@@ -87,7 +87,7 @@ ck("llama backend uninstall preserves model weights", "RemoveLlamaBackend" in co
 ck("readable model spec retains advanced provenance", "spec-readable-section" in app and "Advanced details and raw JSON" in app)
 ck("storage cleanup excludes model pool and external caches", "CleanupOwnedStorage" in storage and "modelRoot" not in storage.split("func (s *Service) CleanupOwnedStorage")[1].split("return report,nil")[0] and "model.write" in storageapi)
 ck("Discover source sorts and cursor integrity", all(x in api for x in ["requestedSort","__sort","likes7d","sort not supported by this source"]) and "a31DiscoverSort" in app)
-ck("Discovery target selection uses trusted enrolled nodes and federated install", "Choose installation node" in app and "/v1/nodes/" in app and "/models/install" in app)
+ck("Discovery target selection uses trusted enrolled nodes and federated install", "Install on" in app and "a31TargetNodeRow" in app and "/v1/nodes/" in app and "/models/install" in app and 'openModal("Choose installation node"' not in app)
 ck("Managed runtimes are tabbed alongside hardware", "managed-runtimes-combined" in app and "onepane-managed-runtime-tab" in app)
 ck("Managed component jobs reattach by durable job ID", "active_job_id" in app and "/v1/local-ai/component-jobs/" in app and "a38OpenAllInstallProgress" in app)
 ck("Unavailable llmfit catalogue offers install and start", "llmfit is unavailable" in app and "/v1/local-ai/llmfit/install" in app and "/v1/local-ai/llmfit/start" in app)

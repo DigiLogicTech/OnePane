@@ -161,9 +161,10 @@ async function a40RenderWebChat(){
   const epoch=++a40WebRenderingEpoch;
   const host=$("#viewHost");if(!host)return;
   host.innerHTML=`<section class="page a39-webchat-page a40-webchat-page">
-    ${pageHeader("Web Chat","Separate manual provider conversations and Research Council handoffs.",'<button class="btn" id="a40NewChatTop">+ New Web Chat</button><button class="btn" id="a40Refresh">Refresh</button>')}
+    ${pageHeader("Web Chat","Separate manual provider conversations and Research Council handoffs.",'<button class="btn primary" id="a41StartCouncil">Start Web-only Council</button><button class="btn" id="a40NewChatTop">+ New Web Chat</button><button class="btn" id="a40Refresh">Refresh</button>')}
     <div id="a40WebRoot" class="a39-webchat-loading">Loading Web Chat…</div>
   </section>`;
+  $("#a41StartCouncil").onclick=a41OpenWebOnlyCouncilWizard;
   $("#a40NewChatTop").onclick=a40WebOpenNewDialog;
   $("#a40Refresh").onclick=()=>renderWebChat();
   const workspace=a40WebWorkspace();
@@ -182,6 +183,7 @@ async function a40RenderWebChat(){
   }
   if(epoch!==a40WebRenderingEpoch || currentTab()?.route!=="webchat")return;
   a39WebTurns=rows;
+  a41AutoBindWebCouncilHandoffs(rows);
   const active=a40WebEnsureSession(rows);
   if(!active)return;
   // Distinct session IDs let ChatGPT #1 and ChatGPT #2 retain independent
@@ -201,7 +203,7 @@ async function a40RenderWebChat(){
   $("#a40WebRoot").innerHTML=`
     <div class="a39-webchat-summary">
       <strong>${pendingCount} pending Council handoff${pendingCount===1?"":"s"}</strong>
-      <span class="list-meta">Each Web Chat tab holds an independent conversation and Council selection; the provider website remains external.</span>
+      <span class="list-meta">OnePane generates prompts for each manual seat. All required answers must be submitted before the next Council round.</span>
     </div>
     <div class="a40-chat-tabs" role="tablist" aria-label="Web Chat conversations">
       ${sessions.map(s=>`

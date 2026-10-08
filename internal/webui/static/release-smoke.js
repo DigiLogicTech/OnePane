@@ -125,7 +125,7 @@
       const large=await frame(355),rect=host.getBoundingClientRect(),bounds=page.getBoundingClientRect();
       check(small.height-large.height>175,label+" shrinks with expanded Logs");
       check(bounds.top>=rect.top-3&&bounds.bottom<=rect.bottom+3,label+" remains within the shell viewport");
-      const scroller=page.querySelector("#nextNodeRoot")||
+      const scroller=page.querySelector(".a36-settings-content")||page.querySelector("#nextNodeRoot")||
         page.querySelector(":scope > :is(#a31OperationsBody,#tasksBody,.project-hub,#a31AgentsBody,#a31SkillsBody,.settings-shell,#secretCatalogue,#a31ModelsRoot)");
       const overflow=getComputedStyle(scroller||page).overflowY;
       check(overflow==="auto"||overflow==="scroll",label+" has a reachable vertical scroller");

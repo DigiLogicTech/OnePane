@@ -183,6 +183,7 @@ async function a40RenderWebChat(){
   }
   if(epoch!==a40WebRenderingEpoch || currentTab()?.route!=="webchat")return;
   a39WebTurns=rows;
+  a41RememberWebQueue(workspace,rows);
   a41AutoBindWebCouncilHandoffs(rows);
   const active=a40WebEnsureSession(rows);
   if(!active)return;

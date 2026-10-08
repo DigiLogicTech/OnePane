@@ -6,6 +6,13 @@ qa5AgentCheck=async function(dep){
   const deployments=await qa5LoadManagedDeployments();
   const current=deployments.find(x=>String(x.deployment_id)===id);
   if(!current){notice("This deployment is missing from the active inventory. Rescan Installed Models before running Agent Check.","bad");return}
+  // Embedding models have no chat-completions endpoint. Do not overwrite a
+  // successful vector qualification with misleading plain-text/JSON failures.
+  if(/embedding/i.test(String(current.model_ref||""))){
+   await qa5InspectModel(current);
+   notice("Embedding qualification uses /v1/embeddings. Review vector results in the Spec Sheet.");
+   return;
+  }
   notice("Starting Agent Check for "+(current.display_name||current.model_ref||id)+"…");
   stage="starting testbed session";
   const session=await apiRequest(`/v1/model-deployments/${encodeURIComponent(id)}/testbed/sessions`,{method:"POST",body:JSON.stringify({notes:"OnePane manual Agent Check"})});

@@ -573,7 +573,7 @@ async function a31SettingsSection(){
 }
 renderSettings=async function(){
   if(!await a36RenderSettingsShell())return;
-  $("[data-a31-settings]").forEach(b=>b.onclick=()=>a31SetSettingsView(b.dataset.a31Settings));
+  $$("[data-a31-settings]").forEach(b=>b.onclick=()=>a31SetSettingsView(b.dataset.a31Settings));
   a36BindSettingsSearch();
   $("#a36OpenLogs")?.addEventListener("click",()=>{activeDrawerTab="logs";setDrawerOpen(true);renderDrawer()});
   $$("[data-settings-theme]").forEach(b=>b.onclick=()=>{applyTheme(b.dataset.settingsTheme);renderSettings()});$$("[data-approval-default]").forEach(b=>b.onclick=()=>{state.approvalLevel=b.dataset.approvalDefault;persist();renderSettings()});

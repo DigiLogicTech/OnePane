@@ -41,5 +41,20 @@ qa5AgentCheck=async function(dep){
   const msg=/not found/i.test(ex.message)?" Verify this deployment still exists and its runtime is available.":""; 
   if(sessionID){try{await qa5InspectModel(dep)}catch{}}
   notice(prefix+msg+(sessionID?" · Session: "+sessionID:""),"bad");
+  if(/managed model file missing|managed model file inaccessible|managed model path is not a file|managed model unavailable/i.test(ex.message)){
+    openModal("Repair local model",`<div class="widget-body"><p>The registered model artifact is missing or inaccessible. Agent Check cannot run until the installation is repaired.</p><p class="page-subtitle">Rescan disables stale registrations but preserves files, projects and settings. You can then reinstall a verified artifact.</p><div class="toolbar"><button class="btn primary" id="qa5RescanReinstall">Rescan & reinstall</button><button class="btn" id="qa5RepairCancel">Cancel</button></div><div id="qa5RepairFeedback" class="error"></div></div>`);
+    document.querySelector("#qa5RepairCancel")?.addEventListener("click",closeModal);
+    document.querySelector("#qa5RescanReinstall")?.addEventListener("click",async()=>{
+      const button=document.querySelector("#qa5RescanReinstall");button.disabled=true;
+      try{
+        const report=await apiRequest("/v1/local-ai/deployments/reconcile",{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace})});
+        const catalog=a31Array(await apiRequest("/v1/local-ai/catalog"));
+        const model=catalog.find(m=>String(m.model_ref||"").toLowerCase()===String(current.model_ref||"").toLowerCase());
+        closeModal();notice(`Rescan completed: ${report.removed_stale||0} stale registrations disabled.`);
+        if(model?.installable)await a31InstallModel(model);
+        else notice("Find a verified artifact in Discover Models to reinstall this model.","bad");
+      }catch(repairError){const target=document.querySelector("#qa5RepairFeedback");if(target)target.textContent=repairError.message;button.disabled=false}
+    });
+  }
  }
 };

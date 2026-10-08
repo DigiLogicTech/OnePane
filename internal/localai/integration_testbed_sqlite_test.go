@@ -51,6 +51,10 @@ func TestSQLiteManualTestbedRequiredForProductionAdmission(t *testing.T) {
 
 	inf := inference.NewService(db.SQL(), db, clock.Real{})
 	svc := NewService(db.SQL(), db, clock.Real{}, inf, t.TempDir(), nil)
+	// This integration fixture intentionally tests SQLite testbed lifecycle and
+	// admission, not runtime binary availability. Runtime preflight is covered
+	// separately by supervisor tests; do not launch a non-existent CUDA binary.
+	svc.supervisor = nil
 	if _, err := svc.AdmitModel(ctx, "dep", AdmissionCommand{Status: AdmissionAccepted, ActorPrincipalID: "admin"}); err == nil || !strings.Contains(err.Error(), "completed manual testbed") {
 		t.Fatalf("expected manual-testbed gate, got %v", err)
 	}

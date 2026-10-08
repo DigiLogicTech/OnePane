@@ -60,6 +60,29 @@ func (s *Service) CleanupOwnedStorage(ctx context.Context)(StorageReport,error){
  if _,err:=os.Stat(filepath.Join(s.dataDir,"runtimes","omniroute","3.8.51","node-v22.22.2-win-x64","node.exe"));err==nil{
   roots=append(roots,filepath.Join(s.dataDir,"components","downloads","node-v22.22.2-win-x64.zip"))
  }
+ // Disabled llama.cpp backends may retain Windows-locked DLL files after
+ // uninstall. Reclaim their OnePane-owned runtime directories only after all
+ // active process records have drained, never deleting the shared model pool.
+ llamaRoot:=filepath.Clean(filepath.Join(s.dataDir,"runtimes","llamacpp"))
+ disabled,err:=s.db.QueryContext(ctx,`SELECT r.install_root FROM managed_local_runtimes r
+ WHERE r.runtime_name LIKE 'llamacpp@%' AND r.status='disabled'
+ AND NOT EXISTS (
+   SELECT 1 FROM local_runtime_instances i WHERE i.runtime_id=r.id
+   AND i.status IN ('starting','healthy','busy','draining')
+ )`)
+ if err!=nil{return StorageReport{},err}
+ for disabled.Next(){
+  var root string
+  if err:=disabled.Scan(&root);err!=nil{disabled.Close();return StorageReport{},err}
+  clean:=filepath.Clean(root)
+  if strings.HasPrefix(strings.ToLower(clean),strings.ToLower(llamaRoot)+string(os.PathSeparator)){
+   var ready int
+   if err:=s.db.QueryRowContext(ctx,"SELECT COUNT(*) FROM managed_local_runtimes WHERE install_root=? AND status='ready'",root).Scan(&ready);err!=nil{disabled.Close();return StorageReport{},err}
+   if ready==0{roots=append(roots,clean)}
+  }
+ }
+ if err:=disabled.Err();err!=nil{disabled.Close();return StorageReport{},err}
+ disabled.Close()
  // Clean abandoned installation staging older than 24h under owned runtimes.
  runtimeRoot:=filepath.Join(s.dataDir,"runtimes")
  _=filepath.WalkDir(runtimeRoot,func(p string,d fs.DirEntry,err error)error{

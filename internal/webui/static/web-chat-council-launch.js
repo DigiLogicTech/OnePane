@@ -53,6 +53,70 @@ function a41CouncilRevision(entry){
   return Number(entry?.revision??entry?.Revision??1);
 }
 
+
+// Exact session/member binding ensures that two tabs for the same provider
+// do not accidentally consume each other's responses. A successful prior
+// round remains visible until this member's next pending round is queued.
+function a41AutoBindWebCouncilHandoffs(rows){
+  let changed=false;
+  for(const tab of a40WebTabs()){
+    if(!tab.session_id||!tab.member_id)continue;
+    const owned=rows.filter(t=>t.session_id===tab.session_id && t.member_id===tab.member_id
+      && t.provider_id===tab.provider_id);
+    const pending=owned.filter(t=>t.status==="awaiting_input").sort((a,b)=>
+      (Number(b.created_at)||0)-(Number(a.created_at)||0));
+    const current=owned.find(t=>t.turn_id===tab.turn_id);
+    if(current?.status==="awaiting_input")continue; // Preserve active pending answer.
+    if(!pending.length)continue;
+    const next=pending[0];
+    if(next.turn_id===tab.turn_id)continue;
+    if(a40WebDrafts.get(tab.id)?.response?.trim())continue; // Do not discard draft.
+    tab.turn_id=next.turn_id;
+    tab.conversation_generation=Number(next.conversation_generation)||1;
+    changed=true;
+  }
+  if(changed)persist();
+  return changed;
+}
+
+// Poll only queue metadata and rerender if queue records change, never every
+// interval tick: continuously rebuilding the DOM would erase text selection
+// and interfere with an operator copying/pasting prompts or responses.
+let a41QueueMonitorStarted=false;
+let a41QueueMonitorBusy=false;
+let a41QueueFingerprint="";
+function a41WebQueueDigest(workspace,rows){
+  return workspace+"|"+rows.map(t=>[
+    t.turn_id,t.status,t.conversation_generation,t.submitted_at
+  ].join(":")).sort().join("|");
+}
+function a41RememberWebQueue(workspace,rows){
+  a41QueueFingerprint=a41WebQueueDigest(workspace,rows);
+  a41MonitorWebQueue();
+}
+function a41MonitorWebQueue(){
+  if(a41QueueMonitorStarted)return;
+  a41QueueMonitorStarted=true;
+  setInterval(async()=>{
+    if(a41QueueMonitorBusy||document.hidden||currentTab()?.route!=="webchat"||!a40WebWorkspace())return;
+    a41QueueMonitorBusy=true;
+    try{
+      const ws=a40WebWorkspace();
+      const data=await apiRequest(`/v1/manual-web/turns?workspace_id=${encodeURIComponent(ws)}`);
+      if(ws!==a40WebWorkspace()||currentTab()?.route!=="webchat")return;
+      const rows=a31Array(data);
+      const digest=a41WebQueueDigest(ws,rows);
+      if(digest!==a41QueueFingerprint){
+        a41QueueFingerprint=digest;
+        renderWebChat();
+      }
+    }catch{
+      // Transient errors leave the last good queue visible. Explicit Refresh
+      // surfaces API failures in the current workspace.
+    }finally{a41QueueMonitorBusy=false}
+  },8000);
+}
+
 // Network execution is separately testable. State never includes API keys,
 // cookies or subscription sessions; only exact resource IDs and form settings.
 async function a41CreateWebOnlyCouncil(workspace,draft,existing=null,options={}){

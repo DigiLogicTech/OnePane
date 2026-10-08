@@ -115,11 +115,11 @@ func (s *Service) QueueManualWebChair(ctx context.Context,c QueueManualWebChairC
  return s.ManualWebChairTurn(ctx,idv)
 }
 func(s *Service) chairActor(ctx context.Context,tx storage.Tx,ws,actor string)bool{
- if !s.isHuman(ctx,actor){return false}
  var status string
  return tx.QueryRowContext(ctx,`SELECT status FROM workspace_memberships WHERE workspace_id=? AND principal_id=?`,ws,actor).Scan(&status)==nil&&status=="active"
 }
 func(s *Service) SubmitManualWebChair(ctx context.Context,c SubmitManualWebChairCommand)(ManualWebChairTurn,error){
+ if !s.isHuman(ctx,c.Actor){return ManualWebChairTurn{},ErrHumanRequired}
  response:=strings.TrimSpace(c.Response)
  if response==""||len(response)>256<<10{return ManualWebChairTurn{},ErrInvalid}
  now:=s.clock.UnixMilli()
@@ -154,6 +154,7 @@ func(s *Service) SubmitManualWebChair(ctx context.Context,c SubmitManualWebChair
  return s.ManualWebChairTurn(ctx,c.ID)
 }
 func(s *Service) ApproveManualWebChair(ctx context.Context,c ApproveManualWebChairCommand)(ManualWebChairTurn,error){
+ if !s.isHuman(ctx,c.Actor){return ManualWebChairTurn{},ErrHumanRequired}
  text:=strings.TrimSpace(c.ApprovedText)
  if text==""||len(text)>256<<10{return ManualWebChairTurn{},ErrInvalid}
  now:=s.clock.UnixMilli()

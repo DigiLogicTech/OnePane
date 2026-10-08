@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+    "fmt"
+    "os"
 	"strings"
 )
 
@@ -80,6 +82,19 @@ func (s *Service) findExistingInstall(ctx context.Context, workspaceID, nodeID, 
 		ORDER BY CASE WHEN j.status='ready' THEN 0 ELSE 1 END, COALESCE(j.updated_at,mm.updated_at) DESC LIMIT 1`,
 		workspaceID, nodeID, modelRef, quantization).Scan(&jobID)
 	if err == nil && strings.TrimSpace(jobID) != "" {
+        // Reattachment is only correct when the previously installed artifact
+        // still exists. A missing file needs inventory reconciliation first.
+        var path string
+        pathErr:=s.db.QueryRowContext(ctx,`SELECT mm.local_path FROM managed_local_models mm
+          JOIN local_model_install_plans p ON p.id=mm.plan_id
+          JOIN models m ON m.id=mm.model_id
+          WHERE p.workspace_id=? AND mm.node_id=? AND lower(mm.model_ref)=lower(?)
+            AND lower(COALESCE(m.quantization,''))=lower(?) AND mm.status<>'removed'
+          ORDER BY mm.updated_at DESC LIMIT 1`, workspaceID,nodeID,modelRef,quantization).Scan(&path)
+        if pathErr!=nil{return nil,pathErr}
+        if st,e:=os.Stat(path);e!=nil||st.IsDir(){
+           return nil,fmt.Errorf("existing model artifact is missing or invalid; use Rescan Installed Models, then reinstall %s (%s)",modelRef,quantization)
+        }
 		j, err := s.InstallJob(ctx, jobID)
 		return &j, err
 	}

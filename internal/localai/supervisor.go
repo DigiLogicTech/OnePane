@@ -576,7 +576,7 @@ func validateLlamaPlacementDevices(executable,backend string,plan PlacementPlan)
  ctx,cancel:=context.WithTimeout(context.Background(),8*time.Second)
  defer cancel()
  out,err:=exec.CommandContext(ctx,executable,"--list-devices").CombinedOutput()
- if err!=nil{return fmt.Errorf("list devices from managed %s backend: %w: %s",backend,err,strings.TrimSpace(string(out)))}
+ if err!=nil{return fmt.Errorf("list devices from managed %s backend failed: %w: %s; use Models → Local → llama.cpp Settings → Repair runtime to restore the exact backend executable and its dependencies",backend,err,strings.TrimSpace(string(out)))}
  known:=map[string]bool{}
  // Different llama.cpp builds format the list as either "CUDA0: ..." or
  // "- CUDA0: ..."; some put devices after a log prefix. Match complete

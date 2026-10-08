@@ -270,7 +270,7 @@ func (s *Server) discoverLocalAIModels(w http.ResponseWriter,r *http.Request){
         status:="connected";message:="More models available with Load more."
         if len(x.rows)==0{status="connected_empty";message="No matching entries returned by this source."}
         if x.next==""{message="End of the source's published API results."}
-        if x.name=="huggingbay"&&x.next==""&&len(x.rows)>=500{message="Reached the Hugging Bay API maximum of 500 listings; this endpoint does not document further pagination."}
+        if x.name=="huggingbay"&&x.next==""{if len(x.rows)>=500{message="Reached the Hugging Bay API maximum of 500 listings; this endpoint does not document further pagination."}else{message=fmt.Sprintf("Upstream Hugging Bay currently returned %d entries (not a OnePane UI limit). Try Hugging Face or All sources to broaden discovery.",len(x.rows))}}
         out.Sources[x.name]=discoverySourceStatus{Status:status,Message:message,Count:len(x.rows)}
     }
     if len(out.Errors)==0{out.Errors=nil}

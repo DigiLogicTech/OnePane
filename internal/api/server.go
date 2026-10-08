@@ -360,6 +360,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/local-ai/components", s.listManagedComponents)
 	s.mux.HandleFunc("POST /v1/local-ai/components/{componentID}/{action}", s.manageComponent)
 	s.mux.HandleFunc("GET /v1/local-ai/component-jobs/{jobID}", s.getComponentJob)
+	s.mux.HandleFunc("GET /v1/local-ai/component-jobs", s.listRecentComponentJobs)
 	s.mux.HandleFunc("GET /v1/local-ai/deployments", s.listManagedLocalDeployments)
 	s.mux.HandleFunc("POST /v1/local-ai/deployments/reconcile", s.reconcileManagedLocalDeployments)
 	s.mux.HandleFunc("GET /v1/local-ai/deployments/{deploymentID}/compute-policy", s.getDeploymentComputePolicy)

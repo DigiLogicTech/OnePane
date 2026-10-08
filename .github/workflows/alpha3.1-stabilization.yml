@@ -1,8 +1,8 @@
-name: Alpha 3.3 Consolidated QA Release Candidate
+name: Alpha 3.3 RC2 — Models QA Remediation
 
 on:
   push:
-    branches: [alpha3.2-integration, alpha3.2-windows-stabilization, alpha3.2-qa-round2-remediation, alpha3.2-qa-round3-remediation, alpha3.2-next-release-remediation, feature/colibri-tiered-inference, release/alpha3.3-consolidated-qa]
+    branches: [alpha3.2-integration, alpha3.2-windows-stabilization, alpha3.2-qa-round2-remediation, alpha3.2-qa-round3-remediation, alpha3.2-next-release-remediation, feature/colibri-tiered-inference, release/alpha3.3-consolidated-qa, fix/alpha3.3-qa-models-rc2]
   workflow_dispatch:
     inputs:
       run_hosted_smoke:
@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 env:
-  ONEPANE_VERSION: 0.1.0-alpha.3.3-rc.1
+  ONEPANE_VERSION: 0.1.0-alpha.3.3-rc.2
 
 jobs:
   validate:
@@ -133,6 +133,10 @@ jobs:
           node scripts/validate_web_only_council.js
           node scripts/validate_web_chair.js
           node scripts/validate_colibri_spec_tour.js
+          node --check internal/webui/static/colibri-registration-dialog.js
+          node scripts/validate_models_qa_rc2.js
+          go test ./internal/localai -run 'TestQ40SizingRequiresExactVerifiedArtifact|TestChooseManagedLlamaExecutableKeepsPinAndRepairsExactBackend' -count=1
+          go test -tags integration ./internal/localai -run '^TestSQLiteManualTestbedRequiredForProductionAdmission
           go test ./internal/storage/sqlite -run TestManualWebChairMigrationCreatesAuditableTurnSchema -count=1
       - name: Go tests
         run: go test ./...
@@ -199,7 +203,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: OnePane-alpha3.3-rc1-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc2-source-native-${{ github.sha }}
           path: |
             dist/**
           if-no-files-found: warn
@@ -242,7 +246,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.3-rc1-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc2-source-native-${{ github.sha }}
           path: artifact
       - name: Install launch uninstall reinstall
         shell: pwsh
@@ -363,7 +367,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.3-rc1-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc2-source-native-${{ github.sha }}
           path: artifact
       - name: Install verify and preserve data
         shell: bash
@@ -394,9 +398,9 @@ jobs:
 
 
   qa-prerelease:
-    name: Publish Alpha 3.3 RC1 for operator QA
+    name: Publish Alpha 3.3 RC2 for operator QA
     needs: [validate, runtime_artifact_smoke, windows-installed-smoke, ubuntu-installed-smoke]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release/alpha3.3-consolidated-qa' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/fix/alpha3.3-qa-models-rc2' }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     permissions:
@@ -405,7 +409,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.3-rc1-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc2-source-native-${{ github.sha }}
           path: artifacts
       - name: Verify manifest and publish immutable QA prerelease
         shell: bash
@@ -431,6 +435,308 @@ jobs:
           fi
           gh release create "$tag" prerelease-assets/* \
             --target "$GITHUB_SHA" \
-            --title "OnePane Alpha 3.3 RC1 — consolidated QA" \
+            --title "OnePane Alpha 3.3 RC2 — consolidated QA" \
+            --prerelease \
+            --notes "Alpha 3.3 release candidate for operator QA, not promoted known-good. Includes Alpha 3.2 remediation; Colibri tiered inference, residency planning and safe hot swap; readable Colibri model Spec Sheet; Web Chat Research Councils with AI Chair and approval gates; and an updated product tour. Fixes QA issues in Q4_0 exact-quantization planning, stale CUDA backend executable rebinding/diagnostics, Agent Check abort lifecycle, and Colibri registration UI. Windows x64 installer and Ubuntu amd64 package have passed build and installed-product gates. Validate actual GPU/Colibri behaviour and Council browser handoffs manually before promotion."
+ -count=1
+          go test ./internal/storage/sqlite -run TestManualWebChairMigrationCreatesAuditableTurnSchema -count=1
+      - name: Go tests
+        run: go test ./...
+      - name: Build Windows x64 installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf packaging/windows/setup/payload
+          mkdir -p dist/windows-x64 packaging/windows/setup/payload
+          export GOOS=windows GOARCH=amd64 CGO_ENABLED=0
+          BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          BUILD_LDFLAGS="-s -w -X github.com/DigiLogicTech/OnePane/internal/buildinfo.Version=$ONEPANE_VERSION -X github.com/DigiLogicTech/OnePane/internal/buildinfo.Revision=$GITHUB_SHA -X github.com/DigiLogicTech/OnePane/internal/buildinfo.BuildTime=$BUILD_TIME"
+          go build -trimpath -ldflags "$BUILD_LDFLAGS" -o packaging/windows/setup/payload/OnePane.Backend.exe ./cmd/harnessd
+          go build -trimpath -ldflags "$BUILD_LDFLAGS" -o packaging/windows/setup/payload/OnePane.Service.exe ./packaging/windows/service
+          go build -trimpath -ldflags "-H windowsgui $BUILD_LDFLAGS" -o packaging/windows/setup/payload/OnePane.Desktop.exe ./packaging/windows/desktop
+          cp packaging/windows/assets/OnePane.ico packaging/windows/setup/payload/OnePane.ico
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, re
+          setup = Path("packaging/windows/setup/main.go")
+          text = setup.read_text()
+          payload = Path("packaging/windows/setup/payload")
+          for name in ["OnePane.Backend.exe", "OnePane.Service.exe", "OnePane.Desktop.exe", "OnePane.ico"]:
+              digest = hashlib.sha256((payload / name).read_bytes()).hexdigest()
+              pattern = rf'("{re.escape(name)}"\s*:\s*")[0-9a-f]{{64}}(")'
+              text, n = re.subn(pattern, rf'\g<1>{digest}\2', text, count=1)
+              if n != 1:
+                  raise SystemExit(f"could not refresh payload hash for {name}")
+          setup.write_text(text)
+          PY
+          go build -trimpath -ldflags "-H windowsgui $BUILD_LDFLAGS" -o dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe ./packaging/windows/setup
+          (cd dist/windows-x64 && sha256sum "OnePane-$ONEPANE_VERSION-windows-x64-setup.exe" > "OnePane-$ONEPANE_VERSION-windows-x64-setup.exe.sha256")
+          test -s dist/windows-x64/OnePane-$ONEPANE_VERSION-windows-x64-setup.exe
+          python3 - <<'PY'
+          from pathlib import Path
+          p=next(Path("dist/windows-x64").glob("*-setup.exe"))
+          if p.read_bytes()[:2] != b"MZ":
+              raise SystemExit("Windows installer is not a PE executable")
+          print(f"validated installer {p} ({p.stat().st_size} bytes)")
+          PY
+      - name: Build Ubuntu amd64 package
+        if: ${{ github.ref_name != 'alpha3.2-windows-stabilization' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/build-ubuntu-deb.sh
+      - name: Write immutable candidate manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, os
+          manifest={
+              "version": os.environ["ONEPANE_VERSION"],
+              "commit": os.environ["GITHUB_SHA"],
+              "workflow_run_id": os.environ["GITHUB_RUN_ID"],
+              "workflow_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "branch": os.environ["GITHUB_REF_NAME"],
+          }
+          Path("dist").mkdir(exist_ok=True)
+          Path("dist/candidate-manifest.json").write_text(json.dumps(manifest,indent=2)+"\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: OnePane-alpha3.3-rc2-source-native-${{ github.sha }}
+          path: |
+            dist/**
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Clean self-hosted build workspace
+        if: always()
+        shell: bash
+        run: |
+          rm -rf dist packaging/windows/setup/payload
+
+  runtime_artifact_smoke:
+    name: Managed runtime artifact smoke (${{ matrix.os }})
+    needs: validate
+    if: ${{ needs.validate.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(github.ref_name == 'alpha3.2-windows-stabilization' && '["windows-latest"]' || '["ubuntu-latest","windows-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: true
+          fetch-depth: 1
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Download extract and execute pinned CPU runtime
+        env:
+          ONEPANE_RUNTIME_ARTIFACT_SMOKE: "1"
+        run: go test ./internal/localai -run '^TestBundledCPURuntimeArtifactSmoke$' -count=1 -v
+  windows-installed-smoke:
+    name: Windows installed-product smoke (release gate)
+    needs: [validate, runtime_artifact_smoke]
+    if: ${{ needs.validate.result == 'success' && needs.runtime_artifact_smoke.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_hosted_smoke == true)) }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: OnePane-alpha3.3-rc2-source-native-${{ github.sha }}
+          path: artifact
+      - name: Install launch uninstall reinstall
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Get-ChildItem -Path artifact -Recurse -Filter '*-windows-x64-setup.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'Windows installer artifact not found' }
+
+          $root = Join-Path $env:RUNNER_TEMP 'OnePaneInstalledSmoke'
+          $install = Join-Path $root 'App'
+          $projects = Join-Path $root 'Projects'
+          $models = Join-Path $root 'Models'
+          New-Item -ItemType Directory -Force -Path $root,$projects,$models | Out-Null
+
+          function Invoke-OnePaneSetup([string[]]$SetupArgs) {
+            $proc = Start-Process -FilePath $installer.FullName -ArgumentList $SetupArgs -Wait -PassThru
+            if ($proc.ExitCode -ne 0) { throw "OnePane Setup failed with exit code $($proc.ExitCode): $($SetupArgs -join ' ')" }
+          }
+          function Wait-OnePaneHealth([int]$Seconds = 90) {
+            $deadline = (Get-Date).AddSeconds($Seconds)
+            while ((Get-Date) -lt $deadline) {
+              try {
+                $health = Invoke-RestMethod -Uri 'http://127.0.0.1:18181/v1/health' -TimeoutSec 2
+                if ($health.status -eq 'ok') { return }
+              } catch {}
+              Start-Sleep -Milliseconds 750
+            }
+            throw 'OnePane service did not become healthy'
+          }
+          function Assert-OnePaneVersion {
+            $about = Invoke-RestMethod -Uri 'http://127.0.0.1:18181/v1/about' -TimeoutSec 5
+            if ($about.version -ne $env:ONEPANE_VERSION) { throw "Backend version mismatch: $($about.version)" }
+            $reg = Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\OnePane'
+            if ($reg.DisplayVersion -ne $env:ONEPANE_VERSION) { throw "Installed Apps version mismatch: $($reg.DisplayVersion)" }
+          }
+          function Assert-NativeUIReady {
+            $marker = Join-Path $env:LOCALAPPDATA 'OnePane\ui-ready.txt'
+            $e2eMarker = Join-Path $env:LOCALAPPDATA 'OnePane\ui-e2e.txt'
+            Remove-Item -Force -ErrorAction SilentlyContinue $marker,$e2eMarker
+            $env:ONEPANE_UI_E2E = '1'
+            $desktop = Start-Process -FilePath (Join-Path $install 'OnePane.Desktop.exe') -PassThru
+            try {
+              $deadline = (Get-Date).AddSeconds(120)
+              $uiReady = $false
+              while ((Get-Date) -lt $deadline) {
+                if ((-not $uiReady) -and (Test-Path $marker)) {
+                  $value = (Get-Content -Raw $marker).Trim()
+                  if ($value -ne "onepane-ui-ready|$env:ONEPANE_VERSION") { throw "Unexpected native UI-ready marker: $value" }
+                  $uiReady = $true
+                }
+                if (Test-Path $e2eMarker) {
+                  $e2e = (Get-Content -Raw $e2eMarker).Trim()
+                  if (-not $e2e.StartsWith('onepane-ui-e2e|PASS|')) { throw "Installed UI acceptance failed: $e2e" }
+                  if ($uiReady) { return }
+                }
+                if ($desktop.HasExited) { throw "OnePane Desktop exited before installed UI acceptance completed (exit $($desktop.ExitCode))" }
+                Start-Sleep -Milliseconds 500
+              }
+              $log = Join-Path $env:LOCALAPPDATA 'OnePane\desktop.log'
+              if (Test-Path $log) { Get-Content $log -Tail 160 | Write-Host }
+              throw 'Native OnePane UI did not complete behavioural acceptance'
+            } finally {
+              Remove-Item Env:ONEPANE_UI_E2E -ErrorAction SilentlyContinue
+              Get-Process 'OnePane.Desktop' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          try {
+            Invoke-OnePaneSetup @(
+              '--elevated','--silent','--no-launch','--skip-optional-runtime',
+              '--install-dir',$install,'--project-root',$projects,'--model-pool',$models
+            )
+            Wait-OnePaneHealth
+            Assert-OnePaneVersion
+            Assert-NativeUIReady
+
+            $sentinel = Join-Path $env:ProgramData 'OnePane\qa-preserve.txt'
+            Set-Content -Path $sentinel -Value 'preserve-alpha3.2' -NoNewline
+            Invoke-OnePaneSetup @('--elevated','--silent','--no-launch','--uninstall')
+
+            $deadline = (Get-Date).AddSeconds(30)
+            while ((Test-Path $install) -and ((Get-Date) -lt $deadline)) { Start-Sleep -Milliseconds 500 }
+            if (Test-Path $install) { throw 'Application install directory survived uninstall' }
+            if (-not (Test-Path $sentinel)) { throw 'Durable ProgramData content was deleted by uninstall' }
+
+            Invoke-OnePaneSetup @(
+              '--elevated','--silent','--no-launch','--skip-optional-runtime',
+              '--install-dir',$install,'--project-root',$projects,'--model-pool',$models
+            )
+            Wait-OnePaneHealth
+            Assert-OnePaneVersion
+            Assert-NativeUIReady
+            if ((Get-Content -Raw $sentinel).Trim() -ne 'preserve-alpha3.2') { throw 'Durable data changed across reinstall' }
+            # Regression: legacy installs may have Models/Projects underneath
+            # the application directory. Uninstall MUST preserve both.
+            $embeddedModels = Join-Path $install 'Models'
+            $embeddedProjects = Join-Path $install 'Projects'
+            New-Item -ItemType Directory -Force -Path $embeddedModels,$embeddedProjects | Out-Null
+            Set-Content -LiteralPath (Join-Path $embeddedModels 'preserve.gguf') -Value 'model-sentinel' -NoNewline
+            Set-Content -LiteralPath (Join-Path $embeddedProjects 'preserve.txt') -Value 'project-sentinel' -NoNewline
+            Invoke-OnePaneSetup @('--elevated','--silent','--no-launch','--uninstall')
+            if ((Get-Content -Raw (Join-Path $embeddedModels 'preserve.gguf')) -ne 'model-sentinel') { throw 'Uninstaller deleted models within application directory' }
+            if ((Get-Content -Raw (Join-Path $embeddedProjects 'preserve.txt')) -ne 'project-sentinel') { throw 'Uninstaller deleted projects within application directory' }
+            if (Test-Path (Join-Path $install 'OnePane.Backend.exe')) { throw 'Application executable not removed on uninstall' }
+            Write-Host 'Verified model and Project survival inside legacy install root'
+          } finally {
+            Get-Process 'OnePane.Desktop' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            try { Invoke-OnePaneSetup @('--elevated','--silent','--no-launch','--uninstall') } catch { Write-Warning $_ }
+            if (Test-Path $root) { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+          }
+
+  ubuntu-installed-smoke:
+    name: Ubuntu installed-package smoke (release gate)
+    needs: [validate, runtime_artifact_smoke]
+    if: ${{ github.ref_name != 'alpha3.2-windows-stabilization' && needs.validate.result == 'success' && needs.runtime_artifact_smoke.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_hosted_smoke == true)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: OnePane-alpha3.3-rc2-source-native-${{ github.sha }}
+          path: artifact
+      - name: Install verify and preserve data
+        shell: bash
+        run: |
+          set -euo pipefail
+          deb="$(realpath "$(find artifact -type f -name 'onepane_*_amd64.deb' -print -quit)")"
+          test -n "$deb"
+          test "$(dpkg-deb -f "$deb" Version)" = "$ONEPANE_VERSION"
+          sudo apt-get update
+          sudo apt-get install -y "$deb"
+          test "$(dpkg-query -W -f='${Version}' onepane)" = "$ONEPANE_VERSION"
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8080/v1/health >/tmp/onepane-health.json; then break; fi
+            sleep 1
+          done
+          grep -q '"status":"ok"' /tmp/onepane-health.json
+          curl -fsS http://127.0.0.1:8080/v1/about >/tmp/onepane-about.json
+          python3 - <<'PY'
+          import json, os
+          data=json.load(open('/tmp/onepane-about.json'))
+          assert data['version']==os.environ['ONEPANE_VERSION'], data
+          PY
+          sudo systemctl is-active --quiet onepane.service
+          echo preserve-alpha3.2 | sudo tee /var/lib/onepane/qa-preserve.txt >/dev/null
+          sudo apt-get remove -y onepane
+          sudo test -f /var/lib/onepane/qa-preserve.txt
+          test "$(sudo cat /var/lib/onepane/qa-preserve.txt | tr -d '\n')" = "preserve-alpha3.2"
+
+
+  qa-prerelease:
+    name: Publish Alpha 3.3 RC2 for operator QA
+    needs: [validate, runtime_artifact_smoke, windows-installed-smoke, ubuntu-installed-smoke]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/fix/alpha3.3-qa-models-rc2' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: OnePane-alpha3.3-rc2-source-native-${{ github.sha }}
+          path: artifacts
+      - name: Verify manifest and publish immutable QA prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -f artifacts/candidate-manifest.json
+          test -n "$(find artifacts -type f -name '*-windows-x64-setup.exe' -print -quit)"
+          test -n "$(find artifacts -type f -name '*.deb' -print -quit)"
+          python3 - <<'PY'
+          import json,os
+          d=json.load(open("artifacts/candidate-manifest.json"))
+          assert d["commit"]==os.environ["GITHUB_SHA"],d
+          assert d["version"]==os.environ["ONEPANE_VERSION"],d
+          PY
+          tag="v${ONEPANE_VERSION}"
+          mkdir -p prerelease-assets
+          find artifacts -type f \( -name '*.exe' -o -name '*.deb' -o -name '*.sha256' -o -name '*.json' \) -exec cp -v '{}' prerelease-assets/ \;
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::QA release tag already exists; refusing to overwrite immutable assets"
+            exit 1
+          fi
+          gh release create "$tag" prerelease-assets/* \
+            --target "$GITHUB_SHA" \
+            --title "OnePane Alpha 3.3 RC2 — consolidated QA" \
             --prerelease \
             --notes "Alpha 3.3 release candidate for operator QA, not promoted known-good. Includes Alpha 3.2 remediation; Colibri tiered inference, residency planning and safe hot swap; readable Colibri model Spec Sheet; Web Chat Research Councils with AI Chair and approval gates; and an updated product tour. Windows x64 installer and Ubuntu amd64 package have passed build and installed-product gates. Validate actual GPU/Colibri behaviour and Council browser handoffs manually before promotion."

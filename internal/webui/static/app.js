@@ -11,6 +11,7 @@ let a31SettingsView="general";
 let a31OperationsView="overview";
 let a31ControlTab="assistant";
 let a31AssistantThreadID="";
+let a31AssistantThreadWorkspace="";
 let a31InstallPoll=null;
 
 pages.skills={title:"Skills",icon:"✦"};
@@ -542,7 +543,10 @@ function a31OpenControlChat(tab=a31ControlTab){
 }
 function a31CloseControlChat(){const p=$("#controlChatPanel");if(p){p.dataset.state="closed";p.setAttribute("hidden","")}}
 async function a31EnsureAssistantThread(){
-  if(a31AssistantThreadID)return a31AssistantThreadID;const rows=await apiRequest(`/v1/assistant/threads?workspace_id=${encodeURIComponent(onepaneWorkspace)}&limit=20`);const t=a31Array(rows)[0]||await apiRequest("/v1/assistant/threads",{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace,title:"OnePane Control Chat"})});a31AssistantThreadID=t.id;return t.id;
+  const workspace=String(onepaneWorkspace||"");if(a31AssistantThreadID&&a31AssistantThreadWorkspace===workspace)return a31AssistantThreadID;
+  a31AssistantThreadID="";a31AssistantThreadWorkspace="";
+  const rows=await apiRequest(`/v1/assistant/threads?workspace_id=${encodeURIComponent(workspace)}&limit=20`);const t=a31Array(rows)[0]||await apiRequest("/v1/assistant/threads",{method:"POST",body:JSON.stringify({workspace_id:workspace,title:"OnePane Control Chat"})});
+  a31AssistantThreadID=t.id;a31AssistantThreadWorkspace=workspace;return t.id;
 }
 async function a31RenderControlChat(){
   const body=$("#controlChatBody");if(!body)return;const projects=a31Array(qa4ProjectHub?.projects),current=a31CurrentProject();

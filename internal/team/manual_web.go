@@ -121,7 +121,6 @@ func (s *Service) QueueManualWebTurn(ctx context.Context,c QueueManualWebTurnCom
 // the same immutable prompt packet. The Council seat/round does not change.
 func (s *Service) RestartManualWebConversation(ctx context.Context,turnID,actor string) (ManualWebTurn,error) {
     if !s.isHuman(ctx,actor){return ManualWebTurn{},ErrHumanRequired}
-    now:=s.clock.UnixMilli()
     err:=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
         updated,err:=tx.ExecContext(ctx,`UPDATE manual_web_council_turns
             SET conversation_generation=conversation_generation+1
@@ -134,7 +133,8 @@ func (s *Service) RestartManualWebConversation(ctx context.Context,turnID,actor 
         if n!=1{return ErrSessionState}
         t,err:=scanManualWebTurn(tx.QueryRowContext(ctx,manualWebTurnSelect+" WHERE turn_id=?",turnID))
         if err!=nil{return err}
-        if !s.workspaceMember(ctx,t.WorkspaceID,actor){return ErrInvalid}
+        var memberStatus string
+        if err:=tx.QueryRowContext(ctx,"SELECT status FROM workspace_memberships WHERE workspace_id=? AND principal_id=?",t.WorkspaceID,actor).Scan(&memberStatus);err!=nil||memberStatus!="active"{return ErrInvalid}
         return s.emit(ctx,tx,t.WorkspaceID,"team.manual_web_new_conversation","team_session",t.SessionID,&actor,
             map[string]any{"turn_id":t.TurnID,"conversation_generation":t.ConversationGeneration})
     })
@@ -151,7 +151,8 @@ func (s *Service) SubmitManualWebResponse(ctx context.Context,c SubmitManualWebR
     err:=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
         t,err:=scanManualWebTurn(tx.QueryRowContext(ctx,manualWebTurnSelect+" WHERE turn_id=?",c.TurnID))
         if err!=nil{return err}
-        if !s.workspaceMember(ctx,t.WorkspaceID,c.SubmittedBy){return ErrInvalid}
+        var memberStatus string
+        if err:=tx.QueryRowContext(ctx,"SELECT status FROM workspace_memberships WHERE workspace_id=? AND principal_id=?",t.WorkspaceID,c.SubmittedBy).Scan(&memberStatus);err!=nil||memberStatus!="active"{return ErrInvalid}
         if t.Status!="awaiting_input"||t.ConversationGeneration!=c.ConversationGeneration{return ErrSessionState}
         var round int64
         if err=tx.QueryRowContext(ctx,`SELECT tr.round_number FROM team_turn_requests tr

@@ -260,6 +260,29 @@ type runtimeConfig struct {
 
 type managedRefs struct{ RuntimeID, ModelID string }
 
+// A backend repair/update may replace the registered executable generation.
+// Use the original pinned executable if it still exists; otherwise rebind only
+// to the live, managed executable for the EXACT same registered backend.
+// Never translate CUDA to CPU/Vulkan or launch a path outside our runtime pool.
+func chooseManagedLlamaExecutable(configured,registered,runtimeName,backend,managedRoot string)(string,error){
+ if !strings.EqualFold(strings.TrimSpace(runtimeName),"llamacpp@"+strings.ToLower(strings.TrimSpace(backend))){
+  return "",fmt.Errorf("registered llama.cpp runtime %s differs from deployment backend %s; repair the matching backend",runtimeName,backend)
+ }
+ within:=func(path string)bool{
+  if !filepath.IsAbs(path){return false}
+  rel,err:=filepath.Rel(managedRoot,filepath.Clean(path))
+  return err==nil&&rel!=".."&&!strings.HasPrefix(rel,".."+string(os.PathSeparator))
+ }
+ valid:=func(path string)bool{
+  if !within(path){return false}
+  st,err:=os.Stat(path)
+  return err==nil&&!st.IsDir()&&(runtime.GOOS=="windows"||st.Mode()&0111!=0)
+ }
+ if valid(configured){return configured,nil}
+ if !valid(registered){return "",fmt.Errorf("managed llama.cpp %s executable is missing or inaccessible; repair or reinstall this backend from Models → Local → llama.cpp Settings before Agent Check",backend)}
+ return registered,nil
+}
+
 func (s *RuntimeSupervisor) resolve(ctx context.Context, deploymentID string) (runtimeConfig, managedRefs, string, error) {
 	var raw, node string
 	if err := s.db.QueryRowContext(ctx, `SELECT runtime_config_json,node_id FROM model_deployments WHERE id=? AND node_id IS NOT NULL`, deploymentID).Scan(&raw, &node); err != nil {
@@ -276,18 +299,22 @@ func (s *RuntimeSupervisor) resolve(ctx context.Context, deploymentID string) (r
 	if err := s.db.QueryRowContext(ctx, `SELECT runtime_id,id FROM managed_local_models WHERE deployment_id=? AND status IN ('qualifying','ready')`, deploymentID).Scan(&refs.RuntimeID, &refs.ModelID); err != nil {
 		return cfg, refs, "", err
 	}
-	var exe, modelPath string
-	if err := s.db.QueryRowContext(ctx, `SELECT executable_path FROM managed_local_runtimes WHERE id=? AND status='ready'`, refs.RuntimeID).Scan(&exe); err != nil {
+	var exe, runtimeName, modelPath string
+	if err := s.db.QueryRowContext(ctx, `SELECT executable_path,runtime_name FROM managed_local_runtimes WHERE id=? AND status='ready'`, refs.RuntimeID).Scan(&exe,&runtimeName); err != nil {
 		return cfg, refs, "", err
 	}
 	if err := s.db.QueryRowContext(ctx, `SELECT local_path FROM managed_local_models WHERE id=?`, refs.ModelID).Scan(&modelPath); err != nil {
 		return cfg, refs, "", err
 	}
-	// managed_local_runtimes records the currently preferred version of a runtime.
-	// Existing deployments may remain pinned to an older versioned executable;
-	// their immutable deployment config remains authoritative as long as it is
-	// still under the managed runtime root. Model inventory remains exact.
-	_ = exe
+	// managed_local_runtimes records the currently preferred trusted executable.
+	// Older pinned generations remain valid if present, but an obsolete path is
+	// rebound at launch to the registered SAME-backend executable. No model
+	// weights, model placement, or cloud credentials are changed.
+	if strings.HasPrefix(strings.ToLower(runtimeName),"llamacpp@") {
+		var chooseErr error
+		cfg.Executable,chooseErr=chooseManagedLlamaExecutable(cfg.Executable,exe,runtimeName,cfg.RuntimeBackend,filepath.Join(s.dataDir,"runtimes"))
+		if chooseErr!=nil{return cfg,refs,"",chooseErr}
+	}
 	if filepath.Clean(modelPath) != filepath.Clean(cfg.ModelPath) {
 		return cfg, refs, "", errors.New("managed model inventory does not match deployment config")
 	}
@@ -549,7 +576,7 @@ func validateLlamaPlacementDevices(executable,backend string,plan PlacementPlan)
  ctx,cancel:=context.WithTimeout(context.Background(),8*time.Second)
  defer cancel()
  out,err:=exec.CommandContext(ctx,executable,"--list-devices").CombinedOutput()
- if err!=nil{return fmt.Errorf("list devices from managed %s backend: %w: %s",backend,err,strings.TrimSpace(string(out)))}
+ if err!=nil{return fmt.Errorf("list devices from managed %s backend failed: %w: %s; use Models → Local → llama.cpp Settings → Repair runtime to restore the exact backend executable and its dependencies",backend,err,strings.TrimSpace(string(out)))}
  known:=map[string]bool{}
  // Different llama.cpp builds format the list as either "CUDA0: ..." or
  // "- CUDA0: ..."; some put devices after a log prefix. Match complete

@@ -51,6 +51,10 @@ func TestSQLiteManualTestbedRequiredForProductionAdmission(t *testing.T) {
 
 	inf := inference.NewService(db.SQL(), db, clock.Real{})
 	svc := NewService(db.SQL(), db, clock.Real{}, inf, t.TempDir(), nil)
+	// This integration fixture intentionally tests SQLite testbed lifecycle and
+	// admission, not runtime binary availability. Runtime preflight is covered
+	// separately by supervisor tests; do not launch a non-existent CUDA binary.
+	svc.supervisor = nil
 	if _, err := svc.AdmitModel(ctx, "dep", AdmissionCommand{Status: AdmissionAccepted, ActorPrincipalID: "admin"}); err == nil || !strings.Contains(err.Error(), "completed manual testbed") {
 		t.Fatalf("expected manual-testbed gate, got %v", err)
 	}
@@ -58,8 +62,29 @@ func TestSQLiteManualTestbedRequiredForProductionAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Seed one recorded mock inference response into the SQLite fixture.
+	// Production completion still rejects sessions with zero successful turns;
+	// these tests verify database semantics without requiring a GPU runtime.
+	if _,err:=db.SQL().ExecContext(ctx,`INSERT INTO model_testbed_turns
+	 (id,session_id,sequence_no,request_json,response_json,usage_json,metrics_json,synthetic_tool_probe,created_at)
+	 VALUES('test-turn',?,1,'{"prompt":"Reply with exactly ONEPANE_OK"}',
+	 '{"choices":[{"message":{"content":"ONEPANE_OK"}}]}','{}','{}',0,?)`,
+	 session.ID,now);err!=nil{t.Fatal(err)}
 	if err := svc.CompleteTestbed(ctx, session.ID); err != nil {
 		t.Fatal(err)
+	}
+	// A failed runtime launch must be abortable without violating the DB's
+	// active/completed/cancelled testbed lifecycle CHECK constraint.
+	failed, err := svc.StartTestbed(ctx, "dep", strPtr("admin"), "failing CUDA launch")
+	if err != nil { t.Fatal(err) }
+	if err := svc.AbortTestbed(ctx, failed.ID, "CUDA executable was missing"); err != nil { t.Fatal(err) }
+	aborted, err := svc.TestbedSession(ctx, failed.ID)
+	if err != nil { t.Fatal(err) }
+	if aborted.Status != "cancelled" { t.Fatalf("failed testbed should be cancelled, got %q",aborted.Status) }
+	sheetAfterAbort,err:=svc.SpecSheet(ctx,"dep")
+	if err!=nil {t.Fatal(err)}
+	if !strings.Contains(string(sheetAfterAbort.Qualification),"CUDA executable was missing"){
+	 t.Fatalf("missing failed Agent Check diagnostic evidence: %s",sheetAfterAbort.Qualification)
 	}
 	allowTools := false
 	sheet, err := svc.AdmitModel(ctx, "dep", AdmissionCommand{Status: AdmissionRestricted, ActorPrincipalID: "admin", Restrictions: ModelRestrictions{MaxContextTokens: 8192, DenyCapabilities: []string{"agent.tool"}, AllowToolUse: &allowTools, Notes: []string{"manual trial found weak tool calling"}}})

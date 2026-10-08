@@ -13,7 +13,7 @@ type quantInfo struct {
 }
 
 var quants = map[string]quantInfo{
-	"Q8_0": {1.0, 100}, "Q6_K": {0.78, 96}, "Q5_K_M": {0.68, 93}, "Q4_K_M": {0.58, 88}, "Q3_K_M": {0.48, 80}, "Q2_K": {0.40, 70},
+	"Q8_0": {1.0, 100}, "Q6_K": {0.78, 96}, "Q5_K_M": {0.68, 93}, "Q4_K_M": {0.58, 88}, "Q4_0": {0.56, 84}, "Q3_K_M": {0.48, 80}, "Q2_K": {0.40, 70},
 }
 
 func supportsUseCase(m ModelSpec, u UseCase) bool {

@@ -257,6 +257,22 @@ function a41ProvisionWebCouncilTabs(result){
   persist();
   return created;
 }
+const A41_WEB_MODEL_CHOICES={chatgpt:["GPT-6","GPT-5.6","GPT-5.5"],claude:["Claude Opus","Claude Sonnet","Claude Haiku"],gemini:["Gemini Pro","Gemini Flash"]};
+const A41_WEB_ROLE_CHOICES=["Independent researcher","Critical analyst","Alternative researcher","Technical specialist","Domain expert","Evidence reviewer","Devil's advocate","Methodology reviewer","Synthesis specialist"];
+function a41SeatOptions(values,selected,custom=false){return `<option value="">Select…</option>${values.map(v=>`<option value="${escapeHtml(v)}" ${v===selected?"selected":""}>${escapeHtml(v)}</option>`).join("")}<option value="__custom" ${custom?"selected":""}>Other / Custom…</option>`;}
+function a41BindSeatEditors(form){
+ $("[data-a41-seat]",form).forEach(row=>{
+  const provider=row.querySelector('[name="provider_id"]'),model=row.querySelector('[name="model_choice"]'),name=row.querySelector('[name="model_label"]');
+  const role=row.querySelector('[name="role_choice"]'),roleName=row.querySelector('[name="role_name"]');
+  if(model?.dataset.bound==="yes")return;
+  model.dataset.bound="yes";
+  const updateModels=()=>{const values=A41_WEB_MODEL_CHOICES[provider.value]||[];const old=name.value;model.innerHTML=a41SeatOptions(values,old,!!old&&!values.includes(old));if(!old)model.value="";name.hidden=model.value!=="__custom";};
+  provider.addEventListener("change",()=>{name.value="";updateModels();});
+  model.addEventListener("change",()=>{name.value=model.value==="__custom"?"":model.value;name.hidden=model.value!=="__custom";});
+  role.addEventListener("change",()=>{roleName.value=role.value==="__custom"?"":role.value;roleName.hidden=role.value!=="__custom";});
+  updateModels();
+ });
+}
 function a41WebSeatRow(seat){
   return `<div class="a41-council-seat" data-a41-seat>
     <div class="a41-council-seat-head"><strong>Web provider seat</strong><button type="button" class="btn" data-a41-remove-seat title="Remove this seat">Remove</button></div>
@@ -264,8 +280,8 @@ function a41WebSeatRow(seat){
       <label>Provider<select name="provider_id" required>
         ${A39_WEB_PROVIDERS.map(p=>`<option value="${escapeHtml(p.id)}" ${seat.provider_id===p.id?"selected":""}>${escapeHtml(p.name)}</option>`).join("")}
       </select></label>
-      <label>Selected web model<input name="model_label" required maxlength="128" value="${escapeHtml(seat.model_label||"")}" placeholder="e.g. the model selected in your browser"></label>
-      <label>Role<input name="role_name" required maxlength="120" value="${escapeHtml(seat.role_name||"Independent researcher")}"></label>
+      <label>Model used<select name="model_choice" aria-label="Model used"></select><input name="model_label" required maxlength="128" value="${escapeHtml(seat.model_label||"")}" placeholder="Exact model selected on provider site" ${(A41_WEB_MODEL_CHOICES[seat.provider_id]||[]).includes(seat.model_label)?"hidden":""}></label>
+      <label>Role<select name="role_choice">${a41SeatOptions(A41_WEB_ROLE_CHOICES,seat.role_name||"Independent researcher",!A41_WEB_ROLE_CHOICES.includes(seat.role_name||"Independent researcher"))}</select><input name="role_name" required maxlength="120" value="${escapeHtml(seat.role_name||"Independent researcher")}" ${A41_WEB_ROLE_CHOICES.includes(seat.role_name||"Independent researcher")?"hidden":""} placeholder="Custom Council role"></label>
     </div>
   </div>`;
 }
@@ -336,7 +352,7 @@ function a41OpenWebOnlyCouncilWizard(){
       syncChair();syncSynthesis();
     });
   };
-  bindRemove();
+  bindRemove();a41BindSeatEditors(form);
   const syncChair=()=>{
     const manual=$("#a41ChairMode").value==="manual";
     $("#a41ChairFields").hidden=!manual;
@@ -348,7 +364,7 @@ function a41OpenWebOnlyCouncilWizard(){
   const syncSynthesis=()=>{
     const control=$("#a41SynthesisSeat");
     const selected=control.options.length?Number(control.value):draft.synthesis_index;
-    control.innerHTML=$("[data-a41-seat]",form).map((el,i)=>{
+    control.innerHTML=$$("[data-a41-seat]",form).map((el,i)=>{
       const role=el.querySelector('[name="role_name"]')?.value||("Research seat "+(i+1));
       const provider=el.querySelector('[name="provider_id"]')?.value||"";
       return `<option value="${i}">${escapeHtml(provider+" · "+role)}</option>`;
@@ -357,6 +373,7 @@ function a41OpenWebOnlyCouncilWizard(){
   };
   $("#a41ChairMode").onchange=()=>{syncChair();syncSynthesis()};
   $("#a41CouncilSeats").addEventListener("change",syncSynthesis);
+  $("#a41CouncilSeats").addEventListener("input",syncSynthesis);
   syncChair();syncSynthesis();
   $("#a41AddSeat").onclick=()=>{
     const rows=$$("[data-a41-seat]",form);
@@ -365,7 +382,7 @@ function a41OpenWebOnlyCouncilWizard(){
     host.insertAdjacentHTML("beforeend",a41WebSeatRow({
       provider_id:"chatgpt",model_label:"",role_name:"Independent reviewer"
     }));
-    bindRemove();
+    bindRemove();a41BindSeatEditors(form);
     syncChair();syncSynthesis();
   };
   form.onsubmit=async e=>{

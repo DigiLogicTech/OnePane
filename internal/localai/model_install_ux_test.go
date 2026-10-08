@@ -52,3 +52,16 @@ func TestColibriProvisionalContext(t *testing.T) {
         if got:=initialColibriContext(declared);got!=tc.initial{t.Errorf("initial %s: got %d, want %d",tc.data,got,tc.initial)}
     }
 }
+
+func TestOperatorMemoryOverrideIsExplicitOnly(t *testing.T) {
+    rec:=Recommendation{
+        FitLevel:FitTooTight,
+        Placement:PlacementPlan{Experimental:true,Notes:[]string{"explicit operator override of estimated resource fit"}},
+    }
+    if !isOperatorMemoryOverride(rec){t.Fatal("expected explicit opt-in to be honored by runtime admission")}
+    rec.Placement.Notes=nil
+    if isOperatorMemoryOverride(rec){t.Fatal("experimental runtime features are not resource overrides")}
+    rec.Placement.Notes=[]string{"explicit operator override of estimated resource fit"}
+    rec.FitLevel=FitGood
+    if isOperatorMemoryOverride(rec){t.Fatal("fitting model must not bypass normal residency checks")}
+}

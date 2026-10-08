@@ -403,3 +403,17 @@
 .qa-form label.install-override-option{display:flex;align-items:flex-start;gap:10px;cursor:pointer;color:var(--text);font-size:13px;line-height:1.5}
 .qa-form .install-override-option input[type="checkbox"]{box-sizing:border-box;appearance:auto;flex:0 0 18px;width:18px!important;min-width:18px;height:18px;margin:1px 0 0;padding:0;border:1px solid var(--border);border-radius:4px;accent-color:var(--accent);box-shadow:none!important;outline:none}
 .qa-form .install-override-option input[type="checkbox"]:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px;box-shadow:none!important}
+
+/* User menu uses the same theme tokens, not native browser surface colours. */
+.onepane-account-menu{width:min(335px,calc(100vw - 20px));box-sizing:border-box;padding:12px;max-height:min(560px,calc(100dvh - 60px));overflow-y:auto}
+.account-menu-header{display:flex;align-items:center;gap:10px;padding:5px 4px 13px}
+.account-menu-header>div{min-width:0;overflow-wrap:anywhere}
+.account-menu-avatar{width:38px;height:38px;flex:0 0 38px;display:grid;place-items:center;background:var(--accent-soft);color:var(--text);border:1px solid var(--border);border-radius:50%;font-weight:750}
+.account-menu-workspace{display:grid;gap:5px;padding:12px;background:var(--panel-2);border:1px solid var(--border);border-radius:9px}
+.account-menu-workspace details{font-size:11px;color:var(--muted);max-width:100%;overflow-wrap:anywhere}
+.account-menu-workspace summary{cursor:pointer}
+.account-menu-workspace code{display:block;margin-top:5px;word-break:break-all;white-space:normal}
+.account-menu-links{display:grid;gap:3px;border-bottom:1px solid var(--border);padding:10px 0}
+.account-menu-link{background:transparent;border:0;text-align:left;color:var(--text);width:100%;border-radius:7px;padding:10px 8px;cursor:pointer;font:inherit}
+.account-menu-link:hover,.account-menu-link:focus-visible{background:var(--panel-2);outline:2px solid transparent}
+.account-menu-signout{margin-top:6px;color:var(--text)}

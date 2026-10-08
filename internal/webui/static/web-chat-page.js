@@ -9,7 +9,7 @@ async function a39AddManualWebSeat(team){
       <label>Provider<select name="provider_id">
         ${A39_WEB_PROVIDERS.map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("")}
       </select></label>
-      <label>Model label<input name="model_label" required maxlength="128" placeholder="e.g. GPT-6 High, Claude Sonnet" value="GPT-6 High"></label>
+      <label>Model label<input name="model_label" required maxlength="128" placeholder="Enter the exact model selected in the provider website"></label>
       <label>Seat name<input name="display_name" required maxlength="120" value="Web Research Consultant"></label>
       <label>Research role<input name="role_name" required maxlength="120" value="Independent researcher"></label>
       <button class="btn primary" type="submit">Add consultation-only seat</button>
@@ -161,6 +161,7 @@ async function renderWebChat(){
         <div class="card-header"><div><div class="card-title">${escape(provider.name)} Web</div><div class="list-meta">Subscription-based conversation · manual use</div></div></div>
         <div class="widget-body">
           <p>Open this provider in your normal browser, sign in there, then paste a Council prompt. OnePane doesn't access your session or send requests on your behalf.</p>
+          <p class="list-meta">Review Council prompts for private or sensitive project information before sharing with external cloud providers.</p>
           <div class="toolbar">
             ${provider.url?`<a class="btn primary" href="${escape(provider.url)}" target="_blank" rel="noopener noreferrer">Open ${escape(provider.name)}</a>`:""}
             <button class="btn" id="a39WebNewConversation" type="button">New Conversation</button>

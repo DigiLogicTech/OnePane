@@ -137,8 +137,12 @@ func (s *Service) RegisterColibriFolder(ctx context.Context, cmd RegisterColibri
 	if cmd.DisplayName == "" {
 		cmd.DisplayName = cmd.ModelRef
 	}
+	// Context 0 means automatic: read the model declaration, but never mark it verified.
 	if cmd.ContextTokens <= 0 {
-		cmd.ContextTokens = 8192
+		cmd.ContextTokens = colibriAutoContext(cmd.ModelPath)
+	}
+	if cmd.ContextTokens > colibriInitialContextCap {
+		return out, fmt.Errorf("initial Colibri context exceeds safe %d-token cap; qualify a lower context before increasing it", colibriInitialContextCap)
 	}
 	if !filepath.IsAbs(cmd.ModelPath) {
 		return out, errors.New("Colibri model path must be absolute")

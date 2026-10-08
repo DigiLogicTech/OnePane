@@ -2,7 +2,7 @@ name: Alpha 3.2 Integration CI
 
 on:
   push:
-    branches: [alpha3.2-integration, alpha3.2-windows-stabilization, alpha3.2-qa-round2-remediation, alpha3.2-qa-round3-remediation]
+    branches: [alpha3.2-integration, alpha3.2-windows-stabilization, alpha3.2-qa-round2-remediation, alpha3.2-qa-round3-remediation, alpha3.2-next-release-remediation]
   workflow_dispatch:
     inputs:
       run_hosted_smoke:
@@ -99,6 +99,7 @@ jobs:
           node --check internal/webui/static/model-agentcheck-diagnostics.js
           node --check internal/webui/static/qa-round2-discovery-logs.js
           node --check internal/webui/static/host-metrics.js
+          node --check internal/webui/static/nodes-management.js
           node --check internal/webui/static/model-qa-remediation.js
           ! grep -F "type=\"module\"" internal/webui/static/index.html
           ! grep -F "from './chat-commands.js'" internal/webui/static/app.js
@@ -317,9 +318,22 @@ jobs:
             Assert-OnePaneVersion
             Assert-NativeUIReady
             if ((Get-Content -Raw $sentinel).Trim() -ne 'preserve-alpha3.2') { throw 'Durable data changed across reinstall' }
+            # Regression: legacy installs may have Models/Projects underneath
+            # the application directory. Uninstall MUST preserve both.
+            $embeddedModels = Join-Path $install 'Models'
+            $embeddedProjects = Join-Path $install 'Projects'
+            New-Item -ItemType Directory -Force -Path $embeddedModels,$embeddedProjects | Out-Null
+            Set-Content -LiteralPath (Join-Path $embeddedModels 'preserve.gguf') -Value 'model-sentinel' -NoNewline
+            Set-Content -LiteralPath (Join-Path $embeddedProjects 'preserve.txt') -Value 'project-sentinel' -NoNewline
+            Invoke-OnePaneSetup @('--elevated','--silent','--no-launch','--uninstall')
+            if ((Get-Content -Raw (Join-Path $embeddedModels 'preserve.gguf')) -ne 'model-sentinel') { throw 'Uninstaller deleted models within application directory' }
+            if ((Get-Content -Raw (Join-Path $embeddedProjects 'preserve.txt')) -ne 'project-sentinel') { throw 'Uninstaller deleted projects within application directory' }
+            if (Test-Path (Join-Path $install 'OnePane.Backend.exe')) { throw 'Application executable not removed on uninstall' }
+            Write-Host 'Verified model and Project survival inside legacy install root'
           } finally {
             Get-Process 'OnePane.Desktop' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
             try { Invoke-OnePaneSetup @('--elevated','--silent','--no-launch','--uninstall') } catch { Write-Warning $_ }
+            if (Test-Path $root) { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
           }
 
   ubuntu-installed-smoke:

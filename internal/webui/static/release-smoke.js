@@ -74,7 +74,7 @@
     if(path==="/v1/provider-oauth/connections")return json([]);
     if(path==="/v1/local-ai/discovery")return json({models:[],source_errors:{}});
     if(path==="/v1/local-ai/llama-runtimes")return json([]);
-    if(["/v1/providers","/v1/events","/v1/agent-runtime-presets","/v1/scheduler/candidates","/v1/local-ai/catalog","/v1/skills/packages","/v1/skills/assignments","/v1/agent-profiles","/v1/teams","/v1/team-presets","/v1/provider-oauth/configs"].includes(path))return json([]);
+    if(["/v1/providers","/v1/events","/v1/agent-runtime-presets","/v1/scheduler/candidates","/v1/skills/packages","/v1/skills/assignments","/v1/agent-profiles","/v1/teams","/v1/team-presets","/v1/provider-oauth/configs"].includes(path))return json([]);
     if(path==="/v1/local-ai/catalog")return json(discoverInstalledFixture?[{model_ref:"google/gemma-3-1b-it",display_name:"Gemma 3 1B IT",installable:true,installable_quantizations:["Q4_K_M"],context_length:8192}]:[]);
     if(path==="/v1/local-ai/deployments")return json({deployments:discoverInstalledFixture?[{deployment_id:"dep-gemma-qa",model_ref:"google/gemma-3-1b-it",display_name:"Gemma 3 1B IT",status:"ready",runtime_name:"llamacpp"}]:[]});
     if(path==="/v1/local-ai/components")return json({});

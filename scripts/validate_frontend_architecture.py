@@ -19,7 +19,8 @@ def definitions(src):
             out.setdefault(match.group(1),[]).append(line_no)
     return out
 
-expected_foundation_blob="2484c9e8d60086785ffbbeb6aae099453411bd89"
+# Reviewed change: Web Chat quick action and route in the mobile navigation sheet.
+expected_foundation_blob="80600c5556674945a1b19eff8a6a6508e09f3c00"
 foundation_bytes=foundation.encode("utf-8")
 actual_foundation_blob=hashlib.sha1(b"blob "+str(len(foundation_bytes)).encode("ascii")+b"\0"+foundation_bytes).hexdigest()
 

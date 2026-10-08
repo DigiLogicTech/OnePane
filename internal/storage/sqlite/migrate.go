@@ -365,6 +365,16 @@ func (d *DB) applyMigration(ctx context.Context, m migration) error {
 		return fmt.Errorf("inspect migration %s: %w", m.filename, err)
 	}
 
+	// Version 35 rebuilds a referenced parent table. SQLite's default
+	// foreign_keys=ON performs an implicit DELETE when DROP TABLE executes,
+	// even if defer_foreign_keys=ON is set inside the transaction. On populated
+	// installations that makes COMMIT fail with SQLITE_CONSTRAINT_FOREIGNKEY.
+	// Use a connection-pinned, FK-disabled transaction, validate every
+	// relationship before commit, then re-enable FK enforcement.
+	if m.version == 35 {
+		return d.applyReferencedParentRebuild(ctx, m)
+	}
+
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin migration %s: %w", m.filename, err)
@@ -384,4 +394,66 @@ func (d *DB) applyMigration(ctx context.Context, m migration) error {
 		return fmt.Errorf("commit migration %s: %w", m.filename, err)
 	}
 	return nil
+}
+
+
+// applyReferencedParentRebuild is deliberately limited to the reviewed v0035
+// schema rebuild, never to arbitrary future migrations. It preserves the
+// original migration bytes/checksum for RC3 databases where v0035 succeeded
+// on an empty store. FK enforcement changes are connection-local in SQLite,
+// so PRAGMA, transaction, verification and restoration share one connection.
+func (d *DB) applyReferencedParentRebuild(ctx context.Context, m migration) (resultErr error) {
+ conn,err:=d.db.Conn(ctx)
+ if err!=nil{return fmt.Errorf("open dedicated migration connection: %w",err)}
+ defer conn.Close()
+
+ // Disable enforcement before BEGIN; PRAGMA foreign_keys has no effect once
+ // a transaction is active. The migration is only run during bootstrap.
+ if _,err=conn.ExecContext(ctx,"PRAGMA foreign_keys=OFF");err!=nil{
+  return fmt.Errorf("disable foreign keys for referenced parent rebuild: %w",err)
+ }
+ defer func(){
+  // Restore enforcement even when the caller context has been cancelled.
+  cleanup,cancel:=context.WithTimeout(context.Background(),5*time.Second)
+  defer cancel()
+  if _,e:=conn.ExecContext(cleanup,"PRAGMA foreign_keys=ON");e!=nil {
+   if resultErr==nil{resultErr=fmt.Errorf("restore SQLite foreign-key enforcement: %w",e)}
+  }else{
+   var enabled int
+   if e:=conn.QueryRowContext(cleanup,"PRAGMA foreign_keys").Scan(&enabled);e!=nil||enabled!=1 {
+    if resultErr==nil{resultErr=fmt.Errorf("SQLite foreign-key enforcement not restored: enabled=%d error=%v",enabled,e)}
+   }
+  }
+ }()
+ var fkEnabled int
+ if err=conn.QueryRowContext(ctx,"PRAGMA foreign_keys").Scan(&fkEnabled);err!=nil||fkEnabled!=0{
+  return fmt.Errorf("foreign key suspension was not active: enabled=%d err=%v",fkEnabled,err)
+ }
+ tx,err:=conn.BeginTx(ctx,nil)
+ if err!=nil{return fmt.Errorf("begin referenced parent rebuild %s: %w",m.filename,err)}
+ defer tx.Rollback()
+ if _,err=tx.ExecContext(ctx,string(m.body));err!=nil{
+  return fmt.Errorf("execute referenced parent rebuild %s: %w",m.filename,err)
+ }
+ // Never commit a migration that damages actual existing relationships.
+ rows,err:=tx.QueryContext(ctx,"PRAGMA foreign_key_check")
+ if err!=nil{return fmt.Errorf("check relationships after %s: %w",m.filename,err)}
+ if rows.Next(){
+  var table,parent string
+  var rowid sql.NullInt64
+  var fkID int
+  scanErr:=rows.Scan(&table,&rowid,&parent,&fkID)
+  rows.Close()
+  if scanErr!=nil{return fmt.Errorf("inspect foreign-key violation after %s: %w",m.filename,scanErr)}
+  return fmt.Errorf("foreign-key violation after %s: table=%s rowid=%v referenced=%s fk=%d",m.filename,table,rowid,parent,fkID)
+ }
+ if err=rows.Err();err!=nil{rows.Close();return fmt.Errorf("scan foreign-key validation: %w",err)}
+ if err=rows.Close();err!=nil{return fmt.Errorf("close foreign-key validation: %w",err)}
+ if _,err=tx.ExecContext(ctx,
+   `INSERT INTO schema_migrations(version,name,checksum,applied_at) VALUES(?,?,?,?)`,
+   m.version,m.name,m.checksum,time.Now().UTC().UnixMilli());err!=nil{
+  return fmt.Errorf("record referenced parent migration %s: %w",m.filename,err)
+ }
+ if err=tx.Commit();err!=nil{return fmt.Errorf("commit referenced parent migration %s: %w",m.filename,err)}
+ return nil
 }

@@ -5,6 +5,12 @@ async function a31LoadActiveInstallJobs(){
   if(!onepaneWorkspace)return [];
   return a31Array(await apiRequest(`/v1/local-ai/install-jobs?workspace_id=${encodeURIComponent(onepaneWorkspace)}`).catch(()=>[]))
 }
+async function a31CancelQueuedInstall(jobID){
+ const job=await apiRequest(`/v1/local-ai/install-jobs/${encodeURIComponent(jobID)}/cancel`,{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace})});
+ notice("Queued model download cancelled.");
+ await a31RefreshDownloadMonitor();a31OpenDownloadManager();
+ return job;
+}
 function a31InstallJobTitle(j){return j.model_ref||"Local model install"}
 function a31InstallJobProgressMarkup(j){
   const pct=Math.max(0,Math.min(100,Math.round(Number(j.progress_pct||0)))),done=Number(j.bytes_downloaded||0),total=Number(j.bytes_total||0);
@@ -17,8 +23,9 @@ function a31DrawDownloadIndicator(){
 }
 function a31OpenDownloadManager(){
   const rows=a31ActiveInstallJobs;
-  openModal("Background model downloads",rows.length?`<div class="model-download-list">${rows.map(j=>`<div class="model-download-row"><div class="model-download-head"><div><strong>${escapeHtml(a31InstallJobTitle(j))}</strong><div class="list-meta">${escapeHtml(j.quantization||"")} · ${escapeHtml(titleCase(String(j.status||"queued")))}</div></div><button class="btn" data-a31-view-install="${escapeHtml(j.id)}">View progress</button></div><div class="model-download-progress"><span style="width:${Math.max(0,Math.min(100,Number(j.progress_pct||0)))}%"></span></div><div class="list-meta">${escapeHtml(j.current_artifact||"Queued")}</div></div>`).join("")}</div>`:'<div class="empty-state compact">No active model downloads.</div>');
-  $$("[data-a31-view-install]").forEach(b=>b.onclick=()=>a31OpenInstallProgress(b.dataset.a31ViewInstall))
+  openModal("Background model downloads",rows.length?`<div class="model-download-list">${rows.map(j=>`<div class="model-download-row"><div class="model-download-head"><div><strong>${escapeHtml(a31InstallJobTitle(j))}</strong><div class="list-meta">${escapeHtml(j.quantization||"")} · ${escapeHtml(titleCase(String(j.status||"queued")))}</div></div><div class="toolbar"><button class="btn" data-a31-view-install="${escapeHtml(j.id)}">View progress</button>${["queued","interrupted"].includes(String(j.status))?`<button class="btn danger" data-a31-cancel-install="${escapeHtml(j.id)}">Cancel</button>`:""}</div></div><div class="model-download-progress"><span style="width:${Math.max(0,Math.min(100,Number(j.progress_pct||0)))}%"></span></div><div class="list-meta">${escapeHtml(j.current_artifact||"Queued")}</div></div>`).join("")}</div>`:'<div class="empty-state compact">No active model downloads.</div>');
+  $$("[data-a31-view-install]").forEach(b=>b.onclick=()=>a31OpenInstallProgress(b.dataset.a31ViewInstall));
+  $$("[data-a31-cancel-install]").forEach(b=>b.onclick=()=>a31ConfirmAction("Cancel queued download","Cancel this queued model installation? Active downloads are not interrupted by this action.","Cancel download",()=>a31CancelQueuedInstall(b.dataset.a31CancelInstall)));
 }
 async function a31OpenInstallProgress(jobID){
   let first;

@@ -285,8 +285,8 @@ function a31PersistOperationsLayout(){
 
 /* Operations */
 function a31OperationsTabs(){
-  const tabs=[["overview","Overview"],["activity","Activity"],["logs","Logs"],["health","Health"],["nodes","Nodes"],["providers","Providers"],["recovery","Recovery"]];
-  return `<div class="subtabs operations-subtabs">${tabs.map(([v,l])=>`<button class="subtab ${a31OperationsView===v?'active':''}" data-a31-ops="${v}">${l}</button>`).join("")}</div>`;
+  const tabs=[["overview","Overview"],["activity","Activity"],["health","Health"],["recovery","Recovery"]];
+  return `<div class="operations-navigation"><div class="subtabs operations-subtabs">${tabs.map(([v,l])=>`<button class="subtab ${a31OperationsView===v?'active':''}" data-a31-ops="${v}">${l}</button>`).join("")}</div><div class="toolbar compact operations-shortcuts"><button class="btn" data-a31-ops="nodes">Nodes ↗</button><button class="btn" data-a31-ops="providers">Providers ↗</button><button class="btn" data-a31-ops="logs">Logs</button></div></div>`;
 }
 function a31BindOperationsTabs(){
   $$("[data-a31-ops]").forEach(b=>b.onclick=()=>{const v=b.dataset.a31Ops;if(v==="logs"){a31ToggleLogs();return}if(v==="nodes"){openRoute("nodes");return}if(v==="providers"){a31SetModelView("cloud");openRoute("models");return}a31SetOperationsView(v)});
@@ -344,6 +344,22 @@ async function a31RecoveryContent(){
   const empty=componentsReported&&tasksReported&&!compRows.length&&!failed.length?'<div class="empty-state compact">No degraded components or failed/blocked tasks require recovery.</div>':"";
   return `<section class="panel-card"><div class="card-header recovery-card-header"><div><div class="card-title">Recovery</div><div class="list-meta">Actionable degraded state only; OnePane does not reset healthy components.</div></div><button class="btn" id="a31RecoveryRefresh">Refresh health</button></div><div class="widget-body"><div class="recovery-list">${unavailable}${compRows.map(c=>`<div class="recovery-row"><div><strong>${escapeHtml(c.display_name||c.id)}</strong><div class="list-meta">${escapeHtml(c.last_error||c.state||"degraded")}</div></div><button class="btn" data-a31-repair-component="${escapeHtml(c.id)}">Repair</button></div>`).join("")}${failed.map(t=>`<div class="recovery-row"><div><strong>Task ${escapeHtml(t.id||"")}</strong><div class="list-meta">${escapeHtml(t.objective||t.state||"")}</div></div><button class="btn" data-route="tasks">Open Tasks</button></div>`).join("")}${empty}</div></div></section>`
 }
+/* A concise always-visible command-centre summary. Never fabricate missing
+ * telemetry: values are derived only from the reported operational feeds. */
+function a43OperationsPulse(){
+ const tasks=a31Array(liveOps.tasks),nodes=a31Array(liveOps.nodes);
+ const running=tasks.filter(t=>!["complete","cancelled","failed"].includes(String(t.state||"").toLowerCase()));
+ const actionable=liveOpsAttentionReported()?ATTENTION_ITEMS.length:null;
+ const health=!liveOpsReported("health")?"Not reported":liveOps.health==="ok"?"Healthy":String(liveOps.health||"Degraded");
+ const online=liveOpsReported("nodes")?nodes.filter(n=>!["offline","failed","unavailable","stale"].includes(String(n.status||n.state||"").toLowerCase())).length:null;
+ const cells=[
+  ["Control plane",health],
+  ["Active tasks",liveOpsReported("tasks")?String(running.length):"Not reported"],
+  ["Healthy nodes",online===null?"Not reported":online+" / "+nodes.length],
+  ["Attention",actionable===null?"Not reported":String(actionable)]
+ ];
+ return `<div class="operations-pulse" aria-label="Current operational summary">${cells.map(([label,value],i)=>`<div class="operations-pulse-cell"><span class="list-meta">${escapeHtml(label)}</span><strong class="${i===3&&Number(value)>0?"attention":""}">${escapeHtml(value)}</strong></div>`).join("")}</div>`;
+}
 let a31OperationsRefreshOnly=0;
 const a31RefreshOperationalDataBase=refreshOperationalDataQA;
 refreshOperationalDataQA=async function(force=false){
@@ -353,6 +369,7 @@ refreshOperationalDataQA=async function(force=false){
 };
 function a31RefreshOperationsData(){
   if(!a31RouteIs("operations")||a31OperationsView!=="overview")return false;
+  const pulse=$("#a43OperationsPulse");if(pulse)pulse.innerHTML=a43OperationsPulse();
   const root=$("#operationsLayout");if(!root)return false;
   if(root.classList.contains("layout-interacting")||root.dataset.layoutSaving==="true"){root.dataset.layoutRefreshPending="true";return true}
   for(const w of a31OperationsLayoutItems()||[]){
@@ -364,8 +381,8 @@ function a31RefreshOperationsData(){
 renderOperations=async function(){
   if(a31OperationsRefreshOnly>0&&a31RefreshOperationsData())return;
   const edit=a31OperationsEditing();
-  const actions=`<button class="btn" id="a35OperationsRefresh">Refresh</button><button class="btn ${edit?'primary':''}" id="editOperations">${edit?'Done':'Edit layout'}</button>${edit?'<button class="btn" id="addOperationsComponent">Add component</button><button class="btn" id="resetOperationsLayout">Reset layout</button>':""}`;
-  $("#viewHost").innerHTML=`<section class="page">${pageHeader("Operations","System overview, activity, health and recovery",actions)}${a31OperationsTabs()}<div id="a31OperationsBody"></div></section>`;
+  const actions=`<button class="btn" id="a35OperationsRefresh">Refresh</button><button class="btn ${edit?'primary':''}" id="editOperations">${edit?'Save layout':'Edit layout'}</button>${edit?'<button class="btn" id="a43CancelOperationsLayout">Cancel</button><button class="btn" id="addOperationsComponent">Add component</button><button class="btn" id="resetOperationsLayout">Reset layout</button>':""}`;
+  $("#viewHost").innerHTML=`<section class="page operations-command-center">${pageHeader("Operations","Live status, current workloads and actionable recovery",actions)}<div id="a43OperationsPulse">${a43OperationsPulse()}</div>${a31OperationsTabs()}<div id="a31OperationsBody"></div></section>`;
   a31BindOperationsTabs();
   const body=$("#a31OperationsBody");
   if(a31OperationsView==="overview"){body.innerHTML=`<div class="operations-layout-grid ${edit?'editing':''}" id="operationsLayout"></div>`;a31RenderOperationsGrid()}
@@ -374,7 +391,8 @@ renderOperations=async function(){
   else if(a31OperationsView==="recovery"){body.innerHTML=await a31RecoveryContent();$("#a31RecoveryRefresh")?.addEventListener("click",async()=>{await refreshOperationalDataQA(true);renderOperations()});$$("[data-a31-repair-component]").forEach(b=>b.onclick=()=>a31ComponentAction(b.dataset.a31RepairComponent,"repair"))}
   $("#a35OperationsRefresh")?.addEventListener("click",async e=>{const b=e.currentTarget;b.disabled=true;b.textContent="Refreshing…";try{await refreshOperationalDataQA(true);await renderOperations()}catch(ex){notice("Operations refresh failed: "+ex.message,"bad");b.disabled=false;b.textContent="Refresh"}});
   $("#editOperations")?.addEventListener("click",()=>{if(a31OperationsEditing())a31CommitOperationsEdit();else a31BeginOperationsEdit();renderOperations()});
-  $("#resetOperationsLayout")?.addEventListener("click",()=>{a31OperationsDraftWidgets=defaultState().operationsWidgets.map(x=>({...x}));a31NormalizeLayout(a31OperationsDraftWidgets);renderOperations()});
+  $("#a43CancelOperationsLayout")?.addEventListener("click",()=>{a31CancelOperationsEdit();renderOperations()});
+  $("#resetOperationsLayout")?.addEventListener("click",()=>{if(!confirm("Reset the editable layout to defaults? Saved layout is preserved until Save layout."))return;a31OperationsDraftWidgets=defaultState().operationsWidgets.map(x=>({...x}));a31NormalizeLayout(a31OperationsDraftWidgets);renderOperations()});
   $("#addOperationsComponent")?.addEventListener("click",openOperationsComponentPicker);
   bindViewActions($("#viewHost"));
 }

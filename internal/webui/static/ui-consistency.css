@@ -434,3 +434,21 @@
 .workspace-page .workspace-grid{container-type:inline-size}
 @container (max-width:470px){.workspace-widget .widget-handle{display:flex;flex-wrap:wrap}}
 @media(max-width:650px){.project-portfolio-toolbar{flex-wrap:wrap}.project-portfolio-toolbar input,.project-portfolio-toolbar select{width:100%;flex:1 1 100%}}
+
+/* Post-RC4 command centre and workspace hierarchy, theme-neutral. */
+.operations-command-center{min-width:0}
+.operations-navigation{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.operations-shortcuts{margin-left:auto}
+.operations-pulse{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:10px 0 14px;min-width:0}
+.operations-pulse-cell{display:grid;gap:6px;min-width:0;padding:13px 16px;background:var(--panel);border:1px solid var(--border);border-radius:11px}
+.operations-pulse-cell strong{font-size:clamp(15px,1.7vw,23px);line-height:1.2;overflow-wrap:anywhere}
+.operations-pulse-cell strong.attention{color:var(--warn,var(--text))}
+.workspace-page .workspace-context-bar{display:flex;gap:12px;align-items:center;justify-content:space-between}
+.a43-workspace-context{display:flex;flex-wrap:wrap;gap:7px;min-width:0}
+.a43-context-chip{display:flex;align-items:center;gap:7px;background:var(--panel-2);border:1px solid var(--border);padding:6px 10px;border-radius:8px;max-width:100%}
+.a43-context-chip small{color:var(--muted);font-size:11px}
+.a43-context-chip strong{max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.a43-workspace-switch{display:flex;align-items:center;gap:10px}
+.a43-workspace-switch select,#a43WorkspacePreset{color:var(--text);background:var(--panel-2);border:1px solid var(--border);padding:8px;border-radius:8px;max-width:100%}
+@media(max-width:850px){.operations-pulse{grid-template-columns:repeat(2,minmax(0,1fr))}.workspace-page .workspace-context-bar{align-items:flex-start;flex-direction:column}}
+@media(max-width:480px){.operations-pulse{grid-template-columns:1fr 1fr}.operations-shortcuts{margin-left:0}.a43-context-chip{width:auto}}

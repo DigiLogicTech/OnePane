@@ -2,7 +2,7 @@ name: Alpha 3.3 RC2 Models QA Remediation
 
 on:
   push:
-    branches: [alpha3.2-integration, alpha3.2-windows-stabilization, alpha3.2-qa-round2-remediation, alpha3.2-qa-round3-remediation, alpha3.2-next-release-remediation, feature/colibri-tiered-inference, release/alpha3.3-consolidated-qa, fix/alpha3.3-qa-models-rc2, fix/alpha3.3-upgrade-startup-diagnostics, fix/alpha3.3-model-install-colibri-ux, fix/alpha3.3-qa-consolidated-rc3, fix/alpha3.3-rc4-migration-upgrade]
+    branches: [alpha3.2-integration, alpha3.2-windows-stabilization, alpha3.2-qa-round2-remediation, alpha3.2-qa-round3-remediation, alpha3.2-next-release-remediation, feature/colibri-tiered-inference, release/alpha3.3-consolidated-qa, fix/alpha3.3-qa-models-rc2, fix/alpha3.3-upgrade-startup-diagnostics, fix/alpha3.3-model-install-colibri-ux, fix/alpha3.3-qa-consolidated-rc3, fix/alpha3.3-rc4-migration-upgrade, feature/alpha3.3-rc5-approved-ux, release/alpha3.3-rc6-approved-ux]
   workflow_dispatch:
     inputs:
       run_hosted_smoke:
@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 env:
-  ONEPANE_VERSION: 0.1.0-alpha.3.3-rc.4
+  ONEPANE_VERSION: 0.1.0-alpha.3.3-rc.6
 
 jobs:
   validate:
@@ -203,7 +203,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: OnePane-alpha3.3-rc4-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc6-source-native-${{ github.sha }}
           path: |
             dist/**
           if-no-files-found: warn
@@ -246,7 +246,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.3-rc4-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc6-source-native-${{ github.sha }}
           path: artifact
       - name: Install launch uninstall reinstall
         shell: pwsh
@@ -317,8 +317,8 @@ jobs:
           try {
             # Fresh-only CI was insufficient: reproduce the supported RC2 -> RC4
             # in-place upgrade, preserving the actual Windows ProgramData/config/DB.
-            $rc2Tag = 'v0.1.0-alpha.3.3-rc.2'
-            $rc2Name = 'OnePane-0.1.0-alpha.3.3-rc.2-windows-x64-setup.exe'
+            $rc2Tag = 'v0.1.0-alpha.3.3-rc.4'
+            $rc2Name = 'OnePane-0.1.0-alpha.3.3-rc.4-windows-x64-setup.exe'
             $rc2Base = "https://github.com/DigiLogicTech/OnePane/releases/download/$rc2Tag"
             $rc2Installer = Join-Path $root $rc2Name
             $rc2Checksum = Join-Path $root "$rc2Name.sha256"
@@ -335,7 +335,7 @@ jobs:
             if ($oldSetup.ExitCode -ne 0) { throw "RC2 baseline installation failed: $($oldSetup.ExitCode)" }
             Wait-OnePaneHealth
             $prior = Invoke-RestMethod -Uri 'http://127.0.0.1:18181/v1/about' -TimeoutSec 5
-            if ($prior.version -ne '0.1.0-alpha.3.3-rc.2') { throw "RC2 baseline version mismatch: $($prior.version)" }
+            if ($prior.version -ne '0.1.0-alpha.3.3-rc.4') { throw "RC2 baseline version mismatch: $($prior.version)" }
             $configPath = Join-Path $env:ProgramData 'OnePane\config.yaml'
             $priorConfigHash = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
             $upgradeSentinel = Join-Path $env:ProgramData 'OnePane\qa-upgrade-preserve.txt'
@@ -406,7 +406,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.3-rc4-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc6-source-native-${{ github.sha }}
           path: artifact
       - name: Install verify and preserve data
         shell: bash
@@ -437,9 +437,9 @@ jobs:
 
 
   qa-prerelease:
-    name: Publish Alpha 3.3 RC4 for operator QA
+    name: Publish Alpha 3.3 RC6 for operator QA
     needs: [validate, runtime_artifact_smoke, windows-installed-smoke, ubuntu-installed-smoke]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/fix/alpha3.3-rc4-migration-upgrade' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release/alpha3.3-rc6-approved-ux' }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     permissions:
@@ -448,7 +448,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.3-rc4-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc6-source-native-${{ github.sha }}
           path: artifacts
       - name: Verify manifest and publish immutable QA prerelease
         shell: bash
@@ -474,6 +474,6 @@ jobs:
           fi
           gh release create "$tag" prerelease-assets/* \
             --target "$GITHUB_SHA" \
-            --title "OnePane Alpha 3.3 RC4 — populated-upgrade recovery" \
+            --title "OnePane Alpha 3.3 RC6 — approved UX remediation" \
             --prerelease \
-            --notes "Alpha 3.3 RC4 repairs the RC3 SQLite v0035 foreign-key migration failure found when upgrading a real populated RC2 database. The unchanged v0035 migration is executed on a dedicated connection with FK enforcement suspended only for its transactional parent-table rebuild; foreign_key_check must pass before commit, and enforcement is restored. Includes new populated RC2-with-managed-model-FK upgrade regression, pre-migration backup and integrity gates, plus all RC3 model, profile, Secrets, Nodes, Projects and Workspace QA remediation. Fresh and RC2 upgrade Windows/Ubuntu installed-product smoke tests passed before publication. Do not remove user database, models or projects. Embedded native provider browser is not yet included; actual GPU/Colibri remains operator QA."
+            --notes "Alpha 3.3 RC6 consolidates the completed RC5 UX development changes and adds integrated isolated native WebView2 provider workspace on Windows with external browser fallback, 65/35 provider/Prompt-and-Reply layout, refreshed Operations live metrics/navigation, Project/Workspace task surfaces, responsive Workspace selection and layout-only presets, and an explicit compute review before manual Agent Check. RC4 migration recovery remains unchanged and is the supported upgrade baseline. The Windows installer and Ubuntu package passed automated CI; the embedded provider sign-in/overlay/focus behaviour still requires hands-on Windows QA before promotion."

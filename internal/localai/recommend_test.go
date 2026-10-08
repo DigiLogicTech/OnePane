@@ -113,3 +113,17 @@ func TestQ40SizingRequiresExactVerifiedArtifact(t *testing.T){
  if got:=weightBytes(9,"Q4_0");got<=0{t.Fatalf("Q4_0 estimate invalid: %d",got)}
  if _,ok:=quants["Q0_UNKNOWN"];ok{t.Fatal("unknown quantizations cannot be accepted")}
 }
+
+func TestAutoPlacementPrefersNvidiaCUDAOverIntegratedVulkan(t *testing.T) {
+ p:=HardwareProfile{
+   Memory:Memory{AvailableBytes:16<<30},
+   GPUs:[]GPU{
+    {Vendor:"intel",Name:"Intel HD Graphics 530",DeviceID:"intel",DeviceIndex:1,VRAMBytes:1<<30,Backends:[]string{"vulkan"}},
+    {Vendor:"nvidia",Name:"GeForce GTX 1060",DeviceID:"gpu-0",DeviceIndex:0,VRAMBytes:6<<30,FreeVRAMBytes:5<<30,Backends:[]string{"cuda","vulkan"}},
+   },
+ }
+ plan,mode,_,fit:=bestPlacement(p,700<<20,PlacementSingleDevice)
+ if fit==FitTooTight || mode!=RunGPU || plan.Backend!="cuda" || len(plan.Devices)!=1 || plan.Devices[0].DeviceID!="gpu-0" {
+   t.Fatalf("Auto must prefer NVIDIA CUDA instead of integrated Vulkan: fit=%v mode=%v plan=%+v",fit,mode,plan)
+ }
+}

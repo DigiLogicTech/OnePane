@@ -336,7 +336,7 @@ function a40RequestEmbedGeometry(){
   if(!a40NativeProviderAvailable())return;
   const region=document.getElementById("a40ProviderViewport");
   const route=currentTab()?.route;
-  const blocked=!!document.querySelector('.overlay[role="dialog"],.modal-overlay:not(.hidden),.component-picker[role="dialog"]');
+  const blocked=!!document.querySelector('#overlayRoot .overlay,#overlayRoot .popover,.tour-overlay,.mobile-sheet-overlay');
   if(!region||route!=="webchat"||!a40EmbedDesiredURL||blocked||region.getClientRects().length===0){
    a40NativeProviderSend({op:"hide"});return;
   }

@@ -665,15 +665,21 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 	execPath := filepath.Join(runtimeRoot, runtime.ExecutableRel)
 	var runtimeDownloads []string
 	reuseRuntime := false
-	var installedVersion, installedSHA, installedExec string
+	var installedVersion, installedSHA, installedExec, installedRoot string
 	runtimeInventoryName := runtime.Name
 	if b := strings.ToLower(strings.TrimSpace(runtime.Backend)); b != "" {
 		runtimeInventoryName += "@" + b
 	}
-	err = s.db.QueryRowContext(ctx, `SELECT runtime_version,source_sha256,executable_path FROM managed_local_runtimes WHERE node_id=? AND runtime_name=? AND status='ready'`, p.NodeID, runtimeInventoryName).Scan(&installedVersion, &installedSHA, &installedExec)
-	if err == nil && installedVersion == runtime.Version && strings.EqualFold(installedSHA, runtimeFingerprint) && filepath.Clean(installedExec) == filepath.Clean(execPath) {
-		if st, statErr := os.Stat(execPath); statErr == nil && !st.IsDir() {
-			reuseRuntime = true
+	err = s.db.QueryRowContext(ctx, `SELECT runtime_version,source_sha256,executable_path,install_root FROM managed_local_runtimes WHERE node_id=? AND runtime_name=? AND status='ready'`, p.NodeID, runtimeInventoryName).Scan(&installedVersion, &installedSHA, &installedExec, &installedRoot)
+	if err == nil && installedVersion == runtime.Version && strings.EqualFold(installedSHA, runtimeFingerprint) {
+		// Runtime updates can use a versioned .rev-N generation. Trust the
+		// inventory's exact fingerprint + executable, not a fixed path guess.
+		managedRoot := filepath.Join(s.dataDir, "runtimes")
+		if pathWithin(managedRoot, installedRoot) && pathWithin(installedRoot, installedExec) {
+			if st, statErr := os.Stat(installedExec); statErr == nil && !st.IsDir() {
+				reuseRuntime = true
+				runtimeRoot, execPath = installedRoot, installedExec
+			}
 		}
 	} else if err != nil && err != sql.ErrNoRows {
 		return inference.ModelDeployment{}, err

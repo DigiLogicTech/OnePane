@@ -1285,7 +1285,16 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"principal_id": i.PrincipalID, "principal_type": i.PrincipalType, "auth_method": i.AuthMethod, "workspaces": json.RawMessage(i.WorkspaceScope), "capabilities": json.RawMessage(i.CapabilityScope)})
+	identity := map[string]any{"principal_id": i.PrincipalID, "principal_type": i.PrincipalType, "auth_method": i.AuthMethod, "workspaces": json.RawMessage(i.WorkspaceScope), "capabilities": json.RawMessage(i.CapabilityScope)}
+	// Return the authenticated user's actual name, not an anonymous UI label.
+	// Resolve it from the validated session, never from an untrusted header.
+	if c, err := r.Cookie(WebSessionCookie); err == nil && s.webAuth != nil {
+		if session, err := s.webAuth.AuthenticateSession(r.Context(), c.Value, "", false); err == nil && session.PrincipalID == i.PrincipalID {
+			identity["username"] = session.Username
+			identity["display_name"] = session.DisplayName
+		}
+	}
+	writeJSON(w, http.StatusOK, identity)
 }
 
 func (s *Server) setSessionCookies(w http.ResponseWriter, token, csrf string, expiresAt int64) {

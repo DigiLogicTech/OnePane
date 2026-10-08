@@ -391,3 +391,46 @@ jobs:
           sudo apt-get remove -y onepane
           sudo test -f /var/lib/onepane/qa-preserve.txt
           test "$(sudo cat /var/lib/onepane/qa-preserve.txt | tr -d '\n')" = "preserve-alpha3.2"
+
+
+  qa-prerelease:
+    name: Publish Alpha 3.3 RC1 for operator QA
+    needs: [validate, runtime_artifact_smoke, windows-installed-smoke, ubuntu-installed-smoke]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release/alpha3.3-consolidated-qa' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: OnePane-alpha3.3-rc1-source-native-${{ github.sha }}
+          path: artifacts
+      - name: Verify manifest and publish immutable QA prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -f artifacts/candidate-manifest.json
+          test -n "$(find artifacts -type f -name '*-windows-x64-setup.exe' -print -quit)"
+          test -n "$(find artifacts -type f -name '*.deb' -print -quit)"
+          python3 - <<'PY'
+          import json,os
+          d=json.load(open("artifacts/candidate-manifest.json"))
+          assert d["commit"]==os.environ["GITHUB_SHA"],d
+          assert d["version"]==os.environ["ONEPANE_VERSION"],d
+          PY
+          tag="v${ONEPANE_VERSION}"
+          mkdir -p prerelease-assets
+          find artifacts -type f \( -name '*.exe' -o -name '*.deb' -o -name '*.sha256' -o -name '*.json' \) -exec cp -v '{}' prerelease-assets/ \;
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::QA release tag already exists; refusing to overwrite immutable assets"
+            exit 1
+          fi
+          gh release create "$tag" prerelease-assets/* \
+            --target "$GITHUB_SHA" \
+            --title "OnePane Alpha 3.3 RC1 — consolidated QA" \
+            --prerelease \
+            --notes "Alpha 3.3 release candidate for operator QA, not promoted known-good. Includes Alpha 3.2 remediation; Colibri tiered inference, residency planning and safe hot swap; readable Colibri model Spec Sheet; Web Chat Research Councils with AI Chair and approval gates; and an updated product tour. Windows x64 installer and Ubuntu amd64 package have passed build and installed-product gates. Validate actual GPU/Colibri behaviour and Council browser handoffs manually before promotion."

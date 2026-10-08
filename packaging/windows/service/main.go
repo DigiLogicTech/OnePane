@@ -108,6 +108,7 @@ func serviceMain(argc uint32, argv **uint16) uintptr {
 	if !ready {
 		if startupErr != nil {
 			fmt.Fprintln(os.Stderr, "OnePane backend failed during startup:", startupErr)
+			recordStartupError(startupErr)
 		}
 		setStatus(serviceStopped, 0, 0, 0, 1)
 		return 0
@@ -136,6 +137,25 @@ func serviceMain(argc uint32, argv **uint16) uintptr {
 
 	setStatus(serviceStopped, 0, 0, 0, exitCode)
 	return 0
+}
+
+// Record SCM readiness failures in the persistent service log: the service's
+// stderr is not normally visible to an end user running Setup.
+func recordStartupError(startupErr error) {
+	if startupErr == nil {
+		return
+	}
+	programData := os.Getenv("ProgramData")
+	if programData == "" {
+		programData = `C:\\ProgramData`
+	}
+	logPath := filepath.Join(programData, "OnePane", "logs", "onepane.log")
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s OnePane service startup failure: %v\n", time.Now().Format(time.RFC3339Nano), startupErr)
 }
 
 func waitForBackendHealth(done <-chan error, timeout time.Duration) (bool, error) {
@@ -195,7 +215,7 @@ func setStatus(state, accepted, checkpoint, waitHint, exitCode uint32) {
 	procSetServiceStatus.Call(statusHandle, uintptr(unsafe.Pointer(&s)))
 }
 
-func runBackend() error {
+func runBackend() (retErr error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -216,6 +236,11 @@ func runBackend() error {
 		return err
 	}
 	defer logFile.Close()
+	defer func() {
+		if retErr != nil {
+			fmt.Fprintf(logFile, "%s OnePane backend launch/exit failure: %v\n", time.Now().Format(time.RFC3339Nano), retErr)
+		}
+	}()
 	fmt.Fprintf(logFile, "OnePane Service %s starting\n", buildinfo.Version)
 
 	backend := filepath.Join(installDir, "OnePane.Backend.exe")
@@ -244,7 +269,7 @@ func runBackend() error {
 	if err!=nil{return fmt.Errorf("create managed process job: %w",err)}
 	defer job.Close()
 	if err := cmd.Start(); err != nil {
-		return err
+		return fmt.Errorf("launch OnePane backend %s: %w", backend, err)
 	}
 	if err:=job.Assign(cmd.Process.Pid);err!=nil{
 		// Never leave an unowned daemon running. On Windows 8+ nested jobs

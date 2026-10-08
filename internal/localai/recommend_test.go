@@ -103,3 +103,13 @@ func TestCPUOnlyPlacementIsFirstClass(t *testing.T) {
 		t.Fatalf("expected CPU-only placement: fit=%s mode=%s plan=%+v", fit, mode, plan)
 	}
 }
+
+func TestQ40SizingRequiresExactVerifiedArtifact(t *testing.T){
+ // Q4_0 is a supported llama.cpp tensor quantization. Its memory estimate
+ // is allowed, but the separate artifact resolver still requires a
+ // signed/adopted digest-pinned exact-quantization download.
+ v,ok:=quants["Q4_0"]
+ if !ok||v.bytesPerParam<=0||v.quality<=0{t.Fatalf("Q4_0 was not registered as a supported estimator: %+v",v)}
+ if got:=weightBytes(9,"Q4_0");got<=0{t.Fatalf("Q4_0 estimate invalid: %d",got)}
+ if _,ok:=quants["Q0_UNKNOWN"];ok{t.Fatal("unknown quantizations cannot be accepted")}
+}

@@ -21,6 +21,16 @@ func (s *Server) requireColibriTier(w http.ResponseWriter) (colibriTierService,b
     return service,true
 }
 
+type colibriSwapService interface {
+    ColibriHotSwap(context.Context, string) (localai.ColibriSwapState, error)
+    ColibriHotSwapStatus(context.Context, string) (localai.ColibriSwapState, error)
+}
+func (s *Server) requireColibriSwap(w http.ResponseWriter) (colibriSwapService,bool) {
+    service,ok:=s.localAI.(colibriSwapService)
+    if !ok {writeError(w,http.StatusServiceUnavailable,"Colibri hot swapping unavailable");return nil,false}
+    return service,true
+}
+
 // Authorize against the deployment's real workspace, not a caller-provided
 // workspace ID. Tier settings are never cross-workspace writable.
 func (s *Server) authorizeColibriDeployment(w http.ResponseWriter, r *http.Request, workspace, deployment, capability string) bool {
@@ -74,3 +84,28 @@ func (s *Server) planColibriTier(w http.ResponseWriter, r *http.Request) {
     writeJSON(w,http.StatusOK,out)
 }
 
+
+func (s *Server) getColibriSwap(w http.ResponseWriter, r *http.Request) {
+    i,ok:=s.authenticate(w,r);if !ok{return}
+    ws:=strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+    dep:=strings.TrimSpace(r.PathValue("deploymentID"))
+    if !s.authorizeColibriDeployment(w,r,ws,dep,"model.read"){return}
+    if !s.authorize(w,r,i,ws,"model.read"){return}
+    swap,ready:=s.requireColibriSwap(w);if !ready{return}
+    out,err:=swap.ColibriHotSwapStatus(r.Context(),dep)
+    respondDomain(w,out,err,http.StatusOK)
+}
+
+func (s *Server) activateColibriSwap(w http.ResponseWriter, r *http.Request) {
+    i,ok:=s.authenticate(w,r);if !ok{return}
+    var in struct{ WorkspaceID string `json:"workspace_id"` }
+    if !decodeJSON(w,r,&in){return}
+    ws:=strings.TrimSpace(in.WorkspaceID)
+    dep:=strings.TrimSpace(r.PathValue("deploymentID"))
+    if !s.authorizeColibriDeployment(w,r,ws,dep,"model.write"){return}
+    if !s.authorize(w,r,i,ws,"model.write"){return}
+    swap,ready:=s.requireColibriSwap(w);if !ready{return}
+    out,err:=swap.ColibriHotSwap(r.Context(),dep)
+    if err!=nil{writeError(w,http.StatusConflict,err.Error());return}
+    writeJSON(w,http.StatusOK,out)
+}

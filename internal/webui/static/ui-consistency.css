@@ -183,6 +183,14 @@
   }
   .view-host > .page > .settings-shell{align-content:start}
   .view-host > .page > #secretCatalogue{max-height:none}
+  /* Local/Cloud/Routing model views were still taller than the available
+   * shell area because only Discover had a constrained inner scroller. */
+  .view-host > .models-page #a31ModelsRoot{
+    overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
+  }
+  .view-host > .models-page #a31ModelsRoot > .models-single-column{
+    min-height:0;min-width:0;max-width:100%;
+  }
   /* Do not clip a legacy/secondary page whose body is not one of the above
    * bounded containers. Those pages scroll at their own root. */
   .view-host > .page:not(:has(

@@ -101,13 +101,13 @@ function a41AutoBindWebCouncilHandoffs(rows){
 let a41QueueMonitorStarted=false;
 let a41QueueMonitorBusy=false;
 let a41QueueFingerprint="";
-function a41WebQueueDigest(workspace,rows){
-  return workspace+"|"+rows.map(t=>[
-    t.turn_id,t.status,t.conversation_generation,t.submitted_at
-  ].join(":")).sort().join("|");
+function a41WebQueueDigest(workspace,rows,chairs=[]){
+  const seats=rows.map(t=>[t.turn_id,t.status,t.conversation_generation,t.submitted_at].join(":"));
+  const chair=chairs.map(t=>[t.id,t.status,t.submitted_at,t.approved_at].join(":"));
+  return workspace+"|"+[...seats,...chair].sort().join("|");
 }
-function a41RememberWebQueue(workspace,rows){
-  a41QueueFingerprint=a41WebQueueDigest(workspace,rows);
+function a41RememberWebQueue(workspace,rows,chairs=[]){
+  a41QueueFingerprint=a41WebQueueDigest(workspace,rows,chairs);
   a41MonitorWebQueue();
 }
 function a41MonitorWebQueue(){
@@ -118,10 +118,14 @@ function a41MonitorWebQueue(){
     a41QueueMonitorBusy=true;
     try{
       const ws=a40WebWorkspace();
-      const data=await apiRequest(`/v1/manual-web/turns?workspace_id=${encodeURIComponent(ws)}`);
+      const [data,chairData]=await Promise.all([
+        apiRequest(`/v1/manual-web/turns?workspace_id=${encodeURIComponent(ws)}`),
+        apiRequest(`/v1/manual-web/chair-turns?workspace_id=${encodeURIComponent(ws)}`)
+      ]);
       if(ws!==a40WebWorkspace()||currentTab()?.route!=="webchat")return;
       const rows=a31Array(data);
-      const digest=a41WebQueueDigest(ws,rows);
+      const chairs=a31Array(chairData);
+      const digest=a41WebQueueDigest(ws,rows,chairs);
       if(digest!==a41QueueFingerprint){
         a41QueueFingerprint=digest;
         renderWebChat();

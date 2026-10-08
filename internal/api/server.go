@@ -122,9 +122,11 @@ type localAIService interface {
 	ManageComponent(context.Context, string, string) (localai.ManagedComponent, error)
 }
 
-type nodeFederationService interface {
+type nodeComputePolicyService interface {
 	ComputePolicy(context.Context, string) (nodefederation.ComputePolicy, error)
 	SetComputePolicy(context.Context, nodefederation.SetComputePolicyCommand) (nodefederation.ComputePolicy, error)
+}
+type nodeFederationService interface {
 	Nodes(context.Context) ([]nodefederation.NodeView, error)
 	Pairings(context.Context) ([]nodefederation.Pairing, error)
 	BeginPair(context.Context, string) (nodefederation.Pairing, string, error)
@@ -2823,7 +2825,8 @@ func (s *Server) revokeNode(w http.ResponseWriter, r *http.Request) {
 // Model Routing. No remote install permission is implied by a compute grant.
 func (s *Server) getNodeComputePolicy(w http.ResponseWriter, r *http.Request) {
  if _,ok:=s.requireNodeOperator(w,r);!ok{return}
- p,err:=s.federation.ComputePolicy(r.Context(),strings.TrimSpace(r.PathValue("nodeID")))
+ fleet,yes:=s.federation.(nodeComputePolicyService);if !yes{writeError(w,503,"node compute policy unavailable");return}
+ p,err:=fleet.ComputePolicy(r.Context(),strings.TrimSpace(r.PathValue("nodeID")))
  if errors.Is(err,sql.ErrNoRows){
   writeJSON(w,200,map[string]any{"node_id":r.PathValue("nodeID"),"enabled":false,"idle_only":true,"allow_model_downloads":false,"runtime_installation":"confirm","project_scope":"selected","allowed_projects":[]string{}})
   return
@@ -2845,7 +2848,8 @@ func (s *Server) setNodeComputePolicy(w http.ResponseWriter, r *http.Request) {
  }
  if !decodeJSON(w,r,&in){return}
  nodeID:=strings.TrimSpace(r.PathValue("nodeID"))
- p,err:=s.federation.SetComputePolicy(r.Context(),nodefederation.SetComputePolicyCommand{
+ fleet,yes:=s.federation.(nodeComputePolicyService);if !yes{writeError(w,503,"node compute policy unavailable");return}
+ p,err:=fleet.SetComputePolicy(r.Context(),nodefederation.SetComputePolicyCommand{
   NodeID:nodeID,Actor:actor.PrincipalID,Enabled:in.Enabled,IdleOnly:in.IdleOnly,
   AllowModelDownloads:in.AllowModelDownloads,RuntimeInstallation:in.RuntimeInstallation,
   ProjectScope:in.ProjectScope,AvailabilityJSON:in.Availability,LimitsJSON:in.Limits,

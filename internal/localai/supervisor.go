@@ -542,11 +542,18 @@ func validateLlamaPlacementDevices(executable,backend string,plan PlacementPlan)
  out,err:=exec.CommandContext(ctx,executable,"--list-devices").CombinedOutput()
  if err!=nil{return fmt.Errorf("list devices from managed %s backend: %w: %s",backend,err,strings.TrimSpace(string(out)))}
  known:=map[string]bool{}
+ // Different llama.cpp builds format the list as either "CUDA0: ..." or
+ // "- CUDA0: ..."; some put devices after a log prefix. Match complete
+ // device tokens rather than assuming they occupy the first column.
  for _,line:=range strings.Split(string(out),"\n"){
-  fields:=strings.Fields(strings.TrimSpace(line));if len(fields)==0{continue}
-  candidate:=strings.TrimRight(fields[0],":,")
-  if strings.HasPrefix(strings.ToLower(candidate),"cuda")||strings.HasPrefix(strings.ToLower(candidate),"vulkan"){
-   known[strings.ToLower(candidate)]=true
+  for _,word:=range strings.Fields(line){
+   candidate:=strings.Trim(word," \t:,*()[]")
+   lower:=strings.ToLower(candidate)
+   if (strings.HasPrefix(lower,"cuda")||strings.HasPrefix(lower,"vulkan")||
+       strings.HasPrefix(lower,"rocm")||strings.HasPrefix(lower,"sycl")||
+       strings.HasPrefix(lower,"metal"))&&len(lower)>4 {
+    known[lower]=true
+   }
   }
  }
  for _,name:=range strings.Split(selected,","){

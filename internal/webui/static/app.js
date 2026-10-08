@@ -7,7 +7,7 @@ let a31ModelView="local";
 let a31CloudConsumerFilter="all";
 let a31AgentView="profiles";
 let a31SkillsView="installed";
-let a31SettingsView="general";
+let a31SettingsView="overview";
 let a31OperationsView="overview";
 let a31ControlTab="assistant";
 let a31AssistantThreadID="";
@@ -572,10 +572,14 @@ async function a31SettingsSection(){
   return `<section class="settings-section"><h2>Updates & Diagnostics</h2><label>Release channel<select id="a31UpdateChannel"><option value="alpha">Alpha</option><option value="stable">Stable</option></select></label><div class="toolbar"><button class="btn" id="a31OpenLogs">Open Logs</button><button class="btn" data-action="product-tour">Restart product tour</button></div><p class="page-subtitle">Recovery actions that mutate runtimes live in Operations → Recovery.</p></section>`
 }
 renderSettings=async function(){
-  $("#viewHost").innerHTML=`<section class="page">${pageHeader("Settings","Application preferences and defaults. Workspace-owned policy remains in each Workspace.")}<div class="settings-shell">${a31SettingsNav()}<div id="a31SettingsContent"><div class="widget-body">Loading…</div></div></div></section>`;
-  $("#a31SettingsContent").innerHTML=await a31SettingsSection();$$("[data-a31-settings]").forEach(b=>b.onclick=()=>a31SetSettingsView(b.dataset.a31Settings));$("#a31SettingsSearch").oninput=e=>{const q=e.target.value.toLowerCase();$$("[data-settings-search]").forEach(b=>b.hidden=q&&!b.dataset.settingsSearch.includes(q))};
+  if(!await a36RenderSettingsShell())return;
+  $("[data-a31-settings]").forEach(b=>b.onclick=()=>a31SetSettingsView(b.dataset.a31Settings));
+  a36BindSettingsSearch();
+  $("#a36OpenLogs")?.addEventListener("click",()=>{activeDrawerTab="logs";setDrawerOpen(true);renderDrawer()});
   $$("[data-settings-theme]").forEach(b=>b.onclick=()=>{applyTheme(b.dataset.settingsTheme);renderSettings()});$$("[data-approval-default]").forEach(b=>b.onclick=()=>{state.approvalLevel=b.dataset.approvalDefault;persist();renderSettings()});
   const p=qa5Prefs(),d=p.workspace_defaults||{};if($("#a31DefaultMode"))$("#a31DefaultMode").value=d.orchestration||"direct";if($("#a31Landing"))$("#a31Landing").value=p.landing||"operations";if($("#a31Runtime"))$("#a31Runtime").value=p.default_runtime||"auto";if($("#a31ComputeDefault"))$("#a31ComputeDefault").value=p.default_compute||"auto";if($("#a31AssistantCompute"))$("#a31AssistantCompute").value=p.assistant_defaults?.compute_preference||"auto";if($("#a31UpdateChannel"))$("#a31UpdateChannel").value=p.update_channel||"alpha";
+  $("#a36SaveGeneral")?.addEventListener("click",()=>{qa5SavePrefs({landing:$("#a31Landing").value});notice("Startup preferences saved.")});
+  $("#a36SaveUpdates")?.addEventListener("click",()=>{qa5SavePrefs({update_channel:$("#a31UpdateChannel").value});notice("Release channel preference saved.")});
   $("#a31SaveDefaults")?.addEventListener("click",()=>{qa5SavePrefs({workspace_defaults:{orchestration:$("#a31DefaultMode").value,seats:Number($("#a31DefaultSeats").value||2),model_routing:$("#a31DefaultRouting").checked,remote_models:$("#a31DefaultRemote").checked,browser:$("#a31DefaultBrowser").checked,computer:$("#a31DefaultComputer").checked}});notice("Defaults saved for newly created Workspaces.")});
   $("#a31SaveModelSettings")?.addEventListener("click",async()=>{try{await apiRequest("/v1/settings/local-ai",{method:"POST",body:JSON.stringify({model_pool_path:$("#a31ModelPool").value})});qa5SavePrefs({default_runtime:$("#a31Runtime").value,default_compute:$("#a31ComputeDefault").value});notice("Model defaults saved.")}catch(ex){notice(ex.message,"bad")}});
   $("#a31SaveAgentSettings")?.addEventListener("click",()=>{qa5SavePrefs({assistant_defaults:{...p.assistant_defaults,compute_preference:$("#a31AssistantCompute").value},research_default:$("#a31ResearchDefault").checked});notice("Agent and Research defaults saved.")});

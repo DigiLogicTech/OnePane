@@ -300,7 +300,7 @@ async function a40RenderWebChat(){
       </section>
     </div>`;
   a40SyncEmbeddedProvider(provider,nativeProvider);
-  $("[data-a40-switch]").forEach(b=>b.onclick=()=>a40WebSwitch(b.dataset.a40Switch));
+  $$("[data-a40-switch]").forEach(b=>b.onclick=()=>a40WebSwitch(b.dataset.a40Switch));
   $$("[data-a40-close]").forEach(b=>b.onclick=()=>a40WebClose(b.dataset.a40Close));
   $("#a40AddWebChat").onclick=a40WebOpenNewDialog;
   $("#a40NewConversation").onclick=()=>a40WebNewConversation(active,selected);

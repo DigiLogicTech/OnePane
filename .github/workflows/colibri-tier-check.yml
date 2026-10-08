@@ -1,0 +1,38 @@
+name: Colibri Tier Feature Checks
+
+on:
+  push:
+    branches: [feature/colibri-tiered-inference]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Go and UI validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+      - name: Check Colibri UI syntax
+        run: |
+          node --check internal/webui/static/colibri-tiered-ui.js
+          node --check internal/webui/static/models-page.js
+      - name: Check Go formatting and compile
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./internal/localai ./internal/api
+      - name: Windows cross-compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          GOOS=windows GOARCH=amd64 go build -o /tmp/onepane-tier-check.exe ./cmd/harnessd

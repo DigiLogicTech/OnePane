@@ -117,9 +117,9 @@ renderProjects=async function(){
     const projects=qa4ProjectHub.projects.filter(p=>!q||String(p.name||"").toLowerCase().includes(q)||String(p.description||"").toLowerCase().includes(q));
     projects.sort((a,b)=>sort==="name"?String(a.name||"").localeCompare(String(b.name||"")):sort==="active"?a35ProjectTaskCount(b.id)-a35ProjectTaskCount(a.id):Number(b.updated_at||0)-Number(a.updated_at||0));
     $("#a35ProjectGrid").innerHTML=projects.length?projects.map(a35ProjectCard).join(""):'<div class="empty-state compact">No projects match your search.</div>';
-    $("[data-a35-open-project]").forEach(b=>b.onclick=()=>a35OpenWorkspace(b.dataset.a35OpenProject,b.dataset.a35OpenWorkspace||""));
-    $("[data-a35-project-settings]").forEach(b=>b.onclick=()=>{const p=qa4ProjectHub.projects.find(x=>x.id===b.dataset.a35ProjectSettings);if(p)qa4Inspect("project",p.id,p.name,p)});
-    $("[data-a35-delete-project]").forEach(b=>b.onclick=()=>{const p=qa4ProjectHub.projects.find(x=>x.id===b.dataset.a35DeleteProject);if(p)a33DeleteProject(p)});
+    $$("[data-a35-open-project]").forEach(b=>b.onclick=()=>a35OpenWorkspace(b.dataset.a35OpenProject,b.dataset.a35OpenWorkspace||""));
+    $$("[data-a35-project-settings]").forEach(b=>b.onclick=()=>{const p=qa4ProjectHub.projects.find(x=>x.id===b.dataset.a35ProjectSettings);if(p)qa4Inspect("project",p.id,p.name,p)});
+    $$("[data-a35-delete-project]").forEach(b=>b.onclick=()=>{const p=qa4ProjectHub.projects.find(x=>x.id===b.dataset.a35DeleteProject);if(p)a33DeleteProject(p)});
   };
   $("#a35ProjectSearch").oninput=drawProjects;$("#a35ProjectSort").onchange=drawProjects;drawProjects();
 };

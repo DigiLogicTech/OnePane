@@ -34,7 +34,10 @@ not have to build a Team manually beforehand. The wizard supports:
 After confirmation, OnePane creates the canonical Team, registers L0
 consultation-only members, saves the Research configuration, creates an
 operator-review Task, and starts a Council session. It never requests an
-inference deployment or tools for these manual seats.
+inference deployment or tools for these manual seats. **Web-only Council
+Tasks cannot transition into executable/ready task states:** the Team
+admission guard explicitly rejects them, without changing ordinary Team or
+Council Task behaviour.
 
 One Web Chat conversation tab is provisioned for each seat when there is
 capacity (16 tabs per Workspace). Tabs are pinned to their originating

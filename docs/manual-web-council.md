@@ -20,13 +20,61 @@ not an API, proxy, OAuth or unofficial browser bridge dependency.
 
 No provider browser cookies, access tokens or messages are extracted by OnePane.
 
+## AI Chair: model-led agenda, operator-controlled execution
+
+The Web-only Council wizard now offers an AI Chair who is **a separate manual
+Web Chat seat**, distinct from independent researchers and the synthesis
+model. Its default Web provider is ChatGPT; the operator enters the actual
+selected web model label. **No AI Chair** retains the original deterministic
+workflow. Local-model and cloud-API Chair modes are displayed as disabled
+future hybrid options and are **not implemented** by this Web-only feature.
+
+The user explicitly selects a **final synthesis participant** and may require
+approval of the Chair's proposals (enabled by default).
+
+1. **Chair agenda, before Round 1:** TeamWorker prepares a scoped objective,
+   evaluation-criteria and hypothesis-planning request for the Chair model,
+   not research answers. The operator copies it into the Chair's own provider
+   website and pastes its response into OnePane.
+2. **Agenda approval:** The model's raw proposal, source provider/model label,
+   operator, prompt hash, response hash and timestamp are durable. The
+   operator reviews or edits the guidance and clicks **Approve agenda /
+   questions**. Until approval, Round 1 does not start.
+3. **Independent pass:** OnePane's immutable prompt packet incorporates the
+   *approved* Chair agenda, and no peer research answer is visible. Chair-only
+   seats are excluded from participant and synthesis turns.
+4. **Chair-led cross-critique:** After all required research seats complete a
+   round, OnePane asks the Chair to identify contradictions, insufficient
+   evidence and targeted next questions, using scoped **completed** outputs.
+   The new round cannot begin until the proposal is submitted and, if enabled,
+   approved.
+5. **Final synthesis:** A specifically selected **research participant**
+   integrates the previous rounds using approved Chair guidance. The Chair
+   does not silently author the synthesis or replace another model.
+
+The orchestration engine, **not the Chair model**, owns round advancement,
+membership, evidence boundaries, time/order, retries and permissions. The
+Chair cannot execute tasks or call cloud inference APIs. All operator-approved
+guidance is retained with its SHA-256 hash and attributed reviewer.
+
+The Web-only Chair occupies one of the eight maximum Team seats; configure
+**2–7 research participants plus one Chair** (or 2–8 without a Chair).
+The Chair and research participants can use the same provider in separate
+tabs without mixing turns.
+
+The Chair proposes questions in plain text. OnePane wraps the approved text
+in deterministic phase-specific prompts; it does **not** allow an arbitrary
+Chair response to replace safety, scope or isolation instructions. The
+Chair's identity remains operator-attested, because no automated browser
+integration verifies the actual model selected on the provider website.
+
 ## Start a Web-only Council (guided flow)
 
 The **Start Web-only Council** button on Web Chat opens a wizard; the user does
 not have to build a Team manually beforehand. The wizard supports:
 
 - A research objective and friendly Council name.
-- Two to eight manual-only seats, each with an explicitly chosen provider,
+- Two to eight manual research seats without a Chair, or two to seven with one Chair, each with an explicitly chosen provider,
   model label and research role. The same provider may appear multiple times.
 - One to five configured independent cross-critique rounds and optional final
   synthesis, with Research integrity enabled automatically.

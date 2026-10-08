@@ -2,7 +2,6 @@ package localai
 
 import (
     "context"
-    "database/sql"
     "encoding/json"
     "fmt"
     "io/fs"
@@ -110,5 +109,3 @@ func colibriAutoContext(path string) int64 {
     return initialColibriContext(colibriDeclaredContext(data))
 }
 
-// Compile-time witness for the SQL state reader.
-var _ = sql.ErrNoRows

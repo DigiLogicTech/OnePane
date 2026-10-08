@@ -317,7 +317,7 @@ renderWebChat=a40RenderWebChat;
 /* An isolated Windows WebView2 sibling is used instead of an iframe.
  * External pages have no WebMessageReceived listener and cannot invoke
  * native OnePane commands. Other platforms keep their browser fallback. */
-const a40NativeProviderAvailable=()=>!!(window.chrome&&window.chrome.webview&&typeof window.chrome.webview.postMessage==="function");
+const a40NativeProviderAvailable=()=>typeof window!=="undefined"&&!!(window.chrome&&window.chrome.webview&&typeof window.chrome.webview.postMessage==="function");
 function a40NativeProviderSend(payload){
  if(!a40NativeProviderAvailable())return;
  window.chrome.webview.postMessage("onepane-provider|"+JSON.stringify(payload));

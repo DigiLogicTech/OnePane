@@ -29,6 +29,7 @@ type Thread struct {
 	Title           string  `json:"title"`
 	Status          string  `json:"status"`
 	ActiveProjectID *string `json:"active_project_id,omitempty"`
+	PreferredModelDeploymentID *string `json:"preferred_model_deployment_id,omitempty"`
 	CreatedBy       string  `json:"created_by"`
 	Revision        int64   `json:"revision"`
 	CreatedAt       int64   `json:"created_at"`
@@ -100,18 +101,57 @@ func NewService(db *sql.DB, clk clock.Clock, sched schedulerService, inf inferen
 }
 
 func scanThread(row interface{ Scan(...any) error }) (Thread,error) {
-	var t Thread; var project sql.NullString
-	if err:=row.Scan(&t.ID,&t.WorkspaceID,&t.Title,&t.Status,&project,&t.CreatedBy,&t.Revision,&t.CreatedAt,&t.UpdatedAt);err!=nil{
+	var t Thread; var project,model sql.NullString
+	if err:=row.Scan(&t.ID,&t.WorkspaceID,&t.Title,&t.Status,&project,&t.CreatedBy,&t.Revision,&t.CreatedAt,&t.UpdatedAt,&model);err!=nil{
 		if errors.Is(err,sql.ErrNoRows){return Thread{},ErrNotFound};return Thread{},err
 	}
-	if project.Valid{t.ActiveProjectID=&project.String};return t,nil
+	if project.Valid{t.ActiveProjectID=&project.String};if model.Valid{t.PreferredModelDeploymentID=&model.String};return t,nil
 }
 func (s *Service) Thread(ctx context.Context,idv string)(Thread,error){
-	return scanThread(s.db.QueryRowContext(ctx,`SELECT id,workspace_id,title,status,active_project_id,created_by,revision,created_at,updated_at FROM assistant_threads WHERE id=?`,strings.TrimSpace(idv)))
+	return scanThread(s.db.QueryRowContext(ctx,`SELECT id,workspace_id,title,status,active_project_id,created_by,revision,created_at,updated_at,(SELECT deployment_id FROM assistant_model_preferences WHERE thread_id=assistant_threads.id) FROM assistant_threads WHERE id=?`,strings.TrimSpace(idv)))
 }
 func (s *Service) Threads(ctx context.Context,workspaceID string,limit int)([]Thread,error){
-	if limit<=0||limit>100{limit=50};rows,err:=s.db.QueryContext(ctx,`SELECT id,workspace_id,title,status,active_project_id,created_by,revision,created_at,updated_at FROM assistant_threads WHERE workspace_id=? ORDER BY updated_at DESC,id DESC LIMIT ?`,strings.TrimSpace(workspaceID),limit);if err!=nil{return nil,err};defer rows.Close();out:=[]Thread{};for rows.Next(){t,e:=scanThread(rows);if e!=nil{return nil,e};out=append(out,t)};return out,rows.Err()
+	if limit<=0||limit>100{limit=50};rows,err:=s.db.QueryContext(ctx,`SELECT id,workspace_id,title,status,active_project_id,created_by,revision,created_at,updated_at,(SELECT deployment_id FROM assistant_model_preferences WHERE thread_id=assistant_threads.id) FROM assistant_threads WHERE workspace_id=? ORDER BY updated_at DESC,id DESC LIMIT ?`,strings.TrimSpace(workspaceID),limit);if err!=nil{return nil,err};defer rows.Close();out:=[]Thread{};for rows.Next(){t,e:=scanThread(rows);if e!=nil{return nil,e};out=append(out,t)};return out,rows.Err()
 }
+// SetModel pins a deployment for global Assistant reasoning on this thread.
+// Nil or empty resets to normal automatic scheduler routing. An explicit pin
+// cannot fall back to a different model when the deployment is unavailable.
+func (s *Service) SetModel(ctx context.Context, threadID string, deploymentID *string) (Thread,error) {
+ t,err:=s.Thread(ctx,threadID);if err!=nil{return Thread{},err}
+ selected:=""
+ if deploymentID!=nil{selected=strings.TrimSpace(*deploymentID)}
+ if selected!=""{
+  listing,ok:=s.scheduler.(interface{
+   Candidates(context.Context,string,string,string)([]scheduler.Candidate,error)
+  })
+  if !ok{return Thread{},fmt.Errorf("%w: scheduler model inventory unavailable",ErrInvalid)}
+  candidates,err:=listing.Candidates(ctx,t.WorkspaceID,"inference.general","onepane-assistant")
+  if err!=nil{return Thread{},err}
+  found:=false
+  for _,candidate:=range candidates {
+   if candidate.ID!=selected||candidate.Kind!=scheduler.CandidateModel{continue}
+   if !candidate.Schedulable||candidate.Qualification==scheduler.QualIncompatible{
+    return Thread{},fmt.Errorf("%w: selected model is not admitted or available for Assistant inference",ErrInvalid)
+   }
+   found=true;break
+  }
+  if !found{return Thread{},fmt.Errorf("%w: selected model is not available to this workspace",ErrInvalid)}
+ }
+ now:=s.clock.UnixMilli()
+ tx,err:=s.db.BeginTx(ctx,nil);if err!=nil{return Thread{},err}
+ defer tx.Rollback()
+ if selected==""{
+  _,err=tx.ExecContext(ctx,`DELETE FROM assistant_model_preferences WHERE thread_id=?`,t.ID)
+ }else{
+  _,err=tx.ExecContext(ctx,`INSERT INTO assistant_model_preferences(thread_id,deployment_id,updated_at) VALUES(?,?,?) ON CONFLICT(thread_id) DO UPDATE SET deployment_id=excluded.deployment_id,updated_at=excluded.updated_at`,t.ID,selected,now)
+ }
+ if err!=nil{return Thread{},err}
+ _,err=tx.ExecContext(ctx,`UPDATE assistant_threads SET revision=revision+1,updated_at=? WHERE id=?`,now,t.ID)
+ if err!=nil{return Thread{},err}
+ if err=tx.Commit();err!=nil{return Thread{},err}
+ return s.Thread(ctx,t.ID)
+}
+
 func (s *Service) SetScope(ctx context.Context, threadID string, projectID *string) (Thread,error) {
 	t,err:=s.Thread(ctx,threadID);if err!=nil{return Thread{},err}
 	var value any=nil
@@ -153,10 +193,22 @@ func (s *Service) globalSnapshot(ctx context.Context,workspaceID string) json.Ra
 	raw,_:=json.Marshal(map[string]any{"scope":"global","counts":counts,"projects":projects});return raw
 }
 
-func(s *Service) reasonGlobal(ctx context.Context,workspaceID,actor,content string)(string,*string,error){
+func(s *Service) reasonGlobal(ctx context.Context,workspaceID,actor,content string,pin *string)(string,*string,error){
 	label:=policy.DataLabel{WorkspaceID:workspaceID,Confidentiality:policy.ConfidentialityInternal,Residency:policy.ResidencyAny,Trust:policy.TrustUserInstruction}
-	decision,err:=s.scheduler.Route(ctx,scheduler.RouteRequest{WorkspaceID:workspaceID,CapabilityID:"inference.general",RoleName:"onepane-assistant",ProtocolLevel:"L1",ContextTokens:8192,DataLabel:label,AllowUntested:true,AllowLimited:true,AllowMediated:true,AllowDegraded:true,PreferZeroIncrementalCost:true,AllowedKinds:[]scheduler.CandidateKind{scheduler.CandidateModel}})
-	if err!=nil||decision.Selected==nil{return "",nil,fmt.Errorf("route OnePane Assistant: %w",err)}
+	selected:=""
+ if pin!=nil{selected=strings.TrimSpace(*pin)}
+ route:=scheduler.RouteRequest{WorkspaceID:workspaceID,CapabilityID:"inference.general",RoleName:"onepane-assistant",ProtocolLevel:"L1",ContextTokens:8192,DataLabel:label,AllowUntested:true,AllowLimited:true,AllowMediated:true,AllowDegraded:true,PreferZeroIncrementalCost:true,AllowedKinds:[]scheduler.CandidateKind{scheduler.CandidateModel}}
+ if selected!=""{
+  route.IncludeCandidateIDs=[]string{selected}
+  // Manual model selection may use a smaller verified context than the
+  // automatic route. Keep at least 2k for the bounded Assistant snapshot.
+  route.ContextTokens=2048
+ }
+ decision,err:=s.scheduler.Route(ctx,route)
+	if err!=nil||decision.Selected==nil{
+  if selected!=""{return "",nil,fmt.Errorf("selected Assistant model is unavailable or disallowed (no substitution): %w",err)}
+  return "",nil,fmt.Errorf("route OnePane Assistant: %w",err)
+ }
 	dep:=decision.Selected.Candidate.ID;snapshot:=s.globalSnapshot(ctx,workspaceID)
 	system:=`You are the global OnePane Assistant. You may explain global OnePane state and help navigate. Do not claim direct tool, filesystem, secret, node, or approval authority. Project-specific work must be delegated to that Project's Orchestrator. Use only the supplied bounded global context.`
 	req,_:=json.Marshal(map[string]any{"messages":[]map[string]string{{"role":"system","content":system},{"role":"user","content":"Global context:\n"+string(snapshot)+"\n\nUser:\n"+content}},"max_tokens":1000,"temperature":0.2})
@@ -200,6 +252,6 @@ func (s *Service) Submit(ctx context.Context,c SubmitCommand)(SubmitResult,error
 		_,_=s.db.ExecContext(ctx,`UPDATE assistant_threads SET active_project_id=?,revision=revision+1,updated_at=? WHERE id=?`,*projectID,created,thread.ID)
 		t:=Turn{ID:turnID,ThreadID:thread.ID,Role:"assistant",Content:res.Turn.Content,ProjectID:projectID,TaskID:res.TaskID,ProvenanceJSON:provRaw,CreatedAt:created};return SubmitResult{Turn:t,Delegated:true,HandoffID:&hid,Project:projectID,Orchestrator:&res},nil
 	}
-	answer,dep,reasonErr:=s.reasonGlobal(ctx,thread.WorkspaceID,c.ActorPrincipalID,c.Content);if reasonErr!=nil{answer="OnePane Assistant is available, but no eligible reasoning model could complete this turn: "+reasonErr.Error()}
-	prov:=map[string]any{"assistant_thread_id":thread.ID,"scope":"global"};if dep!=nil{prov["candidate_kind"]="model_deployment";prov["candidate_id"]=*dep};provRaw,_:=json.Marshal(prov);turnID,_:=s.ids.New("aturn");created:=s.clock.UnixMilli();_,err=s.db.ExecContext(ctx,`INSERT INTO assistant_turns(id,thread_id,role,content,project_id,task_id,provenance_json,created_at) VALUES(?,?,'assistant',?,NULL,NULL,?,?)`,turnID,thread.ID,answer,string(provRaw),created);if err!=nil{return SubmitResult{},err};_,_=s.db.ExecContext(ctx,`UPDATE assistant_threads SET revision=revision+1,updated_at=? WHERE id=?`,created,thread.ID);return SubmitResult{Turn:Turn{ID:turnID,ThreadID:thread.ID,Role:"assistant",Content:answer,ProvenanceJSON:provRaw,CreatedAt:created}},nil
+	answer,dep,reasonErr:=s.reasonGlobal(ctx,thread.WorkspaceID,c.ActorPrincipalID,c.Content,thread.PreferredModelDeploymentID);if reasonErr!=nil{answer="OnePane Assistant could not complete this turn: "+reasonErr.Error()}
+	prov:=map[string]any{"assistant_thread_id":thread.ID,"scope":"global"};if dep!=nil{prov["candidate_kind"]="model_deployment";prov["candidate_id"]=*dep};if thread.PreferredModelDeploymentID!=nil{prov["configured_model_deployment_id"]=*thread.PreferredModelDeploymentID};provRaw,_:=json.Marshal(prov);turnID,_:=s.ids.New("aturn");created:=s.clock.UnixMilli();_,err=s.db.ExecContext(ctx,`INSERT INTO assistant_turns(id,thread_id,role,content,project_id,task_id,provenance_json,created_at) VALUES(?,?,'assistant',?,NULL,NULL,?,?)`,turnID,thread.ID,answer,string(provRaw),created);if err!=nil{return SubmitResult{},err};_,_=s.db.ExecContext(ctx,`UPDATE assistant_threads SET revision=revision+1,updated_at=? WHERE id=?`,created,thread.ID);return SubmitResult{Turn:Turn{ID:turnID,ThreadID:thread.ID,Role:"assistant",Content:answer,ProvenanceJSON:provRaw,CreatedAt:created}},nil
 }

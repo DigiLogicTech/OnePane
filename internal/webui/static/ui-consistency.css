@@ -71,6 +71,17 @@
 /* Palette colours use SVG presentation attributes instead of CSP-blocked inline CSS. */
 .theme-compact-swatches>span>svg{display:block;width:100%;height:100%;overflow:hidden}
 
+/* Nodes occupies the remaining shell grid row, including after the Logs
+ * drawer resizes. Scroll the node content within that row, not the shell. */
+.nodes-page{height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.nodes-page>.page-heading{flex:0 0 auto}
+.nodes-page #a31Nodes{flex:1 1 0;min-height:0;min-width:0;display:flex;flex-direction:column}
+.nodes-page #nextNodeRoot{flex:1 1 0;min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;align-content:start;padding-bottom:12px}
+.nodes-page #nextNodeRoot>.next-node-manager{min-height:0}
+@media(max-width:700px){
+ .nodes-page #nextNodeRoot{overscroll-behavior:auto}
+}
+
 /* Nodes fleet management: keep the selected machine visually anchored. */
 #nextNodeRoot{display:grid;gap:14px;min-width:0}
 #nextNodeRoot .node-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}

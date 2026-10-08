@@ -7,7 +7,7 @@ const A41_MAX_WEB_SEATS=8;
 let a41WebCouncilLaunch=null;
 
 function a41DefaultWebCouncilDraft(){
-  return {name:"Web Research Council",objective:"",critique_rounds:2,synthesis_pass:true,seats:[
+  return {name:"Web Research Council",objective:"",critique_rounds:2,synthesis_pass:true,chair_mode:"manual",chair_provider_id:"chatgpt",chair_model_label:"",chair_require_approval:true,synthesis_index:0,seats:[
     {provider_id:"chatgpt",model_label:"",role_name:"Independent researcher"},
     {provider_id:"claude",model_label:"",role_name:"Critical analyst"},
     {provider_id:"gemini",model_label:"",role_name:"Alternative researcher"}
@@ -24,6 +24,18 @@ function a41ValidateWebCouncilDraft(source){
   if(!Array.isArray(source.seats)||source.seats.length<2||source.seats.length>A41_MAX_WEB_SEATS)
     throw Error("A Web-only Council requires between 2 and 8 manual seats.");
   const providers=new Set(A39_WEB_PROVIDERS.map(p=>p.id));
+  const chair_mode=String(source.chair_mode||"none").trim();
+  if(chair_mode!=="manual" && chair_mode!=="none")throw Error("This Web-only Council supports a manual Web Chat Chair or deterministic no-Chair mode. Local/API chairs require a hybrid Council configuration.");
+  if(chair_mode==="manual"&&source.seats.length>A41_MAX_WEB_SEATS-1)
+    throw Error("A manual AI Chair occupies one Team seat. Select 2–7 research participants.");
+  const synthesis_index=Number(source.synthesis_index??0);
+  if(!Number.isInteger(synthesis_index)||synthesis_index<0||synthesis_index>=source.seats.length)
+    throw Error("Select a participating model for final synthesis.");
+  const chair_provider_id=String(source.chair_provider_id||"").trim();
+  const chair_model_label=String(source.chair_model_label||"").trim();
+  if(chair_mode==="manual"&&(!A39_WEB_PROVIDERS.some(p=>p.id===chair_provider_id)
+     ||!chair_model_label||chair_model_label.length>128||/[\r\n]/.test(chair_model_label)))
+    throw Error("Select the Chair provider and enter its exact selected web model.");
   const seats=source.seats.map((raw,index)=>{
     const provider_id=String(raw.provider_id||"").trim().toLowerCase();
     const model_label=String(raw.model_label||"").trim();
@@ -35,15 +47,19 @@ function a41ValidateWebCouncilDraft(source){
       throw Error(`Seat ${index+1}: enter a role (3–120 characters).`);
     return {provider_id,model_label,role_name};
   });
-  return {name,objective,critique_rounds:critique,synthesis_pass:source.synthesis_pass!==false,seats};
+  return {name,objective,critique_rounds:critique,synthesis_pass:source.synthesis_pass!==false,chair_mode,chair_provider_id,chair_model_label,chair_require_approval:source.chair_require_approval!==false,synthesis_index,seats};
 }
-function a41WebCouncilResearch(draft){
+function a41WebCouncilResearch(draft,memberIDs=[]){
   return {research_mode:true,research:{
     pin_models:true,disable_model_substitution:true,same_model_retries:true,
     preserve_failed_seats:true,independent_first_pass:true,scoped_evidence:true,
     record_raw_outputs:true,full_provenance:true,require_all_seats:true,
     anonymized_cross_critique:true,critique_rounds:draft.critique_rounds,
-    synthesis_pass:draft.synthesis_pass
+    synthesis_pass:draft.synthesis_pass,
+    synthesis_member_id:memberIDs[draft.synthesis_index]||"",
+    chair_mode:draft.chair_mode,
+    chair_member_id:draft.chair_mode==="manual"?(memberIDs[draft.seats.length]||""):"",
+    chair_require_approval:draft.chair_mode==="manual"&&draft.chair_require_approval
   }};
 }
 function a41CouncilIdentifier(entry){
@@ -146,9 +162,15 @@ async function a41CreateWebOnlyCouncil(workspace,draft,existing=null,options={})
     if(!state0.team_id)throw Error("Team creation did not return an identifier; inspect Teams before retrying.");
     state0.team_revision=a41CouncilRevision(record);
   }
-  for(let i=state0.member_ids.length;i<normalized.seats.length;i++){
-    const seat=normalized.seats[i];
-    progress(`Adding manual Web Council seat ${i+1} of ${normalized.seats.length}…`);
+  const allSeats=[...normalized.seats,...(normalized.chair_mode==="manual"?[{
+    provider_id:normalized.chair_provider_id,
+    model_label:normalized.chair_model_label,
+    role_name:"Council Chair",
+    council_chair_only:true
+  }]:[])];
+  for(let i=state0.member_ids.length;i<allSeats.length;i++){
+    const seat=allSeats[i];
+    progress(`Adding manual Web Council seat ${i+1} of ${allSeats.length}…`);
     const provider=A39_WEB_PROVIDERS.find(x=>x.id===seat.provider_id);
     const record=await send(`/v1/teams/${encodeURIComponent(state0.team_id)}/members`,{
       method:"POST",body:JSON.stringify({
@@ -157,7 +179,7 @@ async function a41CreateWebOnlyCouncil(workspace,draft,existing=null,options={})
         role_name:seat.role_name,
         capability_id:"inference.general",protocol_level:"L0",
         route_policy:{},
-        config:{manual_web:{enabled:true,provider_id:seat.provider_id,model_label:seat.model_label}},
+        config:{manual_web:{enabled:true,provider_id:seat.provider_id,model_label:seat.model_label},...(seat.council_chair_only?{council_chair_only:true}:{})},
         ordinal:i
       })
     });
@@ -170,7 +192,7 @@ async function a41CreateWebOnlyCouncil(workspace,draft,existing=null,options={})
     const record=await send(`/v1/teams/${encodeURIComponent(state0.team_id)}/configuration`,{
       method:"PATCH",body:JSON.stringify({
         expected_revision:state0.team_revision,
-        configuration:a41WebCouncilResearch(normalized)
+        configuration:a41WebCouncilResearch(normalized,state0.member_ids)
       })
     });
     state0.team_revision=a41CouncilRevision(record);
@@ -217,9 +239,17 @@ function a41ProvisionWebCouncilTabs(result){
     s.turn_id="";
     created++;
   }
-  if(created===result.draft.seats.length ||
-      result.draft.seats.every((_,i)=>a40WebTabs(result.workspace_id).some(t=>
-        t.session_id===result.session_id&&t.member_id===result.member_ids[i])))result.tabs_created=true;
+  if(result.draft.chair_mode==="manual"){
+    const idx=result.draft.seats.length,chairID=result.member_ids[idx];
+    if(!a40WebTabs(result.workspace_id).some(t=>t.session_id===result.session_id&&t.member_id===chairID)
+        &&a40WebTabs(result.workspace_id).length<A40_WEB_MAX_TABS){
+      const s=a40WebNewSession(result.draft.chair_provider_id,"Council Chair",true);
+      if(s){s.session_id=result.session_id;s.member_id=chairID;s.council_chair=true;s.chair_turn_id="";created++;}
+    }
+  }
+  const everySeat=result.member_ids.every(memberID=>a40WebTabs(result.workspace_id)
+      .some(t=>t.session_id===result.session_id&&t.member_id===memberID));
+  if(everySeat)result.tabs_created=true;
   persist();
   return created;
 }
@@ -241,6 +271,11 @@ function a41CouncilWizardSnapshot(form){
     objective:form.elements.namedItem("objective").value,
     critique_rounds:Number(form.elements.namedItem("critique_rounds").value),
     synthesis_pass:form.elements.namedItem("synthesis_pass").checked,
+    synthesis_index:Number(form.elements.namedItem("synthesis_index").value),
+    chair_mode:form.elements.namedItem("chair_mode").value,
+    chair_provider_id:form.elements.namedItem("chair_provider_id").value,
+    chair_model_label:form.elements.namedItem("chair_model_label").value,
+    chair_require_approval:form.elements.namedItem("chair_require_approval").checked,
     seats:$$("[data-a41-seat]",form).map(row=>({
       provider_id:row.querySelector('[name="provider_id"]').value,
       model_label:row.querySelector('[name="model_label"]').value,
@@ -263,7 +298,24 @@ function a41OpenWebOnlyCouncilWizard(){
         </select></label>
         <label class="inline-check"><input type="checkbox" name="synthesis_pass" checked> Include final synthesis</label>
       </div>
-      <div class="a41-council-seats-title"><strong>Manual web consultation seats (2–8)</strong><button class="btn" id="a41AddSeat" type="button">+ Add provider seat</button></div>
+      <div class="a41-council-seats-title"><strong>Council leadership</strong><span class="list-meta">Chair advises; OnePane enforces approval and isolation</span></div>
+      <div class="a41-council-settings">
+        <label>Chair mode<select name="chair_mode" id="a41ChairMode">
+          <option value="manual" selected>Manual Web Chat AI Chair</option>
+          <option value="none">No AI Chair — structured workflow</option>
+          <option value="local" disabled>OnePane local model — hybrid mode (not yet integrated)</option>
+          <option value="api" disabled>Connected cloud API — hybrid mode (not yet integrated)</option>
+        </select></label>
+        <label>Final synthesis seat<select name="synthesis_index" id="a41SynthesisSeat"></select></label>
+      </div>
+      <div class="a41-council-settings" id="a41ChairFields">
+        <label>Chair Web provider<select name="chair_provider_id">
+          ${A39_WEB_PROVIDERS.map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("")}
+        </select></label>
+        <label>Chair selected model<input name="chair_model_label" required maxlength="128" placeholder="Exact model selected on the provider website"></label>
+      </div>
+      <label class="inline-check" id="a41ChairApproval"><input type="checkbox" name="chair_require_approval" checked> Require my approval for the Chair agenda and follow-up questions</label>
+      <div class="a41-council-seats-title"><strong>Manual web consultation seats (2–7 with Chair, 2–8 without)</strong><button class="btn" id="a41AddSeat" type="button">+ Add provider seat</button></div>
       <div class="a41-council-seats" id="a41CouncilSeats">${draft.seats.map(a41WebSeatRow).join("")}</div>
       <p class="list-meta">You can choose the same provider more than once. Specify the model you will select on each website. All first-round seats remain independent, with no automatic model substitutions.</p>
       <div class="error" id="a41CouncilError" role="alert"></div>
@@ -277,19 +329,40 @@ function a41OpenWebOnlyCouncilWizard(){
       const rows=$$("[data-a41-seat]",form);
       if(rows.length<=2)return notice("Keep at least two Council seats.","bad");
       b.closest("[data-a41-seat]").remove();
-      form.querySelector("#a41AddSeat").disabled=false;
+      syncChair();syncSynthesis();
     });
   };
   bindRemove();
+  const syncChair=()=>{
+    const manual=$("#a41ChairMode").value==="manual";
+    $("#a41ChairFields").hidden=!manual;
+    $("#a41ChairApproval").hidden=!manual;
+    form.elements.namedItem("chair_model_label").required=manual;
+    const count=$("[data-a41-seat]",form).length;
+    $("#a41AddSeat").disabled=count>=A41_MAX_WEB_SEATS-(manual?1:0);
+  };
+  const syncSynthesis=()=>{
+    const control=$("#a41SynthesisSeat");
+    const selected=Number(control.value);
+    control.innerHTML=$("[data-a41-seat]",form).map((el,i)=>{
+      const role=el.querySelector('[name="role_name"]')?.value||("Research seat "+(i+1));
+      const provider=el.querySelector('[name="provider_id"]')?.value||"";
+      return `<option value="${i}">${escapeHtml(provider+" · "+role)}</option>`;
+    }).join("");
+    control.value=String(selected>=0&&selected<control.options.length?selected:0);
+  };
+  $("#a41ChairMode").onchange=()=>{syncChair();syncSynthesis()};
+  $("#a41CouncilSeats").addEventListener("change",syncSynthesis);
+  syncChair();syncSynthesis();
   $("#a41AddSeat").onclick=()=>{
     const rows=$$("[data-a41-seat]",form);
-    if(rows.length>=A41_MAX_WEB_SEATS)return;
+    if(rows.length>=A41_MAX_WEB_SEATS-($("#a41ChairMode").value==="manual"?1:0))return;
     const host=$("#a41CouncilSeats");
     host.insertAdjacentHTML("beforeend",a41WebSeatRow({
       provider_id:"chatgpt",model_label:"",role_name:"Independent reviewer"
     }));
     bindRemove();
-    if(rows.length+1>=A41_MAX_WEB_SEATS)$("#a41AddSeat").disabled=true;
+    syncChair();syncSynthesis();
   };
   form.onsubmit=async e=>{
     e.preventDefault();

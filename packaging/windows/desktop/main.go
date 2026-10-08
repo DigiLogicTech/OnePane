@@ -171,6 +171,19 @@ var (
 	webviewEnvironment uintptr
 	webviewController  uintptr
 	webviewObject      uintptr
+    providerEnvironment uintptr
+    providerController uintptr
+    providerObject uintptr
+    providerCreateProc uintptr
+    providerEnvHandler *comHandler
+    providerCtrlHandler *comHandler
+    providerInitializing bool
+    providerDesiredURL string
+    providerNavigatedURL string
+    providerRequested bool
+    providerViewportWidth float64
+    providerViewportHeight float64
+    providerBounds providerCSSBounds
 	quitting           atomic.Bool
 	trayData           notifyIconData
 
@@ -300,6 +313,7 @@ func wndProc(hwnd uintptr, message uint32, wParam, lParam uintptr) uintptr {
 	switch message {
 	case wmSize:
 		resizeWebView()
+        resizeProviderWebView()
 		return 0
 	case wmClose:
 		if !quitting.Load() {
@@ -582,7 +596,8 @@ func initializeWebView2() error {
 		return fmt.Errorf("WebView2 runtime export unavailable: %v", e)
 	}
 
-	userData := webViewDataDir()
+	providerCreateProc = createProc
+    userData := webViewDataDir()
 	_ = os.MkdirAll(userData, 0o755)
 	userDataPtr, _ := syscall.UTF16PtrFromString(userData)
 	envHandler = &comHandler{Vtbl: &handlerVtbl, Refs: 1, Kind: 1}
@@ -644,6 +659,28 @@ func comInvoke(this, result, object uintptr) uintptr {
 		return result
 	}
 	switch h.Kind {
+    case 4:
+        _ = callCOM(object, 1)
+        providerEnvironment = object
+        providerCtrlHandler = &comHandler{Vtbl: &handlerVtbl, Refs: 1, Kind: 5}
+        hr := callCOM(object, 3, mainHwnd, uintptr(unsafe.Pointer(providerCtrlHandler)))
+        if int32(hr) < 0 { desktopLogf("provider controller create failed: HRESULT 0x%08X",uint32(hr));providerInitializing=false }
+        return hr
+    case 5:
+        _ = callCOM(object,1)
+        providerController=object
+        var web uintptr
+        hr:=callCOM(object,25,uintptr(unsafe.Pointer(&web)))
+        if int32(hr)<0||web==0 { desktopLogf("provider browser unavailable: HRESULT 0x%08X",uint32(hr));providerInitializing=false;return hr }
+        _=callCOM(web,1)
+        providerObject=web
+        // This controller has NO WebMessageReceived listener: the external
+        // provider can never issue native OnePane commands.
+        providerInitializing=false
+        resizeProviderWebView()
+        if providerRequested && providerDesiredURL!="" {navigateProvider(providerDesiredURL)}
+        desktopLogf("isolated provider WebView2 controller ready")
+        return 0
 	case 1:
 		// The completion-handler result is a COM interface. Retain it beyond
 		// this callback; otherwise the runtime may release it as soon as Invoke
@@ -713,6 +750,95 @@ func callCOM(obj uintptr, slot int, args ...uintptr) uintptr {
 	a = append(a, args...)
 	r, _, _ := syscall.SyscallN(proc, a...)
 	return r
+}
+
+// providerCSSBounds are DOM coordinates relative to the control-plane
+// WebView viewport. They are converted to physical client pixels at the
+// native Win32 boundary; shell and Inspector resizing never change the model.
+type providerCSSBounds struct {
+    Left float64 `json:"left"`
+    Top float64 `json:"top"`
+    Width float64 `json:"width"`
+    Height float64 `json:"height"`
+}
+type providerViewCommand struct {
+    Op string `json:"op"`
+    URL string `json:"url"`
+    Rect providerCSSBounds `json:"rect"`
+    ViewportWidth float64 `json:"viewportWidth"`
+    ViewportHeight float64 `json:"viewportHeight"`
+}
+func approvedProviderURL(raw string) bool {
+    u,err:=url.Parse(raw)
+    if err!=nil||u.Scheme!="https"||u.User!=nil||u.Port()!="" { return false }
+    switch strings.ToLower(u.Hostname()) {
+    case "chatgpt.com","claude.ai","gemini.google.com","www.perplexity.ai","grok.com":
+        return true
+    }
+    return false
+}
+func navigateProvider(target string) {
+    if providerObject==0 || target==providerNavigatedURL || !approvedProviderURL(target) {return}
+    ptr,err:=syscall.UTF16PtrFromString(target)
+    if err!=nil {return}
+    hr:=callCOM(providerObject,5,uintptr(unsafe.Pointer(ptr)))
+    if int32(hr)<0 {desktopLogf("provider navigation failed: HRESULT 0x%08X",uint32(hr));return}
+    providerNavigatedURL=target
+}
+func initializeProviderWebView() {
+    if providerEnvironment!=0||providerInitializing||providerCreateProc==0{return}
+    providerInitializing=true
+    userData:=filepath.Join(webViewDataDir(),"ProviderSessions")
+    if err:=os.MkdirAll(userData,0o700);err!=nil {desktopLogf("provider profile directory unavailable: %v",err);providerInitializing=false;return}
+    ptr,err:=syscall.UTF16PtrFromString(userData)
+    if err!=nil {providerInitializing=false;return}
+    providerEnvHandler=&comHandler{Vtbl:&handlerVtbl,Refs:1,Kind:4}
+    hr,_,_:=syscall.SyscallN(providerCreateProc,1,0,uintptr(unsafe.Pointer(ptr)),0,uintptr(unsafe.Pointer(providerEnvHandler)))
+    if int32(hr)<0 {desktopLogf("isolated provider environment failed: 0x%08X",uint32(hr));providerInitializing=false}
+}
+func handleProviderViewMessage(message string) {
+    var cmd providerViewCommand
+    if len(message)>3072||json.Unmarshal([]byte(strings.TrimPrefix(message,"onepane-provider|")),&cmd)!=nil{return}
+    if cmd.Op=="hide"{
+        providerRequested=false
+        resizeProviderWebView()
+        return
+    }
+    if cmd.Op!="show"||!approvedProviderURL(cmd.URL){return}
+    if cmd.ViewportWidth<160||cmd.ViewportHeight<160||cmd.ViewportWidth>100000||cmd.ViewportHeight>100000 ||
+        cmd.Rect.Width<120||cmd.Rect.Height<120 || cmd.Rect.Left<0 || cmd.Rect.Top<0 ||
+        cmd.Rect.Left+cmd.Rect.Width>cmd.ViewportWidth+3 || cmd.Rect.Top+cmd.Rect.Height>cmd.ViewportHeight+3 {return}
+    providerDesiredURL=cmd.URL
+    providerBounds=cmd.Rect
+    providerViewportWidth=cmd.ViewportWidth
+    providerViewportHeight=cmd.ViewportHeight
+    providerRequested=true
+    if providerObject==0 {initializeProviderWebView();return}
+    navigateProvider(cmd.URL)
+    resizeProviderWebView()
+}
+func resizeProviderWebView() {
+    if providerController==0||mainHwnd==0{return}
+    if !providerRequested||providerViewportWidth<=0||providerViewportHeight<=0{
+        _=callCOM(providerController,4,0)
+        return
+    }
+    var window rect
+    if ok,_,_:=pGetClientRect.Call(mainHwnd,uintptr(unsafe.Pointer(&window)));ok==0{return}
+    sx:=float64(window.Right-window.Left)/providerViewportWidth
+    sy:=float64(window.Bottom-window.Top)/providerViewportHeight
+    r:=rect{
+        Left:int32(providerBounds.Left*sx),
+        Top:int32(providerBounds.Top*sy),
+        Right:int32((providerBounds.Left+providerBounds.Width)*sx),
+        Bottom:int32((providerBounds.Top+providerBounds.Height)*sy),
+    }
+    if r.Right>window.Right {r.Right=window.Right}
+    if r.Bottom>window.Bottom {r.Bottom=window.Bottom}
+    if r.Right<=r.Left||r.Bottom<=r.Top {_=callCOM(providerController,4,0);return}
+    _=callCOM(providerController,6,uintptr(unsafe.Pointer(&r)))
+    _=callCOM(providerController,23)
+    _=callCOM(providerController,4,1)
 }
 
 func resizeWebView() {
@@ -807,6 +933,7 @@ func applyInitialNativeTheme() {
 }
 
 func handleWebMessage(message string) {
+    if strings.HasPrefix(message,"onepane-provider|"){handleProviderViewMessage(message);return}
 	if strings.HasPrefix(message, "onepane-ui-ready|") {
 		desktopLogf("%s", message)
 		dir := filepath.Join(os.Getenv("LOCALAPPDATA"), "OnePane")

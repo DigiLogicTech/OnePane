@@ -83,64 +83,10 @@ async function a31OpenCompute(dep){
   const form=$("#a31ComputeForm");form.elements.preference.value=current.preference||"auto";form.elements.mode.value=current.placement_mode||"auto";if(a31Array(current.required_device_ids).length)form.elements.device.value=current.required_device_ids[0];
   form.onsubmit=async e=>{e.preventDefault();const pref=form.elements.preference.value,device=form.elements.device.value,required=pref==="require_gpu"&&device?[device]:[],preferred=pref==="prefer_gpu"&&device?[device]:[];$("#a31ComputeStatus").textContent="Applying…";try{await apiRequest(`/v1/local-ai/deployments/${encodeURIComponent(dep.deployment_id)}/compute-policy`,{method:"PATCH",body:JSON.stringify({workspace_id:onepaneWorkspace,preference:pref,placement_mode:form.elements.mode.value,preferred_device_ids:preferred,required_device_ids:required})});notice("Compute placement updated.");closeModal();renderModels()}catch(ex){$("#a31ComputeStatus").innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`}}
 }
-let a31InstallMonitorTimer=null;
-let a31ActiveInstallJobs=[];
-async function a31LoadActiveInstallJobs(){
-  if(!onepaneWorkspace)return [];
-  return a31Array(await apiRequest(`/v1/local-ai/install-jobs?workspace_id=${encodeURIComponent(onepaneWorkspace)}`).catch(()=>[]))
-}
-function a31InstallJobTitle(j){return j.model_ref||"Local model install"}
-function a31InstallJobProgressMarkup(j){
-  const pct=Math.max(0,Math.min(100,Math.round(Number(j.progress_pct||0)))),done=Number(j.bytes_downloaded||0),total=Number(j.bytes_total||0);
-  return `<div class="install-step active">${escapeHtml(j.current_artifact||titleCase(String(j.status||"queued").replaceAll("_"," ")))}</div><div class="install-progress-track"><span style="width:${pct}%"></span></div><div class="install-progress-meta"><span>${pct}%</span><span>${total>0?`${bytesQA(done)} / ${bytesQA(total)}`:""}</span></div>`
-}
-function a31DrawDownloadIndicator(){
-  const n=a31ActiveInstallJobs.length,button=$("#modelDownloadButton"),mobile=$("#mobileModelDownloadButton");
-  if(button){button.classList.toggle("hidden",n===0);$("#modelDownloadBadge").textContent=String(n);$("#modelDownloadLabel").textContent=n===1?"1 download":`${n} downloads`}
-  if(mobile){mobile.classList.toggle("hidden",n===0);$("#mobileModelDownloadBadge").textContent=String(n)}
-}
-function a31OpenDownloadManager(){
-  const rows=a31ActiveInstallJobs;
-  openModal("Background model downloads",rows.length?`<div class="model-download-list">${rows.map(j=>`<div class="model-download-row"><div class="model-download-head"><div><strong>${escapeHtml(a31InstallJobTitle(j))}</strong><div class="list-meta">${escapeHtml(j.quantization||"")} · ${escapeHtml(titleCase(String(j.status||"queued")))}</div></div><button class="btn" data-a31-view-install="${escapeHtml(j.id)}">View progress</button></div><div class="model-download-progress"><span style="width:${Math.max(0,Math.min(100,Number(j.progress_pct||0)))}%"></span></div><div class="list-meta">${escapeHtml(j.current_artifact||"Queued")}</div></div>`).join("")}</div>`:'<div class="empty-state compact">No active model downloads.</div>');
-  $$("[data-a31-view-install]").forEach(b=>b.onclick=()=>a31OpenInstallProgress(b.dataset.a31ViewInstall))
-}
-async function a31OpenInstallProgress(jobID){
-  let first;
-  try{first=await apiRequest(`/v1/local-ai/install-jobs/${encodeURIComponent(jobID)}`)}catch(ex){return notice(ex.message,"bad")}
-  openModal("Model install progress",`<div class="widget-body"><strong>${escapeHtml(a31InstallJobTitle(first))}</strong><div class="list-meta">${escapeHtml(first.quantization||"")}</div><div id="a31BackgroundJobProgress">${a31InstallJobProgressMarkup(first)}</div></div>`);
-  const poll=async()=>{
-    const box=$("#a31BackgroundJobProgress");if(!box)return;
-    try{
-      const j=await apiRequest(`/v1/local-ai/install-jobs/${encodeURIComponent(jobID)}`);box.innerHTML=a31InstallJobProgressMarkup(j);
-      if(["ready","failed","cancelled"].includes(String(j.status)))return
-    }catch(ex){box.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;return}
-    setTimeout(poll,900)
-  };setTimeout(poll,900)
-}
-async function a31RefreshDownloadMonitor(){
-  if(!onepaneWorkspace)return;
-  const prev=new Map(a31ActiveInstallJobs.map(j=>[j.id,j]));
-  const next=await a31LoadActiveInstallJobs();a31ActiveInstallJobs=next;a31DrawDownloadIndicator();
-  const active=new Set(next.map(j=>j.id));
-  for(const [id,old] of prev){
-    if(active.has(id))continue;
-    try{
-      const done=await apiRequest(`/v1/local-ai/install-jobs/${encodeURIComponent(id)}`);
-      if(done.status==="ready")notice(`${a31InstallJobTitle(done)} installed and ready.`);
-      else if(done.status==="failed")notice(`${a31InstallJobTitle(done)} install failed: ${done.failure_reason||"unknown error"}`,"bad");
-    }catch{}
-  }
-  if(a31RouteIs("models")&&a31ModelView==="local"&&prev.size!==next.length)setTimeout(()=>renderModels(),0)
-}
-function a31StartDownloadMonitor(){
-  if(a31InstallMonitorTimer)return;
-  $("#modelDownloadButton")?.addEventListener("click",a31OpenDownloadManager);
-  $("#mobileModelDownloadButton")?.addEventListener("click",a31OpenDownloadManager);
-  a31RefreshDownloadMonitor().catch(()=>{});
-  a31InstallMonitorTimer=setInterval(()=>a31RefreshDownloadMonitor().catch(()=>{}),3000)
-}
-
 async function a31InstallModel(model){
+  // Reopen an active durable job instead of creating a second runtime install.
+  const active=(await a31LoadActiveInstallJobs().catch(()=>[])).find(j=>String(j.status||"")!=="interrupted"&&String(j.model_ref||"").toLowerCase()===String(model?.model_ref||"").toLowerCase());
+  if(active){a31OpenInstallProgress(active.id);return}
   if(!model?.installable){notice(model?.install_reason||"This model is advisory only; no verified artifact is available.","bad");return}
   if(!localProfileQA){try{await a31DetectHardware()}catch(ex){notice(ex.message,"bad");return}}
   const qs=a31Array(model.installable_quantizations),defaultQ=qs[0]||a31Array(model.quantizations)[0]||"";
@@ -148,6 +94,9 @@ async function a31InstallModel(model){
   const form=$("#a31InstallModelForm");form.elements.quantization.value=defaultQ;
   form.onsubmit=async e=>{
     e.preventDefault();const box=$("#a31InstallProgress"),submit=$("#a31InstallSubmit");submit.disabled=true;
+    const active=(await a31LoadActiveInstallJobs().catch(()=>[])).find(j=>String(j.status||"")!=="interrupted"&&String(j.model_ref||"").toLowerCase()===String(model.model_ref||"").toLowerCase()&&String(j.quantization||"").toLowerCase()===String(form.elements.quantization.value||"").toLowerCase());
+    if(active){a31OpenInstallProgress(active.id);return}
+
     box.innerHTML='<div class="install-step active">Resolving trusted catalogue…</div>';
     try{
       const job=await apiRequest("/v1/local-ai/install-jobs",{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace,profile_id:localProfileQA.id,role_name:"local-managed",use_case:"general",context_tokens:8192,model_ref:model.model_ref,quantization:form.elements.quantization.value,compute_preference:form.elements.compute.value,allow_resource_override:form.elements.resource_override.checked})});
@@ -189,7 +138,7 @@ async function a31RenderLocalModels(){
   recommendations=recommendations.map(x=>{const m={...(x.model||{})},verified=installByRef.get(String(m.model_ref||"").toLowerCase());if(verified){m.installable=!!verified.installable;m.installable_quantizations=a31Array(verified.installable_quantizations);m.install_reason=verified.install_reason}return {...x,model:m}});
   const installedRefs=new Set(deployments.map(d=>String(d.model_ref||"").toLowerCase())),activeRefs=new Set(a31ActiveInstallJobs.map(j=>String(j.model_ref||"").toLowerCase()));
   const colibri=components.colibri||{},llama=components.llamacpp||{};
-  root.innerHTML=`<div class="models-single-column"><div class="models-runtime-grid local-runtime-grid">${a31RuntimeCard("colibri","Colibri",colibri,"Managed large-model runtime.")}${a31LlamaRuntimeCard(llama,llamaRows)}<section class="panel-card hardware-card"><div class="card-header models-card-header"><div><div class="card-title">Hardware</div><div class="list-meta">Detected compute resources used for recommendations and runtime selection.</div></div><button class="btn primary a31-detect-large models-header-action" id="detectLocal">${localProfileQA?"Refresh":"⚙ Detect Hardware"}</button></div><div class="widget-body" id="localResult">${a31HardwareMarkup()}</div></section></div><section class="panel-card"><div class="card-header models-card-header"><div><div class="card-title">Recommended Models</div><div class="list-meta">Hardware-aware recommendations for this node. The full catalogue lives in Discover.</div></div><button class="btn models-header-action" id="a31OpenDiscover">Discover models</button></div><div class="widget-body recommendation-list">${localProfileQA?(recommendations.length?recommendations.map((x,i)=>{const m=x.model||{};return `<div class="recommendation-row"><div><strong>${escapeHtml(m.display_name||m.model_ref||"Model")}</strong><div class="list-meta">${escapeHtml(x.quantization||"")} · ${escapeHtml(x.run_mode||"")} · ${bytesQA(x.memory_required_bytes||0)} estimated memory</div></div><span class="pill good">${escapeHtml(x.fit_level||"fit")}</span><button class="btn ${m.installable&&!installedRefs.has(String(m.model_ref||"").toLowerCase())&&!activeRefs.has(String(m.model_ref||"").toLowerCase())?'primary':''}" data-a31-recommend-install="${i}" ${m.installable&&!installedRefs.has(String(m.model_ref||"").toLowerCase())&&!activeRefs.has(String(m.model_ref||"").toLowerCase())?'':'disabled'}>${installedRefs.has(String(m.model_ref||"").toLowerCase())?'Installed':activeRefs.has(String(m.model_ref||"").toLowerCase())?'Downloading':m.installable?'Install':'Unavailable'}</button></div>`}).join(""):'<div class="empty-state compact">No safe recommendation was returned for this hardware profile.</div>'):'<div class="empty-state compact">Detect hardware to calculate recommended models and the recommended runtime stack.</div>'}</div></section><section class="panel-card"><div class="card-header models-card-header"><div><div class="card-title">Installed Models</div><div class="list-meta">Registered local deployments reconciled against the managed model cache.</div></div><button class="btn models-header-action" id="a31RescanInstalledModels">Rescan models</button></div><div class="model-tile-scroll">${a31InstalledModelsMarkup(deployments)}</div></section></div>`;
+  root.innerHTML=`<div class="models-single-column"><div class="models-runtime-grid local-runtime-grid">${a31RuntimeCard("colibri","Colibri",colibri,"Managed large-model runtime.")}${a31LlamaRuntimeCard(llama,llamaRows)}<section class="panel-card hardware-card"><div class="card-header models-card-header"><div><div class="card-title">Hardware</div><div class="list-meta">Detected compute resources used for recommendations and runtime selection.</div></div><button class="btn primary a31-detect-large models-header-action" id="detectLocal">${localProfileQA?"Refresh":"⚙ Detect Hardware"}</button></div><div class="widget-body" id="localResult">${a31HardwareMarkup()}</div></section></div><section class="panel-card"><div class="card-header models-card-header"><div><div class="card-title">Recommended Models</div><div class="list-meta">Hardware-aware recommendations for this node. The full catalogue lives in Discover.</div></div><button class="btn models-header-action" id="a31OpenDiscover">Discover models</button></div><div class="widget-body recommendation-list">${localProfileQA?(recommendations.length?recommendations.map((x,i)=>{const m=x.model||{};return `<div class="recommendation-row"><div><strong>${escapeHtml(m.display_name||m.model_ref||"Model")}</strong><div class="list-meta">${escapeHtml(x.quantization||"")} · ${escapeHtml(x.run_mode||"")} · ${bytesQA(x.memory_required_bytes||0)} estimated memory</div></div><span class="pill good">${escapeHtml(x.fit_level||"fit")}</span><button class="btn ${m.installable&&!installedRefs.has(String(m.model_ref||"").toLowerCase())&&!activeRefs.has(String(m.model_ref||"").toLowerCase())?'primary':''}" data-a31-recommend-install="${i}" ${m.installable&&!installedRefs.has(String(m.model_ref||"").toLowerCase())?'':'disabled'}>${installedRefs.has(String(m.model_ref||"").toLowerCase())?'Installed':activeRefs.has(String(m.model_ref||"").toLowerCase())?'View progress':m.installable?'Install':'Unavailable'}</button></div>`}).join(""):'<div class="empty-state compact">No safe recommendation was returned for this hardware profile.</div>'):'<div class="empty-state compact">Detect hardware to calculate recommended models and the recommended runtime stack.</div>'}</div></section><section class="panel-card"><div class="card-header models-card-header"><div><div class="card-title">Installed Models</div><div class="list-meta">Registered local deployments reconciled against the managed model cache.</div></div><button class="btn models-header-action" id="a31RescanInstalledModels">Rescan models</button></div><div class="model-tile-scroll">${a31InstalledModelsMarkup(deployments)}</div></section></div>`;
   $("#detectLocal").onclick=async()=>{const b=$("#localResult");b.textContent="Detecting…";try{await a31DetectHardware();renderModels()}catch(ex){b.innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`}};
   $("#a31OpenDiscover").onclick=()=>a31SetModelView("discover");
   $("#a31RescanInstalledModels").onclick=async()=>{const b=$("#a31RescanInstalledModels");b.disabled=true;b.textContent="Scanning…";try{const r=await apiRequest("/v1/local-ai/deployments/reconcile",{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace})});notice(`Model rescan complete · ${r.kept||0} kept · ${r.removed_stale||0} stale removed · ${r.removed_duplicates||0} duplicate${Number(r.removed_duplicates||0)===1?"":"s"} removed.`);await renderModels()}catch(ex){b.disabled=false;b.textContent="Rescan models";notice(ex.message,"bad")}};
@@ -280,7 +229,7 @@ async function a31RenderRoutingModels(){
   const project=a31CurrentProject(),workspace=a31CurrentWorkspace();
   if(!project){root.innerHTML='<div class="empty-state">Create or open a Project before configuring Model Routing profiles.</div>';return}
   const rows=a31RoutingProfileRows(project);
-  root.innerHTML=`<div class="models-single-column"><section class="panel-card"><div class="card-header models-card-header"><div><div class="card-title">Model Routing Profiles</div><div class="list-meta">Reusable ordered model chains for Direct, Workers, Teams and Councils.</div></div><div class="toolbar"><button class="btn" id="a31StarterRoute">Create worker fallback profile</button><button class="btn primary" id="a31NewRoute">New profile</button></div></div><div class="widget-body routing-profile-grid" id="a31RoutingProfiles">${rows.length?rows.map((p,i)=>`<article class="routing-profile-card"><div class="provider-tile-head"><strong>${escapeHtml(p.name||"Routing profile")}</strong><div class="toolbar"><button class="btn tiny" data-a31-route-edit="${i}">Edit</button><button class="btn tiny danger" data-a31-route-delete="${i}" aria-label="Delete routing profile">×</button></div></div><div class="routing-chain"><span>${escapeHtml(a31ModelOptionLabel(p.primary_model||"auto"))}</span>${a31Array(p.fallback_models).map(v=>`<span class="routing-arrow">→</span><span>${escapeHtml(a31ModelOptionLabel(v))}</span>`).join("")}</div><div class="routing-apply"><select data-a31-route-role="${i}"><option value="supervisor">Direct</option><option value="workers" selected>Workers</option><option value="team">Team</option><option value="council">Council</option></select><button class="btn primary" data-a31-route-apply="${i}" ${workspace?"":"disabled"}>Apply to ${escapeHtml(workspace?.name||"Workspace")}</button></div></article>`).join(""):'<div class="empty-state compact">No routing profiles yet. Create a reusable multi-fallback chain for worker agents or other roles.</div>'}</div></section><section class="panel-card"><div class="widget-body"><strong>Routing integrity</strong><p class="page-subtitle">Profiles write into Workspace routing policy and therefore affect actual task routing. Research mode remains authoritative when a Team/Council requires pinned models or disables substitution.</p></div></section></div>`;
+  root.innerHTML=`<div class="models-single-column"><section class="panel-card"><div class="card-header models-card-header models-routing-header"><div><div class="card-title">Model Routing Profiles</div><div class="list-meta">Reusable ordered model chains for Direct, Workers, Teams and Councils.</div></div><div class="toolbar models-routing-actions"><button class="btn" id="a31StarterRoute">Create worker fallback profile</button><button class="btn primary" id="a31NewRoute">New profile</button></div></div><div class="widget-body routing-profile-grid" id="a31RoutingProfiles">${rows.length?rows.map((p,i)=>`<article class="routing-profile-card"><div class="provider-tile-head"><strong>${escapeHtml(p.name||"Routing profile")}</strong><div class="toolbar"><button class="btn tiny" data-a31-route-edit="${i}">Edit</button><button class="btn tiny danger" data-a31-route-delete="${i}" aria-label="Delete routing profile">×</button></div></div><div class="routing-chain"><span>${escapeHtml(a31ModelOptionLabel(p.primary_model||"auto"))}</span>${a31Array(p.fallback_models).map(v=>`<span class="routing-arrow">→</span><span>${escapeHtml(a31ModelOptionLabel(v))}</span>`).join("")}</div><div class="routing-apply"><select data-a31-route-role="${i}"><option value="supervisor">Direct</option><option value="workers" selected>Workers</option><option value="team">Team</option><option value="council">Council</option></select><button class="btn primary" data-a31-route-apply="${i}" ${workspace?"":"disabled"}>Apply to ${escapeHtml(workspace?.name||"Workspace")}</button></div></article>`).join(""):'<div class="empty-state compact">No routing profiles yet. Create a reusable multi-fallback chain for worker agents or other roles.</div>'}</div></section><section class="panel-card"><div class="widget-body"><strong>Routing integrity</strong><p class="page-subtitle">Profiles write into Workspace routing policy and therefore affect actual task routing. Research mode remains authoritative when a Team/Council requires pinned models or disables substitution.</p></div></section></div>`;
   $("#a31NewRoute").onclick=()=>a31EditRoutingProfile(-1);$("#a31StarterRoute").onclick=a31CreateWorkerRoutingProfile;
   $$("[data-a31-route-edit]").forEach(b=>b.onclick=()=>a31EditRoutingProfile(Number(b.dataset.a31RouteEdit)));
   $$("[data-a31-route-delete]").forEach(b=>b.onclick=()=>{const i=Number(b.dataset.a31RouteDelete),profile=rows[i];a31ConfirmAction("Delete routing profile?",`Delete "${profile?.name||"profile"}"? Existing Workspaces keep the routing policy already applied from this profile.`,"Delete profile",async()=>{await qa4SaveProjectUI(project,{model_routing_profiles:rows.filter((_,n)=>n!==i)});renderModels()})});
@@ -315,10 +264,19 @@ async function a31VerifyExternalModel(model){
 }
 
 async function a31RenderDiscoverModels(){
-  const root=$("#a31ModelsRoot");let catalog=[],recommendations=[],external=[],sourceErrors={},nextCursor="",loadingExternal=false,requestEpoch=0,autoPages=0;
-  try{catalog=await apiRequest("/v1/local-ai/catalog");if(localProfileQA)recommendations=await a31RecommendedModels(50).catch(()=>[])}catch(ex){root.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;return}
+  const root=$("#a31ModelsRoot");let catalog=[],recommendations=[],external=[],sourceErrors={},nextCursor="",loadingExternal=false,requestEpoch=0,autoPages=0,installedRefs=null;
+  const deploymentRefs=rows=>{
+    const list=Array.isArray(rows)?rows:rows?.deployments;
+    return Array.isArray(list)?new Set(list.map(x=>String(x.model_ref||"").trim().toLowerCase()).filter(Boolean)):null
+  };
+  try{
+    const [cat,deployments]=await Promise.all([apiRequest("/v1/local-ai/catalog"),apiRequest("/v1/local-ai/deployments?workspace_id="+encodeURIComponent(onepaneWorkspace)).catch(()=>null)]);
+    catalog=cat;installedRefs=deploymentRefs(deployments);
+    if(localProfileQA)recommendations=await a31RecommendedModels(50).catch(()=>[])
+  }catch(ex){root.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;return}
   const fits=new Map(recommendations.map(x=>[String(x.model?.model_ref||"").toLowerCase(),{fit:x.fit_level,mode:x.run_mode}]));
   root.innerHTML=`<div class="models-single-column"><section class="panel-card"><div class="card-header models-card-header"><div><div class="card-title">Discover Models</div><div class="list-meta">OnePane Verified installs remain digest-pinned; external catalogues expand discovery without weakening the trust boundary.</div></div><button class="btn models-header-action" id="a31DiscoverDetect">${localProfileQA?"Refresh hardware fit":"Detect hardware"}</button></div><div class="models-discover-controls"><input id="a31DiscoverFilter" class="catalogue-filter" placeholder="Search model, capability, quantization…"><select id="a31DiscoverSource"><option value="all">All sources</option><option value="onepane">OnePane Verified</option><option value="huggingface">Hugging Face</option><option value="huggingbay">Hugging Bay</option><option value="llmfit">llmfit</option></select><select id="a31DiscoverAvailability"><option value="all">All models</option><option value="downloadable">Downloadable only</option><option value="verification">Verification required</option><option value="unavailable">Unavailable</option><option value="recommended">Recommended for this hardware</option></select><select id="a31DiscoverSort" aria-label="Sort models"><option value="popular">Most popular</option></select><button class="btn primary" id="a31DiscoverSearch">Search catalogues</button></div><div id="a31DiscoverSourceStatus" class="page-subtitle discover-source-status"></div><div id="a31DiscoverCatalog" class="model-tile-scroll"></div><div class="discover-pagination"><span id="a31DiscoverCount" class="page-subtitle"></span><button class="btn" id="a31DiscoverMore" hidden>Load more models</button></div></section></div>`;
+  const isInstalled=m=>installedRefs?.has(String(m.model_ref||m.id||"").trim().toLowerCase())===true;
   const localRows=()=>a31Array(catalog).map(m=>{const f=fits.get(String(m.model_ref||"").toLowerCase());return {...m,_source:"onepane",_fit:f}});
   const externalRows=()=>external.map(x=>({...x,_source:x.source||"external",_fit:x.fit_level?{fit:x.fit_level,mode:x.run_mode}:null}));
   const availabilityChanged=()=>{if($("#a31DiscoverCatalog"))draw()};const draw=()=>{
@@ -326,25 +284,35 @@ async function a31RenderDiscoverModels(){
     let rows=[...localRows(),...externalRows()];
     rows=rows.filter(m=>{
       const hit=!q||JSON.stringify(m).toLowerCase().includes(q),sourceHit=source==="all"||(source==="onepane"?m._source==="onepane":m._source===source),fit=!!m._fit;
-      const isLocal=m._source==="onepane",availability=isLocal?(m.installable?"yes":"no"):a40DownloadCache.get(m._source+":"+(m.id||m.model_ref||""))?.state;
+      const isLocal=m._source==="onepane",availability=isInstalled(m)?"no":isLocal?(m.installable&&installedRefs?"yes":"no"):a40DownloadCache.get(m._source+":"+(m.id||m.model_ref||""))?.state;
       return hit&&sourceHit&&(mode==="all"||mode==="downloadable"&&availability==="yes"||mode==="verification"&&!isLocal&&(!availability||availability==="error")||mode==="unavailable"&&(availability==="no"||availability==="error")||mode==="recommended"&&fit)
     });
     $("#a31DiscoverCatalog").innerHTML=rows.length?rows.map((m,i)=>{
       if(m._source==="onepane"){
-        const f=m._fit;return `<article class="model-tile"><div><div class="model-source-line"><span class="pill good">OnePane Verified</span><span class="pill ${m.installable?'good':''}">${m.installable?"Ready to install":"Advisory only"}</span></div><strong>${escapeHtml(m.display_name||m.model_ref)}</strong><div class="list-meta">${escapeHtml(String(m.params_b||m.parameter_count||m.parameter_scale||"—"))} · ${formatContextQA(m.context_length||m.max_context_tokens||m.context_tokens)} context</div><div class="list-meta">${m.installable?`Digest-pinned · ${escapeHtml(a31Array(m.installable_quantizations).join(", "))}`:`Advisory · ${escapeHtml(m.install_reason||"No verified artifact")}`}${f?` · ${escapeHtml(f.fit||"fit")} · ${escapeHtml(f.mode||"")}`:""}</div></div><div class="toolbar">${f?`<span class="pill good">${escapeHtml(f.fit||"Recommended")}</span>`:""}<button class="btn ${m.installable?'primary':''}" data-a31-discover-install-ref="${escapeHtml(m.model_ref||"")}" ${m.installable?'':'disabled'}>${m.installable?'Install':'Unavailable'}</button></div></article>`
+        const f=m._fit,installed=isInstalled(m),canInstall=!!m.installable&&installedRefs!==null&&!installed;
+        const label=installed?"Installed":installedRefs===null?"Inventory unavailable":m.installable?"Ready to install":"Advisory only";
+        return `<article class="model-tile"><div><div class="model-source-line"><span class="pill good">OnePane Verified</span><span class="pill ${installed||canInstall?'good':''}">${label}</span></div><strong>${escapeHtml(m.display_name||m.model_ref)}</strong><div class="list-meta">${escapeHtml(String(m.params_b||m.parameter_count||m.parameter_scale||"—"))} · ${formatContextQA(m.context_length||m.max_context_tokens||m.context_tokens)} context</div><div class="list-meta">${m.installable?`Digest-pinned · ${escapeHtml(a31Array(m.installable_quantizations).join(", "))}`:`Advisory · ${escapeHtml(m.install_reason||"No verified artifact")}`}${f?` · ${escapeHtml(f.fit||"fit")} · ${escapeHtml(f.mode||"")}`:""}</div></div><div class="toolbar">${f?`<span class="pill good">${escapeHtml(f.fit||"Recommended")}</span>`:""}<button class="btn ${canInstall?'primary':''}" data-a31-discover-install-ref="${escapeHtml(m.model_ref||"")}" ${canInstall?'':'disabled'}>${installed?'Installed':canInstall?'Install':installedRefs===null?'Unavailable':'Unavailable'}</button></div></article>`
       }
       const availability=m._source==="llmfit"?"Hardware advisory · artifact not verified":m._source==="huggingbay"?"Manifest verification required":"Artifact verification required",action=m._source==="llmfit"?"Find compatible GGUF":m._source==="huggingbay"?"Verify manifest":"Verify artifact";
       const src=a31ExternalSourceLabel(m._source),meta=[m.quantization,m.runtime,m.license,m.downloads?`${Number(m.downloads).toLocaleString()} downloads`:"",m.seeds?`${Number(m.seeds).toLocaleString()} seeds`:""].filter(Boolean).join(" · ");
-      return `<article class="model-tile external-model-tile" data-a40-source="${escapeHtml(m._source)}" data-a40-id="${escapeHtml(m.id||m.model_ref||"")}"><div><div class="model-source-line"><span class="pill">${escapeHtml(src)}</span><span class="pill ${m.verified?'good':''}">${escapeHtml(m.trust||"advisory")}</span><span class="pill">${escapeHtml(availability)}</span><span class="pill a40-download-status" aria-live="polite">Checking download…</span></div><strong>${escapeHtml(m.display_name||m.id||"Model")}</strong><div class="list-meta">${escapeHtml(meta||m.category||"External catalogue entry")}</div><div class="list-meta">${m._fit?`${escapeHtml(m._fit.fit||"fit")} · ${escapeHtml(m._fit.mode||"")}`:`${escapeHtml(m.install_reason||"External source metadata")}`}</div></div><div class="toolbar">${m._fit?`<span class="pill good">${escapeHtml(m._fit.fit||"Recommended")}</span>`:""}${m.source_url?`<button class="btn" data-a31-source-url="${escapeHtml(m.source_url)}">View source</button>`:""}<button class="btn primary" data-a31-verify-source="${escapeHtml(m._source)}" data-a31-verify-id="${escapeHtml(m.id||m.model_ref||"")}">${escapeHtml(action)}</button></div></article>`
+      return `<article class="model-tile external-model-tile" data-a40-source="${escapeHtml(m._source)}" data-a40-id="${escapeHtml(m.id||m.model_ref||"")}"><div><div class="model-source-line"><span class="pill">${escapeHtml(src)}</span><span class="pill ${m.verified?'good':''}">${escapeHtml(m.trust||"advisory")}</span><span class="pill">${escapeHtml(availability)}</span><span class="pill a40-download-status" aria-live="polite">Checking download…</span></div><strong>${escapeHtml(m.display_name||m.id||"Model")}</strong><div class="list-meta">${escapeHtml(meta||m.category||"External catalogue entry")}</div><div class="list-meta">${m._fit?`${escapeHtml(m._fit.fit||"fit")} · ${escapeHtml(m._fit.mode||"")}`:`${escapeHtml(m.install_reason||"External source metadata")}`}</div></div><div class="toolbar">${m._fit?`<span class="pill good">${escapeHtml(m._fit.fit||"Recommended")}</span>`:""}${m.source_url?`<button class="btn" data-a31-source-url="${escapeHtml(m.source_url)}">View source</button>`:""}<button class="btn ${isInstalled(m)?'':'primary'}" data-a31-verify-source="${escapeHtml(m._source)}" data-a31-verify-id="${escapeHtml(m.id||m.model_ref||"")}" ${isInstalled(m)?'disabled':''}>${isInstalled(m)?'Installed':escapeHtml(action)}</button></div></article>`
     }).join(""):'<div class="empty-state compact">No models match these filters.</div>';
     const checked=external.filter(m=>a40DownloadCache.has((m.source||"external")+":"+(m.id||m.model_ref||""))).length;
     const confirmed=external.filter(m=>a40DownloadCache.get((m.source||"external")+":"+(m.id||m.model_ref||""))?.state==="yes").length;
     $("#a31DiscoverCount").textContent=`${rows.length} visible · ${confirmed} external downloadable confirmed · ${checked}/${external.length} checked`;
     if(["downloadable","verification","unavailable"].includes(mode))for(const m of external){const s=m.source||"external",id=m.id||m.model_ref||"";if(id)a40QueueAvailability(s,id,availabilityChanged)}
     if(mode==="downloadable"&&nextCursor&&checked===external.length&&rows.length<8&&!loadingExternal&&autoPages<5){autoPages++;Promise.resolve().then(()=>fetchExternal(true))}
-    $$("[data-a31-discover-install-ref]").forEach(b=>b.onclick=()=>a31InstallModel(catalog.find(x=>String(x.model_ref)===b.dataset.a31DiscoverInstallRef)));
+    $$("[data-a31-discover-install-ref]:not(:disabled)").forEach(b=>b.onclick=async()=>{
+      const model=catalog.find(x=>String(x.model_ref)===b.dataset.a31DiscoverInstallRef);
+      if(!model)return;
+      const current=await apiRequest("/v1/local-ai/deployments?workspace_id="+encodeURIComponent(onepaneWorkspace)).catch(()=>null);
+      installedRefs=deploymentRefs(current);draw();
+      if(installedRefs===null)return notice("Cannot verify existing installations; retry after refreshing the inventory.","bad");
+      if(isInstalled(model))return notice("Model is already installed.");
+      a31InstallModel(model)
+    });
     $$("[data-a31-source-url]").forEach(b=>b.onclick=()=>a31OpenModelSource(b.dataset.a31SourceUrl));
-    $$("[data-a31-verify-source]").forEach(b=>b.onclick=()=>{const m=external.find(x=>String(x.source||"")===b.dataset.a31VerifySource&&String(x.id||x.model_ref||"")===b.dataset.a31VerifyId);if(m)a31VerifyExternalModel({...m,_source:m.source})})
+    $$("[data-a31-verify-source]:not(:disabled)").forEach(b=>b.onclick=()=>{const m=external.find(x=>String(x.source||"")===b.dataset.a31VerifySource&&String(x.id||x.model_ref||"")===b.dataset.a31VerifyId);if(m&&!isInstalled(m))a31VerifyExternalModel({...m,_source:m.source})})
     if(typeof a40ScheduleAvailabilityChecks==="function")a40ScheduleAvailabilityChecks();
   };
 

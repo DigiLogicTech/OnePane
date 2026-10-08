@@ -7,3 +7,5 @@ func readMemory()(memStats,error){return memStats{},unavailable}
 func readDisk()(diskStats,error){return diskStats{},unavailable}
 func readNetwork()(rx,tx uint64,err error){return 0,0,unavailable}
 func readProcessRSS()(uint64,error){return 0,unavailable}
+
+func readDiskAt(path string)(diskStats,error){return diskStats{},unavailable}

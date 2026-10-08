@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"sync"
 
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/event"
@@ -71,6 +72,10 @@ type Service struct {
 	catalog      *CatalogService
 	catalogTrust *CatalogTrustStore
 	llmfit       *LLMFitClient
+	// A single node can service concurrent UI/remote install requests. Serialize
+	// shared runtime provisioning, without serializing entire model downloads.
+	runtimeInstallMu sync.Mutex
+	installQueueMu   sync.Mutex
 }
 
 func NewService(db *sql.DB, tx storage.Transactor, clk clock.Clock, inf *inference.Service, dataDir string, trust *CatalogTrustStore) *Service {
@@ -274,7 +279,10 @@ func trustedRuntimeArtifact(cat ArtifactCatalog, p HardwareProfile, rec Recommen
 			fallback = &copy
 		}
 	}
-	if fallback != nil {
+	// A generic/CPU runtime may never be substituted for an accelerated
+	// placement: its --device table will not contain the requested CUDA/Vulkan
+	// identifier. Fail closed and let the operator choose CPU explicitly.
+	if fallback != nil && wanted == "cpu" {
 		return *fallback, true
 	}
 	return RuntimeCatalogEntry{}, false
@@ -624,6 +632,11 @@ func (s *Service) Plan(ctx context.Context, id string) (InstallPlan, error) {
 // ProvisionApprovedPlan installs a managed runtime/model from trusted resolved artifacts.
 // It deliberately stops at QUALIFYING: empirical qualification must prove the deployment before scheduling it.
 func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runtime RuntimeManifest, model ModelArtifact) (inference.ModelDeployment, error) {
+	// Two models may request the same runtime concurrently. Prevent one job
+	// from seeing the other's newly renamed but not-yet-inventoried runtime.
+	s.runtimeInstallMu.Lock()
+	runtimeLocked := true
+	defer func() { if runtimeLocked { s.runtimeInstallMu.Unlock() } }()
 	p, err := s.Plan(ctx, planID)
 	if err != nil {
 		return inference.ModelDeployment{}, err
@@ -652,15 +665,21 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 	execPath := filepath.Join(runtimeRoot, runtime.ExecutableRel)
 	var runtimeDownloads []string
 	reuseRuntime := false
-	var installedVersion, installedSHA, installedExec string
+	var installedVersion, installedSHA, installedExec, installedRoot string
 	runtimeInventoryName := runtime.Name
 	if b := strings.ToLower(strings.TrimSpace(runtime.Backend)); b != "" {
 		runtimeInventoryName += "@" + b
 	}
-	err = s.db.QueryRowContext(ctx, `SELECT runtime_version,source_sha256,executable_path FROM managed_local_runtimes WHERE node_id=? AND runtime_name=? AND status='ready'`, p.NodeID, runtimeInventoryName).Scan(&installedVersion, &installedSHA, &installedExec)
-	if err == nil && installedVersion == runtime.Version && strings.EqualFold(installedSHA, runtimeFingerprint) && filepath.Clean(installedExec) == filepath.Clean(execPath) {
-		if st, statErr := os.Stat(execPath); statErr == nil && !st.IsDir() {
-			reuseRuntime = true
+	err = s.db.QueryRowContext(ctx, `SELECT runtime_version,source_sha256,executable_path,install_root FROM managed_local_runtimes WHERE node_id=? AND runtime_name=? AND status='ready'`, p.NodeID, runtimeInventoryName).Scan(&installedVersion, &installedSHA, &installedExec, &installedRoot)
+	if err == nil && installedVersion == runtime.Version && strings.EqualFold(installedSHA, runtimeFingerprint) {
+		// Runtime updates can use a versioned .rev-N generation. Trust the
+		// inventory's exact fingerprint + executable, not a fixed path guess.
+		managedRoot := filepath.Join(s.dataDir, "runtimes")
+		if pathWithin(managedRoot, installedRoot) && pathWithin(installedRoot, installedExec) {
+			if st, statErr := os.Stat(installedExec); statErr == nil && !st.IsDir() {
+				reuseRuntime = true
+				runtimeRoot, execPath = installedRoot, installedExec
+			}
 		}
 	} else if err != nil && err != sql.ErrNoRows {
 		return inference.ModelDeployment{}, err
@@ -761,6 +780,8 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 	if err != nil {
 		return inference.ModelDeployment{}, err
 	}
+	s.runtimeInstallMu.Unlock()
+	runtimeLocked = false
 	for _, downloaded := range runtimeDownloads {
 		_ = os.Remove(downloaded)
 	}

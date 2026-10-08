@@ -122,6 +122,10 @@ type localAIService interface {
 	ManageComponent(context.Context, string, string) (localai.ManagedComponent, error)
 }
 
+type nodeComputePolicyService interface {
+	ComputePolicy(context.Context, string) (nodefederation.ComputePolicy, error)
+	SetComputePolicy(context.Context, nodefederation.SetComputePolicyCommand) (nodefederation.ComputePolicy, error)
+}
 type nodeFederationService interface {
 	Nodes(context.Context) ([]nodefederation.NodeView, error)
 	Pairings(context.Context) ([]nodefederation.Pairing, error)
@@ -332,6 +336,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/assistant/threads/{threadID}/turns", s.listAssistantTurns)
 	s.mux.HandleFunc("POST /v1/assistant/threads/{threadID}/turns", s.submitAssistantTurn)
 	s.mux.HandleFunc("POST /v1/assistant/threads/{threadID}/scope", s.setAssistantScope)
+	s.mux.HandleFunc("PUT /v1/assistant/threads/{threadID}/model", s.setAssistantModel)
 	s.mux.HandleFunc("GET /v1/agent-profiles", s.listAgentProfiles)
 	s.mux.HandleFunc("POST /v1/agent-profiles", s.createAgentProfile)
 	s.mux.HandleFunc("GET /v1/agent-profiles/{profileID}", s.getAgentProfile)
@@ -446,6 +451,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/pair/confirm", s.confirmNodePair)
 	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/revoke", s.revokeNode)
 	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/capabilities", s.nodeCapabilities)
+	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/compute-policy", s.getNodeComputePolicy)
+	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/compute-policy", s.setNodeComputePolicy)
 	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/model-management", s.getNodeModelManagement)
 	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/model-management", s.setNodeModelManagement)
 	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/remote-model-management", s.getRemoteNodeModelManagement)
@@ -458,6 +465,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/model-testbed/{sessionID}/turns", s.remoteNodeListModelTestbedTurns)
 	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/model-testbed/{sessionID}/turns", s.remoteNodeRunModelTestbedTurn)
 	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/model-testbed/{sessionID}/complete", s.remoteNodeCompleteModelTestbed)
+	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/model-testbed/{sessionID}/abort", s.remoteNodeAbortModelTestbed)
 	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/models/{deploymentID}/admission", s.remoteNodeAdmitModel)
 	s.mux.HandleFunc("POST /v1/local-ai/detect", s.detectLocalAI)
 	s.mux.HandleFunc("POST /v1/local-ai/recommendations", s.recommendLocalAI)
@@ -471,6 +479,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/model-testbed/{sessionID}/turns", s.listModelTestbedTurns)
 	s.mux.HandleFunc("POST /v1/model-testbed/{sessionID}/turns", s.runModelTestbedTurn)
 	s.mux.HandleFunc("POST /v1/model-testbed/{sessionID}/complete", s.completeModelTestbed)
+	s.mux.HandleFunc("POST /v1/model-testbed/{sessionID}/abort", s.abortModelTestbed)
 	s.mux.HandleFunc("POST /v1/model-deployments/{deploymentID}/admission", s.admitModelDeployment)
 	s.mux.HandleFunc("GET /v1/projects", s.listProjects)
 	s.mux.HandleFunc("POST /v1/projects", s.createProject)
@@ -2511,6 +2520,22 @@ func (s *Server) completeModelTestbed(w http.ResponseWriter, r *http.Request) {
  }
 	writeJSON(w, http.StatusOK, map[string]any{"completed": true})
 }
+// An interrupted Agent Check must not leave its model resident in VRAM.
+func (s *Server) abortModelTestbed(w http.ResponseWriter,r *http.Request) {
+ actor,ok:=s.authenticate(w,r);if !ok{return}
+ sid:=strings.TrimSpace(r.PathValue("sessionID"))
+ sess,err:=s.localAI.TestbedSession(r.Context(),sid)
+ if err!=nil{respondDomain(w,nil,err,0);return}
+ if !s.authorizeManagedDeployment(w,r,actor,sess.DeploymentID,"model.write"){return}
+ var in struct{Reason string `json:"reason"`}
+ if !decodeJSON(w,r,&in){return}
+ aborter,ok:=s.localAI.(interface{AbortTestbed(context.Context,string,string) error})
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Agent Check cleanup unavailable");return}
+ if err:=aborter.AbortTestbed(r.Context(),sid,in.Reason);err!=nil{
+  writeError(w,http.StatusConflict,err.Error());return
+ }
+ writeJSON(w,http.StatusOK,map[string]any{"aborted":true})
+}
 func (s *Server) admitModelDeployment(w http.ResponseWriter, r *http.Request) {
 	i, ok := s.authenticate(w, r)
 	if !ok {
@@ -2815,6 +2840,44 @@ func (s *Server) revokeNode(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"revoked": true})
 }
+// Node-scoped scheduling policy is administered independently from global
+// Model Routing. No remote install permission is implied by a compute grant.
+func (s *Server) getNodeComputePolicy(w http.ResponseWriter, r *http.Request) {
+ if _,ok:=s.requireNodeOperator(w,r);!ok{return}
+ fleet,yes:=s.federation.(nodeComputePolicyService);if !yes{writeError(w,503,"node compute policy unavailable");return}
+ p,err:=fleet.ComputePolicy(r.Context(),strings.TrimSpace(r.PathValue("nodeID")))
+ if errors.Is(err,sql.ErrNoRows){
+  writeJSON(w,200,map[string]any{"node_id":r.PathValue("nodeID"),"enabled":false,"idle_only":true,"allow_model_downloads":false,"runtime_installation":"confirm","project_scope":"selected","allowed_projects":[]string{}})
+  return
+ }
+ if err!=nil{writeError(w,500,err.Error());return}
+ writeJSON(w,200,p)
+}
+func (s *Server) setNodeComputePolicy(w http.ResponseWriter, r *http.Request) {
+ actor,ok:=s.requireNodeOperator(w,r);if !ok{return}
+ var in struct{
+  Enabled bool `json:"enabled"`
+  IdleOnly bool `json:"idle_only"`
+  AllowModelDownloads bool `json:"allow_model_downloads"`
+  RuntimeInstallation string `json:"runtime_installation"`
+  ProjectScope string `json:"project_scope"`
+  Availability json.RawMessage `json:"availability"`
+  Limits json.RawMessage `json:"limits"`
+  AllowedProjects json.RawMessage `json:"allowed_projects"`
+ }
+ if !decodeJSON(w,r,&in){return}
+ nodeID:=strings.TrimSpace(r.PathValue("nodeID"))
+ fleet,yes:=s.federation.(nodeComputePolicyService);if !yes{writeError(w,503,"node compute policy unavailable");return}
+ p,err:=fleet.SetComputePolicy(r.Context(),nodefederation.SetComputePolicyCommand{
+  NodeID:nodeID,Actor:actor.PrincipalID,Enabled:in.Enabled,IdleOnly:in.IdleOnly,
+  AllowModelDownloads:in.AllowModelDownloads,RuntimeInstallation:in.RuntimeInstallation,
+  ProjectScope:in.ProjectScope,AvailabilityJSON:in.Availability,LimitsJSON:in.Limits,
+  AllowedProjectsJSON:in.AllowedProjects,
+ })
+ if err!=nil{writeError(w,http.StatusConflict,err.Error());return}
+ writeJSON(w,200,p)
+}
+
 func (s *Server) nodeCapabilities(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireNodeOperator(w, r); !ok {
 		return
@@ -2991,6 +3054,17 @@ func (s *Server) remoteNodeCompleteModelTestbed(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, map[string]any{"completed": true})
 }
 
+func (s *Server) remoteNodeAbortModelTestbed(w http.ResponseWriter, r *http.Request) {
+ if _,ok:=s.requireNodeOperator(w,r);!ok{return}
+ var in struct{Reason string `json:"reason"`}
+ if !decodeJSON(w,r,&in){return}
+ remote,ok:=s.federation.(interface{RemoteAbortModelTestbed(context.Context,string,string,string) error})
+ if !ok{writeError(w,http.StatusServiceUnavailable,"remote Agent Check cleanup unavailable");return}
+ if err:=remote.RemoteAbortModelTestbed(r.Context(),strings.TrimSpace(r.PathValue("nodeID")),strings.TrimSpace(r.PathValue("sessionID")),in.Reason);err!=nil{
+  writeError(w,http.StatusConflict,err.Error());return
+ }
+ writeJSON(w,http.StatusOK,map[string]any{"aborted":true})
+}
 func (s *Server) remoteNodeAdmitModel(w http.ResponseWriter, r *http.Request) {
 	i, ok := s.requireNodeOperator(w, r)
 	if !ok {

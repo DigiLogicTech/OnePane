@@ -522,6 +522,48 @@ func llamaPlacementArgs(plan PlacementPlan) []string {
 	}
 }
 
+// Validate accelerator identity against the selected runtime build. A detected
+// CUDA0 GPU is not proof that a Vulkan-only executable can address CUDA0.
+func validateLlamaPlacementDevices(executable,backend string,plan PlacementPlan) error {
+ args:=llamaPlacementArgs(plan)
+ var selected string
+ for i:=0;i+1<len(args);i++{if args[i]=="--device"{selected=args[i+1];break}}
+ if selected==""||selected=="none"{return nil}
+ for _,name:=range strings.Split(selected,","){
+  name=strings.TrimSpace(name)
+  if strings.EqualFold(backend,"vulkan")&&strings.HasPrefix(strings.ToLower(name),"cuda")||
+    strings.EqualFold(backend,"cuda")&&strings.HasPrefix(strings.ToLower(name),"vulkan")||
+    strings.EqualFold(backend,"cpu") {
+    return fmt.Errorf("runtime backend %s cannot address device %s; change Compute placement or repair the matching llama.cpp backend",backend,name)
+  }
+ }
+ ctx,cancel:=context.WithTimeout(context.Background(),8*time.Second)
+ defer cancel()
+ out,err:=exec.CommandContext(ctx,executable,"--list-devices").CombinedOutput()
+ if err!=nil{return fmt.Errorf("list devices from managed %s backend: %w: %s",backend,err,strings.TrimSpace(string(out)))}
+ known:=map[string]bool{}
+ // Different llama.cpp builds format the list as either "CUDA0: ..." or
+ // "- CUDA0: ..."; some put devices after a log prefix. Match complete
+ // device tokens rather than assuming they occupy the first column.
+ for _,line:=range strings.Split(string(out),"\n"){
+  for _,word:=range strings.Fields(line){
+   candidate:=strings.Trim(word," \t:,*()[]")
+   lower:=strings.ToLower(candidate)
+   if (strings.HasPrefix(lower,"cuda")||strings.HasPrefix(lower,"vulkan")||
+       strings.HasPrefix(lower,"rocm")||strings.HasPrefix(lower,"sycl")||
+       strings.HasPrefix(lower,"metal"))&&len(lower)>4 {
+    known[lower]=true
+   }
+  }
+ }
+ for _,name:=range strings.Split(selected,","){
+  if !known[strings.ToLower(strings.TrimSpace(name))]{
+   return fmt.Errorf("selected runtime %s does not advertise %s in --list-devices; re-detect hardware or change Compute placement",backend,name)
+  }
+ }
+ return nil
+}
+
 func reserveLoopbackPort() (int, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -577,6 +619,9 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 		if old.Status == RuntimeStarting && s.processes.Alive(old.PID) {
 			return s.waitHealthy(ctx, old.ID, 120*time.Second)
 		}
+	}
+	if !strings.EqualFold(cfg.RuntimeBackend,"colibri"){
+		if err:=validateLlamaPlacementDevices(cfg.Executable,cfg.RuntimeBackend,cfg.Placement);err!=nil{return RuntimeInstance{},err}
 	}
 	if err := s.ensureCapacity(ctx, deploymentID, nodeID); err != nil {
 		return RuntimeInstance{}, err
@@ -785,6 +830,35 @@ func (s *RuntimeSupervisor) VerifyIdentity(ctx context.Context, inst RuntimeInst
 		return errors.New("runtime process identity mismatch")
 	}
 	return nil
+}
+
+// StopIfIdle releases CPU/GPU memory after an Agent Check without evicting a
+// runtime used by concurrent inference. Both locks are held through Stop:
+// Acquire takes residencyMu then SetBusy (activityMu), so a new inference
+// cannot enter between the safety check and process termination.
+func (s *RuntimeSupervisor) StopIfIdle(ctx context.Context, deploymentID string) (bool, error) {
+ if s==nil {return false,nil}
+ deploymentID=strings.TrimSpace(deploymentID)
+ if deploymentID=="" {return false,errors.New("deployment id required")}
+ s.residencyMu.Lock()
+ defer s.residencyMu.Unlock()
+ s.activityMu.Lock()
+ defer s.activityMu.Unlock()
+ if s.activeRequests[deploymentID]>0 {return false,nil}
+ inst,err:=s.Instance(ctx,deploymentID)
+ if errors.Is(err,sql.ErrNoRows){return false,nil}
+ if err!=nil{return false,err}
+ switch inst.Status {
+ case RuntimeHealthy,RuntimeStarting:
+  if err:=s.Stop(ctx,deploymentID);err!=nil{return false,err}
+  return true,nil
+ case RuntimeBusy:
+  // A stale busy marker is not proof that no other process owns the model.
+  return false,nil
+ default:
+  // Already stopped, failed or orphaned: never signal an unknown process.
+  return false,nil
+ }
 }
 
 func (s *RuntimeSupervisor) Stop(ctx context.Context, deploymentID string) error {

@@ -10,6 +10,7 @@ qa4InspectorOverview=function(){
  const devs=Array.isArray(place.devices)?place.devices:[],dev=devs.find(x=>x.kind==="accelerator")||devs[0];
  const requested=Number(s.requested_context_tokens||q.requested_context_tokens||0),verified=Number(s.verified_context_tokens||metrics.verified_context||d.context_max_verified||0);
  const speed=s.measured_tps??metrics.tokens_per_second??metrics.completion_tokens_per_second??q.tokens_per_second;
+ const embedding=/embedding/i.test(String(d.model_ref||""))||e.embedding_ok!==undefined||metrics.capability==="inference.embedding";
  const errors=Array.isArray(e.errors)?e.errors:[],probes=Array.isArray(e.context_probes)?e.context_probes:[];
  const name=String(dev?.name||dev?.device_name||"Not reported").replaceAll("&amp;","&");
  const layout=a37Section("Runtime and placement",[
@@ -23,12 +24,13 @@ qa4InspectorOverview=function(){
  const context=a37Section("Context and performance",[
   a37Field("Requested context",requested?`${requested.toLocaleString()} tokens`:"Not reported"),
   a37Field("Verified context",verified?`${verified.toLocaleString()} tokens${requested?" of "+requested.toLocaleString():""}`:"Not yet verified"),
-  a37Field("Generation speed",speed!=null?`${Number(speed).toFixed(2)} tokens/s (${s.measured_tps!=null?"OnePane benchmark":"Agent Check"})`:"Not measured"),
-  a37Field("Time to first token",s.measured_ttft_ms!=null?`${Math.round(Number(s.measured_ttft_ms))} ms`:"Not measured")
+  embedding?a37Field("Vector dimensions",e.dimensions||metrics.embedding_dimensions||"Not reported"):a37Field("Generation speed",speed!=null?`${Number(speed).toFixed(2)} tokens/s (${s.measured_tps!=null?"OnePane benchmark":"Agent Check"})`:"Not measured"),
+  embedding?a37Field("Embedding latency",metrics.elapsed_ms!=null?`${metrics.elapsed_ms} ms`:"Not measured"):a37Field("Time to first token",s.measured_ttft_ms!=null?`${Math.round(Number(s.measured_ttft_ms))} ms`:"Not measured")
  ].join(""));
  const allErrors=[...errors,...probes.filter(x=>x.error).map(x=>x.error)];
  const warning=allErrors.length?`<div class="spec-warning">${allErrors.map(x=>escapeHtml(String(x))).join("<hr>")}</div>`:"";
- const qual=a37Section("Agent Check",`<div class="spec-check-grid">${a37Check("Plain-text response",e.plain_ok)}${a37Check("JSON response",e.json_ok)}${a37Check("Schema validation",e.schema_ok)}${a37Check("Tool calling",e.tools_ok)}</div>${a37Field("Qualification",q.status||e.status||"Not tested")}${a37Field("Protocol level",metrics.protocol_level||q.protocol_level||"Not reported")}`);
+ const qual=embedding?a37Section("Embedding qualification",`<div class="spec-check-grid">${a37Check("Valid numeric vector",e.embedding_ok)}${a37Field("Vector dimensions",e.dimensions||metrics.embedding_dimensions||"Not reported")}${a37Field("Endpoint",e.probe||"/v1/embeddings")}</div>`):
+ a37Section("Agent Check",`<div class="spec-check-grid">${a37Check("Plain-text response",e.plain_ok)}${a37Check("JSON response",e.json_ok)}${a37Check("Schema validation",e.schema_ok)}${a37Check("Tool calling",e.tools_ok)}</div>${a37Field("Qualification",q.status||e.status||"Not tested")}${a37Field("Protocol level",metrics.protocol_level||q.protocol_level||"Not reported")}`);
  if(s.error)return `<div class="error">${escapeHtml(s.error)}</div>`;
  return `<div class="model-spec-inspector readable-model-spec"><div class="spec-readable-head"><strong>${escapeHtml(d.display_name||d.model_ref||"Local model")}</strong><span class="pill">${escapeHtml(d.status||"Unknown")}</span></div>${layout}${context}${warning}${qual}<details class="spec-technical-details"><summary>Advanced technical details and raw evidence</summary><pre class="spec-sheet-json">${escapeHtml(JSON.stringify(s,null,2))}</pre></details><button class="btn primary" id="qa5InspectorAgentCheck">Run Agent Check</button></div>`;
 };

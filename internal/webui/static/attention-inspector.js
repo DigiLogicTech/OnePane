@@ -1,3 +1,17 @@
+// Toasts must be detached from modal/popover content. The compatibility
+// foundation remains immutable; this enhancement owns the dedicated toast root.
+let a9ToastSerial=0;
+notice=function(text,kind="good"){
+ let root=document.querySelector("#noticeRoot");
+ if(!root){
+  root=document.createElement("div");root.id="noticeRoot";
+  root.setAttribute("role","status");root.setAttribute("aria-live","polite");
+  document.body.appendChild(root);
+ }
+ const serial=++a9ToastSerial;
+ root.innerHTML=`<div class="toast ${kind}">${escapeHtml(text)}</div>`;
+ setTimeout(()=>{if(serial===a9ToastSerial)root.innerHTML="";},2600);
+};
 let a9All=[],a9Statuses=new Map(),a9Filter="active",a9Workspace="",a9LastRead=0,a9Loading=null;
 function a9Status(id){return a9Statuses.get(String(id))||"active"}
 function a9RefreshState(){
@@ -33,10 +47,20 @@ async function a9Change(id,status){
  if(!a9All.some(x=>x.id===id))return notice("Attention source no longer available.","bad");
  try{
   await apiRequest("/v1/ui/attention?workspace_id="+encodeURIComponent(onepaneWorkspace),{method:"POST",body:JSON.stringify({alert_id:id,disposition:status})});
-  a9Statuses.set(id,status);a9RefreshState();a9RenderAgain();
+  a9Statuses.set(id,status);a9RefreshState();a9RenderAgain();a9RefreshOpenPopover();
   if(qa4Inspector.kind==="attention"&&String(qa4Inspector.id)===id)renderInspector();
   notice(status==="archived"?"Attention archived; source event retained.":status==="acknowledged"?"Attention acknowledged.":"Attention restored.")
  }catch(ex){notice("Attention update failed: "+ex.message,"bad")}
+}
+// Refresh the list in place; preserve the current filter and scroll offset.
+function a9RefreshOpenPopover(){
+ const root=document.querySelector("#overlayRoot .notification-center");
+ const panel=root?.querySelector(".attention-panel");if(!panel)return;
+ const scroll=panel.scrollTop;
+ panel.outerHTML=a9Panel();
+ const fresh=root.querySelector(".attention-panel");
+ if(fresh)fresh.scrollTop=scroll;
+ a9Bind(root);
 }
 function a9Rows(rows){
  return rows.map(n=>{const status=a9Status(n.id);return `<li class="attention-item">
@@ -62,7 +86,7 @@ const a9EntityOld=qa4FindEntity;
 qa4FindEntity=function(kind,id){return kind==="attention"?(a9All.find(x=>x.id===String(id))||qa4Inspector.data||{}):a9EntityOld(kind,id)};
 function a9Inspect(id){const n=a9All.find(x=>x.id===id);if(n)qa4Inspect("attention",id,n.title,n);else notice("Attention item no longer in feed.","bad")}
 function a9Bind(root=document){
- $$("[data-a9-filter]",root).forEach(b=>b.onclick=e=>{e.stopPropagation();a9Filter=b.dataset.a9Filter;a9RenderAgain();if($("#overlayRoot .notification-center"))openAttentionPopover(b)});
+ $$("[data-a9-filter]",root).forEach(b=>b.onclick=e=>{e.stopPropagation();a9Filter=b.dataset.a9Filter;a9RenderAgain();a9RefreshOpenPopover()});
  $$("[data-a9-inspect]",root).forEach(b=>b.onclick=e=>{e.stopPropagation();a9Inspect(b.dataset.a9Inspect)});
  $$("[data-a9-state]",root).forEach(b=>b.onclick=e=>{e.stopPropagation();const v=b.dataset.a9State,i=v.lastIndexOf(":");if(i>=0)a9Change(v.slice(0,i),v.slice(i+1))});
  $$("[data-a9-bulk]",root).forEach(b=>b.onclick=async e=>{e.stopPropagation();for(const n of a9All.filter(x=>a9Status(x.id)==="acknowledged"))await a9Change(n.id,"archived")})

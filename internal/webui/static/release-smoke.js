@@ -27,7 +27,7 @@
   const workspace2={id:"pws-release-2",name:"Disposable workspace",widgets:[{id:"pw-release-2-notes",type:"notes",title:"Notes",col:6,row:4}],orchestration:{mode:"direct",supervisor:{model:"auto",agent:"onepane-default"},team:{model:"auto",agent:"onepane-default",count:2},council:{model:"auto",agent:"onepane-default",count:2}}};
   let project={id:"project-release",workspace_id:"workspace-release",name:"Release QA Project",description:"Installed behavioural acceptance",status:"active",revision:1,project_policy:{onepane_ui:{workspaces:[workspace,workspace2]}}};
   let taskRows=[{id:"task-release",workspace_id:"workspace-release",project_id:"project-release",project_workspace_id:"pws-release",objective:"Release task",state:"complete",scheduling_class:"user_interactive",priority:0,revision:1,created_at:1700000000000,updated_at:1700000000000}],archivedTaskRows=[],routineRows=[],lastRoutinePayload=null;
-  let projectPatchCount=0,turns=[];
+  let projectPatchCount=0,turns=[],discoverInstalledFixture=false,assistantModelChoice=null;
   const originalFetch=window.fetch.bind(window);
   window.EventSource=class{addEventListener(){}close(){}};
 
@@ -51,7 +51,12 @@
       project={...project,revision:project.revision+1,project_policy:clone(body.project_policy||project.project_policy)};projectPatchCount++;return json(clone(project));
     }
     if(path==="/v1/skills/tool-bundles")return json([{id:"bundle-release",name:"Release Tools",tools:["read"]}]);
-    if(path==="/v1/assistant/threads"&&method==="GET")return json([{id:"thread-release",title:"Release Assistant"}]);
+    if(path==="/v1/assistant/threads"&&method==="GET")return json([{id:"thread-release",title:"Release Assistant",preferred_model_deployment_id:assistantModelChoice}]);
+    if(path==="/v1/assistant/threads/thread-release/model"&&method==="PUT"){
+      const selection=JSON.parse(opts.body||"{}");assistantModelChoice=selection.deployment_id||null;
+      return json({id:"thread-release",preferred_model_deployment_id:assistantModelChoice});
+    }
+    if(path==="/v1/scheduler/candidates")return json([{id:"dep-test-gpu",kind:"model_deployment",display_name:"Test GPU Model",provider:"local",local:true,cost_class:"local",schedulable:true,status:"ready",qualification:"verified"}]);
     if(path==="/v1/assistant/threads/thread-release/turns"&&method==="GET")return json(clone(turns));
     if(path==="/v1/assistant/threads/thread-release/turns"&&method==="POST"){
       const body=JSON.parse(opts.body||"{}");turns.push({role:"user",content:body.content||""},{role:"assistant",content:"No eligible reasoning model is configured. Configure a model to run reasoning."});return json(turns.at(-1),201);
@@ -74,8 +79,9 @@
     if(path==="/v1/provider-oauth/connections")return json([]);
     if(path==="/v1/local-ai/discovery")return json({models:[],source_errors:{}});
     if(path==="/v1/local-ai/llama-runtimes")return json([]);
-    if(["/v1/providers","/v1/events","/v1/agent-runtime-presets","/v1/scheduler/candidates","/v1/local-ai/catalog","/v1/skills/packages","/v1/skills/assignments","/v1/agent-profiles","/v1/teams","/v1/team-presets","/v1/provider-oauth/configs"].includes(path))return json([]);
-    if(path==="/v1/local-ai/deployments")return json({deployments:[]});
+    if(["/v1/providers","/v1/events","/v1/agent-runtime-presets","/v1/scheduler/candidates","/v1/skills/packages","/v1/skills/assignments","/v1/agent-profiles","/v1/teams","/v1/team-presets","/v1/provider-oauth/configs"].includes(path))return json([]);
+    if(path==="/v1/local-ai/catalog")return json(discoverInstalledFixture?[{model_ref:"google/gemma-3-1b-it",display_name:"Gemma 3 1B IT",installable:true,installable_quantizations:["Q4_K_M"],context_length:8192}]:[]);
+    if(path==="/v1/local-ai/deployments")return json({deployments:discoverInstalledFixture?[{deployment_id:"dep-gemma-qa",model_ref:"google/gemma-3-1b-it",display_name:"Gemma 3 1B IT",status:"ready",runtime_name:"llamacpp"}]:[]});
     if(path==="/v1/local-ai/components")return json({});
     if(path==="/v1/settings/local-ai")return json({model_pool_path:""});
     return json({});
@@ -98,6 +104,71 @@
     await waitFor(()=>document.querySelector("#viewHost")?.dataset.renderedRoute===name,`render:${name}`,30000);
     check(currentTab()?.route===name,`active:${name}`);
   };
+
+  // Every desktop route must use only the shell's remaining height when
+  // the Logs drawer expands. Exercise primary pages and meaningful subviews
+  // against live layout geometry (not source-string assertions).
+  async function testAllDrawerAwarePages(){
+    if(innerWidth<=700)return; // mobile Logs is an overlay
+    const main=check(document.querySelector(".main-shell"),"Drawer layout shell");
+    const previous={drawer:state.drawer,height:state.drawerHeight,transition:main.style.transition,
+      operations:a31OperationsView,models:a31ModelView,agents:a31AgentView,
+      skills:a31SkillsView,settings:a31SettingsView};
+    const root=document.documentElement,host=check(document.querySelector("#viewHost"),"Drawer page host");
+    const frame=async(height)=>{
+      state.drawerHeight=height;root.style.setProperty("--drawer",height+"px");
+      await new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)));
+      return host.getBoundingClientRect();
+    };
+    const verify=async(label)=>{
+      const small=await frame(145),page=check(host.querySelector(":scope > .page"),label+" page container");
+      const large=await frame(355),rect=host.getBoundingClientRect(),bounds=page.getBoundingClientRect();
+      check(small.height-large.height>175,label+" shrinks with expanded Logs");
+      check(bounds.top>=rect.top-3&&bounds.bottom<=rect.bottom+3,label+" remains within the shell viewport");
+      const scroller=page.querySelector(".a36-settings-content")||page.querySelector("#nextNodeRoot")||
+        page.querySelector(":scope > :is(#a31OperationsBody,#tasksBody,.project-hub,#a31AgentsBody,#a31SkillsBody,.settings-shell,#secretCatalogue,#a31ModelsRoot)");
+      const overflow=getComputedStyle(scroller||page).overflowY;
+      check(overflow==="auto"||overflow==="scroll",label+" has a reachable vertical scroller");
+    };
+    try{
+      main.style.transition="none";
+      state.drawerHeight=145;setDrawerOpen(true);
+      for(const routeName of ["operations","tasks","projects","models","nodes","agents","skills","settings","secrets"]){
+        await route(routeName);
+        await verify(routeName);
+        const modes={
+          operations:["overview","activity","health","recovery"],
+          models:["local","cloud","routing","discover"],
+          agents:["profiles","teams","sessions","councils"],
+          skills:["installed","catalogue","assignments","matrix","packages","bundles"],
+          settings:["general","appearance","defaults","models","providers","nodes","agents","skills","security","updates"]
+        }[routeName]||[];
+        for(const mode of modes){
+          if(routeName==="operations"){a31OperationsView=mode;await renderOperations()}
+          if(routeName==="models"){a31ModelView=mode;await renderModels()}
+          if(routeName==="agents"){a31AgentView=mode;await renderAgents()}
+          if(routeName==="skills"){a31SkillsView=mode;await renderSkills()}
+          if(routeName==="settings"){a31SettingsView=mode;await renderSettings()}
+          await verify(routeName+" / "+mode);
+        }
+      }
+      // Workspaces are a distinct nested route reached from the Project tile.
+      await route("projects");
+      const open=check(document.querySelector('[data-a35-open-project="project-release"]'),"Workspace route entry for Logs audit");
+      open.click();
+      await waitFor(()=>currentTab()?.route==="workspaces"&&document.querySelector("#qa4WorkspaceGrid"),"Workspaces Logs audit entry");
+      await verify("workspaces");
+      results.push("All primary desktop pages and subviews resize with Logs");
+    } finally {
+      a31OperationsView=previous.operations;a31ModelView=previous.models;
+      a31AgentView=previous.agents;a31SkillsView=previous.skills;
+      a31SettingsView=previous.settings;
+      state.drawerHeight=previous.height;
+      setDrawerOpen(previous.drawer==="open");
+      root.style.setProperty("--drawer",previous.drawer==="open"?previous.height+"px":"0px");
+      main.style.transition=previous.transition;
+    }
+  }
 
   async function testProjectLayout(){
     await route("projects");
@@ -314,17 +385,83 @@
     const restoreButton=await waitFor(()=>document.querySelector('[data-task-archive="task-release"][data-task-restore="1"]'),"Task Restore action");restoreButton.click();
     await waitFor(()=>taskRows.some(t=>t.id==="task-release")&&!archivedTaskRows.some(t=>t.id==="task-release"),"Archived task restored");
     await waitFor(()=>document.querySelector('[data-task-archive="task-release"][data-task-restore="0"]')&&!document.querySelector('[data-task-archive="task-release"][data-task-restore="1"]'),"Task restore render settled");
-    await route("models");check(document.querySelector("#a31ModelsRoot")&&!document.querySelector("#a31ModelsRoot .error"),"Models route");check(document.querySelectorAll("[data-a31-model-tab]").length===4,"Models exposes Local Cloud Routing Discover tabs");check(document.querySelector('#primaryNav [data-route="secrets"]'),"Secrets is primary navigation");a31SetModelView("discover");await waitFor(()=>document.querySelector("#a31DiscoverCatalog"),"Discover model catalogue");check(document.querySelector("#a31DiscoverSource"),"Discover source selector");a31SetModelView("cloud");await waitFor(()=>document.querySelector('[data-cloud-provider-row][data-auth="oauth"]'),"Cloud OAuth provider is visible");a31SetModelView("local");await waitFor(()=>document.querySelector(".hardware-card"),"Local Models hardware surface");check(document.querySelector("#a31-llamacpp-status"),"llama.cpp managed runtime card");
-    await route("nodes");check(document.querySelector("#a31Nodes")&&!document.querySelector("#a31Nodes .error"),"Nodes envelope");
+    discoverInstalledFixture=true;
+    await route("models");check(document.querySelector("#a31ModelsRoot")&&!document.querySelector("#a31ModelsRoot .error"),"Models route");check(document.querySelectorAll("[data-a31-model-tab]").length===4,"Models exposes Local Cloud Routing Discover tabs");check(document.querySelector('#primaryNav [data-route="secrets"]'),"Secrets is primary navigation");a31SetModelView("discover");await waitFor(()=>document.querySelector("#a31DiscoverCatalog"),"Discover model catalogue");check(document.querySelector("#a31DiscoverSource"),"Discover source selector");await waitFor(()=>document.querySelector('[data-a31-discover-install-ref="google/gemma-3-1b-it"]'),"Installed Gemma Discover action");
+    const installedDiscoverButton=check(document.querySelector('[data-a31-discover-install-ref="google/gemma-3-1b-it"]'),"Installed model discover button");
+    check(installedDiscoverButton.disabled&&installedDiscoverButton.textContent.trim()==="Installed","Already-installed catalogue model cannot be installed again");
+    discoverInstalledFixture=false;a31SetModelView("cloud");await waitFor(()=>document.querySelector('[data-cloud-provider-row][data-auth="oauth"]'),"Cloud OAuth provider is visible");a31SetModelView("local");await waitFor(()=>document.querySelector(".hardware-card"),"Local Models hardware surface");check(document.querySelector("#a31-llamacpp-status"),"llama.cpp managed runtime card");
+    await route("nodes");
+    const nodeRoot=document.querySelector("#a31Nodes"),nodeError=nodeRoot?.querySelector(".error")?.textContent||"";
+    check(nodeRoot&&!nodeError,"Nodes envelope"+(nodeError?": "+nodeError:""));
     document.querySelector("#a31AddNode")?.click();await waitFor(()=>document.querySelector("#pairNodeForm"),"pairing modal");check(document.querySelector("#pairNodeForm"),"Add Node pairing flow");closeModal();
     await route("nodes");await waitFor(()=>document.querySelector('[data-a31-node="node-release"]'),"Node card");check(document.querySelector('[data-a31-node="node-release"] .card-title')?.textContent==="RELEASE-PC (Local)","Nodes prefer machine name and mark local device");check(document.querySelector('[data-a31-node="node-release"] .list-meta')?.textContent?.includes("node-release"),"Node ID remains secondary metadata");
+    // Nodes must track the available shell viewport as the Logs drawer
+    // expands, rather than extending behind the drawer.
+    const nodeScrollPane=check(document.querySelector(".nodes-page #nextNodeRoot"),"Nodes own scrolling viewport");
+    check(getComputedStyle(nodeScrollPane).overflowY==="auto","Nodes scroll content within the page");
+    const drawerInitiallyOpen=state.drawer==="open",initialDrawerHeight=state.drawerHeight;
+    setDrawerOpen(true);
+    state.drawerHeight=150;document.documentElement.style.setProperty("--drawer","150px");
+    await sleep(240);
+    const nodesHostHeightBefore=document.querySelector("#viewHost").getBoundingClientRect().height;
+    state.drawerHeight=360;document.documentElement.style.setProperty("--drawer","360px");
+    await sleep(240);
+    const nodesHost=document.querySelector("#viewHost").getBoundingClientRect();
+    const nodeViewport=nodeScrollPane.getBoundingClientRect();
+    check(nodesHostHeightBefore-nodesHost.height>150,"Nodes shell area shrinks when Logs expands");
+    check(nodeViewport.bottom<=nodesHost.bottom+3,"Nodes stay above the expanded Logs drawer");
+    state.drawerHeight=initialDrawerHeight;
+    document.documentElement.style.setProperty("--drawer",initialDrawerHeight+"px");
+    setDrawerOpen(drawerInitiallyOpen);
     await route("agents");check(!document.querySelector("#viewHost .error"),"Agents route");
 
     await route("skills");const bundles=check(document.querySelector('[data-a31-skills-tab="bundles"]'),"Tool Bundles tab");bundles.click();
     await waitFor(()=>document.querySelector("#a31SkillsBody")?.textContent?.includes("Tool Bundles"),"Tool Bundles view");check(!document.querySelector("#a31SkillsBody .error"),"Skills route");
 
     await route("settings");check(document.querySelector("#a31SettingsContent"),"Settings route");
-    document.querySelector('[data-a31-settings="appearance"]')?.click();await waitFor(()=>a31SettingsView==="appearance","Appearance settings");check(document.querySelector("[data-settings-theme]"),"Themes rendered");
+    check(document.querySelector(".a36-settings-page .a36-settings-sidebar"),"Redesigned Settings navigation");
+    check(document.querySelectorAll(".a36-settings-navigation [data-a31-settings]").length===11,"All settings categories and Overview retained");
+    check(document.querySelector(".a36-settings-panel-heading"),"Settings content has contextual heading");
+    const settingsSearch=check(document.querySelector("#a31SettingsSearch"),"Search settings control");
+    settingsSearch.value="oauth";settingsSearch.dispatchEvent(new Event("input",{bubbles:true}));
+    check(!document.querySelector('[data-a31-settings="providers"]').hidden,"Settings search finds provider configuration");
+    check(document.querySelector('[data-a31-settings="appearance"]').hidden,"Settings search hides unrelated categories");
+    settingsSearch.value="";settingsSearch.dispatchEvent(new Event("input",{bubbles:true}));
+    check(!document.querySelector('[data-a31-settings="appearance"]').hidden,"Settings search restores all categories");
+    document.querySelector('[data-a31-settings="general"]').click();
+    await waitFor(()=>document.querySelector("#a36SaveGeneral"),"Settings startup save action");
+    const savedLanding=qa5Prefs().landing||"operations";
+    document.querySelector("#a31Landing").value="tasks";
+    document.querySelector("#a36SaveGeneral").click();
+    check(qa5Prefs().landing==="tasks","Settings saves startup destination");
+    document.querySelector("#a31Landing").value=savedLanding;
+    document.querySelector("#a36SaveGeneral").click();
+    document.querySelector('[data-a31-settings="updates"]').click();
+    await waitFor(()=>document.querySelector("#a36SaveUpdates"),"Settings release-channel save action");
+    const savedChannel=qa5Prefs().update_channel||"alpha";
+    document.querySelector("#a31UpdateChannel").value="stable";
+    document.querySelector("#a36SaveUpdates").click();
+    check(qa5Prefs().update_channel==="stable","Settings saves release channel");
+    document.querySelector("#a31UpdateChannel").value=savedChannel;
+    document.querySelector("#a36SaveUpdates").click();
+    document.querySelector('[data-a31-settings="defaults"]').click();
+    await waitFor(()=>document.querySelector("#a31SaveDefaults"),"Workspace defaults retained");
+    check(document.querySelectorAll("#a31DefaultMode,#a31DefaultSeats,#a31DefaultRouting,#a31DefaultRemote,#a31DefaultBrowser,#a31DefaultComputer").length===6,"All Workspace defaults retained");
+    document.querySelector('[data-a31-settings="models"]').click();
+    await waitFor(()=>document.querySelector("#a31SaveModelSettings"),"Models configuration retained");
+    check(document.querySelector("#a31ModelPool")&&document.querySelector("#a31ComputeDefault"),"Model storage and compute controls retained");
+    document.querySelector('[data-a31-settings="agents"]').click();
+    await waitFor(()=>document.querySelector("#a31SaveAgentSettings"),"Agent and research defaults retained");
+    document.querySelector('[data-a31-settings="security"]').click();
+    await waitFor(()=>document.querySelectorAll("[data-approval-default]").length===3,"All approval levels retained");
+    document.querySelector('[data-a31-settings="providers"]').click();
+    await waitFor(()=>document.querySelector("#a31AddOAuthConfig"),"Provider OAuth configuration retained");
+    document.querySelector('[data-a31-settings="nodes"]').click();
+    await waitFor(()=>document.querySelector('[data-route="nodes"]'),"Node management link retained");
+    document.querySelector('[data-a31-settings="skills"]').click();
+    await waitFor(()=>document.querySelector('[data-route="skills"]'),"Skills management link retained");
+    document.querySelector('[data-a31-settings="appearance"]').click();
+    await waitFor(()=>document.querySelector("[data-settings-theme]"),"Appearance settings");check(document.querySelector("[data-settings-theme]"),"Themes rendered");
 
     await testProjectLayout();
     const workspaceThemeSelect=check(document.querySelector(".qa7-workspace-settings select"),"Workspace settings themed select"),themeBefore=document.documentElement.dataset.theme;
@@ -348,11 +485,21 @@
     const launcher=check(document.querySelector("#controlChatLauncher"),"Chat launcher");launcher.click();await waitFor(()=>document.querySelector("#a31ControlChatForm"),"Assistant chat");
     const panel=check(document.querySelector("#controlChatPanel"),"Chat panel"),chatToggle=check(document.querySelector("#controlChatToggle"),"Chat header toggle"),chatPosBefore=a33ControlChatPosition();
     await gesture(chatToggle,0,-90);check(a33ControlChatPosition()!==chatPosBefore,"Chat moves vertically");check(a33ControlChatOpen(),"Chat drag keeps panel open");
+    const assistantSelector=check(document.querySelector("#a31AssistantModel"),"Assistant model selector is visible");
+    check(assistantSelector.value==="","Assistant defaults to automatic routing");
+    assistantSelector.value="dep-test-gpu";
+    assistantSelector.dispatchEvent(new Event("change",{bubbles:true}));
+    await waitFor(()=>document.querySelector("#a31AssistantModel")?.value==="dep-test-gpu"&&assistantModelChoice==="dep-test-gpu","Assistant model selection persists");
+    check(document.querySelector("#a31AssistantModel")?.options[document.querySelector("#a31AssistantModel")?.selectedIndex]?.textContent?.includes("Test GPU Model"),"Assistant selected model remains visible");
+    document.querySelector("#a31AssistantModel").value="";
+    document.querySelector("#a31AssistantModel").dispatchEvent(new Event("change",{bubbles:true}));
+    await waitFor(()=>assistantModelChoice===null&&document.querySelector("#a31AssistantModel")?.value==="","Assistant Auto selection restores routing");
     const form=document.querySelector("#a31ControlChatForm");form.querySelector("textarea").value="hello";form.requestSubmit(form.querySelector('button:not([name="run"])'));
     await waitFor(()=>document.querySelector("#controlChatBody")?.textContent?.includes("No eligible reasoning model is configured."),"no-model Assistant response",30000);
     const expandedTransform=getComputedStyle(panel.querySelector(".control-chat-chevron")).transform;chatToggle.click();check(panel.dataset.collapsed==="true","Chat collapses from header");await sleep(220);const collapsedTransform=getComputedStyle(panel.querySelector(".control-chat-chevron")).transform;check(expandedTransform!=="none"&&collapsedTransform==="none","Chat chevron direction matches collapse state");chatToggle.click();check(panel.dataset.collapsed==="false","Chat expands from header");await sleep(220);
     launcher.click();check(!a33ControlChatOpen(),"Chat launcher closes open chat");launcher.click();await waitFor(()=>a33ControlChatOpen(),"Chat launcher reopens closed chat");a31CloseControlChat();
 
+    await testAllDrawerAwarePages();
     await route("projects");const projectDelete=await waitFor(()=>document.querySelector('[data-a35-delete-project="project-release"]'),"Delete project action",10000);projectDelete.click();const confirmProjectDelete=await waitFor(()=>document.querySelector("#a33ConfirmDeleteProject"),"Delete project confirmation");confirmProjectDelete.click();await waitFor(()=>project.status==="archived"&&!qa4ProjectHub.projects.some(x=>x.id==="project-release"),"Project lifecycle delete persisted",30000);check(document.querySelector(".empty-state")?.textContent?.includes("No projects yet"),"Deleted project leaves active Projects list");
 
     results.push("installed behavioural acceptance complete");post("PASS");

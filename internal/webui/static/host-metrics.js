@@ -24,6 +24,18 @@ function a50MetricsMarkup(x){
   {name:"Network RX",now:x.network_rx_bytes_per_sec==null?"Unavailable":a50PrettyBytes(x.network_rx_bytes_per_sec)+"/s",note:"Host receive throughput",meter:0,chart:""},
   {name:"Network TX",now:x.network_tx_bytes_per_sec==null?"Unavailable":a50PrettyBytes(x.network_tx_bytes_per_sec)+"/s",note:"Host transmit throughput",meter:0,chart:""}
  ];
+ const volumes=a31Array(x.storage_volumes);
+ const volumeCards=volumes.map(vol=>{
+  const used=Math.max(0,Number(vol.total_bytes||0)-Number(vol.free_bytes||0));
+  const system=String(x.disk_path||"").toLowerCase()===String(vol.path||"").toLowerCase();
+  if(system){
+   const sysCard=cards.find(c=>c.name==="Storage");
+   if(sysCard)sysCard.note=[vol.path,...a31Array(vol.roles)].join(" · ");
+   return null;
+  }
+  return {name:a31Array(vol.roles).join(" + ")+" Storage",now:a50PrettyBytes(vol.free_bytes)+" free",note:vol.path+" · "+a50PrettyBytes(vol.total_bytes)+" total",meter:vol.total_bytes?100*used/vol.total_bytes:0,chart:""};
+ }).filter(Boolean);
+ cards.push(...volumeCards);
  const g=a31Array(x.gpus).map(g=>`<article class="host-metric-tile"><strong>${escapeHtml(g.name)}</strong><div class="host-metric-value">${g.usage_percent==null?"Utilisation unavailable":a50Pct(g.usage_percent)}</div><span class="page-subtitle">${a50PrettyBytes(g.vram_used_bytes)} / ${a50PrettyBytes(g.vram_total_bytes)} VRAM · ${g.temperature_c==null?"Temperature unavailable":g.temperature_c+" °C"}</span>${a50Progress(g.usage_percent??0,100)}</article>`).join("");
  return `<div class="host-metrics"><div class="host-metrics-head"><strong>${escapeHtml(x.hostname||"Local host")} · Live performance</strong><span class="list-meta">5-second samples · ${new Date(x.timestamp).toLocaleTimeString()}</span></div><div class="host-metrics-grid">${cards.map(c=>`<article class="host-metric-tile"><strong>${c.name}</strong><div class="host-metric-value">${c.now}</div><span class="page-subtitle">${c.note}</span>${c.chart?a50HistorySVG(c.chart):a50Progress(c.meter,100)}</article>`).join("")}${g||'<article class="host-metric-tile"><strong>GPU telemetry</strong><div class="page-subtitle">Unavailable (NVIDIA nvidia-smi is optional; integrated GPU usage requires a supported sensor).</div></article>'}</div></div>`;
 }

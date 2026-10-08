@@ -434,6 +434,9 @@ func installWebView2() error {
 	if err := os.MkdirAll(tempDir, 0o755); err != nil {
 		return err
 	}
+	// This folder is owned by this Setup run only. Remove abandoned installer
+	// downloads when Setup succeeds or fails; never touch shared Windows caches.
+	defer os.RemoveAll(tempDir)
 	// Microsoft recommends the tiny Evergreen bootstrapper for online clients.
 	// It downloads only the matching architecture and keeps the OnePane setup
 	// package small. Offline packaging can still embed the standalone runtime.
@@ -562,6 +565,9 @@ func offerOllamaInstall() error {
 	if err := os.MkdirAll(tempDir, 0o755); err != nil {
 		return err
 	}
+	// This folder is owned by this Setup run only. Remove abandoned installer
+	// downloads when Setup succeeds or fails; never touch shared Windows caches.
+	defer os.RemoveAll(tempDir)
 	installer := filepath.Join(tempDir, "OllamaSetup.exe")
 	if err := downloadFile("https://ollama.com/download/OllamaSetup.exe", installer); err != nil {
 		return fmt.Errorf("download Ollama: %w", err)
@@ -639,18 +645,27 @@ func uninstallProduct() error {
 	// synchronously and report a real failure if a lock remains. When the
 	// installed Setup is uninstalling itself, remove every sibling first and
 	// schedule only the final self/delete step after this process exits.
+	// Only delete the known signed application payload. An existing installation
+	// may contain a user-selected Models or Projects folder; recursive deletion
+	// of the installation root would destroy user data.
 	self, _ := os.Executable()
-	if !pathWithin(self, installDir) {
-		if err := removeTreeWithRetry(installDir, 20*time.Second); err != nil {
-			return fmt.Errorf("remove OnePane application directory: %w", err)
-		}
-		return nil
-	}
 	if err := removeInstallSiblings(installDir, self); err != nil {
 		return fmt.Errorf("remove OnePane application payload: %w", err)
 	}
+	if !pathWithin(self, installDir) {
+		// Setup was launched from outside the installation. Remove only the
+		// installed Setup file, then remove the root iff it is empty.
+		if err := removeInstalledSetup(installDir); err != nil {
+			return err
+		}
+		removeEmptyInstallRoot(installDir)
+		return nil
+	}
+	// Setup cannot delete its running executable. The deferred command may
+	// remove that single file and then try to remove an EMPTY directory only.
+	// It must never use rmdir /s: model weights and Project files may be here.
 	cmd := exec.Command("cmd.exe", "/d", "/c",
-		"ping 127.0.0.1 -n 3 >nul & del /f /q \""+self+"\" >nul 2>&1 & rmdir /s /q \""+installDir+"\" >nul 2>&1")
+		"ping 127.0.0.1 -n 3 >nul & del /f /q \""+self+"\" >nul 2>&1 & rmdir /q \""+installDir+"\" >nul 2>&1")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("schedule OnePane uninstaller cleanup: %w", err)
@@ -691,26 +706,49 @@ func removeTreeWithRetry(path string, timeout time.Duration) error {
 	}
 }
 
+// uninstallPayloadNames is the exact allowlist of application-owned files.
+// Unknown files and directories (including Models and Projects) are user data.
+var uninstallPayloadNames = []string{
+	"OnePane.Backend.exe", "OnePane.Service.exe", "OnePane.Desktop.exe",
+	"OnePane.ico",
+}
+
 func removeInstallSiblings(installDir, self string) error {
-	entries, err := os.ReadDir(installDir)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
 	selfAbs, _ := filepath.Abs(self)
-	for _, entry := range entries {
-		path := filepath.Join(installDir, entry.Name())
-		pathAbs, _ := filepath.Abs(path)
-		if strings.EqualFold(filepath.Clean(pathAbs), filepath.Clean(selfAbs)) {
+	for _, name := range uninstallPayloadNames {
+		path := filepath.Join(installDir, name)
+		if strings.EqualFold(filepath.Clean(path), filepath.Clean(selfAbs)) {
 			continue
 		}
-		if err := removeTreeWithRetry(path, 10*time.Second); err != nil {
+		if err := removePayloadFile(path); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func removePayloadFile(path string) error {
+	st, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) { return nil }
+	if err != nil { return err }
+	if st.IsDir() { return fmt.Errorf("refusing to remove directory at application payload path: %s", path) }
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if err = os.Remove(path); err == nil || errors.Is(err, os.ErrNotExist) { return nil }
+		if time.Now().After(deadline) { return fmt.Errorf("remove application file %s: %w", path, err) }
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func removeInstalledSetup(installDir string) error {
+	return removePayloadFile(filepath.Join(installDir, "OnePane.Setup.exe"))
+}
+
+func removeEmptyInstallRoot(installDir string) {
+	if err := os.Remove(installDir); err != nil {
+		// ENOTEMPTY is intentional when user-owned content is present.
+		logf("preserved non-application files in install directory %s: %v", installDir, err)
+	}
 }
 
 func waitForServiceDeletion(timeout time.Duration) bool {

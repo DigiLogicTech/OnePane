@@ -70,3 +70,330 @@
 
 /* Palette colours use SVG presentation attributes instead of CSP-blocked inline CSS. */
 .theme-compact-swatches>span>svg{display:block;width:100%;height:100%;overflow:hidden}
+
+/* Nodes occupies the remaining shell grid row, including after the Logs
+ * drawer resizes. Scroll the node content within that row, not the shell. */
+.nodes-page{height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.nodes-page>.page-heading{flex:0 0 auto}
+.nodes-page #a31Nodes{flex:1 1 0;min-height:0;min-width:0;display:flex;flex-direction:column}
+.nodes-page #nextNodeRoot{flex:1 1 0;min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;align-content:start;padding-bottom:12px}
+.nodes-page #nextNodeRoot>.next-node-manager{min-height:0}
+@media(max-width:700px){
+ .nodes-page #nextNodeRoot{overscroll-behavior:auto}
+}
+
+/* Nodes fleet management: keep the selected machine visually anchored. */
+#nextNodeRoot{display:grid;gap:14px;min-width:0}
+#nextNodeRoot .node-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+#nextNodeRoot .node-card{min-height:128px}
+#nextNodeRoot .node-card .widget-body{display:flex;align-items:center;justify-content:space-between;gap:12px}
+#nextNodeRoot .next-node-selected{border-color:var(--accent)}
+#nextNodeRoot .next-node-manager{min-height:380px;min-width:0}
+#nextNodeRoot .next-node-manager>.subtabs{margin:0 12px;border-radius:8px}
+#nextNodeRoot .next-node-manager>.widget-body{overflow:auto;min-width:0}
+#nextNodeRoot .next-node-manager .definition-grid{max-width:880px}
+#nextNodeRoot .next-node-manager .table-shell{overflow-x:auto}
+@media(max-width:900px){
+ #nextNodeRoot .node-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ #nextNodeRoot .node-card .widget-body{flex-wrap:wrap}
+}
+
+/* Stable right-aligned page actions without disturbing title wrapping. */
+.models-routing-header > .models-routing-actions{margin-left:auto;margin-top:0;flex:0 0 auto}
+.models-routing-header > div:first-child{flex:1 1 auto;min-width:0}
+#nextNodeRoot .next-node-manager > .card-header{gap:12px}
+#nextNodeRoot .next-node-manager > .card-header > div:first-child{flex:1 1 auto;min-width:0}
+#nextNodeRoot .next-node-manager > .card-header > #nextNodeRefresh{margin-left:auto;flex:0 0 auto}
+@media(max-width:620px){
+ .models-routing-header{flex-wrap:wrap}
+ .models-routing-header > .models-routing-actions{flex-wrap:wrap;justify-content:flex-end;width:100%}
+}
+
+
+/* Keep first-party provenance badges at the far right of each card header.
+ * Scope to Agents > Profiles and Skills > Installed/Catalogue only. */
+.agent-profile-card > .card-header,
+.skill-card > .card-header {
+  height:auto;
+  min-height:54px;
+  padding:8px 12px;
+  gap:12px;
+}
+.agent-profile-card > .card-header > div:first-child,
+.skill-card > .card-header > div:first-child {
+  flex:1 1 auto;
+  min-width:0;
+}
+.agent-profile-card > .card-header > .pill,
+.skill-card > .card-header > .pill {
+  margin-left:auto;
+  flex:0 0 auto;
+  white-space:nowrap;
+}
+
+/* Per-thread model choice for the global OnePane Assistant only. */
+.control-chat-model-row{
+ display:flex;align-items:center;gap:9px;padding:9px 12px 3px;
+ min-width:0;
+}
+.control-chat-model-row label{flex:0 0 auto;font-size:12px;font-weight:650;color:var(--muted)}
+.control-chat-model-row select{
+ flex:1 1 auto;min-width:0;width:100%;max-width:100%;
+ padding:7px 9px;border:1px solid var(--border);border-radius:8px;
+ background:var(--panel-2);color:var(--text);color-scheme:inherit;
+}
+.control-chat-model-row select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.control-chat-model-status{padding:0 12px 8px;font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+@media(max-width:440px){
+ .control-chat-model-row{flex-wrap:wrap}
+ .control-chat-model-row select{flex-basis:100%}
+}
+
+
+/* The Logs drawer and Inspector own shell space; content pages must never
+ * compute their height from the full window. Keep one scroll owner per page.
+ * Tablet/phone use the mobile overlay drawer instead of the desktop grid. */
+@media (min-width:701px) {
+  .app-shell,.main-shell{min-height:0}
+  .main-shell{
+    height:100%;
+    overflow:hidden;
+    grid-template-rows:52px minmax(0,1fr) minmax(0,var(--drawer));
+  }
+  .view-host{height:100%;min-width:0;min-height:0;overflow:auto;overscroll-behavior:contain}
+  .view-host > .page{
+    height:100%;min-height:0;min-width:0;max-width:100%;
+    box-sizing:border-box;
+    display:flex;flex-direction:column;overflow:hidden;
+  }
+  .view-host > .page > :is(.page-heading,.subtabs,.models-section-tabs,.secret-toolbar){
+    flex:0 0 auto;
+  }
+  /* The page heading/tabs remain visible while the content independently
+   * scrolls; this applies to every primary view, not just Nodes/Models. */
+  .view-host > .page > :is(
+    #a31OperationsBody,#tasksBody,.project-hub,
+    #a31AgentsBody,#a31SkillsBody,.settings-shell,#secretCatalogue
+  ){
+    flex:1 1 0;min-height:0;min-width:0;max-width:100%;
+    overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
+  }
+  .view-host > .page > .project-hub{
+    height:auto;min-height:0;align-content:start;
+  }
+  .view-host > .page > .settings-shell{align-content:start}
+  .view-host > .page > #secretCatalogue{max-height:none}
+  /* Local/Cloud/Routing model views were still taller than the available
+   * shell area because only Discover had a constrained inner scroller. */
+  .view-host > .models-page #a31ModelsRoot{
+    overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
+  }
+  .view-host > .models-page #a31ModelsRoot > .models-single-column{
+    min-height:0;min-width:0;max-width:100%;
+  }
+  /* Do not clip a legacy/secondary page whose body is not one of the above
+   * bounded containers. Those pages scroll at their own root. */
+  .view-host > .page:not(:has(
+    #a31OperationsBody,#tasksBody,.project-hub,#a31ModelsRoot,#nextNodeRoot,
+    #a31AgentsBody,#a31SkillsBody,.settings-shell,#secretCatalogue
+  )){overflow-y:auto}
+  .view-host > .page :is(
+    .table-shell,.agent-profile-grid,.skill-grid,.models-single-column,
+    .workspace-grid,.operations-layout-grid,.settings-section
+  ){min-width:0;max-width:100%}
+  .view-host > .page .table-shell{overflow-x:auto}
+}
+
+
+/* Settings redesign: a drawer-aware configuration centre. */
+.a36-settings-page{min-width:0;min-height:0;overflow:hidden}
+.a36-settings-top{
+ display:flex;align-items:center;justify-content:space-between;gap:16px;
+ flex:0 0 auto;padding:7px 3px 17px;
+}
+.a36-settings-eyebrow{
+ color:var(--muted);font-size:10px;font-weight:750;letter-spacing:.13em;margin-bottom:5px;
+}
+.a36-settings-top h1{margin:0;font-size:26px;letter-spacing:-.03em}
+.a36-settings-top p{margin:3px 0 0;color:var(--muted)}
+.a36-settings-top-actions{display:flex;align-items:center;gap:8px}
+.a36-settings-layout{
+ display:grid;grid-template-columns:minmax(200px,242px) minmax(0,1fr);
+ gap:16px;flex:1 1 0;min-height:0;min-width:0;max-width:1500px;width:100%;
+ margin-inline:auto;align-items:stretch;
+}
+.a36-settings-sidebar{
+ min-width:0;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+ display:flex;flex-direction:column;gap:9px;
+ padding:12px 9px 11px;background:var(--panel);border:1px solid var(--border);
+ border-radius:12px;scrollbar-gutter:stable;
+}
+.a36-settings-sidebar>label{
+ color:var(--muted);font-size:11px;font-weight:650;letter-spacing:.02em;
+ padding:1px 6px 0;
+}
+.a36-settings-sidebar #a31SettingsSearch{
+ flex:0 0 auto;width:100%;height:36px;min-width:0;
+ border-radius:8px;border:1px solid var(--border);
+ background:var(--panel-2);color:var(--text);padding:7px 10px;color-scheme:inherit;
+}
+.a36-settings-sidebar #a31SettingsSearch:focus-visible{
+ outline:2px solid var(--accent);outline-offset:1px;
+}
+.a36-settings-navigation{display:flex;flex-direction:column;gap:2px;min-width:0}
+.a36-settings-navigation [hidden],.a36-settings-group[hidden],.a36-settings-empty[hidden] {display:none!important}
+.a36-settings-group{
+ font-size:10px;font-weight:750;letter-spacing:.095em;text-transform:uppercase;
+ color:var(--muted);padding:13px 8px 5px;
+}
+.a36-settings-link{
+ border:1px solid transparent;border-radius:8px;background:transparent;
+ padding:9px 8px;display:flex;align-items:center;gap:9px;width:100%;
+ color:var(--muted);font-size:12px;text-align:left;cursor:pointer;
+}
+.a36-settings-link:hover{background:var(--panel-2);color:var(--text)}
+.a36-settings-link.active{
+ border-color:color-mix(in srgb,var(--accent) 28%,var(--border));
+ background:var(--accent-soft);color:var(--text);font-weight:700;
+}
+.a36-settings-icon{width:20px;flex:0 0 20px;text-align:center;font-size:15px;line-height:1}
+.a36-settings-nav-name{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.a36-settings-nav-arrow{font-size:18px;line-height:1;opacity:.5}
+.a36-settings-link.active .a36-settings-nav-arrow{opacity:1;color:var(--accent)}
+.a36-settings-empty{font-size:12px;color:var(--muted);padding:8px}
+.a36-settings-sidebar-foot{
+ display:flex;flex-direction:column;gap:7px;margin-top:auto;
+ padding:13px 8px 4px;border-top:1px solid var(--border);
+}
+.a36-settings-sidebar-foot strong{font-size:11px}
+.a36-settings-sidebar-foot span{font-size:11px;color:var(--muted);line-height:1.4}
+.a36-settings-sidebar-foot .btn{align-self:flex-start}
+.a36-settings-content{
+ min-width:0;min-height:0;overflow-y:auto;overflow-x:hidden;
+ scrollbar-gutter:stable;overscroll-behavior:contain;
+ padding:3px 5px 18px 2px;align-self:stretch;
+}
+.a36-settings-panel-heading{
+ border-bottom:1px solid var(--border);padding:5px 3px 15px;margin-bottom:17px;
+}
+.a36-settings-breadcrumb{color:var(--muted);font-size:11px;margin-bottom:11px}
+.a36-settings-breadcrumb span{margin-inline:6px}
+.a36-settings-heading-row{
+ display:flex;align-items:center;justify-content:space-between;gap:12px;
+}
+.a36-settings-heading-row h2{font-size:21px;letter-spacing:-.02em;margin:0}
+.a36-settings-heading-row p{color:var(--muted);margin:5px 0 0}
+.a36-settings-scope{
+ flex:0 0 auto;font-size:10px;font-weight:650;color:var(--muted);
+ border:1px solid var(--border);border-radius:999px;
+ background:var(--panel-2);padding:5px 9px;
+}
+.a36-settings-panel-body{min-width:0}
+.a36-settings-panel-body>.settings-section{
+ width:100%;min-width:0;border:0;background:transparent;
+ padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+ align-items:start;gap:12px;
+}
+.a36-settings-panel-body>.settings-section>h2{
+ grid-column:1/-1;font-size:14px;margin:3px 1px 1px;
+}
+.a36-settings-panel-body>.settings-section>.page-subtitle,
+.a36-settings-panel-body>.settings-section>.toolbar,
+.a36-settings-panel-body>.settings-section>.theme-grid,
+.a36-settings-panel-body>.settings-section>.approval-profile-grid,
+.a36-settings-panel-body>.settings-section>.oauth-config-list,
+.a36-settings-panel-body>.settings-section>.a36-settings-save,
+.a36-settings-panel-body>.settings-section>p{
+ grid-column:1/-1;
+}
+.a36-settings-panel-body>.settings-section>label{
+ min-width:0;display:flex;flex-direction:column;align-items:stretch;gap:9px;
+ border:1px solid var(--border);border-radius:10px;
+ background:var(--panel);padding:14px;font-weight:650;font-size:12px;
+}
+.a36-settings-panel-body>.settings-section>label.inline-check{
+ flex-direction:row;align-items:center;gap:12px;min-height:54px;
+ font-weight:500;
+}
+.a36-settings-panel-body>.settings-section>label.inline-check input{
+ flex:0 0 auto;width:16px;height:16px;accent-color:var(--accent);
+}
+.a36-settings-panel-body>.settings-section>label :is(select,input:not([type=checkbox])){
+ width:100%;max-width:100%;min-width:0;min-height:35px;
+ background:var(--panel-2);border:1px solid var(--border);
+ color:var(--text);border-radius:7px;padding:7px 9px;color-scheme:inherit;
+}
+.a36-settings-panel-body>.settings-section>button{
+ align-self:start;justify-self:start;
+}
+.a36-settings-panel-body>.settings-section>.a36-settings-save{
+ display:flex;justify-content:flex-end;padding:4px 0;
+}
+.a36-settings-panel-body>.settings-section>.oauth-config-list{
+ min-width:0;overflow-x:auto;border-radius:10px;
+}
+.a36-settings-panel-body .oauth-config-row{
+ grid-template-columns:minmax(115px,1fr) auto minmax(130px,2fr);
+}
+.a36-settings-panel-body .oauth-config-row > :last-child{min-width:0;overflow-wrap:anywhere}
+.a36-settings-panel-body>.settings-section>.theme-grid{margin-top:0}
+.a36-settings-panel-body .approval-profile-grid{margin-top:0}
+.a36-settings-overview{display:flex;flex-direction:column;gap:16px}
+.a36-settings-intro h2{font-size:17px;margin:0 0 4px}
+.a36-settings-intro p{margin:0;color:var(--muted)}
+.a36-settings-preview-grid{
+ display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;
+}
+.a36-settings-preview{
+ min-width:0;min-height:141px;display:flex;flex-direction:column;align-items:flex-start;
+ gap:6px;border:1px solid var(--border);border-radius:12px;text-align:left;
+ padding:15px;background:var(--panel);color:var(--text);cursor:pointer;
+}
+.a36-settings-preview:hover{border-color:var(--accent);background:var(--panel-2)}
+.a36-settings-preview-kicker{
+ color:var(--muted);font-weight:700;font-size:11px;
+}
+.a36-settings-preview strong{
+ font-size:18px;white-space:nowrap;max-width:100%;
+ text-overflow:ellipsis;overflow:hidden;
+}
+.a36-settings-preview>span:nth-child(3){font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.a36-settings-preview-link{margin-top:auto;color:var(--accent);font-size:11px;font-weight:700}
+.a36-settings-quick,.a36-settings-footnote{
+ border:1px solid var(--border);border-radius:12px;background:var(--panel);
+ padding:16px;display:flex;flex-direction:column;gap:12px;
+}
+.a36-settings-quick h3{font-size:14px;margin:0}
+.a36-settings-quick p,.a36-settings-footnote p{
+ margin:3px 0 0;color:var(--muted);font-size:12px;
+}
+.a36-settings-quick-links{display:flex;flex-wrap:wrap;gap:8px}
+.a36-settings-footnote strong{font-size:12px}
+.a36-settings-page :is(button,input,select):focus-visible{
+ outline:2px solid var(--accent);outline-offset:2px;
+}
+@media(max-width:1120px){
+ .a36-settings-layout{grid-template-columns:200px minmax(0,1fr);gap:10px}
+ .a36-settings-panel-body>.settings-section{grid-template-columns:minmax(0,1fr)}
+ .a36-settings-preview-grid{grid-template-columns:minmax(0,1fr)}
+}
+@media(max-width:700px){
+ .a36-settings-page{height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+ .a36-settings-top{padding:3px 0 12px}
+ .a36-settings-top h1{font-size:22px}
+ .a36-settings-top p{font-size:11px}
+ .a36-settings-layout{display:flex;flex-direction:column;gap:9px;min-height:0}
+ .a36-settings-sidebar{
+  flex:0 0 auto;overflow:visible;padding:8px;gap:7px;
+ }
+ .a36-settings-sidebar>label,.a36-settings-sidebar-foot,.a36-settings-group,.a36-settings-nav-arrow{display:none}
+ .a36-settings-sidebar #a31SettingsSearch{height:34px}
+ .a36-settings-navigation{display:flex;flex-direction:row;overflow-x:auto;gap:4px;scrollbar-width:thin}
+ .a36-settings-link{width:auto;flex:0 0 auto;padding:7px 9px;gap:4px;white-space:nowrap}
+ .a36-settings-icon{width:auto;flex:0 0 auto}
+ .a36-settings-content{flex:1 1 0;min-height:0;padding:3px 1px 16px}
+ .a36-settings-heading-row{align-items:flex-start;flex-wrap:wrap}
+ .a36-settings-scope{align-self:flex-start}
+ .a36-settings-panel-body>.settings-section{grid-template-columns:1fr}
+ .a36-settings-preview-grid{grid-template-columns:1fr}
+}

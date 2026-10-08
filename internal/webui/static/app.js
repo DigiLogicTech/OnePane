@@ -7,10 +7,11 @@ let a31ModelView="local";
 let a31CloudConsumerFilter="all";
 let a31AgentView="profiles";
 let a31SkillsView="installed";
-let a31SettingsView="general";
+let a31SettingsView="overview";
 let a31OperationsView="overview";
 let a31ControlTab="assistant";
 let a31AssistantThreadID="";
+let a31AssistantThreadWorkspace="";
 let a31InstallPoll=null;
 
 pages.skills={title:"Skills",icon:"✦"};
@@ -292,7 +293,7 @@ function a31BindOperationsTabs(){
 function a31ToggleLogs(){
   const drawer=$("#bottomDrawer");if(!drawer)return;
   if(drawer.dataset.state==="open"&&activeDrawerTab==="logs"){setDrawerOpen(false);return}
-  activeDrawerTab="logs";setDrawerOpen(true);renderDrawer();if(a31RouteIs("operations"))renderOperations();
+  activeDrawerTab="logs";setDrawerOpen(true); // CSS resizes the page; do not rerender Operations or reset its scroll.
 }
 function a31OpsWidget(w){
   const edit=a31OperationsEditing();
@@ -542,12 +543,15 @@ function a31OpenControlChat(tab=a31ControlTab){
 }
 function a31CloseControlChat(){const p=$("#controlChatPanel");if(p){p.dataset.state="closed";p.setAttribute("hidden","")}}
 async function a31EnsureAssistantThread(){
-  if(a31AssistantThreadID)return a31AssistantThreadID;const rows=await apiRequest(`/v1/assistant/threads?workspace_id=${encodeURIComponent(onepaneWorkspace)}&limit=20`);const t=a31Array(rows)[0]||await apiRequest("/v1/assistant/threads",{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace,title:"OnePane Control Chat"})});a31AssistantThreadID=t.id;return t.id;
+  const workspace=String(onepaneWorkspace||"");if(a31AssistantThreadID&&a31AssistantThreadWorkspace===workspace)return a31AssistantThreadID;
+  a31AssistantThreadID="";a31AssistantThreadWorkspace="";
+  const rows=await apiRequest(`/v1/assistant/threads?workspace_id=${encodeURIComponent(workspace)}&limit=20`);const t=a31Array(rows)[0]||await apiRequest("/v1/assistant/threads",{method:"POST",body:JSON.stringify({workspace_id:workspace,title:"OnePane Control Chat"})});
+  a31AssistantThreadID=t.id;a31AssistantThreadWorkspace=workspace;return t.id;
 }
 async function a31RenderControlChat(){
   const body=$("#controlChatBody");if(!body)return;const projects=a31Array(qa4ProjectHub?.projects),current=a31CurrentProject();
   $("#controlChatAssistantTab")?.classList.toggle("active",a31ControlTab==="assistant");$("#controlChatOrchestratorTab")?.classList.toggle("active",a31ControlTab==="orchestrator");
-  if(a31ControlTab==="assistant"){body.innerHTML='<div class="control-chat-loading">Loading Assistant…</div>';try{const id=await a31EnsureAssistantThread(),turns=await apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/turns?limit=100`);body.innerHTML=`<div class="control-chat-scope">Global OnePane Assistant</div><div class="control-chat-history">${a31Array(turns).map(t=>`<div class="control-chat-message ${t.role||t.author_kind||''}"><strong>${escapeHtml(t.role||t.author_kind||"OnePane")}</strong><span>${escapeHtml(t.content||t.text||"")}</span></div>`).join("")}</div><form id="a31ControlChatForm" class="control-chat-form"><textarea rows="3" placeholder="Ask OnePane…"></textarea><div><button class="btn">Ask</button><button class="btn primary" name="run" value="1">Run</button></div></form>`;$("#a31ControlChatForm").onsubmit=async e=>{e.preventDefault();const text=e.currentTarget.querySelector("textarea").value.trim();if(!text)return;const run=e.submitter?.value==="1";try{await apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/turns`,{method:"POST",body:JSON.stringify({content:text,allow_task_creation:run,force_task:false})});a31RenderControlChat()}catch(ex){notice(ex.message,"bad")}}}catch(ex){body.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`}}
+  if(a31ControlTab==="assistant"){body.innerHTML='<div class="control-chat-loading">Loading Assistant…</div>';try{const id=await a31EnsureAssistantThread(),[turns,picker]=await Promise.all([apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/turns?limit=100`),a31AssistantModelPicker(id)]);body.innerHTML=`<div class="control-chat-scope">Global OnePane Assistant</div>${picker.ui}<div class="control-chat-history">${a31Array(turns).map(t=>`<div class="control-chat-message ${t.role||t.author_kind||''}"><strong>${escapeHtml(t.role||t.author_kind||"OnePane")}</strong><span>${escapeHtml(t.content||t.text||"")}</span></div>`).join("")}</div><form id="a31ControlChatForm" class="control-chat-form"><textarea rows="3" placeholder="Ask OnePane…"></textarea><div><button class="btn">Ask</button><button class="btn primary" name="run" value="1">Run</button></div></form>`;a31BindAssistantModelPicker(id,picker);$("#a31ControlChatForm").onsubmit=async e=>{e.preventDefault();const text=e.currentTarget.querySelector("textarea").value.trim();if(!text)return;const run=e.submitter?.value==="1";try{await apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/turns`,{method:"POST",body:JSON.stringify({content:text,allow_task_creation:run,force_task:false})});a31RenderControlChat()}catch(ex){notice(ex.message,"bad")}}}catch(ex){body.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`}}
   else{const pid=$("#controlChatProject")?.value||current?.id||projects[0]?.id;if(!pid){body.innerHTML='<div class="empty-state compact">Create a Project before using Project Orchestrator.</div>';return}const p=projects.find(x=>x.id===pid),workspaces=p?qa4Workspaces(p):[];body.innerHTML=`<div class="control-chat-selectors"><label>Project<select id="controlChatProject">${projects.map(x=>`<option value="${escapeHtml(x.id)}" ${x.id===pid?'selected':''}>${escapeHtml(x.name)}</option>`).join("")}</select></label><label>Workspace<select id="controlChatWorkspace"><option value="">Project-wide</option>${workspaces.map(w=>`<option value="${escapeHtml(w.id)}">${escapeHtml(w.name)}</option>`).join("")}</select></label></div><div id="a31OrchestratorTurns" class="control-chat-history">Loading…</div><form id="a31OrchestratorForm" class="control-chat-form"><textarea rows="3" placeholder="Ask the Project Orchestrator…"></textarea><div><button class="btn">Ask</button><button class="btn primary" name="run" value="1">Run</button></div></form>`;$("#controlChatProject").onchange=()=>a31RenderControlChat();try{const turns=await apiRequest(`/v1/projects/${encodeURIComponent(pid)}/orchestrator/turns?limit=100`);$("#a31OrchestratorTurns").innerHTML=a31Array(turns).map(t=>`<div class="control-chat-message ${t.role||''}"><strong>${escapeHtml(t.role||"OnePane")}</strong><span>${escapeHtml(t.content||t.objective||t.response||"")}</span></div>`).join("");$("#a31OrchestratorForm").onsubmit=async e=>{e.preventDefault();const objective=e.currentTarget.querySelector("textarea").value.trim(),run=e.submitter?.value==="1",ws=$("#controlChatWorkspace").value;if(!objective)return;try{await apiRequest(`/v1/projects/${encodeURIComponent(pid)}/orchestrator/turns`,{method:"POST",body:JSON.stringify({objective,project_workspace_id:ws,allow_task_creation:run,force_task:false})});a31RenderControlChat()}catch(ex){notice(ex.message,"bad")}}}catch(ex){$("#a31OrchestratorTurns").innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`}}
 }
 
@@ -568,10 +572,14 @@ async function a31SettingsSection(){
   return `<section class="settings-section"><h2>Updates & Diagnostics</h2><label>Release channel<select id="a31UpdateChannel"><option value="alpha">Alpha</option><option value="stable">Stable</option></select></label><div class="toolbar"><button class="btn" id="a31OpenLogs">Open Logs</button><button class="btn" data-action="product-tour">Restart product tour</button></div><p class="page-subtitle">Recovery actions that mutate runtimes live in Operations → Recovery.</p></section>`
 }
 renderSettings=async function(){
-  $("#viewHost").innerHTML=`<section class="page">${pageHeader("Settings","Application preferences and defaults. Workspace-owned policy remains in each Workspace.")}<div class="settings-shell">${a31SettingsNav()}<div id="a31SettingsContent"><div class="widget-body">Loading…</div></div></div></section>`;
-  $("#a31SettingsContent").innerHTML=await a31SettingsSection();$$("[data-a31-settings]").forEach(b=>b.onclick=()=>a31SetSettingsView(b.dataset.a31Settings));$("#a31SettingsSearch").oninput=e=>{const q=e.target.value.toLowerCase();$$("[data-settings-search]").forEach(b=>b.hidden=q&&!b.dataset.settingsSearch.includes(q))};
+  if(!await a36RenderSettingsShell())return;
+  $$("[data-a31-settings]").forEach(b=>b.onclick=()=>a31SetSettingsView(b.dataset.a31Settings));
+  a36BindSettingsSearch();
+  $("#a36OpenLogs")?.addEventListener("click",()=>{activeDrawerTab="logs";setDrawerOpen(true);renderDrawer()});
   $$("[data-settings-theme]").forEach(b=>b.onclick=()=>{applyTheme(b.dataset.settingsTheme);renderSettings()});$$("[data-approval-default]").forEach(b=>b.onclick=()=>{state.approvalLevel=b.dataset.approvalDefault;persist();renderSettings()});
   const p=qa5Prefs(),d=p.workspace_defaults||{};if($("#a31DefaultMode"))$("#a31DefaultMode").value=d.orchestration||"direct";if($("#a31Landing"))$("#a31Landing").value=p.landing||"operations";if($("#a31Runtime"))$("#a31Runtime").value=p.default_runtime||"auto";if($("#a31ComputeDefault"))$("#a31ComputeDefault").value=p.default_compute||"auto";if($("#a31AssistantCompute"))$("#a31AssistantCompute").value=p.assistant_defaults?.compute_preference||"auto";if($("#a31UpdateChannel"))$("#a31UpdateChannel").value=p.update_channel||"alpha";
+  $("#a36SaveGeneral")?.addEventListener("click",()=>{qa5SavePrefs({landing:$("#a31Landing").value});notice("Startup preferences saved.")});
+  $("#a36SaveUpdates")?.addEventListener("click",()=>{qa5SavePrefs({update_channel:$("#a31UpdateChannel").value});notice("Release channel preference saved.")});
   $("#a31SaveDefaults")?.addEventListener("click",()=>{qa5SavePrefs({workspace_defaults:{orchestration:$("#a31DefaultMode").value,seats:Number($("#a31DefaultSeats").value||2),model_routing:$("#a31DefaultRouting").checked,remote_models:$("#a31DefaultRemote").checked,browser:$("#a31DefaultBrowser").checked,computer:$("#a31DefaultComputer").checked}});notice("Defaults saved for newly created Workspaces.")});
   $("#a31SaveModelSettings")?.addEventListener("click",async()=>{try{await apiRequest("/v1/settings/local-ai",{method:"POST",body:JSON.stringify({model_pool_path:$("#a31ModelPool").value})});qa5SavePrefs({default_runtime:$("#a31Runtime").value,default_compute:$("#a31ComputeDefault").value});notice("Model defaults saved.")}catch(ex){notice(ex.message,"bad")}});
   $("#a31SaveAgentSettings")?.addEventListener("click",()=>{qa5SavePrefs({assistant_defaults:{...p.assistant_defaults,compute_preference:$("#a31AssistantCompute").value},research_default:$("#a31ResearchDefault").checked});notice("Agent and Research defaults saved.")});
@@ -727,4 +735,16 @@ renderActiveView=async function(){
   const renderers={operations:renderOperations,tasks:renderTasks,projects:renderProjects,models:renderModels,nodes:renderNodes,agents:renderAgents,skills:renderSkills,settings:renderSettings,secrets:renderSecrets,evidence:()=>renderPlaceholder("Evidence / Audit","Event Ledger, Artifacts, Observations and Verifications.")};
   try{await Promise.resolve((renderers[route]||renderOperations)())}finally{const host=$("#viewHost");if(epoch===qa31ViewEpoch){if(host)host.dataset.renderedRoute=route;renderNav()}}
 };
+// Apply the preferred landing page before boot renders the first view.
+ // This avoids racing the initial asynchronous Operations renderer, and
+ // leaves restored multi-tab sessions untouched.
+(function a36ApplyStartupLanding(){
+  if(new URLSearchParams(location.search).get("onepane_release_smoke")==="1")return;
+  const landing=qa5Prefs().landing||"operations",tab=currentTab();
+  if(!["projects","tasks"].includes(landing)||state.tabs.length!==1||tab?.route!=="operations")return;
+  const now=Date.now(),id="tab-"+landing+"-startup";
+  tab.state="background";tab.backgroundAt=now;
+  state.tabs.push({id,route:landing,title:pages[landing]?.title||landing,pinned:false,state:"active",lastActive:now});
+  state.activeTab=id;persist();
+})();
 bootOnePane().then(()=>window.onepaneReleaseSmoke?.()).catch(ex=>{try{window.chrome?.webview?.postMessage(`onepane-ui-e2e|FAIL|boot: ${String(ex?.message||ex)}`)}catch{}});

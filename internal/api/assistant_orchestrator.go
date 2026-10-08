@@ -17,6 +17,7 @@ type assistantService interface {
 	Threads(context.Context,string,int) ([]assistant.Thread,error)
 	CreateThread(context.Context,string,string,string) (assistant.Thread,error)
 	SetScope(context.Context,string,*string) (assistant.Thread,error)
+	SetModel(context.Context,string,*string) (assistant.Thread,error)
 	Turns(context.Context,string,int) ([]assistant.Turn,error)
 	Submit(context.Context,assistant.SubmitCommand) (assistant.SubmitResult,error)
 	ProjectHandoffs(context.Context,string,int) ([]assistant.Handoff,error)
@@ -75,6 +76,21 @@ func (s *Server) setAssistantScope(w http.ResponseWriter,r *http.Request){
 	var in struct{ProjectID *string `json:"project_id"`}
 	if !decodeJSON(w,r,&in){return}
 	out,err:=s.assistant.SetScope(r.Context(),t.ID,in.ProjectID);respondDomain(w,out,err,http.StatusOK)
+}
+// Configure the global Assistant model on this specific thread. The
+// Project Orchestrator has its own routing and is not affected.
+func (s *Server) setAssistantModel(w http.ResponseWriter,r *http.Request){
+ i,ok:=s.authenticate(w,r);if !ok{return}
+ if s.assistant==nil{writeError(w,http.StatusServiceUnavailable,"assistant unavailable");return}
+ t,err:=s.assistant.Thread(r.Context(),r.PathValue("threadID"))
+ if err!=nil{respondDomain(w,nil,err,0);return}
+ if !s.authorize(w,r,i,t.WorkspaceID,"project.read"){return}
+ if !s.authorize(w,r,i,t.WorkspaceID,"model.read"){return}
+ var in struct{DeploymentID *string `json:"deployment_id"`}
+ if !decodeJSON(w,r,&in){return}
+ out,err:=s.assistant.SetModel(r.Context(),t.ID,in.DeploymentID)
+ if err!=nil{respondDomain(w,nil,err,http.StatusOK);return}
+ writeJSON(w,http.StatusOK,out)
 }
 func (s *Server) listAssistantTurns(w http.ResponseWriter,r *http.Request){
 	i,ok:=s.authenticate(w,r);if !ok{return};t,err:=s.assistant.Thread(r.Context(),r.PathValue("threadID"));if err!=nil{respondDomain(w,nil,err,0);return}

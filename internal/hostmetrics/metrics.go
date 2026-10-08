@@ -10,6 +10,7 @@ import (
  "time"
  "runtime"
  "path/filepath"
+ "sort"
 )
 
 type GPU struct {
@@ -18,6 +19,12 @@ type GPU struct {
  VRAMUsedBytes uint64 `json:"vram_used_bytes"`
  VRAMTotalBytes uint64 `json:"vram_total_bytes"`
  TemperatureC *float64 `json:"temperature_c,omitempty"`
+}
+type StorageVolume struct {
+ Path string `json:"path"`
+ Roles []string `json:"roles"`
+ TotalBytes uint64 `json:"total_bytes"`
+ FreeBytes uint64 `json:"free_bytes"`
 }
 type Snapshot struct {
  Timestamp int64 `json:"timestamp"`
@@ -28,6 +35,7 @@ type Snapshot struct {
  DiskTotalBytes uint64 `json:"disk_total_bytes,omitempty"`
  DiskFreeBytes uint64 `json:"disk_free_bytes,omitempty"`
  DiskPath string `json:"disk_path"`
+ StorageVolumes []StorageVolume `json:"storage_volumes,omitempty"`
  NetworkRXBytesPerSec *float64 `json:"network_rx_bytes_per_sec,omitempty"`
  NetworkTXBytesPerSec *float64 `json:"network_tx_bytes_per_sec,omitempty"`
  ProcessRSSBytes uint64 `json:"process_rss_bytes,omitempty"`
@@ -41,8 +49,10 @@ type Sampler struct {
  previous time.Time
 }
 var hostSampler=&Sampler{}
-func Collect() Snapshot {return hostSampler.Collect()}
-func (s *Sampler) Collect() Snapshot {
+func Collect() Snapshot {return hostSampler.CollectWithPaths(nil)}
+func CollectWithPaths(paths map[string]string) Snapshot {return hostSampler.CollectWithPaths(paths)}
+func (s *Sampler) Collect() Snapshot {return s.CollectWithPaths(nil)}
+func (s *Sampler) CollectWithPaths(paths map[string]string) Snapshot {
  now:=time.Now()
  name,_:=os.Hostname()
  out:=Snapshot{Timestamp:now.UnixMilli(),Hostname:name,Goroutines:runtime.NumGoroutine(),GPUs:[]GPU{}}
@@ -70,6 +80,7 @@ func (s *Sampler) Collect() Snapshot {
  if netErr==nil {s.rx=rx;s.tx=tx;s.previous=now}
  s.mu.Unlock()
  out.GPUs=readGPUs()
+ out.StorageVolumes=collectStorageVolumes(paths)
  return out
 }
 type memStats struct{total,available uint64}
@@ -99,3 +110,22 @@ func readGPUs() []GPU {
  return rows
 }
 
+
+func collectStorageVolumes(paths map[string]string) []StorageVolume {
+ // Coalesce by resolved volume, not by configured folder. A model pool and
+ // project root on D:\ must be one physical-space tile.
+ volumes:=map[string]*StorageVolume{}
+ for _,role:=range []string{"Models","Projects"} {
+  p:=strings.TrimSpace(paths[role]);if p==""{continue}
+  stat,e:=readDiskAt(p);if e!=nil||stat.total==0{continue}
+  key:=strings.ToLower(filepath.Clean(stat.path))
+  if v,ok:=volumes[key];ok{v.Roles=append(v.Roles,role)}else{
+   volumes[key]=&StorageVolume{Path:stat.path,Roles:[]string{role},TotalBytes:stat.total,FreeBytes:stat.free}
+  }
+ }
+ var out []StorageVolume
+ for _,v:=range volumes {out=append(out,*v)}
+ // Stable ordering keeps tiles from moving around between five-second samples.
+ sort.Slice(out,func(i,j int)bool{return out[i].Path<out[j].Path})
+ return out
+}

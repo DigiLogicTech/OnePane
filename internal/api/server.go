@@ -477,6 +477,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/model-testbed/{sessionID}/turns", s.listModelTestbedTurns)
 	s.mux.HandleFunc("POST /v1/model-testbed/{sessionID}/turns", s.runModelTestbedTurn)
 	s.mux.HandleFunc("POST /v1/model-testbed/{sessionID}/complete", s.completeModelTestbed)
+	s.mux.HandleFunc("POST /v1/model-testbed/{sessionID}/abort", s.abortModelTestbed)
 	s.mux.HandleFunc("POST /v1/model-deployments/{deploymentID}/admission", s.admitModelDeployment)
 	s.mux.HandleFunc("GET /v1/projects", s.listProjects)
 	s.mux.HandleFunc("POST /v1/projects", s.createProject)
@@ -2516,6 +2517,22 @@ func (s *Server) completeModelTestbed(w http.ResponseWriter, r *http.Request) {
   return
  }
 	writeJSON(w, http.StatusOK, map[string]any{"completed": true})
+}
+// An interrupted Agent Check must not leave its model resident in VRAM.
+func (s *Server) abortModelTestbed(w http.ResponseWriter,r *http.Request) {
+ actor,ok:=s.authenticate(w,r);if !ok{return}
+ sid:=strings.TrimSpace(r.PathValue("sessionID"))
+ sess,err:=s.localAI.TestbedSession(r.Context(),sid)
+ if err!=nil{respondDomain(w,nil,err,0);return}
+ if !s.authorizeManagedDeployment(w,r,actor,sess.DeploymentID,"model.write"){return}
+ var in struct{Reason string `json:"reason"`}
+ if !decodeJSON(w,r,&in){return}
+ aborter,ok:=s.localAI.(interface{AbortTestbed(context.Context,string,string) error})
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Agent Check cleanup unavailable");return}
+ if err:=aborter.AbortTestbed(r.Context(),sid,in.Reason);err!=nil{
+  writeError(w,http.StatusConflict,err.Error());return
+ }
+ writeJSON(w,http.StatusOK,map[string]any{"aborted":true})
 }
 func (s *Server) admitModelDeployment(w http.ResponseWriter, r *http.Request) {
 	i, ok := s.authenticate(w, r)

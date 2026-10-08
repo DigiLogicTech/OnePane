@@ -95,21 +95,30 @@ func (s *RuntimeSupervisor) ColibriHotSwap(ctx context.Context,deploymentID stri
     previous,err:=s.colibriResidents(ctx,nodeID,deploymentID)
     if err!=nil{return state,err}
     // The actual evictions happen inside startLocked, under the same lock.
-    inst,err:=s.startLocked(ctx,deploymentID)
-    if err!=nil {
-        // Best-effort rollback of the most recently used healthy predecessor.
-        // Never replace another model if it has become busy.
-        for _,p:=range previous {
-            if p.Status!=RuntimeHealthy {continue}
-            if _,restoreErr:=s.startLocked(ctx,p.ID);restoreErr!=nil {
-                return state,fmt.Errorf("Colibri swap failed: %w; rollback to %s also failed: %v",err,p.ID,restoreErr)
-            }
-            return state,fmt.Errorf("Colibri swap failed: %w; restored previous model %s",err,p.ID)
-        }
-        return state,err
+    inst,launchErr:=s.startLocked(ctx,deploymentID)
+    after,queryErr:=s.colibriResidents(ctx,nodeID,deploymentID)
+    if queryErr!=nil {
+        if launchErr!=nil{return state,fmt.Errorf("Colibri launch failed: %w; residency inspection failed: %v",launchErr,queryErr)}
+        return state,queryErr
     }
+    still:=map[string]bool{}
+    for _,c:=range after {still[c.ID]=true}
     for _,p:=range previous {
-        if p.Status==RuntimeHealthy && p.ID!=deploymentID {state.EvictedDeploymentIDs=append(state.EvictedDeploymentIDs,p.ID)}
+        if p.Status==RuntimeHealthy && !still[p.ID]{
+            state.EvictedDeploymentIDs=append(state.EvictedDeploymentIDs,p.ID)
+        }
+    }
+    if launchErr!=nil {
+        // Only roll back an instance that was actually stopped. Never
+        // attempt another model switch when an active/busy model blocked us.
+        if len(state.EvictedDeploymentIDs)>0{
+            prev:=state.EvictedDeploymentIDs[0]
+            if _,restoreErr:=s.startLocked(ctx,prev);restoreErr!=nil{
+                return state,fmt.Errorf("Colibri swap failed: %w; rollback to %s also failed: %v",launchErr,prev,restoreErr)
+            }
+            return state,fmt.Errorf("Colibri swap failed: %w; restored previous model %s",launchErr,prev)
+        }
+        return state,launchErr
     }
     state.Status=string(inst.Status)
     state.ActiveDeploymentIDs=[]string{deploymentID}
@@ -123,9 +132,7 @@ func (s *Service) ColibriHotSwap(ctx context.Context,deploymentID string) (Colib
 }
 
 func (s *Service) ColibriHotSwapStatus(ctx context.Context,deploymentID string) (ColibriSwapState,error) {
-    cfg,err:=s.colibriTierSnapshot(ctx,deploymentID)
-    if err!=nil{return ColibriSwapState{},err}
-    _=cfg
+    if _,err:=s.colibriTierSnapshot(ctx,deploymentID);err!=nil{return ColibriSwapState{},err}
     state:=ColibriSwapState{DeploymentID:deploymentID,Status:"stopped",ActiveDeploymentIDs:[]string{}}
     var nodeID string
     if err:=s.db.QueryRowContext(ctx,"SELECT node_id FROM model_deployments WHERE id=?",deploymentID).Scan(&nodeID);err!=nil{return state,err}

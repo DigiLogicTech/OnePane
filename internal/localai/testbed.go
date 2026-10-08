@@ -288,7 +288,7 @@ func (s *Service) markManualAgentCheckFailed(ctx context.Context, sess TestbedSe
  if failure==nil{return}
  msg:=strings.TrimSpace(failure.Error())
  if len(msg)>500{msg=msg[:500]+"…"}
- raw,_:=json.Marshal(map[string]any{"status":"failed","profile_version":"onepane.manual-agent-check/v2","evidence":map[string]any{"errors":[]string{msg},"plain_ok":false,"plain_tested":true},"session_id":sess.ID})
+ raw,_:=json.Marshal(map[string]any{"status":"blocked","profile_version":"onepane.manual-agent-check/v2","evidence":map[string]any{"errors":[]string{msg},"infrastructure_error":true},"session_id":sess.ID})
  _,_=s.db.ExecContext(ctx,`UPDATE model_spec_sheets SET qualification_json=?,updated_at=?,revision=revision+1 WHERE deployment_id=? AND hardware_profile_id=?`,string(raw),s.clock.UnixMilli(),sess.DeploymentID,sess.HardwareProfileID)
 }
 func (s *Service) RunTestbedTurn(ctx context.Context, sessionID string, cmd TestbedTurnCommand) (TestbedTurn, error) {
@@ -435,6 +435,12 @@ func (s *Service) CompleteTestbed(ctx context.Context, sessionID string) error {
   }
  }
  evidence["plain_tested"]=plainChecked;evidence["json_tested"]=jsonChecked;evidence["tools_tested"]=toolsChecked
+ // Retain errors from unsuccessful probes in the same session; do not
+ // confuse a failed network/runtime request with a capability rejection.
+ if sheet,err:=s.SpecSheet(ctx,sess.DeploymentID);err==nil {
+  var prior struct {SessionID string `json:"session_id"`;Evidence struct{Errors []string `json:"errors"`} `json:"evidence"`}
+  if json.Unmarshal(sheet.Qualification,&prior)==nil&&prior.SessionID==sessionID&&len(prior.Evidence.Errors)>0{evidence["errors"]=prior.Evidence.Errors}
+ }
  status:="limited"
  if evidence["plain_ok"]==true&&evidence["json_ok"]==true&&evidence["schema_ok"]==true&&evidence["tools_ok"]==true{status="passed"}
  metrics:=map[string]any{"successful_turns":len(turns)}

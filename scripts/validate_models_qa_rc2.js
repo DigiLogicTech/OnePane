@@ -25,7 +25,7 @@ assert.ok(html.includes('src="/colibri-registration-dialog.js"'),"registration d
 (async()=>{
  await vm.runInContext("qa5RegisterColibri()",ctx);
  assert.equal(actions[0].title,"Register Colibri model");
- for(const v of ["name=\"model_path\"","name=\"model_ref\"","name=\"display_name\"","name=\"context_tokens\"","config.json","managed pool"]){
+ for(const v of ["name=\"model_path\"","name=\"model_ref\"","name=\"display_name\"","name=\"context_tokens\"","config.json","OnePane model pool"]){
   assert.ok(actions[0].markup.includes(v),"missing useful form field/requirement "+v)
  }
  assert.ok(!src.includes("prompt("),"no native browser prompt in registration");

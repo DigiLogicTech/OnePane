@@ -12,7 +12,7 @@ let saves=0;
 const context=vm.createContext({
   A39_WEB_PROVIDERS:providers,onepaneWorkspace:"workspace-1",
   state:{},Date,Math,Map,Set,JSON,Number,String,Array,Error,Promise,
-  a40WebTabs:(ws)=>tabs.filter(t=>t.workspace_id===ws),
+  a40WebTabs:(ws="workspace-1")=>tabs.filter(t=>t.workspace_id===ws),
   a40WebNewSession:(id,title)=>{
     const entry={id:"tab"+(tabs.length+1),workspace_id:"workspace-1",provider_id:id,title,turn_id:""};
     tabs.push(entry);return entry

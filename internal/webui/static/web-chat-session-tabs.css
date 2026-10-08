@@ -1,0 +1,32 @@
+
+/* Web Chat session tabs: each cloud-provider conversation has independent
+ * Council binding; the underlying provider website is never iframed. */
+.a40-chat-tabs{display:flex;align-items:stretch;gap:.3rem;overflow-x:auto;scrollbar-width:thin;padding:.3rem .1rem .65rem;max-width:100%;margin-bottom:.7rem}
+.a40-chat-tab{display:flex;flex:0 0 auto;align-items:stretch;min-width:0;max-width:230px;border:1px solid var(--border,rgba(120,120,120,.25));border-radius:.6rem .6rem .35rem .35rem;background:var(--panel,transparent);overflow:hidden}
+.a40-chat-tab.active{background:var(--panel-2,rgba(110,110,110,.15));border-color:var(--accent,var(--primary,#7c83f5));box-shadow:inset 0 -2px var(--accent,var(--primary,#7c83f5))}
+.a40-chat-tab [data-a40-switch]{display:flex;align-items:center;gap:.45rem;min-width:0;padding:.55rem .2rem .55rem .7rem;border:0;background:transparent;color:inherit;cursor:pointer}
+.a40-provider-mark{flex-shrink:0}
+.a40-tab-label{min-width:0;text-overflow:ellipsis;white-space:nowrap;overflow:hidden}
+.a40-tab-pending{font-size:1.25rem;line-height:0;color:var(--accent,var(--primary,#7c83f5));font-weight:900}
+.a40-tab-close{padding:.3rem .65rem;margin-left:auto;color:inherit;border:0;background:transparent;cursor:pointer;font-size:1.1rem}
+.a40-tab-close:hover{background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.a40-add-tab{flex:0 0 auto;border:1px dashed var(--border,rgba(120,120,120,.3));border-radius:.5rem;background:transparent;color:inherit;padding:.45rem .85rem;cursor:pointer}
+.a40-add-tab:hover{border-color:var(--accent,var(--primary,#7c83f5))}
+.a40-webchat-layout{min-width:0}
+.a40-webchat-layout .a39-webchat-queue{max-height:330px}
+.a40-webchat-layout .a39-webchat-provider-card,.a40-webchat-layout .a39-webchat-handoff-card{min-width:0}
+.a40-webchat-layout .a39-webchat-provider-card .widget-body p{overflow-wrap:anywhere}
+@media(max-width:1000px){.a40-chat-tabs{width:100%}}
+
+/* Guided creation of an entirely manual multi-provider Research Council. */
+.a41-council-form{max-width:min(860px,96vw);max-height:min(74vh,770px);overflow-y:auto;padding-right:.3rem}
+.a41-council-settings{display:grid;grid-template-columns:minmax(150px,1fr) minmax(180px,1fr);align-items:center;gap:1rem}
+.a41-council-seats-title{display:flex;justify-content:space-between;align-items:center;gap:.7rem;flex-wrap:wrap}
+.a41-council-seats{display:flex;flex-direction:column;gap:.65rem}
+.a41-council-seat{border:1px solid var(--border,rgba(120,120,120,.3));background:var(--panel-2,rgba(125,125,125,.06));padding:.75rem;border-radius:.7rem;min-width:0}
+.a41-council-seat-head{display:flex;justify-content:space-between;align-items:center;gap:.5rem;margin-bottom:.45rem}
+.a41-council-seat-fields{display:grid;grid-template-columns:minmax(120px,.8fr) minmax(150px,1fr) minmax(150px,1.2fr);align-items:end;gap:.6rem}
+.a41-council-seat-fields label{min-width:0}
+.a41-council-seat-fields select,.a41-council-seat-fields input{width:100%;max-width:100%}
+#a41CouncilProgress:not(:empty){padding:.4rem 0}
+@media(max-width:850px){.a41-council-seat-fields{grid-template-columns:1fr}.a41-council-settings{grid-template-columns:1fr}}

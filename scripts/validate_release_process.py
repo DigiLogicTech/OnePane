@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import re
 import sys
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -11,7 +12,7 @@ required={
     "installed browser behavioural gate is mandatory": "ui-e2e.txt" in workflow and "ONEPANE_UI_E2E" in workflow and "release-smoke.js" in workflow,
     "Windows installed-product gate remains mandatory": "Windows installed-product smoke (release gate)" in workflow and "Install launch uninstall reinstall" in workflow,
     "Ubuntu installed-package gate remains mandatory": "Ubuntu installed-package smoke (release gate)" in workflow and "Install verify and preserve data" in workflow,
-    "candidate artifact is SHA-addressed": "OnePane-alpha3.2-source-native-${{ github.sha }}" in workflow,
+    "candidate artifact is SHA-addressed": bool(re.search(r"OnePane-alpha3[.\w-]+-source-native-\$\{\{\s*github\.sha\s*\}\}", workflow)),
     "candidate artifact carries provenance manifest": "candidate-manifest.json" in workflow and '"commit": os.environ["GITHUB_SHA"]' in workflow,
     "source validation must leave checkout clean": "git diff --exit-code" in workflow,
 }

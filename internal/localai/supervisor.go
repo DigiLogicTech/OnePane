@@ -114,7 +114,15 @@ func (b *OSProcessBackend) Signal(pid int, sig os.Signal) error {
 		return err
 	}
 	if runtime.GOOS == "windows" {
-		return p.Kill()
+		// Colibri runs an inference-engine child beneath its Python server.
+		// Killing only the parent on Windows leaks the child and its VRAM.
+		// This is called only after VerifyIdentity authenticates the managed
+		// process, and taskkill's /T closes its descendants as well.
+		result, killErr := exec.Command("taskkill.exe", "/PID", strconv.Itoa(pid), "/T", "/F").CombinedOutput()
+		if killErr != nil && b.Alive(pid) {
+			return fmt.Errorf("stop verified managed process tree: %w: %s", killErr, strings.TrimSpace(string(result)))
+		}
+		return nil
 	}
 	return p.Signal(sig)
 }
@@ -247,6 +255,7 @@ type runtimeConfig struct {
 	RuntimeBackend string        `json:"runtime_backend,omitempty"`
 	EnginePath     string        `json:"engine_path,omitempty"`
 	ModelRef       string        `json:"model_ref,omitempty"`
+	ColibriTier    ColibriTierSettings `json:"colibri_tier,omitempty"`
 }
 
 type managedRefs struct{ RuntimeID, ModelID string }
@@ -610,6 +619,15 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 	if err != nil {
 		return RuntimeInstance{}, err
 	}
+	// Colibri is memory-tiered internally, so its registered model's one-byte
+	// placeholder is not a meaningful host-memory admission estimate. Limit
+	// this node to one resident Colibri model unless another is still serving.
+	// This is shared by explicit hot swap AND ordinary inference acquisition.
+	if strings.EqualFold(cfg.RuntimeBackend, "colibri") {
+		if _, err := s.prepareColibriSwapLocked(ctx, nodeID, deploymentID); err != nil {
+			return RuntimeInstance{}, err
+		}
+	}
 	var existing *RuntimeInstance
 	if old, err := s.Instance(ctx, deploymentID); err == nil {
 		existing = &old
@@ -642,7 +660,29 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 		if strings.EqualFold(filepath.Base(py), "py.exe") {
 			args = append(args, "-3")
 		}
-		args = append(args, cfg.Executable, "--model", cfg.ModelPath, "--engine", cfg.EnginePath, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "--model-id", firstNonEmpty(cfg.ModelRef, "onepane-colibri"))
+				// Preserve legacy installations until the operator explicitly enables
+		// a tier profile. The coli launcher supplies --auto-tier and model-aware
+		// planning; openai_server.py remains a supported compatibility fallback.
+		launcher := ""
+		if cfg.ColibriTier.Mode != "" { launcher = colibriLauncher(filepath.Dir(cfg.Executable)) }
+		if launcher != "" {
+			args = append(args, launcher, "serve", "--model", cfg.ModelPath,
+				"--host", "127.0.0.1", "--port", strconv.Itoa(port),
+				"--model-id", firstNonEmpty(cfg.ModelRef, "onepane-colibri"),
+				"--ctx", strconv.FormatInt(cfg.ContextTokens, 10))
+			if cfg.ColibriTier.Mode == "automatic" || cfg.ColibriTier.Mode == "balanced" {
+				args = append(args, "--auto-tier")
+			}
+			if cfg.ColibriTier.Mode == "balanced" { args = append(args, "--policy", "balanced") }
+			if cfg.ColibriTier.Mode == "manual" {
+				if cfg.ColibriTier.RAMGB > 0 { args = append(args, "--ram", strconv.Itoa(cfg.ColibriTier.RAMGB)) }
+				if cfg.ColibriTier.RepinTokens > 0 { args = append(args, "--repin", strconv.Itoa(cfg.ColibriTier.RepinTokens)) }
+			}
+			args = append(args, colibriTierCapArgs(cfg.ColibriTier)...)
+		} else {
+			args = append(args, cfg.Executable, "--model", cfg.ModelPath, "--engine", cfg.EnginePath, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "--model-id", firstNonEmpty(cfg.ModelRef, "onepane-colibri"))
+			args = append(args, colibriTierCapArgs(cfg.ColibriTier)...)
+		}
 	} else {
         // Embedding models use a pooled-vector endpoint, not chat completions.
         // Preserve the model's declared use case from its approved install plan.
@@ -693,7 +733,8 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 		env = append(env, "LD_LIBRARY_PATH="+filepath.Dir(cfg.Executable))
 	}
 	if strings.EqualFold(cfg.RuntimeBackend, "colibri") {
-		env = append(env, "COLI_MODEL="+cfg.ModelPath, "COLI_MODEL_ID="+firstNonEmpty(cfg.ModelRef, "onepane-colibri"))
+		env = append(env, "COLI_MODEL="+cfg.ModelPath, "COLI_MODEL_ID="+firstNonEmpty(cfg.ModelRef, "onepane-colibri"), "COLI_SERVE_PORT="+strconv.Itoa(port))
+		env = append(env, colibriTierEnv(cfg.ColibriTier)...)
 	}
 	pid, err := s.processes.Start(context.Background(), LaunchSpec{Executable: executable, Args: args, Env: env, Dir: filepath.Dir(cfg.Executable),LogPath: filepath.Join(s.dataDir,"components","logs","local-runtime-"+inst.ID+".log")})
 	if err != nil {
@@ -815,11 +856,20 @@ func (s *RuntimeSupervisor) VerifyIdentity(ctx context.Context, inst RuntimeInst
 			return err
 		}
 		serverFound := false
-		for _, a := range ident.Args {
-			if filepath.Clean(a) == filepath.Clean(cfg.Executable) {
-				serverFound = true
-				break
+		allowed := []string{cfg.Executable}
+		if cfg.ColibriTier.Mode != "" {
+			if launcher := colibriLauncher(filepath.Dir(cfg.Executable)); launcher != "" {
+				allowed = append(allowed, launcher)
 			}
+		}
+		for _, a := range ident.Args {
+			for _, expected := range allowed {
+				if filepath.Clean(a) == filepath.Clean(expected) {
+					serverFound = true
+					break
+				}
+			}
+			if serverFound { break }
 		}
 		if filepath.Clean(ident.Executable) != filepath.Clean(py) || !serverFound || !argsContainPair(ident.Args, "--model", cfg.ModelPath) || !argsContainPair(ident.Args, "--host", "127.0.0.1") || !argsContainPair(ident.Args, "--port", strconv.Itoa(inst.Port)) {
 			return errors.New("Colibri runtime process identity mismatch")
@@ -908,6 +958,13 @@ func (s *RuntimeSupervisor) Stop(ctx context.Context, deploymentID string) error
 		}
 	}
 	deadline := time.Now().Add(5 * time.Second)
+	// Colibri's SIGTERM handler drains the child engine and flushes expert
+	// cache state before exit. Avoid forcing it down at the generic 5s limit.
+	var runtimeName string
+	_ = s.db.QueryRowContext(ctx, "SELECT runtime_name FROM model_deployments WHERE id=?", deploymentID).Scan(&runtimeName)
+	if strings.EqualFold(runtimeName, "colibri") && runtime.GOOS != "windows" {
+		deadline = time.Now().Add(35 * time.Second)
+	}
 	for inst.PID > 1 && s.processes.Alive(inst.PID) && time.Now().Before(deadline) {
 		time.Sleep(100 * time.Millisecond)
 	}

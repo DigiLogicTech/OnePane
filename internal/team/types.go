@@ -37,6 +37,9 @@ type ResearchSettings struct {
 	SynthesisPass            bool   `json:"synthesis_pass"`
 	CritiqueRounds           int    `json:"critique_rounds"`
 	SynthesisMemberID        string `json:"synthesis_member_id,omitempty"`
+	ChairMode string `json:"chair_mode,omitempty"`
+	ChairMemberID string `json:"chair_member_id,omitempty"`
+	ChairRequireApproval bool `json:"chair_require_approval"`
 }
 
 const (
@@ -224,4 +227,5 @@ var (
 	ErrPlanRequired          = errors.New("team plan must be accepted before task admission")
 	ErrOpenBlockingObjection = errors.New("open blocking team objection requires explicit human risk acceptance")
 	ErrHumanRequired         = errors.New("human principal required")
+	ErrManualWebCouncilExecution = errors.New("Web-only Council consultation Tasks cannot be executed")
 )

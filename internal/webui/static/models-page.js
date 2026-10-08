@@ -118,7 +118,7 @@ function a31HardwareMarkup(){
   return `<div class="hardware-summary"><strong>${escapeHtml(localProfileQA.cpu?.name||"CPU")}</strong><div>${bytesQA(localProfileQA.memory?.total_bytes||0)} RAM${localProfileQA.storage?.available_bytes?` · ${bytesQA(localProfileQA.storage.available_bytes)} free`:""}</div>${gpus.length?gpus.map((g,i)=>`<div>${escapeHtml(g.name||`GPU ${i}`)} · ${bytesQA(g.vram_bytes||0)} VRAM</div>`).join(""):"<div>No GPU detected</div>"}</div>`
 }
 function a31InstalledModelsMarkup(deployments){
-  return deployments.length?deployments.map(d=>`<article class="model-tile"><div><strong>${escapeHtml(d.display_name||d.model_ref)}</strong><div class="list-meta">${escapeHtml(d.quantization||"")} · ${escapeHtml(d.runtime_name||d.runtime_backend||"managed")} · ${escapeHtml(d.status||"unknown")}</div><div class="list-meta"><span class="pill">${a31PlacementLabel(d)}</span> · admission ${escapeHtml(d.admission_status||"pending")}</div></div><div class="toolbar"><button class="btn" data-a31-compute="${escapeHtml(d.deployment_id)}">Compute</button><button class="btn" data-a31-model-spec="${escapeHtml(d.deployment_id)}">Spec sheet</button><button class="btn primary" data-a31-agent-check="${escapeHtml(d.deployment_id)}">Agent Check</button></div></article>`).join(""):'<div class="empty-state compact">No managed local models yet.</div>'
+  return deployments.length?deployments.map(d=>`<article class="model-tile"><div><strong>${escapeHtml(d.display_name||d.model_ref)}</strong><div class="list-meta">${escapeHtml(d.quantization||"")} · ${escapeHtml(d.runtime_name||d.runtime_backend||"managed")} · ${escapeHtml(d.status||"unknown")}</div><div class="list-meta"><span class="pill">${a31PlacementLabel(d)}</span> · admission ${escapeHtml(d.admission_status||"pending")}</div></div><div class="toolbar">${String(d.runtime_name||"").toLowerCase()==="colibri"?`<button class="btn" data-a42-colibri-tier="${escapeHtml(d.deployment_id)}">Tiering</button><button class="btn" data-a42-colibri-swap="${escapeHtml(d.deployment_id)}">Hot swap</button>`:`<button class="btn" data-a31-compute="${escapeHtml(d.deployment_id)}">Compute</button>`}<button class="btn" data-a31-model-spec="${escapeHtml(d.deployment_id)}">Spec sheet</button><button class="btn primary" data-a31-agent-check="${escapeHtml(d.deployment_id)}">Agent Check</button></div></article>`).join(""):'<div class="empty-state compact">No managed local models yet.</div>'
 }
 function a31LlamaRuntimeCard(c,rows){
   const recommended=a31Array(rows).filter(x=>x.recommended),installed=a31Array(rows).filter(x=>x.installed);
@@ -145,6 +145,8 @@ async function a31RenderLocalModels(){
   $$("[data-a31-recommend-install]").forEach(b=>b.onclick=()=>a31InstallModel(recommendations[Number(b.dataset.a31RecommendInstall)]?.model));
   a31BindComponentButtons(root,components);
   $$("[data-a31-compute]").forEach(b=>b.onclick=()=>a31OpenCompute(deployments.find(d=>d.deployment_id===b.dataset.a31Compute)));
+  $$("[data-a42-colibri-tier]").forEach(b=>b.onclick=()=>a42OpenColibriTier(deployments.find(d=>d.deployment_id===b.dataset.a42ColibriTier)));
+  $$("[data-a42-colibri-swap]").forEach(b=>b.onclick=()=>a42SwapColibri(deployments.find(d=>d.deployment_id===b.dataset.a42ColibriSwap),b));
   $$("[data-a31-model-spec]").forEach(b=>b.onclick=()=>qa5InspectModel(deployments.find(d=>d.deployment_id===b.dataset.a31ModelSpec)));
   $$("[data-a31-agent-check]").forEach(b=>b.onclick=()=>qa5AgentCheck(deployments.find(d=>d.deployment_id===b.dataset.a31AgentCheck)))
 }

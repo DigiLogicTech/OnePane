@@ -202,6 +202,24 @@ func (s *Service) AddMember(ctx context.Context, c AddMemberCommand) (Member, er
 	if err != nil {
 		return Member{}, err
 	}
+	// Operator-mediated Web seats are consultation-only and cannot be
+	// configured with a runnable agent protocol or principal identity.
+	var manualSeat struct{
+		ManualWeb *struct{
+			Enabled bool `json:"enabled"`
+			ProviderID string `json:"provider_id"`
+			ModelLabel string `json:"model_label"`
+		} `json:"manual_web"`
+	}
+	if err := json.Unmarshal(cfg, &manualSeat); err != nil {return Member{}, ErrInvalid}
+	if manualSeat.ManualWeb != nil && manualSeat.ManualWeb.Enabled {
+		if _,_,err:=ValidateManualWebProvider(manualSeat.ManualWeb.ProviderID,manualSeat.ManualWeb.ModelLabel);err!=nil {
+			return Member{},ErrInvalid
+		}
+		if c.MemberKind!="agent" || c.PrincipalID!=nil || c.ProtocolLevel!="L0" || c.CapabilityID!="inference.general" {
+			return Member{},ErrInvalid
+		}
+	}
 	mid, _ := s.ids.New("tmember")
 	now := s.clock.UnixMilli()
 	m := Member{ID: mid, TeamID: t.ID, WorkspaceID: t.WorkspaceID, PrincipalID: c.PrincipalID, MemberKind: c.MemberKind, DisplayName: strings.TrimSpace(c.DisplayName), RoleName: strings.TrimSpace(c.RoleName), CapabilityID: c.CapabilityID, ProtocolLevel: c.ProtocolLevel, RoutePolicy: rp, Ordinal: c.Ordinal, Status: "active", Config: cfg, CreatedAt: now, UpdatedAt: now}
@@ -394,9 +412,45 @@ func (s *Service) StartSession(ctx context.Context, c StartSessionCommand) (Sess
 	if err != nil {
 		return Session{}, err
 	}
+	for _, member := range members {
+		var cfg struct {ManualWeb *struct {Enabled bool `json:"enabled"`} `json:"manual_web"`}
+		if err:=json.Unmarshal(member.Config,&cfg);err!=nil{return Session{},ErrInvalid}
+		if cfg.ManualWeb!=nil && cfg.ManualWeb.Enabled && mode!="council"{
+			return Session{},ErrInvalid
+		}
+	}
 	researchMode, research := researchConfiguration(t.Configuration)
 	if mode != "council" {
 		researchMode = false
+	}
+	// Chair decisions must be bound to a frozen Research Council manifest.
+	// The Web-only release supports a human-mediated Chair or no Chair.
+	if research.ChairMode!="" && research.ChairMode!="none" && research.ChairMode!="manual" {
+		return Session{}, ErrInvalid
+	}
+	if research.ChairMode=="manual" {
+		if !researchMode || research.ChairMemberID=="" || research.ChairMemberID==research.SynthesisMemberID {
+			return Session{}, ErrInvalid
+		}
+		chairValid:=false
+		for _, m:=range members {
+			if m.ID!=research.ChairMemberID {continue}
+			var cfg struct {
+				ManualWeb *struct {Enabled bool `json:"enabled"`} `json:"manual_web"`
+				ChairOnly bool `json:"council_chair_only"`
+			}
+			if json.Unmarshal(m.Config,&cfg)==nil && cfg.ChairOnly && cfg.ManualWeb!=nil && cfg.ManualWeb.Enabled && m.Status=="active" {
+				chairValid=true
+			}
+		}
+		if !chairValid {return Session{},ErrInvalid}
+	}
+	if research.SynthesisPass && research.SynthesisMemberID!="" {
+		found:=false
+		for _,m:=range members {
+			if m.ID==research.SynthesisMemberID && m.Status=="active" && m.MemberKind!="human" {found=true;break}
+		}
+		if !found{return Session{},ErrInvalid}
 	}
 	sid, _ := s.ids.New("tsession")
 	now := s.clock.UnixMilli()
@@ -597,6 +651,9 @@ func (s *Service) RequestRound(ctx context.Context, c RequestRoundCommand) ([]Tu
 		for _, m := range members {
 			if m.Status != "active" || m.MemberKind == "human" {
 				continue
+			}
+			if researchMode && research.ChairMode=="manual" && m.ID==research.ChairMemberID {
+				continue // Chair is never an independent/critique/synthesis participant.
 			}
 			if len(want) > 0 && !want[m.ID] {
 				continue
@@ -954,15 +1011,26 @@ func (s *Service) AllowReady(ctx context.Context, t task.Task) error {
 func (s *Service) AllowStart(ctx context.Context, t task.Task) error {
 	return s.allowAdmission(ctx, t.ID)
 }
+func manualWebCouncilExecutionDisabled(mode string, cfg json.RawMessage) bool {
+	if mode != "council" { return false }
+	var policy struct {
+		ManualWebOnly bool `json:"manual_web_only"`
+	}
+	if json.Unmarshal(cfg, &policy) != nil { return true } // fail closed on corrupt Council profile
+	return policy.ManualWebOnly
+}
 func (s *Service) allowAdmission(ctx context.Context, taskID string) error {
-	var mode string
+	var mode, cfg string
 	var session sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT execution_mode,team_session_id FROM task_execution_profiles WHERE task_id=?`, taskID).Scan(&mode, &session)
+	err := s.db.QueryRowContext(ctx, `SELECT execution_mode,team_session_id,config_json FROM task_execution_profiles WHERE task_id=?`, taskID).Scan(&mode, &session, &cfg)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return err
+	}
+	if manualWebCouncilExecutionDisabled(mode, json.RawMessage(cfg)) {
+		return ErrManualWebCouncilExecution
 	}
 	if mode != "team" {
 		return nil

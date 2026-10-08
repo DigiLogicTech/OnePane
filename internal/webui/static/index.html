@@ -66,6 +66,7 @@
       <nav id="primaryNav" class="primary-nav"></nav>
       <div class="sidebar-spacer"></div>
       <button class="sidebar-action control-chat-launcher" id="controlChatLauncher" type="button" aria-label="Open OnePane Chat"><span class="nav-icon">✦</span><span>OnePane Chat</span></button>
+      <button class="sidebar-action" id="webChatLauncher" type="button" aria-label="Open Web Chat"><span class="nav-icon" aria-hidden="true">☁</span><span>Web Chat</span></button>
       <button class="sidebar-action" data-action="command-palette" aria-label="Command palette"><span class="nav-icon sidebar-action-icon" aria-hidden="true">⌘</span><span class="shortcut-label">Ctrl+K</span> <span class="sidebar-action-label">Command</span></button>
       <button class="sidebar-action" data-action="product-tour">? <span>Help / Tour</span></button>
       <button class="sidebar-action" data-route="settings">⚙ <span>Settings</span></button>
@@ -137,18 +138,26 @@
   <template id="legacyBotSurfaceMarker" data-view="bots" aria-hidden="true"></template>
   <div id="overlayRoot"></div>
   <div id="noticeRoot" role="status" aria-live="polite"></div>
+  <link rel="stylesheet" href="/web-chat-page.css">
+  <link rel="stylesheet" href="/web-chat-session-tabs.css">
   <script src="/chat-commands.js"></script>
   <script src="/app-foundation.js"></script>
   <script src="/release-smoke.js"></script>
   <script src="/tasks-page.js"></script>
   <script src="/models-page.js"></script>
+  <script src="/colibri-tiered-ui.js"></script>
   <script src="/models-install-monitor.js"></script>
   <script src="/assistant-model-picker.js"></script>
   <script src="/settings-redesign.js"></script>
   <script src="/app.js"></script>
+  <script src="/web-chat-page.js"></script>
+  <script src="/web-chat-session-tabs.js"></script>
+  <script src="/web-chat-council-launch.js"></script>
+  <script src="/web-chat-chair.js"></script>
   <script src="/project-workspace-page.js"></script>
   <script src="/model-qa-remediation.js"></script>
   <script src="/models-followup-view.js"></script>
+  <script src="/colibri-spec-sheet.js"></script>
   <script src="/models-followup-jobs.js"></script>
   <script src="/models-followup-discover.js"></script>
   <script src="/ui-consistency.js"></script>

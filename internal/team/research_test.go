@@ -47,3 +47,23 @@ func TestResearchCritiqueRoundsAreBounded(t *testing.T) {
 		t.Fatalf("total rounds=%d", got)
 	}
 }
+
+func TestManualWebCouncilTaskExecutionIsBlocked(t *testing.T) {
+	for _, test := range []struct {
+		mode string
+		config string
+		blocked bool
+	}{
+		{mode:"council", config:`{"manual_web_only":true,"task_execution":false}`, blocked:true},
+		{mode:"council", config:`{"manual_web_only":false}`, blocked:false},
+		{mode:"council", config:`{}`, blocked:false},
+		{mode:"team", config:`{"manual_web_only":true}`, blocked:false},
+		{mode:"direct", config:`{"manual_web_only":true}`, blocked:false},
+		{mode:"council", config:`{invalid_json`, blocked:true},
+	} {
+		result:=manualWebCouncilExecutionDisabled(test.mode, json.RawMessage(test.config))
+		if result!=test.blocked {
+			t.Fatalf("mode=%s, config=%s blocked=%t want=%t",test.mode,test.config,result,test.blocked)
+		}
+	}
+}

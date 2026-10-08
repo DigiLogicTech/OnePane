@@ -1,8 +1,8 @@
-name: Alpha 3.2 Integration CI
+name: Alpha 3.3 Consolidated QA Release Candidate
 
 on:
   push:
-    branches: [alpha3.2-integration, alpha3.2-windows-stabilization, alpha3.2-qa-round2-remediation, alpha3.2-qa-round3-remediation, alpha3.2-next-release-remediation]
+    branches: [alpha3.2-integration, alpha3.2-windows-stabilization, alpha3.2-qa-round2-remediation, alpha3.2-qa-round3-remediation, alpha3.2-next-release-remediation, feature/colibri-tiered-inference, release/alpha3.3-consolidated-qa]
   workflow_dispatch:
     inputs:
       run_hosted_smoke:
@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 env:
-  ONEPANE_VERSION: 0.1.0-alpha.3.2
+  ONEPANE_VERSION: 0.1.0-alpha.3.3-rc.1
 
 jobs:
   validate:
@@ -92,6 +92,7 @@ jobs:
           node --check internal/webui/static/assistant-model-picker.js
           node --check internal/webui/static/project-workspace-page.js
           node --check internal/webui/static/models-followup-view.js
+          node --check internal/webui/static/colibri-tiered-ui.js
           node --check internal/webui/static/models-followup-jobs.js
           node --check internal/webui/static/models-install-monitor.js
           node --check internal/webui/static/models-followup-discover.js
@@ -120,6 +121,19 @@ jobs:
           ! grep -F "QA8_RELEASE" internal/webui/static/app-foundation.js internal/webui/static/app.js
           grep -F "apiRequest('/v1/about')" internal/webui/static/app-foundation.js
           git diff --exit-code
+      - name: Consolidated feature and tour validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          for asset in web-chat-page.js web-chat-session-tabs.js web-chat-council-launch.js web-chat-chair.js colibri-tiered-ui.js colibri-spec-sheet.js; do
+            node --check "internal/webui/static/$asset"
+          done
+          node --check internal/webui/static/app.js
+          node scripts/validate_web_chat_sessions.js
+          node scripts/validate_web_only_council.js
+          node scripts/validate_web_chair.js
+          node scripts/validate_colibri_spec_tour.js
+          go test ./internal/storage/sqlite -run TestManualWebChairMigrationCreatesAuditableTurnSchema -count=1
       - name: Go tests
         run: go test ./...
       - name: Build Windows x64 installer
@@ -185,11 +199,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: OnePane-alpha3.2-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc1-source-native-${{ github.sha }}
           path: |
             dist/**
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 14
       - name: Clean self-hosted build workspace
         if: always()
         shell: bash
@@ -228,7 +242,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.2-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc1-source-native-${{ github.sha }}
           path: artifact
       - name: Install launch uninstall reinstall
         shell: pwsh
@@ -349,7 +363,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.2-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc1-source-native-${{ github.sha }}
           path: artifact
       - name: Install verify and preserve data
         shell: bash
@@ -377,3 +391,46 @@ jobs:
           sudo apt-get remove -y onepane
           sudo test -f /var/lib/onepane/qa-preserve.txt
           test "$(sudo cat /var/lib/onepane/qa-preserve.txt | tr -d '\n')" = "preserve-alpha3.2"
+
+
+  qa-prerelease:
+    name: Publish Alpha 3.3 RC1 for operator QA
+    needs: [validate, runtime_artifact_smoke, windows-installed-smoke, ubuntu-installed-smoke]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release/alpha3.3-consolidated-qa' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: OnePane-alpha3.3-rc1-source-native-${{ github.sha }}
+          path: artifacts
+      - name: Verify manifest and publish immutable QA prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -f artifacts/candidate-manifest.json
+          test -n "$(find artifacts -type f -name '*-windows-x64-setup.exe' -print -quit)"
+          test -n "$(find artifacts -type f -name '*.deb' -print -quit)"
+          python3 - <<'PY'
+          import json,os
+          d=json.load(open("artifacts/candidate-manifest.json"))
+          assert d["commit"]==os.environ["GITHUB_SHA"],d
+          assert d["version"]==os.environ["ONEPANE_VERSION"],d
+          PY
+          tag="v${ONEPANE_VERSION}"
+          mkdir -p prerelease-assets
+          find artifacts -type f \( -name '*.exe' -o -name '*.deb' -o -name '*.sha256' -o -name '*.json' \) -exec cp -v '{}' prerelease-assets/ \;
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::QA release tag already exists; refusing to overwrite immutable assets"
+            exit 1
+          fi
+          gh release create "$tag" prerelease-assets/* \
+            --target "$GITHUB_SHA" \
+            --title "OnePane Alpha 3.3 RC1 — consolidated QA" \
+            --prerelease \
+            --notes "Alpha 3.3 release candidate for operator QA, not promoted known-good. Includes Alpha 3.2 remediation; Colibri tiered inference, residency planning and safe hot swap; readable Colibri model Spec Sheet; Web Chat Research Councils with AI Chair and approval gates; and an updated product tour. Windows x64 installer and Ubuntu amd64 package have passed build and installed-product gates. Validate actual GPU/Colibri behaviour and Council browser handoffs manually before promotion."

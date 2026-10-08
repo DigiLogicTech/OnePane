@@ -71,7 +71,7 @@ a31DrawDownloadIndicator=function(){
  const extra=Object.values(a38Components).filter(c=>c.active_job_id).length+a38RemoteJobs.filter(j=>!["ready","failed","cancelled"].includes(j.status)).length;
  if(!extra)return;
  const total=extra+a31ActiveInstallJobs.length,desk=$("#modelDownloadButton"),mobile=$("#mobileModelDownloadButton");
- if(desk){desk.classList.remove("hidden");$("#modelDownloadBadge").textContent=String(total);$("#modelDownloadLabel").textContent=total===1?"1 active install":`${total} active installs`}
+ if(desk){desk.classList.remove("hidden");$("#modelDownloadBadge").textContent=String(total);$("#modelDownloadLabel").textContent=`Installing · ${total}`}
  if(mobile){mobile.classList.remove("hidden");$("#mobileModelDownloadBadge").textContent=String(total)}
 };
 async function a38PollManagedInstalls(){

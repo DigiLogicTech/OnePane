@@ -1,6 +1,21 @@
 /* QA Round 2: source-authoritative download availability and persistent managed-component history. */
 const a40DownloadCache = new Map();
 let a40InspectQueue = [], a40ActiveInspect = 0, a40Observer = null;
+const a40InspectPending=new Set(),a40InspectCallbacks=new Map();
+function a40QueueAvailability(source,id,done){
+ const key=source+":"+id;if(!source||!id||a40DownloadCache.has(key))return;
+ if(typeof done==="function"){
+  if(!a40InspectCallbacks.has(key))a40InspectCallbacks.set(key,new Set());
+  a40InspectCallbacks.get(key).add(done);
+ }
+ if(a40InspectPending.has(key))return;
+ if(source==="llmfit"){
+  a40DownloadCache.set(key,{state:"no",label:"No direct artifact",message:"llmfit supplies hardware estimates, not a downloadable model artifact."});
+  const callbacks=a40InspectCallbacks.get(key);a40InspectCallbacks.delete(key);
+  for(const cb of callbacks||[])cb();return;
+ }
+ a40InspectPending.add(key);a40InspectQueue.push({source,id,key});a40DrainInspectionQueue();
+}
 function a40DisplayAvailability(card, record) {
  if (!card?.isConnected) return;
  const badge=card.querySelector(".a40-download-status"), action=card.querySelector("[data-a31-verify-source]");
@@ -16,7 +31,6 @@ function a40DisplayAvailability(card, record) {
 async function a40DrainInspectionQueue() {
  while(a40ActiveInspect<3&&a40InspectQueue.length){
   const task=a40InspectQueue.shift();
-  if(!task.card.isConnected)continue;
   a40ActiveInspect++;
   (async()=>{
    let result;
@@ -25,31 +39,24 @@ async function a40DrainInspectionQueue() {
     const downloadable=!!inspected.can_adopt&&a31Array(inspected.artifacts).length>0;
     result={state:downloadable?"yes":"no",label:downloadable?"Downloadable · verify":"Unavailable",message:inspected.message||"No verified GGUF artifact available from this source."};
    }catch(e){result={state:"error",label:"Check unavailable",message:e.message||"Artifact lookup failed."}}
-   a40DownloadCache.set(task.key,result);
+   a40DownloadCache.set(task.key,result);a40InspectPending.delete(task.key);
+   const callbacks=a40InspectCallbacks.get(task.key);a40InspectCallbacks.delete(task.key);
    for(const tile of document.querySelectorAll(".external-model-tile[data-a40-source]")){
     if(tile.dataset.a40Source===task.source&&tile.dataset.a40Id===task.id)a40DisplayAvailability(tile,result);
    }
+   for(const cb of callbacks||[])cb();
   })().finally(()=>{a40ActiveInspect--;a40DrainInspectionQueue()});
  }
 }
 function a40ScheduleAvailabilityChecks(){
  const root=document.querySelector("#a31DiscoverCatalog");if(!root)return;
  if(a40Observer){a40Observer.disconnect();a40Observer=null}
- a40InspectQueue=[];
  const elements=[...root.querySelectorAll(".external-model-tile[data-a40-source]")];
  const queue=tile=>{
-   const source=tile.dataset.a40Source,id=tile.dataset.a40Id,key=source+":"+id;
-   if(!id||!source)return;
-   const old=a40DownloadCache.get(key);
-   if(old){a40DisplayAvailability(tile,old);return}
-   if(source==="llmfit"){
-    const advisory={state:"no",label:"No direct artifact",message:"llmfit is a hardware advisory, not a downloadable model source."};
-    a40DownloadCache.set(key,advisory);a40DisplayAvailability(tile,advisory);return;
-   }
-   if(tile.dataset.a40Queued==="1")return;
-   tile.dataset.a40Queued="1";
-   a40InspectQueue.push({source,id,key,card:tile});
-   a40DrainInspectionQueue();
+  const source=tile.dataset.a40Source,id=tile.dataset.a40Id,key=source+":"+id;
+  if(!source||!id)return;
+  const old=a40DownloadCache.get(key);if(old){a40DisplayAvailability(tile,old);return}
+  a40QueueAvailability(source,id);
  };
  if(typeof IntersectionObserver!=="undefined"){
   a40Observer=new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting){a40Observer?.unobserve(entry.target);queue(entry.target)}},{root,rootMargin:"120px 0px",threshold:0});
@@ -61,18 +68,11 @@ const a40BaseRenderDrawer=renderDrawer;
 renderDrawer=function(){
  a40BaseRenderDrawer();
  if(activeDrawerTab!=="logs")return;
- const host=document.querySelector("#drawerContent");if(!host)return;
- const selectedLevel=document.querySelector("#logLevel")?.value?.toLowerCase()||"all levels";
- const rows=a40ComponentJobs.filter(j=>selectedLevel==="all levels"||(selectedLevel==="error"&&j.status==="failed")||(selectedLevel==="info"&&j.status!=="failed")||(selectedLevel==="warn"&&j.status==="interrupted"));
- const html=rows.map(j=>{
-  const bad=j.status==="failed",warn=j.status==="interrupted";
-  const when=j.updated_at?new Date(Number(j.updated_at)).toLocaleString():"";
-  const desc=j.failure_reason||(`Operation ${j.action} · ${j.stage||j.status}`);
-  return `<tr><td class="log-time">${escapeHtml(when)}</td><td class="log-level"><span class="pill ${bad?"bad":warn?"warn":""}">${bad?"ERROR":warn?"WARN":"INFO"}</span></td><td class="log-component">${escapeHtml(j.component_id||"component")}</td><td>${escapeHtml(desc)}<div class="list-meta">Job ${escapeHtml(j.id)} · ${escapeHtml(j.status)}</div></td></tr>`;
- }).join("");
- host.insertAdjacentHTML("afterbegin",`<section class="a40-component-history"><div class="list-meta"><strong>Managed component history</strong> · retained after notifications disappear</div>${rows.length?`<table class="log-table"><tbody>${html}</tbody></table>`:'<div class="list-meta">No recent component operations recorded.</div>'}</section>`);
  if(!a40JobFetching&&Date.now()-a40JobFetchAt>10000){
   a40JobFetching=true;a40JobFetchAt=Date.now();
-  apiRequest("/v1/local-ai/component-jobs").then(jobs=>{a40ComponentJobs=a31Array(jobs);if(activeDrawerTab==="logs")renderDrawer()}).catch(e=>{const h=document.querySelector(".a40-component-history");if(h)h.insertAdjacentHTML("beforeend",`<div class="error">${escapeHtml(e.message)}</div>`)}).finally(()=>{a40JobFetching=false});
+  apiRequest("/v1/local-ai/component-jobs").then(jobs=>{
+   a40ComponentJobs=a31Array(jobs);
+   if(activeDrawerTab==="logs")renderDrawer();
+  }).catch(e=>{const c=document.querySelector("#drawerContent");if(c)c.insertAdjacentHTML("beforeend",`<div class="error">${escapeHtml(e.message)}</div>`)}).finally(()=>{a40JobFetching=false});
  }
 };

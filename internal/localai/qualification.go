@@ -164,6 +164,9 @@ func (q *Qualifier) Qualify(ctx context.Context, req QualificationRequest) (Qual
 	if err != nil {
 		return QualificationRun{}, q.fail(ctx, run, err)
 	}
+    if req.CapabilityID=="inference.embedding" {
+      return q.qualifyEmbedding(ctx,req,dep,model,run,inst.Port)
+    }
 	base := map[string]any{"model": model.ModelRef, "stream": false, "temperature": 0, "max_tokens": 32}
 	plain := cloneMap(base)
 	plain["messages"] = []map[string]string{{"role": "user", "content": "Reply with exactly OK."}}

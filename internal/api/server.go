@@ -314,6 +314,7 @@ func (s *Server) SetRuntimeConfig(path, modelPoolPath string) {
 func (s *Server) Handler() http.Handler { return s.securityHeaders(s.mux) }
 
 func (s *Server) routes() {
+	s.mux.HandleFunc("GET /v1/system/metrics", s.hostMetricsRequest)
 	s.mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 	})
@@ -2327,6 +2328,7 @@ func (s *Server) queueLocalAIInstall(w http.ResponseWriter, r *http.Request) {
 		PreferGPU           bool                  `json:"prefer_gpu"`
 		PlacementPreference localai.PlacementMode `json:"placement_preference,omitempty"`
 		ComputePreference   string                `json:"compute_preference,omitempty"`
+		AllowResourceOverride bool                 `json:"allow_resource_override,omitempty"`
 	}
 	if !decodeJSON(w, r, &in) {
 		return
@@ -2338,13 +2340,11 @@ func (s *Server) queueLocalAIInstall(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "local AI unavailable")
 		return
 	}
-	out, err := s.localAI.QueueOneClickInstall(r.Context(), localai.OneClickInstallRequest{WorkspaceID: in.WorkspaceID, HardwareProfileID: in.ProfileID, RoleName: in.RoleName, UseCase: in.UseCase, ContextTokens: in.ContextTokens, ModelRef: in.ModelRef, Quantization: in.Quantization, PreferGPU: in.PreferGPU, PlacementPreference: in.PlacementPreference, ComputePreference: in.ComputePreference, RequestedBy: i.PrincipalID})
+	out, err := s.localAI.QueueOneClickInstall(r.Context(), localai.OneClickInstallRequest{WorkspaceID: in.WorkspaceID, HardwareProfileID: in.ProfileID, RoleName: in.RoleName, UseCase: in.UseCase, ContextTokens: in.ContextTokens, ModelRef: in.ModelRef, Quantization: in.Quantization, PreferGPU: in.PreferGPU, PlacementPreference: in.PlacementPreference, ComputePreference: in.ComputePreference, AllowResourceOverride: in.AllowResourceOverride, RequestedBy: i.PrincipalID})
 	if err != nil {
 		msg := err.Error()
 		low := strings.ToLower(msg)
-		if strings.Contains(low, "catalog") || strings.Contains(low, "no rows in result set") || strings.Contains(low, "verified artifact") {
-			msg = "Trusted Local AI catalogue is unavailable or does not contain a verified artifact for this model/quantization."
-		}
+		if strings.Contains(low, "no rows in result set") {msg="Trusted Local AI catalogue is unavailable."}
 		writeError(w, http.StatusBadRequest, msg)
 		return
 	}

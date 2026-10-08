@@ -71,3 +71,13 @@
 #modelDownloadButton #modelDownloadLabel{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.3}
 #modelDownloadButton #modelDownloadBadge{flex:0 0 auto}
 @media(max-width:1100px){#modelDownloadButton{max-width:103px}}
+
+.host-metrics{padding:10px 12px;display:grid;gap:9px;min-width:0}
+.host-metrics-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.host-metrics-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px}
+.host-metric-tile{display:grid;gap:6px;min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:var(--panel-2)}
+.host-metric-tile strong{font-size:12px}
+.host-metric-value{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums}
+.host-meter{height:5px;background:var(--border);border-radius:4px;overflow:hidden}
+.host-meter span{height:100%;display:block;background:var(--accent)}
+.host-spark{height:33px;width:100%;color:var(--accent)}

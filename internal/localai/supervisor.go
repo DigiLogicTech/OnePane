@@ -298,9 +298,11 @@ func (s *RuntimeSupervisor) resolve(ctx context.Context, deploymentID string) (r
 	if st, err := os.Stat(exe); err != nil || st.IsDir() || (runtime.GOOS != "windows" && st.Mode()&0111 == 0) {
 		return cfg, refs, "", errors.New("managed runtime executable unavailable")
 	}
-	if st, err := os.Stat(modelPath); err != nil || (st.IsDir() && !strings.EqualFold(cfg.RuntimeBackend, "colibri")) {
-		return cfg, refs, "", errors.New("managed model unavailable")
-	}
+	if st, err := os.Stat(modelPath); err != nil {
+        return cfg, refs, "", fmt.Errorf("managed model file missing or inaccessible at %s: %w",modelPath,err)
+    } else if st.IsDir() && !strings.EqualFold(cfg.RuntimeBackend, "colibri") {
+        return cfg, refs, "", fmt.Errorf("managed model path is not a file: %s",modelPath)
+    }
 	if strings.EqualFold(cfg.RuntimeBackend, "colibri") {
 		if strings.TrimSpace(cfg.EnginePath) == "" {
 			engineName := "colibri"
@@ -597,6 +599,13 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 		}
 		args = append(args, cfg.Executable, "--model", cfg.ModelPath, "--engine", cfg.EnginePath, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "--model-id", firstNonEmpty(cfg.ModelRef, "onepane-colibri"))
 	} else {
+        // Embedding models use a pooled-vector endpoint, not chat completions.
+        // Preserve the model's declared use case from its approved install plan.
+        var purpose string
+        if cfg.PlanID!="" {
+          _ = s.db.QueryRowContext(ctx,"SELECT use_case FROM local_model_install_plans WHERE id=?",cfg.PlanID).Scan(&purpose)
+        }
+        if purpose==string(UseEmbedding) {args=append(args,"--embeddings","--pooling","mean")}
 		args = append(args, llamaPlacementArgs(cfg.Placement)...)
 	}
 	launch, _ := json.Marshal(map[string]any{"executable": executable, "args": args, "context_tokens": cfg.ContextTokens, "host": "127.0.0.1", "port": port, "runtime_backend": cfg.RuntimeBackend})

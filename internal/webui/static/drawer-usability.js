@@ -5,14 +5,26 @@ function a10Events(){
  return [...liveOps.events]
 }
 function a10LevelOf(e){const t=String(e.event_type||"");return /fail|error|blocked|unavailable|recovery/i.test(t)?"ERROR":/warn|approval|required|degraded|rate_limited/i.test(t)?"WARN":"INFO"}
-function a10Filtered(){
- const q=a10Search.toLowerCase(),all=a10Events().slice(-500).reverse();
- return all.filter(e=>(a10Level==="all"||a10LevelOf(e)===a10Level)&&(a10Source==="all"||String(e.aggregate_type||"event")===a10Source)&&(!q||`${e.event_type||""} ${e.aggregate_type||""} ${e.aggregate_id||""} ${e.sequence||""}`.toLowerCase().includes(q)))
+function a10AllEntries(){
+ const events=a10Events();
+ if(activeDrawerTab!=="logs")return events;
+ const jobs=(typeof a40ComponentJobs!=="undefined"?a40ComponentJobs:[]).map(j=>({
+  _componentJob:j,event_type:"component."+j.action+"."+j.status,
+  aggregate_type:j.component_id||"component",aggregate_id:j.id,
+  sequence:"componentjob:"+j.id,occurred_at:j.updated_at,
+  _summary:j.failure_reason||("Operation "+j.action+" · "+j.stage+" · "+j.status)
+ }));
+ const ids=new Set(jobs.map(j=>String(j.aggregate_id)));
+ return [...events.filter(e=>!ids.has(String(e.aggregate_id))),...jobs];
 }
-function a10Text(e){return `${e.event_type||"Event"} · ${e.aggregate_type||"event"} · ${e.aggregate_id||""}`}
+function a10Filtered(){
+ const q=a10Search.toLowerCase(),all=a10AllEntries().slice().sort((a,b)=>Number(b.occurred_at||0)-Number(a.occurred_at||0)).slice(0,500);
+ return all.filter(e=>(a10Level==="all"||a10LevelOf(e)===a10Level)&&(a10Source==="all"||String(e.aggregate_type||"event")===a10Source)&&(!q||`${e.event_type||""} ${e.aggregate_type||""} ${e.aggregate_id||""} ${e.sequence||""} ${e._summary||""}`.toLowerCase().includes(q)))
+}
+function a10Text(e){return e._summary||`${e.event_type||"Event"} · ${e.aggregate_type||"event"} · ${e.aggregate_id||""}`}
 function a10ListMarkup(){
  const events=a10Filtered(),mode=activeDrawerTab;
- if(!liveOpsReported("events"))return '<div class="empty-state compact">Operational Event Ledger unavailable. These entries have not been confirmed.</div>';
+ if(!liveOpsReported("events")&&!(activeDrawerTab==="logs"&&events.length))return '<div class="empty-state compact">Operational Event Ledger unavailable. These entries have not been confirmed.</div>';
  if(!events.length)return '<div class="empty-state compact">No events match the selected filters.</div>';
  return `<table class="log-table"><tbody>${events.map(e=>{
   const ts=Number(e.occurred_at||0),time=ts?new Date(ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"}):"";
@@ -47,8 +59,8 @@ function a10Bind(){
 }
 function a10BindRows(){
  $$("[data-a10-event]",$("#drawerContent")||document).forEach(b=>b.onclick=()=>{
-  const id=b.dataset.a10Event,e=a10Events().find(x=>String(x.sequence||x.id||"")===id);
-  if(e)qa4Inspect("event",id,eventLabel(e),e)
+  const id=b.dataset.a10Event,e=a10AllEntries().find(x=>String(x.sequence||x.id||"")===id);
+  if(e)qa4Inspect(e._componentJob?"component_job":"event",id,e._summary||eventLabel(e),e._componentJob||e)
  })
 }
 function a10Fill(){
@@ -59,10 +71,10 @@ renderDrawer=function(){
  a10DrawBase();
  const c=$("#drawerContent");if(!c)return;
  if(["logs","events"].includes(activeDrawerTab)){
-  const sources=[...new Set(a10Events().map(e=>String(e.aggregate_type||"event")))].sort();
-  const title=activeDrawerTab==="logs"?"Operational messages (Event Ledger source)":"Structured Event Ledger";
+  const sources=[...new Set(a10AllEntries().map(e=>String(e.aggregate_type||"event")))].sort();
+  const title=activeDrawerTab==="logs"?"Unified operational logs":"Structured Event Ledger";
   c.innerHTML=`<div class="drawer-log-shell"><div class="drawer-tools">
-    <div class="drawer-feed-label"><strong>${title}</strong><span class="list-meta">Showing up to 500 recent entries · ${a10Paused?"Paused":"Live feed"}</span></div>
+    <div class="drawer-feed-label"><strong>${title}</strong><span class="list-meta">Event Ledger + managed component history · ${a10Paused?"Paused":"Live feed"}</span></div>
     <input id="a10Search" aria-label="Search log or event" placeholder="Search message, ID, source…" value="${escapeHtml(a10Search)}">
     <select id="a10Level" aria-label="Severity filter">${["all","INFO","WARN","ERROR"].map(x=>`<option value="${x}" ${a10Level===x?"selected":""}>${x==="all"?"All levels":x}</option>`).join("")}</select>
     <select id="a10Source" aria-label="Component filter"><option value="all">All components</option>${sources.map(x=>`<option value="${escapeHtml(x)}" ${a10Source===x?"selected":""}>${escapeHtml(x)}</option>`).join("")}</select>

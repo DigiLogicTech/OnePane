@@ -131,7 +131,8 @@ async function a40WebNewConversation(session, turn) {
   }
   a40WebDrafts.delete(session.id);
   persist();
-  a39WebOpen(provider.url);
+  if(a40NativeProviderAvailable())a40NativeProviderSend({op:"new",url:provider.url});
+  else a39WebOpen(provider.url);
   notice("Handoff restarted. Start a new chat on the provider website; the Council turn is unchanged.");
   renderWebChat();
 }
@@ -197,6 +198,7 @@ async function a40RenderWebChat(){
   // Council selections and drafts, even when they share a cloud provider.
   const sessions=a40WebTabs(workspace);
   const provider=a40WebProvider(active.provider_id);
+  const nativeProvider=a40NativeProviderAvailable();
   const associated=rows.filter(t=>t.provider_id===active.provider_id);
   const selected=associated.find(t=>t.turn_id===active.turn_id)||null;
   const chairTurn=a42ChairActive(active);
@@ -237,13 +239,10 @@ async function a40RenderWebChat(){
           <div class="list-meta">${safe(provider.name)} · Conversation ${Number(selected?.conversation_generation||active.conversation_generation)||1}</div></div>
         </div>
         <div class="widget-body">
-          <p>Use your signed-in ${safe(provider.name)} website. OnePane does not embed, automate or read your browser session.</p>
-          <div class="toolbar">
-            ${provider.url?`<a class="btn primary" href="${safe(provider.url)}" target="_blank" rel="noopener noreferrer">Open ${safe(provider.name)}</a>`:""}
-            <button class="btn" id="a40NewConversation">New Conversation</button>
-          </div>
-          <p class="list-meta">Review prompts before sharing project information with a third-party cloud service.</p>
-          <h3>Available Council handoffs</h3>
+          ${nativeProvider&&provider.url?`<div class="a40-browser-bar"><span class="a40-browser-label" title="${safe(provider.url)}">${safe(new URL(provider.url).hostname)} · Embedded browser</span><a class="btn" href="${safe(provider.url)}" target="_blank" rel="noopener noreferrer">Open externally ↗</a><button class="btn" id="a40NewConversation" type="button">New conversation</button></div><div id="a40ProviderViewport" class="a40-provider-viewport" aria-label="${safe(provider.name)} embedded website"><div class="a40-provider-hint">Loading provider website… If sign-in is blocked, use Open externally.</div></div>`:
+          `<div class="a40-external-browser"><p>Open ${safe(provider.name)} in your browser. Embedded provider windows are available in the Windows desktop app; OnePane cannot read or automate external sessions.</p><div class="toolbar"><a class="btn primary" href="${safe(provider.url)}" target="_blank" rel="noopener noreferrer">Open ${safe(provider.name)}</a><button class="btn" id="a40NewConversation" type="button">New conversation</button></div></div>`}
+          <p class="list-meta">Review prompts before sharing project information with a third-party provider. The browser session is isolated from OnePane, and responses remain manual.</p>
+          <details class="a40-council-handoffs" ${associated.some(t=>t.status==="awaiting_input")?"open":""}><summary>Available Council handoffs · ${associated.filter(t=>t.status==="awaiting_input").length} pending</summary>
           <div class="a39-webchat-queue">
             ${(active.council_chair?[]:associated.filter(t=>t.status==="awaiting_input"||t.turn_id===active.turn_id)).map(t=>`
               <button class="a39-webchat-turn ${selected?.turn_id===t.turn_id?"selected":""}" data-a40-assign="${safe(t.turn_id)}" type="button">
@@ -252,7 +251,7 @@ async function a40RenderWebChat(){
               </button>
             `).join("")||'<p class="list-meta">No pending Council handoffs for this provider. This tab can be used independently.</p>'}
           </div>
-          <button class="btn" id="a40UnlinkTurn" type="button" ${!selected?"disabled":""}>Show independent chat pad</button>
+          <button class="btn" id="a40UnlinkTurn" type="button" ${!selected?"disabled":""}>Show independent chat pad</button></details>
         </div>
       </section>
       <section class="panel-card a39-webchat-handoff-card">
@@ -262,12 +261,14 @@ async function a40RenderWebChat(){
           </div>
         </div>
         <div class="widget-body a39-webchat-handoff-content">
+          <div class="a40-scratch-card a40-prompt-card">
           <label class="a39-webchat-label" for="a40Prompt">${chairTurn?"Chair model prompt":attached?"Prepared Council prompt":"Prompt scratchpad (local, not submitted to Council)"}</label>
           <textarea class="a39-webchat-textarea" id="a40Prompt" rows="11" ${attached?"readonly":""} placeholder="Write or paste a prompt for this web conversation.">${safe(draft)}</textarea>
           <div class="toolbar">
             <button class="btn primary" id="a40CopyPrompt" type="button">Copy Prompt</button>
 
-          </div>
+          </div></div>
+          <div class="a40-scratch-card a40-response-card">
           <label class="a39-webchat-label" for="a40Response">${chairTurn?.status==="awaiting_approval"?"Review/edit Chair proposal before approval":chairTurn?"Chair proposal":attached?"Paste provider response":"Response scratchpad"}</label>
           <textarea class="a39-webchat-textarea" id="a40Response" rows="10" ${(selected?.status==="submitted"||chairTurn?.status==="approved")?"disabled":""} placeholder="Paste the provider's response here.">${safe(response)}</textarea>
           <div class="toolbar">
@@ -275,11 +276,12 @@ async function a40RenderWebChat(){
               chairTurn?.status==="awaiting_approval"?'<button class="btn primary" data-a42-chair-approve type="button">Approve agenda / questions</button>':
               selected?`<button class="btn primary" data-a40-submit type="button" ${selected.status!=="awaiting_input"?"disabled":""}>Submit to Council</button>`:""}
             <span class="list-meta">${chairTurn?"Chair proposals only · operator-approved guidance · no executable authority":attached?"Manual consultation only · no tools or task authority":"Text in an unlinked scratchpad is not automatically saved or routed to a Council."}</span>
-          </div>
+          </div></div>
         </div>
       </section>
     </div>`;
-  $$("[data-a40-switch]").forEach(b=>b.onclick=()=>a40WebSwitch(b.dataset.a40Switch));
+  a40SyncEmbeddedProvider(provider,nativeProvider);
+  $("[data-a40-switch]").forEach(b=>b.onclick=()=>a40WebSwitch(b.dataset.a40Switch));
   $$("[data-a40-close]").forEach(b=>b.onclick=()=>a40WebClose(b.dataset.a40Close));
   $("#a40AddWebChat").onclick=a40WebOpenNewDialog;
   $("#a40NewConversation").onclick=()=>a40WebNewConversation(active,selected);
@@ -310,3 +312,57 @@ async function a40RenderWebChat(){
 // OnePane's route renderer calls this symbol. Keep the original provider
 // picker code as a compatibility fallback for older browser caches.
 renderWebChat=a40RenderWebChat;
+
+
+/* An isolated Windows WebView2 sibling is used instead of an iframe.
+ * External pages have no WebMessageReceived listener and cannot invoke
+ * native OnePane commands. Other platforms keep their browser fallback. */
+const a40NativeProviderAvailable=()=>typeof window!=="undefined"&&!!(window.chrome&&window.chrome.webview&&typeof window.chrome.webview.postMessage==="function");
+function a40NativeProviderSend(payload){
+ if(!a40NativeProviderAvailable())return;
+ window.chrome.webview.postMessage("onepane-provider|"+JSON.stringify(payload));
+}
+let a40EmbedScheduled=false;
+let a40EmbedDesiredURL="";
+function a40SyncEmbeddedProvider(provider,native){
+ a40EmbedDesiredURL=(native&&provider?.url)||"";
+ a40RequestEmbedGeometry();
+}
+function a40RequestEmbedGeometry(){
+ if(a40EmbedScheduled)return;
+ a40EmbedScheduled=true;
+ requestAnimationFrame(()=>{
+  a40EmbedScheduled=false;
+  if(!a40NativeProviderAvailable())return;
+  const region=document.getElementById("a40ProviderViewport");
+  const route=currentTab()?.route;
+  const blocked=!!document.querySelector('#overlayRoot .overlay,#overlayRoot .popover,.tour-overlay,.mobile-sheet-overlay');
+  if(!region||route!=="webchat"||!a40EmbedDesiredURL||blocked||region.getClientRects().length===0){
+   a40NativeProviderSend({op:"hide"});return;
+  }
+  const b=region.getBoundingClientRect();
+  if(b.width<120||b.height<120||b.left<0||b.top<0){
+   a40NativeProviderSend({op:"hide"});return;
+  }
+  a40NativeProviderSend({op:"show",url:a40EmbedDesiredURL,
+    rect:{left:b.left,top:b.top,width:b.width,height:b.height},
+    viewportWidth:window.innerWidth,viewportHeight:window.innerHeight});
+ });
+}
+(function a40SetupBrowserLayoutObserver(){
+ if(typeof window==="undefined"||!window.addEventListener)return;
+ window.addEventListener("resize",a40RequestEmbedGeometry,{passive:true});
+ window.addEventListener("scroll",a40RequestEmbedGeometry,{passive:true,capture:true});
+ const register=()=>{
+  if(!document.body)return;
+  const observer=new MutationObserver(a40RequestEmbedGeometry);
+  observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:["class","style","hidden","data-state"]});
+  if(typeof ResizeObserver!=="undefined"){
+   const sizeObserver=new ResizeObserver(a40RequestEmbedGeometry);
+   const target=document.getElementById("viewHost");
+   if(target)sizeObserver.observe(target);
+  }
+ };
+ if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",register,{once:true});
+ else register();
+})();

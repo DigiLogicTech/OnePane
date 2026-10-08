@@ -36,3 +36,22 @@
 .a40-webchat-layout .a39-webchat-handoff-card .widget-body{gap:10px}
 .a40-chat-tabs{margin-bottom:10px}
 @media(max-width:800px){.a40-webchat-layout{display:flex;flex-direction:column}}
+
+
+/* Embedded provider workspace. Flex wrapping responds to Inspector and shell widths. */
+.a40-webchat-layout{display:flex!important;flex-wrap:wrap;align-items:stretch!important;gap:12px;min-width:0}
+.a40-webchat-layout>.a39-webchat-provider-card{flex:1 1 calc(65% - 8px);min-width:min(100%,440px)}
+.a40-webchat-layout>.a39-webchat-handoff-card{flex:1 1 calc(35% - 8px);min-width:min(100%,300px)}
+.a40-webchat-layout .a39-webchat-handoff-content{display:grid;grid-template-rows:minmax(205px,1fr) minmax(205px,1fr);height:100%;gap:12px}
+.a40-scratch-card{display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0;padding:12px;background:var(--panel-2);border:1px solid var(--border);border-radius:10px}
+.a40-scratch-card>.a39-webchat-textarea{flex:1 1 auto;min-height:115px;max-height:none;background:var(--panel);resize:vertical}
+.a40-scratch-card>.toolbar{margin-top:auto}
+.a40-browser-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end}
+.a40-browser-label{flex:1;min-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px}
+.a40-provider-viewport{position:relative;width:100%;height:clamp(340px,64vh,770px);min-height:340px;overflow:hidden;background:var(--panel-2);border:1px solid var(--border);border-radius:10px}
+.a40-provider-hint{padding:20px;color:var(--muted);font-size:12px;text-align:center}
+.a40-council-handoffs{margin-top:8px;border-top:1px solid var(--border);padding-top:10px}
+.a40-council-handoffs>summary{cursor:pointer;font-weight:600}
+.a40-council-handoffs .a39-webchat-queue{max-height:200px}
+.a40-external-browser{min-height:180px;display:flex;flex-direction:column;justify-content:center;background:var(--panel-2);border-radius:9px;padding:18px}
+@media(max-width:850px){.a40-webchat-layout>.a39-webchat-provider-card,.a40-webchat-layout>.a39-webchat-handoff-card{flex-basis:100%;min-width:0}.a40-provider-viewport{height:50vh}}

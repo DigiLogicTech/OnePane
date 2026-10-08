@@ -72,7 +72,7 @@ function nextNodeAddJob(id,job){
 }
 async function renderNodes(){
  var host=$("#viewHost");
- host.innerHTML='<section class="page">'+pageHeader("Nodes","Central management for local and paired Windows/Ubuntu compute nodes.",'<button class="btn primary" id="a31AddNode">Add Node</button>')+'<div id="a31Nodes"><div id="nextNodeRoot"><div class="widget-body">Loading registered nodes…</div></div></div></section>';
+ host.innerHTML='<section class="page nodes-page">'+pageHeader("Nodes","Central management for local and paired Windows/Ubuntu compute nodes.",'<button class="btn primary" id="a31AddNode">Add Node</button>')+'<div id="a31Nodes"><div id="nextNodeRoot"><div class="widget-body">Loading registered nodes…</div></div></div></section>';
  $("#a31AddNode").onclick=openPairNode;
  try{
   var result=await apiRequest("/v1/nodes"),rows=nextNodeArray(Array.isArray(result)?result:result.nodes);

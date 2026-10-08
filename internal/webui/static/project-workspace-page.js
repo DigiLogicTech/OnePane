@@ -76,7 +76,10 @@ function a35OpenWorkspace(projectID,workspaceID=""){
   a35CancelWorkspaceEdit();
   qa4ProjectHub.activeProjectID=projectID;
   const rows=qa4Workspaces(project);
-  qa4ProjectHub.activeWorkspaceID=rows.some(w=>w.id===workspaceID)?workspaceID:(rows[0]?.id||"");
+  const remembered=localStorage.getItem("onepane:last-workspace:"+projectID)||"";
+  const wanted=workspaceID||remembered;
+  qa4ProjectHub.activeWorkspaceID=rows.some(w=>w.id===wanted)?wanted:(rows[0]?.id||"");
+  if(qa4ProjectHub.activeWorkspaceID)localStorage.setItem("onepane:last-workspace:"+projectID,qa4ProjectHub.activeWorkspaceID);
   openRoute("workspaces");
 }
 function a35ProjectCard(project){
@@ -86,16 +89,12 @@ function a35ProjectCard(project){
       <div><h2>${escapeHtml(project.name||"Project")}</h2><div class="page-subtitle">${escapeHtml(project.description||"No project description.")}</div></div>
       <span class="pill ${project.status==="active"?"good":""}">${escapeHtml(project.status||"active")}</span>
     </div>
-    <div class="project-overview-metrics">
-      <div><strong>${workspaces.length}</strong><span>Workspace${workspaces.length===1?"":"s"}</span></div>
-      <div><strong>${active}</strong><span>Active task${active===1?"":"s"}</span></div>
-      <div><strong>${escapeHtml(a35ProjectUpdated(project))}</strong><span>Updated</span></div>
-    </div>
+    <div class="project-overview-compact-meta"><span>${workspaces.length} workspace${workspaces.length===1?"":"s"}</span><span>${active} active task${active===1?"":"s"}</span><span>Updated ${escapeHtml(a35ProjectUpdated(project))}</span></div>
     <div class="project-overview-workspaces">${workspaces.slice(0,4).map(w=>`<button class="project-workspace-chip" data-a35-open-project="${escapeHtml(project.id)}" data-a35-open-workspace="${escapeHtml(w.id)}">${escapeHtml(w.name||"Workspace")}</button>`).join("")}${workspaces.length>4?`<span class="list-meta">+${workspaces.length-4} more</span>`:""}</div>
     <div class="toolbar project-overview-actions">
       <button class="btn primary" data-a35-open-project="${escapeHtml(project.id)}">Open</button>
       <button class="btn" data-a35-project-settings="${escapeHtml(project.id)}">Project settings</button>
-      <button class="btn danger" data-a35-delete-project="${escapeHtml(project.id)}">Delete project</button>
+      <details class="project-card-actions"><summary aria-label="More project actions">More ▾</summary><button class="btn danger" data-a35-delete-project="${escapeHtml(project.id)}">Delete project</button></details>
     </div>
   </article>`;
 }
@@ -112,10 +111,17 @@ renderProjects=async function(){
     host.outerHTML='<div class="empty-state"><strong>No projects yet.</strong><br>Create a project to begin adding workspaces.</div>';
     return;
   }
-  host.outerHTML=`<div class="project-overview-grid" id="a35ProjectGrid">${qa4ProjectHub.projects.map(a35ProjectCard).join("")}</div>`;
-  $$("[data-a35-open-project]").forEach(b=>b.onclick=()=>a35OpenWorkspace(b.dataset.a35OpenProject,b.dataset.a35OpenWorkspace||""));
-  $$("[data-a35-project-settings]").forEach(b=>b.onclick=()=>{const p=qa4ProjectHub.projects.find(x=>x.id===b.dataset.a35ProjectSettings);if(p)qa4Inspect("project",p.id,p.name,p)});
-  $$("[data-a35-delete-project]").forEach(b=>b.onclick=()=>{const p=qa4ProjectHub.projects.find(x=>x.id===b.dataset.a35DeleteProject);if(p)a33DeleteProject(p)});
+  host.outerHTML=`<div class="project-portfolio"><div class="project-portfolio-toolbar"><input id="a35ProjectSearch" placeholder="Search projects…" aria-label="Search projects"><select id="a35ProjectSort" aria-label="Sort projects"><option value="recent">Recently updated</option><option value="name">Name</option><option value="active">Active tasks</option></select></div><div class="project-overview-grid" id="a35ProjectGrid"></div></div>`;
+  const drawProjects=()=>{
+    const q=String($("#a35ProjectSearch")?.value||"").trim().toLowerCase(),sort=$("#a35ProjectSort")?.value||"recent";
+    const projects=qa4ProjectHub.projects.filter(p=>!q||String(p.name||"").toLowerCase().includes(q)||String(p.description||"").toLowerCase().includes(q));
+    projects.sort((a,b)=>sort==="name"?String(a.name||"").localeCompare(String(b.name||"")):sort==="active"?a35ProjectTaskCount(b.id)-a35ProjectTaskCount(a.id):Number(b.updated_at||0)-Number(a.updated_at||0));
+    $("#a35ProjectGrid").innerHTML=projects.length?projects.map(a35ProjectCard).join(""):'<div class="empty-state compact">No projects match your search.</div>';
+    $$("[data-a35-open-project]").forEach(b=>b.onclick=()=>a35OpenWorkspace(b.dataset.a35OpenProject,b.dataset.a35OpenWorkspace||""));
+    $$("[data-a35-project-settings]").forEach(b=>b.onclick=()=>{const p=qa4ProjectHub.projects.find(x=>x.id===b.dataset.a35ProjectSettings);if(p)qa4Inspect("project",p.id,p.name,p)});
+    $$("[data-a35-delete-project]").forEach(b=>b.onclick=()=>{const p=qa4ProjectHub.projects.find(x=>x.id===b.dataset.a35DeleteProject);if(p)a33DeleteProject(p)});
+  };
+  $("#a35ProjectSearch").oninput=drawProjects;$("#a35ProjectSort").onchange=drawProjects;drawProjects();
 };
 
 function a35WorkspaceWidget(w,project,workspace){
@@ -218,23 +224,24 @@ async function renderWorkspaces(){
   qa7NormalizeWorkspace(project,workspace);
   if(a35WorkspaceEditing()&&!a35WorkspaceSessionMatches(project,workspace))a35CancelWorkspaceEdit();
   const edit=a35WorkspaceSessionMatches(project,workspace);
-  const actions=`<button class="btn" id="a35AddWorkspace">Add workspace</button><button class="btn ${edit?"primary":""}" id="qa4EditWorkspace">${edit?"Done":"Edit layout"}</button>${edit?'<button class="btn" id="qa4AddComponent">Add component</button><button class="btn" id="a35ResetWorkspaceLayout">Reset layout</button>':""}`;
+  const actions=`<button class="btn" id="a35AddWorkspace">Add workspace</button><button class="btn ${edit?"primary":""}" id="qa4EditWorkspace">${edit?"Save layout":"Edit layout"}</button>${edit?'<button class="btn" id="a35CancelWorkspaceLayout">Cancel</button><button class="btn" id="qa4AddComponent">Add component</button><button class="btn" id="a35ResetWorkspaceLayout">Reset layout</button>':""}`;
   $("#viewHost").innerHTML=`<section class="page workspace-page">${pageHeader(project.name||"Workspace",project.description||"Project workspace",actions)}
     <div class="workspace-tabs">${rows.map(w=>`<button class="workspace-tab ${w.id===workspace.id?"active":""}" data-a35-workspace="${escapeHtml(w.id)}">${escapeHtml(w.name||"Workspace")}</button>`).join("")}</div>
     <div class="workspace-context-bar"><div><strong>${escapeHtml(workspace.name)}</strong><span class="list-meta"> · workspace sandbox ${workspace.sandbox?.internet?"internet allowed":"internet blocked"} · ${workspace.routing?.enabled!==false?"routing enabled":"single-path"} · ${escapeHtml(titleCase(workspace.orchestration?.mode||"direct"))}</span></div><div class="toolbar compact a32-workspace-actions"><button class="btn" id="qa4WorkspaceSettings">Workspace settings</button><button class="btn danger" id="a32DeleteWorkspace" ${rows.length<=1?"disabled":""}>Delete workspace</button></div></div>
     <div class="workspace-grid ${edit?"editing":""}" id="qa4WorkspaceGrid"></div>
   </section>`;
   a35RenderWorkspaceGrid(project,workspace);
-  $$("[data-a35-workspace]").forEach(b=>b.onclick=()=>{a35CancelWorkspaceEdit();qa4ProjectHub.activeWorkspaceID=b.dataset.a35Workspace;renderWorkspaces();renderNav()});
+  $$("[data-a35-workspace]").forEach(b=>b.onclick=()=>{a35CancelWorkspaceEdit();qa4ProjectHub.activeWorkspaceID=b.dataset.a35Workspace;localStorage.setItem("onepane:last-workspace:"+project.id,b.dataset.a35Workspace);renderWorkspaces();renderNav()});
   $("#a35AddWorkspace").onclick=()=>a35AddWorkspace(project);
   $("#qa4WorkspaceSettings").onclick=()=>qa6OpenInInspector(project,workspace,"settings");
   $("#a32DeleteWorkspace").onclick=()=>a35DeleteWorkspace(project,workspace);
   $("#qa4EditWorkspace").onclick=async e=>{
     if(!a35WorkspaceSessionMatches(project,workspace)){a35BeginWorkspaceEdit(project,workspace);await renderWorkspaces();return}
     const button=e.currentTarget;button.disabled=true;button.textContent="Saving…";
-    try{await a35CommitWorkspaceEdit(project,workspace);await renderWorkspaces()}catch{button.disabled=false;button.textContent="Done"}
+    try{await a35CommitWorkspaceEdit(project,workspace);await renderWorkspaces()}catch{button.disabled=false;button.textContent="Save layout"}
   };
   $("#qa4AddComponent")?.addEventListener("click",()=>qa4AddWorkspaceComponent(project,workspace));
+  $("#a35CancelWorkspaceLayout")?.addEventListener("click",()=>{a35CancelWorkspaceEdit();renderWorkspaces()});
   $("#a35ResetWorkspaceLayout")?.addEventListener("click",()=>{a35ResetWorkspaceDraft(project,workspace);a35RenderWorkspaceGrid(project,workspace)});
   qa6StartEventStream();renderNav();
 }

@@ -748,7 +748,7 @@ async function enterOnePane(){
   setAuthStage('app');
   init();
   const user=$('#userButton');
-  if(user){const display=onepaneIdentity.display_name||onepaneIdentity.username||'OP';user.textContent=display.split(/\s+/).map(x=>x[0]).join('').slice(0,2).toUpperCase()||'OP';}
+  if(user){const display=onepaneIdentity.username||onepaneIdentity.display_name||'OP';user.textContent=display.split(/\s+/).map(x=>x[0]).join('').slice(0,2).toUpperCase()||'OP';}
   refreshOperationalDataQA(true);
 }
 
@@ -1013,7 +1013,15 @@ function bindShell(){
   bindDrawerResize();bindInspectorResize();syncPanelRestoreButtons();syncNotificationBadges();sendNativeTheme();
 }
 function openNewTabPicker(){const options=navItems.map(([route,icon,label])=>`<button class="component-choice" data-new-tab-route="${route}"><strong>${icon} ${label}</strong><span>Open ${label} in a new tab</span></button>`).join('');openModal('Open a new tab',`<div class="component-picker-grid">${options}</div>`);$$('[data-new-tab-route]').forEach(b=>b.onclick=()=>{const r=b.dataset.newTabRoute;closeModal();openRoute(r,{newTab:true});});}
-function openUserMenu(anchor){popoverFor(anchor,`<div class="popover"><h3>${escapeHtml(onepaneIdentity?.display_name||onepaneIdentity?.username||'OnePane user')}</h3><div class="popover-row">Workspace<div class="list-meta">${escapeHtml(onepaneWorkspace)}</div></div><button class="btn" id="logoutButton" style="width:100%">Sign out</button></div>`);$('#logoutButton').onclick=async()=>{try{await apiRequest('/v1/auth/logout',{method:'POST',body:'{}'});}catch{}location.reload();};}
+function openUserMenu(anchor){
+ const username=String(onepaneIdentity?.username||onepaneIdentity?.display_name||"Signed-in user");
+ const initials=username.trim().split(/\s+/).map(x=>x[0]).join("").slice(0,2).toUpperCase();
+ const workspaceName=String(onepaneIdentity?.workspace_name||onepaneIdentity?.workspace?.name||"Active workspace");
+ popoverFor(anchor,`<div class="popover onepane-account-menu" role="menu" aria-label="Account menu"><div class="account-menu-header"><span class="account-menu-avatar">${escapeHtml(initials||"OP")}</span><div><strong>${escapeHtml(username)}</strong><div class="list-meta">Signed-in OnePane account</div></div></div><div class="account-menu-workspace"><span class="list-meta">ACTIVE WORKSPACE</span><strong>${escapeHtml(workspaceName)}</strong><details><summary>Workspace ID</summary><code>${escapeHtml(onepaneWorkspace)}</code></details></div><div class="account-menu-links"><button class="account-menu-link" id="accountSettings" type="button">Settings &amp; preferences</button><button class="account-menu-link" id="accountTour" type="button">Help &amp; tour</button></div><button class="account-menu-link account-menu-signout" id="logoutButton" type="button">Sign out</button></div>`);
+ $('#accountSettings')?.addEventListener("click",()=>{closePopover();openRoute("settings")});
+ $('#accountTour')?.addEventListener("click",()=>{closePopover();startProductTour({replay:true})});
+ $('#logoutButton').onclick=async()=>{try{await apiRequest('/v1/auth/logout',{method:'POST',body:'{}'});}catch{}location.reload()};
+}
 function openThemePopover(anchor){popoverFor(anchor,`<div class="popover"><h3>Theme</h3><div class="theme-grid">${Object.keys(THEME_PALETTES).map(t=>`<button class="theme-choice ${state.theme===t?'active':''}" data-theme-choice="${t}">${titleCase(t)}</button>`).join('')}</div></div>`);$$('[data-theme-choice]').forEach(b=>b.onclick=()=>{applyTheme(b.dataset.themeChoice);$('#overlayRoot').innerHTML='';});}
 function unreadNotifications(){return NOTIFICATIONS.filter(n=>n.unread!==false);}
 function syncNotificationBadges(){const count=unreadNotifications().length;$$('[data-notification-badge]').forEach(b=>{b.textContent=String(count);b.classList.toggle('hidden',count===0);});}

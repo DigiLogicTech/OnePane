@@ -685,8 +685,15 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 		return inference.ModelDeployment{}, err
 	}
 	if !reuseRuntime {
+		// An existing directory may belong to a previous build or an interrupted
+		// upgrade. Never overwrite or delete its files: install the verified
+		// runtime into an isolated generation and update inventory only after
+		// successful extraction and fingerprint verification.
 		if _, statErr := os.Stat(runtimeRoot); statErr == nil {
-			return inference.ModelDeployment{}, errors.New("managed runtime target already exists but is not the trusted catalog installation")
+			var generationErr error
+			runtimeRoot, generationErr = nextUnusedRuntimeGeneration(runtimeRoot)
+			if generationErr != nil { return inference.ModelDeployment{}, generationErr }
+			execPath = filepath.Join(runtimeRoot, runtime.ExecutableRel)
 		} else if !os.IsNotExist(statErr) {
 			return inference.ModelDeployment{}, statErr
 		}
@@ -1050,4 +1057,17 @@ func (s *Service) ShutdownManagedRuntimes(ctx context.Context) error {
 		return errors.New("local runtime supervisor unavailable")
 	}
 	return s.supervisor.Shutdown(ctx)
+}
+
+// nextUnusedRuntimeGeneration never rewrites preexisting, untrusted or active
+// runtime directories. The caller holds runtimeInstallMu while selecting and
+// atomically renaming its staging directory to the returned path.
+func nextUnusedRuntimeGeneration(root string) (string, error) {
+ for n:=1; n<=256; n++ {
+  candidate:=fmt.Sprintf("%s.rev-%d",root,n)
+  if _,err:=os.Lstat(candidate);os.IsNotExist(err) {
+   if _,stageErr:=os.Lstat(candidate+".installing");os.IsNotExist(stageErr) {return candidate,nil} else if stageErr!=nil{return "",stageErr}
+  } else if err!=nil{return "",err}
+ }
+ return "",errors.New("no free isolated managed-runtime generation; inspect the existing runtime inventory before installing more")
 }

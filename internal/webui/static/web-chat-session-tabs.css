@@ -30,3 +30,9 @@
 .a41-council-seat-fields select,.a41-council-seat-fields input{width:100%;max-width:100%}
 #a41CouncilProgress:not(:empty){padding:.4rem 0}
 @media(max-width:850px){.a41-council-seat-fields{grid-template-columns:1fr}.a41-council-settings{grid-template-columns:1fr}}
+
+/* Adapt to actual content width as well as viewport changes from Inspector. */
+.a40-webchat-layout{container-type:inline-size;align-items:stretch;min-width:0}
+.a40-webchat-layout .a39-webchat-handoff-card .widget-body{gap:10px}
+.a40-chat-tabs{margin-bottom:10px}
+@media(max-width:800px){.a40-webchat-layout{display:flex;flex-direction:column}}

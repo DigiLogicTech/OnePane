@@ -225,6 +225,18 @@ func (s *Service) SetComputePolicy(ctx context.Context, c ComputePolicyCommand) 
 		if _, err := tx.ExecContext(ctx, `UPDATE model_deployments SET runtime_name=?,runtime_version=?,runtime_config_json=?,revision=revision+1,updated_at=? WHERE id=?`,
 			manifest.Name, manifest.Version, string(updatedCfg), now, c.DeploymentID); err != nil { return err }
 		if _, err := tx.ExecContext(ctx, `UPDATE managed_local_models SET runtime_id=?,revision=revision+1,updated_at=? WHERE deployment_id=?`, runtimeID, now, c.DeploymentID); err != nil { return err }
+		// Placement/hardware changes invalidate the current Agent Check and
+		// production admission. Preserve completed testbed history as evidence,
+		// but never present evidence from the old placement as current.
+		placementJSON,_:=json.Marshal(placement)
+		if _,err:=tx.ExecContext(ctx,`UPDATE model_spec_sheets SET
+		  hardware_profile_id=?,placement_json=?,
+		  qualification_json='{"status":"pending_manual_agent_check"}',
+		  admission_status='pending',restrictions_json='{}',
+		  admitted_by=NULL,admitted_at=NULL,admission_notes=NULL,
+		  revision=revision+1,updated_at=?
+		 WHERE deployment_id=? AND (placement_json<>? OR hardware_profile_id<>?)`,
+		 profileID,string(placementJSON),now,c.DeploymentID,string(placementJSON),profileID);err!=nil{return err}
 
 		hasCPU, hasGPU := false, false
 		var ram, vram int64

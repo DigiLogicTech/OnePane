@@ -17,3 +17,15 @@
 .a39-webchat-textarea[readonly]{opacity:.92}
 .a39-webchat-handoff-content .toolbar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 @media(max-width:1000px){.a39-webchat-layout{grid-template-columns:1fr}}
+
+/* RC3 visual parity: all manual-provider fields use OnePane theme tokens. */
+.a39-webchat-textarea{border:1px solid var(--border);border-radius:9px;background:var(--panel-2);color:var(--text);padding:12px;resize:vertical;min-height:120px;max-height:40vh;box-shadow:none;outline:none}
+.a39-webchat-textarea:focus-visible{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.a39-webchat-textarea::placeholder{color:var(--muted);opacity:1}
+.a39-webchat-textarea:disabled{opacity:.6}
+.a39-webchat-provider-card,.a39-webchat-handoff-card{background:var(--panel);border:1px solid var(--border);border-radius:12px}
+.a39-webchat-queue:empty{display:none}
+.a39-webchat-summary{color:var(--muted);padding:7px 1px;margin-bottom:8px}
+.a39-webchat-summary strong{color:var(--text)}
+.a39-webchat-handoff-content .toolbar{justify-content:flex-end}
+.a39-webchat-provider-card .widget-body{gap:14px}

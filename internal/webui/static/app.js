@@ -364,7 +364,7 @@ function a31RefreshOperationsData(){
 renderOperations=async function(){
   if(a31OperationsRefreshOnly>0&&a31RefreshOperationsData())return;
   const edit=a31OperationsEditing();
-  const actions=`<button class="btn ${edit?'primary':''}" id="editOperations">${edit?'Done':'Edit layout'}</button>${edit?'<button class="btn" id="addOperationsComponent">Add component</button><button class="btn" id="resetOperationsLayout">Reset layout</button>':""}`;
+  const actions=`<button class="btn" id="a35OperationsRefresh">Refresh</button><button class="btn ${edit?'primary':''}" id="editOperations">${edit?'Done':'Edit layout'}</button>${edit?'<button class="btn" id="addOperationsComponent">Add component</button><button class="btn" id="resetOperationsLayout">Reset layout</button>':""}`;
   $("#viewHost").innerHTML=`<section class="page">${pageHeader("Operations","System overview, activity, health and recovery",actions)}${a31OperationsTabs()}<div id="a31OperationsBody"></div></section>`;
   a31BindOperationsTabs();
   const body=$("#a31OperationsBody");
@@ -372,6 +372,7 @@ renderOperations=async function(){
   else if(a31OperationsView==="activity")body.innerHTML=a31OperationsActivity();
   else if(a31OperationsView==="health")body.innerHTML=a31OperationsHealth();
   else if(a31OperationsView==="recovery"){body.innerHTML=await a31RecoveryContent();$("#a31RecoveryRefresh")?.addEventListener("click",async()=>{await refreshOperationalDataQA(true);renderOperations()});$$("[data-a31-repair-component]").forEach(b=>b.onclick=()=>a31ComponentAction(b.dataset.a31RepairComponent,"repair"))}
+  $("#a35OperationsRefresh")?.addEventListener("click",async e=>{const b=e.currentTarget;b.disabled=true;b.textContent="Refreshing…";try{await refreshOperationalDataQA(true);await renderOperations()}catch(ex){notice("Operations refresh failed: "+ex.message,"bad");b.disabled=false;b.textContent="Refresh"}});
   $("#editOperations")?.addEventListener("click",()=>{if(a31OperationsEditing())a31CommitOperationsEdit();else a31BeginOperationsEdit();renderOperations()});
   $("#resetOperationsLayout")?.addEventListener("click",()=>{a31OperationsDraftWidgets=defaultState().operationsWidgets.map(x=>({...x}));a31NormalizeLayout(a31OperationsDraftWidgets);renderOperations()});
   $("#addOperationsComponent")?.addEventListener("click",openOperationsComponentPicker);

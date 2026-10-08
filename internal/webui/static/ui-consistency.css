@@ -403,3 +403,34 @@
 .qa-form label.install-override-option{display:flex;align-items:flex-start;gap:10px;cursor:pointer;color:var(--text);font-size:13px;line-height:1.5}
 .qa-form .install-override-option input[type="checkbox"]{box-sizing:border-box;appearance:auto;flex:0 0 18px;width:18px!important;min-width:18px;height:18px;margin:1px 0 0;padding:0;border:1px solid var(--border);border-radius:4px;accent-color:var(--accent);box-shadow:none!important;outline:none}
 .qa-form .install-override-option input[type="checkbox"]:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px;box-shadow:none!important}
+
+/* User menu uses the same theme tokens, not native browser surface colours. */
+.onepane-account-menu{width:min(335px,calc(100vw - 20px));box-sizing:border-box;padding:12px;max-height:min(560px,calc(100dvh - 60px));overflow-y:auto}
+.account-menu-header{display:flex;align-items:center;gap:10px;padding:5px 4px 13px}
+.account-menu-header>div{min-width:0;overflow-wrap:anywhere}
+.account-menu-avatar{width:38px;height:38px;flex:0 0 38px;display:grid;place-items:center;background:var(--accent-soft);color:var(--text);border:1px solid var(--border);border-radius:50%;font-weight:750}
+.account-menu-workspace{display:grid;gap:5px;padding:12px;background:var(--panel-2);border:1px solid var(--border);border-radius:9px}
+.account-menu-workspace details{font-size:11px;color:var(--muted);max-width:100%;overflow-wrap:anywhere}
+.account-menu-workspace summary{cursor:pointer}
+.account-menu-workspace code{display:block;margin-top:5px;word-break:break-all;white-space:normal}
+.account-menu-links{display:grid;gap:3px;border-bottom:1px solid var(--border);padding:10px 0}
+.account-menu-link{background:transparent;border:0;text-align:left;color:var(--text);width:100%;border-radius:7px;padding:10px 8px;cursor:pointer;font:inherit}
+.account-menu-link:hover,.account-menu-link:focus-visible{background:var(--panel-2);outline:2px solid transparent}
+.account-menu-signout{margin-top:6px;color:var(--text)}
+
+/* RC3 project portfolio: compact cards with clear primary actions. */
+.project-portfolio{min-height:0;min-width:0;overflow-y:auto;padding:2px}
+.project-portfolio-toolbar{display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.project-portfolio-toolbar input{min-width:160px;flex:1 1 auto;width:auto;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font:inherit}
+.project-portfolio-toolbar select{flex:0 1 190px;min-width:130px;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font:inherit}
+.project-overview-compact-meta{display:flex;flex-wrap:wrap;gap:7px 12px;color:var(--muted);font-size:12px}
+.project-overview-compact-meta span+span{border-left:1px solid var(--border);padding-left:12px}
+.project-card-actions{position:relative;margin-left:auto}
+.project-card-actions>summary{list-style:none;padding:9px 10px;cursor:pointer;border:1px solid var(--border);border-radius:8px;color:var(--muted)}
+.project-card-actions>summary::-webkit-details-marker{display:none}
+.project-card-actions[open]{z-index:3}
+.project-card-actions>.btn{display:block;margin-top:6px;width:100%;text-align:left}
+.workspace-page .workspace-context-bar{flex-wrap:wrap}
+.workspace-page .workspace-grid{container-type:inline-size}
+@container (max-width:470px){.workspace-widget .widget-handle{display:flex;flex-wrap:wrap}}
+@media(max-width:650px){.project-portfolio-toolbar{flex-wrap:wrap}.project-portfolio-toolbar input,.project-portfolio-toolbar select{width:100%;flex:1 1 100%}}

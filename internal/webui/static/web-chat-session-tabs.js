@@ -161,11 +161,11 @@ async function a40RenderWebChat(){
   const epoch=++a40WebRenderingEpoch;
   const host=$("#viewHost");if(!host)return;
   host.innerHTML=`<section class="page a39-webchat-page a40-webchat-page">
-    ${pageHeader("Web Chat","Separate manual provider conversations and Research Council handoffs.",'<button class="btn primary" id="a41StartCouncil">Start Web-only Council</button><button class="btn" id="a40NewChatTop">+ New Web Chat</button><button class="btn" id="a40Refresh">Refresh</button>')}
+    ${pageHeader("Web Chat","Separate manual provider conversations and Research Council handoffs.",'<button class="btn primary" id="a41StartCouncil">Start Web-only Council</button><button class="btn" id="a40Refresh">Refresh</button>')}
     <div id="a40WebRoot" class="a39-webchat-loading">Loading Web Chat…</div>
   </section>`;
   $("#a41StartCouncil").onclick=a41OpenWebOnlyCouncilWizard;
-  $("#a40NewChatTop").onclick=a40WebOpenNewDialog;
+
   $("#a40Refresh").onclick=()=>renderWebChat();
   const workspace=a40WebWorkspace();
   if(!workspace){
@@ -266,7 +266,7 @@ async function a40RenderWebChat(){
           <textarea class="a39-webchat-textarea" id="a40Prompt" rows="11" ${attached?"readonly":""} placeholder="Write or paste a prompt for this web conversation.">${safe(draft)}</textarea>
           <div class="toolbar">
             <button class="btn primary" id="a40CopyPrompt" type="button">Copy Prompt</button>
-            ${provider.url?`<a class="btn" href="${safe(provider.url)}" target="_blank" rel="noopener noreferrer">Open Provider</a>`:""}
+
           </div>
           <label class="a39-webchat-label" for="a40Response">${chairTurn?.status==="awaiting_approval"?"Review/edit Chair proposal before approval":chairTurn?"Chair proposal":attached?"Paste provider response":"Response scratchpad"}</label>
           <textarea class="a39-webchat-textarea" id="a40Response" rows="10" ${(selected?.status==="submitted"||chairTurn?.status==="approved")?"disabled":""} placeholder="Paste the provider's response here.">${safe(response)}</textarea>

@@ -4,7 +4,6 @@ package main
 
 import (
  "fmt"
- "os"
  "syscall"
  "unsafe"
 )
@@ -65,4 +64,3 @@ func (job *ownedBackendJob) Close()error{
  err:=syscall.CloseHandle(job.handle);job.handle=0
  return err
 }
-var _ = os.ErrClosed

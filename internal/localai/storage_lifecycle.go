@@ -71,18 +71,22 @@ func (s *Service) CleanupOwnedStorage(ctx context.Context)(StorageReport,error){
    AND i.status IN ('starting','healthy','busy','draining')
  )`)
  if err!=nil{return StorageReport{},err}
+ var disabledPaths []string
  for disabled.Next(){
   var root string
   if err:=disabled.Scan(&root);err!=nil{disabled.Close();return StorageReport{},err}
   clean:=filepath.Clean(root)
   if strings.HasPrefix(strings.ToLower(clean),strings.ToLower(llamaRoot)+string(os.PathSeparator)){
-   var ready int
-   if err:=s.db.QueryRowContext(ctx,"SELECT COUNT(*) FROM managed_local_runtimes WHERE install_root=? AND status='ready'",root).Scan(&ready);err!=nil{disabled.Close();return StorageReport{},err}
-   if ready==0{roots=append(roots,clean)}
+   disabledPaths=append(disabledPaths,clean)
   }
  }
  if err:=disabled.Err();err!=nil{disabled.Close();return StorageReport{},err}
  disabled.Close()
+ for _,root:=range disabledPaths{
+  var ready int
+  if err:=s.db.QueryRowContext(ctx,"SELECT COUNT(*) FROM managed_local_runtimes WHERE install_root=? AND status='ready'",root).Scan(&ready);err!=nil{return StorageReport{},err}
+  if ready==0{roots=append(roots,root)}
+ }
  // Clean abandoned installation staging older than 24h under owned runtimes.
  runtimeRoot:=filepath.Join(s.dataDir,"runtimes")
  _=filepath.WalkDir(runtimeRoot,func(p string,d fs.DirEntry,err error)error{

@@ -202,6 +202,24 @@ func (s *Service) AddMember(ctx context.Context, c AddMemberCommand) (Member, er
 	if err != nil {
 		return Member{}, err
 	}
+	// Operator-mediated Web seats are consultation-only and cannot be
+	// configured with a runnable agent protocol or principal identity.
+	var manualSeat struct{
+		ManualWeb *struct{
+			Enabled bool `json:"enabled"`
+			ProviderID string `json:"provider_id"`
+			ModelLabel string `json:"model_label"`
+		} `json:"manual_web"`
+	}
+	if err := json.Unmarshal(cfg, &manualSeat); err != nil {return Member{}, ErrInvalid}
+	if manualSeat.ManualWeb != nil && manualSeat.ManualWeb.Enabled {
+		if _,_,err:=ValidateManualWebProvider(manualSeat.ManualWeb.ProviderID,manualSeat.ManualWeb.ModelLabel);err!=nil {
+			return Member{},ErrInvalid
+		}
+		if c.MemberKind!="agent" || c.PrincipalID!=nil || c.ProtocolLevel!="L0" || c.CapabilityID!="inference.general" {
+			return Member{},ErrInvalid
+		}
+	}
 	mid, _ := s.ids.New("tmember")
 	now := s.clock.UnixMilli()
 	m := Member{ID: mid, TeamID: t.ID, WorkspaceID: t.WorkspaceID, PrincipalID: c.PrincipalID, MemberKind: c.MemberKind, DisplayName: strings.TrimSpace(c.DisplayName), RoleName: strings.TrimSpace(c.RoleName), CapabilityID: c.CapabilityID, ProtocolLevel: c.ProtocolLevel, RoutePolicy: rp, Ordinal: c.Ordinal, Status: "active", Config: cfg, CreatedAt: now, UpdatedAt: now}
@@ -393,6 +411,13 @@ func (s *Service) StartSession(ctx context.Context, c StartSessionCommand) (Sess
 	members, err := s.snapshotMembers(ctx, t.ID, t.WorkspaceID)
 	if err != nil {
 		return Session{}, err
+	}
+	for _, member := range members {
+		var cfg struct {ManualWeb *struct {Enabled bool `json:"enabled"`} `json:"manual_web"`}
+		if err:=json.Unmarshal(member.Config,&cfg);err!=nil{return Session{},ErrInvalid}
+		if cfg.ManualWeb!=nil && cfg.ManualWeb.Enabled && mode!="council"{
+			return Session{},ErrInvalid
+		}
 	}
 	researchMode, research := researchConfiguration(t.Configuration)
 	if mode != "council" {

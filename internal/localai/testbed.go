@@ -384,17 +384,63 @@ func (s *Service) ListTestbedTurns(ctx context.Context, sessionID string) ([]Tes
 	return out, rows.Err()
 }
 
+// Manual Agent Check only records observed evidence. Testbed completion without
+// a single successful inference is never eligible for production admission.
+func testbedResponseEvidence(raw json.RawMessage) (string, bool) {
+ var result struct { Choices []struct { Message struct {
+  Content string `json:"content"`
+  ToolCalls []struct { Function struct { Name string `json:"name"`; Arguments string `json:"arguments"` } `json:"function"` } `json:"tool_calls"`
+ } `json:"message"` } `json:"choices"` }
+ if json.Unmarshal(raw,&result)!=nil||len(result.Choices)==0{return "",false}
+ message:=result.Choices[0].Message
+ toolCalled:=false
+ for _,call:=range message.ToolCalls{if call.Function.Name=="onepane_test_probe" {
+   var args struct{Value string `json:"value"`}
+   if json.Unmarshal([]byte(call.Function.Arguments),&args)==nil&&args.Value=="agent-check"{toolCalled=true}
+ }}
+ return strings.TrimSpace(message.Content),toolCalled
+}
 func (s *Service) CompleteTestbed(ctx context.Context, sessionID string) error {
-	now := s.clock.UnixMilli()
-	res, err := s.db.ExecContext(ctx, `UPDATE model_testbed_sessions SET status='completed',completed_at=?,updated_at=?,revision=revision+1 WHERE id=? AND status='active'`, now, now, sessionID)
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n != 1 {
-		return errors.New("testbed session state conflict")
-	}
-	return nil
+ sess,err:=s.TestbedSession(ctx,sessionID);if err!=nil{return err}
+ if sess.Status!="active"{return errors.New("testbed session is not active")}
+ turns,err:=s.ListTestbedTurns(ctx,sessionID);if err!=nil{return err}
+ if len(turns)==0{return errors.New("cannot complete Agent Check: no successful model inference turns were recorded")}
+ evidence:=map[string]any{"plain_ok":false,"json_ok":false,"schema_ok":false,"tools_ok":false,"context_probes":[]any{},"testbed_session_id":sessionID}
+ plainChecked,jsonChecked,toolsChecked:=false,false,false
+ var totalTokens int64
+ var totalElapsed int64
+ for _,turn:=range turns{
+  content,toolCalled:=testbedResponseEvidence(turn.ResponseJSON)
+  if turn.SyntheticToolProbe{toolsChecked=true;evidence["tools_ok"]=toolCalled
+  }else if !plainChecked{plainChecked=true;evidence["plain_ok"]=content=="ONEPANE_OK"
+  }else if !jsonChecked{
+   jsonChecked=true
+   var payload map[string]any
+   valid:=json.Unmarshal([]byte(content),&payload)==nil
+   evidence["json_ok"]=valid
+   if valid{status,_:=payload["status"].(string);number,ok:=payload["number"].(float64);evidence["schema_ok"]=status=="ok"&&ok&&number==7}
+  }
+  var usage struct {CompletionTokens int64 `json:"completion_tokens"`}
+  var timing struct {ElapsedMS int64 `json:"elapsed_ms"`}
+  if json.Unmarshal(turn.UsageJSON,&usage)==nil&&json.Unmarshal(turn.MetricsJSON,&timing)==nil&&usage.CompletionTokens>0&&timing.ElapsedMS>0{
+   totalTokens+=usage.CompletionTokens;totalElapsed+=timing.ElapsedMS
+  }
+ }
+ evidence["plain_tested"]=plainChecked;evidence["json_tested"]=jsonChecked;evidence["tools_tested"]=toolsChecked
+ status:="limited"
+ if evidence["plain_ok"]==true&&evidence["json_ok"]==true&&evidence["schema_ok"]==true&&evidence["tools_ok"]==true{status="passed"}
+ metrics:=map[string]any{"successful_turns":len(turns)}
+ if totalTokens>0&&totalElapsed>0{metrics["completion_tokens_per_second"]=float64(totalTokens)*1000/float64(totalElapsed)}
+ quality:=map[string]any{"status":status,"profile_version":"onepane.manual-agent-check/v2","evidence":evidence,"metrics":metrics}
+ raw,err:=json.Marshal(quality);if err!=nil{return err}
+ now:=s.clock.UnixMilli()
+ return s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+  res,err:=tx.ExecContext(ctx,`UPDATE model_testbed_sessions SET status='completed',completed_at=?,updated_at=?,revision=revision+1 WHERE id=? AND status='active'`,now,now,sessionID)
+  if err!=nil{return err};n,_:=res.RowsAffected();if n!=1{return errors.New("testbed session state conflict")}
+  // Never promote admission or claim context verification from a manual probe.
+  _,err=tx.ExecContext(ctx,`UPDATE model_spec_sheets SET qualification_json=?,updated_at=?,revision=revision+1 WHERE deployment_id=? AND hardware_profile_id=?`,string(raw),now,sess.DeploymentID,sess.HardwareProfileID)
+  return err
+ })
 }
 
 func validAdmission(v AdmissionStatus) bool {

@@ -2,7 +2,7 @@ name: Alpha 3.2 Integration CI
 
 on:
   push:
-    branches: [alpha3.2-integration, alpha3.2-windows-stabilization]
+    branches: [alpha3.2-integration, alpha3.2-windows-stabilization, alpha3.2-qa-round2-remediation]
   workflow_dispatch:
     inputs:
       run_hosted_smoke:

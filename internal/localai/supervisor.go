@@ -55,6 +55,7 @@ type LaunchSpec struct {
 	Args       []string
 	Env        []string
 	Dir        string
+ LogPath string
 }
 
 type ProcessBackend interface {
@@ -87,7 +88,13 @@ func (b *OSProcessBackend) Start(ctx context.Context, spec LaunchSpec) (int, err
 	if spec.Dir != "" {
 		cmd.Dir = spec.Dir
 	}
-	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	// Preserve bounded startup diagnostics; the process owns no global stdout.
+ if spec.LogPath != "" {
+  if err:=os.MkdirAll(filepath.Dir(spec.LogPath),0o700);err!=nil{return 0,err}
+  if st,err:=os.Stat(spec.LogPath);err==nil&&st.Size()>4<<20{_ = os.Rename(spec.LogPath,spec.LogPath+".previous")}
+  logFile,err:=os.OpenFile(spec.LogPath,os.O_CREATE|os.O_TRUNC|os.O_WRONLY,0o600);if err!=nil{return 0,err}
+  defer logFile.Close();cmd.Stdout,cmd.Stderr=logFile,logFile
+ } else {cmd.Stdout, cmd.Stderr = io.Discard, io.Discard}
 	if err := cmd.Start(); err != nil {
 		return 0, err
 	}
@@ -566,7 +573,7 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 			return old, nil
 		}
 		if old.Status == RuntimeStarting && s.processes.Alive(old.PID) {
-			return s.waitHealthy(ctx, old.ID, 30*time.Second)
+			return s.waitHealthy(ctx, old.ID, 120*time.Second)
 		}
 	}
 	if err := s.ensureCapacity(ctx, deploymentID, nodeID); err != nil {
@@ -634,7 +641,7 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 	if strings.EqualFold(cfg.RuntimeBackend, "colibri") {
 		env = append(env, "COLI_MODEL="+cfg.ModelPath, "COLI_MODEL_ID="+firstNonEmpty(cfg.ModelRef, "onepane-colibri"))
 	}
-	pid, err := s.processes.Start(context.Background(), LaunchSpec{Executable: executable, Args: args, Env: env, Dir: filepath.Dir(cfg.Executable)})
+	pid, err := s.processes.Start(context.Background(), LaunchSpec{Executable: executable, Args: args, Env: env, Dir: filepath.Dir(cfg.Executable),LogPath: filepath.Join(s.dataDir,"components","logs","local-runtime-"+inst.ID+".log")})
 	if err != nil {
 		_ = s.markFailed(context.Background(), inst.ID, err.Error())
 		return RuntimeInstance{}, err
@@ -644,7 +651,7 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 		_ = s.processes.Signal(pid, syscall.SIGTERM)
 		return RuntimeInstance{}, err
 	}
-	return s.waitHealthy(ctx, inst.ID, 30*time.Second)
+	return s.waitHealthy(ctx, inst.ID, 120*time.Second)
 }
 
 func (s *RuntimeSupervisor) Acquire(ctx context.Context, deploymentID string) (RuntimeInstance, error) {

@@ -91,7 +91,13 @@ func (t LocalOpenAITransport) Dispatch(ctx context.Context, req DispatchRequest,
 		return DispatchResult{}, &TransportError{Code: "response_too_large", HTTPStatus: resp.StatusCode, OutcomeKnown: true}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return DispatchResult{}, &TransportError{Code: fmt.Sprintf("http_%d", resp.StatusCode), HTTPStatus: resp.StatusCode, OutcomeKnown: true}
+		// Read only the bounded error summary from this host-local runtime.
+  // Avoid returning arbitrary HTML or any model-generated content in errors.
+  detail := ""
+  var remote struct {Error struct {Message string `json:"message"`} `json:"error"`}
+  if json.Unmarshal(data,&remote)==nil {detail=strings.TrimSpace(remote.Error.Message)}
+  if len(detail)>320 {detail=detail[:320]}
+  return DispatchResult{}, &TransportError{Code: fmt.Sprintf("http_%d", resp.StatusCode), HTTPStatus: resp.StatusCode, OutcomeKnown: true, Err: fmt.Errorf("local runtime rejected inference (HTTP %d): %s", resp.StatusCode, detail)}
 	}
 	if !json.Valid(data) {
 		return DispatchResult{}, &TransportError{Code: "invalid_json_response", HTTPStatus: resp.StatusCode, OutcomeKnown: true}

@@ -27,6 +27,8 @@ jobs:
           node --check internal/webui/static/web-chat-page.js
           node --check internal/webui/static/web-chat-session-tabs.js
           node --check internal/webui/static/web-chat-council-launch.js
+          node --check internal/webui/static/web-chat-chair.js
+          node scripts/validate_web_chair.js
           node scripts/validate_web_only_council.js
           node scripts/validate_web_chat_sessions.js
           node --check internal/webui/static/app.js

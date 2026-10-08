@@ -33,6 +33,7 @@ func main() {
 	flag.StringVar(&configPath, "config", "", "path to bootstrap YAML configuration")
 	flag.Parse()
 
+	log.Printf("harnessd startup: loading configuration")
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		log.Fatalf("configuration: %v", err)
@@ -41,10 +42,12 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	log.Printf("harnessd startup: entering bootstrap")
 	runtime, err := bootstrap.Open(ctx, cfg)
 	if err != nil {
 		log.Fatalf("bootstrap: %v", err)
 	}
+	log.Printf("harnessd startup: bootstrap ready; preparing API routes")
 	defer runtime.DB.Close()
 
 	state, err := runtime.System.Get(ctx)
@@ -133,6 +136,7 @@ func main() {
 			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
 		}
 	}
+	log.Printf("harnessd startup: recovering model download/install jobs")
 	if err := runtime.LocalAI.RecoverInstallJobs(ctx); err != nil {
 		log.Printf("recover local AI install jobs: %v", err)
 	}

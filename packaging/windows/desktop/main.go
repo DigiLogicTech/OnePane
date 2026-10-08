@@ -788,7 +788,7 @@ func navigateProvider(target string) {
 func initializeProviderWebView() {
     if providerEnvironment!=0||providerInitializing||providerCreateProc==0{return}
     providerInitializing=true
-    userData:=filepath.Join(webViewDataDir(),"ProviderSessions")
+    userData:=filepath.Join(filepath.Dir(webViewDataDir()),"ProviderWebView2")
     if err:=os.MkdirAll(userData,0o700);err!=nil {desktopLogf("provider profile directory unavailable: %v",err);providerInitializing=false;return}
     ptr,err:=syscall.UTF16PtrFromString(userData)
     if err!=nil {providerInitializing=false;return}

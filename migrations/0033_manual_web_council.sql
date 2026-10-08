@@ -5,6 +5,7 @@ CREATE TABLE manual_web_council_turns (
     session_id TEXT NOT NULL REFERENCES team_sessions(id) ON DELETE CASCADE,
     workspace_id TEXT NOT NULL REFERENCES workspaces(id),
     member_id TEXT NOT NULL REFERENCES team_members(id),
+    provider_id TEXT NOT NULL,
     model_label TEXT NOT NULL,
     conversation_generation INTEGER NOT NULL DEFAULT 1 CHECK(conversation_generation >= 1),
     prompt_text TEXT NOT NULL,

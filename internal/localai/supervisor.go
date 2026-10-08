@@ -114,7 +114,15 @@ func (b *OSProcessBackend) Signal(pid int, sig os.Signal) error {
 		return err
 	}
 	if runtime.GOOS == "windows" {
-		return p.Kill()
+		// Colibri runs an inference-engine child beneath its Python server.
+		// Killing only the parent on Windows leaks the child and its VRAM.
+		// This is called only after VerifyIdentity authenticates the managed
+		// process, and taskkill's /T closes its descendants as well.
+		result, killErr := exec.Command("taskkill.exe", "/PID", strconv.Itoa(pid), "/T", "/F").CombinedOutput()
+		if killErr != nil && b.Alive(pid) {
+			return fmt.Errorf("stop verified managed process tree: %w: %s", killErr, strings.TrimSpace(string(result)))
+		}
+		return nil
 	}
 	return p.Signal(sig)
 }
@@ -725,7 +733,7 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 		env = append(env, "LD_LIBRARY_PATH="+filepath.Dir(cfg.Executable))
 	}
 	if strings.EqualFold(cfg.RuntimeBackend, "colibri") {
-		env = append(env, "COLI_MODEL="+cfg.ModelPath, "COLI_MODEL_ID="+firstNonEmpty(cfg.ModelRef, "onepane-colibri"))
+		env = append(env, "COLI_MODEL="+cfg.ModelPath, "COLI_MODEL_ID="+firstNonEmpty(cfg.ModelRef, "onepane-colibri"), "COLI_SERVE_PORT="+strconv.Itoa(port))
 		env = append(env, colibriTierEnv(cfg.ColibriTier)...)
 	}
 	pid, err := s.processes.Start(context.Background(), LaunchSpec{Executable: executable, Args: args, Env: env, Dir: filepath.Dir(cfg.Executable),LogPath: filepath.Join(s.dataDir,"components","logs","local-runtime-"+inst.ID+".log")})
@@ -950,6 +958,13 @@ func (s *RuntimeSupervisor) Stop(ctx context.Context, deploymentID string) error
 		}
 	}
 	deadline := time.Now().Add(5 * time.Second)
+	// Colibri's SIGTERM handler drains the child engine and flushes expert
+	// cache state before exit. Avoid forcing it down at the generic 5s limit.
+	var runtimeName string
+	_ = s.db.QueryRowContext(ctx, "SELECT runtime_name FROM model_deployments WHERE id=?", deploymentID).Scan(&runtimeName)
+	if strings.EqualFold(runtimeName, "colibri") && runtime.GOOS != "windows" {
+		deadline = time.Now().Add(35 * time.Second)
+	}
 	for inst.PID > 1 && s.processes.Alive(inst.PID) && time.Now().Before(deadline) {
 		time.Sleep(100 * time.Millisecond)
 	}

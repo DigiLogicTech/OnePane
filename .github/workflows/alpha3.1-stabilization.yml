@@ -88,6 +88,8 @@ jobs:
           node --check internal/webui/static/release-smoke.js
           node --check internal/webui/static/tasks-page.js
           node --check internal/webui/static/app.js
+          node --check internal/webui/static/settings-redesign.js
+          node --check internal/webui/static/assistant-model-picker.js
           node --check internal/webui/static/project-workspace-page.js
           node --check internal/webui/static/models-followup-view.js
           node --check internal/webui/static/models-followup-jobs.js

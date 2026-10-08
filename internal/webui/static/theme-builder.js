@@ -14,7 +14,7 @@ function qa8HexColor(text,fallback){
  const raw=String(text||"").trim();
  if(/^#[0-9a-f]{6}$/i.test(raw))return raw.toLowerCase();
  if(/^#[0-9a-f]{3}$/i.test(raw))return "#"+[...raw.slice(1)].map(c=>c+c).join("").toLowerCase();
- const rgb=/^rgba?\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)/i.exec(raw);
+ const rgb=/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(raw);
  if(rgb){return "#"+rgb.slice(1,4).map(x=>Math.min(255,+x).toString(16).padStart(2,"0")).join("");}
  return fallback;
 }

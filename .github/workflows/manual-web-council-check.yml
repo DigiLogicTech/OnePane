@@ -25,6 +25,8 @@ jobs:
       - name: Check Web Chat syntax
         run: |
           node --check internal/webui/static/web-chat-page.js
+          node --check internal/webui/static/web-chat-session-tabs.js
+          node scripts/validate_web_chat_sessions.js
           node --check internal/webui/static/app.js
           node --check internal/webui/static/app-foundation.js
       - name: Test Council and API packages

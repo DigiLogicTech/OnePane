@@ -132,7 +132,7 @@ async function a40WebNewConversation(session, turn) {
   a40WebDrafts.delete(session.id);
   persist();
   a39WebOpen(provider.url);
-  notice("New conversation ready. The Council turn and frozen prompt are unchanged.");
+  notice("Handoff restarted. Start a new chat on the provider website; the Council turn is unchanged.");
   renderWebChat();
 }
 async function a40WebSubmit(session,turn) {

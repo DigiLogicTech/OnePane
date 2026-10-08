@@ -98,6 +98,9 @@ func (s *Service) installLlamaRuntimeEntry(ctx context.Context, entry RuntimeCat
 			!strings.EqualFold(filepath.Join(filepath.Dir(base),entry.Name()),oldRoot){stale++}
 	}
 	if stale>=2{return fmt.Errorf("llama.cpp %s update blocked: %d obsolete runtime generations require storage cleanup",backend,stale)}
+	// A CUDA archive, its extracted runtime and rollback generation can be
+	// present simultaneously. Keep at least 5 GiB available before staging.
+	if err:=checkRuntimeDiskBudget(filepath.Join(s.dataDir,"runtimes"),5<<30);err!=nil{return err}
 	downloads := filepath.Join(s.dataDir,"components","downloads"); if err:=os.MkdirAll(downloads,0o700); err!=nil{return err}
 	archive := filepath.Join(downloads,fmt.Sprintf("llamacpp-%s-%s",manifest.Version,backend))
 	if _,err:=s.fetcher.Fetch(ctx,manifest.SourceURL,archive,manifest.SHA256); err!=nil{return err}

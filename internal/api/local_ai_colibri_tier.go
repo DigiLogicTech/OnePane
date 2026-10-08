@@ -1,11 +1,25 @@
 package api
 
 import (
+    "context"
+    "encoding/json"
     "net/http"
     "strings"
 
     "github.com/DigiLogicTech/OnePane/internal/localai"
 )
+
+type colibriTierService interface {
+    ColibriTier(context.Context, string) (localai.ColibriTierState, error)
+    SetColibriTier(context.Context, localai.ColibriTierCommand) (localai.ColibriTierState, error)
+    ColibriPlan(context.Context, string) (json.RawMessage, error)
+}
+
+func (s *Server) requireColibriTier(w http.ResponseWriter) (colibriTierService,bool) {
+    service,ok:=s.localAI.(colibriTierService)
+    if !ok {writeError(w,http.StatusServiceUnavailable,"Colibri tier controls unavailable");return nil,false}
+    return service,true
+}
 
 // Authorize against the deployment's real workspace, not a caller-provided
 // workspace ID. Tier settings are never cross-workspace writable.
@@ -26,7 +40,8 @@ func (s *Server) getColibriTier(w http.ResponseWriter, r *http.Request) {
     dep:=strings.TrimSpace(r.PathValue("deploymentID"))
     if !s.authorizeColibriDeployment(w,r,ws,dep,"model.read"){return}
     if !s.authorize(w,r,i,ws,"model.read"){return}
-    out,err:=s.localAI.ColibriTier(r.Context(),dep)
+    tier,ready:=s.requireColibriTier(w);if !ready{return}
+    out,err:=tier.ColibriTier(r.Context(),dep)
     respondDomain(w,out,err,http.StatusOK)
 }
 
@@ -41,7 +56,8 @@ func (s *Server) setColibriTier(w http.ResponseWriter, r *http.Request) {
     dep:=strings.TrimSpace(r.PathValue("deploymentID"))
     if !s.authorizeColibriDeployment(w,r,ws,dep,"model.write"){return}
     if !s.authorize(w,r,i,ws,"model.write"){return}
-    out,err:=s.localAI.SetColibriTier(r.Context(),localai.ColibriTierCommand{DeploymentID:dep,Settings:in.Settings})
+    tier,ready:=s.requireColibriTier(w);if !ready{return}
+    out,err:=tier.SetColibriTier(r.Context(),localai.ColibriTierCommand{DeploymentID:dep,Settings:in.Settings})
     if err!=nil {writeError(w,http.StatusConflict,err.Error());return}
     writeJSON(w,http.StatusOK,out)
 }
@@ -52,7 +68,8 @@ func (s *Server) planColibriTier(w http.ResponseWriter, r *http.Request) {
     dep:=strings.TrimSpace(r.PathValue("deploymentID"))
     if !s.authorizeColibriDeployment(w,r,ws,dep,"model.read"){return}
     if !s.authorize(w,r,i,ws,"model.read"){return}
-    out,err:=s.localAI.ColibriPlan(r.Context(),dep)
+    tier,ready:=s.requireColibriTier(w);if !ready{return}
+    out,err:=tier.ColibriPlan(r.Context(),dep)
     if err!=nil {writeError(w,http.StatusConflict,err.Error());return}
     writeJSON(w,http.StatusOK,out)
 }

@@ -454,13 +454,46 @@ func (s *Service) CompleteTestbed(ctx context.Context, sessionID string) error {
  quality:=map[string]any{"status":status,"profile_version":"onepane.manual-agent-check/v2","evidence":evidence,"metrics":metrics}
  raw,err:=json.Marshal(quality);if err!=nil{return err}
  now:=s.clock.UnixMilli()
- return s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+ if err:=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
   res,err:=tx.ExecContext(ctx,`UPDATE model_testbed_sessions SET status='completed',completed_at=?,updated_at=?,revision=revision+1 WHERE id=? AND status='active'`,now,now,sessionID)
   if err!=nil{return err};n,_:=res.RowsAffected();if n!=1{return errors.New("testbed session state conflict")}
   // Never promote admission or claim context verification from a manual probe.
   _,err=tx.ExecContext(ctx,`UPDATE model_spec_sheets SET qualification_json=?,updated_at=?,revision=revision+1 WHERE deployment_id=? AND hardware_profile_id=?`,string(raw),now,sess.DeploymentID,sess.HardwareProfileID)
   return err
- })
+ });err!=nil{return err}
+ // All probes and evidence are persisted. Release the model's CPU/GPU memory.
+ // Do not evict concurrent inference, which is protected by StopIfIdle.
+ if s.supervisor!=nil{
+  if _,err:=s.supervisor.StopIfIdle(ctx,sess.DeploymentID);err!=nil{
+   return fmt.Errorf("Agent Check evidence saved but runtime could not be unloaded: %w",err)
+  }
+ }
+ return nil
+}
+
+// AbortTestbed closes a failed manual Agent Check and frees model residency.
+// Sessions are not allowed to manufacture a successful qualification on abort.
+func (s *Service) AbortTestbed(ctx context.Context, sessionID string, cause string) error {
+ sess,err:=s.TestbedSession(ctx,strings.TrimSpace(sessionID));if err!=nil{return err}
+ if sess.Status=="completed" {
+  // A late error in the UI must not turn completed evidence into failure.
+  if s.supervisor!=nil {_,err=s.supervisor.StopIfIdle(ctx,sess.DeploymentID)}
+  return err
+ }
+ if sess.Status!="active" {return nil}
+ cause=strings.TrimSpace(cause)
+ if len(cause)>500{cause=cause[:500]}
+ if cause==""{cause="Agent Check interrupted"}
+ now:=s.clock.UnixMilli()
+ res,err:=s.db.ExecContext(ctx,`UPDATE model_testbed_sessions SET status='failed',completed_at=?,updated_at=?,revision=revision+1 WHERE id=? AND status='active'`,now,now,sessionID)
+ if err!=nil{return err}
+ n,err:=res.RowsAffected();if err!=nil{return err}
+ if n!=1{return errors.New("Agent Check session was already finalized")}
+ s.markManualAgentCheckFailed(ctx,sess,errors.New(cause))
+ if s.supervisor!=nil{
+  if _,err:=s.supervisor.StopIfIdle(ctx,sess.DeploymentID);err!=nil{return fmt.Errorf("Agent Check stopped, but model unload failed: %w",err)}
+ }
+ return nil
 }
 
 func validAdmission(v AdmissionStatus) bool {

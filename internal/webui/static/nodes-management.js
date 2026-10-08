@@ -178,11 +178,11 @@ async function nextNodeToggleGrant(){
 }
 async function nextNodeSavePolicy(){
  var id=nextNodeUI.selected,p=nextNodeUI.policy||{};
- var in={enabled:$("#nextNodeEnabled").checked,idle_only:$("#nextNodeIdle").checked,
+ var payload={enabled:$("#nextNodeEnabled").checked,idle_only:$("#nextNodeIdle").checked,
  allow_model_downloads:$("#nextNodeDownloads").checked,runtime_installation:$("#nextNodeRuntimePolicy").value,
  project_scope:$("#nextNodeProjectScope").value,availability:p.availability||{},
  limits:p.limits||{},allowed_projects:p.allowed_projects||[]};
- try{nextNodeUI.policy=await apiRequest("/v1/nodes/"+encodeURIComponent(id)+"/compute-policy",{method:"POST",body:JSON.stringify(in)});nextNodeDraw();notice("Node compute policy saved.");}
+ try{nextNodeUI.policy=await apiRequest("/v1/nodes/"+encodeURIComponent(id)+"/compute-policy",{method:"POST",body:JSON.stringify(payload)});nextNodeDraw();notice("Node compute policy saved.");}
  catch(e){notice(e.message,"bad");}
 }
 async function nextNodeRevoke(){

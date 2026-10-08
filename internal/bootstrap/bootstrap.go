@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -113,10 +114,12 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 		return nil, fmt.Errorf("create state directory: %w", err)
 	}
 
+	log.Printf("bootstrap stage: open durable SQLite state")
 	db, err := sqlite.Open(dbPath)
 	if err != nil {
 		return nil, err
 	}
+	log.Printf("bootstrap stage: apply/validate SQLite migrations")
 	if err := db.Migrate(ctx); err != nil {
 		var migrationErr *sqlite.MigrationError
 		if errors.As(err, &migrationErr) && strings.TrimSpace(migrationErr.BackupPath) != "" {
@@ -130,6 +133,7 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 		return nil, fmt.Errorf("migrate database: %w", err)
 	}
 
+	log.Printf("bootstrap stage: SQLite migrations complete")
 	clk := clock.Real{}
 	systemService := system.NewService(db.SQL(), db, clk)
 	if _, err := systemService.EnsureBootstrap(ctx); err != nil {
@@ -175,6 +179,7 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 	taskService.SetAdmissionGuard(teamService)
 	authorityService := authority.NewService(db.SQL(), db, clk)
 	watchdogService := watchdog.NewService(db.SQL(), db, clk, "control-plane", 15*time.Second)
+	log.Printf("bootstrap stage: initialize watchdog heartbeat")
 	if err := watchdogService.Heartbeat(ctx, map[string]any{"status": "bootstrapping"}); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("initialize watchdog heartbeat: %w", err)
@@ -304,6 +309,7 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 			return nil, fmt.Errorf("register local AI catalog trust key %s: %w", keyID, err)
 		}
 	}
+	log.Printf("bootstrap stage: initialize local AI service")
 	localAIService := localai.NewService(db.SQL(), db, clk, inferenceService, cfg.Storage.DataDir, catalogTrust)
 	if err := localAIService.ConfigureModelPool(cfg.LocalAI.ModelPoolPath); err != nil {
 		_ = db.Close()
@@ -317,6 +323,7 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("configure llmfit advisory source: %w", err)
 	}
+	log.Printf("bootstrap stage: validate bundled model catalogue")
 	if _, err := localAIService.Catalog().EnsureBundled(ctx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("bootstrap trusted local AI catalog: %w", err)
@@ -329,14 +336,17 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("register Colibri local inference transport: %w", err)
 	}
+	log.Printf("bootstrap stage: recover local model processes")
 	if err := localAIService.RecoverManagedRuntimes(ctx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("recover managed local runtimes: %w", err)
 	}
+	log.Printf("bootstrap stage: recover managed model components")
 	if err := localAIService.RecoverManagedComponents(ctx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("recover managed local components: %w", err)
 	}
+	log.Printf("bootstrap stage: initialize Projects and agents")
 	projectWorkspaceService := projectworkspace.NewService(db.SQL(), db, clk)
 	projectRoot := strings.TrimSpace(cfg.Storage.ProjectRoot)
 	if projectRoot == "" {
@@ -388,6 +398,7 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 	}
 	readOnlySlice := verticalslice.NewReadOnlyRunner(taskService, authorityService, toolGateway, observationService, verificationService)
 
+	log.Printf("bootstrap stage: service initialization complete")
 	return &Runtime{
 		DB: db, System: systemService, Nodes: nodeService, Tasks: taskService,
 		Authority: authorityService, Budgets: budgetService, Approvals: approvalService, Policy: policyEngine, Artifacts: artifactService, Observations: observationService,

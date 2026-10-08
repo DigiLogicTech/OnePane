@@ -91,6 +91,7 @@ jobs:
           node --check internal/webui/static/project-workspace-page.js
           node --check internal/webui/static/models-followup-view.js
           node --check internal/webui/static/models-followup-jobs.js
+          node --check internal/webui/static/models-install-monitor.js
           node --check internal/webui/static/models-followup-discover.js
           node --check internal/webui/static/ui-consistency.js
           node --check internal/webui/static/attention-inspector.js

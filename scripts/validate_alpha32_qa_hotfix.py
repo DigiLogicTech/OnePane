@@ -10,7 +10,7 @@ testbed=read("internal/localai/testbed.go")
 storage=read("internal/localai/storage_lifecycle.go")
 install=read("internal/webui/static/models-followup-jobs.js")
 assert '$$("[data-a36-remove-backend]").forEach' in runtime, "llama uninstall button binding must use all-selector"
-assert '$("[data-a36-remove-backend]").forEach' not in runtime, "single-element selector cannot call forEach"
+assert '\n $("[data-a36-remove-backend]").forEach' not in runtime, "single-element selector cannot call forEach"
 assert "ensurePendingManualTestbedSpec" in testbed and "ON CONFLICT(deployment_id) DO NOTHING" in testbed, "Agent Check pending record repair missing"
 assert "status='disabled'" in storage and "status='ready'" in storage, "disabled backend cleanup must protect active runtime roots"
 assert "theme-compact-swatches" in theme and "background-color:" in theme, "theme palette chips missing"

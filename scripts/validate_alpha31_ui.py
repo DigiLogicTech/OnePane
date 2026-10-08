@@ -87,7 +87,7 @@ ck("Colibri and OmniRoute share compact managed lifecycle controls", 'a31Runtime
 ck("External OmniRoute provider lifecycle remains", "omniQA(false)" in app and "omniQA(true)" in app)
 ck("Models expose Local Cloud Routing Discover", all(x in app for x in ['data-a31-model-tab="local"','data-a31-model-tab="cloud"','data-a31-model-tab="routing"','data-a31-model-tab="discover"']))
 ck("Model Routing supports ordered multi fallback", "fallback_models" in app and "a31RenderRoutingModels" in app and "fallback_candidate_ids" in app)
-ck("Discover owns the canonical local model catalogue", "a31RenderDiscoverModels" in app and "Discover Models" in app and "a31OpenDiscover" in app)
+ck("Discover owns the canonical local model catalogue", "a31RenderDiscoverModels" in app and 'data-a31-model-tab="discover"' in app and '<div class="card-title">Recommended Models</div>' not in app)
 ck("Cloud credentials distinguish Direct and OmniRoute consumers", 'data-consumer="direct"' in app and 'data-consumer="omniroute"' in app and "a31EditOmniCredential" in app)
 ck("Secrets is primary navigation", '["secrets","⌑","Secrets"]' in app)
 

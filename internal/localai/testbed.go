@@ -236,6 +236,12 @@ func (s *Service) StartTestbed(ctx context.Context, deploymentID string, actor *
 	if err != nil {
 		return out, fmt.Errorf("cannot load deployment %s for Agent Check: %w", deploymentID, err)
 	}
+    // Agent Check must not create an active trial for an absent model artifact.
+    if s.supervisor!=nil {
+      if _,_,_,e:=s.supervisor.resolve(ctx,deploymentID);e!=nil {
+        return out,fmt.Errorf("Agent Check preflight: %w",e)
+      }
+    }
 	idv, err := s.ids.New("tb")
 	if err != nil {
 		return out, err

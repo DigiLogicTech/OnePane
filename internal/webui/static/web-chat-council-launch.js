@@ -7,7 +7,7 @@ const A41_MAX_WEB_SEATS=8;
 let a41WebCouncilLaunch=null;
 
 function a41DefaultWebCouncilDraft(){
-  return {name:"Web Research Council",objective:"",critique_rounds:2,synthesis_pass:true,chair_mode:"manual",chair_provider_id:"chatgpt",chair_model_label:"",chair_require_approval:true,synthesis_index:0,seats:[
+  return {name:"Web Research Council",objective:"",critique_rounds:2,synthesis_pass:true,chair_mode:"manual",chair_provider_id:"chatgpt",chair_model_label:"",chair_require_approval:true,synthesis_index:1,seats:[
     {provider_id:"chatgpt",model_label:"",role_name:"Independent researcher"},
     {provider_id:"claude",model_label:"",role_name:"Critical analyst"},
     {provider_id:"gemini",model_label:"",role_name:"Alternative researcher"}
@@ -347,7 +347,7 @@ function a41OpenWebOnlyCouncilWizard(){
   };
   const syncSynthesis=()=>{
     const control=$("#a41SynthesisSeat");
-    const selected=Number(control.value);
+    const selected=control.options.length?Number(control.value):draft.synthesis_index;
     control.innerHTML=$("[data-a41-seat]",form).map((el,i)=>{
       const role=el.querySelector('[name="role_name"]')?.value||("Research seat "+(i+1));
       const provider=el.querySelector('[name="provider_id"]')?.value||"";

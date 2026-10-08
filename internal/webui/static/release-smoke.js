@@ -27,7 +27,7 @@
   const workspace2={id:"pws-release-2",name:"Disposable workspace",widgets:[{id:"pw-release-2-notes",type:"notes",title:"Notes",col:6,row:4}],orchestration:{mode:"direct",supervisor:{model:"auto",agent:"onepane-default"},team:{model:"auto",agent:"onepane-default",count:2},council:{model:"auto",agent:"onepane-default",count:2}}};
   let project={id:"project-release",workspace_id:"workspace-release",name:"Release QA Project",description:"Installed behavioural acceptance",status:"active",revision:1,project_policy:{onepane_ui:{workspaces:[workspace,workspace2]}}};
   let taskRows=[{id:"task-release",workspace_id:"workspace-release",project_id:"project-release",project_workspace_id:"pws-release",objective:"Release task",state:"complete",scheduling_class:"user_interactive",priority:0,revision:1,created_at:1700000000000,updated_at:1700000000000}],archivedTaskRows=[],routineRows=[],lastRoutinePayload=null;
-  let projectPatchCount=0,turns=[];
+  let projectPatchCount=0,turns=[],discoverInstalledFixture=false;
   const originalFetch=window.fetch.bind(window);
   window.EventSource=class{addEventListener(){}close(){}};
 
@@ -75,7 +75,8 @@
     if(path==="/v1/local-ai/discovery")return json({models:[],source_errors:{}});
     if(path==="/v1/local-ai/llama-runtimes")return json([]);
     if(["/v1/providers","/v1/events","/v1/agent-runtime-presets","/v1/scheduler/candidates","/v1/local-ai/catalog","/v1/skills/packages","/v1/skills/assignments","/v1/agent-profiles","/v1/teams","/v1/team-presets","/v1/provider-oauth/configs"].includes(path))return json([]);
-    if(path==="/v1/local-ai/deployments")return json({deployments:[]});
+    if(path==="/v1/local-ai/catalog")return json(discoverInstalledFixture?[{model_ref:"google/gemma-3-1b-it",display_name:"Gemma 3 1B IT",installable:true,installable_quantizations:["Q4_K_M"],context_length:8192}]:[]);
+    if(path==="/v1/local-ai/deployments")return json({deployments:discoverInstalledFixture?[{deployment_id:"dep-gemma-qa",model_ref:"google/gemma-3-1b-it",display_name:"Gemma 3 1B IT",status:"ready",runtime_name:"llamacpp"}]:[]});
     if(path==="/v1/local-ai/components")return json({});
     if(path==="/v1/settings/local-ai")return json({model_pool_path:""});
     return json({});
@@ -314,8 +315,14 @@
     const restoreButton=await waitFor(()=>document.querySelector('[data-task-archive="task-release"][data-task-restore="1"]'),"Task Restore action");restoreButton.click();
     await waitFor(()=>taskRows.some(t=>t.id==="task-release")&&!archivedTaskRows.some(t=>t.id==="task-release"),"Archived task restored");
     await waitFor(()=>document.querySelector('[data-task-archive="task-release"][data-task-restore="0"]')&&!document.querySelector('[data-task-archive="task-release"][data-task-restore="1"]'),"Task restore render settled");
-    await route("models");check(document.querySelector("#a31ModelsRoot")&&!document.querySelector("#a31ModelsRoot .error"),"Models route");check(document.querySelectorAll("[data-a31-model-tab]").length===4,"Models exposes Local Cloud Routing Discover tabs");check(document.querySelector('#primaryNav [data-route="secrets"]'),"Secrets is primary navigation");a31SetModelView("discover");await waitFor(()=>document.querySelector("#a31DiscoverCatalog"),"Discover model catalogue");check(document.querySelector("#a31DiscoverSource"),"Discover source selector");a31SetModelView("cloud");await waitFor(()=>document.querySelector('[data-cloud-provider-row][data-auth="oauth"]'),"Cloud OAuth provider is visible");a31SetModelView("local");await waitFor(()=>document.querySelector(".hardware-card"),"Local Models hardware surface");check(document.querySelector("#a31-llamacpp-status"),"llama.cpp managed runtime card");
-    await route("nodes");check(document.querySelector("#a31Nodes")&&!document.querySelector("#a31Nodes .error"),"Nodes envelope");
+    discoverInstalledFixture=true;
+    await route("models");check(document.querySelector("#a31ModelsRoot")&&!document.querySelector("#a31ModelsRoot .error"),"Models route");check(document.querySelectorAll("[data-a31-model-tab]").length===4,"Models exposes Local Cloud Routing Discover tabs");check(document.querySelector('#primaryNav [data-route="secrets"]'),"Secrets is primary navigation");a31SetModelView("discover");await waitFor(()=>document.querySelector("#a31DiscoverCatalog"),"Discover model catalogue");check(document.querySelector("#a31DiscoverSource"),"Discover source selector");await waitFor(()=>document.querySelector('[data-a31-discover-install-ref="google/gemma-3-1b-it"]'),"Installed Gemma Discover action");
+    const installedDiscoverButton=check(document.querySelector('[data-a31-discover-install-ref="google/gemma-3-1b-it"]'),"Installed model discover button");
+    check(installedDiscoverButton.disabled&&installedDiscoverButton.textContent.trim()==="Installed","Already-installed catalogue model cannot be installed again");
+    discoverInstalledFixture=false;a31SetModelView("cloud");await waitFor(()=>document.querySelector('[data-cloud-provider-row][data-auth="oauth"]'),"Cloud OAuth provider is visible");a31SetModelView("local");await waitFor(()=>document.querySelector(".hardware-card"),"Local Models hardware surface");check(document.querySelector("#a31-llamacpp-status"),"llama.cpp managed runtime card");
+    await route("nodes");
+    const nodeRoot=document.querySelector("#a31Nodes"),nodeError=nodeRoot?.querySelector(".error")?.textContent||"";
+    check(nodeRoot&&!nodeError,"Nodes envelope"+(nodeError?": "+nodeError:""));
     document.querySelector("#a31AddNode")?.click();await waitFor(()=>document.querySelector("#pairNodeForm"),"pairing modal");check(document.querySelector("#pairNodeForm"),"Add Node pairing flow");closeModal();
     await route("nodes");await waitFor(()=>document.querySelector('[data-a31-node="node-release"]'),"Node card");check(document.querySelector('[data-a31-node="node-release"] .card-title')?.textContent==="RELEASE-PC (Local)","Nodes prefer machine name and mark local device");check(document.querySelector('[data-a31-node="node-release"] .list-meta')?.textContent?.includes("node-release"),"Node ID remains secondary metadata");
     await route("agents");check(!document.querySelector("#viewHost .error"),"Agents route");

@@ -464,6 +464,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/nodes/{nodeID}/model-testbed/{sessionID}/turns", s.remoteNodeListModelTestbedTurns)
 	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/model-testbed/{sessionID}/turns", s.remoteNodeRunModelTestbedTurn)
 	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/model-testbed/{sessionID}/complete", s.remoteNodeCompleteModelTestbed)
+	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/model-testbed/{sessionID}/abort", s.remoteNodeAbortModelTestbed)
 	s.mux.HandleFunc("POST /v1/nodes/{nodeID}/models/{deploymentID}/admission", s.remoteNodeAdmitModel)
 	s.mux.HandleFunc("POST /v1/local-ai/detect", s.detectLocalAI)
 	s.mux.HandleFunc("POST /v1/local-ai/recommendations", s.recommendLocalAI)
@@ -3052,6 +3053,17 @@ func (s *Server) remoteNodeCompleteModelTestbed(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, map[string]any{"completed": true})
 }
 
+func (s *Server) remoteNodeAbortModelTestbed(w http.ResponseWriter, r *http.Request) {
+ if _,ok:=s.requireNodeOperator(w,r);!ok{return}
+ var in struct{Reason string `json:"reason"`}
+ if !decodeJSON(w,r,&in){return}
+ remote,ok:=s.federation.(interface{RemoteAbortModelTestbed(context.Context,string,string,string) error})
+ if !ok{writeError(w,http.StatusServiceUnavailable,"remote Agent Check cleanup unavailable");return}
+ if err:=remote.RemoteAbortModelTestbed(r.Context(),strings.TrimSpace(r.PathValue("nodeID")),strings.TrimSpace(r.PathValue("sessionID")),in.Reason);err!=nil{
+  writeError(w,http.StatusConflict,err.Error());return
+ }
+ writeJSON(w,http.StatusOK,map[string]any{"aborted":true})
+}
 func (s *Server) remoteNodeAdmitModel(w http.ResponseWriter, r *http.Request) {
 	i, ok := s.requireNodeOperator(w, r)
 	if !ok {

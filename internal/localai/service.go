@@ -279,7 +279,10 @@ func trustedRuntimeArtifact(cat ArtifactCatalog, p HardwareProfile, rec Recommen
 			fallback = &copy
 		}
 	}
-	if fallback != nil {
+	// A generic/CPU runtime may never be substituted for an accelerated
+	// placement: its --device table will not contain the requested CUDA/Vulkan
+	// identifier. Fail closed and let the operator choose CPU explicitly.
+	if fallback != nil && wanted == "cpu" {
 		return *fallback, true
 	}
 	return RuntimeCatalogEntry{}, false

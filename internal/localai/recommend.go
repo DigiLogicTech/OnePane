@@ -210,7 +210,26 @@ func bestPlacement(p HardwareProfile, required int64, pref PlacementMode) (Place
 				}{g, b})
 			}
 		}
-		sort.Slice(candidates, func(i, j int) bool { return candidates[i].g.VRAMBytes < candidates[j].g.VRAMBytes })
+		sort.SliceStable(candidates, func(i, j int) bool {
+			// Automatic placement prioritises a compatible native accelerator
+			// over an integrated GPU. Within a backend prefer more VRAM headroom.
+			rank := func(b string) int {
+				for n, candidate := range backendPriority {
+					if b == candidate { return n }
+				}
+				return len(backendPriority)
+			}
+			pi, pj := rank(candidates[i].b), rank(candidates[j].b)
+			if pi != pj { return pi < pj }
+			fi, fj := candidates[i].g.FreeVRAMBytes, candidates[j].g.FreeVRAMBytes
+			if fi == 0 { fi = candidates[i].g.VRAMBytes }
+			if fj == 0 { fj = candidates[j].g.VRAMBytes }
+			if fi != fj { return fi > fj }
+			if candidates[i].g.VRAMBytes != candidates[j].g.VRAMBytes {
+				return candidates[i].g.VRAMBytes > candidates[j].g.VRAMBytes
+			}
+			return deviceID(candidates[i].g) < deviceID(candidates[j].g)
+		})
 		if len(candidates) > 0 {
 			c := candidates[0]
 			fit := classifyFit(required, c.g.VRAMBytes)

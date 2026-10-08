@@ -838,16 +838,7 @@ function openModal(title,body,footer=''){
   $('[data-close-modal]',root).onclick=closeModal;root.firstElementChild.onclick=e=>{if(e.target===root.firstElementChild)closeModal();};
 }
 function closeModal(){closePopover();const r=$('#overlayRoot');if(r)r.innerHTML='';}
-// Toasts are independent from modal/popover content; updating an Attention item
-// must never replace the notification center that the operator is using.
-let onepaneNoticeSerial=0;
-function notice(text,kind='good'){
-  let r=$('#noticeRoot');
-  if(!r){r=document.createElement('div');r.id='noticeRoot';r.setAttribute('role','status');r.setAttribute('aria-live','polite');document.body.appendChild(r);}
-  const serial=++onepaneNoticeSerial;
-  r.innerHTML=`<div class="toast ${kind}">${escapeHtml(text)}</div>`;
-  setTimeout(()=>{if(serial===onepaneNoticeSerial)r.innerHTML='';},2600);
-}
+function notice(text,kind='good'){const r=$('#overlayRoot');r.innerHTML=`<div class="toast ${kind}">${escapeHtml(text)}</div>`;setTimeout(()=>{if(r.textContent.includes(text))r.innerHTML='';},2600);}
 
 async function renderTasks(){
   $('#viewHost').innerHTML=`<section class="page">${pageHeader('Tasks','Canonical task queue and execution history','<button class="btn primary" id="newTaskButton">New Task</button>')}<div id="tasksBody" class="table-shell"><div class="widget-body">Loading tasks…</div></div></section>`;

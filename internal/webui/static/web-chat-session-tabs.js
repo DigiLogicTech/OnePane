@@ -4,6 +4,7 @@
  */
 const A40_WEB_MAX_TABS = 16;
 const a40WebDrafts = new Map();
+const a40WebSavedResponses = new Map(); // Session-only local transcript; not browser storage.
 let a40WebRenderingEpoch = 0;
 
 function a40WebWorkspace() { return String(onepaneWorkspace||""); }
@@ -63,6 +64,17 @@ function a40WebSwitch(id) {
   persist();
   renderWebChat();
 }
+function a40SaveIndependentResponse(session){
+ const response=String(a40WebDrafts.get(session.id)?.response||"").trim();
+ if(!response)return notice("Paste the provider response before saving.","bad");
+ const records=a40WebSavedResponses.get(session.id)||[];
+ records.push({text:response,provider:session.provider_id,created_at:new Date().toISOString()});
+ a40WebSavedResponses.set(session.id,records);
+ const draft=a40WebDrafts.get(session.id)||{};
+ a40WebDrafts.set(session.id,{...draft,response:""});
+ notice("Response saved in this Web Chat session (not persisted across restarts).");
+ renderWebChat();
+}
 function a40WebClose(id) {
   const entry=a40WebTabs().find(s=>s.id===id);
   if(!entry)return;
@@ -71,12 +83,15 @@ function a40WebClose(id) {
     !confirm("Close this Web Chat tab? Its unsent draft will be discarded; queued Council turns will be preserved."))return;
   state.webChatSessions=a40WebAllTabs().filter(s=>s.id!==id);
   a40WebDrafts.delete(id);
+  a40WebSavedResponses.delete(id);
   const next=a40WebTabs()[0];
   if(state.webChatActiveSession===id)state.webChatActiveSession=next?.id||"";
   persist();
   renderWebChat();
 }
 function a40WebOpenNewDialog() {
+  // A native WebView2 sibling can otherwise occlude the modal and intercept input.
+  a40NativeProviderSend({op:"hide"});
   openModal("New Web Chat",`
     <form id="a40NewChatForm" class="qa-form">
       <label>Cloud provider<select name="provider_id">
@@ -204,6 +219,7 @@ async function a40RenderWebChat(){
   const chairTurn=a42ChairActive(active);
   const pendingCount=rows.filter(t=>t.status==="awaiting_input").length+chairRows.filter(a42ChairPending).length;
   const originalDraft=a40WebDrafts.get(active.id)||{prompt:"",response:""};
+  const savedResponses=a40WebSavedResponses.get(active.id)||[];
   const attached=!!selected||!!chairTurn;
   const draft=chairTurn?chairTurn.prompt_text:(selected?selected.prompt_text:originalDraft.prompt);
   const response=chairTurn?.status==="awaiting_approval"?(chairTurn.response_text||""):
@@ -274,9 +290,12 @@ async function a40RenderWebChat(){
           <div class="toolbar">
             ${chairTurn?.status==="awaiting_input"?'<button class="btn primary" data-a42-chair-submit type="button">Submit Chair proposal</button>':
               chairTurn?.status==="awaiting_approval"?'<button class="btn primary" data-a42-chair-approve type="button">Approve agenda / questions</button>':
-              selected?`<button class="btn primary" data-a40-submit type="button" ${selected.status!=="awaiting_input"?"disabled":""}>Submit to Council</button>`:""}
-            <span class="list-meta">${chairTurn?"Chair proposals only · operator-approved guidance · no executable authority":attached?"Manual consultation only · no tools or task authority":"Text in an unlinked scratchpad is not automatically saved or routed to a Council."}</span>
-          </div></div>
+              selected?`<button class="btn primary" data-a40-submit type="button" ${selected.status!=="awaiting_input"?"disabled":""}>Submit to Council</button>`:
+               !attached?'<button class="btn primary" id="a40SaveResponse" type="button">Save Response</button>':""
+            <span class="list-meta">${chairTurn?"Chair proposals only · operator-approved guidance · no executable authority":attached?"Manual consultation only · no tools or task authority":"Independent responses stay in this session only; they are not sent to providers or Council."}</span>
+          </div>
+          ${!attached&&savedResponses.length?`<div class="a40-saved-responses"><strong>Saved responses · ${savedResponses.length}</strong>${savedResponses.map((entry,i)=>`<details><summary>Response ${i+1} · ${safe(entry.provider)} · ${safe(entry.created_at)}</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${safe(entry.text)}</pre></details>`).join("")}</div>`:""}
+          </div>
         </div>
       </section>
     </div>`;
@@ -305,6 +324,7 @@ async function a40RenderWebChat(){
       notice("Web Chat prompt copied to clipboard.");
     }catch(ex){notice(ex.message,"bad")}
   };
+  $("#a40SaveResponse")?.addEventListener("click",()=>a40SaveIndependentResponse(active));
   if(selected) $("[data-a40-submit]").onclick=()=>a40WebSubmit(active,selected);
   if(chairTurn?.status==="awaiting_input")$("[data-a42-chair-submit]").onclick=()=>a42ChairSubmit(active,chairTurn);
   if(chairTurn?.status==="awaiting_approval")$("[data-a42-chair-approve]").onclick=()=>a42ChairApprove(active,chairTurn);

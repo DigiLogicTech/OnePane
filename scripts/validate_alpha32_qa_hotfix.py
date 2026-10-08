@@ -13,7 +13,7 @@ assert '$$("[data-a36-remove-backend]").forEach' in runtime, "llama uninstall bu
 assert '\n $("[data-a36-remove-backend]").forEach' not in runtime, "single-element selector cannot call forEach"
 assert "ensurePendingManualTestbedSpec" in testbed and "ON CONFLICT(deployment_id) DO NOTHING" in testbed, "Agent Check pending record repair missing"
 assert "status='disabled'" in storage and "status='ready'" in storage, "disabled backend cleanup must protect active runtime roots"
-assert "theme-compact-swatches" in theme and "background-color:" in theme, "theme palette chips missing"
+assert "theme-compact-swatches" in theme and '<rect x="0"' in theme and '"fill="${escapeHtml(c)}"' in theme and "background-color:" not in theme, "theme palette chips missing"
 assert "toLocaleUpperCase" in theme, "theme title capitalisation missing"
 assert "#modelDownloadLabel" in css and "white-space:nowrap" in css, "header install indicator may wrap"
 assert "Installing · " in install, "install indicator should be compact"

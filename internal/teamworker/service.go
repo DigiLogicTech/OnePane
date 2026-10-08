@@ -290,7 +290,9 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 	// Web Chat seats are human-mediated. They never call an inference API,
 	// consume a scheduled provider candidate or acquire tool permissions.
 	// Snapshot config and evidence filtering above still govern their prompt.
-	if manual, ok := manualWebSeatFromConfig(member.Config); ok {
+	manual, manualEnabled, manualErr := manualWebSeatFromConfig(member.Config)
+	if manualErr != nil { return s.fail(ctx, res, manualErr) }
+	if manualEnabled {
 		if executionMode != "council" {
 			return s.fail(ctx, res, fmt.Errorf("manual Web Chat seats require Council execution mode"))
 		}

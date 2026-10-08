@@ -71,3 +71,52 @@ func (s *Server) submitManualWebTurn(w http.ResponseWriter,r *http.Request) {
     if err!=nil{respondDomain(w,nil,err,0);return}
     writeJSON(w,http.StatusOK,out)
 }
+
+
+type manualChairCouncilService interface {
+ ManualWebChairTurn(context.Context,string)(team.ManualWebChairTurn,error)
+ ManualWebChairTurns(context.Context,string)([]team.ManualWebChairTurn,error)
+ SubmitManualWebChair(context.Context,team.SubmitManualWebChairCommand)(team.ManualWebChairTurn,error)
+ ApproveManualWebChair(context.Context,team.ApproveManualWebChairCommand)(team.ManualWebChairTurn,error)
+}
+func(s *Server) manualChairService(w http.ResponseWriter)(manualChairCouncilService,bool){
+ if s.team==nil {writeError(w,http.StatusServiceUnavailable,"Council service unavailable");return nil,false}
+ t,ok:=s.team.(manualChairCouncilService)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Council Chair service unavailable");return nil,false}
+ return t,true
+}
+func(s *Server) listManualChairTurns(w http.ResponseWriter,r *http.Request){
+ i,ok:=s.authenticate(w,r);if !ok{return}
+ ws:=strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+ if ws==""{writeError(w,http.StatusBadRequest,"workspace_id is required");return}
+ if !s.authorize(w,r,i,ws,"team.read"){return}
+ chair,ok:=s.manualChairService(w);if !ok{return}
+ turns,err:=chair.ManualWebChairTurns(r.Context(),ws)
+ respondDomain(w,turns,err,http.StatusOK)
+}
+func(s *Server) manualChairFor(w http.ResponseWriter,r *http.Request,cap string)(manualChairCouncilService,team.ManualWebChairTurn,string,bool){
+ i,ok:=s.authenticate(w,r);if !ok{return nil,team.ManualWebChairTurn{},"",false}
+ chair,ok:=s.manualChairService(w);if !ok{return nil,team.ManualWebChairTurn{},"",false}
+ turn,err:=chair.ManualWebChairTurn(r.Context(),r.PathValue("chairID"))
+ if err!=nil{respondDomain(w,nil,err,0);return nil,team.ManualWebChairTurn{},"",false}
+ if !s.authorize(w,r,i,turn.WorkspaceID,cap){return nil,team.ManualWebChairTurn{},"",false}
+ return chair,turn,i.PrincipalID,true
+}
+func(s *Server) submitManualChairTurn(w http.ResponseWriter,r *http.Request){
+ chair,turn,actor,ok:=s.manualChairFor(w,r,"team.write");if !ok{return}
+ var in struct{Response string `json:"response_text"`}
+ if !decodeJSON(w,r,&in){return}
+ out,err:=chair.SubmitManualWebChair(r.Context(),team.SubmitManualWebChairCommand{
+  ID:turn.ID,Actor:actor,Response:in.Response,
+ })
+ respondDomain(w,out,err,http.StatusOK)
+}
+func(s *Server) approveManualChairTurn(w http.ResponseWriter,r *http.Request){
+ chair,turn,actor,ok:=s.manualChairFor(w,r,"team.write");if !ok{return}
+ var in struct{ApprovedText string `json:"approved_text"`}
+ if !decodeJSON(w,r,&in){return}
+ out,err:=chair.ApproveManualWebChair(r.Context(),team.ApproveManualWebChairCommand{
+  ID:turn.ID,Actor:actor,ApprovedText:in.ApprovedText,
+ })
+ respondDomain(w,out,err,http.StatusOK)
+}

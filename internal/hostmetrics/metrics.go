@@ -51,8 +51,8 @@ type Sampler struct {
 var hostSampler=&Sampler{}
 func Collect() Snapshot {return hostSampler.CollectWithPaths(nil)}
 func CollectWithPaths(paths map[string]string) Snapshot {return hostSampler.CollectWithPaths(paths)}
-func (s *Sampler) CollectWithPaths(paths map[string]string) Snapshot {return s.CollectWithPaths(nil)}
-func (s *Sampler) Collect() Snapshot {
+func (s *Sampler) Collect() Snapshot {return s.CollectWithPaths(nil)}
+func (s *Sampler) CollectWithPaths(paths map[string]string) Snapshot {
  now:=time.Now()
  name,_:=os.Hostname()
  out:=Snapshot{Timestamp:now.UnixMilli(),Hostname:name,Goroutines:runtime.NumGoroutine(),GPUs:[]GPU{}}

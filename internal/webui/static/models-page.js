@@ -165,8 +165,8 @@ async function a31RenderLocalModels(){
   $$("[data-a42-colibri-tier]").forEach(b=>b.onclick=()=>a42OpenColibriTier(deployments.find(d=>d.deployment_id===b.dataset.a42ColibriTier)));
   $$("[data-a42-colibri-swap]").forEach(b=>b.onclick=()=>a42SwapColibri(deployments.find(d=>d.deployment_id===b.dataset.a42ColibriSwap),b));
   $$("[data-a31-model-spec]").forEach(b=>b.onclick=()=>qa5InspectModel(deployments.find(d=>d.deployment_id===b.dataset.a31ModelSpec)));
-  $("[data-a31-agent-check]").forEach(b=>b.onclick=()=>qa5AgentCheck(deployments.find(d=>d.deployment_id===b.dataset.a31AgentCheck)));
-   $("[data-a31-delete-model]").forEach(b=>b.onclick=()=>{
+  $$("[data-a31-agent-check]").forEach(b=>b.onclick=()=>qa5AgentCheck(deployments.find(d=>d.deployment_id===b.dataset.a31AgentCheck)));
+   $$("[data-a31-delete-model]").forEach(b=>b.onclick=()=>{
      const dep=deployments.find(d=>d.deployment_id===b.dataset.a31DeleteModel);
      if(!dep)return;
      a31ConfirmAction("Delete installed model",`Remove ${dep.display_name||dep.model_ref}? The owned model weights will be permanently deleted. Active or shared models are protected; project references are retained.`,"Delete model",async()=>{

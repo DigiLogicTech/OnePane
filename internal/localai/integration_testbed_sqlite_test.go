@@ -61,6 +61,19 @@ func TestSQLiteManualTestbedRequiredForProductionAdmission(t *testing.T) {
 	if err := svc.CompleteTestbed(ctx, session.ID); err != nil {
 		t.Fatal(err)
 	}
+	// A failed runtime launch must be abortable without violating the DB's
+	// active/completed/cancelled testbed lifecycle CHECK constraint.
+	failed, err := svc.StartTestbed(ctx, "dep", strPtr("admin"), "failing CUDA launch")
+	if err != nil { t.Fatal(err) }
+	if err := svc.AbortTestbed(ctx, failed.ID, "CUDA executable was missing"); err != nil { t.Fatal(err) }
+	aborted, err := svc.TestbedSession(ctx, failed.ID)
+	if err != nil { t.Fatal(err) }
+	if aborted.Status != "cancelled" { t.Fatalf("failed testbed should be cancelled, got %q",aborted.Status) }
+	sheetAfterAbort,err:=svc.SpecSheet(ctx,"dep")
+	if err!=nil {t.Fatal(err)}
+	if !strings.Contains(string(sheetAfterAbort.Qualification),"CUDA executable was missing"){
+	 t.Fatalf("missing failed Agent Check diagnostic evidence: %s",sheetAfterAbort.Qualification)
+	}
 	allowTools := false
 	sheet, err := svc.AdmitModel(ctx, "dep", AdmissionCommand{Status: AdmissionRestricted, ActorPrincipalID: "admin", Restrictions: ModelRestrictions{MaxContextTokens: 8192, DenyCapabilities: []string{"agent.tool"}, AllowToolUse: &allowTools, Notes: []string{"manual trial found weak tool calling"}}})
 	if err != nil {

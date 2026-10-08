@@ -101,6 +101,9 @@ async function nextNodeLoadDetail(id){
 }
 function nextNodeDraw(){
  var root=$("#nextNodeRoot");if(!root)return;
+ // Metrics updates rerender this list every five seconds. Do not reset the
+ // operator's scroll position while Logs changes the available viewport.
+ const previousScroll=root.scrollTop;
  var node=nextNodeUI.nodes.find(function(n){return nextNodeID(n)===nextNodeUI.selected;});
  var top=nextNodeRows();
  var list='<div class="node-grid">'+nextNodeUI.nodes.map(function(n){
@@ -109,6 +112,7 @@ function nextNodeDraw(){
  }).join("")+'</div>';
  var detail=node?nextNodeDetail(node):'<section class="panel-card"><div class="widget-body">No enrolled nodes. Select Add Node to begin a mutually confirmed pairing.</div></section>';
  root.innerHTML=top+list+detail;
+ root.scrollTop=previousScroll;
  $$("[data-next-node]",root).forEach(function(b){b.onclick=async function(){nextNodeUI.selected=b.dataset.nextNode;nextNodeUI.tab="overview";await nextNodeLoadDetail(nextNodeUI.selected);nextNodeDraw();};});
  $$("[data-next-node-tab]",root).forEach(function(b){b.onclick=function(){nextNodeUI.tab=b.dataset.nextNodeTab;nextNodeDraw();};});
  $("#nextNodeRefresh")?.addEventListener("click",function(){nextNodeLoadDetail(nextNodeUI.selected).then(nextNodeDraw).catch(function(e){notice(e.message,"bad");});});

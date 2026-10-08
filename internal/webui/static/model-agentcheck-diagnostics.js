@@ -41,13 +41,23 @@ qa5AgentCheck=async function(dep){
   const fresh=qa5ManagedDeployments.find(x=>String(x.deployment_id)===id)||current;
   await qa5InspectModel(fresh);
   if(failures.length)notice("Agent Check completed with limitations: "+failures.join(" · "),"bad");
-  else notice("Agent Check completed; Spec Sheet updated.");
+  else notice("Agent Check completed; Spec Sheet updated and idle model unloaded.");
   if(currentTab()?.route==="models")renderModels();
  }catch(ex){
+  // Failed first probes never reach /complete. Explicitly close the testbed
+  // and release CPU/GPU allocation; report cleanup failures to the user.
+  let cleanupWarning="";
+  if(sessionID){
+   try{
+    await apiRequest(`/v1/model-testbed/${encodeURIComponent(sessionID)}/abort`,{
+     method:"POST",body:JSON.stringify({reason:"Agent Check "+stage+" failed: "+ex.message})
+    });
+   }catch(cleanupError){cleanupWarning=" · Runtime cleanup: "+cleanupError.message}
+  }
   const prefix=`Agent Check ${stage} failed: ${ex.message}`;
   const msg=/not found/i.test(ex.message)?" Verify this deployment still exists and its runtime is available.":""; 
   if(sessionID){try{await qa5InspectModel(dep)}catch{}}
-  notice(prefix+msg+(sessionID?" · Session: "+sessionID:""),"bad");
+  notice(prefix+msg+(sessionID?" · Session: "+sessionID:"")+cleanupWarning,"bad");
   if(/managed model file missing|managed model file inaccessible|managed model path is not a file|managed model unavailable/i.test(ex.message)){
     openModal("Repair local model",`<div class="widget-body"><p>The registered model artifact is missing or inaccessible. Agent Check cannot run until the installation is repaired.</p><p class="page-subtitle">Rescan disables stale registrations but preserves files, projects and settings. You can then reinstall a verified artifact.</p><div class="toolbar"><button class="btn primary" id="qa5RescanReinstall">Rescan & reinstall</button><button class="btn" id="qa5RepairCancel">Cancel</button></div><div id="qa5RepairFeedback" class="error"></div></div>`);
     document.querySelector("#qa5RepairCancel")?.addEventListener("click",closeModal);

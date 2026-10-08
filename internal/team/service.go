@@ -423,6 +423,35 @@ func (s *Service) StartSession(ctx context.Context, c StartSessionCommand) (Sess
 	if mode != "council" {
 		researchMode = false
 	}
+	// Chair decisions must be bound to a frozen Research Council manifest.
+	// The Web-only release supports a human-mediated Chair or no Chair.
+	if research.ChairMode!="" && research.ChairMode!="none" && research.ChairMode!="manual" {
+		return Session{}, ErrInvalid
+	}
+	if research.ChairMode=="manual" {
+		if !researchMode || research.ChairMemberID=="" || research.ChairMemberID==research.SynthesisMemberID {
+			return Session{}, ErrInvalid
+		}
+		chairValid:=false
+		for _, m:=range members {
+			if m.ID!=research.ChairMemberID {continue}
+			var cfg struct {
+				ManualWeb *struct {Enabled bool `json:"enabled"`} `json:"manual_web"`
+				ChairOnly bool `json:"council_chair_only"`
+			}
+			if json.Unmarshal(m.Config,&cfg)==nil && cfg.ChairOnly && cfg.ManualWeb!=nil && cfg.ManualWeb.Enabled && m.Status=="active" {
+				chairValid=true
+			}
+		}
+		if !chairValid {return Session{},ErrInvalid}
+	}
+	if research.SynthesisPass && research.SynthesisMemberID!="" {
+		found:=false
+		for _,m:=range members {
+			if m.ID==research.SynthesisMemberID && m.Status=="active" && m.MemberKind!="human" {found=true;break}
+		}
+		if !found{return Session{},ErrInvalid}
+	}
 	sid, _ := s.ids.New("tsession")
 	now := s.clock.UnixMilli()
 	snapshot := SessionSnapshot{SessionID: sid, TaskID: taskRow.ID, TaskObjective: taskRow.Objective, TeamID: t.ID, TeamRevision: t.Revision, TeamConfiguration: append(json.RawMessage(nil), t.Configuration...), SessionConfiguration: append(json.RawMessage(nil), cfg...), ExecutionMode: mode, ResearchMode: researchMode, Research: research, GatewayTargetID: c.GatewayTargetID, Members: members}
@@ -622,6 +651,9 @@ func (s *Service) RequestRound(ctx context.Context, c RequestRoundCommand) ([]Tu
 		for _, m := range members {
 			if m.Status != "active" || m.MemberKind == "human" {
 				continue
+			}
+			if researchMode && research.ChairMode=="manual" && m.ID==research.ChairMemberID {
+				continue // Chair is never an independent/critique/synthesis participant.
 			}
 			if len(want) > 0 && !want[m.ID] {
 				continue

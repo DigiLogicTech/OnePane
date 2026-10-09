@@ -32,3 +32,17 @@ Up to **50 Tasks and 96 timeline events** (sorted newest first); the ZIP is in-m
 It can correlate existing Task/Worker event metadata but **cannot yet capture per-click UI actions, complete cross-component HTTP traces, MSI setup logs, system resource snapshots, raw Node diagnostics, interactive timeline filtering, operator-entered reproduction notes or time-limited verbose instrumentation. These remain open in #85. A missing Worker run is reported as no execution entry—not as proof that execution occurred or succeeded.
 
 **Release gate:** Finish #85 plus [three-phase code audit → vision questions → second code review #86](https://github.com/DigiLogicTech/OnePane/issues/86) before RC11 packaging. Preserve RC10 as the recovery baseline.
+
+## Opt-in browser incident capture (incremental #85 implementation)
+
+The Development Workspace Task queue now also has **Browser incident capture**, separate from the Task/Worker ZIP. This is an in-memory session recorder controlled by the **user**, not always-on telemetry.
+
+1. Expand **Browser incident capture** and select **Start capture**. Recording is **off by default** and starts only from that button. It continues across OnePane routes in this browser tab, even when the Workspace panel is no longer visible. It never automatically starts after refresh/restart.
+2. Reproduce the problem and optionally press **Mark issue** to insert a timestamped bookmark. **Stop capture**, or allow the hard **10-minute expiry** to stop automatically. Capture can be cleared at any time.
+3. Select **Review incident trace**. It shows a bounded, locally constructed JSON report with generic UI button/link/form activity, fixed route categories, API *subsystem buckets*, request method, response status and elapsed milliseconds, and counts of unhandled browser errors. **No exception messages, stack traces, raw API paths or parameters, bodies, text inputs, clipboard, chat or model output.**
+4. Select **Download reviewed JSON**, which is available only after stopping and reviewing the exact report. A changed/restarted capture requires reviewing again. The downloaded `onepane-browser-incident.json` is created entirely by the browser; **OnePane never uploads the report or transmits it to a diagnostic backend**. Attach it manually together with the separate Workspace QA ZIP only if you choose.
+5. **Clear capture** removes the in-memory events. Navigation between pages preserves the current capture, but browser refresh/restart clears it.
+
+**Safety:** Capture expires after 600 seconds, retains only 120 recent events and discloses a count of events dropped if exceeded. Only same-origin `/v1/` request categories are observed, without paths, queries, headers, bodies or content. DOM listeners and the temporary browser fetch wrapper are removed when capture ends. The recorder does not change network requests, task permissions, local/cloud inference routing, agent tools, Workspace isolation or any backend policies.
+
+**Limits:** A browser-side incident timeline is not end-to-end server tracing and does not include installer logs, Node/container journals, Agent Check offload telemetry, Windows service logs, or user-entered reproduction notes. Neither the new incident JSON nor the older scoped Workspace ZIP is the complete consolidated support bundle. Those remain mandatory work in #85.

@@ -19,8 +19,8 @@ def definitions(src):
             out.setdefault(match.group(1),[]).append(line_no)
     return out
 
-# Reviewed RC8 change: authenticated profile popover toggle and non-workspace Inspector drag/close controls.
-expected_foundation_blob="97fd1acc071ceea31358c69867ff229a87e06af0"
+# Reviewed RC9 change: deterministic popover dismiss/switch and independent toolbar action state.
+expected_foundation_blob="6c3a52fb30d45ff57d02f0f6f983b138ec380825"
 foundation_bytes=foundation.encode("utf-8")
 actual_foundation_blob=hashlib.sha1(b"blob "+str(len(foundation_bytes)).encode("ascii")+b"\0"+foundation_bytes).hexdigest()
 

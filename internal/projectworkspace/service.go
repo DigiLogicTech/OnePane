@@ -416,6 +416,45 @@ func (s *Service) SetRuntimeDesiredState(ctx context.Context, cmd SetRuntimeDesi
 	return s.repo.Runtime(ctx, cmd.RuntimeID)
 }
 
+// SetApplicationDesiredState requests a lifecycle transition through the
+// existing reconciler. It never equates an operator request with a running
+// container, and never executes the tool on the OnePane host.
+func (s *Service) SetApplicationDesiredState(ctx context.Context, cmd SetApplicationDesiredStateCommand) (Application,error) {
+ if strings.TrimSpace(cmd.ApplicationID)=="" || cmd.ExpectedRevision<1 ||
+  strings.TrimSpace(cmd.ActorPrincipalID)=="" || !validAppDesired(cmd.DesiredState) {
+  return Application{},ErrInvalidCommand
+ }
+ eventID,err:=s.ids.New("evt");if err!=nil{return Application{},err}
+ jobID,err:=s.ids.New("job");if err!=nil{return Application{},err}
+ now:=s.clock.UnixMilli()
+ err=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+  app,err:=s.repo.ApplicationTx(ctx,tx,cmd.ApplicationID);if err!=nil{return err}
+  if app.Revision!=cmd.ExpectedRevision{return ErrRevisionConflict}
+  runtime,err:=s.repo.RuntimeTx(ctx,tx,app.ProjectRuntimeID);if err!=nil{return err}
+  project,err:=s.repo.ProjectTx(ctx,tx,runtime.ProjectID);if err!=nil{return err}
+  if project.Status!="active"{return ErrProjectInactive}
+  if err=s.requireActor(ctx,tx,project.WorkspaceID,cmd.ActorPrincipalID);err!=nil{return err}
+  if app.DesiredState==cmd.DesiredState {return nil}
+  if err=s.repo.UpdateApplicationDesired(ctx,tx,app,cmd.DesiredState,now);err!=nil{return err}
+  payload,_:=json.Marshal(map[string]any{
+   "runtime_id":runtime.ID,"application_id":app.ID,"from":app.DesiredState,
+   "to":cmd.DesiredState,"observed_status":app.Status,"revision":app.Revision+1,
+  })
+  if err=s.events.Append(ctx,tx,event.Event{
+   ID:eventID,WorkspaceID:&project.WorkspaceID,Type:"project_application.desired_state_changed",
+   AggregateType:"project_application",AggregateID:app.ID,ActorPrincipalID:&cmd.ActorPrincipalID,
+   RequestID:cmd.RequestID,TraceID:cmd.TraceID,Payload:payload,OccurredAt:now,
+  });err!=nil{return err}
+  jobPayload,_:=json.Marshal(map[string]any{"project_runtime_id":runtime.ID,"application_id":app.ID,"reason":"application_desired_state"})
+  return s.outbox.Enqueue(ctx,tx,outbox.Job{
+   ID:jobID,WorkspaceID:&project.WorkspaceID,Type:"project_runtime.reconcile",
+   Payload:jobPayload,AvailableAt:now,MaxAttempts:10,CreatedAt:now,
+  })
+ })
+ if err!=nil{return Application{},err}
+ return s.repo.Application(ctx,cmd.ApplicationID)
+}
+
 func normalizeRuntimeNetworkPolicy(raw json.RawMessage) (json.RawMessage, error) {
 	if len(raw) == 0 {
 		return defaultNetworkPolicy(), nil

@@ -227,7 +227,14 @@ func (s *Service) continueWithError(ctx context.Context, run Run, res TickResult
 	return res
 }
 
-func (s *Service) journal(ctx context.Context, runID, kind, status string, candidateKind, candidateID, proposalType, resultRef *string, detail any) error {
+// journal stores one immutable Worker observation and its audit event.
+// The regular path owns its transaction; atomic delegation may pass its own.
+func (s *Service) journal(ctx context.Context,runID,kind,status string,candidateKind,candidateID,proposalType,resultRef *string,detail any) error {
+ return s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx) error {
+  return s.journalInTransaction(ctx,tx,runID,kind,status,candidateKind,candidateID,proposalType,resultRef,detail)
+ })
+}
+func (s *Service) journalInTransaction(ctx context.Context,tx storage.Tx,runID,kind,status string,candidateKind,candidateID,proposalType,resultRef *string,detail any) error {
 	if detail == nil {
 		detail = map[string]any{}
 	}
@@ -237,23 +244,21 @@ func (s *Service) journal(ctx context.Context, runID, kind, status string, candi
 	}
 	now := s.clock.UnixMilli()
 	sid, _ := s.ids.New("awstep")
-	return s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		var seq int64
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(step_number),0)+1 FROM agent_worker_steps WHERE run_id=?`, runID).Scan(&seq); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_worker_steps(id,run_id,step_number,step_kind,status,candidate_kind,candidate_id,proposal_type,result_ref,detail_json,started_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, sid, runID, seq, kind, status, candidateKind, candidateID, proposalType, resultRef, string(raw), now, now); err != nil {
-			return err
-		}
-		var ws, taskID string
-		if err := tx.QueryRowContext(ctx, `SELECT workspace_id,task_id FROM agent_worker_runs WHERE id=?`, runID).Scan(&ws, &taskID); err != nil {
-			return err
-		}
-		eid, _ := s.ids.New("evt")
-		p, _ := json.Marshal(map[string]any{"run_id": runID, "task_id": taskID, "step_id": sid, "step_number": seq, "kind": kind, "status": status, "candidate_kind": candidateKind, "candidate_id": candidateID, "proposal_type": proposalType, "result_ref": resultRef, "detail": detail})
-		actor := WorkerPrincipal
-		return s.events.Append(ctx, tx, event.Event{ID: eid, WorkspaceID: &ws, Type: "agent_worker.step", AggregateType: "agent_worker_run", AggregateID: runID, ActorPrincipalID: &actor, Payload: p, OccurredAt: now})
-	})
+	var seq int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(step_number),0)+1 FROM agent_worker_steps WHERE run_id=?`, runID).Scan(&seq); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_worker_steps(id,run_id,step_number,step_kind,status,candidate_kind,candidate_id,proposal_type,result_ref,detail_json,started_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, sid, runID, seq, kind, status, candidateKind, candidateID, proposalType, resultRef, string(raw), now, now); err != nil {
+		return err
+	}
+	var ws, taskID string
+	if err := tx.QueryRowContext(ctx, `SELECT workspace_id,task_id FROM agent_worker_runs WHERE id=?`, runID).Scan(&ws, &taskID); err != nil {
+		return err
+	}
+	eid, _ := s.ids.New("evt")
+	p, _ := json.Marshal(map[string]any{"run_id": runID, "task_id": taskID, "step_id": sid, "step_number": seq, "kind": kind, "status": status, "candidate_kind": candidateKind, "candidate_id": candidateID, "proposal_type": proposalType, "result_ref": resultRef, "detail": detail})
+	actor := WorkerPrincipal
+	return s.events.Append(ctx, tx, event.Event{ID: eid, WorkspaceID: &ws, Type: "agent_worker.step", AggregateType: "agent_worker_run", AggregateID: runID, ActorPrincipalID: &actor, Payload: p, OccurredAt: now})
 }
 
 func (s *Service) findLease(ctx context.Context, workspaceID, taskID, capability string, action authority.ActionMode, resource string) (string, error) {

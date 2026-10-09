@@ -43,6 +43,7 @@ func TestQAModelAgentCheckEvidenceOnlyIncludesAuthorizedDeploymentMetadata(t *te
      ('check-other','foreign','completed',1600,1700,'PRIVATE_PROMPT_BEARER_CANARY','{}')`,
   `INSERT INTO model_agentcheck_failure_observations(session_id,deployment_id,stage,category,observed_at) VALUES
       ('check-a','allowed','inference_dispatch','deadline_exceeded',1175),
+      ('check-a','allowed','session_abort','abort_requested',1299),
       ('check-b','allowed','runtime_unload','execution_failure',1560),
       ('check-other','foreign','runtime_acquire','not_found',1650)`,
   `INSERT INTO model_testbed_turns VALUES

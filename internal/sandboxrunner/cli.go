@@ -210,6 +210,7 @@ func (e *CLIEngine) EnsureContainer(ctx context.Context, s ContainerSpec) (Conta
  if err!=nil{return ContainerState{},err}
  if !p.Rootless{return ContainerState{},ErrRootlessRequired}
  name:=containerName(s.RuntimeID,s.ApplicationID)
+ hash:=specHash(s)
  // Never use a caller-supplied hash, engine label or container name as
  // proof of isolation: inspect the actual OCI config before reuse or removal.
  _,stderr,inspectErr:=runCLI(ctx,p.Executable,"container","inspect",name,

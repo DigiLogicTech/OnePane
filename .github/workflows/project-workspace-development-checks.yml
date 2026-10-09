@@ -8,6 +8,7 @@ on:
     paths:
       - 'internal/webui/static/project-*.js'
       - 'internal/webui/static/project-*.css'
+      - 'internal/webui/static/workspace-*.js'
       - 'internal/webui/static/app-foundation.js'
       - 'internal/webui/static/index.html'
       - 'internal/projectworkspace/**'
@@ -43,6 +44,7 @@ jobs:
           node --check internal/webui/static/workspace-collaboration.js
           node --check internal/webui/static/workspace-library.js
           node --check internal/webui/static/workspace-runtime-controls.js
+          node --check internal/webui/static/workspace-ai-workflow.js
           node --check internal/webui/static/project-library-route.js
           node --check internal/webui/static/project-workspace-page.js
           node --check internal/webui/static/app-foundation.js

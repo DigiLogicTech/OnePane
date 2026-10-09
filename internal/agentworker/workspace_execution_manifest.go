@@ -104,7 +104,7 @@ func workspaceExecutionManifest(ctx context.Context, db *sql.DB, t task.Task) (j
     "path":"Workspace-relative regular file path, required only for preview_text",
     "timeout_seconds":"optional integer 1..60; default 15",
    },
-   "note":"List limited to depth 4; preview_text limited to 64KiB, not a lossless edit source; .git internals, symlinks and host paths denied",
+   "note":"List limited to depth 4; preview_text opens only regular UTF-8 files using Python3 dir_fd O_NOFOLLOW in the rootless OCI image, limited to 64KiB; not a lossless edit source; .git, symlinks and host paths denied",
   },
   "git_inspect_tool":map[string]any{
    "tool_id":"project.app.git.inspect",

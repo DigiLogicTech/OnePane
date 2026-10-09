@@ -208,4 +208,28 @@ assertContains(evidence,'onepaneWorkspace','Evidence read must use current tenan
 assertContains(evidence,'a51PreviousRenderActiveView=renderActiveView',
  'Evidence route must preserve existing route chain');
 assertContains(evidence,'slice(0,100)','Evidence view must bound client-side rows');
+const qaPlan=read('docs/RC11_REMAINING_DEVELOPMENT_AND_REVIEW_GATES.md');
+assertContains(qaPlan,'RC11-13 #85','Debug Centre must remain on the RC11 development worklist');
+assertContains(qaPlan,'RC11-14 #86','three-phase audit/vision/review must gate packaging');
+assertContains(qaPlan,'**First full code review:**','first code audit must precede vision session');
+assert.ok(qaPlan.indexOf('**First full code review:**')<qaPlan.indexOf('**Vision alignment interview:**')&&
+ qaPlan.indexOf('**Vision alignment interview:**')<qaPlan.indexOf('**Second code review and realignment:**'),
+ 'review gate must preserve user-required audit → questions → second review order');
+const qaSource=read('internal/api/qa_snapshot.go');
+const qaAPI=read('internal/api/qa_snapshot_handler.go');
+const qaUI=read('internal/webui/static/workspace-ai-workflow.js');
+new vm.Script(qaUI,{filename:'workspace-ai-workflow.js'});
+assertContains(routes,'GET /v1/qa/workspace-snapshot','explicit QA preview route must be registered');
+assertContains(routes,'POST /v1/qa/workspace-bundle','explicit QA export route must be registered');
+assertContains(qaAPI,'s.authorize(w,r,i,tenant,"project.read")','QA export must check Project read policy');
+assertContains(qaAPI,'s.authorize(w,r,i,tenant,"task.read")','QA export must check Task read policy');
+assertContains(qaAPI,'view.ProjectID!=projectID','QA export must verify canonical Workspace ownership');
+assertContains(qaAPI,'reader.ListProjectWorkspace','QA export must query canonical scoped Task reader');
+assertContains(qaSource,'qaSnapshotTaskCap=50','QA snapshot Task count must remain bounded');
+assertContains(qaSource,'qaSnapshotArchiveCap=128<<10','QA ZIP size must remain bounded');
+assertContains(qaSource,'zip.NewWriter(&buf)','QA ZIP must remain on-device without filesystem temp churn');
+assertContains(qaSource,'ExcludedCategories','QA ZIP must advertise deliberately omitted sensitive data');
+assertContains(qaUI,'Review included data','export must present a reviewed preview');
+assertContains(qaUI,'qaDownload.disabled=true','ZIP must remain disabled until review');
+assertContains(qaUI,'"X-OnePane-CSRF":csrfCookie()','QA bundle request must send CSRF header');
 console.log('PASS: Development + Library/Workspace connection UI syntax, permissions and route contracts');

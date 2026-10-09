@@ -96,3 +96,12 @@
  border-radius:8px;background:var(--panel-2);font-size:12px}
 .a49-task-prerequisites strong{color:var(--text);font-size:12px}
 .a49-task-prerequisites>.list-meta{line-height:1.45}
+
+/* RC11 opt-in QA snapshot uses existing theme tokens, bounded preview. */
+.a49-qa-snapshot{margin-top:12px;padding:12px;border:1px solid var(--border);
+ border-radius:8px;max-width:100%;min-width:0}
+.a49-qa-snapshot summary{cursor:pointer;font-weight:600}
+.a49-qa-snapshot-preview{max-height:320px;overflow:auto;white-space:pre-wrap;
+ overflow-wrap:anywhere;tab-size:2;font-size:12px;line-height:1.5;
+ max-width:100%;background:var(--panel-2);padding:9px;border-radius:6px}
+.a49-qa-snapshot .a49-task-actions{display:flex;gap:8px;flex-wrap:wrap}

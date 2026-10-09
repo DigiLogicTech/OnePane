@@ -62,6 +62,20 @@ func workspaceExecutionManifest(ctx context.Context, db *sql.DB, t task.Task) (j
   "runtime_observed_status":observed,
   "runtime_desired_state":desired,
   "applications":apps,
+  "git_mutation_tool":map[string]any{
+   "tool_id":"project.app.git.mutate",
+   "tool_version":"1",
+   "capability_id":"project.app.execute",
+   "actions":[]string{"init","stage_all","commit"},
+   "input_schema":map[string]any{
+    "runtime_id":"registered runtime_id above",
+    "application_id":"one of the application_id values above",
+    "action":"init, stage_all, or commit",
+    "message":"required only for commit; single line 1..512 bytes",
+    "timeout_seconds":"optional integer 1..120; default 30",
+   },
+   "note":"local Workspace repository only; no remote push/clone, no arbitrary Git flags or host execution",
+  },
   "git_inspect_tool":map[string]any{
    "tool_id":"project.app.git.inspect",
    "tool_version":"1",

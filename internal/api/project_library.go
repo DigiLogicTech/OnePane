@@ -19,6 +19,7 @@ type projectLibraryService interface {
  ImportLibraryAsset(context.Context,projectworkspace.ImportLibraryAssetCommand)(projectworkspace.LibraryAsset,error)
  LibraryAssets(context.Context,string)([]projectworkspace.LibraryAsset,error)
  WorkspaceLibraryAssets(context.Context,string,string,string)([]projectworkspace.LibraryAsset,error)
+ WorkspaceLibraryVersions(context.Context,string,string,string)([]projectworkspace.LibraryVersion,error)
  LibraryVersions(context.Context,string,string)([]projectworkspace.LibraryVersion,error)
  GrantLibraryAsset(context.Context,projectworkspace.GrantLibraryAssetCommand)error
  RevokeLibraryAsset(context.Context,string,string,string,string)error
@@ -42,6 +43,17 @@ func (s *Server) listWorkspaceLibrary(w http.ResponseWriter,r *http.Request){
  items,err:=lib.WorkspaceLibraryAssets(r.Context(),p.ID,workspaceID,r.URL.Query().Get("q"))
  respondDomain(w,items,err,http.StatusOK)
 }
+// A Workspace never receives the unrestricted Project-wide asset history.
+// Each version is independently filtered by the currently effective read grant
+// or enabled directional publication, including pinned-versus-latest policy.
+func (s *Server) listWorkspaceLibraryVersions(w http.ResponseWriter,r *http.Request) {
+ p,workspaceID,_,ok:=s.workspaceRuntimeContext(w,r,false);if !ok{return}
+ lib,ok:=s.projects.(projectLibraryService)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Workspace Library unavailable");return}
+ versions,err:=lib.WorkspaceLibraryVersions(r.Context(),p.ID,workspaceID,r.PathValue("assetID"))
+ respondDomain(w,versions,err,http.StatusOK)
+}
+
 func (s *Server) listProjectLibrary(w http.ResponseWriter,r *http.Request) {
  lib,p,_,ok:=s.projectLibraryAccess(w,r,false);if !ok{return}
  query:=strings.TrimSpace(r.URL.Query().Get("q"))

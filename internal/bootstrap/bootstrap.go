@@ -360,7 +360,7 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 	skillCatalogService := skillcatalog.NewService(db.SQL(), db, clk, cfg.Storage.DataDir)
 	projectOrchestratorService := projectorchestrator.NewService(db.SQL(), db, clk, schedulerService, inferenceService, artifactService, taskService, teamService)
 	assistantService := assistant.NewService(db.SQL(), clk, schedulerService, inferenceService, artifactService, projectOrchestratorService)
-	projectRuntimeReconciler := projectruntime.New(projectWorkspaceService, operationCoordinator, toolGateway, observationService, verificationService)
+	projectRuntimeReconciler := projectruntime.New(projectWorkspaceService, operationCoordinator, toolGateway, observationService, verificationService, localNode.ID)
 	projectRoutineExecutor := projectroutine.New(projectWorkspaceService, toolGateway)
 	routineService := routine.NewService(db.SQL(), db, clk, taskService)
 	routineWorkerService := routineworker.New(db.SQL(), db, clk, taskService, authorityService, projectRoutineExecutor, observationService, verificationService, routineService)

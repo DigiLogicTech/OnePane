@@ -17,8 +17,9 @@ on:
       - 'internal/projectruntime/**'
       - 'internal/sandboxrunner/**'
       - 'internal/agentworker/**'
-      - 'internal/teamworker/**'
       - 'internal/team/**'
+      - 'internal/teamworker/**'
+      - 'internal/agentprotocol/**'
       - 'internal/task/**'
       - 'internal/storage/sqlite/**'
       - 'migrations/**'
@@ -63,7 +64,7 @@ jobs:
           node scripts/validate_legacy_cleanup.js
       - name: Existing sandbox and Project contract tests
         run: |
-          go test ./internal/projectworkspace ./internal/projectruntime ./internal/sandboxrunner ./internal/agentworker ./internal/teamworker ./internal/team ./internal/task ./internal/storage/sqlite ./internal/scheduler ./internal/localai ./internal/api
+          go test ./internal/projectworkspace ./internal/projectruntime ./internal/sandboxrunner ./internal/agentprotocol ./internal/agentworker ./internal/team ./internal/teamworker ./internal/task ./internal/storage/sqlite ./internal/scheduler ./internal/localai ./internal/api
           go test -tags integration ./internal/projectworkspace ./internal/sandboxrunner ./internal/agentworker ./internal/task
       - name: Full Go regression and cross-platform compilation
         run: |

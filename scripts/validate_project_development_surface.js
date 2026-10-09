@@ -68,6 +68,15 @@ assertContains(workflowUI,'secrets:"none"','Workspace Tasks must not implicitly 
 assertContains(workflowUI,'/v1/tasks?workspace_id=','Workspace queue must read actual Task API state');
 assertContains(workflowUI,'"&project_id="+encodeURIComponent(project.id)', 'Workspace Task inventory must query scoped backend');
 assertContains(workflowUI,'"&project_workspace_id="+encodeURIComponent(canonical.id)', 'Workspace Task inventory must pass canonical Workspace selector');
+const workspaceExecSource=read('internal/agentworker/workspace_execution_manifest.go');
+const agentExecSource=read('internal/agentworker/execution.go');
+assertContains(agentExecSource,'ID:"workspace-execution-manifest"','Agent Worker must supply Task-owned OCI execution inventory');
+assertContains(workspaceExecSource,'p.workspace_id=?','OCI execution inventory must respect Task tenant ownership');
+assertContains(workspaceExecSource,'pw.id=? AND pw.status=','OCI execution inventory must enforce Task Project Workspace ownership');
+assertContains(workspaceExecSource,'WHERE a.project_runtime_id=?','OCI applications must be scoped to the selected runtime before row limiting');
+assertContains(workspaceExecSource,'"tool_id":"project.app.exec"','Workspace manifest must advertise actual governed sandbox command tool');
+assert.ok(!workspaceExecSource.includes('environment_bindings_json') &&
+ !workspaceExecSource.includes('secrets_json'), 'The model may not see raw Workspace credential bindings');
 const tasksAPI=read('internal/api/server.go');
 const taskListMethod=tasksAPI.slice(tasksAPI.indexOf('func (s *Server) listTasks('),tasksAPI.indexOf('func (s *Server) createTask('));
 assertContains(taskListMethod,'reader.ListProjectWorkspace(', 'Tasks API must list scoped Tasks before applying row limit');

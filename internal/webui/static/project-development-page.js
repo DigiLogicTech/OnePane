@@ -50,7 +50,7 @@ async function a44LoadProjectEnvironment(project,workspace,container){
    <div class="a44-environment-subsection"><h3>Development workflow</h3>
     <div class="a44-environment-grid">
       ${a44DevelopmentSection("Code and files","Project-owned","Workspace-isolated working trees and Git are required next")}
-      ${a44DevelopmentSection("Reference knowledge","Library integration pending","Only explicitly granted, versioned files should reach agents")}
+      ${a44DevelopmentSection("Reference knowledge","Project Library","Only explicitly granted and versioned files reach other Workspaces")}
       ${a44DevelopmentSection("Tasks and AI workers","Governed execution","Tasks and Project Orchestrator remain separate from a runnable sandbox")}
       ${a44DevelopmentSection("Builds and preview","Execution integration pending","Engines, terminal, tests and preview endpoints require verified isolation")}
     </div>
@@ -60,6 +60,10 @@ async function a44LoadProjectEnvironment(project,workspace,container){
   </section>`;
  container.querySelector("#a44OpenProjectTasks")?.addEventListener("click",()=>openRoute("tasks"));
  container.querySelector("#a44OpenProjectModels")?.addEventListener("click",()=>openRoute("models"));
+ // One canonical renderer owns the Workspace view: feature modules provide
+ // explicit mount functions rather than stacking global function overrides.
+ if(typeof a45MountCollaboration==="function")await a45MountCollaboration(project,workspace,container);
+ if(typeof a46MountWorkspaceLibrary==="function")await a46MountWorkspaceLibrary(project,workspace,container);
 }
 
 renderWorkspaces=async function(){

@@ -4,6 +4,7 @@ package projectworkspace
 
 import (
  "context"
+ "errors"
  "testing"
 
  "github.com/DigiLogicTech/OnePane/internal/clock"
@@ -67,7 +68,7 @@ func TestLegacyAndWorkspaceRuntimesCoexistAfterMigration(t *testing.T){
  // Workspace toolchains. Historical Project runtime applications stay intact.
  if _,err=svc.DeclareApplication(ctx,DeclareApplicationCommand{
   RuntimeID:runtimes[0].ID,Name:"unsafe-floating",SourceKind:AppOCIImage,
-  SourceRef:"ghcr.io/example/godot:latest",CreatedBy:"operator"});err!=ErrInvalidCommand{
+  SourceRef:"ghcr.io/example/godot:latest",CreatedBy:"operator"});!errors.Is(err,ErrInvalidCommand){
   t.Fatalf("new Workspace permitted floating image source: %v",err)
  }
  image:="ghcr.io/example/godot@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"

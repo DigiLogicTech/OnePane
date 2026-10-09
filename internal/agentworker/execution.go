@@ -63,6 +63,9 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 			err = scheduler.ErrNoEligibleCandidate
 		}
 		_ = s.journal(ctx, run.ID, "route", "failed", nil, nil, nil, nil, map[string]any{"error": err.Error(), "rejected": decision.Rejected})
+		if shouldWaitForLocalModel(t,err,decision.Rejected) {
+			return s.waitForLocalModel(ctx,run,res,"awaiting qualified local model: "+err.Error())
+		}
 		return s.blockRun(ctx, run, res, "no eligible inference/agent runtime: "+err.Error())
 	}
 	cand := decision.Selected.Candidate
@@ -111,7 +114,10 @@ func (s *Service) compileContext(ctx context.Context, run Run, t task.Task) (con
 		profileRaw,_:=json.Marshal(map[string]any{"profile_id":profileID,"name":profileName,"role":profileRole,"revision":profileRevision,"instructions":profileInstructions,"authority":false,"note":"Profile instructions affect reasoning only and grant no capabilities or permissions."})
 		sections=append(sections,contextcompiler.Section{ID:"agent-profile",Kind:"agent_profile",Trust:"USER_INSTRUCTION",Authoritative:false,Required:true,Priority:99,Content:profileRaw})
 	} else if !errors.Is(err,sql.ErrNoRows) { return contextcompiler.Result{},err }
-	if len(run.Continuation) > 0 && string(run.Continuation) != "{}" {
+	// Resource backoff is internal scheduler bookkeeping, not an instruction
+	// to the model. Once it becomes available, don't tell the model that it is
+	// still unavailable or let historical wait data bias tool selection.
+	if len(run.Continuation) > 0 && string(run.Continuation) != "{}" && decodeModelWait(run.Continuation)==nil {
 		sections = append(sections, contextcompiler.Section{ID: "worker-continuation", Kind: "continuation", Trust: "UNVERIFIED_DERIVED", Authoritative: false, Required: false, Priority: 80, Content: run.Continuation})
 	}
 	if cp, err := s.verification.LatestValidCheckpoint(ctx, t.ID); err == nil {

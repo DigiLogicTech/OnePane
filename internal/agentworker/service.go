@@ -291,7 +291,17 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 			var c struct {
 				OperationID string `json:"operation_id"`
 			}
-			if json.Unmarshal([]byte(cont), &c) == nil && strings.TrimSpace(c.OperationID) != "" {
+			if json.Unmarshal([]byte(cont), &c) != nil {
+				return fmt.Errorf("invalid durable Agent Worker continuation for run %s",v.run)
+			}
+			// A model-resource wait is a real persisted suspension, not a
+			// dependency-free Task that should resume on every worker tick.
+			// Retain the same pinned model and local-only routing after wake.
+			if modelWait:=decodeModelWait(json.RawMessage(cont));modelWait!=nil &&
+				s.clock.UnixMilli()<modelWait.RetryAtMS {
+				ready=false
+			}
+			if strings.TrimSpace(c.OperationID) != "" {
 				var opState string
 				if err := s.db.QueryRowContext(ctx, `SELECT state FROM operations WHERE id=?`, c.OperationID).Scan(&opState); err != nil {
 					return err
@@ -299,7 +309,7 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 				ready = ready && opState == "committed"
 			}
 			if ready {
-				if _, err := s.tasks.Resume(ctx, task.TransitionCommand{TaskID: v.task, ExpectedRevision: v.rev, ActorPrincipalID: &actor, Reason: "worker dependencies verified complete"}); err != nil && !task.IsRevisionConflict(err) {
+				if _, err := s.tasks.Resume(ctx, task.TransitionCommand{TaskID: v.task, ExpectedRevision: v.rev, ActorPrincipalID: &actor, Reason: "worker dependencies/resources ready for retry"}); err != nil && !task.IsRevisionConflict(err) {
 					return err
 				}
 			}
@@ -373,7 +383,16 @@ func scanRun(row rowScanner) (Run, error) {
 	var r Run
 	var lastKind, lastID, lastErr sql.NullString
 	var completed sql.NullInt64
-	err := row.Scan(&r.ID, &r.WorkspaceID, &r.TaskID, &r.AttemptID, &r.WorkerPrincipalID, &r.Status, &r.RoleName, &r.CapabilityID, &r.ProtocolLevel, &r.MaxSteps, &r.StepCount, &r.MaxReplans, &r.ReplanCount, &r.MaxEscalations, &r.EscalationCount, &r.RoutePolicy, &r.Continuation, &lastKind, &lastID, &lastErr, &r.Revision, &r.StartedAt, &r.UpdatedAt, &completed)
+	var routeJSON, continuationJSON string
+	// SQLite's TEXT columns scan into strings, not *json.RawMessage.
+	// Reconstruct the exact persisted JSON after the successful scan.
+	err := row.Scan(&r.ID, &r.WorkspaceID, &r.TaskID, &r.AttemptID, &r.WorkerPrincipalID, &r.Status, &r.RoleName, &r.CapabilityID, &r.ProtocolLevel, &r.MaxSteps, &r.StepCount, &r.MaxReplans, &r.ReplanCount, &r.MaxEscalations, &r.EscalationCount, &routeJSON, &continuationJSON, &lastKind, &lastID, &lastErr, &r.Revision, &r.StartedAt, &r.UpdatedAt, &completed)
+	if err!=nil{return Run{},err}
+	if !json.Valid([]byte(routeJSON)) || !json.Valid([]byte(continuationJSON)){
+		return Run{},fmt.Errorf("persisted Agent Worker run contains invalid JSON")
+	}
+	r.RoutePolicy=json.RawMessage(routeJSON)
+	r.Continuation=json.RawMessage(continuationJSON)
 	if lastKind.Valid {
 		v := lastKind.String
 		r.LastCandidateKind = &v

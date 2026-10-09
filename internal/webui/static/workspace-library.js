@@ -31,12 +31,12 @@ async function a46RenderLibrary(project,workspace,root){
  const options=targets.map(w=>`<option value="${escapeHtml(w.id)}" ${w.id===source?.id?"selected":""}>${labelOf(w)}</option>`).join("");
  const cards=assets.map(a=>`<article class="a46-library-asset" data-a46-asset="${escapeHtml(a.id)}">
   <div class="a45-link-header"><div><strong>${escapeHtml(a.name)}</strong>
-    <div class="list-meta">${escapeHtml(a.asset_type)} · v${Number(a.current_version)} · ${escapeHtml(a.id)}</div></div>
+    <div class="list-meta">${escapeHtml(a.asset_type)} · v${Number(globalLibrary?a.current_version:(a.accessible_version||a.current_version))} · ${escapeHtml(a.id)}</div></div>
     <span class="pill">Versioned</span></div>
   <div class="toolbar a45-link-actions">
-   <button type="button" class="btn" data-a46-versions="${escapeHtml(a.id)}">Versions</button>
-   <button type="button" class="btn" data-a46-grant="${escapeHtml(a.id)}">Grant Workspace access</button>
-   ${source?.id?`<a class="btn" href="${prefix}/library/${encodeURIComponent(a.id)}/versions/${Number(a.current_version)}/content?workspace_id=${encodeURIComponent(source.id)}" title="Requires an approved Workspace read grant">Download if granted</a>`:""}
+   ${globalLibrary?`<button type="button" class="btn" data-a46-versions="${escapeHtml(a.id)}">Versions</button>`:""}
+   ${globalLibrary?`<button type="button" class="btn" data-a46-grant="${escapeHtml(a.id)}">Grant Workspace access</button>`:""}
+   ${source?.id?`<a class="btn" href="${prefix}/library/${encodeURIComponent(a.id)}/versions/${Number(a.accessible_version||a.current_version)}/content?workspace_id=${encodeURIComponent(source.id)}" title="Rechecked against current Workspace grants when downloaded">Download authorised version</a>`:""}
   </div><div class="a46-versions" data-a46-version-list="${escapeHtml(a.id)}" hidden></div>
  </article>`).join("");
  root.innerHTML=`<h3>Project Library</h3>

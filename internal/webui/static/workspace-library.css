@@ -12,3 +12,8 @@
 .a46-library-version{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:6px 0}
 .a46-library-version .list-meta{overflow-wrap:anywhere}
 @media(max-width:680px){.a46-upload>button{width:100%}}
+
+.a47-library-toolbar{display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:12px 0}
+.a47-library-toolbar>label{display:flex;flex-direction:column;gap:5px;min-width:min(270px,100%);color:var(--muted);font-size:12px}
+.a47-library-toolbar select{color:var(--text);max-width:100%}
+.a47-library-page #a47LibraryContent{padding:12px;max-width:100%;overflow:hidden}

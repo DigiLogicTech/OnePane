@@ -19,8 +19,8 @@ def definitions(src):
             out.setdefault(match.group(1),[]).append(line_no)
     return out
 
-# Reviewed RC9 change: deterministic popover dismiss/switch and independent toolbar action state.
-expected_foundation_blob="6c3a52fb30d45ff57d02f0f6f983b138ec380825"
+# Reviewed Workspace Development change: sandbox UI settings explicitly marked preferences, not granted execution rights.
+expected_foundation_blob="a129deb3ea75bc95a769e3c35a01ba6efe874946"
 foundation_bytes=foundation.encode("utf-8")
 actual_foundation_blob=hashlib.sha1(b"blob "+str(len(foundation_bytes)).encode("ascii")+b"\0"+foundation_bytes).hexdigest()
 

@@ -57,6 +57,14 @@ assert.ok(index.indexOf('/workspace-collaboration.js')<index.indexOf('/workspace
 assertContains(libRoute,'pages.library','global Library navigation must register');
 assertContains(ui,'a49MountDevelopmentTasks','Workspace must queue governed Project Tasks');
 assertContains(workflowUI,'project_workspace_id:canonical.id','AI jobs must use canonical Workspace identities');
+assertContains(workflowUI,'remote_models:values.allow_remote==="yes"',
+ 'Workspace Tasks must require explicit cloud routing opt-in');
+assertContains(workflowUI,'name="allow_remote"','Workspace cloud choice must be visible and default unchecked');
+assert.ok(!/name="allow_remote"[^>]*checked/.test(workflowUI),
+ 'Workspace Task cloud models must not be preapproved');
+assertContains(workflowUI,'mode:"brokered",project_workspace_id:canonical.id',
+ 'Workspace Tasks must create a brokered capability envelope');
+assertContains(workflowUI,'secrets:"none"','Workspace Tasks must not implicitly expose Vault secrets');
 assertContains(workflowUI,'/v1/tasks?workspace_id=','Workspace queue must read actual Task API state');
 assertContains(workflowUI,'t.project_workspace_id===canonical.id',
  'Workspace queue must filter strictly to the canonical Project Workspace');

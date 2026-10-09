@@ -53,3 +53,26 @@ func TestDelegatedCompletionInheritsWorkspacePolicy(t *testing.T) {
 		t.Fatalf("delegated completion did not inherit parent workspace policy: %+v", policy)
 	}
 }
+
+func TestExplicitWorkspaceLocalOnlyPolicyOverridesLegacyCloudDefaults(t *testing.T){
+ local:=json.RawMessage(`{"type":"operator_review","onepane_routing":{
+  "project_workspace_id":"world",
+  "workspace_access":{"mode":"brokered","project_workspace_id":"world",
+   "remote_models":false,"filesystem":"workspace-only","internet":false,
+   "lan":false,"browser":false,"computer":false,"secrets":"none"}
+ }}`)
+ routing:=routingPolicyFromCompletion(local)
+ if routing.WorkspaceAccess.RemoteModels==nil || *routing.WorkspaceAccess.RemoteModels {
+  t.Fatal("explicit local-only Workspace request lost before scheduling")
+ }
+ inherited:=routingPolicyFromCompletion(inheritOnePaneRouting(local,json.RawMessage(`{"type":"operator_review"}`)))
+ if inherited.WorkspaceAccess.RemoteModels==nil || *inherited.WorkspaceAccess.RemoteModels ||
+  inherited.WorkspaceAccess.ProjectWorkspaceID!="world" {
+  t.Fatal("delegation lost local-only Workspace and canonical identity")
+ }
+ cloudOptIn:=json.RawMessage(`{"onepane_routing":{"workspace_access":{"remote_models":true}}}`)
+ configured:=routingPolicyFromCompletion(cloudOptIn)
+ if configured.WorkspaceAccess.RemoteModels==nil || !*configured.WorkspaceAccess.RemoteModels{
+  t.Fatal("explicit cloud opt-in did not remain visible to governed scheduler")
+ }
+}

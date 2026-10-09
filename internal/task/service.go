@@ -323,6 +323,45 @@ func (s *Service) WaitDependency(ctx context.Context, cmd TransitionCommand) (Ta
 	return s.transitionWithAttempt(ctx, cmd, StateWaitingDependency, AttemptWaiting, "task.waiting_dependency")
 }
 
+// WaitDependencyInTransaction is for trusted Agent Worker delegation.
+// Callers may atomically write the delegated child, dependency edge, Worker
+// continuation and step journal alongside this Task/Attempt transition.
+// Unlike the public WaitDependency method this requires an actively running
+// attempt; it cannot re-admit a previously blocked or completed operation.
+func (s *Service) WaitDependencyInTransaction(ctx context.Context, tx storage.Tx, cmd TransitionCommand) error {
+ if tx==nil || strings.TrimSpace(cmd.TaskID)=="" || cmd.ExpectedRevision<1 {
+  return fmt.Errorf("%w: transaction, Task identity and revision required",ErrInvalidCommand)
+ }
+ t,err:=s.repo.GetForUpdate(ctx,tx,cmd.TaskID)
+ if err!=nil{return err}
+ if t.Revision!=cmd.ExpectedRevision{return ErrRevisionConflict}
+ if t.State!=StateRunning || !CanTransition(t.State,StateWaitingDependency) {
+  return fmt.Errorf("%w: delegation requires running Task, found %s",ErrInvalidTransition,t.State)
+ }
+ active,err:=s.repo.ActiveAttempt(ctx,tx,t.ID)
+ if err!=nil{return err}
+ if active==nil {return ErrNoActiveAttempt}
+ if active.State!=AttemptRunning {
+  return fmt.Errorf("%w: delegation requires running Attempt, found %s",ErrInvalidAttempt,active.State)
+ }
+ now:=s.clock.UnixMilli()
+ if err:=s.repo.TransitionAttempt(ctx,tx,active.ID,AttemptRunning,AttemptWaiting,now);err!=nil{return err}
+ if err:=s.repo.Transition(ctx,tx,transitionRecord{
+  TaskID:t.ID,ExpectedRevision:t.Revision,From:t.State,To:StateWaitingDependency,UpdatedAt:now,
+ });err!=nil{return err}
+ eid,err:=s.ids.New("evt")
+ if err!=nil{return err}
+ payload,_:=json.Marshal(map[string]any{
+  "task_id":t.ID,"from":t.State,"to":StateWaitingDependency,
+  "reason":cmd.Reason,"revision":t.Revision+1,
+ })
+ return s.events.Append(ctx,tx,event.Event{
+  ID:eid,WorkspaceID:&t.WorkspaceID,Type:"task.waiting_dependency",
+  AggregateType:"task",AggregateID:t.ID,ActorPrincipalID:cmd.ActorPrincipalID,
+  RequestID:cmd.RequestID,TraceID:cmd.TraceID,Payload:payload,OccurredAt:now,
+ })
+}
+
 func (s *Service) WaitApproval(ctx context.Context, cmd TransitionCommand) (Task, error) {
 	return s.transitionWithAttempt(ctx, cmd, StateWaitingApproval, AttemptWaiting, "task.waiting_approval")
 }

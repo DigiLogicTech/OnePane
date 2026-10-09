@@ -94,3 +94,67 @@ func TestUnscopedHistoricWorkspaceTasksCannotImplicitlyUseCloud(t *testing.T) {
   })
  }
 }
+
+func TestHistoricalNamedWorkspaceToolsStayBrokeredWithoutPolicyJSON(t *testing.T){
+ pid,wid:="project","world"
+ taskRow:=task.Task{
+  ProjectID:&pid,ProjectWorkspaceID:&wid,
+  Completion:json.RawMessage(`{"type":"operator_review"}`),
+ }
+ if err:=workspaceToolAllowedForTask(taskRow,"project.app.execute",authority.ActionExecuteSandboxed,
+  "project.app.exec","project_runtime:runtime-world");err!=nil{
+  t.Fatalf("existing local sandbox command should remain brokered and lease-governed: %v",err)
+ }
+ for _,tc:=range []struct{name,capability,tool,ref string;mode authority.ActionMode}{
+  {"internet","network.external","web.fetch","https://example.com",authority.ActionRead},
+  {"external_send","network.send","http.post","resource",authority.ActionExternalSend},
+  {"browser","browser.navigate","browser.open","resource",authority.ActionRead},
+  {"computer","computer.control","computer.click","resource",authority.ActionExecuteSandboxed},
+  {"vault","vault.read","vault.get","resource",authority.ActionRead},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   if err:=workspaceToolAllowedForTask(taskRow,tc.capability,tc.mode,tc.tool,tc.ref);err==nil{
+    t.Fatal("unscoped historical Workspace Task was granted privileged tool")
+   }
+  })
+ }
+}
+
+func TestNamedWorkspaceExecutionRejectsForgedPolicyAndOwnership(t *testing.T){
+ pid,wid:="project","world"
+ base:=task.Task{ProjectID:&pid,ProjectWorkspaceID:&wid}
+ denied:=[]struct{name string;completion string}{
+  {"foreign_top_identity",`{"onepane_routing":{"project_workspace_id":"story"}}`},
+  {"foreign_access_identity",`{"onepane_routing":{"workspace_access":{"project_workspace_id":"story"}}}`},
+  {"direct_access",`{"onepane_routing":{"workspace_access":{"mode":"direct"}}}`},
+  {"host_filesystem",`{"onepane_routing":{"workspace_access":{"filesystem":"host"}}}`},
+  {"network_access",`{"onepane_routing":{"workspace_access":{"internet":true}}}`},
+  {"lan_access",`{"onepane_routing":{"workspace_access":{"lan":true}}}`},
+  {"browser_access",`{"onepane_routing":{"workspace_access":{"browser":true}}}`},
+  {"computer_access",`{"onepane_routing":{"workspace_access":{"computer":true}}}`},
+  {"unrestricted_vault",`{"onepane_routing":{"workspace_access":{"secrets":"all"}}}`},
+ }
+ for _,tc:=range denied{
+  t.Run(tc.name,func(t *testing.T){
+   scoped:=base
+   scoped.Completion=json.RawMessage(tc.completion)
+   if err:=workspaceToolAllowedForTask(scoped,"project.app.execute",
+    authority.ActionExecuteSandboxed,"project.app.exec","project_runtime:world");err==nil{
+    t.Fatal("forged or elevated historical Task policy accepted")
+   }
+  })
+ }
+ missing:=task.Task{ProjectWorkspaceID:&wid}
+ if err:=workspaceToolAllowedForTask(missing,"project.app.execute",
+  authority.ActionExecuteSandboxed,"project.app.exec","project_runtime:world");err==nil{
+  t.Fatal("Workspace Task with no Project was accepted")
+ }
+}
+
+func TestHistoricalProjectOnlyToolCompatibilityIsPreserved(t *testing.T){
+ legacy:=task.Task{Completion:json.RawMessage(`{"type":"operator_review"}`)}
+ if err:=workspaceToolAllowedForTask(legacy,"browser.navigate",
+  authority.ActionRead,"browser.open","https://example.com");err!=nil{
+  t.Fatalf("legacy Project-only Task unexpectedly restricted: %v",err)
+ }
+}

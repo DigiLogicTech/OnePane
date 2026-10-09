@@ -1672,11 +1672,23 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		 return
 		}
 	}
+	// Only scoped Task pages may receive dependency evidence. The helper
+	// never reveals foreign Workspace child Task identity or state.
+	var dependencies map[string]taskDependencyEvidence
+	if scoped{
+		dependencies,err=loadWorkspaceTaskDependencies(r.Context(),s.attentionDB,
+		 workspaceID,projectID,projectWorkspaceID,rows)
+		if err!=nil{
+		 writeError(w,http.StatusInternalServerError,"Workspace Task prerequisite status unavailable")
+		 return
+		}
+	}
 	out := make([]map[string]any, 0, len(rows))
 	for _, t := range rows {
 		entry:=taskResponse(t)
 		if wait,ok:=modelWaits[t.ID];ok{entry["wait"]=wait}
 		if progress,ok:=execution[t.ID];ok{entry["execution"]=progress}
+		if prerequisites,ok:=dependencies[t.ID];ok{entry["dependencies"]=prerequisites}
 		out=append(out,entry)
 	}
 	writeJSON(w, http.StatusOK, out)

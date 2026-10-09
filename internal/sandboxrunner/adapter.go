@@ -211,16 +211,34 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 		observed,err:=a.engine.ExecContainer(execCtx,in.RuntimeID,in.ApplicationID,command)
 		if execCtx.Err()!=nil{return tool.AdapterResult{},execCtx.Err()}
 		if err!=nil{return tool.AdapterResult{},err}
-		// The raw base64 content and argv are never included in the outward
-		// observation. The immutable requested SHA and execution outcome are.
-		succeeded:=observed.ExitCode==0
-		summary:="Workspace file edit returned without applying the requested change"
-		if succeeded{summary="Workspace file edit completed; independent verification remains required"}
+		// The subprocess command line contains the encoded file bytes. Never
+		// return raw stdout/stderr or the command in a persisted observation.
+		// Validate an exact operation receipt instead of trusting exit code 0.
+		var receipt struct {
+			Action string `json:"action"`
+			Path string `json:"path"`
+			Bytes int `json:"bytes"`
+			SHA256 string `json:"sha256"`
+			Written bool `json:"written"`
+		}
+		succeeded:=observed.ExitCode==0&&json.Unmarshal([]byte(observed.Stdout),&receipt)==nil&&
+			receipt.Written&&receipt.Action==in.Action&&receipt.Path==in.Path&&
+			receipt.Bytes==size&&receipt.SHA256==digest
+		message:="Workspace file edit failed or returned an invalid content receipt"
+		if succeeded{message="Workspace file edit applied; independent Task verification remains required"}
+		failureReason:=""
+		if !succeeded {
+			var diagnostic struct{ Reason string `json:"reason"` }
+			if json.Unmarshal([]byte(observed.Stderr),&diagnostic)==nil{
+				failureReason=boundedEditorDiagnostic(diagnostic.Reason)
+			}
+		}
 		return result(map[string]any{
 			"runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
 			"action":in.Action,"path":in.Path,"content_sha256":digest,"size_bytes":size,
-			"succeeded":succeeded,"result":observed,"container":state,"engine":profile,
-		},summary)
+			"succeeded":succeeded,"exit_code":observed.ExitCode,"failure_reason":failureReason,
+			"receipt_verified":succeeded,"container":state,"engine":profile,
+		},message)
 	case ToolAppFileInspect:
 		if !safeID.MatchString(in.ApplicationID)||len(in.Command)!=0||in.Image!=""||
 			in.TimeoutSeconds<0||in.TimeoutSeconds>60{

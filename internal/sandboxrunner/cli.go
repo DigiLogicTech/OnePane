@@ -187,31 +187,62 @@ func (e *CLIEngine) InspectImage(ctx context.Context, image string) (ImageState,
 	_ = json.Unmarshal([]byte(out), &digests)
 	return ImageState{Reference: image, Digests: digests}, nil
 }
+// verifiedOwnedContainer ensures an OCI engine has not silently reused a
+// differently owned, privileged or host-mounted container under the expected
+// generated name. The spec hash label alone does not establish identity.
+func verifiedOwnedContainer(spec ContainerSpec, state ContainerState) bool {
+ return state.IsolationVerified &&
+  state.RuntimeID==spec.RuntimeID &&
+  state.ApplicationID==spec.ApplicationID &&
+  state.SpecHash!="" &&
+  exactWorkspaceMount(state,spec.WorkspacePath)
+}
+
+func verifiedDesiredContainer(spec ContainerSpec, state ContainerState) bool {
+ return verifiedOwnedContainer(spec,state) &&
+  state.SpecHash==specHash(spec) &&
+  state.Image==spec.Image &&
+  state.NetworkInternal==spec.NetworkInternal
+}
+
 func (e *CLIEngine) EnsureContainer(ctx context.Context, s ContainerSpec) (ContainerState, error) {
-	p, err := e.Probe(ctx)
-	if err != nil {
-		return ContainerState{}, err
-	}
-	name := containerName(s.RuntimeID, s.ApplicationID)
-	hash := specHash(s)
-	out, stderr, inspectErr := runCLI(ctx, p.Executable, "container", "inspect", name, "--format", `{{index .Config.Labels "io.harness.spec-hash"}}|{{.State.Status}}|{{.Id}}`)
-	if inspectErr == nil {
-		parts := strings.SplitN(out, "|", 3)
-		if len(parts) == 3 && parts[0] == hash {
-			if parts[1] == "running" {
-				return ContainerState{Name: name, ID: parts[2], Status: parts[1], SpecHash: hash}, nil
-			}
-			if _, stderr, err := runCLI(ctx, p.Executable, "start", name); err != nil {
-				return ContainerState{}, fmt.Errorf("start container: %v: %s", err, stderr)
-			}
-			return ContainerState{Name: name, ID: parts[2], Status: "running", SpecHash: hash}, nil
-		}
-		if _, stderr, err := runCLI(ctx, p.Executable, "rm", "-f", name); err != nil {
-			return ContainerState{}, fmt.Errorf("replace container: %v: %s", err, stderr)
-		}
-	} else if !containerNotFound(stderr) {
-		return ContainerState{}, fmt.Errorf("inspect container: %v: %s", inspectErr, stderr)
-	}
+ p,err:=e.Probe(ctx)
+ if err!=nil{return ContainerState{},err}
+ if !p.Rootless{return ContainerState{},ErrRootlessRequired}
+ name:=containerName(s.RuntimeID,s.ApplicationID)
+ // Never use a caller-supplied hash, engine label or container name as
+ // proof of isolation: inspect the actual OCI config before reuse or removal.
+ _,stderr,inspectErr:=runCLI(ctx,p.Executable,"container","inspect",name,
+  "--format",`{{.Id}}`)
+ if inspectErr==nil{
+  state,err:=e.InspectContainer(ctx,s.RuntimeID,s.ApplicationID)
+  if err!=nil{return ContainerState{},err}
+  if !verifiedOwnedContainer(s,state){
+   return ContainerState{},fmt.Errorf("%w: existing container fails Workspace ownership/isolation checks",ErrInvalidInput)
+  }
+  if verifiedDesiredContainer(s,state){
+   if state.Status=="running"{return state,nil}
+   if state.Status!="exited"&&state.Status!="stopped"&&state.Status!="created"{
+    return ContainerState{},fmt.Errorf("%w: cannot start container in state %q",ErrInvalidInput,state.Status)
+   }
+   if _,stderr,err:=runCLI(ctx,p.Executable,"start",name);err!=nil{
+    return ContainerState{},fmt.Errorf("start container: %v: %s",err,stderr)
+   }
+   observed,err:=e.InspectContainer(ctx,s.RuntimeID,s.ApplicationID)
+   if err!=nil{return ContainerState{},err}
+   if !verifiedDesiredContainer(s,observed)||observed.Status!="running"{
+    return ContainerState{},fmt.Errorf("%w: started container was not independently verified",ErrInvalidInput)
+   }
+   return observed,nil
+  }
+  // A verified container with a changed pinned image/spec is a supported
+  // upgrade; an unverified container is never removed or overwritten.
+  if _,stderr,err:=runCLI(ctx,p.Executable,"rm","-f",name);err!=nil{
+   return ContainerState{},fmt.Errorf("replace managed container: %v: %s",err,stderr)
+  }
+ }else if !containerNotFound(stderr){
+  return ContainerState{},fmt.Errorf("inspect container: %v: %s",inspectErr,stderr)
+ }
 	network, err := e.EnsureNetwork(ctx, s.RuntimeID, s.NetworkInternal)
 	if err != nil || network.Internal != s.NetworkInternal || network.RuntimeID != s.RuntimeID {
 		if err == nil {
@@ -240,11 +271,18 @@ func (e *CLIEngine) EnsureContainer(ctx context.Context, s ContainerSpec) (Conta
 	}
 	args = append(args, s.Image)
 	args = append(args, s.Command...)
-	id, stderr, err := runCLI(ctx, p.Executable, args...)
+	_, stderr, err = runCLI(ctx, p.Executable, args...)
 	if err != nil {
 		return ContainerState{}, fmt.Errorf("run container: %v: %s", err, stderr)
 	}
-	return ContainerState{Name: name, ID: strings.TrimSpace(id), Status: "running", SpecHash: hash}, nil
+	// Detached OCI launch is not proof that the process is still running or
+	// the actual mounts match the managed Workspace. Observe before success.
+	observed,err:=e.InspectContainer(ctx,s.RuntimeID,s.ApplicationID)
+	if err!=nil{return ContainerState{},err}
+	if !verifiedDesiredContainer(s,observed)||observed.Status!="running"{
+		return ContainerState{},fmt.Errorf("%w: new container did not pass independent OCI verification",ErrInvalidInput)
+	}
+	return observed,nil
 }
 func (e *CLIEngine) InspectContainer(ctx context.Context, runtimeID, applicationID string) (ContainerState, error) {
 	p, err := e.Probe(ctx)

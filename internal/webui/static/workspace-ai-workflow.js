@@ -67,6 +67,24 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    <p class="list-meta" id="a54CaptureStatus" role="status">Capture is off by default. This JSON is separate from the Workspace QA ZIP; nothing is automatically uploaded.</p>
    <pre class="a49-qa-snapshot-preview" id="a54CaptureContent" aria-label="Sanitized browser incident trace preview"></pre>
   </details>
+  <details class="a49-qa-snapshot" id="a56SupportBundle">
+   <summary>Consolidated QA support ZIP (review all data before export)</summary>
+   <p class="list-meta">Create one bounded local ZIP from a fresh authorised Workspace summary, plus explicitly selected browser, model and Node evidence. Every source is re-projected through strict field allowlists; no raw Task identifiers, logs, prompts, model outputs, secrets, credentials or external upload.</p>
+   <div class="a49-task-actions">
+    <label><input type="checkbox" id="a56IncludeBrowser"> Include completed opt-in browser incident capture</label>
+    <label><input type="checkbox" id="a56IncludeModel"> Include authorised Agent Check
+     <input id="a56ModelDeployment" type="text" maxlength="192" placeholder="Model deployment ID (from Local Models)" aria-label="Authorised model deployment ID"></label>
+    <label><input type="checkbox" id="a56IncludeNode"> Include Node administrator evidence
+     <input id="a56NodeID" type="text" maxlength="192" placeholder="Registered Node ID (from Nodes)" aria-label="Node ID"></label>
+   </div>
+   <div class="a49-task-actions">
+    <button class="btn" type="button" id="a56Review">Review consolidated data</button>
+    <button class="btn" type="button" id="a56Export" disabled>Download reviewed support ZIP</button>
+    <button class="btn" type="button" id="a56Discard">Discard review</button>
+   </div>
+   <p class="list-meta" id="a56Status" role="status">No capture or upload starts automatically. Optional model and Node reads require their own permissions. If any requested source is denied, the combined review fails rather than silently omitting it.</p>
+   <pre class="a49-qa-snapshot-preview" id="a56Preview" aria-label="Complete sanitised consolidated support bundle preview"></pre>
+  </details>
  </section>`;
  let taskRows=[],publishedOutputs=[];
  const doneStates=new Set(["complete","failed","cancelled","blocked"]);
@@ -325,6 +343,96 @@ async function a49MountDevelopmentTasks(project,workspace,container){
   for(const button of Object.values(incidentActions))if(button)button.disabled=true;
   incidentStatus.textContent="Browser incident recorder unavailable in this build.";
  }
+ // Client-local reviewed multi-source QA bundle. Optional source IDs are
+ // input selectors only and are NEVER exported; each request reauthorises.
+ const supportRoot=section.querySelector("#a56SupportBundle");
+ const supportReview=section.querySelector("#a56Review");
+ const supportExport=section.querySelector("#a56Export");
+ const supportDiscard=section.querySelector("#a56Discard");
+ const supportStatus=section.querySelector("#a56Status");
+ const supportPreview=section.querySelector("#a56Preview");
+ let supportReviewed=null;
+ const supportOptions=()=>({
+  browser:section.querySelector("#a56IncludeBrowser").checked,
+  model:section.querySelector("#a56IncludeModel").checked,
+  modelID:section.querySelector("#a56ModelDeployment").value.trim(),
+  node:section.querySelector("#a56IncludeNode").checked,
+  nodeID:section.querySelector("#a56NodeID").value.trim()
+ });
+ const supportSignature=()=>JSON.stringify(supportOptions());
+ const discardSupport=()=>{
+  supportReviewed=null;supportExport.disabled=true;
+  supportPreview.textContent="";
+ };
+ supportDiscard.onclick=()=>{
+  discardSupport();
+  supportStatus.textContent="Reviewed support evidence discarded from this panel. No files uploaded.";
+ };
+ for(const field of supportRoot.querySelectorAll("input")){
+  field.addEventListener("change",discardSupport);
+  field.addEventListener("input",discardSupport);
+ }
+ supportReview.onclick=async()=>{
+  discardSupport();
+  supportReview.disabled=true;supportStatus.textContent="Checking access and sanitising selected QA sources…";
+  const selected=supportOptions(),signature=supportSignature();
+  try{
+   if(typeof a56SupportBundle==="undefined")throw Error("Consolidated QA formatter unavailable");
+   if(selected.model&&(!selected.modelID||selected.modelID.length>192)||
+      selected.node&&(!selected.nodeID||selected.nodeID.length>192))
+    throw Error("Select a registered model deployment or Node ID for each optional source");
+   const sources={workspace:await apiRequest("/v1/qa/workspace-snapshot?"+qaQuery)};
+   if(selected.browser){
+    if(!incident)throw Error("Browser recorder unavailable");
+    const observed=incident.snapshot();
+    if(!["stopped","expired"].includes(observed.status)||!observed.events.length)
+     throw Error("Stop and review a browser capture before including it");
+    sources.browser=observed;
+   }
+   if(selected.model)sources.model=await apiRequest("/v1/qa/model-deployments/"+
+      encodeURIComponent(selected.modelID)+"/agent-check");
+   if(selected.node)sources.node=await apiRequest("/v1/qa/nodes/"+
+      encodeURIComponent(selected.nodeID)+"/evidence");
+   if(!section.isConnected||signature!==supportSignature())return;
+   const prepared=a56SupportBundle.prepare(sources);
+   supportPreview.textContent=prepared.json;
+   supportReviewed={prepared,signature,reviewedAt:Date.now(),
+    browserFingerprint:selected.browser?JSON.stringify(sources.browser):null};
+   supportExport.disabled=false;
+   supportStatus.textContent="Review every included field. Export uses exactly this preview, does not re-fetch sources or upload data, and expires after two minutes. Missing source permissions fail closed.";
+  }catch(_){
+   discardSupport();
+   supportStatus.textContent="Unable to create the reviewed bundle. Check Workspace read permissions, selected optional source IDs and Node Admin/model.read access. No partial export is available.";
+  }finally{supportReview.disabled=false}
+ };
+ supportExport.onclick=()=>{
+  const reviewed=supportReviewed;
+  if(!reviewed||!section.isConnected)return;
+  if(reviewed.signature!==supportSignature()||Date.now()-reviewed.reviewedAt>120000||
+     supportPreview.textContent!==reviewed.prepared.json||
+     (reviewed.browserFingerprint!==null&&
+      (!incident||JSON.stringify(incident.snapshot())!==reviewed.browserFingerprint))){
+   discardSupport();
+   supportStatus.textContent="Selected sources, browser capture, review or review expiry changed. Review again before export.";
+   return;
+  }
+  try{
+   const bytes=a56SupportBundle.zip(reviewed.prepared);
+   if(bytes.byteLength>262144||!bytes.byteLength)throw Error("Invalid support ZIP size");
+   const blob=new Blob([bytes],{type:"application/zip"});
+   const url=URL.createObjectURL(blob);
+   try{
+    const link=document.createElement("a");
+    link.href=url;link.download="onepane-reviewed-qa-support.zip";
+    link.style.display="none";document.body.appendChild(link);link.click();link.remove();
+   }finally{URL.revokeObjectURL(url)}
+   supportStatus.textContent="Reviewed local support ZIP downloaded. Inspect before sharing; raw logs and external service health are excluded.";
+   discardSupport();
+  }catch(_){
+   discardSupport();
+   supportStatus.textContent="Support export exceeded the safe bounds or the review changed. Review again.";
+  }
+ };
  section.querySelector("#a49RefreshTasks")?.addEventListener("click",loadTasks);
  section.querySelector("#a49TaskFilter")?.addEventListener("change",paintTasks);
  void loadTasks();

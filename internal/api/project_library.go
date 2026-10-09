@@ -20,6 +20,7 @@ type projectLibraryService interface {
  LibraryAssets(context.Context,string)([]projectworkspace.LibraryAsset,error)
  WorkspaceLibraryAssets(context.Context,string,string,string)([]projectworkspace.LibraryAsset,error)
  WorkspaceLibraryVersions(context.Context,string,string,string)([]projectworkspace.LibraryVersion,error)
+ WorkspacePublishedOutputs(context.Context,string,string)([]projectworkspace.WorkspacePublishedOutput,error)
  LibraryVersions(context.Context,string,string)([]projectworkspace.LibraryVersion,error)
  GrantLibraryAsset(context.Context,projectworkspace.GrantLibraryAssetCommand)error
  RevokeLibraryAsset(context.Context,string,string,string,string)error
@@ -52,6 +53,17 @@ func (s *Server) listWorkspaceLibraryVersions(w http.ResponseWriter,r *http.Requ
  if !ok{writeError(w,http.StatusServiceUnavailable,"Workspace Library unavailable");return}
  versions,err:=lib.WorkspaceLibraryVersions(r.Context(),p.ID,workspaceID,r.PathValue("assetID"))
  respondDomain(w,versions,err,http.StatusOK)
+}
+
+// Completed, source-verified Task outputs can be listed only through the
+// caller's active canonical Workspace; content still requires a fresh
+// per-version download authorisation.
+func (s *Server) listWorkspacePublishedOutputs(w http.ResponseWriter,r *http.Request) {
+ p,workspaceID,_,ok:=s.workspaceRuntimeContext(w,r,false);if !ok{return}
+ lib,ok:=s.projects.(projectLibraryService)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Workspace Task outputs unavailable");return}
+ outputs,err:=lib.WorkspacePublishedOutputs(r.Context(),p.ID,workspaceID)
+ respondDomain(w,outputs,err,http.StatusOK)
 }
 
 func (s *Server) listProjectLibrary(w http.ResponseWriter,r *http.Request) {

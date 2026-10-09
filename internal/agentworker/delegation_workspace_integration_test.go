@@ -133,4 +133,37 @@ func TestDelegationPreservesCanonicalProjectWorkspaceAndLocalOnlyRouting(t *test
  if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM agent_worker_steps WHERE run_id=? AND step_kind='delegate'`,run.ID).Scan(&delegationJournal);err!=nil{t.Fatal(err)}
  if delegationJournal!=1{t.Fatalf("replayed delegation generated %d journals",delegationJournal)}
 
+ // Fault injection: a journal write failing at the END of the transaction
+ // must roll back the child, edge, Task/Attempt and Worker changes together.
+ second,err:=tasks.Create(ctx,task.CreateCommand{
+  WorkspaceID:"tenant",ProjectID:&project.ID,ProjectWorkspaceID:&world.ID,
+  Objective:"Second independent world job",Completion:parent.Completion,ActorPrincipalID:ptr("operator"),
+ })
+ if err!=nil{t.Fatal(err)}
+ second,err=tasks.MarkReady(ctx,task.TransitionCommand{TaskID:second.ID,ExpectedRevision:second.Revision})
+ if err!=nil{t.Fatal(err)}
+ secondRun,startResult:=worker.startRun(ctx,second)
+ if startResult.Error!=""{t.Fatal(startResult.Error)}
+ secondActive,err:=tasks.Get(ctx,second.ID)
+ if err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`CREATE TRIGGER fail_delegate_journal
+ BEFORE INSERT ON agent_worker_steps WHEN NEW.step_kind='delegate'
+ BEGIN SELECT RAISE(ABORT,'injected journal failure'); END`);err!=nil{t.Fatal(err)}
+ failed:=worker.handleDelegate(ctx,secondRun,secondActive,reply,TickResult{
+  TaskID:second.ID,RunID:secondRun.ID,
+ })
+ if failed.Error==""{t.Fatal("delegation succeeded despite journal fault injection")}
+ var createdChildren int
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM tasks WHERE parent_task_id=?`,second.ID).Scan(&createdChildren);err!=nil{t.Fatal(err)}
+ if createdChildren!=0{t.Fatalf("orphan children after aborted delegation: %d",createdChildren)}
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM task_dependencies WHERE task_id=?`,second.ID).Scan(&edges);err!=nil{t.Fatal(err)}
+ if edges!=0{t.Fatalf("orphan dependency edge after aborted delegation: %d",edges)}
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=?`,secondRun.ID).Scan(&runStatus);err!=nil{t.Fatal(err)}
+ if runStatus!=string(RunRunning){t.Fatalf("Worker checkpoint partially committed: %s",runStatus)}
+ secondNow,err:=tasks.Get(ctx,second.ID)
+ if err!=nil{t.Fatal(err)}
+ if secondNow.State!=task.StateRunning{t.Fatalf("Task wait partially committed: %s",secondNow.State)}
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT status FROM task_attempts WHERE id=?`,secondRun.AttemptID).Scan(&attemptStatus);err!=nil{t.Fatal(err)}
+ if attemptStatus!=string(task.AttemptRunning){t.Fatalf("Attempt wait partially committed: %s",attemptStatus)}
+
 }

@@ -37,9 +37,10 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    <option value="all">All</option><option value="active">Active and waiting</option>
    <option value="finished">Completed, blocked or failed</option></select></label>
   <p class="list-meta" id="a49TaskCount" role="status">Loading Workspace Tasks…</p>
+  <p class="list-meta" id="a49OutputStatus" role="status"></p>
   <div id="a49TaskList"></div>
  </section>`;
- let taskRows=[];
+ let taskRows=[],publishedOutputs=[];
  const doneStates=new Set(["complete","failed","cancelled","blocked"]);
  const paintTasks=()=>{
   if(!section.isConnected)return;
@@ -56,10 +57,18 @@ async function a49MountDevelopmentTasks(project,workspace,container){
     '<div class="list-meta">Local-first retry: '+escapeHtml(new Date(Number(wait.retry_at_ms)).toLocaleString())+
     ' · Attempt '+escapeHtml(String(wait.attempt||1))+
     (wait.reason?' · '+escapeHtml(wait.reason):'')+'</div>':'';
+   const outputs=publishedOutputs.filter(o=>o.task_id===t.id);
+   const published=outputs.length?'<div class="a49-published-outputs"><div class="list-meta">Verified Project Library outputs</div>'+
+    outputs.map(o=>'<div class="a49-published-output"><span>'+
+      escapeHtml(o.relative_path)+' · v'+Number(o.version)+' · '+Number(o.size_bytes)+' bytes</span>'+
+      '<a class="btn" title="Workspace read access is verified at download time" href="/v1/projects/'+
+      encodeURIComponent(project.id)+'/library/'+encodeURIComponent(o.asset_id)+'/versions/'+
+      Number(o.version)+'/content?workspace_id='+encodeURIComponent(canonical.id)+
+      '">Download</a></div>').join("")+'</div>':'';
    return '<article class="a49-task-row panel-card"><div class="card-header"><strong>'+
     escapeHtml(t.objective||"Untitled objective")+'</strong><span class="pill">'+
     escapeHtml(displayState)+'</span></div><div class="list-meta">Task '+
-    escapeHtml(t.id)+" · "+escapeHtml(updated)+"</div>"+retry+"</article>";
+    escapeHtml(t.id)+" · "+escapeHtml(updated)+"</div>"+retry+published+"</article>";
   }).join(""):'<div class="empty-state compact">No Workspace Tasks match this filter.</div>';
  };
  const loadTasks=async()=>{
@@ -73,6 +82,21 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    if(!section.isConnected||section.dataset.workspaceId!==String(workspace.id))return;
    taskRows=(Array.isArray(list)?list:[]).filter(t=>t.project_id===project.id&&
     t.project_workspace_id===canonical.id).sort((a,b)=>Number(b.updated_at||0)-Number(a.updated_at||0)).slice(0,15);
+   const outputStatus=section.querySelector("#a49OutputStatus");
+   try{
+    const results=await apiRequest("/v1/projects/"+encodeURIComponent(project.id)+
+     "/workspaces/"+encodeURIComponent(canonical.id)+"/published-outputs");
+    if(!section.isConnected||section.dataset.workspaceId!==String(workspace.id))return;
+    publishedOutputs=(Array.isArray(results)?results:[]).filter(o=>
+     o&&typeof o.task_id==="string"&&typeof o.asset_id==="string"&&
+     Number.isSafeInteger(Number(o.version))&&Number(o.version)>0);
+    if(outputStatus)outputStatus.textContent=publishedOutputs.length+
+     " verified, currently authorised Task outputs in recent publication history";
+   }catch(error){
+    publishedOutputs=[];
+    if(outputStatus)outputStatus.textContent="Published output inventory unavailable: "+
+     String(error.message||"Permission denied");
+   }
    paintTasks();
   }catch(error){
    if(count)count.textContent="Task inventory unavailable: "+String(error.message||"Permission denied");

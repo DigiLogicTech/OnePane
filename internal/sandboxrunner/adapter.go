@@ -182,7 +182,17 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 		if err != nil {
 			return tool.AdapterResult{}, err
 		}
-		return result(map[string]any{"runtime_id": in.RuntimeID, "application_id": in.ApplicationID, "command": in.Command, "timeout_seconds": in.TimeoutSeconds, "result": execResult, "container": state, "engine": profile}, "sandboxed application command executed")
+		// The transport/tool invocation completed even if compilation/tests
+		// failed. Preserve the nonzero exit code and diagnostic output so the
+		// agent can diagnose and retry. Never label a failed build as successful.
+		succeeded := execResult.ExitCode == 0
+		summary := "sandboxed application command completed successfully"
+		if !succeeded {
+			summary = fmt.Sprintf("sandboxed application command exited with code %d", execResult.ExitCode)
+		}
+		return result(map[string]any{"runtime_id": in.RuntimeID, "application_id": in.ApplicationID,
+			"command": in.Command, "timeout_seconds": in.TimeoutSeconds,
+			"succeeded": succeeded, "result": execResult, "container": state, "engine": profile}, summary)
 	case ToolRuntimeEnsure:
 		workspace, workspaceExists, err = managedWorkspacePath(a.dataDir, in.RuntimeID, true)
 		if err != nil || !workspaceExists {

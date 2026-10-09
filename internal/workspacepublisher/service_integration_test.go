@@ -43,6 +43,7 @@ func TestPublishingOCIArtifactRequiresActiveOwnedTaskAndOnlyGrantsSourceWorkspac
  image:="ghcr.io/digilogic/godot@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
  app,err:=projects.DeclareApplication(ctx,projectworkspace.DeclareApplicationCommand{RuntimeID:runtime.ID,Name:"World Builder",SourceKind:projectworkspace.AppOCIImage,SourceRef:image,CreatedBy:"operator"})
  if err!=nil{t.Fatal(err)}
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_runtimes SET status='running' WHERE id=?`,runtime.ID);err!=nil{t.Fatal(err)}
  if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_applications SET status='running' WHERE id=?`,app.ID);err!=nil{t.Fatal(err)}
  artifactStore,err:=artifact.NewLocalStore(filepath.Join(t.TempDir(),"blobs"))
  if err!=nil{t.Fatal(err)}

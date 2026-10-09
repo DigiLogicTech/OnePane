@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type CLIEngine struct{}
@@ -502,7 +503,6 @@ func runtimeNetworkName(runtimeID string) string {
 // under the configured OnePane runtime root instead of global/system TMP.
 // Only the trusted rootless service account may read the 0700 staging folder.
 func writeEnvFile(workspacePath string, env map[string]string) (string, error) {
- if len(env)==0{return "",nil}
  workspacePath,err:=filepath.Abs(workspacePath)
  if err!=nil{return "",err}
  root:=filepath.Dir(workspacePath)
@@ -518,6 +518,10 @@ func writeEnvFile(workspacePath string, env map[string]string) (string, error) {
  if !info.IsDir()||info.Mode()&os.ModeSymlink!=0||info.Mode().Perm()&0o077!=0{
   return "",ErrInvalidInput
  }
+ // Apply retention even when this particular tool has no secret bindings:
+ // a previous process crash must not leave old credentials indefinitely.
+ if err:=cleanupStaleEnvFiles(staging,time.Now());err!=nil{return "",err}
+ if len(env)==0{return "",nil}
  keys:=make([]string,0,len(env))
  for key:=range env{keys=append(keys,key)}
  sort.Strings(keys)
@@ -536,6 +540,29 @@ func writeEnvFile(workspacePath string, env map[string]string) (string, error) {
  if err=f.Close();err!=nil{_=os.Remove(path);return "",err}
  return path,nil
 }
+const sandboxEnvStaleAfter = 24 * time.Hour
+
+// cleanupStaleEnvFiles only removes old regular files matching OnePane's
+// private env-file prefix from the already validated 0700 runtime staging
+// directory. It never traverses subdirectories, follows links, or edits user
+// Project/Workspace files. Recent files remain untouched for active engines.
+func cleanupStaleEnvFiles(dir string, now time.Time) error {
+ entries,err:=os.ReadDir(dir)
+ if err!=nil{return err}
+ for _,entry:=range entries {
+  name:=entry.Name()
+  if !strings.HasPrefix(name,"onepane-sandbox-env-"){continue}
+  path:=filepath.Join(dir,name)
+  info,err:=os.Lstat(path)
+  if os.IsNotExist(err){continue}
+  if err!=nil{return err}
+  if !info.Mode().IsRegular(){continue}
+  if now.Sub(info.ModTime())<sandboxEnvStaleAfter{continue}
+  if err:=os.Remove(path);err!=nil&&!os.IsNotExist(err){return err}
+ }
+ return nil
+}
+
 func containerNotFound(stderr string) bool {
 	v := strings.ToLower(stderr)
 	return strings.Contains(v, "no such container") || strings.Contains(v, "no container with name") || strings.Contains(v, "does not exist") || strings.Contains(v, "not found")

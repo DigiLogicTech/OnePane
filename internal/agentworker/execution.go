@@ -156,16 +156,7 @@ func (s *Service) compileContext(ctx context.Context, run Run, t task.Task) (con
 
 func (s *Service) dispatch(ctx context.Context, run Run, t task.Task, c scheduler.Candidate, compiled contextcompiler.Result, constraints json.RawMessage, label policy.DataLabel, reservationID string) (agentprotocol.Response, string, error) {
 	if c.Kind == scheduler.CandidateAgentRuntime {
-		permitted := append([]agentprotocol.ProposalType(nil), permittedProposals...)
-		if !c.ToolCallback {
-			filtered := permitted[:0]
-			for _, p := range permitted {
-				if p != agentprotocol.ProposalTool {
-					filtered = append(filtered, p)
-				}
-			}
-			permitted = filtered
-		}
+		permitted,_:=proposalsForCandidate(c)
 		taskID, attemptID := t.ID, run.AttemptID
 		result, err := s.runtimes.Invoke(ctx, agentruntime.InvokeCommand{WorkspaceID: run.WorkspaceID, TaskID: &taskID, AttemptID: &attemptID, PrincipalID: WorkerPrincipal, ConnectionID: c.ID, Role: run.RoleName, Objective: t.Objective, Constraints: constraints, Context: compiled.Sections, ContextManifest: compiled.ManifestJSON, PermittedProposalTypes: permitted, InputLabel: label, ActorPrincipalID: strPtr(WorkerPrincipal), BudgetReservationID: optionalString(reservationID)})
 		if err != nil {
@@ -177,17 +168,8 @@ func (s *Service) dispatch(ctx context.Context, run Run, t task.Task, c schedule
 		return *result.Response, result.Invocation.ID, nil
 	}
 	reqID, _ := s.ids.New("agentreq")
-	permitted := append([]agentprotocol.ProposalType(nil), permittedProposals...)
-	if !c.ToolCallback {
-		filtered := permitted[:0]
-		for _, p := range permitted {
-			if p != agentprotocol.ProposalTool {
-				filtered = append(filtered, p)
-			}
-		}
-		permitted = filtered
-	}
-	areq := agentprotocol.Request{ProtocolVersion: agentprotocol.Version, RequestID: reqID, WorkspaceID: run.WorkspaceID, TaskID: t.ID, AttemptID: run.AttemptID, PrincipalID: WorkerPrincipal, Role: run.RoleName, Objective: t.Objective, Constraints: constraints, Context: compiled.Sections, ContextManifest: compiled.ManifestJSON, PermittedProposalTypes: permitted, ToolCallback: c.ToolCallback}
+	permitted,structuredJSONTools:=proposalsForCandidate(c)
+	areq := agentprotocol.Request{ProtocolVersion: agentprotocol.Version, RequestID: reqID, WorkspaceID: run.WorkspaceID, TaskID: t.ID, AttemptID: run.AttemptID, PrincipalID: WorkerPrincipal, Role: run.RoleName, Objective: t.Objective, Constraints: constraints, Context: compiled.Sections, ContextManifest: compiled.ManifestJSON, PermittedProposalTypes: permitted, ToolCallback: c.ToolCallback, JSONToolProposals:structuredJSONTools}
 	if err := areq.Validate(); err != nil {
 		return agentprotocol.Response{}, "", err
 	}

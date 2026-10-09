@@ -29,7 +29,21 @@ async function a48MountWorkspaceRuntime(project,workspace,container){
  if(!section.isConnected||section.dataset.workspaceId!==String(workspace.id))return;
  const verified=runtime?.status==="running";
  const status=runtime?.status||"not provisioned",desired=runtime?.desired_state||"stopped";
- const tools=apps.map(a=>'<div class="a48-app-row"><strong>'+escapeHtml(a.name)+'</strong><span class="pill">'+escapeHtml(a.status||"declared")+'</span><span class="list-meta">'+escapeHtml(a.source_ref||"")+'</span></div>').join("");
+ const tools=apps.map(a=>{
+  const current=String(a.desired_state||"installed");
+  const next=current==="running"?"stopped":"running";
+  const action=next==="running"?"Start tool":"Stop tool";
+  const canStart=runtime?.status==="running";
+  const disabled=next==="running"&&!canStart;
+  return '<div class="a48-app-row" data-a48-app="'+escapeHtml(a.id)+'">'+
+   '<strong>'+escapeHtml(a.name)+'</strong>'+
+   '<span class="pill">'+escapeHtml(a.status||"declared")+'</span>'+
+   '<span class="list-meta">Requested: '+escapeHtml(current)+'</span>'+
+   '<span class="list-meta">'+escapeHtml(a.source_ref||"")+'</span>'+
+   '<button type="button" class="btn" data-a48-app-action="'+escapeHtml(a.id)+'"'+
+   ' data-a48-revision="'+Number(a.revision)+'" data-a48-target="'+next+'" '+
+   (disabled?'disabled title="Start Workspace sandbox first"':'')+'>'+action+'</button></div>';
+ }).join("");
  const buttons=runtime?
   '<button type="button" class="btn" id="a48Start" '+(desired==="running"?"disabled":"")+'>Start</button> <button type="button" class="btn" id="a48Stop" '+(desired==="stopped"?"disabled":"")+'>Stop</button>':
   '<button type="button" class="btn primary" id="a48Create">Create isolated sandbox</button>';
@@ -61,6 +75,26 @@ async function a48MountWorkspaceRuntime(project,workspace,container){
  section.querySelector("#a48Start")?.addEventListener("click",()=>mutate("/v1/project-runtimes/"+encodeURIComponent(runtime.id)+"/desired-state",{expected_revision:runtime.revision,desired_state:"running"}));
  section.querySelector("#a48Stop")?.addEventListener("click",()=>mutate("/v1/project-runtimes/"+encodeURIComponent(runtime.id)+"/desired-state",{expected_revision:runtime.revision,desired_state:"stopped"}));
  section.querySelector("#a48Refresh")?.addEventListener("click",refresh);
+ // App start and stop are requested states, never a claim that the
+ // image is installed or executing until the independent observer confirms.
+ section.querySelectorAll("[data-a48-app-action]").forEach(button=>button.addEventListener("click",async()=>{
+  const id=button.dataset.a48AppAction,target=button.dataset.a48Target;
+  if(!["running","stopped"].includes(target))return;
+  button.disabled=true;
+  try{
+   await apiRequest("/v1/project-runtimes/"+encodeURIComponent(runtime.id)+
+    "/applications/"+encodeURIComponent(id)+"/desired-state",{
+     method:"POST",body:JSON.stringify({
+      expected_revision:Number(button.dataset.a48Revision),desired_state:target
+     })
+   });
+   notice("Tool "+(target==="running"?"start":"stop")+" requested; awaiting verification.");
+   await refresh();
+  }catch(e){
+   button.disabled=false;
+   notice("Tool lifecycle request failed: "+e.message,"bad");
+  }
+ }));
  section.querySelector("#a48Install")?.addEventListener("submit",async e=>{
   e.preventDefault();
   const form=e.currentTarget;const btn=form.querySelector('button[type="submit"]');btn.disabled=true;

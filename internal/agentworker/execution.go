@@ -446,29 +446,55 @@ func (s *Service) handleDelegate(ctx context.Context, run Run, t task.Task, resp
 	p.Completion = inheritOnePaneRouting(t.Completion, p.Completion)
 	actor := WorkerPrincipal
 	var child task.Task
+	// A model response cannot be considered a committed delegation until the
+	// entire child/edge/Task/Attempt/Worker/journal checkpoint is durable.
+	// Every mutation below is in ONE transaction: crash/retry cannot leave an
+	// orphaned child or duplicate its work in another Workspace.
 	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		var e error
-		child, e = s.tasks.CreateInTransaction(ctx, tx, task.CreateCommand{WorkspaceID: t.WorkspaceID, ProjectID: t.ProjectID, ProjectWorkspaceID: t.ProjectWorkspaceID, ArtifactSessionID: t.ArtifactSessionID, PlanID: t.PlanID, ParentTaskID: &t.ID, Objective: p.Objective, SchedulingClass: t.SchedulingClass, Priority: t.Priority, Completion: p.Completion, ActorPrincipalID: &actor})
-		if e != nil {
-			return e
+		var observedStatus string
+		var revision int64
+		if err:=tx.QueryRowContext(ctx,`SELECT status,revision FROM agent_worker_runs
+		 WHERE id=? AND task_id=? AND attempt_id=? AND workspace_id=?`,
+		 run.ID,t.ID,run.AttemptID,t.WorkspaceID).Scan(&observedStatus,&revision);err!=nil{return err}
+		if observedStatus!=string(RunRunning)||revision!=run.Revision {
+			return fmt.Errorf("%w: delegation Worker incarnation changed",ErrInvalidWorkerState)
 		}
-		meta, _ := json.Marshal(map[string]any{"source": "agent_delegate", "run_id": run.ID})
-		_, e = tx.ExecContext(ctx, `INSERT INTO task_dependencies(task_id,depends_on_task_id,dependency_type,dependency_mode,metadata_json) VALUES(?,?,'hard','all',?)`, t.ID, child.ID, string(meta))
-		return e
+		var e error
+		child, e = s.tasks.CreateInTransaction(ctx, tx, task.CreateCommand{
+			WorkspaceID:t.WorkspaceID,ProjectID:t.ProjectID,ProjectWorkspaceID:t.ProjectWorkspaceID,
+			ArtifactSessionID:t.ArtifactSessionID,PlanID:t.PlanID,ParentTaskID:&t.ID,
+			Objective:p.Objective,SchedulingClass:t.SchedulingClass,Priority:t.Priority,
+			Completion:p.Completion,ActorPrincipalID:&actor,
+		})
+		if e!=nil{return e}
+		meta,_:=json.Marshal(map[string]any{"source":"agent_delegate","run_id":run.ID})
+		if _,e=tx.ExecContext(ctx,`INSERT INTO task_dependencies
+		 (task_id,depends_on_task_id,dependency_type,dependency_mode,metadata_json)
+		 VALUES(?,?,'hard','all',?)`,t.ID,child.ID,string(meta));e!=nil{return e}
+		if e=s.tasks.WaitDependencyInTransaction(ctx,tx,task.TransitionCommand{
+			TaskID:t.ID,ExpectedRevision:t.Revision,ActorPrincipalID:&actor,
+			Reason:"waiting for delegated child task "+child.ID,
+		});e!=nil{return e}
+		cont,_:=json.Marshal(map[string]any{"delegated_task_id":child.ID,"objective":child.Objective})
+		now:=s.clock.UnixMilli()
+		updated,e:=tx.ExecContext(ctx,`UPDATE agent_worker_runs
+		 SET status='waiting',continuation_json=?,last_error=NULL,revision=revision+1,updated_at=?
+		 WHERE id=? AND task_id=? AND attempt_id=? AND workspace_id=?
+		 AND status='running' AND revision=?`,string(cont),now,
+		 run.ID,t.ID,run.AttemptID,t.WorkspaceID,run.Revision)
+		if e!=nil{return e}
+		n,e:=updated.RowsAffected()
+		if e!=nil{return e}
+		if n!=1{return fmt.Errorf("%w: concurrent Worker delegation",ErrInvalidWorkerState)}
+		return s.journalInTransaction(ctx,tx,run.ID,"delegate","waiting",nil,nil,
+		 strPtr("delegate"),strPtr(child.ID),map[string]any{"child_task_id":child.ID})
 	})
-	if err != nil {
-		return s.failRun(ctx, run, res, err)
+	if err!=nil{
+		// The transaction rolled back all state. Do not call failRun here:
+		// a concurrent Worker may now own this incarnation, and failing it
+		// would destroy the safe optimistic-concurrency boundary.
+		return failedResult(res,err)
 	}
-	cont, _ := json.Marshal(map[string]any{"delegated_task_id": child.ID, "objective": child.Objective})
-	if err := s.updateRun(ctx, run.ID, run.Revision, RunWaiting, cont, nil, 0, 0, nil, nil, nil); err != nil {
-		return failedResult(res, err)
-	}
-	cur, _ := s.tasks.Get(ctx, t.ID)
-	_, err = s.tasks.WaitDependency(ctx, task.TransitionCommand{TaskID: cur.ID, ExpectedRevision: cur.Revision, ActorPrincipalID: &actor, Reason: "waiting for delegated child task " + child.ID})
-	if err != nil {
-		return s.failRun(ctx, run, res, err)
-	}
-	_ = s.journal(ctx, run.ID, "delegate", "waiting", nil, nil, strPtr("delegate"), strPtr(child.ID), map[string]any{"child_task_id": child.ID})
 	res.Status = "waiting_dependency"
 	return res
 }

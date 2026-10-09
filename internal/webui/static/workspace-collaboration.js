@@ -2,9 +2,7 @@
  * Workspaces remain sandbox-isolated. This is not a shared directory or
  * permission to run arbitrary tools or receive ungranted Library bytes.
  */
-const a45LoadDevelopmentBase=a44LoadProjectEnvironment;
-a44LoadProjectEnvironment=async function(project,workspace,container){
- await a45LoadDevelopmentBase(project,workspace,container);
+async function a45MountCollaboration(project,workspace,container){
  if(!container.isConnected)return;
  const section=document.createElement("section");
  section.className="a45-collaboration a44-environment-subsection";
@@ -12,7 +10,7 @@ a44LoadProjectEnvironment=async function(project,workspace,container){
  section.innerHTML='<h3>Workspace connections</h3><p class="list-meta">Loading approved Project artifact channels…</p>';
  container.append(section);
  await a45RenderCollaboration(project,workspace,section);
-};
+}
 function a45BackendLegacyID(view){
  let state=view?.state||{};
  if(typeof state==="string"){try{state=JSON.parse(state)}catch{state={}}}

@@ -41,6 +41,8 @@ const links=read('internal/webui/static/workspace-collaboration.js');
 const lib=read('internal/webui/static/workspace-library.js');
 const libRoute=read('internal/webui/static/project-library-route.js');
 const runtimeUI=read('internal/webui/static/workspace-runtime-controls.js');
+const workflowUI=read('internal/webui/static/workspace-ai-workflow.js');
+new vm.Script(workflowUI,{filename:'workspace-ai-workflow.js'});
 new vm.Script(runtimeUI,{filename:'workspace-runtime-controls.js'});
 const api=read('internal/api/project_library.go');
 const routes=read('internal/api/server.go');
@@ -53,6 +55,8 @@ assertContains(index,'/workspace-library.js','Project Library UI must be loaded'
 assertContains(index,'/project-library-route.js','first-class Library route must be loaded');
 assert.ok(index.indexOf('/workspace-collaboration.js')<index.indexOf('/workspace-library.js'),'Library loads after collaboration');
 assertContains(libRoute,'pages.library','global Library navigation must register');
+assertContains(ui,'a49MountDevelopmentTasks','Workspace must queue governed Project Tasks');
+assertContains(workflowUI,'project_workspace_id:canonical.id','AI jobs must use canonical Workspace identities');
 assertContains(ui,'a48MountWorkspaceRuntime','canonical Workspace sandbox must be mounted');
 assertContains(runtimeUI,'/desired-state','Workspace runtime lifecycle must use governed runtime endpoint');
 assertContains(runtimeUI,'@sha256:','toolchains must require pinned images');

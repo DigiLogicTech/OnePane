@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/DigiLogicTech/OnePane/internal/agentruntime"
+	"github.com/DigiLogicTech/OnePane/internal/artifact"
 	"github.com/DigiLogicTech/OnePane/internal/assurance"
 	"github.com/DigiLogicTech/OnePane/internal/botruntime"
 	"github.com/DigiLogicTech/OnePane/internal/buildinfo"
@@ -245,6 +246,7 @@ type gatewayService interface {
 type Server struct {
 	mux             *http.ServeMux
 	attentionDB     *sql.DB
+	libraryArtifacts *artifact.Service
 	projects        projectService
 	events          eventReader
 	auth            Authorizer
@@ -285,6 +287,7 @@ func NewServer(projects projectService, events eventReader, auth Authorizer) *Se
 	return s
 }
 func (s *Server) SetAttentionDB(db *sql.DB) { s.attentionDB = db }
+func (s *Server) SetLibraryArtifacts(a *artifact.Service) { s.libraryArtifacts = a }
 func (s *Server) SetPreviewSessions(m previewSessionMinter) { s.previewSessions = m }
 func (s *Server) SetWebAuth(a *webauth.Service, secureCookies bool) {
 	s.webAuth = a
@@ -501,6 +504,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/projects/{projectID}", s.getProject)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces", s.listProjectWorkspaces)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces", s.createCanonicalProjectWorkspace)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/library", s.listProjectLibrary)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/library", s.uploadProjectLibrary)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/library/{assetID}/versions", s.listProjectLibraryVersions)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/library/{assetID}/grants", s.grantProjectLibrary)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/library/{assetID}/versions/{version}/content", s.downloadWorkspaceLibraryVersion)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspace-links", s.projectWorkspaceLinks)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspace-links", s.projectWorkspaceLinks)
 	s.mux.HandleFunc("PATCH /v1/workspace-links/{linkID}", s.toggleWorkspaceLink)

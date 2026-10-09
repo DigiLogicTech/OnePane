@@ -23,7 +23,8 @@ async function a46RenderLibrary(project,workspace,root){
  if(!root.isConnected)return;
  workspaces=Array.isArray(workspaces)?workspaces:[];
  assets=Array.isArray(assets)?assets:[];
- const source=workspaces.find(w=>a45BackendLegacyID(w)===String(workspace.id));
+ const globalLibrary=root.dataset.globalLibrary==="true";
+ const source=globalLibrary?{id:"",name:"Project Library"}:workspaces.find(w=>a45BackendLegacyID(w)===String(workspace.id));
  const labelOf=w=>escapeHtml(w.name||w.id||"Workspace");
  const targets=workspaces.filter(w=>w.status==="active");
  const options=targets.map(w=>`<option value="${escapeHtml(w.id)}" ${w.id===source?.id?"selected":""}>${labelOf(w)}</option>`).join("");
@@ -34,14 +35,14 @@ async function a46RenderLibrary(project,workspace,root){
   <div class="toolbar a45-link-actions">
    <button type="button" class="btn" data-a46-versions="${escapeHtml(a.id)}">Versions</button>
    <button type="button" class="btn" data-a46-grant="${escapeHtml(a.id)}">Grant Workspace access</button>
-   ${source?`<a class="btn" href="${prefix}/library/${encodeURIComponent(a.id)}/versions/${Number(a.current_version)}/content?workspace_id=${encodeURIComponent(source.id)}" title="Requires an approved Workspace read grant">Download if granted</a>`:""}
+   ${source?.id?`<a class="btn" href="${prefix}/library/${encodeURIComponent(a.id)}/versions/${Number(a.current_version)}/content?workspace_id=${encodeURIComponent(source.id)}" title="Requires an approved Workspace read grant">Download if granted</a>`:""}
   </div><div class="a46-versions" data-a46-version-list="${escapeHtml(a.id)}" hidden></div>
  </article>`).join("");
  root.innerHTML=`<h3>Project Library</h3>
  <p class="list-meta">Shared Project storage, versioned and permissioned per Workspace. Uploading an asset to this Workspace does not give other sandboxes permission to read it.</p>
  <form class="a46-upload" id="a46UploadForm">
   <label>New asset<input type="file" name="file" required></label>
-  <button class="btn primary" type="submit" ${source?"":"disabled"}>Upload into ${escapeHtml(workspace.name||"Workspace")} Library</button>
+  <button class="btn primary" type="submit" ${source?"":"disabled"}>${globalLibrary?"Upload to Project Library":"Upload into "+escapeHtml(workspace.name||"Workspace")+" Library"}</button>
  </form>
  ${!source?'<p class="list-meta">Register this Workspace under Workspace connections to enable uploads.</p>':""}
  <div class="a46-library-items">${cards||'<div class="empty-state compact">No Project Library assets. Upload a document, source artifact or asset to begin.</div>'}</div>`;

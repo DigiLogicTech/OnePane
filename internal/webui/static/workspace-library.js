@@ -47,6 +47,7 @@ async function a46RenderLibrary(project,workspace,root){
  </form>
  ${!source?'<p class="list-meta">Register this Workspace under Workspace connections to enable uploads.</p>':""}
  <div class="toolbar a46-recovery-toolbar"><button id="a46RecoverArtifact" type="button" class="btn">Adopt existing managed artifact</button></div>
+ <label class="a46-library-filter">Filter Library assets<input id="a46FilterAssets" placeholder="Search by filename or type…" aria-label="Filter Library assets"></label>
  <div class="a46-library-items">${cards||'<div class="empty-state compact">No Project Library assets. Upload a document, source artifact or asset to begin.</div>'}</div>`;
  root.querySelector("#a46RecoverArtifact")?.addEventListener("click",()=>{
   openModal("Adopt existing OnePane artifact",`<form id="a46AdoptForm" class="qa-form">
@@ -68,6 +69,12 @@ async function a46RenderLibrary(project,workspace,root){
     await a46RenderLibrary(project,workspace,root);
    }catch(err){btn.disabled=false;af.querySelector("#a46AdoptError").textContent=err.message}
   };
+ });
+ root.querySelector("#a46FilterAssets")?.addEventListener("input",e=>{
+  const query=String(e.target.value||"").toLowerCase().trim();
+  root.querySelectorAll(".a46-library-asset").forEach(card=>{
+    card.hidden=!!query&&!card.textContent.toLowerCase().includes(query);
+  });
  });
  const form=root.querySelector("#a46UploadForm");
  form?.addEventListener("submit",async e=>{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,6 +16,8 @@ type fakeEngine struct {
 	profile                      EngineProfile
 	ensure                       ContainerSpec
 	pulls, ensures, stops, execs int
+	inspectMount string
+	extraBind bool
 }
 
 func (f *fakeEngine) Probe(context.Context) (EngineProfile, error) {
@@ -36,8 +39,16 @@ func (f *fakeEngine) PullImage(_ context.Context, image string) (ImageState, err
 func (f *fakeEngine) InspectImage(_ context.Context, image string) (ImageState, error) {
 	return ImageState{Reference: image, Digests: []string{"example@sha256:abc"}}, nil
 }
-func (f *fakeEngine) InspectContainer(context.Context, string, string) (ContainerState, error) {
-	return ContainerState{Name: "c", ID: "id", Status: "running", SpecHash: "sha256:x", IsolationVerified: true}, nil
+func (f *fakeEngine) InspectContainer(_ context.Context, runtimeID, appID string) (ContainerState, error) {
+ st := ContainerState{Name: "c", ID: "id", Status: "running", RuntimeID: runtimeID,
+  ApplicationID: appID, SpecHash: "sha256:x", IsolationVerified: true}
+ if f.inspectMount!="" {
+  st.Mounts=[]MountState{{Type:"bind",Source:f.inspectMount,Destination:"/workspace",RW:true}}
+ }
+ if f.extraBind {
+  st.Mounts=append(st.Mounts,MountState{Type:"bind",Source:"/host",Destination:"/other",RW:true})
+ }
+ return st,nil
 }
 func (f *fakeEngine) ListRuntime(context.Context, string) ([]ContainerState, error) {
 	return []ContainerState{{Name: "c", ID: "id", Status: "running", SpecHash: "sha256:x"}}, nil
@@ -160,12 +171,26 @@ func TestInspectToolsAreReadOnlyObservations(t *testing.T) {
 }
 
 func TestAppExecRequiresVerifiedSandbox(t *testing.T) {
-	eng := &fakeEngine{profile: EngineProfile{Kind: "podman", Rootless: true}}
-	a := NewAdapter(t.TempDir(), eng)
-	res, err := a.Invoke(context.Background(), tool.AdapterRequest{ToolID: ToolAppExec, Input: json.RawMessage(`{"runtime_id":"r","application_id":"a","command":["echo","hello"]}`)})
-	if err != nil || !json.Valid(res.Result) || eng.execs != 1 {
-		t.Fatalf("err=%v result=%s execs=%d", err, res.Result, eng.execs)
-	}
+ eng := &fakeEngine{profile:EngineProfile{Kind:"podman",Rootless:true}}
+ a:=NewAdapter(t.TempDir(),eng)
+ path,exists,err:=managedWorkspacePath(a.dataDir,"r",true)
+ if err!=nil||!exists{t.Fatal(err)}
+ eng.inspectMount=path
+ input:=tool.AdapterRequest{ToolID:ToolAppExec,Input:json.RawMessage(`{"runtime_id":"r","application_id":"a","command":["echo","hello"]}`)}
+ result,err:=a.Invoke(context.Background(),input)
+ if err!=nil||!json.Valid(result.Result)||eng.execs!=1{
+  t.Fatalf("valid sandbox rejected: %v %s execs=%d",err,result.Result,eng.execs)
+ }
+ // A different Workspace's host volume must never be executable.
+ eng.inspectMount=filepath.Join(a.dataDir,"projects","other","workspace")
+ if _,err=a.Invoke(context.Background(),input);err==nil||eng.execs!=1{
+  t.Fatalf("foreign Workspace mount executed: %v execs=%d",err,eng.execs)
+ }
+ eng.inspectMount=path
+ eng.extraBind=true
+ if _,err=a.Invoke(context.Background(),input);err==nil||eng.execs!=1{
+  t.Fatalf("additional host bind executed: %v execs=%d",err,eng.execs)
+ }
 }
 
 func TestRegisterSandboxToolsAreMutations(t *testing.T) {
@@ -199,4 +224,52 @@ func TestRegisterSandboxToolsAreMutations(t *testing.T) {
 	if string(b.Definition.Mode) != "execute_sandboxed" || b.Definition.CapabilityID != CapabilityExecute {
 		t.Fatalf("exec mode=%s capability=%s", b.Definition.Mode, b.Definition.CapabilityID)
 	}
+}
+
+
+func TestManagedWorkspaceRejectsSymlinksAndFiles(t *testing.T){
+ for _,location:=range []string{"projects","runtime","workspace"}{
+  t.Run(location,func(t *testing.T){
+   root:=t.TempDir()
+   outside:=t.TempDir()
+   base:=filepath.Join(root,"projects","runtime","workspace")
+   var target string
+   switch location {
+   case "projects": target=filepath.Join(root,"projects")
+   case "runtime":
+    if err:=os.Mkdir(filepath.Join(root,"projects"),0o700);err!=nil{t.Fatal(err)}
+    target=filepath.Join(root,"projects","runtime")
+   case "workspace":
+    if err:=os.MkdirAll(filepath.Join(root,"projects","runtime"),0o700);err!=nil{t.Fatal(err)}
+    target=base
+   }
+   if err:=os.Symlink(outside,target);err!=nil{t.Skipf("symlink unsupported: %v",err)}
+   if _,_,err:=managedWorkspacePath(root,"runtime",true);!errors.Is(err,ErrInvalidInput){
+    t.Fatalf("followed symlink %s: %v",location,err)
+   }
+   if _,_,err:=managedWorkspacePath(root,"runtime",false);!errors.Is(err,ErrInvalidInput){
+    t.Fatalf("read-only inspect followed symlink %s: %v",location,err)
+   }
+  })
+ }
+}
+
+func TestInspectDoesNotClaimIsolationWithForeignWorkspaceMount(t *testing.T){
+ eng:=&fakeEngine{profile:EngineProfile{Kind:"podman",Rootless:true}}
+ a:=NewAdapter(t.TempDir(),eng)
+ expected,ok,err:=managedWorkspacePath(a.dataDir,"r",true)
+ if err!=nil||!ok{t.Fatal(err)}
+ in:=tool.AdapterRequest{ToolID:ToolAppInspect,Input:json.RawMessage(`{"runtime_id":"r","application_id":"a"}`)}
+ eng.inspectMount=filepath.Join(a.dataDir,"projects","different","workspace")
+ bad,err:=a.Invoke(context.Background(),in)
+ if err!=nil{t.Fatal(err)}
+ var denied struct{Container ContainerState `json:"container"`}
+ if err=json.Unmarshal(bad.Result,&denied);err!=nil{t.Fatal(err)}
+ if denied.Container.IsolationVerified{t.Fatal("foreign mount was reported as isolated")}
+ eng.inspectMount=expected
+ good,err:=a.Invoke(context.Background(),in)
+ if err!=nil{t.Fatal(err)}
+ var allowed struct{Container ContainerState `json:"container"`}
+ if err=json.Unmarshal(good.Result,&allowed);err!=nil{t.Fatal(err)}
+ if !allowed.Container.IsolationVerified{t.Fatal("managed mount not verified")}
 }

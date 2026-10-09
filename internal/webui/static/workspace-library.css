@@ -1,0 +1,14 @@
+/* Shared semantic tokens: Library never overrides the selected theme. */
+.a46-library{min-width:0;overflow-wrap:anywhere}
+.a46-library>h3{margin-bottom:6px}
+.a46-upload{display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:12px 0;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--panel-2)}
+.a46-upload>label{display:flex;flex:1 1 180px;min-width:0;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)}
+.a46-upload input[type=file]{max-width:100%;color:var(--text)}
+.a46-library-items{display:flex;flex-direction:column;gap:8px}
+.a46-library-asset{padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--panel-2)}
+.a46-library-asset .btn{text-decoration:none;color:var(--text)}
+.a46-versions{padding-top:9px;border-top:1px solid var(--border)}
+.a46-versions[hidden]{display:none!important}
+.a46-library-version{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:6px 0}
+.a46-library-version .list-meta{overflow-wrap:anywhere}
+@media(max-width:680px){.a46-upload>button{width:100%}}

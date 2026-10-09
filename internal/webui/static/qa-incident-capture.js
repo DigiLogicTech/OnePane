@@ -76,7 +76,9 @@
    if(status!=="recording")return false;
    // Do not copy uncontrolled error reasons.
    const outcome=reason==="expired"?"expired":"stopped";
-   note({kind:"capture",action:"stopped",outcome});
+   // Do not call note() while expiring: note() itself tests the deadline.
+   if(events.length>=MAX_EVENTS){events.shift();dropped++}
+   events.push({at_utc:timestamp(),kind:"capture",action:"stopped",outcome});
    status=outcome;
    ended=now();
    detach();

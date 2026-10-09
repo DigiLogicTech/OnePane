@@ -19,6 +19,7 @@ type repository interface {
 	Runtime(context.Context, string) (ProjectRuntime, error)
 	RuntimeTx(context.Context, storage.Tx, string) (ProjectRuntime, error)
 	RuntimeByProject(context.Context, string) (ProjectRuntime, error)
+	RuntimeByProjectWorkspace(context.Context, string, string) (ProjectRuntime, error)
 	InsertRuntime(context.Context, storage.Tx, ProjectRuntime) error
 	UpdateRuntimeDesired(context.Context, storage.Tx, ProjectRuntime, RuntimeDesiredState, int64) error
 	UpdateRuntimePolicy(context.Context, storage.Tx, ProjectRuntime, json.RawMessage, json.RawMessage, int64) error

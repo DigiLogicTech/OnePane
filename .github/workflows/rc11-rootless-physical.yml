@@ -1,0 +1,91 @@
+name: RC11 Trusted Rootless Node Acceptance
+
+# Self-hosted Node code must never run from a pull_request event.
+# Only an authorised push to the RC11 integration branch can schedule it.
+on:
+  push:
+    branches:
+      - feature/project-workspace-development-environments
+
+permissions:
+  contents: read
+
+jobs:
+  physical-rootless-node:
+    name: Rootless Workspace physical Node smoke (opt-in)
+    # Never run self-hosted physical tests from untrusted pull requests.
+    # This gate is intentionally skipped until a repo administrator sets an
+    # approved immutable digest already present in the unprivileged runner's
+    # local OCI image pool. A skipped gate is not a physical QA pass.
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feature/project-workspace-development-environments' && vars.ONEPANE_ROOTLESS_SMOKE_IMAGE != '' }}
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 12
+    env:
+      ONEPANE_SANDBOX_SMOKE_IMAGE: ${{ vars.ONEPANE_ROOTLESS_SMOKE_IMAGE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Confirm approved rootless Node and pre-pulled image
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$ONEPANE_SANDBOX_SMOKE_IMAGE" =~ ^[^[:space:]]+@sha256:[[:xdigit:]]{64}$ ]]; then
+            echo "::error::ONEPANE_ROOTLESS_SMOKE_IMAGE must be an immutable 64-digit sha256 OCI reference"
+            exit 1
+          fi
+          if ! command -v podman >/dev/null; then
+            echo "::error::Runner has no rootless Podman; physical smoke not complete"
+            exit 1
+          fi
+          if [[ "$(podman info --format '{{.Host.Security.Rootless}}')" != "true" ]]; then
+            echo "::error::The runner must execute as an unprivileged rootless Podman user"
+            exit 1
+          fi
+          if ! podman image exists "$ONEPANE_SANDBOX_SMOKE_IMAGE"; then
+            echo "::error::Approved digest-pinned OCI image not pre-pulled under runner identity"
+            exit 1
+          fi
+      - name: Real OCI network, command, filesystem and teardown acceptance
+        run: go test -tags integration ./internal/sandboxrunner -run '^(TestRealRootlessNodeSmoke|TestRealRootlessWorkspaceIsolation)$' -v -count=1 -timeout 9m
+
+  physical-rootless-godot:
+    name: Rootless Godot 4 Workspace build (opt-in)
+    # Never run self-hosted physical tests from untrusted pull requests.
+    # Never pull unspecified/mutable engine images onto user-managed Nodes.
+    # Approval means a pre-pulled digest and deliberate repository variable.
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feature/project-workspace-development-environments' && vars.ONEPANE_GODOT_SMOKE_IMAGE != '' }}
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 12
+    env:
+      ONEPANE_GODOT_SMOKE_IMAGE: ${{ vars.ONEPANE_GODOT_SMOKE_IMAGE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Confirm explicit digest and rootless pre-pulled Godot image
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$ONEPANE_GODOT_SMOKE_IMAGE" =~ ^[^[:space:]]+@sha256:[[:xdigit:]]{64}$ ]]; then
+            echo '::error::ONEPANE_GODOT_SMOKE_IMAGE must use an immutable 64-digit OCI SHA-256'
+            exit 1
+          fi
+          if ! command -v podman >/dev/null; then
+            echo '::error::Rootless Podman is required for physical Godot QA'
+            exit 1
+          fi
+          if [[ "$(podman info --format '{{.Host.Security.Rootless}}')" != "true" ]]; then
+            echo '::error::Do not run engine smoke tests as root'
+            exit 1
+          fi
+          if ! podman image exists "$ONEPANE_GODOT_SMOKE_IMAGE"; then
+            echo '::error::Approved Godot image was not pre-pulled under runner identity'
+            exit 1
+          fi
+      - name: Godot 4 scene import and hash-verified sandbox output
+        run: go test -tags integration ./internal/sandboxrunner -run '^TestRealRootlessGodotWorldBuild$' -v -count=1 -timeout 7m

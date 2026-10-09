@@ -105,3 +105,11 @@ func fileEditCommand(action, relative, contentsB64, expectedSHA string) ([]strin
  digest:=sha256.Sum256(data)
  return []string{"python3","-I","-S","-c",workspaceFileEditor,action,relative,contentsB64,expectedSHA},hex.EncodeToString(digest[:]),len(data),nil
 }
+
+func boundedEditorDiagnostic(reason string) string {
+ if len(reason)>384{reason=reason[:384]}
+ return strings.Map(func(r rune)rune {
+  if r < ' ' || r == 127{return -1}
+  return r
+ },reason)
+}

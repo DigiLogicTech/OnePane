@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/DigiLogicTech/OnePane/internal/authority"
 	"github.com/DigiLogicTech/OnePane/internal/event"
@@ -40,6 +41,57 @@ func boundedJSON(v json.RawMessage, n int) any {
 	}
 	return map[string]any{"truncated": true, "bytes": len(v)}
 }
+// diagnosticTail retains the most actionable last lines from compiler/test
+// output without cutting a UTF-8 codepoint or flooding a model's context.
+func diagnosticTail(v string,maxBytes int) string {
+ if maxBytes<=0{return ""}
+ if len(v)<=maxBytes{return v}
+ start:=len(v)-maxBytes
+ for start<len(v)&&!utf8.RuneStart(v[start]){start++}
+ return v[start:]
+}
+
+// boundedToolResult retains exit status and bounded stderr/stdout tails when
+// a governed sandbox tool result exceeds the normal Agent Worker context cap.
+// The full trusted ToolGateway result remains stored for provenance; only the
+// compact LLM continuation is reduced. Other tools use the existing limiter.
+func boundedToolResult(v json.RawMessage,maxBytes int) any {
+ if len(v)<=maxBytes{return boundedJSON(v,maxBytes)}
+ if maxBytes<1024{return boundedJSON(v,maxBytes)}
+ var payload struct{
+  RuntimeID string `json:"runtime_id"`
+  ApplicationID string `json:"application_id"`
+  Command []string `json:"command"`
+  Succeeded *bool `json:"succeeded"`
+  Result struct{
+   ExitCode *int `json:"exit_code"`
+   Stdout string `json:"stdout"`
+   Stderr string `json:"stderr"`
+  } `json:"result"`
+ }
+ if json.Unmarshal(v,&payload)!=nil||payload.Succeeded==nil||payload.Result.ExitCode==nil{
+  return boundedJSON(v,maxBytes)
+ }
+ args:=make([]string,0,8)
+ for i,arg:=range payload.Command{
+  if i>=8{break}
+  args=append(args,boundedString(arg,128))
+ }
+ tailLimit:=maxBytes/3
+ return map[string]any{
+  "truncated":true,"bytes":len(v),
+  "runtime_id":boundedString(payload.RuntimeID,128),
+  "application_id":boundedString(payload.ApplicationID,128),
+  "command_prefix":args,
+  "succeeded":*payload.Succeeded,
+  "exit_code":*payload.Result.ExitCode,
+  "stdout_bytes":len(payload.Result.Stdout),
+  "stderr_bytes":len(payload.Result.Stderr),
+  "stdout_tail":diagnosticTail(payload.Result.Stdout,tailLimit),
+  "stderr_tail":diagnosticTail(payload.Result.Stderr,tailLimit),
+ }
+}
+
 func defaultJSON(v json.RawMessage) json.RawMessage {
 	if len(v) == 0 || !json.Valid(v) {
 		return json.RawMessage(`{}`)

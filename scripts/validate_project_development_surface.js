@@ -91,4 +91,14 @@ assertContains(api,'ResolveWorkspaceLibraryVersion','Library download must enfor
 assertContains(api,'VerifyContent','downloads must verify immutable artifact bytes');
 assertContains(migration,'CHECK (source_workspace_id<>target_workspace_id)','self-link must fail');
 assertContains(routes,'revokeProjectLibraryGrant','Library must support access revocation');
+const evidence=read('internal/webui/static/evidence-audit-page.js');
+new vm.Script(evidence,{filename:'evidence-audit-page.js'});
+assertContains(index,'/evidence-audit-page.js','Evidence route must mount real backend event surface');
+assert.ok(index.indexOf('/project-library-route.js')<index.indexOf('/evidence-audit-page.js'),
+ 'Evidence final renderer must load after the Project Library route');
+assertContains(evidence,'/v1/events?workspace_id=','Evidence events must come from authorised backend API');
+assertContains(evidence,'onepaneWorkspace','Evidence read must use current tenancy scope');
+assertContains(evidence,'a51PreviousRenderActiveView=renderActiveView',
+ 'Evidence route must preserve existing route chain');
+assertContains(evidence,'slice(0,100)','Evidence view must bound client-side rows');
 console.log('PASS: Development + Library/Workspace connection UI syntax, permissions and route contracts');

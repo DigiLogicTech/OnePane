@@ -92,7 +92,7 @@ type routePolicy struct {
 }
 
 func defaultRoutePolicy() routePolicy {
-	return routePolicy{RoutingEnabled: true, AllowDelegation: true, AllowRemote: true, PreferZeroIncrementalCost: true, AllowMediated: true, AllowDegraded: true}
+	// Resource-adaptive ordinary tasks may use an accepted/restricted, empirically\n\t// qualified limited model. The scheduler still enforces exact capability,\n\t// protocol, context, admission, data handling and explicit cost policy.\n\t// Research mode uses separately pinned seats and must not substitute models.\n\treturn routePolicy{RoutingEnabled: true, AllowDelegation: true, AllowRemote: true, PreferZeroIncrementalCost: true, AllowLimited: true, AllowMediated: true, AllowDegraded: true}
 }
 
 type toolProposal struct {

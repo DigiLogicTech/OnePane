@@ -1,0 +1,45 @@
+name: Project Workspace Development Architecture
+
+on:
+  push:
+    branches:
+      - feature/project-workspace-development-environments
+  pull_request:
+    paths:
+      - 'internal/webui/static/project-*.js'
+      - 'internal/webui/static/project-*.css'
+      - 'internal/webui/static/app-foundation.js'
+      - 'internal/webui/static/index.html'
+      - 'internal/projectworkspace/**'
+      - 'internal/projectruntime/**'
+      - 'internal/sandboxrunner/**'
+      - 'docs/PROJECT_WORKSPACE_DEVELOPMENT_ENVIRONMENTS_RFC.md'
+      - 'scripts/validate_project_development_surface.js'
+      - '.github/workflows/project-workspace-development-checks.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  development-contract:
+    name: Validate honest Workspace runtime boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Frontend syntax and runtime-boundary contract
+        run: |
+          node --check internal/webui/static/project-development-page.js
+          node --check internal/webui/static/project-workspace-page.js
+          node --check internal/webui/static/app-foundation.js
+          node scripts/validate_project_development_surface.js
+      - name: Existing sandbox and Project contract tests
+        run: |
+          go test ./internal/projectworkspace ./internal/projectruntime ./internal/sandboxrunner

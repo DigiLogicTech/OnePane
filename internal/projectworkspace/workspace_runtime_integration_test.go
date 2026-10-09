@@ -30,6 +30,29 @@ func TestLegacyAndWorkspaceRuntimesCoexistAfterMigration(t *testing.T){
  if old.ProjectWorkspaceID!=nil{t.Fatal("legacy runtime unexpectedly assigned to Workspace")}
  legacyApp,err:=svc.DeclareApplication(ctx,DeclareApplicationCommand{RuntimeID:old.ID,Name:"old-tool",SourceKind:AppOCIImage,SourceRef:"ghcr.io/example/legacy@sha256:abc",CreatedBy:"operator"})
  if err!=nil{t.Fatal(err)}
+ started,err:=svc.SetApplicationDesiredState(ctx,SetApplicationDesiredStateCommand{
+  ApplicationID:legacyApp.ID,ExpectedRevision:legacyApp.Revision,
+  DesiredState:AppDesiredRunning,ActorPrincipalID:"operator"})
+ if err!=nil{t.Fatalf("request tool start: %v",err)}
+ if started.DesiredState!=AppDesiredRunning||started.Status!=AppDeclared {
+  t.Fatalf("request must not forge observed running state: %+v",started)
+ }
+ if _,err=svc.SetApplicationDesiredState(ctx,SetApplicationDesiredStateCommand{
+  ApplicationID:legacyApp.ID,ExpectedRevision:legacyApp.Revision,
+  DesiredState:AppDesiredStopped,ActorPrincipalID:"operator"});err!=ErrRevisionConflict{
+  t.Fatalf("stale lifecycle request must conflict, got %v",err)
+ }
+ stopped,err:=svc.SetApplicationDesiredState(ctx,SetApplicationDesiredStateCommand{
+  ApplicationID:legacyApp.ID,ExpectedRevision:started.Revision,
+  DesiredState:AppDesiredStopped,ActorPrincipalID:"operator"})
+ if err!=nil||stopped.DesiredState!=AppDesiredStopped{
+  t.Fatalf("request tool stop: %+v %v",stopped,err)
+ }
+ if _,err=svc.SetApplicationDesiredState(ctx,SetApplicationDesiredStateCommand{
+  ApplicationID:legacyApp.ID,ExpectedRevision:stopped.Revision,
+  DesiredState:AppDesiredState("invalid"),ActorPrincipalID:"operator"});err!=ErrInvalidCommand{
+  t.Fatalf("invalid app state must be rejected, got %v",err)
+ }
  a,err:=svc.CreateWorkspaceView(ctx,CreateWorkspaceViewCommand{ProjectID:p.ID,Name:"World",ActorPrincipalID:"operator"});if err!=nil{t.Fatal(err)}
  b,err:=svc.CreateWorkspaceView(ctx,CreateWorkspaceViewCommand{ProjectID:p.ID,Name:"Story",ActorPrincipalID:"operator"});if err!=nil{t.Fatal(err)}
  c,err:=svc.CreateWorkspaceView(ctx,CreateWorkspaceViewCommand{ProjectID:p.ID,Name:"Art",ActorPrincipalID:"operator"});if err!=nil{t.Fatal(err)}

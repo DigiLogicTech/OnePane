@@ -96,21 +96,32 @@ async function a45RenderCollaboration(project,workspace,root){
    method:"PATCH",body:JSON.stringify({expected_revision:Number(b.dataset.a45Revision),enabled:b.dataset.a45Enabled!=="1"})
   });await refresh()}catch(err){b.disabled=false;notice("Link update failed: "+err.message,"bad")}
  }));
- root.querySelectorAll("[data-a45-publish]").forEach(b=>b.addEventListener("click",()=>{
+ root.querySelectorAll("[data-a45-publish]").forEach(b=>b.addEventListener("click",async()=>{
   const id=b.dataset.a45Publish;
+  let assets=[];
+  try{
+   const result=await apiRequest(endpoint+"/library");
+   assets=Array.isArray(result)?result:[];
+  }catch(err){notice("Project Library unavailable: "+err.message,"bad");return}
+  if(!assets.length){notice("Upload an asset into this Workspace Library before publishing it.","bad");return}
+  const suggestions=assets.map(a=>`<option value="${a45HTML(a.id)}">${a45HTML(a.name)} · v${Number(a.current_version)}</option>`).join("");
   openModal("Publish to Workspace",`<form id="a45PublishForm" class="qa-form">
-   <p class="list-meta">Publish one registered Project Library asset version. The source Workspace must have read and derivative rights. No source files are copied or mounted into the target sandbox.</p>
-   <label>Library asset ID<input name="asset_id" required placeholder="Project Library asset identifier"></label>
-   <label>Exact version<input name="version" type="number" min="1" value="1" required></label>
+   <p class="list-meta">Publish one immutable Project Library version. The source Workspace must have an active read-and-derivative grant. The target receives only this exact published version.</p>
+   <label>Library asset<select name="asset_id" required>${suggestions}</select></label>
+   <label>Exact version<input name="version" type="number" min="1" value="${Number(assets[0].current_version)}" required></label>
    <div class="error" id="a45PublishError"></div><button class="btn primary" type="submit">Publish pinned version</button>
   </form>`);
   const form=document.querySelector("#a45PublishForm");
+  form.querySelector('[name="asset_id"]').onchange=e=>{
+   const item=assets.find(a=>a.id===e.target.value);
+   if(item)form.querySelector('[name="version"]').value=String(item.current_version);
+  };
   form.onsubmit=async e=>{
    e.preventDefault();const submit=form.querySelector('[type="submit"]');submit.disabled=true;
    const fields=Object.fromEntries(new FormData(form));
    try{
     await apiRequest(`/v1/workspace-links/${encodeURIComponent(id)}/publications`,{method:"POST",body:JSON.stringify({asset_id:fields.asset_id,version:Number(fields.version)})});
-    closeModal();notice("Version published to Workspace.");await refresh();
+    closeModal();notice("Version published to connected Workspace.");await refresh();
    }catch(err){submit.disabled=false;form.querySelector("#a45PublishError").textContent=err.message}
   };
  }));

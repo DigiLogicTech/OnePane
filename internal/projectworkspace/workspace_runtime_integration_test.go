@@ -4,6 +4,7 @@ package projectworkspace
 
 import (
  "context"
+ "errors"
  "testing"
 
  "github.com/DigiLogicTech/OnePane/internal/clock"
@@ -62,6 +63,20 @@ func TestLegacyAndWorkspaceRuntimesCoexistAfterMigration(t *testing.T){
   if err!=nil{t.Fatalf("create runtime for %s: %v",w.Name,err)}
   if r.ProjectWorkspaceID==nil||*r.ProjectWorkspaceID!=w.ID||r.ID==old.ID{t.Fatalf("bad ownership: %+v",r)}
   runtimes=append(runtimes,r)
+ }
+ // API calls cannot bypass pinned digest requirements for new named
+ // Workspace toolchains. Historical Project runtime applications stay intact.
+ if _,err=svc.DeclareApplication(ctx,DeclareApplicationCommand{
+  RuntimeID:runtimes[0].ID,Name:"unsafe-floating",SourceKind:AppOCIImage,
+  SourceRef:"ghcr.io/example/godot:latest",CreatedBy:"operator"});!errors.Is(err,ErrInvalidCommand){
+  t.Fatalf("new Workspace permitted floating image source: %v",err)
+ }
+ image:="ghcr.io/example/godot@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+ pinned,err:=svc.DeclareApplication(ctx,DeclareApplicationCommand{
+  RuntimeID:runtimes[0].ID,Name:"godot-tool",SourceKind:AppOCIImage,
+  SourceRef:image,CreatedBy:"operator"})
+ if err!=nil||pinned.SourceRef!=image{
+  t.Fatalf("new Workspace rejected immutable digest: %+v %v",pinned,err)
  }
  gotOld,err:=svc.RuntimeByProject(ctx,p.ID)
  if err!=nil||gotOld.ID!=old.ID{t.Fatalf("legacy runtime altered: %+v %v",gotOld,err)}

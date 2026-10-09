@@ -741,6 +741,12 @@ func (s *Service) DeclareApplication(ctx context.Context, cmd DeclareApplication
 		if err != nil {
 			return err
 		}
+		// Only new independently owned Workspace toolchains require an immutable
+		// OCI digest. Historic Project-scoped applications are preserved and
+		// remain subject to the existing reconciliation security controls.
+		if r.ProjectWorkspaceID != nil && cmd.SourceKind == AppOCIImage && !pinnedOCIImageSource(sourceRef) {
+			return fmt.Errorf("%w: Workspace OCI tools require an immutable sha256 image digest", ErrInvalidCommand)
+		}
 		p, err := s.repo.ProjectTx(ctx, tx, r.ProjectID)
 		if err != nil {
 			return err

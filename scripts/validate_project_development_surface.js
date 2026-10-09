@@ -76,6 +76,11 @@ assertContains(workflowUI,'"&project_workspace_id="+encodeURIComponent(canonical
 const workspaceExecSource=read('internal/agentworker/workspace_execution_manifest.go');
 const agentExecSource=read('internal/agentworker/execution.go');
 assertContains(agentExecSource,'ID:"workspace-execution-manifest"','Agent Worker must supply Task-owned OCI execution inventory');
+const delegateSource=read('internal/agentworker/execution.go');
+assertContains(delegateSource,'ProjectWorkspaceID: t.ProjectWorkspaceID',
+ 'delegated child Tasks must retain canonical Project Workspace ownership');
+assertContains(delegateSource,'inheritOnePaneRouting(t.Completion, p.Completion)',
+ 'delegation must preserve parent model, sandbox and Vault restrictions');
 assertContains(workspaceExecSource,'p.workspace_id=?','OCI execution inventory must respect Task tenant ownership');
 assertContains(workspaceExecSource,'pw.id=? AND pw.status=','OCI execution inventory must enforce Task Project Workspace ownership');
 assertContains(workspaceExecSource,'WHERE a.project_runtime_id=?','OCI applications must be scoped to the selected runtime before row limiting');

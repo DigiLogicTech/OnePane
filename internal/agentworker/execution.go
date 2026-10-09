@@ -437,6 +437,9 @@ func (s *Service) handleDelegate(ctx context.Context, run Run, t task.Task, resp
 	if !json.Valid(p.Completion) {
 		return s.failRun(ctx, run, res, fmt.Errorf("delegate completion JSON invalid"))
 	}
+	// Canonical ProjectWorkspaceID is an authoritative relational boundary,
+	// not merely a model-visible JSON hint. It MUST survive delegation so the
+	// child cannot disappear from the Workspace queue or lose OCI tool scoping.
 	// Child work inherits the parent's OnePane workspace routing/access policy.
 	// This prevents delegated workers from escaping the originating workspace's
 	// model-routing, remote-access, sandbox, or secret boundaries.
@@ -445,7 +448,7 @@ func (s *Service) handleDelegate(ctx context.Context, run Run, t task.Task, resp
 	var child task.Task
 	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
 		var e error
-		child, e = s.tasks.CreateInTransaction(ctx, tx, task.CreateCommand{WorkspaceID: t.WorkspaceID, ProjectID: t.ProjectID, ArtifactSessionID: t.ArtifactSessionID, PlanID: t.PlanID, ParentTaskID: &t.ID, Objective: p.Objective, SchedulingClass: t.SchedulingClass, Priority: t.Priority, Completion: p.Completion, ActorPrincipalID: &actor})
+		child, e = s.tasks.CreateInTransaction(ctx, tx, task.CreateCommand{WorkspaceID: t.WorkspaceID, ProjectID: t.ProjectID, ProjectWorkspaceID: t.ProjectWorkspaceID, ArtifactSessionID: t.ArtifactSessionID, PlanID: t.PlanID, ParentTaskID: &t.ID, Objective: p.Objective, SchedulingClass: t.SchedulingClass, Priority: t.Priority, Completion: p.Completion, ActorPrincipalID: &actor})
 		if e != nil {
 			return e
 		}

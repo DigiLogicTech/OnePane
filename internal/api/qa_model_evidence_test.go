@@ -22,6 +22,9 @@ func qaOpenModelTestDB(t *testing.T)*sql.DB{
     notes TEXT,placement_json TEXT)`,
   `CREATE TABLE model_testbed_turns(id TEXT PRIMARY KEY,session_id TEXT,synthetic_tool_probe INTEGER,
     request_json TEXT,response_json TEXT,metrics_json TEXT)`,
+  `CREATE TABLE model_agentcheck_failure_observations(id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,deployment_id TEXT NOT NULL,stage TEXT NOT NULL,
+    category TEXT NOT NULL,observed_at INTEGER NOT NULL)`,
  }{
   if _,err:=db.Exec(statement);err!=nil{_ = db.Close();t.Fatal(err)}
  }
@@ -38,6 +41,11 @@ func TestQAModelAgentCheckEvidenceOnlyIncludesAuthorizedDeploymentMetadata(t *te
      ('check-a','allowed','cancelled',1100,1200,'PRIVATE_PROMPT_BEARER_CANARY','{"token":"PRIVATE_PROMPT_BEARER_CANARY"}'),
      ('check-b','allowed','completed',1300,1500,'PRIVATE_PROMPT_BEARER_CANARY','{}'),
      ('check-other','foreign','completed',1600,1700,'PRIVATE_PROMPT_BEARER_CANARY','{}')`,
+  `INSERT INTO model_agentcheck_failure_observations(session_id,deployment_id,stage,category,observed_at) VALUES
+      ('check-a','allowed','inference_dispatch','deadline_exceeded',1175),
+      ('check-a','allowed','session_abort','abort_requested',1299),
+      ('check-b','allowed','runtime_unload','execution_failure',1560),
+      ('check-other','foreign','runtime_acquire','not_found',1650)`,
   `INSERT INTO model_testbed_turns VALUES
      ('turn-a','check-a',0,'{"prompt":"PRIVATE_PROMPT_BEARER_CANARY"}','{"answer":"PRIVATE_PROMPT_BEARER_CANARY"}','{}'),
      ('turn-b','check-b',0,'{"prompt":"PRIVATE_PROMPT_BEARER_CANARY"}','{"answer":"PRIVATE_PROMPT_BEARER_CANARY"}','{}'),
@@ -46,7 +54,7 @@ func TestQAModelAgentCheckEvidenceOnlyIncludesAuthorizedDeploymentMetadata(t *te
  }{if _,err:=db.ExecContext(ctx,q);err!=nil{t.Fatal(err)}}
  got,err:=loadQAModelEvidence(ctx,db,"allowed")
  if err!=nil{t.Fatal(err)}
- if got.SchemaVersion!=1||got.Scope!="authorised_managed_model_deployment"||got.DeploymentRef==""||
+ if got.SchemaVersion!=2||got.Scope!="authorised_managed_model_deployment"||got.DeploymentRef==""||
   got.DeploymentRef=="allowed"||got.DeploymentStatus!="ready"||got.ResidencyState!="stopped"{
   t.Fatalf("unexpected model projection %+v",got)
  }
@@ -55,11 +63,14 @@ func TestQAModelAgentCheckEvidenceOnlyIncludesAuthorizedDeploymentMetadata(t *te
  }
  a,b:=got.Sessions[0],got.Sessions[1]
  if a.Status!="completed"||a.RecordedTurns!=2||a.RecordedToolProbes!=1||
-   a.SessionRef=="check-b"||a.FailureDetails!="not_recorded_as_structured_evidence"{
+   a.SessionRef=="check-b"||a.FailureDetails!="structured_failure_category_only"||
+   a.LastFailureStage!="runtime_unload"||a.LastFailureCategory!="execution_failure"||
+   a.FailureObservedAt==nil||*a.FailureObservedAt!=1560{
    t.Fatalf("unexpected successful session evidence %+v",a)
  }
  if b.Status!="cancelled"||b.RecordedTurns!=1||b.RecordedToolProbes!=0||
-  b.SessionRef=="check-a"{
+  b.SessionRef=="check-a"||b.LastFailureStage!="inference_dispatch"||
+  b.LastFailureCategory!="deadline_exceeded"||b.FailureObservedAt==nil||*b.FailureObservedAt!=1175{
   t.Fatalf("unexpected cancelled session evidence %+v",b)
  }
  raw,err:=json.Marshal(got)
@@ -98,5 +109,29 @@ func TestQAModelEvidenceIsBoundedAndHasNoInferredGPUStatus(t *testing.T){
  if qaResidencyStatus("GPU: 100%")!="not_observed"||
     qaSessionStatus("cancelled: operator secret")!="unavailable"{
   t.Fatal("non-enumerated state text cannot be exported")
+ }
+}
+
+// A forged observation with the right session ID but wrong deployment must
+// not modify the selected model's diagnostic result.
+func TestQAModelFailureEvidenceDoesNotCrossDeployment(t *testing.T){
+ ctx:=context.Background()
+ db:=qaOpenModelTestDB(t);defer db.Close()
+ for _,q:=range []string{
+  `INSERT INTO model_deployments VALUES('allowed','ready','stopped',100),('foreign','failed','failed',101)`,
+  `INSERT INTO model_testbed_sessions(id,deployment_id,status,started_at,completed_at)
+   VALUES('sess','allowed','cancelled',100,200)`,
+  `INSERT INTO model_agentcheck_failure_observations(session_id,deployment_id,stage,category,observed_at)
+   VALUES('sess','foreign','runtime_acquire','not_found',190)`,
+ }{if _,err:=db.ExecContext(ctx,q);err!=nil{t.Fatal(err)}}
+ out,err:=loadQAModelEvidence(ctx,db,"allowed")
+ if err!=nil{t.Fatal(err)}
+ if len(out.Sessions)!=1||out.Sessions[0].LastFailureStage!=""||
+    out.Sessions[0].FailureDetails!="not_recorded_as_structured_evidence"{
+  t.Fatalf("cross-deployment diagnostic forged: %+v",out)
+ }
+ if qaModelFailureStage("operator-access-token")!="unavailable"||
+  qaModelFailureCategory("Bearer secret")!="unknown"{
+  t.Fatal("unknown machine-coded strings must never escape the allowlist")
  }
 }

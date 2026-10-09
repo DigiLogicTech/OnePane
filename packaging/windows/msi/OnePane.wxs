@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="DigiLogic OnePane Alpha 3.3 RC9" Manufacturer="DigiLogic" Version="3.3.9"
+           UpgradeCode="9F7D57AE-B2C4-44E2-96E4-F09E145AE235" Scope="perMachine" Language="1033">
+    <SummaryInformation Description="DigiLogic OnePane native Windows desktop application" Manufacturer="DigiLogic" />
+    <MajorUpgrade DowngradeErrorMessage="A newer OnePane MSI is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+    <Icon Id="OnePaneProductIcon" SourceFile="$(var.PayloadDir)\OnePane.ico"/>
+    <Property Id="ARPPRODUCTICON" Value="OnePaneProductIcon"/>
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER"/>
+    <!-- Public secure MSI properties support unattended enterprise installs.
+         GUI installation offers the same Data root and storage paths. -->
+    <Property Id="ONEPANE_DATA_ROOT" Secure="yes"/>
+    <Property Id="ONEPANE_MODEL_ROOT" Secure="yes"/>
+    <Property Id="ONEPANE_PROJECT_ROOT" Secure="yes"/>
+    <SetProperty Id="ONEPANE_DATA_ROOT" Value="[CommonAppDataFolder]OnePane" Before="CostFinalize"
+                 Sequence="both" Condition="NOT ONEPANE_DATA_ROOT"/>
+    <SetProperty Id="ONEPANE_MODEL_ROOT" Value="[ONEPANE_DATA_ROOT]\models" Before="CostFinalize"
+                 Sequence="both" Condition="NOT ONEPANE_MODEL_ROOT"/>
+    <SetProperty Id="ONEPANE_PROJECT_ROOT" Value="[ONEPANE_DATA_ROOT]\Projects" Before="CostFinalize"
+                 Sequence="both" Condition="NOT ONEPANE_PROJECT_ROOT"/>
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="DigiLogicFolder" Name="DigiLogic">
+        <Directory Id="INSTALLFOLDER" Name="OnePane"/>
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="DigiLogicMenu" Name="DigiLogic"/>
+    </StandardDirectory>
+    <ComponentGroup Id="OnePanePayload" Directory="INSTALLFOLDER">
+      <Component Id="OnePaneService" Guid="4F8A237D-ECD6-488F-8589-96C0609DA358">
+        <File Id="OnePaneServiceExe" Source="$(var.PayloadDir)\OnePane.Service.exe" KeyPath="yes"/>
+        <ServiceInstall Id="OnePaneServiceInstall" Name="OnePane" DisplayName="OnePane" Description="DigiLogic OnePane local-first AI control plane"
+                        Type="ownProcess" Start="auto" ErrorControl="normal" Account="LocalSystem"/>
+        <ServiceControl Id="OnePaneServiceControl" Name="OnePane" Start="install" Stop="both" Remove="uninstall" Wait="yes"/>
+      </Component>
+      <Component Id="OnePaneBackend" Guid="AE1B138F-2FF7-474A-89A3-0D67536F5879">
+        <File Id="OnePaneBackendExe" Source="$(var.PayloadDir)\OnePane.Backend.exe" KeyPath="yes"/>
+      </Component>
+      <Component Id="OnePaneDesktop" Guid="7E322D0B-6E92-4148-A542-75A2ABDC403F">
+        <File Id="OnePaneDesktopExe" Source="$(var.PayloadDir)\OnePane.Desktop.exe" KeyPath="yes"/>
+      </Component>
+      <Component Id="OnePaneIconComponent" Guid="598F4D95-7A91-472B-8920-78E8DF6E0A7E">
+        <File Id="OnePaneIconFile" Source="$(var.PayloadDir)\OnePane.ico" KeyPath="yes"/>
+      </Component>
+      <Component Id="OnePaneRegistry" Guid="2E29C90F-BB96-4542-B894-5EB4DA095190">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\DigiLogic\OnePane" Name="DataRoot" Type="string" Value="[ONEPANE_DATA_ROOT]" KeyPath="yes"/>
+        <RegistryValue Root="HKLM" Key="SOFTWARE\DigiLogic\OnePane" Name="ModelRoot" Type="string" Value="[ONEPANE_MODEL_ROOT]"/>
+        <RegistryValue Root="HKLM" Key="SOFTWARE\DigiLogic\OnePane" Name="ProjectRoot" Type="string" Value="[ONEPANE_PROJECT_ROOT]"/>
+      </Component>
+    </ComponentGroup>
+    <ComponentGroup Id="OnePaneShortcuts" Directory="DigiLogicMenu">
+      <Component Id="OnePaneStartMenu" Guid="A6CCAB99-4E30-4194-8BA3-7E0476CFAC34">
+        <Shortcut Id="OnePaneStartShortcut" Name="OnePane" Description="DigiLogic OnePane" Target="[#OnePaneDesktopExe]"
+                  WorkingDirectory="INSTALLFOLDER" Icon="OnePaneProductIcon"/>
+        <RemoveFolder Id="OnePaneMenuRemove" On="uninstall"/>
+        <RegistryValue Root="HKCU" Key="Software\DigiLogic\OnePane" Name="StartMenu" Type="integer" Value="1" KeyPath="yes"/>
+      </Component>
+    </ComponentGroup>
+    <Feature Id="OnePaneFeature" Title="DigiLogic OnePane" Level="1" Display="expand" AllowAdvertise="no">
+      <ComponentGroupRef Id="OnePanePayload"/>
+      <ComponentGroupRef Id="OnePaneShortcuts"/>
+    </Feature>
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER"/>
+    <!-- A second wizard page exposes the data/model/project roots before installation. -->
+    <UI>
+      <Dialog Id="OnePaneStorageDlg" Width="370" Height="270" Title="OnePane - Data Locations">
+        <Control Id="Title" Type="Text" X="20" Y="16" Width="330" Height="21" Transparent="yes" NoPrefix="yes"
+                 Text="Choose OnePane storage locations"/>
+        <Control Id="Help" Type="Text" X="20" Y="43" Width="330" Height="31"
+                 Text="Models, runtimes, logs, configuration and Projects can be stored on a separate drive. Select an available local NTFS volume."/>
+        <Control Id="DataLabel" Type="Text" X="20" Y="87" Width="325" Height="14" Text="Application data directory (runtimes, logs, caches, database):"/>
+        <Control Id="DataInput" Type="Edit" X="20" Y="101" Width="325" Height="18" Property="ONEPANE_DATA_ROOT"/>
+        <Control Id="ModelsLabel" Type="Text" X="20" Y="129" Width="325" Height="14" Text="Model weights directory:"/>
+        <Control Id="ModelsInput" Type="Edit" X="20" Y="143" Width="325" Height="18" Property="ONEPANE_MODEL_ROOT"/>
+        <Control Id="ProjectsLabel" Type="Text" X="20" Y="171" Width="325" Height="14" Text="Project directory:"/>
+        <Control Id="ProjectsInput" Type="Edit" X="20" Y="185" Width="325" Height="18" Property="ONEPANE_PROJECT_ROOT"/>
+        <Control Id="Back" Type="PushButton" X="182" Y="243" Width="56" Height="17" Text="&lt; Back">
+          <Publish Event="NewDialog" Value="InstallDirDlg"/>
+        </Control>
+        <Control Id="Next" Type="PushButton" X="242" Y="243" Width="56" Height="17" Default="yes" Text="Next &gt;">
+          <Publish Event="NewDialog" Value="VerifyReadyDlg" Condition="ONEPANE_DATA_ROOT AND ONEPANE_MODEL_ROOT AND ONEPANE_PROJECT_ROOT"/>
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="Cancel">
+          <Publish Event="SpawnDialog" Value="CancelDlg"/>
+        </Control>
+      </Dialog>
+      <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog" Value="OnePaneStorageDlg" Order="5" Condition="NOT Installed"/>
+    </UI>
+  </Package>
+</Wix>

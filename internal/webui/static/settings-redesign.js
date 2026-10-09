@@ -17,7 +17,7 @@ const A36_SETTINGS_META={
 let a36SettingsQuery="";
 let a36SettingsRequest=0;
 function a36SettingsList(){
- return ["overview",...A31_SETTINGS.map(x=>x[0])].map(id=>[id,A36_SETTINGS_META[id]]).filter(x=>x[1]);
+ return ["overview","general","appearance","defaults","agents","security","models","providers","nodes","skills","updates"].map(id=>[id,A36_SETTINGS_META[id]]).filter(x=>x[1]);
 }
 function a36SettingsNav(){
  const rows=a36SettingsList();

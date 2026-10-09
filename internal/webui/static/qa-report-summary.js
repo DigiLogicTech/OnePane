@@ -25,7 +25,7 @@
   // Build fields are controlled by trusted build metadata, but still
   // constrained here to prevent accidentally echoing arbitrary server text.
   const version=typeof s.build_version==="string"&&
-   /^[A-Za-z0-9.+_-]{1,32}$/.test(s.build_version)?s.build_version:"unavailable";
+   /^(?:dev|[0-9]+(?:\\.[0-9]+){1,3}(?:[-.](?:alpha|beta|rc)[0-9]{1,3})?|alpha[0-9]+(?:\\.[0-9]+){1,3}(?:-rc[0-9]+)?)$/i.test(s.build_version)?s.build_version:"unavailable";
   const revision=typeof s.build_revision==="string"&&
    /^[0-9a-fA-F]{7,40}$/.test(s.build_revision)?s.build_revision:"unavailable";
   const tasks=Array.isArray(s.tasks)?s.tasks.slice(0,50):[];

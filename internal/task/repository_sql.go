@@ -118,6 +118,29 @@ FROM tasks WHERE workspace_id=? AND archived_at IS NULL ORDER BY updated_at DESC
 	return out, nil
 }
 
+// ListProjectWorkspace searches *within* one canonical Workspace before the
+// limit is applied. Scanning an arbitrary top-N tenancy Task list and filtering
+// in JavaScript can silently hide real jobs in active multi-Project installs.
+func (r *sqlRepository) ListProjectWorkspace(ctx context.Context, tenancyID, projectID, projectWorkspaceID string, limit int) ([]Task,error) {
+ if limit<1||limit>500{limit=100}
+ rows,err:=r.db.QueryContext(ctx,`SELECT
+ id,workspace_id,project_id,project_workspace_id,artifact_session_id,plan_id,parent_task_id,
+ objective,state,scheduling_class,priority,completion_json,result_json,
+ revision,ready_at,cancel_requested_at,archived_at,created_at,updated_at
+ FROM tasks
+ WHERE workspace_id=? AND project_id=? AND project_workspace_id=? AND archived_at IS NULL
+ ORDER BY updated_at DESC,id DESC LIMIT ?`,tenancyID,projectID,projectWorkspaceID,limit)
+ if err!=nil{return nil,fmt.Errorf("list scoped Workspace tasks: %w",err)}
+ defer rows.Close()
+ out:=make([]Task,0)
+ for rows.Next(){
+  t,err:=scanTask(rows)
+  if err!=nil{return nil,err}
+  out=append(out,t)
+ }
+ return out,rows.Err()
+}
+
 func (r *sqlRepository) ListArchived(ctx context.Context, workspaceID string, limit int) ([]Task, error) {
 	if limit < 1 || limit > 500 {
 		limit = 100

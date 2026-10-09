@@ -43,6 +43,10 @@ type taskService interface {
 	List(context.Context, string, int) ([]task.Task, error)
 }
 
+type scopedWorkspaceTaskReader interface {
+ ListProjectWorkspace(context.Context,string,string,string,int)([]task.Task,error)
+}
+
 type taskArchiveService interface {
 	Get(context.Context, string) (task.Task, error)
 	ListArchived(context.Context, string, int) ([]task.Task, error)
@@ -1596,7 +1600,45 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	var rows []task.Task
 	var err error
-	if r.URL.Query().Get("archived") == "1" || strings.EqualFold(r.URL.Query().Get("archived"), "true") {
+	projectID:=strings.TrimSpace(r.URL.Query().Get("project_id"))
+	projectWorkspaceID:=strings.TrimSpace(r.URL.Query().Get("project_workspace_id"))
+	scoped:=projectID!=""||projectWorkspaceID!=""
+	archived:=r.URL.Query().Get("archived")=="1"||strings.EqualFold(r.URL.Query().Get("archived"),"true")
+	if scoped {
+		if projectID==""||projectWorkspaceID==""{
+			writeError(w,http.StatusBadRequest,"scoped Task inventory requires both project_id and project_workspace_id")
+			return
+		}
+		if archived{
+			writeError(w,http.StatusBadRequest,"archived scoped Task inventory is not yet available")
+			return
+		}
+		if s.projects==nil{
+			writeError(w,http.StatusServiceUnavailable,"Project Workspace service unavailable")
+			return
+		}
+		projectRow,e:=s.projects.Project(r.Context(),projectID)
+		if e!=nil||projectRow.WorkspaceID!=workspaceID||projectRow.Status=="archived"{
+			writeError(w,http.StatusBadRequest,"Project is not available in the requested tenancy")
+			return
+		}
+		workspaceReader,ok:=s.projects.(projectWorkspaceViewReader)
+		if !ok{
+			writeError(w,http.StatusServiceUnavailable,"Project Workspace service unavailable")
+			return
+		}
+		workspaceRow,e:=workspaceReader.WorkspaceView(r.Context(),projectWorkspaceID)
+		if e!=nil||workspaceRow.ProjectID!=projectID||workspaceRow.Status=="archived"{
+			writeError(w,http.StatusBadRequest,"Project Workspace is not part of this Project")
+			return
+		}
+		reader,ok:=s.tasks.(scopedWorkspaceTaskReader)
+		if !ok{
+			writeError(w,http.StatusServiceUnavailable,"scoped Task listing unavailable")
+			return
+		}
+		rows,err=reader.ListProjectWorkspace(r.Context(),workspaceID,projectID,projectWorkspaceID,limit)
+	} else if archived {
 		archiver, ok := s.tasks.(taskArchiveService)
 		if !ok {
 			writeError(w, http.StatusServiceUnavailable, "task archive service unavailable")

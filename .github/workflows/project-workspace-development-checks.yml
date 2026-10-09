@@ -16,6 +16,7 @@ on:
       - 'internal/sandboxrunner/**'
       - 'internal/agentworker/**'
       - 'internal/task/**'
+      - 'internal/api/**'
       - 'internal/scheduler/**'
       - 'internal/localai/**'
       - 'docs/PROJECT_WORKSPACE_DEVELOPMENT_ENVIRONMENTS_RFC.md'
@@ -54,7 +55,7 @@ jobs:
       - name: Existing sandbox and Project contract tests
         run: |
           go test ./internal/projectworkspace ./internal/projectruntime ./internal/sandboxrunner ./internal/agentworker ./internal/task ./internal/scheduler ./internal/localai ./internal/api
-          go test -tags integration ./internal/projectworkspace ./internal/sandboxrunner ./internal/agentworker
+          go test -tags integration ./internal/projectworkspace ./internal/sandboxrunner ./internal/agentworker ./internal/task
       - name: Full Go regression and cross-platform compilation
         run: |
           go test ./...

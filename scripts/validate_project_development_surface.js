@@ -66,6 +66,12 @@ assertContains(workflowUI,'mode:"brokered",project_workspace_id:canonical.id',
  'Workspace Tasks must create a brokered capability envelope');
 assertContains(workflowUI,'secrets:"none"','Workspace Tasks must not implicitly expose Vault secrets');
 assertContains(workflowUI,'/v1/tasks?workspace_id=','Workspace queue must read actual Task API state');
+assertContains(workflowUI,'"&project_id="+encodeURIComponent(project.id)', 'Workspace Task inventory must query scoped backend');
+assertContains(workflowUI,'"&project_workspace_id="+encodeURIComponent(canonical.id)', 'Workspace Task inventory must pass canonical Workspace selector');
+const tasksAPI=read('internal/api/server.go');
+const taskListMethod=tasksAPI.slice(tasksAPI.indexOf('func (s *Server) listTasks('),tasksAPI.indexOf('func (s *Server) createTask('));
+assertContains(taskListMethod,'reader.ListProjectWorkspace(', 'Tasks API must list scoped Tasks before applying row limit');
+assertContains(taskListMethod,'workspaceRow.ProjectID!=projectID','Tasks API must validate requested Workspace ownership');
 assertContains(workflowUI,'t.project_workspace_id===canonical.id',
  'Workspace queue must filter strictly to the canonical Project Workspace');
 assertContains(workflowUI,'t.project_id===project.id',

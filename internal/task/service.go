@@ -68,6 +68,20 @@ func (s *Service) List(ctx context.Context, workspaceID string, limit int) ([]Ta
 	return s.repo.List(ctx, workspaceID, limit)
 }
 
+// ListProjectWorkspace exposes the authorised backend-scoped Task inventory.
+// The API independently authenticates the tenancy, Project and Workspace
+// relationships. This selector cannot accidentally return other Workspaces.
+func (s *Service) ListProjectWorkspace(ctx context.Context, tenancyID, projectID, projectWorkspaceID string, limit int) ([]Task,error) {
+ if strings.TrimSpace(tenancyID)==""||strings.TrimSpace(projectID)==""||strings.TrimSpace(projectWorkspaceID)==""{
+  return nil,fmt.Errorf("%w: tenancy, Project and Workspace required",ErrInvalidCommand)
+ }
+ reader,ok:=s.repo.(interface{
+  ListProjectWorkspace(context.Context,string,string,string,int)([]Task,error)
+ })
+ if !ok{return nil,fmt.Errorf("%w: scoped Task repository is unavailable",ErrInvalidCommand)}
+ return reader.ListProjectWorkspace(ctx,tenancyID,projectID,projectWorkspaceID,limit)
+}
+
 func (s *Service) ListArchived(ctx context.Context, workspaceID string, limit int) ([]Task, error) {
 	workspaceID = strings.TrimSpace(workspaceID)
 	if workspaceID == "" {

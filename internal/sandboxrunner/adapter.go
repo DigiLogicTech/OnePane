@@ -129,7 +129,8 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 			return tool.AdapterResult{}, err
 		}
 		state.IsolationVerified = state.IsolationVerified && workspaceExists &&
-			exactWorkspaceMount(state, workspace)
+			state.RuntimeID == in.RuntimeID && state.ApplicationID == in.ApplicationID &&
+			state.SpecHash != "" && exactWorkspaceMount(state, workspace)
 		network, err := a.engine.InspectNetwork(ctx, in.RuntimeID)
 		if err != nil {
 			return tool.AdapterResult{}, err
@@ -157,7 +158,9 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 		if err != nil {
 			return tool.AdapterResult{}, tool.KnownFailure(err)
 		}
-		if state.Status != "running" || !state.IsolationVerified || !workspaceExists || !exactWorkspaceMount(state, workspace) {
+		if state.Status != "running" || !state.IsolationVerified || !workspaceExists ||
+			state.RuntimeID != in.RuntimeID || state.ApplicationID != in.ApplicationID ||
+			state.SpecHash == "" || !exactWorkspaceMount(state, workspace) {
 			return tool.AdapterResult{}, tool.KnownFailure(fmt.Errorf("%w: application is not a verified running sandbox", ErrInvalidInput))
 		}
 		execResult, err := a.engine.ExecContainer(ctx, in.RuntimeID, in.ApplicationID, in.Command)

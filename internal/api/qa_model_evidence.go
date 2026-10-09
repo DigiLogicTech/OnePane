@@ -110,7 +110,8 @@ func loadQAModelEvidence(ctx context.Context,db *sql.DB,deploymentID string)(qaM
  LEFT JOIN model_agentcheck_failure_observations f ON f.id=(
   SELECT f2.id FROM model_agentcheck_failure_observations f2
   WHERE f2.session_id=s.id AND f2.deployment_id=s.deployment_id
-  ORDER BY f2.observed_at DESC,f2.id DESC LIMIT 1)
+  ORDER BY CASE WHEN f2.stage='session_abort' THEN 1 ELSE 0 END,
+   f2.observed_at DESC,f2.id DESC LIMIT 1)
  WHERE s.deployment_id=?
  GROUP BY s.id,s.status,s.started_at,s.completed_at,f.stage,f.category,f.observed_at
  ORDER BY s.started_at DESC,s.id DESC LIMIT ?`,deploymentID,qaModelSessionCap+1)

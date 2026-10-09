@@ -25,6 +25,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/event"
 	"github.com/DigiLogicTech/OnePane/internal/ingress"
 	"github.com/DigiLogicTech/OnePane/internal/nodefederation"
+	"github.com/DigiLogicTech/OnePane/internal/sandboxrunner"
 	"github.com/DigiLogicTech/OnePane/internal/webui"
 )
 
@@ -49,6 +50,12 @@ func main() {
 	}
 	log.Printf("harnessd startup: bootstrap ready; preparing API routes")
 	defer runtime.DB.Close()
+	// A previous service crash may have stranded private OCI credential files
+	// without another sandbox command to trigger the per-runtime cleanup.
+	// Never clean global/SYSTEM temp or user Project/Workspace data.
+	if err:=sandboxrunner.CleanupStaleRuntimeCredentialFiles(cfg.Storage.DataDir);err!=nil{
+		log.Printf("private sandbox credential cleanup needs attention: %v",err)
+	}
 
 	state, err := runtime.System.Get(ctx)
 	if err != nil {

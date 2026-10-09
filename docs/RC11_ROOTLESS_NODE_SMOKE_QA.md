@@ -54,3 +54,31 @@ Sandbox Adapter → independent Observation/Verification path on the installed
 Windows+Ubuntu configuration; Workspace A/B isolation and cross-Workspace grants;
 migration preserving RC10 Projects/models; UI/Inspector/drawer QA. See issues
 #19, #20, #29 and #30.
+
+## Optional self-hosted GitHub Actions gate
+
+The `Project Workspace Development Architecture` workflow has a separate
+`physical-rootless-node` job. It is **skipped by default**; a skipped job
+means physical acceptance **has not happened**.
+
+To opt in for the development branch:
+
+1. Verify the self-hosted Linux x64 runner uses an unprivileged service
+   identity with **rootless Podman**, and that the intended repository/workflow
+   is trusted to execute on that runner.
+2. Pre-pull an approved immutable `@sha256:<64 hex>` OCI image containing
+   `sh` and `sleep` **as the runner's exact service identity**. Do not put
+   credentials or mutable tags in the image reference.
+3. Set repository Actions variable `ONEPANE_ROOTLESS_SMOKE_IMAGE` to that
+   pre-pulled reference, then run the branch workflow. The physical job will
+   fail explicitly if the image is absent or Podman is not rootless. No
+   automatic registry pull is performed.
+4. Archive the successful physical job URL/log as release evidence, along
+   with the Node and image versions. Remove or unset the repository variable
+   to opt out of further physical smoke execution.
+
+Ordinary hosted Go/SQLite and Windows cross-compile jobs remain independent.
+A green hosted workflow with a **skipped** physical job is never sufficient
+to approve RC11. The smoke is one acceptance gate; real installed OnePane
+API→Task/lease→operation→verification, multi-Workspace isolation and
+Windows/Ubuntu upgrade preservation must also pass.

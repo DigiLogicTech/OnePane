@@ -415,26 +415,32 @@ function closePopover(){
   if(activePopoverCleanup){const cleanup=activePopoverCleanup;activePopoverCleanup=null;cleanup();}
   activePopoverAnchor=null;
 }
+function dismissActivePopover(anchor){
+ const root=$('#overlayRoot');
+ if(activePopoverAnchor!==anchor || !root?.firstElementChild?.classList.contains('popover'))return false;
+ closePopover();root.innerHTML='';return true;
+}
 function popoverFor(anchor,html){
-  const existing=$('#overlayRoot')?.firstElementChild;
-  if(activePopoverAnchor===anchor && existing?.classList.contains('popover')){
-    closePopover();$('#overlayRoot').innerHTML='';return false;
-  }
-  closePopover();activePopoverAnchor=anchor;
-  const root=$('#overlayRoot');
-  root.innerHTML=html;
-  const p=root.firstElementChild,r=anchor.getBoundingClientRect();
-  if(isPhoneLayout())p.classList.add('mobile-popover');
-  else{p.style.top=`${r.bottom+8}px`;p.style.right=`${Math.max(8,innerWidth-r.right)}px`;}
-  const closer=e=>{
-    if(!p.isConnected){closePopover();return;}
-    if(!p.contains(e.target)&&e.target!==anchor){root.innerHTML='';closePopover();}
-  };
-  const timer=setTimeout(()=>document.addEventListener('click',closer,{capture:true}),0);
-  activePopoverCleanup=()=>{clearTimeout(timer);document.removeEventListener('click',closer,{capture:true});};
+ if(dismissActivePopover(anchor))return false;
+ closePopover();
+ const root=$('#overlayRoot');
+ if(!root||!anchor)return false;
+ activePopoverAnchor=anchor;root.innerHTML=html;
+ const p=root.firstElementChild,r=anchor.getBoundingClientRect();
+ if(!p)return false;
+ if(isPhoneLayout())p.classList.add('mobile-popover');
+ else{p.style.top=`${r.bottom+8}px`;p.style.right=`${Math.max(8,innerWidth-r.right)}px`;}
+ const closer=e=>{
+  if(!p.isConnected){closePopover();return;}
+  if(!p.contains(e.target)&&e.target!==anchor){root.innerHTML='';closePopover();}
+ };
+ const timer=setTimeout(()=>document.addEventListener('click',closer,{capture:true}),0);
+ activePopoverCleanup=()=>{clearTimeout(timer);document.removeEventListener('click',closer,{capture:true});};
+ return true;
 }
 function openThemePopover(anchor){popoverFor(anchor,`<div class="popover"><h3>Theme</h3><div class="theme-grid">${['system','light','dark','graphite','midnight','forest'].map(t=>`<button class="theme-choice ${state.theme===t?'active':''}" data-theme-choice="${t}">${titleCase(t)}</button>`).join('')}</div></div>`);$$('[data-theme-choice]').forEach(b=>b.onclick=()=>{state.theme=b.dataset.themeChoice;document.documentElement.dataset.theme=state.theme;persist();$('#overlayRoot').innerHTML='';});}
 async function openAttentionPopover(anchor){
+  if(dismissActivePopover(anchor))return;
   try{await refreshOperationalDataQA(true)}catch{}
   const items=a31Array(ATTENTION_ITEMS),complete=liveOpsAttentionReported();
   const rows=items.slice(0,8).map(item=>`<div class="popover-row"><strong>${escapeHtml(item.title||'Attention item')}</strong><div class="list-meta">${escapeHtml(item.detail||'No detail reported')}</div></div>`).join('');
@@ -442,6 +448,7 @@ async function openAttentionPopover(anchor){
   popoverFor(anchor,`<div class="popover"><h3>Attention</h3>${rows||empty}</div>`);
 }
 async function openHealthPopover(anchor){
+  if(dismissActivePopover(anchor))return;
   try{await refreshOperationalDataQA(true)}catch{}
   const nodeRows=a31Array(liveOps.nodes),providerRows=a31Array(liveOps.providers);
   const healthyNodes=nodeRows.filter(n=>['online','ready','active'].includes(String(n.status||n.state||'').toLowerCase())).length;
@@ -1033,6 +1040,7 @@ function unreadNotifications(){return NOTIFICATIONS.filter(n=>n.unread!==false);
 function syncNotificationBadges(){const count=unreadNotifications().length;$$('[data-notification-badge]').forEach(b=>{b.textContent=String(count);b.classList.toggle('hidden',count===0);});}
 function pushNotification(n){NOTIFICATIONS.unshift({...n,unread:n.unread!==false});syncNotificationBadges();}
 async function openAttentionPopover(anchor){
+  if(dismissActivePopover(anchor))return;
   try{await refreshOperationalDataQA(true);}catch{}
   const rows=unreadNotifications();
   popoverFor(anchor,`<div class="popover notification-center"><div class="popover-title-row"><h3>Notifications</h3><div class="toolbar compact"><span class="pill">${rows.length}</span>${rows.length?'<button class="btn tiny" id="markNotificationsRead">Clear</button>':''}</div></div>${rows.length?rows.map(n=>`<button class="notification-row" data-notification-id="${escapeHtml(n.id||'')}"><strong>${escapeHtml(n.title)}</strong><span>${escapeHtml(n.detail)}</span></button>`).join(''):'<div class="notification-empty">No unread notifications.</div>'}</div>`);

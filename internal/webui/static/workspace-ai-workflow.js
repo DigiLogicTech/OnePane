@@ -27,7 +27,53 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    <label>Execution priority<select name="priority"><option value="10">Normal</option><option value="20">High</option><option value="5">Background</option></select></label>
    <button type="submit" class="btn primary">Queue governed Task</button>
   </div><div id="a49TaskStatus" role="status"></div>
- </form>`;
+ </form>
+ <section class="panel-card a49-task-queue">
+  <div class="card-header"><div><h4>Workspace Task queue</h4>
+   <p class="list-meta">Observed Task states from the OnePane scheduler; queueing does not mean execution completed.</p></div>
+   <button type="button" class="btn" id="a49RefreshTasks">Refresh</button></div>
+  <label>Show <select id="a49TaskFilter" aria-label="Filter Workspace Tasks">
+   <option value="all">All</option><option value="active">Active and waiting</option>
+   <option value="finished">Completed, blocked or failed</option></select></label>
+  <p class="list-meta" id="a49TaskCount" role="status">Loading Workspace Tasks…</p>
+  <div id="a49TaskList"></div>
+ </section>`;
+ let taskRows=[];
+ const doneStates=new Set(["complete","failed","cancelled","blocked"]);
+ const paintTasks=()=>{
+  if(!section.isConnected)return;
+  const choice=section.querySelector("#a49TaskFilter")?.value||"all";
+  const rows=taskRows.filter(t=>choice==="all"||(choice==="finished"?doneStates.has(t.state):!doneStates.has(t.state)));
+  const count=section.querySelector("#a49TaskCount"),list=section.querySelector("#a49TaskList");
+  if(!count||!list)return;
+  count.textContent=rows.length+" shown · "+taskRows.length+" Workspace Tasks in the most recent tenant Task inventory";
+  list.innerHTML=rows.length?rows.map(t=>{
+   const updated=Number(t.updated_at)>0?new Date(Number(t.updated_at)).toLocaleString():"Unknown";
+   return '<article class="a49-task-row panel-card"><div class="card-header"><strong>'+
+    escapeHtml(t.objective||"Untitled objective")+'</strong><span class="pill">'+
+    escapeHtml(t.state||"unknown")+'</span></div><div class="list-meta">Task '+
+    escapeHtml(t.id)+" · "+escapeHtml(updated)+"</div></article>";
+  }).join(""):'<div class="empty-state compact">No Workspace Tasks match this filter.</div>';
+ };
+ const loadTasks=async()=>{
+  if(!section.isConnected)return;
+  const count=section.querySelector("#a49TaskCount");
+  if(count)count.textContent="Refreshing verified Task inventory…";
+  try{
+   const list=await apiRequest("/v1/tasks?workspace_id="+encodeURIComponent(onepaneWorkspace)+"&limit=200");
+   if(!section.isConnected||section.dataset.workspaceId!==String(workspace.id))return;
+   taskRows=(Array.isArray(list)?list:[]).filter(t=>t.project_id===project.id&&
+    t.project_workspace_id===canonical.id).sort((a,b)=>Number(b.updated_at||0)-Number(a.updated_at||0)).slice(0,15);
+   paintTasks();
+  }catch(error){
+   if(count)count.textContent="Task inventory unavailable: "+String(error.message||"Permission denied");
+   const list=section.querySelector("#a49TaskList");
+   if(list)list.innerHTML='<div class="error" role="alert">'+escapeHtml(error.message||"Unable to read Workspace Tasks")+'</div>';
+  }
+ };
+ section.querySelector("#a49RefreshTasks")?.addEventListener("click",loadTasks);
+ section.querySelector("#a49TaskFilter")?.addEventListener("change",paintTasks);
+ void loadTasks();
  const form=section.querySelector("#a49TaskForm");
  form.addEventListener("submit",async e=>{
   e.preventDefault();
@@ -43,6 +89,7 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    })});
    status.innerHTML='<span class="good">Queued '+escapeHtml(created.id||"Task")+' for this Workspace. Review progress in Tasks and Inspector.</span>';
    form.querySelector('[name="objective"]').value="";
+   await loadTasks();
   }catch(err){status.innerHTML='<span class="error">'+escapeHtml(err.message)+'</span>'}
   finally{button.disabled=false}
  });

@@ -500,6 +500,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/projects", s.createProject)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}", s.getProject)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces", s.listProjectWorkspaces)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces", s.createCanonicalProjectWorkspace)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspace-links", s.projectWorkspaceLinks)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspace-links", s.projectWorkspaceLinks)
 	s.mux.HandleFunc("PATCH /v1/workspace-links/{linkID}", s.toggleWorkspaceLink)

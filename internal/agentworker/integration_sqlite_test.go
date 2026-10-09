@@ -102,3 +102,49 @@ func TestSystemMembershipRunJournalAndCrashRecoveryAreDurable(t *testing.T) {
 		t.Fatalf("attempt state=%s", attemptState)
 	}
 }
+
+func TestCrashRecoveryRollsBackWhenAttemptCannotBeInterrupted(t *testing.T){
+ ctx:=context.Background()
+ db,err:=sqlite.Open(filepath.Join(t.TempDir(),"state.db"))
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ if err:=db.Migrate(ctx);err!=nil{t.Fatal(err)}
+ now:=int64(1_700_000_000_000)
+ if _,err:=db.SQL().ExecContext(ctx,`INSERT INTO workspaces(id,name,status,revision,created_at,updated_at) VALUES('ws','Workspace','active',1,?,?)`,now,now);err!=nil{t.Fatal(err)}
+ clk:=clock.Real{}
+ tasks:=task.NewService(db.SQL(),db,clk)
+ svc:=New(db.SQL(),db,clk,"node-local",tasks,nil,nil,nil,nil,nil,nil,nil,nil,nil,nil)
+ if err:=svc.ensureWorkspaceAccess(ctx,"ws");err!=nil{t.Fatal(err)}
+ created,err:=tasks.Create(ctx,task.CreateCommand{WorkspaceID:"ws",Objective:"atomic recovery"})
+ if err!=nil{t.Fatal(err)}
+ ready,err:=tasks.MarkReady(ctx,task.TransitionCommand{TaskID:created.ID,ExpectedRevision:created.Revision})
+ if err!=nil{t.Fatal(err)}
+ run,res:=svc.startRun(ctx,ready)
+ if res.Error!=""{t.Fatal(res.Error)}
+ // Simulate a corrupt/nonactive execution record so recovery must fail
+ // AFTER finding a running Worker run but BEFORE writing any recovery event.
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE task_attempts SET status='succeeded' WHERE id=?`,run.AttemptID);err!=nil{t.Fatal(err)}
+ if count,err:=svc.RecoverLostRuns(ctx);err==nil||count!=0{
+  t.Fatalf("recovery should fail atomically: count=%d err=%v",count,err)
+ }
+ var status string
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=?`,run.ID).Scan(&status);err!=nil{t.Fatal(err)}
+ if status!=string(RunRunning){t.Fatalf("Worker prematurely marked interrupted: %q",status)}
+ taskRow,err:=tasks.Get(ctx,created.ID)
+ if err!=nil{t.Fatal(err)}
+ if taskRow.State!=task.StateRunning{t.Fatalf("Task mutated despite recovery rollback: %s",taskRow.State)}
+ var events,jobs int
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT count(*) FROM events WHERE aggregate_id=? AND type='task.attempt_interrupted'`,created.ID).Scan(&events);err!=nil{t.Fatal(err)}
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT count(*) FROM outbox_jobs WHERE type='task.recovery.required' AND workspace_id='ws'`).Scan(&jobs);err!=nil{t.Fatal(err)}
+ if events!=0||jobs!=0{t.Fatalf("orphan recovery records events=%d jobs=%d",events,jobs)}
+ // Once reconciliation restores the execution record, exactly one atomic
+ // interruption is recorded and a repeat call does not duplicate the outbox.
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE task_attempts SET status='running' WHERE id=?`,run.AttemptID);err!=nil{t.Fatal(err)}
+ count,err:=svc.RecoverLostRuns(ctx)
+ if err!=nil||count!=1{t.Fatalf("retry recovery count=%d err=%v",count,err)}
+ count,err=svc.RecoverLostRuns(ctx)
+ if err!=nil||count!=0{t.Fatalf("recovery must be idempotent: count=%d err=%v",count,err)}
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT count(*) FROM events WHERE aggregate_id=? AND type='task.attempt_interrupted'`,created.ID).Scan(&events);err!=nil{t.Fatal(err)}
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT count(*) FROM outbox_jobs WHERE type='task.recovery.required' AND workspace_id='ws'`).Scan(&jobs);err!=nil{t.Fatal(err)}
+ if events!=1||jobs!=1{t.Fatalf("recovery records duplicated: events=%d jobs=%d",events,jobs)}
+}

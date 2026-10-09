@@ -97,7 +97,7 @@ func loadQANodeEvidence(ctx context.Context,db *sql.DB,nodeID string)(qaNodeEvid
  if seen.Valid&&seen.Int64>0{v:=seen.Int64;out.LastSeenAt=&v}
 
  // Only the immutable control-plane metadata for a manifest; never select
- // manifest_json, which may contain host/device identifiers or private paths.
+ // the full manifest payload, which may contain private host or device data.
  var seq,received,expires sql.NullInt64
  err:=db.QueryRowContext(ctx,`SELECT sequence,received_at,expires_at
  FROM node_capability_manifests WHERE peer_node_id=?`,nodeID).Scan(&seq,&received,&expires)
@@ -128,7 +128,7 @@ func loadQANodeEvidence(ctx context.Context,db *sql.DB,nodeID string)(qaNodeEvid
  if err!=nil&&!errors.Is(err,sql.ErrNoRows){return qaNodeEvidence{},fmt.Errorf("read latest Node wake state: %w",err)}
  if err==nil{out.WakeAttempts.LastKnownState=qaNodeWakeState(trust)}
 
- // Model outputs, raw remote request IDs and error_code are intentionally
+ // Model outputs, raw request IDs and free-text remote failures are intentionally
  // absent from the SQL projection.
  err=db.QueryRowContext(ctx,`SELECT COUNT(*),
  COALESCE(SUM(CASE WHEN status='succeeded' THEN 1 ELSE 0 END),0),

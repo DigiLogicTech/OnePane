@@ -459,6 +459,9 @@ func (s *Service) handleDelegate(ctx context.Context, run Run, t task.Task, resp
 		if observedStatus!=string(RunRunning)||revision!=run.Revision {
 			return fmt.Errorf("%w: delegation Worker incarnation changed",ErrInvalidWorkerState)
 		}
+		// Validate persisted ancestry inside the write transaction before
+		// allocating any child ID, event, dependency or admission outbox job.
+		if err:=verifyDelegationAncestry(ctx,tx,t);err!=nil{return err}
 		var e error
 		child, e = s.tasks.CreateInTransaction(ctx, tx, task.CreateCommand{
 			WorkspaceID:t.WorkspaceID,ProjectID:t.ProjectID,ProjectWorkspaceID:t.ProjectWorkspaceID,
@@ -489,6 +492,9 @@ func (s *Service) handleDelegate(ctx context.Context, run Run, t task.Task, resp
 		return s.journalInTransaction(ctx,tx,run.ID,"delegate","waiting",nil,nil,
 		 strPtr("delegate"),strPtr(child.ID),map[string]any{"child_task_id":child.ID})
 	})
+	if errors.Is(err,ErrDelegationDepthLimit)||errors.Is(err,ErrDelegationAncestry){
+		return s.blockRun(ctx,run,res,err.Error())
+	}
 	if err!=nil{
 		// The transaction rolled back all state. Do not call failRun here:
 		// a concurrent Worker may now own this incarnation, and failing it

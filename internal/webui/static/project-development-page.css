@@ -105,3 +105,10 @@
  overflow-wrap:anywhere;tab-size:2;font-size:12px;line-height:1.5;
  max-width:100%;background:var(--panel-2);padding:9px;border-radius:6px}
 .a49-qa-snapshot .a49-task-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+/* QA summary is local, readonly and selectable, with no user-content upload. */
+.a49-qa-summary{display:block;width:100%;max-width:100%;min-width:0;
+ min-height:175px;box-sizing:border-box;resize:vertical;overflow:auto;
+ padding:10px;margin:8px 0 12px;border:1px solid var(--border);
+ border-radius:8px;background:var(--panel-2);color:var(--text);
+ font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}

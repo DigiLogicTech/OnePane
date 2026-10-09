@@ -63,6 +63,19 @@ assertContains(runtimeUI,'@sha256:','toolchains must require pinned images');
 assertContains(runtimeUI,'data-a48-app-action','each provisioned tool must expose start/stop controls');
 assertContains(runtimeUI,'expected_revision','app state changes must be revision-checked');
 assertContains(routes,'s.setApplicationDesired','API must expose governed application lifecycle route');
+const runtimeAccess=read('internal/api/workspace_runtimes.go');
+assertContains(runtimeAccess,'if write && !s.authorize(w,r,i,p.WorkspaceID,"project.run")',
+ 'Workspace sandbox provisioning must require execution authority');
+const within=(start,end)=>{const a=routes.indexOf(start),b=routes.indexOf(end,a+start.length);
+ assert.ok(a>=0&&b>a,'Missing API handler boundary: '+start);return routes.slice(a,b)};
+const initialRuntime=within('func (s *Server) createRuntime(', 'func (s *Server) getRuntimeByProject(');
+const initialApp=within('func (s *Server) declareApplication(', 'func (s *Server) listApplications(');
+assertContains(initialRuntime,'in.DesiredState == projectworkspace.RuntimeDesiredRunning',
+ 'Legacy initial Running runtime creation must be guarded');
+assertContains(initialRuntime,'"project.run"','Legacy initial Running runtime needs project.run');
+assertContains(initialApp,'in.DesiredState == projectworkspace.AppDesiredRunning',
+ 'Running app declaration must be guarded');
+assertContains(initialApp,'"project.run"','Initial Running application requires project.run');
 assertContains(ui,'a45MountCollaboration','Development renderer must mount collaboration explicitly');
 assertContains(ui,'a46MountWorkspaceLibrary','Development renderer must mount Library explicitly');
 assertContains(links,'async function a45MountCollaboration','collaboration must export a mount function');

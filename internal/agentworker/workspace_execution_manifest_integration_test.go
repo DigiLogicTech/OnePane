@@ -54,6 +54,7 @@ func TestWorkspaceExecutionManifestListsOnlyTaskOwnedOCIApplications(t *testing.
   Applications []struct{ID string `json:"application_id"`} `json:"applications"`
   CommandTool struct{ID string `json:"tool_id"`;Version string `json:"tool_version"`} `json:"command_tool"`
   GitInspectTool struct{ID string `json:"tool_id"`;Version string `json:"tool_version"`;Actions []string `json:"actions"`} `json:"git_inspect_tool"`
+  FileInspectTool struct{ID string `json:"tool_id"`;Version string `json:"tool_version"`;Actions []string `json:"actions"`} `json:"file_inspect_tool"`
   GitMutationTool struct{ID string `json:"tool_id"`;Version string `json:"tool_version"`;Actions []string `json:"actions"`} `json:"git_mutation_tool"`
  }
  if err:=json.Unmarshal(raw,&manifest);err!=nil{t.Fatal(err)}
@@ -61,6 +62,7 @@ func TestWorkspaceExecutionManifestListsOnlyTaskOwnedOCIApplications(t *testing.
   manifest.ResourceRef!="project_runtime:"+worldRun.ID||
   manifest.CommandTool.ID!="project.app.exec"||manifest.CommandTool.Version!="1"||
   manifest.GitInspectTool.ID!="project.app.git.inspect"||manifest.GitInspectTool.Version!="1"||len(manifest.GitInspectTool.Actions)!=4||
+  manifest.FileInspectTool.ID!="project.app.files.inspect"||manifest.FileInspectTool.Version!="1"||len(manifest.FileInspectTool.Actions)!=2||
   manifest.GitMutationTool.ID!="project.app.git.mutate"||manifest.GitMutationTool.Version!="1"||len(manifest.GitMutationTool.Actions)!=3||
   len(manifest.Applications)!=1||manifest.Applications[0].ID!=appWorld.ID {
   t.Fatalf("incorrect Task-owned Workspace execution manifest: %s",raw)

@@ -138,3 +138,20 @@ func (s *Service) PublishWorkspaceFileVersion(ctx context.Context,c PublishWorks
  })
  return result,err
 }
+
+ // LatestWorkspacePublishedFileVersion resolves only an existing stable
+ // mapping for an active source Workspace; it never creates/grants an asset.
+func (s *Service) LatestWorkspacePublishedFileVersion(ctx context.Context,projectID,workspaceID,relativePath string)(LibraryVersion,error){
+ var v LibraryVersion
+ if projectID==""||workspaceID==""||relativePath==""{return v,ErrInvalidCommand}
+ err:=s.db.QueryRowContext(ctx,`SELECT v.asset_id,v.version,v.content_hash,
+ v.size_bytes,v.mime_type,v.storage_uri,v.created_at
+ FROM workspace_published_file_assets m
+ JOIN project_workspaces pw ON pw.id=m.project_workspace_id AND pw.status='active'
+ JOIN project_library_assets a ON a.id=m.asset_id AND a.project_id=pw.project_id AND a.archived=0
+ JOIN project_library_asset_versions v ON v.asset_id=a.id AND v.version=a.current_version
+ WHERE m.project_workspace_id=? AND m.relative_path=? AND a.project_id=?`,
+ workspaceID,relativePath,projectID).Scan(&v.AssetID,&v.Version,&v.ContentHash,
+ &v.SizeBytes,&v.MIMEType,&v.StorageURI,&v.CreatedAt)
+ return v,err
+}

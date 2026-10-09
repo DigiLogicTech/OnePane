@@ -77,6 +77,17 @@ const workspaceExecSource=read('internal/agentworker/workspace_execution_manifes
 const agentExecSource=read('internal/agentworker/execution.go');
 assertContains(agentExecSource,'ID:"workspace-execution-manifest"','Agent Worker must supply Task-owned OCI execution inventory');
 const delegateSource=read('internal/agentworker/execution.go');
+assertContains(delegateSource,'WaitDependencyInTransaction(ctx,tx',
+ 'delegated Task/Attempt wait must join child creation transaction');
+assertContains(delegateSource,'s.journalInTransaction(ctx,tx',
+ 'delegated child journal must be part of the same durable transaction');
+assertContains(delegateSource,"AND status='running' AND revision=?",
+ 'delegated Worker continuation must use a status/revision compare-and-swap');
+assertContains(delegateSource,'return failedResult(res,err)',
+ 'failed delegation transaction must not overwrite a concurrent Worker incarnation');
+const taskTransitionSource=read('internal/task/service.go');
+assertContains(taskTransitionSource,'func (s *Service) WaitDependencyInTransaction(',
+ 'running Task/Attempt must expose a transaction-scoped dependency transition');
 assertContains(delegateSource,'ProjectWorkspaceID: t.ProjectWorkspaceID',
  'delegated child Tasks must retain canonical Project Workspace ownership');
 assertContains(delegateSource,'inheritOnePaneRouting(t.Completion, p.Completion)',

@@ -73,9 +73,8 @@ const initialApp=within('func (s *Server) declareApplication(', 'func (s *Server
 assertContains(initialRuntime,'in.DesiredState == projectworkspace.RuntimeDesiredRunning',
  'Legacy initial Running runtime creation must be guarded');
 assertContains(initialRuntime,'"project.run"','Legacy initial Running runtime needs project.run');
-assertContains(initialApp,'in.DesiredState == projectworkspace.AppDesiredRunning',
- 'Running app declaration must be guarded');
-assertContains(initialApp,'"project.run"','Initial Running application requires project.run');
+assertContains(initialApp,'if !s.authorize(w, r, i, p.WorkspaceID, "project.run")',
+ 'All application installations must require project.run, even if initially stopped');
 assertContains(ui,'a45MountCollaboration','Development renderer must mount collaboration explicitly');
 assertContains(ui,'a46MountWorkspaceLibrary','Development renderer must mount Library explicitly');
 assertContains(links,'async function a45MountCollaboration','collaboration must export a mount function');

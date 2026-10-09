@@ -9,6 +9,8 @@ on:
       - 'internal/webui/static/project-*.js'
       - 'internal/webui/static/project-*.css'
       - 'internal/webui/static/workspace-*.js'
+      - 'internal/webui/static/models-page.js'
+      - 'internal/webui/static/model-agentcheck-diagnostics.js'
       - 'internal/webui/static/app-foundation.js'
       - 'internal/webui/static/index.html'
       - 'internal/projectworkspace/**'
@@ -49,10 +51,13 @@ jobs:
           node --check internal/webui/static/workspace-library.js
           node --check internal/webui/static/workspace-runtime-controls.js
           node --check internal/webui/static/workspace-ai-workflow.js
+          node --check internal/webui/static/models-page.js
+          node --check internal/webui/static/model-agentcheck-diagnostics.js
           node --check internal/webui/static/project-library-route.js
           node --check internal/webui/static/project-workspace-page.js
           node --check internal/webui/static/app-foundation.js
           node scripts/validate_project_development_surface.js
+          node scripts/validate_model_agentcheck_residency.js
           node scripts/validate_legacy_cleanup.js
       - name: Existing sandbox and Project contract tests
         run: |

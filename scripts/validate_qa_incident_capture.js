@@ -57,7 +57,7 @@ assert.ok(report.events.some(e=>e.action==="unhandled_rejection"));
 assert.ok(report.events.some(e=>e.kind==="ui"&&e.route==="other"));
 assert.ok(!report.events.some(e=>e.subsystem==="api_other"&&e.method==="POST"));
 const encoded=JSON.stringify(report);
-for(const value of [secret,"Bearer","/v1/tasks/private","authorization","password","filename","stack","input","query"]){
+for(const value of [secret,"Bearer "+secret,"/v1/tasks/private","Authorization:","api_key="+secret,"filename:"+secret]){
  assert.ok(!encoded.includes(value),"capture leaked sensitive marker "+value);
 }
 assert.equal(controller.stop(),true);

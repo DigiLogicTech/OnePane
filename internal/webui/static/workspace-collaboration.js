@@ -98,7 +98,7 @@ async function a45RenderCollaboration(project,workspace,root){
   const id=b.dataset.a45Publish;
   let assets=[];
   try{
-   const result=await apiRequest(endpoint+"/library");
+   const result=await apiRequest(endpoint+"/workspaces/"+encodeURIComponent(current.id)+"/library");
    assets=Array.isArray(result)?result:[];
   }catch(err){notice("Project Library unavailable: "+err.message,"bad");return}
   if(!assets.length){notice("Upload an asset into this Workspace Library before publishing it.","bad");return}

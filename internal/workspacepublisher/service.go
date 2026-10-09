@@ -98,42 +98,63 @@ func (s *Service) PublishWorkspaceFile(ctx context.Context,c sandboxrunner.Works
  if err!=nil{return sandboxrunner.WorkspacePublication{},err}
  if recorded{return existing,nil}
  actor:=worker.String
- meta,_:=json.Marshal(map[string]any{
-  "source":"verified_workspace_oci_file","task_id":c.TaskID,"attempt_id":c.AttemptID,
-  "runtime_id":c.RuntimeID,"application_id":c.ApplicationID,"project_workspace_id":projectWorkspaceID,
-  "relative_path":c.Path,"content_hash":c.ContentHash,
- })
- label:=policy.DataLabel{WorkspaceID:tenant,Confidentiality:policy.ConfidentialityInternal,
-  Residency:policy.ResidencyOriginNode,Trust:policy.TrustUntrustedContent}
- a,err:=s.artifacts.Create(ctx,artifact.CreateCommand{
-  WorkspaceID:tenant,ProjectID:&projectID,MediaType:mime,Label:label,
-  CreatedBy:&actor,ActorPrincipalID:&actor,Metadata:meta,
- },bytes.NewReader(c.Content))
- if err!=nil{return sandboxrunner.WorkspacePublication{},err}
- if a.ContentHash!=c.ContentHash||a.SizeBytes!=int64(len(c.Content))||
-  s.artifacts.VerifyContent(ctx,a.ID)!=nil{
-  return sandboxrunner.WorkspacePublication{},fmt.Errorf("%w: managed artifact integrity not verified",ErrPublishDenied)
+ // Reuse a verified immutable artifact for identical content at the same
+ // source Workspace path, even across independent Tasks. No duplicate
+ // artifact row, Library asset or version for an unchanged build.
+ var stored artifact.Artifact
+ previous,e:=s.projects.LatestWorkspacePublishedFileVersion(ctx,projectID,projectWorkspaceID,c.Path)
+ if e==nil&&previous.ContentHash==c.ContentHash{
+  if !strings.HasPrefix(previous.StorageURI,"artifact:"){
+   return sandboxrunner.WorkspacePublication{},ErrPublishDenied
+  }
+  priorID:=strings.TrimPrefix(previous.StorageURI,"artifact:")
+  stored,e=s.artifacts.Get(ctx,priorID)
+  if e!=nil||stored.ProjectID==nil||*stored.ProjectID!=projectID||
+   stored.WorkspaceID!=tenant||stored.ContentHash!=c.ContentHash||
+   stored.SizeBytes!=int64(len(c.Content))||
+   s.artifacts.VerifyContent(ctx,priorID)!=nil{
+   return sandboxrunner.WorkspacePublication{},ErrPublishDenied
+  }
+ }else{
+  if e!=nil&&!errors.Is(e,sql.ErrNoRows){return sandboxrunner.WorkspacePublication{},e}
+  meta,_:=json.Marshal(map[string]any{
+   "source":"verified_workspace_oci_file","task_id":c.TaskID,"attempt_id":c.AttemptID,
+   "runtime_id":c.RuntimeID,"application_id":c.ApplicationID,"project_workspace_id":projectWorkspaceID,
+   "relative_path":c.Path,"content_hash":c.ContentHash,
+  })
+  label:=policy.DataLabel{WorkspaceID:tenant,Confidentiality:policy.ConfidentialityInternal,
+   Residency:policy.ResidencyOriginNode,Trust:policy.TrustUntrustedContent}
+  stored,e=s.artifacts.Create(ctx,artifact.CreateCommand{
+   WorkspaceID:tenant,ProjectID:&projectID,MediaType:mime,Label:label,
+   CreatedBy:&actor,ActorPrincipalID:&actor,Metadata:meta,
+  },bytes.NewReader(c.Content))
+  if e!=nil{return sandboxrunner.WorkspacePublication{},e}
+  if stored.ContentHash!=c.ContentHash||stored.SizeBytes!=int64(len(c.Content))||
+   s.artifacts.VerifyContent(ctx,stored.ID)!=nil{
+   return sandboxrunner.WorkspacePublication{},fmt.Errorf("%w: managed artifact integrity not verified",ErrPublishDenied)
+  }
  }
  if _,err=s.db.ExecContext(ctx,`UPDATE workspace_file_publications
  SET artifact_id=?,updated_at=? WHERE task_id=? AND relative_path=? AND content_hash=?
- AND status='in_progress'`,a.ID,time.Now().UnixMilli(),c.TaskID,c.Path,c.ContentHash);err!=nil{
+ AND status='in_progress'`,stored.ID,time.Now().UnixMilli(),c.TaskID,c.Path,c.ContentHash);err!=nil{
   return sandboxrunner.WorkspacePublication{},err
  }
- item,err:=s.projects.ImportLibraryAsset(ctx,projectworkspace.ImportLibraryAssetCommand{
-  ProjectID:projectID,Name:name,MIMEType:mime,ArtifactID:a.ID,
-  ContentHash:a.ContentHash,SizeBytes:a.SizeBytes,
-  SourceWorkspaceID:projectWorkspaceID,ActorPrincipalID:actor,
+ item,err:=s.projects.PublishWorkspaceFileVersion(ctx,projectworkspace.PublishWorkspaceFileVersionCommand{
+  ProjectID:projectID,SourceWorkspaceID:projectWorkspaceID,RelativePath:c.Path,
+  Name:name,MIMEType:mime,ArtifactID:stored.ID,ContentHash:stored.ContentHash,
+  SizeBytes:stored.SizeBytes,ActorPrincipalID:actor,TaskID:c.TaskID,AttemptID:c.AttemptID,
  })
  if err!=nil{return sandboxrunner.WorkspacePublication{},err}
  if _,err=s.db.ExecContext(ctx,`UPDATE workspace_file_publications
  SET status='complete',artifact_id=?,library_asset_id=?,asset_version=?,updated_at=?
  WHERE task_id=? AND relative_path=? AND content_hash=? AND status='in_progress'`,
- a.ID,item.ID,item.CurrentVersion,time.Now().UnixMilli(),c.TaskID,c.Path,c.ContentHash);err!=nil{
+ stored.ID,item.Asset.ID,item.Version.Version,time.Now().UnixMilli(),c.TaskID,c.Path,c.ContentHash);err!=nil{
   return sandboxrunner.WorkspacePublication{},err
  }
  return sandboxrunner.WorkspacePublication{
-  ArtifactID:a.ID,LibraryAssetID:item.ID,Version:item.CurrentVersion,
-  ContentHash:a.ContentHash,SizeBytes:a.SizeBytes,SourceWorkspaceID:projectWorkspaceID,
+  ArtifactID:stored.ID,LibraryAssetID:item.Asset.ID,Version:item.Version.Version,
+  ContentHash:item.Version.ContentHash,SizeBytes:item.Version.SizeBytes,
+  SourceWorkspaceID:projectWorkspaceID,
  },nil
 }
 

@@ -24,13 +24,13 @@ type projectLibraryService interface {
 }
 func (s *Server) projectLibraryAccess(w http.ResponseWriter,r *http.Request,write bool)(projectLibraryService,projectworkspace.Project,string,bool) {
  i,ok:=s.authenticate(w,r)
- if !ok{return nil,projectworkspace.Project,"",false}
+ if !ok{return nil,projectworkspace.Project{},"",false}
  p,err:=s.projects.Project(r.Context(),strings.TrimSpace(r.PathValue("projectID")))
- if err!=nil{respondDomain(w,nil,err,0);return nil,projectworkspace.Project,"",false}
+ if err!=nil{respondDomain(w,nil,err,0);return nil,projectworkspace.Project{},"",false}
  permission:="project.read";if write{permission="project.write"}
- if !s.authorize(w,r,i,p.WorkspaceID,permission){return nil,projectworkspace.Project,"",false}
+ if !s.authorize(w,r,i,p.WorkspaceID,permission){return nil,projectworkspace.Project{},"",false}
  lib,ok:=s.projects.(projectLibraryService)
- if !ok{writeError(w,http.StatusServiceUnavailable,"Project Library unavailable");return nil,projectworkspace.Project,"",false}
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Project Library unavailable");return nil,projectworkspace.Project{},"",false}
  return lib,p,i.PrincipalID,true
 }
 func (s *Server) listProjectLibrary(w http.ResponseWriter,r *http.Request) {

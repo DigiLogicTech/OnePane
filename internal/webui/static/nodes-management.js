@@ -191,7 +191,7 @@ async function nextNodeShowQAEvidence(nodeID){
  const selected=String(nodeID||"");
  if(!selected)return;
  openModal("Node QA evidence",'<div class="widget-body">'+
-  '<p class="page-subtitle">Local control-plane record only. OS service state is not collected, and last-seen/manifest records do not prove the Node is currently reachable. Pairing material, raw errors, telemetry and remote payloads are excluded.</p>'+
+  '<p class="page-subtitle">Read-only control-plane report. For the local Node only, a systemd/Windows SCM status may be queried; remote services are not collected. A service marked running does not establish application readiness, and historical Node timestamps do not prove reachability. Pairing material, raw errors, telemetry and remote payloads are excluded.</p>'+
   '<p class="list-meta" id="nextNodeQAStatus" role="status">Checking Node administrator permissions and recorded evidence…</p>'+
   '<pre class="json-preview" id="nextNodeQAPreview" style="max-height:45vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere"></pre>'+
   '<div class="toolbar"><button class="btn" type="button" id="nextNodeQAClose">Close</button>'+
@@ -206,7 +206,7 @@ async function nextNodeShowQAEvidence(nodeID){
   const report=JSON.stringify(data,null,2);
   if(report.length>24000)throw Error("Report exceeds safe display size");
   preview.textContent=report;
-  status.textContent="Review the sanitized Node evidence before exporting. OS service status and physical runtime diagnostics remain unavailable.";
+  status.textContent="Review before export. Local OS service-manager status appears only when successfully observed; drivers, remote services and physical runtime diagnostics are not collected.";
   exportButton.disabled=false;
   exportButton.onclick=()=>{
    if(!preview.isConnected||preview.textContent!==report||nextNodeUI.selected!==selected)return;

@@ -215,6 +215,39 @@ assertContains(qaPlan,'**First full code review:**','first code audit must prece
 assert.ok(qaPlan.indexOf('**First full code review:**')<qaPlan.indexOf('**Vision alignment interview:**')&&
  qaPlan.indexOf('**Vision alignment interview:**')<qaPlan.indexOf('**Second code review and realignment:**'),
  'review gate must preserve user-required audit → questions → second review order');
+const qaServiceProbe=read('internal/api/qa_service_probe.go');
+const qaLinuxServiceProbe=read('internal/api/qa_service_probe_linux.go');
+const qaWindowsServiceProbe=read('internal/api/qa_service_probe_windows.go');
+const qaOtherServiceProbe=read('internal/api/qa_service_probe_other.go');
+const qaLocalNodeHandler=read('internal/api/qa_node_evidence_handler.go');
+assertContains(qaServiceProbe,'qaServiceProbeTimeout=2*time.Second',
+ 'local OS service-manager query must be time bounded');
+assertContains(qaServiceProbe,'qaServiceOutputLimit=4096',
+ 'OS service-manager stdout must be strictly size bounded');
+assertContains(qaServiceProbe,'filepath.IsAbs(executable)',
+ 'OS service-manager executables must never be user-PATH resolved');
+assertContains(qaServiceProbe,'cmd.Stderr=nil',
+ 'OS service-manager stderr must never enter diagnostic report');
+assertContains(qaServiceProbe,'requestedID!=serverLocalID',
+ 'remote or forged Node must never execute the host service probe');
+assertContains(qaServiceProbe,'!report.IsLocal',
+ 'local record must be verified before OS-level probe');
+assertContains(qaLocalNodeHandler,'s.localNodeID,probeLocalOnePaneService',
+ 'service check must attach only with server canonical local Node ID');
+assertContains(qaLinuxServiceProbe,'"/usr/bin/systemctl"',
+ 'Linux probe must use the fixed systemctl absolute path');
+assertContains(qaLinuxServiceProbe,'"onepane.service"',
+ 'Linux probe must inspect only the installed OnePane service');
+assertContains(qaWindowsServiceProbe,'filepath.Join(root,"System32","sc.exe")',
+ 'Windows probe must use the installed SCM binary');
+assertContains(qaWindowsServiceProbe,'"OnePane"',
+ 'Windows probe must inspect only OnePane service');
+assertContains(qaOtherServiceProbe,'not_collected',
+ 'unsupported operating systems must fail safely');
+assertContains(qaServiceProbe,'qaLinuxServiceState(raw string)',
+ 'systemd output must be narrowed through fixed enums');
+assertContains(qaServiceProbe,'qaWindowsServiceState(raw string)',
+ 'Windows SCM output must be narrowed through fixed enums');
 const qaNode=read('internal/api/qa_node_evidence.go');
 const qaNodeHandler=read('internal/api/qa_node_evidence_handler.go');
 const qaNodeUI=read('internal/webui/static/nodes-management.js');

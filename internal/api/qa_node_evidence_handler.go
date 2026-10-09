@@ -30,6 +30,10 @@ func(s *Server)qaNodeEvidenceHandler(w http.ResponseWriter,r *http.Request){
   writeError(w,http.StatusServiceUnavailable,"Node diagnostics unavailable")
   return
  }
+ // Only an actual locally registered Node with exactly the server's
+ // canonical local Node ID can trigger this OS query. Remote nodes never
+ // receive the server host's service status.
+ qaAttachLocalServiceEvidence(r.Context(),&report,nodeID,s.localNodeID,probeLocalOnePaneService)
  w.Header().Set("Cache-Control","no-store")
  writeJSON(w,http.StatusOK,report)
 }

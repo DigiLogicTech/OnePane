@@ -56,3 +56,26 @@ func TestImagePresentRequiresExactReference(t *testing.T) {
  if !imagePresent(raw,"ghcr.io/acme/app@sha256:abc"){t.Fatal("image not recognized")}
  if imagePresent(raw,"ghcr.io/acme/app:latest"){t.Fatal("wrong image accepted")}
 }
+
+func TestReconcilerNodePlacementNeverFallsBackToServiceHost(t *testing.T){
+ local:="node-windows"
+ same:="node-windows"
+ remote:="node-ubuntu"
+ empty:=""
+ cases:=[]struct{name,host string;requested *string;allowed bool}{
+  {"legacy_unassigned_local","node-windows",nil,true},
+  {"explicit_local","node-windows",&same,true},
+  {"explicit_remote","node-windows",&remote,false},
+  {"no_local_identity_with_explicit_target","",&same,false},
+  {"explicit_empty_target","node-windows",&empty,false},
+  {"explicit_target_with_empty_host","",&remote,false},
+  {"remote_never_ignored_even_when_windows_service","node-windows",&remote,false},
+ }
+ for _,tc:=range cases {
+  t.Run(tc.name,func(t *testing.T){
+   if got:=localPlacementAllowed(tc.host,tc.requested);got!=tc.allowed{
+    t.Fatalf("wrong local OCI placement decision: got %v want %v",got,tc.allowed)
+   }
+  })
+ }
+}

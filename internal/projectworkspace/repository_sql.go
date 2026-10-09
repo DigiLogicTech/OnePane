@@ -94,42 +94,47 @@ func (r *sqlRepository) ArchiveProject(ctx context.Context, tx storage.Tx, p Pro
 	return nil
 }
 
-const runtimeSelect = `SELECT id,project_id,node_id,isolation_mode,backend,desired_state,status,runtime_spec_json,resource_limits_json,network_policy_json,filesystem_policy_json,environment_bindings_json,revision,created_by,created_at,updated_at FROM project_runtimes WHERE id=?`
+const runtimeColumns = "id,project_id,project_workspace_id,node_id,isolation_mode,backend,desired_state,status,runtime_spec_json,resource_limits_json,network_policy_json,filesystem_policy_json,environment_bindings_json,revision,created_by,created_at,updated_at"
+const runtimeSelect = "SELECT "+runtimeColumns+" FROM project_runtimes WHERE id=?"
 
-func scanRuntime(row scanner) (ProjectRuntime, error) {
-	var x ProjectRuntime
-	var node sql.NullString
-	var rs, rl, np, fp, eb string
-	if err := row.Scan(&x.ID, &x.ProjectID, &node, &x.IsolationMode, &x.Backend, &x.DesiredState, &x.Status, &rs, &rl, &np, &fp, &eb, &x.Revision, &x.CreatedBy, &x.CreatedAt, &x.UpdatedAt); err != nil {
-		return ProjectRuntime{}, err
-	}
-	if node.Valid {
-		v := node.String
-		x.NodeID = &v
-	}
-	x.RuntimeSpecJSON = json.RawMessage(rs)
-	x.ResourceLimitsJSON = json.RawMessage(rl)
-	x.NetworkPolicyJSON = json.RawMessage(np)
-	x.FilesystemPolicyJSON = json.RawMessage(fp)
-	x.EnvironmentBindingsJSON = json.RawMessage(eb)
-	return x, nil
+func scanRuntime(row scanner) (ProjectRuntime,error) {
+ var x ProjectRuntime
+ var node,projectWorkspace sql.NullString
+ var rs,rl,np,fp,eb string
+ if err:=row.Scan(&x.ID,&x.ProjectID,&projectWorkspace,&node,&x.IsolationMode,&x.Backend,&x.DesiredState,&x.Status,&rs,&rl,&np,&fp,&eb,&x.Revision,&x.CreatedBy,&x.CreatedAt,&x.UpdatedAt);err!=nil{
+  return ProjectRuntime{},err
+ }
+ if node.Valid{v:=node.String;x.NodeID=&v}
+ if projectWorkspace.Valid{v:=projectWorkspace.String;x.ProjectWorkspaceID=&v}
+ x.RuntimeSpecJSON=json.RawMessage(rs)
+ x.ResourceLimitsJSON=json.RawMessage(rl)
+ x.NetworkPolicyJSON=json.RawMessage(np)
+ x.FilesystemPolicyJSON=json.RawMessage(fp)
+ x.EnvironmentBindingsJSON=json.RawMessage(eb)
+ return x,nil
 }
-func (r *sqlRepository) Runtime(ctx context.Context, id string) (ProjectRuntime, error) {
-	return scanRuntime(r.db.QueryRowContext(ctx, runtimeSelect, id))
+func (r *sqlRepository) Runtime(ctx context.Context,id string)(ProjectRuntime,error){
+ return scanRuntime(r.db.QueryRowContext(ctx,runtimeSelect,id))
 }
-func (r *sqlRepository) RuntimeTx(ctx context.Context, tx storage.Tx, id string) (ProjectRuntime, error) {
-	return scanRuntime(tx.QueryRowContext(ctx, runtimeSelect, id))
+func (r *sqlRepository) RuntimeTx(ctx context.Context,tx storage.Tx,id string)(ProjectRuntime,error){
+ return scanRuntime(tx.QueryRowContext(ctx,runtimeSelect,id))
 }
-func (r *sqlRepository) RuntimeByProject(ctx context.Context, projectID string) (ProjectRuntime, error) {
-	q := `SELECT id,project_id,node_id,isolation_mode,backend,desired_state,status,runtime_spec_json,resource_limits_json,network_policy_json,filesystem_policy_json,environment_bindings_json,revision,created_by,created_at,updated_at FROM project_runtimes WHERE project_id=?`
-	return scanRuntime(r.db.QueryRowContext(ctx, q, projectID))
+func (r *sqlRepository) RuntimeByProject(ctx context.Context,projectID string)(ProjectRuntime,error){
+ return scanRuntime(r.db.QueryRowContext(ctx,"SELECT "+runtimeColumns+" FROM project_runtimes WHERE project_id=? AND project_workspace_id IS NULL",projectID))
 }
-func (r *sqlRepository) InsertRuntime(ctx context.Context, tx storage.Tx, x ProjectRuntime) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO project_runtimes(id,project_id,node_id,isolation_mode,backend,desired_state,status,runtime_spec_json,resource_limits_json,network_policy_json,filesystem_policy_json,environment_bindings_json,revision,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, x.ID, x.ProjectID, x.NodeID, x.IsolationMode, x.Backend, x.DesiredState, x.Status, string(x.RuntimeSpecJSON), string(x.ResourceLimitsJSON), string(x.NetworkPolicyJSON), string(x.FilesystemPolicyJSON), string(x.EnvironmentBindingsJSON), x.Revision, x.CreatedBy, x.CreatedAt, x.UpdatedAt)
-	if err != nil {
-		return fmt.Errorf("insert project runtime: %w", err)
-	}
-	return nil
+func (r *sqlRepository) RuntimeByProjectWorkspace(ctx context.Context,projectID,workspaceID string)(ProjectRuntime,error){
+ return scanRuntime(r.db.QueryRowContext(ctx,"SELECT "+runtimeColumns+" FROM project_runtimes WHERE project_id=? AND project_workspace_id=?",projectID,workspaceID))
+}
+func (r *sqlRepository) InsertRuntime(ctx context.Context,tx storage.Tx,x ProjectRuntime)error{
+ _,err:=tx.ExecContext(ctx,`INSERT INTO project_runtimes(
+ id,project_id,project_workspace_id,node_id,isolation_mode,backend,desired_state,status,
+ runtime_spec_json,resource_limits_json,network_policy_json,filesystem_policy_json,
+ environment_bindings_json,revision,created_by,created_at,updated_at)
+ VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,x.ID,x.ProjectID,x.ProjectWorkspaceID,x.NodeID,x.IsolationMode,x.Backend,x.DesiredState,x.Status,
+ string(x.RuntimeSpecJSON),string(x.ResourceLimitsJSON),string(x.NetworkPolicyJSON),string(x.FilesystemPolicyJSON),
+ string(x.EnvironmentBindingsJSON),x.Revision,x.CreatedBy,x.CreatedAt,x.UpdatedAt)
+ if err!=nil{return fmt.Errorf("insert project runtime: %w",err)}
+ return nil
 }
 func (r *sqlRepository) UpdateRuntimeDesired(ctx context.Context, tx storage.Tx, x ProjectRuntime, to RuntimeDesiredState, now int64) error {
 	res, err := tx.ExecContext(ctx, `UPDATE project_runtimes SET desired_state=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?`, to, now, x.ID, x.Revision)

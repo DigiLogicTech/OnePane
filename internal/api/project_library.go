@@ -89,6 +89,39 @@ func (s *Server) uploadProjectLibrary(w http.ResponseWriter,r *http.Request) {
  }
  writeError(w,http.StatusBadRequest,"multipart file missing")
 }
+// Adopt an already-managed artifact from a previous OnePane build without
+// duplicating or moving its bytes. Never accept arbitrary filesystem paths.
+func (s *Server) adoptManagedProjectArtifact(w http.ResponseWriter,r *http.Request){
+ lib,p,actor,ok:=s.projectLibraryAccess(w,r,true);if !ok{return}
+ if s.libraryArtifacts==nil{writeError(w,http.StatusServiceUnavailable,"Artifact store unavailable");return}
+ var in struct{
+  ArtifactID string `json:"artifact_id"`
+  Name string `json:"name"`
+  SourceWorkspaceID string `json:"source_workspace_id"`
+ }
+ if !decodeJSON(w,r,&in){return}
+ in.ArtifactID=strings.TrimSpace(in.ArtifactID)
+ if in.ArtifactID==""||strings.ContainsAny(in.ArtifactID,"/\\\\") {
+  writeError(w,http.StatusBadRequest,"managed artifact ID required");return
+ }
+ a,err:=s.libraryArtifacts.Get(r.Context(),in.ArtifactID)
+ if err!=nil{writeError(w,http.StatusNotFound,"managed artifact not found");return}
+ if a.WorkspaceID!=p.WorkspaceID||(a.ProjectID!=nil&&*a.ProjectID!=p.ID){
+  writeError(w,http.StatusForbidden,"artifact belongs to a different Project or tenancy");return
+ }
+ if a.Status!=artifact.StatusActive{
+  writeError(w,http.StatusConflict,"artifact is not active; review its integrity before adoption");return
+ }
+ if err=s.libraryArtifacts.VerifyContent(r.Context(),a.ID);err!=nil{
+  writeError(w,http.StatusConflict,"stored artifact failed integrity verification");return
+ }
+ if strings.TrimSpace(in.Name)==""{in.Name="Recovered artifact "+a.ID}
+ item,err:=lib.ImportLibraryAsset(r.Context(),projectworkspace.ImportLibraryAssetCommand{
+  ProjectID:p.ID,Name:in.Name,MIMEType:a.MediaType,ArtifactID:a.ID,
+  ContentHash:a.ContentHash,SizeBytes:a.SizeBytes,
+  SourceWorkspaceID:in.SourceWorkspaceID,ActorPrincipalID:actor})
+ respondDomain(w,item,err,http.StatusCreated)
+}
 func (s *Server) grantProjectLibrary(w http.ResponseWriter,r *http.Request) {
  lib,p,actor,ok:=s.projectLibraryAccess(w,r,true);if !ok{return}
  var in struct{

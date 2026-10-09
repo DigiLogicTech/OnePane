@@ -64,7 +64,9 @@ func TestDelegationPreservesCanonicalProjectWorkspaceAndLocalOnlyRouting(t *test
  raw,err:=json.Marshal(proposal)
  if err!=nil{t.Fatal(err)}
  reply:=agentprotocol.Response{ProposalType:agentprotocol.ProposalDelegate,Proposal:raw}
- result:=worker.handleDelegate(ctx,run,ready,reply,TickResult{TaskID:ready.ID,RunID:run.ID})
+ activeParent,err:=tasks.Get(ctx,ready.ID)
+ if err!=nil{t.Fatal(err)}
+ result:=worker.handleDelegate(ctx,run,activeParent,reply,TickResult{TaskID:ready.ID,RunID:run.ID})
  if result.Error!=""||result.Status!="waiting_dependency" {
   t.Fatalf("delegation failed: %+v",result)
  }
@@ -101,4 +103,34 @@ func TestDelegationPreservesCanonicalProjectWorkspaceAndLocalOnlyRouting(t *test
  var dbWorkspace sql.NullString
  if err:=db.SQL().QueryRowContext(ctx,`SELECT project_workspace_id FROM tasks WHERE id=?`,child.ID).Scan(&dbWorkspace);err!=nil{t.Fatal(err)}
  if !dbWorkspace.Valid||dbWorkspace.String!=world.ID{t.Fatalf("canonical owner lost in SQLite: %+v",dbWorkspace)}
+
+ var runStatus,continuation string
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT status,continuation_json FROM agent_worker_runs WHERE id=?`,run.ID).
+  Scan(&runStatus,&continuation);err!=nil{t.Fatal(err)}
+ if runStatus!=string(RunWaiting){t.Fatalf("delegation Worker not suspended atomically: %s",runStatus)}
+ var durable map[string]any
+ if err:=json.Unmarshal([]byte(continuation),&durable);err!=nil||durable["delegated_task_id"]!=child.ID{
+  t.Fatalf("Worker continuation does not identify exact child: %+v %v",durable,err)
+ }
+ parentRow,err:=tasks.Get(ctx,parent.ID)
+ if err!=nil{t.Fatal(err)}
+ if parentRow.State!=task.StateWaitingDependency {
+  t.Fatalf("delegated parent was not durably suspended: %s",parentRow.State)
+ }
+ var attemptStatus string
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT status FROM task_attempts WHERE id=?`,run.AttemptID).Scan(&attemptStatus);err!=nil{t.Fatal(err)}
+ if attemptStatus!=string(task.AttemptWaiting){t.Fatalf("parent Attempt not durably suspended: %s",attemptStatus)}
+ var delegationJournal int
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM agent_worker_steps WHERE run_id=? AND step_kind='delegate' AND status='waiting'`,run.ID).Scan(&delegationJournal);err!=nil{t.Fatal(err)}
+ if delegationJournal!=1{t.Fatalf("child and Worker wait require one durable delegate journal, got %d",delegationJournal)}
+ // A delayed or repeated model response cannot create a second child after
+ // the original atomic checkpoint.
+ repeat:=worker.handleDelegate(ctx,run,activeParent,reply,TickResult{TaskID:parent.ID,RunID:run.ID})
+ if repeat.Error==""{t.Fatal("replaying committed delegation silently created or accepted duplicate child")}
+ var edges int
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM task_dependencies WHERE task_id=?`,parent.ID).Scan(&edges);err!=nil{t.Fatal(err)}
+ if edges!=1{t.Fatalf("replayed delegation created %d children",edges)}
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM agent_worker_steps WHERE run_id=? AND step_kind='delegate'`,run.ID).Scan(&delegationJournal);err!=nil{t.Fatal(err)}
+ if delegationJournal!=1{t.Fatalf("replayed delegation generated %d journals",delegationJournal)}
+
 }

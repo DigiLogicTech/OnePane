@@ -46,3 +46,4 @@ jobs:
       - name: Existing sandbox and Project contract tests
         run: |
           go test ./internal/projectworkspace ./internal/projectruntime ./internal/sandboxrunner ./internal/agentworker ./internal/scheduler ./internal/localai
+          go test -tags integration ./internal/projectworkspace

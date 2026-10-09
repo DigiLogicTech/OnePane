@@ -63,3 +63,21 @@
 .a49-publication-review-row{display:flex;flex-direction:column;gap:3px;padding:8px 0;border-top:1px solid var(--border);overflow-wrap:anywhere}
 .a49-publication-review-row>strong{color:var(--text);font-size:12px}
 .a49-publication-review-row>span{color:var(--muted);font-size:12px}
+
+/* The independent Workspace sandbox is the primary environment; the legacy
+   shared Project runtime remains accessible only as optional compatibility. */
+.a44-development-shortcuts{padding:14px 16px;margin-bottom:12px}
+.a44-development-shortcuts .card-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.a44-development-shortcuts .list-meta{margin:5px 0 0;line-height:1.45}
+.a44-shortcut-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:10px}
+.a44-legacy-runtime{margin:12px 0;padding:0;min-width:0;overflow:hidden;border:1px solid var(--border);border-radius:10px;background:var(--panel)}
+.a44-legacy-runtime>summary{cursor:pointer;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:12px 16px;color:var(--text);font-weight:600}
+.a44-legacy-runtime>summary::marker{color:var(--muted)}
+.a44-legacy-runtime[open]>summary{border-bottom:1px solid var(--border)}
+.a44-legacy-runtime .a44-environment-grid{padding:12px 16px}
+@media(max-width:700px){
+ .a44-development-shortcuts{padding:12px}
+ .a44-legacy-runtime>summary{padding:10px 12px}
+ .a44-shortcut-actions{justify-content:stretch}
+ .a44-shortcut-actions .btn{flex:1 1 120px}
+}

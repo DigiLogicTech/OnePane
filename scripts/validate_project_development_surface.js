@@ -382,6 +382,47 @@ assertContains(qaUI,'qaCopySummary.disabled=true','QA summary copy must remain d
 assertContains(qaUI,'navigator.clipboard.writeText(qaSummaryContent.value)',
  'manual user gesture must initiate sanitized QA summary copy');
 
+const supportBundleSource=read('internal/webui/static/qa-consolidated-support.js');
+new vm.Script(supportBundleSource,{filename:'qa-consolidated-support.js'});
+require('./validate_consolidated_qa_support.js');
+assertContains(index,'/qa-consolidated-support.js',
+ 'multi-source QA bundle module must load in the browser');
+assert.ok(index.indexOf('/qa-consolidated-support.js')<
+ index.indexOf('/workspace-ai-workflow.js'),
+ 'bundle sanitizer must load before Workspace UI');
+assertContains(qaUI,'id="a56SupportBundle"',
+ 'consolidated QA review must be visible from Workspace Tasks');
+assertContains(qaUI,'/v1/qa/workspace-snapshot?"+qaQuery',
+ 'Workspace report must use existing authorized canonical Project Workspace scope');
+assertContains(qaUI,'/v1/qa/model-deployments/',
+ 'optional Agent Check evidence must use existing model.read authorization');
+assertContains(qaUI,'/v1/qa/nodes/',
+ 'optional Node evidence must use existing Admin Node authorization');
+assertContains(qaUI,'a56SupportBundle.prepare(sources)',
+ 'all sources must be freshly sanitized before preview');
+assertContains(qaUI,'supportPreview.textContent=prepared.json',
+ 'combined preview must not interpret source JSON as HTML');
+assertContains(qaUI,'supportPreview.textContent!==reviewed.prepared.json',
+ 'final export must be identical to the human-reviewed preview');
+assertContains(qaUI,'Date.now()-reviewed.reviewedAt>120000',
+ 'review must expire within two minutes');
+assertContains(qaUI,'JSON.stringify(incident.snapshot())!==reviewed.browserFingerprint',
+ 'updated browser incident captures must require new review');
+assertContains(qaUI,'a56SupportBundle.zip(reviewed.prepared)',
+ 'only the reviewed locally sanitized sources may enter ZIP');
+assert.ok(!supportBundleSource.includes('fetch(')&&!supportBundleSource.includes('XMLHttpRequest')&&
+ !supportBundleSource.includes('localStorage')&&!supportBundleSource.includes('sessionStorage'),
+ 'ZIP module must be pure; it cannot fetch/upload or persist support data');
+assertContains(supportBundleSource,'MAX_ZIP=256*1024',
+ 'consolidated support ZIP must have a strict 256-KiB memory cap');
+assertContains(supportBundleSource,'const files={"workspace.json":workspace(sources.workspace)}',
+ 'Workspace report must be freshly projected, never blindly serialized');
+assertContains(supportBundleSource,'files["browser.json"]=browser(sources.browser)',
+ 'browser report must pass allowlisted projection');
+assertContains(supportBundleSource,'files["agent-check.json"]=model(sources.model)',
+ 'model report must pass allowlisted projection');
+assertContains(supportBundleSource,'files["node.json"]=node(sources.node)',
+ 'Node report must pass allowlisted projection');
 new vm.Script(qaUI,{filename:'workspace-ai-workflow.js'});
 assertContains(routes,'GET /v1/qa/workspace-snapshot','explicit QA preview route must be registered');
 assertContains(routes,'POST /v1/qa/workspace-bundle','explicit QA export route must be registered');

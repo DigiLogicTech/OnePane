@@ -40,6 +40,16 @@ async function a49MountDevelopmentTasks(project,workspace,container){
   <p class="list-meta" id="a49OutputStatus" role="status"></p>
   <div id="a49PublicationReviews" role="status"></div>
   <div id="a49TaskList"></div>
+  <details class="a49-qa-snapshot" id="a49QASnapshot">
+   <summary>QA diagnostic snapshot (read-only, opt-in)</summary>
+   <p class="list-meta">First Debug Centre slice: a sanitised, bounded snapshot of this canonical Workspace's Task states, hard dependencies and last Worker checkpoints only. Not a full capture of logs, installer errors or Node internals.</p>
+   <div class="a49-task-actions">
+    <button class="btn" type="button" id="a49QAPreview">Review included data</button>
+    <button class="btn" type="button" id="a49QADownload" disabled>Generate QA ZIP</button>
+   </div>
+   <p class="list-meta" id="a49QAStatus" role="status">Preview before downloading. No data is sent off-device.</p>
+   <pre class="a49-qa-snapshot-preview" id="a49QAPreviewContent" aria-label="Redacted QA snapshot preview"></pre>
+  </details>
  </section>`;
  let taskRows=[],publishedOutputs=[];
  const doneStates=new Set(["complete","failed","cancelled","blocked"]);
@@ -152,6 +162,55 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    if(list)list.innerHTML='<div class="error" role="alert">'+escapeHtml(error.message||"Unable to read Workspace Tasks")+'</div>';
   }
  };
+ const qaPreview=section.querySelector("#a49QAPreview");
+ const qaDownload=section.querySelector("#a49QADownload");
+ const qaStatus=section.querySelector("#a49QAStatus");
+ const qaPreviewContent=section.querySelector("#a49QAPreviewContent");
+ const qaScope={workspace_id:onepaneWorkspace,project_id:project.id,project_workspace_id:canonical.id};
+ const qaQuery=Object.entries(qaScope).map(([k,v])=>encodeURIComponent(k)+"="+encodeURIComponent(v)).join("&");
+ let qaReviewed=false;
+ qaPreview?.addEventListener("click",async()=>{
+  qaReviewed=false;qaDownload.disabled=true;
+  qaPreview.disabled=true;qaStatus.textContent="Loading permission-checked QA snapshot…";
+  try{
+   const snapshot=await apiRequest("/v1/qa/workspace-snapshot?"+qaQuery);
+   if(!section.isConnected)return;
+   qaPreviewContent.textContent=JSON.stringify(snapshot,null,2);
+   qaStatus.textContent="Review the categories and Task metadata above before export. "+
+    "Excluded: raw logs, prompts, model output, credentials, source code, private files and Node data. "+
+    "Export creates a fresh snapshot; Task status may change between preview and download.";
+   qaReviewed=true;qaDownload.disabled=false;
+  }catch(err){
+   qaPreviewContent.textContent="";
+   qaStatus.textContent="QA snapshot unavailable: "+String(err.message||"Not authorised");
+  }finally{qaPreview.disabled=false}
+ });
+ qaDownload?.addEventListener("click",async()=>{
+  if(!qaReviewed||!section.isConnected)return;
+  qaDownload.disabled=true;qaStatus.textContent="Generating local QA ZIP (no upload)…";
+  try{
+   const response=await fetch("/v1/qa/workspace-bundle",{
+    method:"POST",credentials:"same-origin",
+    headers:{"Content-Type":"application/json","X-OnePane-CSRF":csrfCookie()},
+    body:JSON.stringify(qaScope)
+   });
+   if(!response.ok){
+    let message="HTTP "+response.status;
+    try{const details=await response.json();message=details.error||details.message||message}catch{}
+    throw Error(message);
+   }
+   const payload=await response.blob();
+   if(payload.size>131072||payload.size===0)throw Error("QA ZIP size is outside safe bounds");
+   const url=URL.createObjectURL(payload);
+   try{
+    const link=document.createElement("a");
+    link.href=url;link.download="onepane-workspace-qa-snapshot.zip";
+    link.style.display="none";document.body.appendChild(link);link.click();link.remove();
+   }finally{URL.revokeObjectURL(url)}
+   qaStatus.textContent="QA ZIP created locally. Inspect its contents before sharing; this is an intentionally limited Task snapshot.";
+  }catch(err){qaStatus.textContent="QA export failed: "+String(err.message||"Unavailable")}
+  finally{qaDownload.disabled=false}
+ });
  section.querySelector("#a49RefreshTasks")?.addEventListener("click",loadTasks);
  section.querySelector("#a49TaskFilter")?.addEventListener("change",paintTasks);
  void loadTasks();

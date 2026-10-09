@@ -94,6 +94,30 @@ func TestPublishingOCIArtifactRequiresActiveOwnedTaskAndOnlyGrantsSourceWorkspac
   t.Fatalf("published receipt mismatch: %+v",published)
  }
  if err:=artifacts.VerifyContent(ctx,published.ArtifactID);err!=nil{t.Fatal(err)}
+ repeated,err:=publisher.PublishWorkspaceFile(ctx,request)
+ if err!=nil{t.Fatalf("duplicate publication should reuse verified receipt: %v",err)}
+ if repeated.ArtifactID!=published.ArtifactID||repeated.LibraryAssetID!=published.LibraryAssetID||
+  repeated.Version!=published.Version{
+  t.Fatalf("replayed Task publication created duplicate asset: first=%+v replay=%+v",published,repeated)
+ }
+ var ledgerCount int
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM workspace_file_publications
+ WHERE task_id=? AND relative_path=? AND content_hash=? AND status='complete'`,
+ request.TaskID,request.Path,request.ContentHash).Scan(&ledgerCount);err!=nil||ledgerCount!=1{
+  t.Fatalf("idempotency record not uniquely completed: count=%d err=%v",ledgerCount,err)
+ }
+ // An interrupted publication may have written a blob or Library version.
+ // Do not re-run an ambiguous external side effect until recovery verifies it.
+ interrupted:=request
+ interrupted.Path="maps/unknown-outcome.txt"
+ if _,err:=db.SQL().ExecContext(ctx,`INSERT INTO workspace_file_publications(
+ task_id,project_id,project_workspace_id,runtime_id,application_id,
+ relative_path,content_hash,status,created_at,updated_at)
+ VALUES(?,?,?,?,?,?,?,'in_progress',?,?)`,
+ interrupted.TaskID,p.ID,world.ID,runtime.ID,app.ID,interrupted.Path,interrupted.ContentHash,now,now);err!=nil{t.Fatal(err)}
+ if _,err:=publisher.PublishWorkspaceFile(ctx,interrupted);err!=ErrPublicationRecoveryRequired{
+  t.Fatalf("uncertain publication outcome silently retried: %v",err)
+ }
  source,err:=projects.WorkspaceLibraryAssets(ctx,p.ID,world.ID,"")
  if err!=nil||len(source)!=1||source[0].ID!=published.LibraryAssetID{
   t.Fatalf("World did not receive its own content-addressed asset: %+v %v",source,err)

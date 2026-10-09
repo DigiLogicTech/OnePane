@@ -1652,9 +1652,16 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	modelWaits,err:=loadTaskModelWaits(r.Context(),s.attentionDB,workspaceID,rows)
+	if err!=nil{
+		writeError(w,http.StatusInternalServerError,"Workspace Task execution status unavailable")
+		return
+	}
 	out := make([]map[string]any, 0, len(rows))
 	for _, t := range rows {
-		out = append(out, taskResponse(t))
+		entry:=taskResponse(t)
+		if wait,ok:=modelWaits[t.ID];ok{entry["wait"]=wait}
+		out=append(out,entry)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

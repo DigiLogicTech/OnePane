@@ -11,6 +11,7 @@ import (
  "fmt"
  "path"
  "strings"
+ "time"
 
  "github.com/DigiLogicTech/OnePane/internal/artifact"
  "github.com/DigiLogicTech/OnePane/internal/policy"
@@ -19,6 +20,7 @@ import (
 )
 
 var ErrPublishDenied=errors.New("Workspace file publication denied")
+var ErrPublicationRecoveryRequired=errors.New("Workspace publication has an uncertain previous outcome; recovery required before retry")
 
 // Service performs a second independent authority boundary behind the
 // leased, Task-owned OCI tool. A model cannot assign its own source Project,
@@ -87,6 +89,14 @@ func (s *Service) PublishWorkspaceFile(ctx context.Context,c sandboxrunner.Works
  if len(mime)>120||strings.ContainsAny(mime,"\r\n\x00")||!strings.Contains(mime,"/"){
   return sandboxrunner.WorkspacePublication{},ErrPublishDenied
  }
+ // Reserve the immutable (Task, relative path, source SHA-256) key
+ // BEFORE creating a blob or a new Library asset. A repeated completed
+ // publication returns the same artifact and Library version, not a copy.
+ // An interrupted previous attempt stays in_progress until independently
+ // reconciled; never assume a prior external side effect failed.
+ existing,recorded,err:=s.reservePublication(ctx,c,projectID,projectWorkspaceID)
+ if err!=nil{return sandboxrunner.WorkspacePublication{},err}
+ if recorded{return existing,nil}
  actor:=worker.String
  meta,_:=json.Marshal(map[string]any{
   "source":"verified_workspace_oci_file","task_id":c.TaskID,"attempt_id":c.AttemptID,
@@ -104,14 +114,104 @@ func (s *Service) PublishWorkspaceFile(ctx context.Context,c sandboxrunner.Works
   s.artifacts.VerifyContent(ctx,a.ID)!=nil{
   return sandboxrunner.WorkspacePublication{},fmt.Errorf("%w: managed artifact integrity not verified",ErrPublishDenied)
  }
+ if _,err=s.db.ExecContext(ctx,`UPDATE workspace_file_publications
+ SET artifact_id=?,updated_at=? WHERE task_id=? AND relative_path=? AND content_hash=?
+ AND status='in_progress'`,a.ID,time.Now().UnixMilli(),c.TaskID,c.Path,c.ContentHash);err!=nil{
+  return sandboxrunner.WorkspacePublication{},err
+ }
  item,err:=s.projects.ImportLibraryAsset(ctx,projectworkspace.ImportLibraryAssetCommand{
   ProjectID:projectID,Name:name,MIMEType:mime,ArtifactID:a.ID,
   ContentHash:a.ContentHash,SizeBytes:a.SizeBytes,
   SourceWorkspaceID:projectWorkspaceID,ActorPrincipalID:actor,
  })
  if err!=nil{return sandboxrunner.WorkspacePublication{},err}
+ if _,err=s.db.ExecContext(ctx,`UPDATE workspace_file_publications
+ SET status='complete',artifact_id=?,library_asset_id=?,asset_version=?,updated_at=?
+ WHERE task_id=? AND relative_path=? AND content_hash=? AND status='in_progress'`,
+ a.ID,item.ID,item.CurrentVersion,time.Now().UnixMilli(),c.TaskID,c.Path,c.ContentHash);err!=nil{
+  return sandboxrunner.WorkspacePublication{},err
+ }
  return sandboxrunner.WorkspacePublication{
   ArtifactID:a.ID,LibraryAssetID:item.ID,Version:item.CurrentVersion,
   ContentHash:a.ContentHash,SizeBytes:a.SizeBytes,SourceWorkspaceID:projectWorkspaceID,
  },nil
+}
+
+func (s *Service) reservePublication(ctx context.Context,c sandboxrunner.WorkspacePublicationRequest,projectID,workspaceID string)(sandboxrunner.WorkspacePublication,bool,error){
+ now:=time.Now().UnixMilli()
+ res,err:=s.db.ExecContext(ctx,`INSERT INTO workspace_file_publications(
+ task_id,project_id,project_workspace_id,runtime_id,application_id,
+ relative_path,content_hash,status,created_at,updated_at)
+ VALUES(?,?,?,?,?,?,?,'in_progress',?,?)
+ ON CONFLICT(task_id,relative_path,content_hash) DO NOTHING`,
+ c.TaskID,projectID,workspaceID,c.RuntimeID,c.ApplicationID,c.Path,c.ContentHash,now,now)
+ if err!=nil{return sandboxrunner.WorkspacePublication{},false,err}
+ count,err:=res.RowsAffected()
+ if err!=nil{return sandboxrunner.WorkspacePublication{},false,err}
+ if count==1{return sandboxrunner.WorkspacePublication{},false,nil}
+ var p,w,r,a,status string
+ var artifactID,assetID sql.NullString
+ var version sql.NullInt64
+ err=s.db.QueryRowContext(ctx,`SELECT project_id,project_workspace_id,runtime_id,
+ application_id,status,artifact_id,library_asset_id,asset_version
+ FROM workspace_file_publications WHERE task_id=? AND relative_path=? AND content_hash=?`,
+ c.TaskID,c.Path,c.ContentHash).
+ Scan(&p,&w,&r,&a,&status,&artifactID,&assetID,&version)
+ if err!=nil||p!=projectID||w!=workspaceID||r!=c.RuntimeID||a!=c.ApplicationID{
+  return sandboxrunner.WorkspacePublication{},false,ErrPublishDenied
+ }
+ recovered:=false
+ if status!="complete"{
+  // Recovery can only *recognize* a verified existing Library version:
+  // it must never create a second Artifact or Library asset on uncertainty.
+  if !artifactID.Valid{return sandboxrunner.WorkspacePublication{},false,ErrPublicationRecoveryRequired}
+  rows,err:=s.db.QueryContext(ctx,`SELECT v.asset_id,v.version
+   FROM project_library_asset_versions v JOIN project_library_assets a ON a.id=v.asset_id
+   WHERE v.storage_uri=? AND a.project_id=? AND a.archived=0`,
+   "artifact:"+artifactID.String,projectID)
+  if err!=nil{return sandboxrunner.WorkspacePublication{},false,err}
+  count:=0
+  var candidateID string
+  var candidateVersion int64
+  for rows.Next(){
+   if err=rows.Scan(&candidateID,&candidateVersion);err!=nil{break}
+   count++
+   if count>1{break}
+  }
+  if scanErr:=rows.Err();err==nil{err=scanErr}
+  _=rows.Close()
+  if err!=nil{return sandboxrunner.WorkspacePublication{},false,err}
+  if count!=1{return sandboxrunner.WorkspacePublication{},false,ErrPublicationRecoveryRequired}
+  assetID=sql.NullString{String:candidateID,Valid:true}
+  version=sql.NullInt64{Int64:candidateVersion,Valid:true}
+  recovered=true
+ }
+ if !artifactID.Valid||!assetID.Valid||!version.Valid||version.Int64<1{
+  return sandboxrunner.WorkspacePublication{},false,ErrPublishDenied
+ }
+ // A ledger status is not evidence of content integrity or of an effective
+ // source Workspace grant. Verify both before reusing a prior receipt.
+ stored,err:=s.artifacts.Get(ctx,artifactID.String)
+ if err!=nil||stored.ProjectID==nil||*stored.ProjectID!=projectID||
+  stored.WorkspaceID!=c.WorkspaceID||stored.ContentHash!=c.ContentHash||
+  stored.SizeBytes!=int64(len(c.Content))||
+  s.artifacts.VerifyContent(ctx,artifactID.String)!=nil{
+  return sandboxrunner.WorkspacePublication{},false,ErrPublishDenied
+ }
+ v,err:=s.projects.ResolveWorkspaceLibraryVersion(ctx,projectID,workspaceID,assetID.String,version.Int64)
+ if err!=nil||v.ContentHash!=c.ContentHash||v.Version!=version.Int64{
+  return sandboxrunner.WorkspacePublication{},false,ErrPublishDenied
+ }
+ if recovered{
+  _,err=s.db.ExecContext(ctx,`UPDATE workspace_file_publications SET
+   status='complete',library_asset_id=?,asset_version=?,updated_at=?
+   WHERE task_id=? AND relative_path=? AND content_hash=?
+   AND status='in_progress' AND artifact_id=?`,
+   assetID.String,version.Int64,time.Now().UnixMilli(),c.TaskID,c.Path,c.ContentHash,artifactID.String)
+  if err!=nil{return sandboxrunner.WorkspacePublication{},false,err}
+ }
+ return sandboxrunner.WorkspacePublication{
+  ArtifactID:artifactID.String,LibraryAssetID:assetID.String,Version:v.Version,
+  ContentHash:c.ContentHash,SizeBytes:stored.SizeBytes,SourceWorkspaceID:workspaceID,
+ },true,nil
 }

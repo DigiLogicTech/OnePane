@@ -63,6 +63,7 @@ func main() {
 	auth := api.NewHybridAuthorizer(bearerAuth, runtime.WebAuth)
 	apiServer := api.NewServer(runtime.ProjectWorkspaces, event.NewReader(runtime.DB.SQL()), auth)
 	apiServer.SetAttentionDB(runtime.DB.SQL())
+	apiServer.SetLibraryArtifacts(runtime.Artifacts)
 	apiServer.SetWebAuth(runtime.WebAuth, strings.HasPrefix(config.APIOrigin(cfg), "https://"))
 	apiServer.SetVault(runtime.Vault)
 	apiServer.SetProviderOnboarding(runtime.ProviderOnboarding)

@@ -8,6 +8,47 @@ import (
  "github.com/DigiLogicTech/OnePane/internal/projectworkspace"
 )
 
+// Canonical Workspace IDs must be minted by the backend. Legacy dashboard IDs
+// remain compatibility mappings inside state_json, never runtime identifiers.
+type workspaceViewCreator interface {
+ CreateWorkspaceView(context.Context,projectworkspace.CreateWorkspaceViewCommand)(projectworkspace.WorkspaceView,error)
+}
+func (s *Server) createCanonicalProjectWorkspace(w http.ResponseWriter,r *http.Request){
+ i,ok:=s.authenticate(w,r);if !ok{return}
+ projectID:=strings.TrimSpace(r.PathValue("projectID"))
+ p,err:=s.projects.Project(r.Context(),projectID)
+ if err!=nil{respondDomain(w,nil,err,0);return}
+ if !s.authorize(w,r,i,p.WorkspaceID,"project.write"){return}
+ writer,ok:=s.projects.(workspaceViewCreator)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Canonical Workspace creation unavailable");return}
+ var input struct {
+  Name string `json:"name"`
+  LegacyWorkspaceID string `json:"legacy_workspace_id"`
+ }
+ if !decodeJSON(w,r,&input){return}
+ input.Name=strings.TrimSpace(input.Name)
+ input.LegacyWorkspaceID=strings.TrimSpace(input.LegacyWorkspaceID)
+ if len(input.Name)<1||len(input.Name)>120||len(input.LegacyWorkspaceID)<1||len(input.LegacyWorkspaceID)>128{
+  writeError(w,http.StatusBadRequest,"invalid Workspace name or legacy ID");return
+ }
+ // Reconcile by mapping, rather than guessing from an independently generated UI ID.
+ reader,ok:=s.projects.(projectWorkspaceViewReader)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Workspace registry unavailable");return}
+ existing,err:=reader.WorkspaceViews(r.Context(),projectID)
+ if err!=nil{respondDomain(w,nil,err,0);return}
+ for _,view:=range existing {
+  var state struct{LegacyID string `json:"legacy_workspace_id"`}
+  _=json.Unmarshal(view.StateJSON,&state)
+  if state.LegacyID==input.LegacyWorkspaceID {
+   writeJSON(w,http.StatusOK,view);return
+  }
+ }
+ state,_:=json.Marshal(map[string]any{"legacy_workspace_id":input.LegacyWorkspaceID})
+ out,err:=writer.CreateWorkspaceView(r.Context(),projectworkspace.CreateWorkspaceViewCommand{
+  ProjectID:projectID,Name:input.Name,StateJSON:state,ActorPrincipalID:i.PrincipalID})
+ respondDomain(w,out,err,http.StatusCreated)
+}
+
 // Project Workspace links are explicit, revocable *artifact manifest* channels.
 // Their endpoints do not grant sandbox filesystem mounts, executables or secrets.
 type workspaceLinkReader interface {

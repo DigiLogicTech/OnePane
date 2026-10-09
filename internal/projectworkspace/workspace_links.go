@@ -5,7 +5,6 @@ import (
  "database/sql"
  "encoding/json"
  "errors"
- "fmt"
  "strings"
 
  "github.com/DigiLogicTech/OnePane/internal/event"
@@ -159,7 +158,7 @@ func (s *Service) PublishWorkspaceAsset(ctx context.Context,c PublishWorkspaceAs
    c.AssetID,c.Version,link.ProjectID,link.SourceWorkspaceID,c.Version).Scan(&name,&hash)
   if errors.Is(err,sql.ErrNoRows){return ErrCrossWorkspace}
   if err!=nil{return err}
-  if !strings.HasPrefix(strings.ToLower(hash),"")||strings.TrimSpace(hash)==""{return fmt.Errorf("%w: empty content hash",ErrInvalidCommand)}
+  if strings.TrimSpace(hash)==""{return ErrInvalidCommand}
   _,err=tx.ExecContext(ctx,`INSERT INTO project_workspace_publications(id,link_id,asset_id,asset_version,content_hash,published_by,published_at) VALUES(?,?,?,?,?,?,?)`,
    id,c.LinkID,c.AssetID,c.Version,hash,c.ActorPrincipalID,now)
   if err!=nil{return err}

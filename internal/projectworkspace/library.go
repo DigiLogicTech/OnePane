@@ -82,6 +82,41 @@ func (s *Service) LibraryAssets(ctx context.Context,projectID string)([]LibraryA
  }
  return out,rows.Err()
 }
+// WorkspaceLibraryAssets lists only assets visible through a direct grant or
+// an explicitly enabled, hash-pinned incoming publication. This is a metadata
+// inventory, not a capability to read arbitrary versions or artifact bytes.
+func (s *Service) WorkspaceLibraryAssets(ctx context.Context,projectID,workspaceID,search string)([]LibraryAsset,error){
+ if strings.TrimSpace(projectID)==""||strings.TrimSpace(workspaceID)==""{return nil,ErrInvalidCommand}
+ search=strings.TrimSpace(search)
+ if len(search)>256{return nil,ErrInvalidCommand}
+ var count int
+ err:=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_workspaces WHERE id=? AND project_id=? AND status='active'`,workspaceID,projectID).Scan(&count)
+ if err!=nil{return nil,err}
+ if count!=1{return nil,ErrCrossWorkspace}
+ rows,err:=s.db.QueryContext(ctx,`SELECT a.id,a.project_id,a.name,a.asset_type,a.current_version,a.archived,a.created_at,a.updated_at
+  FROM project_library_assets a
+  WHERE a.project_id=? AND a.archived=0 AND instr(lower(a.name),lower(?))>0
+  AND (
+    EXISTS(SELECT 1 FROM workspace_library_grants g
+     WHERE g.asset_id=a.id AND g.project_workspace_id=? AND g.enabled=1
+       AND json_extract(g.permissions_json,'$.read')=1
+       AND (g.version_policy='latest' OR
+        EXISTS(SELECT 1 FROM project_library_asset_versions v WHERE v.asset_id=a.id AND v.version=g.pinned_version)))
+    OR EXISTS(SELECT 1 FROM project_workspace_publications pub
+       JOIN project_workspace_links l ON l.id=pub.link_id
+       JOIN project_library_asset_versions v ON v.asset_id=pub.asset_id AND v.version=pub.asset_version AND v.content_hash=pub.content_hash
+       WHERE pub.asset_id=a.id AND l.project_id=a.project_id
+        AND l.target_workspace_id=? AND l.enabled=1)
+  ) ORDER BY a.updated_at DESC,a.id LIMIT 100`,projectID,search,workspaceID,workspaceID)
+ if err!=nil{return nil,err}
+ defer rows.Close()
+ out:=[]LibraryAsset{}
+ for rows.Next(){var x LibraryAsset;var archived int
+  if err=rows.Scan(&x.ID,&x.ProjectID,&x.Name,&x.AssetType,&x.CurrentVersion,&archived,&x.CreatedAt,&x.UpdatedAt);err!=nil{return nil,err}
+  x.Archived=archived!=0;out=append(out,x)
+ }
+ return out,rows.Err()
+}
 func (s *Service) LibraryVersions(ctx context.Context,projectID,assetID string)([]LibraryVersion,error){
  if projectID==""||assetID==""{return nil,ErrInvalidCommand}
  rows,err:=s.db.QueryContext(ctx,`SELECT v.asset_id,v.version,v.content_hash,COALESCE(v.size_bytes,0),COALESCE(v.mime_type,''),v.storage_uri,v.created_at

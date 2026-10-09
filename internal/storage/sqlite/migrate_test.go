@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -247,9 +248,22 @@ func TestWorkspaceRuntimeV37UpgradePreservesLiveLegacyReferences(t *testing.T) {
  if err=rows.Err();err!=nil{rows.Close();t.Fatal(err)};rows.Close()
  var integrity string
  if err=db.SQL().QueryRowContext(ctx,"PRAGMA quick_check").Scan(&integrity);err!=nil||integrity!="ok"{t.Fatalf("migration integrity: %v %s",err,integrity)}
- backupPaths,err:=filepath.Glob(path+".pre-migrate-v0037-*.bak");if err!=nil||len(backupPaths)!=1{t.Fatalf("pre-migration backup not retained: %v %v",err,backupPaths)}
+ // The backup filename identifies the final target schema version (now 0038),
+ // not the first pending migration. Keep this preservation test valid as new
+ // additive migrations follow the v0037 referenced-parent rebuild.
+ latest:=36
+ for _,migration:=range migrations{if migration.version>latest{latest=migration.version}}
+ backupPattern:=fmt.Sprintf("%s.pre-migrate-v%04d-*.bak",path,latest)
+ backupPaths,err:=filepath.Glob(backupPattern)
+ if err!=nil||len(backupPaths)!=1{t.Fatalf("pre-migration backup not retained for target v%04d: %v %v",latest,err,backupPaths)}
  backup,err:=Open(backupPaths[0]);if err!=nil{t.Fatal(err)}
  defer backup.Close()
+ // The pre-upgrade backup must remain at v0036 and include the preserved
+ // legacy records, even when the final target schema is later than v0037.
+ var previousVersion int
+ if err=backup.SQL().QueryRowContext(ctx,"SELECT MAX(version) FROM schema_migrations").Scan(&previousVersion);err!=nil||previousVersion!=36{
+  t.Fatalf("rollback snapshot is not the untouched v0036 database: %v v%d",err,previousVersion)
+ }
  // The untouched rollback copy must contain the exact original runtime IDs.
  var backupApp string
  if err=backup.SQL().QueryRowContext(ctx,`SELECT project_runtime_id FROM project_applications WHERE id='old-app'`).Scan(&backupApp);err!=nil||backupApp!="old-runtime"{t.Fatalf("rollback missing prior application: %v %s",err,backupApp)}

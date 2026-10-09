@@ -6,8 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -107,7 +105,10 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 	if !profile.Rootless {
 		return tool.AdapterResult{}, tool.KnownFailure(ErrRootlessRequired)
 	}
-	workspace := filepath.Join(a.dataDir, "projects", in.RuntimeID, "workspace")
+	workspace, workspaceExists, err := managedWorkspacePath(a.dataDir, in.RuntimeID, false)
+	if err != nil {
+		return tool.AdapterResult{}, tool.KnownFailure(err)
+	}
 	switch req.ToolID {
 	case ToolRuntimeInspect:
 		states, err := a.engine.ListRuntime(ctx, in.RuntimeID)
@@ -118,11 +119,6 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 		if err != nil {
 			return tool.AdapterResult{}, err
 		}
-		_, statErr := os.Stat(workspace)
-		workspaceExists := statErr == nil
-		if statErr != nil && !os.IsNotExist(statErr) {
-			return tool.AdapterResult{}, statErr
-		}
 		return result(map[string]any{"runtime_id": in.RuntimeID, "workspace_path": workspace, "workspace_exists": workspaceExists, "containers": states, "network": network, "engine": profile}, "project runtime observed")
 	case ToolAppInspect:
 		if !safeID.MatchString(in.ApplicationID) {
@@ -132,6 +128,8 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 		if err != nil {
 			return tool.AdapterResult{}, err
 		}
+		state.IsolationVerified = state.IsolationVerified && workspaceExists &&
+			exactWorkspaceMount(state, workspace)
 		network, err := a.engine.InspectNetwork(ctx, in.RuntimeID)
 		if err != nil {
 			return tool.AdapterResult{}, err
@@ -159,7 +157,7 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 		if err != nil {
 			return tool.AdapterResult{}, tool.KnownFailure(err)
 		}
-		if state.Status != "running" || !state.IsolationVerified {
+		if state.Status != "running" || !state.IsolationVerified || !workspaceExists || !exactWorkspaceMount(state, workspace) {
 			return tool.AdapterResult{}, tool.KnownFailure(fmt.Errorf("%w: application is not a verified running sandbox", ErrInvalidInput))
 		}
 		execResult, err := a.engine.ExecContainer(ctx, in.RuntimeID, in.ApplicationID, in.Command)
@@ -168,8 +166,9 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 		}
 		return result(map[string]any{"runtime_id": in.RuntimeID, "application_id": in.ApplicationID, "command": in.Command, "result": execResult, "container": state, "engine": profile}, "sandboxed application command executed")
 	case ToolRuntimeEnsure:
-		if err := os.MkdirAll(workspace, 0o700); err != nil {
-			return tool.AdapterResult{}, err
+		workspace, workspaceExists, err = managedWorkspacePath(a.dataDir, in.RuntimeID, true)
+		if err != nil || !workspaceExists {
+			return tool.AdapterResult{}, tool.KnownFailure(err)
 		}
 		networkInternal, err := networkInternalFromPolicy(in.NetworkPolicy)
 		if err != nil {
@@ -202,8 +201,9 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 		if !safeID.MatchString(in.ApplicationID) || !validImage(in.Image) {
 			return tool.AdapterResult{}, tool.KnownFailure(ErrInvalidInput)
 		}
-		if err := os.MkdirAll(workspace, 0o700); err != nil {
-			return tool.AdapterResult{}, err
+		workspace, workspaceExists, err = managedWorkspacePath(a.dataDir, in.RuntimeID, true)
+		if err != nil || !workspaceExists {
+			return tool.AdapterResult{}, tool.KnownFailure(err)
 		}
 		spec, err := decodeRuntimeSpec(in.RuntimeSpec)
 		if err != nil {

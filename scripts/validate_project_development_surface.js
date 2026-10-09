@@ -77,6 +77,13 @@ const workspaceExecSource=read('internal/agentworker/workspace_execution_manifes
 const agentExecSource=read('internal/agentworker/execution.go');
 assertContains(agentExecSource,'ID:"workspace-execution-manifest"','Agent Worker must supply Task-owned OCI execution inventory');
 const delegateSource=read('internal/agentworker/execution.go');
+const ancestrySource=read('internal/agentworker/delegation_ancestry.go');
+assertContains(delegateSource,'verifyDelegationAncestry(ctx,tx,t)',
+ 'delegation must validate persisted ancestry inside child creation transaction');
+assertContains(ancestrySource,'maxAutonomousDelegationDepth = 6',
+ 'untrusted recursive delegation must be capped');
+assertContains(ancestrySource,'project_workspace_id,parent_task_id',
+ 'delegation ancestry must verify persisted Project Workspace ownership');
 assertContains(delegateSource,'WaitDependencyInTransaction(ctx,tx',
  'delegated Task/Attempt wait must join child creation transaction');
 assertContains(delegateSource,'s.journalInTransaction(ctx,tx',

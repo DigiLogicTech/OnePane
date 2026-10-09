@@ -58,7 +58,6 @@ func TestImagePresentRequiresExactReference(t *testing.T) {
 }
 
 func TestReconcilerNodePlacementNeverFallsBackToServiceHost(t *testing.T){
- local:="node-windows"
  same:="node-windows"
  remote:="node-ubuntu"
  empty:=""

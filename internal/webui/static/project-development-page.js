@@ -30,34 +30,31 @@ async function a44LoadProjectEnvironment(project,workspace,container){
  const desired=runtime?String(runtime.desired_state||"unknown"):"not requested";
  const appList=apps.length?apps.map(a=>`<div class="a44-installed-app"><div><strong>${safe(a.name||"Application")}</strong><div class="list-meta">${safe(a.source_kind||"source")} · ${safe(a.source_ref||"")} · ${safe(a.status||"declared")}</div></div><span class="pill">${safe(a.desired_state||"defined")}</span></div>`).join(""):'<div class="empty-state compact">No Project applications have been registered in the shared sandbox.</div>';
  container.innerHTML=`
-  <section class="panel-card a44-environment-shell">
-   <div class="card-header"><div><div class="card-title">Development environment</div>
-   <div class="list-meta">Observed Project runtime and available development tools — not dashboard settings.</div></div>
-   <span class="pill ${observed==="running"?"good":observed==="failed"?"bad":""}">${safe(a44RuntimeStatusLabel(observed))}</span></div>
-   <div class="a44-environment-note"><strong>Legacy shared Project sandbox (compatibility)</strong>
-   <p>This runtime belongs to <strong>${safe(project.name||"the Project")}</strong>, not exclusively to the
-   <strong>${safe(workspace.name||"current")}</strong> Workspace. Installing an engine here would be visible to
-   other Workspaces. Separate Workspace sandboxes are the next required backend milestone.</p></div>
+  <section class="panel-card a44-development-shortcuts">
+   <div class="card-header"><div><div class="card-title">Workspace development</div>
+    <p class="list-meta">Use the dedicated Workspace sandbox for isolated tools, then run Tasks and publish verified outputs to the Project Library.</p></div></div>
+   <div class="toolbar a44-shortcut-actions">
+    <button type="button" class="btn" id="a44OpenProjectTasks">Open Tasks</button>
+    <button type="button" class="btn" id="a44OpenProjectModels">Choose Models</button>
+   </div>
+  </section>
+  ${runtime?`<details class="panel-card a44-legacy-runtime">
+   <summary><span>Legacy shared Project sandbox (compatibility)</span>
+    <span class="pill ${observed==="running"?"good":observed==="failed"?"bad":""}">${safe(a44RuntimeStatusLabel(observed))}</span></summary>
+   <div class="a44-environment-note"><p>This older sandbox belongs to <strong>${safe(project.name||"the Project")}</strong>
+    and is shared rather than isolated to <strong>${safe(workspace.name||"this")}</strong> Workspace.
+    It is preserved for compatibility. New development tools belong in the dedicated Workspace sandbox above.</p></div>
    <div class="a44-environment-grid">
-     ${a44DevelopmentSection("Observed sandbox",a44RuntimeStatusLabel(observed),"Requested state: "+desired)}
-     ${a44DevelopmentSection("Execution backend",runtime?.backend||"Not assigned",runtime?.node_id?"Node: "+runtime.node_id:"No verified execution Node assigned")}
-     ${a44DevelopmentSection("Registered applications",String(apps.length),"Observed application status must be verified before execution")}
-     ${a44DevelopmentSection("Workspace isolation","Not yet provisioned","Project-level runtime does not provide separate Workspace toolchains")}
+    ${a44DevelopmentSection("Observed legacy runtime",a44RuntimeStatusLabel(observed),"Requested state: "+desired)}
+    ${a44DevelopmentSection("Legacy execution backend",runtime?.backend||"Not assigned",runtime?.node_id?"Node: "+runtime.node_id:"No verified execution Node assigned")}
+    ${a44DevelopmentSection("Registered legacy applications",String(apps.length),"Application states are read from the Project runtime")}
+    ${a44DevelopmentSection("Workspace isolation","Shared Project scope","Not a dedicated Workspace toolchain")}
    </div>
-   <div class="a44-environment-subsection"><h3>Installed tools and applications</h3>
-    <p class="list-meta">Only records provided by the authorised Project runtime API are displayed. A declared application is not proof that installation succeeded.</p>
+   <div class="a44-environment-subsection"><h3>Legacy installed applications</h3>
+    <p class="list-meta">Declared applications are not proof that installation or execution succeeded.</p>
     <div class="a44-app-list">${appList}</div></div>
-   <div class="a44-environment-subsection"><h3>Development workflow</h3>
-    <div class="a44-environment-grid">
-      ${a44DevelopmentSection("Code and files","Project-owned","Workspace-isolated working trees and Git are required next")}
-      ${a44DevelopmentSection("Reference knowledge","Project Library","Only explicitly granted and versioned files reach other Workspaces")}
-      ${a44DevelopmentSection("Tasks and AI workers","Governed execution","Tasks and Project Orchestrator remain separate from a runnable sandbox")}
-      ${a44DevelopmentSection("Builds and preview","Execution integration pending","Engines, terminal, tests and preview endpoints require verified isolation")}
-    </div>
-    <div class="toolbar"><button type="button" class="btn" id="a44OpenProjectTasks">Open Tasks</button><button type="button" class="btn" id="a44OpenProjectModels">Choose Models</button></div>
-   </div>
-   ${error?`<div class="error" role="alert">${safe(error)}</div>`:""}
-  </section>`;
+  </details>`:""}
+  ${error?`<div class="error" role="alert">${safe(error)}</div>`:""}`;
  container.querySelector("#a44OpenProjectTasks")?.addEventListener("click",()=>openRoute("tasks"));
  container.querySelector("#a44OpenProjectModels")?.addEventListener("click",()=>openRoute("models"));
  // One canonical renderer owns the Workspace view: feature modules provide

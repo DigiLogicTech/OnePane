@@ -17,3 +17,7 @@
 .a47-library-toolbar>label{display:flex;flex-direction:column;gap:5px;min-width:min(270px,100%);color:var(--muted);font-size:12px}
 .a47-library-toolbar select{color:var(--text);max-width:100%}
 .a47-library-page #a47LibraryContent{padding:12px;max-width:100%;overflow:hidden}
+
+.a46-library-filter{display:flex;flex-direction:column;gap:5px;min-width:0;max-width:400px;margin:12px 0;color:var(--muted);font-size:12px}
+.a46-library-filter input{color:var(--text);width:100%;box-sizing:border-box}
+.a46-library-asset[hidden]{display:none!important}

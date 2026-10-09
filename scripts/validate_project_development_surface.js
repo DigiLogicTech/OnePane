@@ -215,6 +215,34 @@ assertContains(qaPlan,'**First full code review:**','first code audit must prece
 assert.ok(qaPlan.indexOf('**First full code review:**')<qaPlan.indexOf('**Vision alignment interview:**')&&
  qaPlan.indexOf('**Vision alignment interview:**')<qaPlan.indexOf('**Second code review and realignment:**'),
  'review gate must preserve user-required audit → questions → second review order');
+const qaNode=read('internal/api/qa_node_evidence.go');
+const qaNodeHandler=read('internal/api/qa_node_evidence_handler.go');
+const qaNodeUI=read('internal/webui/static/nodes-management.js');
+assertContains(routes,'GET /v1/qa/nodes/{nodeID}/evidence',
+ 'Node QA endpoint must be explicitly routed');
+assertContains(qaNodeHandler,'s.requireNodeOperator(w,r)',
+ 'Node diagnostic report must require Admin Node operator privilege');
+assertContains(qaNodeHandler,'Cache-Control","no-store',
+ 'Node diagnostic evidence must be non-cacheable');
+assertContains(qaNode,'FROM harness_nodes WHERE id=?',
+ 'Node diagnostic must query the selected registered Node only');
+assertContains(qaNode,'WHERE peer_node_id=?',
+ 'Node diagnostic must scope paired peer events');
+assertContains(qaNode,'FROM node_wake_attempts WHERE node_id=?',
+ 'Node diagnostic must scope wake observations');
+assertContains(qaNode,'ServiceState:"not_collected"',
+ 'Node diagnostic must not fabricate OS service health');
+assert.ok(!qaNode.includes('SELECT *')&&!qaNode.includes('pairing_token')&&
+ !qaNode.includes('pairing_code')&&!qaNode.includes('peer_certificate_pem')&&
+ !qaNode.includes('manifest_json')&&!qaNode.includes('response_json')&&
+ !qaNode.includes('error_code')&&!qaNode.includes('wake_targets_json'),
+ 'Node diagnostic SQL may not fetch pairing materials, manifest payloads or raw errors');
+assertContains(qaNodeUI,'nextNodeShowQAEvidence(nextNodeUI.selected)',
+ 'Node management page must offer user-selected QA evidence');
+assertContains(qaNodeUI,'preview.textContent=report',
+ 'Node QA evidence must be rendered only as literal text');
+assertContains(qaNodeUI,'Download reviewed JSON',
+ 'Node export must require preview before download');
 const qaModel=read('internal/api/qa_model_evidence.go');
 const qaRedactionMigration=read('migrations/0042_redact_legacy_agentcheck_errors.sql');
 const qaLegacyTestbed=read('internal/localai/testbed.go');

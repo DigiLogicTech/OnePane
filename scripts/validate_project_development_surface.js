@@ -215,6 +215,7 @@ assertContains(qaPlan,'**First full code review:**','first code audit must prece
 assert.ok(qaPlan.indexOf('**First full code review:**')<qaPlan.indexOf('**Vision alignment interview:**')&&
  qaPlan.indexOf('**Vision alignment interview:**')<qaPlan.indexOf('**Second code review and realignment:**'),
  'review gate must preserve user-required audit → questions → second review order');
+const qaModel=read('internal/api/qa_model_evidence.go');
 const qaFailureMigration=read('migrations/0041_agentcheck_failure_observations.sql');
 const qaFailureWriter=read('internal/localai/agentcheck_failure.go');
 const qaTestbedWriter=read('internal/localai/testbed.go');
@@ -242,7 +243,6 @@ assertContains(qaModel,'f2.deployment_id=s.deployment_id',
  'failure observation must be restricted by both session and deployment');
 assertContains(qaModel,'qaModelFailureCategory(category.String)',
  'unknown failure categories must be sanitized');
-const qaModel=read('internal/api/qa_model_evidence.go');
 const qaModelHandler=read('internal/api/qa_model_evidence_handler.go');
 const qaAgentCheckUI=read('internal/webui/static/model-agentcheck-diagnostics.js');
 assertContains(routes,'GET /v1/qa/model-deployments/{deploymentID}/agent-check',

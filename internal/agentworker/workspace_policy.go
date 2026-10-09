@@ -77,11 +77,49 @@ func inheritOnePaneRouting(parent, child json.RawMessage) json.RawMessage {
 	return b
 }
 
+// workspaceToolAllowedForTask enforces the *persisted* Project Workspace
+// identity even for Tasks created before the new Task creation invariant.
+// Model-generated completion or missing legacy scope cannot grant extra tools.
+func workspaceToolAllowedForTask(t task.Task, capabilityID string, mode authority.ActionMode, toolID, resourceRef string) error {
+ if t.ProjectWorkspaceID==nil{
+  return workspaceToolAllowed(t.Completion,capabilityID,mode,toolID,resourceRef)
+ }
+ if t.ProjectID==nil || *t.ProjectID=="" || *t.ProjectWorkspaceID=="" {
+  return fmt.Errorf("named Workspace Task requires persisted Project identity")
+ }
+ routing:=routingPolicyFromCompletion(t.Completion)
+ if routing.ProjectWorkspaceID!=""&&routing.ProjectWorkspaceID!=*t.ProjectWorkspaceID{
+  return fmt.Errorf("Workspace routing identity does not match persisted Task ownership")
+ }
+ p:=routing.WorkspaceAccess
+ if p.ProjectWorkspaceID!=""&&p.ProjectWorkspaceID!=*t.ProjectWorkspaceID{
+  return fmt.Errorf("Workspace access identity does not match persisted Task ownership")
+ }
+ if p.Mode!=""&&p.Mode!="brokered"{
+  return fmt.Errorf("named Workspace Task requires brokered access")
+ }
+ if p.Filesystem!=""&&p.Filesystem!="none"&&p.Filesystem!="workspace-only"{
+  return fmt.Errorf("named Workspace Task cannot access host filesystems")
+ }
+ if p.Internet||p.LAN||p.Browser||p.Computer||(p.Secrets!=""&&p.Secrets!="none"){
+  return fmt.Errorf("Workspace Task tool privileges require independently authorised grants")
+ }
+ p.Mode="brokered"
+ p.ProjectWorkspaceID=*t.ProjectWorkspaceID
+ if p.Filesystem==""{p.Filesystem="workspace-only"}
+ p.Secrets="none"
+ return workspaceToolAllowedWithPolicy(p,capabilityID,mode,toolID,resourceRef)
+}
+
 func workspaceToolAllowed(raw json.RawMessage, capabilityID string, mode authority.ActionMode, toolID, resourceRef string) error {
-	p := routingPolicyFromCompletion(raw).WorkspaceAccess
-	if strings.TrimSpace(p.Mode) == "" && strings.TrimSpace(p.ProjectWorkspaceID) == "" {
-		return nil // Legacy task without project-workspace policy.
-	}
+ p:=routingPolicyFromCompletion(raw).WorkspaceAccess
+ if strings.TrimSpace(p.Mode)==""&&strings.TrimSpace(p.ProjectWorkspaceID)==""{
+  return nil // Historical Project-only Tasks retain their existing semantics.
+ }
+ return workspaceToolAllowedWithPolicy(p,capabilityID,mode,toolID,resourceRef)
+}
+
+func workspaceToolAllowedWithPolicy(p workspaceAccessPolicy, capabilityID string, mode authority.ActionMode, toolID, resourceRef string) error {
 	if p.Mode != "brokered" {
 		return fmt.Errorf("workspace policy requires brokered access")
 	}

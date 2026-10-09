@@ -26,7 +26,7 @@ type LibraryVersion struct {
  ContentHash string `json:"content_hash"`
  SizeBytes int64 `json:"size_bytes"`
  MIMEType string `json:"mime_type"`
- StorageURI string `json:"storage_uri"`
+ StorageURI string `json:"-"` // internal reference; never reveal blob identity to Library clients
  CreatedAt int64 `json:"created_at"`
 }
 type ImportLibraryAssetCommand struct {

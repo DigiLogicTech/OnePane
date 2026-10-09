@@ -15,6 +15,8 @@ async function a46RenderLibrary(project,workspace,root){
  if(!root?.isConnected)return;
  const prefix=`/v1/projects/${encodeURIComponent(project.id)}`;
  const globalLibrary=root.dataset.globalLibrary==="true";
+ const query=String(root.dataset.libraryQuery||"").trim().slice(0,256);
+ const suffix=query?"?q="+encodeURIComponent(query):"";
  let workspaces=[],assets=[],source=null;
  try{
   const list=await apiRequest(prefix+"/workspaces");
@@ -22,8 +24,8 @@ async function a46RenderLibrary(project,workspace,root){
   source=globalLibrary?{id:"",name:"Project Library"}:workspaces.find(w=>a45BackendLegacyID(w)===String(workspace.id));
   // A Workspace may see ONLY its explicit grant/published inventory; the
   // broader Project Library is accessible from the Project-owned Library page.
-  if(globalLibrary){const response=await apiRequest(prefix+"/library");assets=Array.isArray(response)?response:[]}
-  else if(source?.id){const response=await apiRequest(prefix+"/workspaces/"+encodeURIComponent(source.id)+"/library");assets=Array.isArray(response)?response:[]}
+  if(globalLibrary){const response=await apiRequest(prefix+"/library"+suffix);assets=Array.isArray(response)?response:[]}
+  else if(source?.id){const response=await apiRequest(prefix+"/workspaces/"+encodeURIComponent(source.id)+"/library"+suffix);assets=Array.isArray(response)?response:[]}
  }catch(e){if(root.isConnected)root.innerHTML=`<h3>Project Library</h3><div class="error" role="alert">${escapeHtml(e.message)}</div>`;return}
  if(!root.isConnected)return;
  const labelOf=w=>escapeHtml(w.name||w.id||"Workspace");
@@ -47,7 +49,12 @@ async function a46RenderLibrary(project,workspace,root){
  </form>
  ${!source?'<p class="list-meta">Register this Workspace under Workspace connections to enable uploads.</p>':""}
  <div class="toolbar a46-recovery-toolbar"><button id="a46RecoverArtifact" type="button" class="btn">Adopt existing managed artifact</button></div>
- <label class="a46-library-filter">Filter Library assets<input id="a46FilterAssets" placeholder="Search by filename or type…" aria-label="Filter Library assets"></label>
+ <form id="a46SearchAssetsForm" class="a46-library-filter toolbar">
+   <label>Search filenames / MIME types<input id="a46FilterAssets" name="query" maxlength="256"
+    value="${escapeHtml(query)}" placeholder="Filename or file type…" aria-label="Search permitted Library metadata"></label>
+   <button class="btn" type="submit">Search Library</button>
+   <button class="btn" type="button" id="a46ClearSearch" ${query?"":"disabled"}>Clear</button>
+ </form>
  <div class="a46-library-items">${cards||'<div class="empty-state compact">No Project Library assets. Upload a document, source artifact or asset to begin.</div>'}</div>`;
  root.querySelector("#a46RecoverArtifact")?.addEventListener("click",()=>{
   openModal("Adopt existing OnePane artifact",`<form id="a46AdoptForm" class="qa-form">
@@ -69,6 +76,15 @@ async function a46RenderLibrary(project,workspace,root){
     await a46RenderLibrary(project,workspace,root);
    }catch(err){btn.disabled=false;af.querySelector("#a46AdoptError").textContent=err.message}
   };
+ });
+ root.querySelector("#a46SearchAssetsForm")?.addEventListener("submit",e=>{
+  e.preventDefault();
+  root.dataset.libraryQuery=String(root.querySelector("#a46FilterAssets")?.value||"").trim().slice(0,256);
+  a46RenderLibrary(project,workspace,root);
+ });
+ root.querySelector("#a46ClearSearch")?.addEventListener("click",()=>{
+  root.dataset.libraryQuery="";
+  a46RenderLibrary(project,workspace,root);
  });
  root.querySelector("#a46FilterAssets")?.addEventListener("input",e=>{
   const query=String(e.target.value||"").toLowerCase().trim();

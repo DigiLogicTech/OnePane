@@ -867,6 +867,12 @@ func (s *Server) createRuntime(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &in) {
 		return
 	}
+	// Creating a runtime directly in Running must not bypass the project.run
+	// check used by subsequent desired-state transitions.
+	if in.DesiredState == projectworkspace.RuntimeDesiredRunning &&
+		!s.authorize(w, r, i, p.WorkspaceID, "project.run") {
+		return
+	}
 	x, err := s.projects.CreateRuntime(r.Context(), projectworkspace.CreateRuntimeCommand{ProjectID: p.ID, NodeID: in.NodeID, IsolationMode: in.IsolationMode, DesiredState: in.DesiredState, RuntimeSpecJSON: in.RuntimeSpecJSON, ResourceLimitsJSON: in.ResourceLimitsJSON, EnvironmentBindingsJSON: in.EnvironmentBindingsJSON, CreatedBy: i.PrincipalID, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
 	respondDomain(w, x, err, http.StatusCreated)
 }
@@ -973,6 +979,12 @@ func (s *Server) declareApplication(w http.ResponseWriter, r *http.Request) {
 		DesiredState            projectworkspace.AppDesiredState `json:"desired_state"`
 	}
 	if !decodeJSON(w, r, &in) {
+		return
+	}
+	// Initial Running requests are execution, not a harmless declaration.
+	// Without this guard, project.write could bypass the run-only endpoint.
+	if in.DesiredState == projectworkspace.AppDesiredRunning &&
+		!s.authorize(w, r, i, p.WorkspaceID, "project.run") {
 		return
 	}
 	out, err := s.projects.DeclareApplication(r.Context(), projectworkspace.DeclareApplicationCommand{RuntimeID: x.ID, Name: in.Name, SourceKind: in.SourceKind, SourceRef: in.SourceRef, VersionRef: in.VersionRef, InstallSpecJSON: in.InstallSpecJSON, RuntimeSpecJSON: in.RuntimeSpecJSON, EnvironmentBindingsJSON: in.EnvironmentBindingsJSON, DesiredState: in.DesiredState, CreatedBy: i.PrincipalID, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})

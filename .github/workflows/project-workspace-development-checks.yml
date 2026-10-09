@@ -42,6 +42,7 @@ jobs:
           node --check internal/webui/static/project-development-page.js
           node --check internal/webui/static/workspace-collaboration.js
           node --check internal/webui/static/workspace-library.js
+          node --check internal/webui/static/workspace-runtime-controls.js
           node --check internal/webui/static/project-library-route.js
           node --check internal/webui/static/project-workspace-page.js
           node --check internal/webui/static/app-foundation.js

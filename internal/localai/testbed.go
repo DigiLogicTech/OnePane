@@ -292,7 +292,7 @@ func (s *Service) TestbedSession(ctx context.Context, idv string) (TestbedSessio
 // An unsuccessful run never changes admission or invents a benchmark.
 func (s *Service) markManualAgentCheckFailed(ctx context.Context, sess TestbedSession, failure error) {
  if failure==nil{return}
- // The former v2 qualification stored failure.Error() verbatim, potentially
+ // The former v2 qualification stored raw runtime error text, potentially
  // exposing local model paths, prompts, bearer tokens or process output to
  // any Spec Sheet reader. The v3 record includes only fixed labels; the
  // separately authorized QA evidence endpoint provides observed stages.

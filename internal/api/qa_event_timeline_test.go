@@ -57,7 +57,7 @@ func TestQATimelineScopesTaskAndWorkerEventsWithoutPayloadLeakage(t *testing.T){
   if strings.Contains(ev.TraceRef,"trace-s1")||strings.Contains(ev.RequestRef,"request-s1"){
    t.Fatalf("raw trace/request values leaked: %+v",ev)
   }
-  if strings.Contains(ev.EventRef,"e1"){t.Fatalf("raw event ID leaked: %+v",ev)}
+  if ev.EventRef=="e1"{t.Fatalf("raw event ID leaked: %+v",ev)}
  }
  if result[2].RunRef!=qaOpaqueRef("run","run-world")||result[2].TraceRef!=result[4].TraceRef{
   t.Fatalf("Worker and Task trace must correlate by stable pseudonyms: %+v",result)

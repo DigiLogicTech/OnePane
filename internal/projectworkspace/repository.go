@@ -28,6 +28,7 @@ type repository interface {
 	ListApplications(context.Context, string) ([]Application, error)
 	ApplicationTx(context.Context, storage.Tx, string) (Application, error)
 	InsertApplication(context.Context, storage.Tx, Application) error
+	UpdateApplicationDesired(context.Context, storage.Tx, Application, AppDesiredState, int64) error
 	UpdateApplicationObserved(context.Context, storage.Tx, Application, AppStatus, int64) error
 	InsertEndpoint(context.Context, storage.Tx, Endpoint) error
 	Endpoint(context.Context, string) (Endpoint, error)

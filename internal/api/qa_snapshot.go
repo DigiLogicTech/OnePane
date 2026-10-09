@@ -20,7 +20,7 @@ import (
 // immutable, typed, allowlisted state instead of serialising arbitrary logs,
 // event payloads, prompts, tool results or model continuation JSON.
 const (
- qaSnapshotVersion=1
+ qaSnapshotVersion=2
  qaSnapshotTaskCap=50
  qaSnapshotArchiveCap=128<<10
 )
@@ -52,8 +52,8 @@ func qaStepKind(s string)string{
  // The DB column is not a diagnostic permission boundary. Export known
  // high-level worker categories only, never model-defined text.
  switch s {
- case "route","model","tool","delegate","replan","complete","human","escalate",
-      "wait","fail","verify","tool_result","decision","execution":
+ case "route","model","agent_runtime","tool","operation","delegate","replan","complete",
+      "human","escalate","wait","fail","verification":
   return s
  default:return "unavailable"
  }
@@ -154,7 +154,7 @@ func qaBundle(snapshot qaSnapshot)([]byte,error){
  snapshotJSON,err:=json.MarshalIndent(snapshot,"","  ")
  if err!=nil{return nil,err}
  if len(snapshotJSON)>64<<10{return nil,fmt.Errorf("QA snapshot exceeds safe bound")}
- const readme="OnePane RC11 QA snapshot (schema v1). This is a read-only, sanitised Task/Worker status and event chronology extract, not the full Debug Centre. Opaque refs correlate records without copying event payloads/trace IDs. Physical Node/tool/installer evidence, raw logs, secrets, code, prompts and Workspace files are excluded. Review contents locally before sharing.\n"
+ const readme="OnePane RC11 QA snapshot (schema v2). This is a read-only, sanitised Task/Worker status and event chronology extract, not the full Debug Centre. Opaque refs correlate records without copying event payloads/trace IDs. Physical Node/tool/installer evidence, raw logs, secrets, code, prompts and Workspace files are excluded. Review contents locally before sharing.\n"
  files:=map[string][]byte{"snapshot.json":snapshotJSON,"README.txt":[]byte(readme)}
  hashes:=map[string]string{}
  for name,data:=range files{h:=sha256.Sum256(data);hashes[name]=hex.EncodeToString(h[:])}

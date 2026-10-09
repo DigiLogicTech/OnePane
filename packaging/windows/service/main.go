@@ -152,7 +152,7 @@ func recordStartupError(startupErr error) {
 	if programData == "" {
 		programData = `C:\\ProgramData`
 	}
-	logPath := filepath.Join(programData, "OnePane", "logs", "onepane.log")
+	logPath := filepath.Join(configuredOnePaneDataRoot(filepath.Join(programData,"OnePane")),"logs","onepane.log")
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return

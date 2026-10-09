@@ -1,0 +1,27 @@
+/* Workspace development surface — intentionally uses the shared OnePane tokens. */
+.a44-development-tabs{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:10px 0 16px;padding:0 2px}
+.a44-development-tabs>.subtab{min-width:115px}
+.a44-development-panel{min-height:0;max-width:100%;box-sizing:border-box}
+.a44-development-panel[hidden],#qa4WorkspaceGrid[hidden]{display:none!important}
+.a44-environment-shell{min-height:240px;overflow:hidden}
+.a44-environment-shell .card-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.a44-environment-note{margin:12px 16px;padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--panel-2);color:var(--text)}
+.a44-environment-note p{font-size:13px;margin:5px 0 0;color:var(--muted);line-height:1.5}
+.a44-environment-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(205px,100%),1fr));gap:10px;padding:12px 16px}
+.a44-environment-tile{background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:14px;min-width:0;overflow-wrap:anywhere}
+.a44-environment-tile strong{display:block;margin-top:6px;font-size:15px;color:var(--text)}
+.a44-environment-tile p{margin:7px 0 0;line-height:1.45}
+.a44-environment-subsection{margin:8px 16px 18px;border-top:1px solid var(--border);padding-top:13px}
+.a44-environment-subsection>h3{font-size:15px;font-weight:650;margin:0 0 5px;color:var(--text)}
+.a44-environment-subsection>.a44-environment-grid{padding:12px 0}
+.a44-app-list{padding-top:8px}
+.a44-installed-app{display:flex;justify-content:space-between;gap:16px;align-items:center;border-bottom:1px solid var(--border);padding:12px 2px;overflow-wrap:anywhere}
+.a44-installed-app .pill{flex-shrink:0}
+.a44-environment-subsection>.toolbar{display:flex;justify-content:flex-end;flex-wrap:wrap;margin-top:8px}
+@media(max-width:700px){
+ .a44-development-tabs>.subtab{min-width:0;flex:1 1 120px}
+ .a44-environment-shell .card-header{flex-wrap:wrap}
+ .a44-environment-grid{grid-template-columns:1fr;padding:8px 12px}
+ .a44-environment-note{margin:10px 12px}
+ .a44-environment-subsection{margin:8px 12px 16px}
+}

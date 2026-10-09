@@ -44,6 +44,16 @@ func (s *Server) listWorkspaceLibrary(w http.ResponseWriter,r *http.Request){
 }
 func (s *Server) listProjectLibrary(w http.ResponseWriter,r *http.Request) {
  lib,p,_,ok:=s.projectLibraryAccess(w,r,false);if !ok{return}
+ query:=strings.TrimSpace(r.URL.Query().Get("q"))
+ if query!="" {
+  search,ok:=s.projects.(interface{
+   SearchLibraryAssets(context.Context,string,string)([]projectworkspace.LibraryAsset,error)
+  })
+  if !ok{writeError(w,http.StatusServiceUnavailable,"Project Library search unavailable");return}
+  assets,err:=search.SearchLibraryAssets(r.Context(),p.ID,query)
+  respondDomain(w,assets,err,http.StatusOK)
+  return
+ }
  assets,err:=lib.LibraryAssets(r.Context(),p.ID)
  respondDomain(w,assets,err,http.StatusOK)
 }

@@ -297,7 +297,7 @@ func (s *Service) markManualAgentCheckFailed(ctx context.Context, sess TestbedSe
  raw,_:=json.Marshal(map[string]any{"status":"blocked","profile_version":"onepane.manual-agent-check/v2","evidence":map[string]any{"errors":[]string{msg},"infrastructure_error":true},"session_id":sess.ID})
  _,_=s.db.ExecContext(ctx,`UPDATE model_spec_sheets SET qualification_json=?,updated_at=?,revision=revision+1 WHERE deployment_id=? AND hardware_profile_id=?`,string(raw),s.clock.UnixMilli(),sess.DeploymentID,sess.HardwareProfileID)
 }
-func (s *Service) RunTestbedTurn(ctx context.Context, sessionID string, cmd TestbedTurnCommand) (TestbedTurn, error) {
+func (s *Service) RunTestbedTurn(ctx context.Context, sessionID string, cmd TestbedTurnCommand) (completed TestbedTurn, resultErr error) {
 	var out TestbedTurn
 	sess, err := s.TestbedSession(ctx, sessionID)
 	if err != nil {
@@ -327,14 +327,21 @@ func (s *Service) RunTestbedTurn(ctx context.Context, sessionID string, cmd Test
 		}
 		req, _ = json.Marshal(body)
 	}
-	// The manual Testbed is the qualification path for a newly installed model.
-	// Start the managed runtime here even while the deployment is still in the
-	// qualifying state; normal scheduler dispatch remains gated by admission.
+	// Each manual Agent Check turn holds an activity lease. A long-running
+	// CPU-only probe must not be evicted by the idle reaper or a concurrent
+	// Agent Check, even while deployment admission remains pending.
 	if s.supervisor != nil {
-		if _, err := s.supervisor.Start(ctx, sess.DeploymentID); err != nil {
+		if _,err:=s.supervisor.Acquire(ctx,sess.DeploymentID);err!=nil{
 			s.markManualAgentCheckFailed(ctx,sess,err)
-   return out, fmt.Errorf("start managed runtime for testbed: %w", err)
+			return out,fmt.Errorf("acquire managed runtime for testbed: %w",err)
 		}
+		defer func(){
+			cleanupCtx,cancel:=context.WithTimeout(context.Background(),15*time.Second)
+			defer cancel()
+			if err:=s.supervisor.Release(cleanupCtx,sess.DeploymentID);err!=nil{
+				resultErr=errors.Join(resultErr,fmt.Errorf("release Agent Check probe runtime: %w",err))
+			}
+		}()
 	}
 	dep, err := s.inference.Deployment(ctx, sess.DeploymentID)
 	if err != nil {

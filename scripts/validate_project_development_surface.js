@@ -215,6 +215,33 @@ assertContains(qaPlan,'**First full code review:**','first code audit must prece
 assert.ok(qaPlan.indexOf('**First full code review:**')<qaPlan.indexOf('**Vision alignment interview:**')&&
  qaPlan.indexOf('**Vision alignment interview:**')<qaPlan.indexOf('**Second code review and realignment:**'),
  'review gate must preserve user-required audit → questions → second review order');
+const qaFailureMigration=read('migrations/0041_agentcheck_failure_observations.sql');
+const qaFailureWriter=read('internal/localai/agentcheck_failure.go');
+const qaTestbedWriter=read('internal/localai/testbed.go');
+assertContains(qaFailureMigration,'CREATE TABLE model_agentcheck_failure_observations',
+ 'Agent Check structured failure migration is required');
+assertContains(qaFailureMigration,'model_agentcheck_failure_no_update',
+ 'typed observations must be immutable');
+assertContains(qaFailureMigration,'model_agentcheck_failure_no_delete',
+ 'typed observations must not be deletable');
+assert.ok(!qaFailureMigration.includes('error_text')&&!qaFailureMigration.includes('payload_json')&&
+ !qaFailureMigration.includes('reason TEXT'),'failure journal must not contain free text');
+assertContains(qaFailureWriter,'agentCheckCategory(stage,cause)',
+ 'typed failures must classify from code path, not expose error text');
+assertContains(qaFailureWriter,'2*time.Second',
+ 'best-effort failure record must have a fixed DB timeout');
+assert.ok(!qaFailureWriter.includes('cause.Error()'),
+ 'error messages must never be stored in typed QA observations');
+assertContains(qaTestbedWriter,'s.recordAgentCheckFailure(ctx,sess,"inference_dispatch",err)',
+ 'inference error code path must persist typed Agent Check evidence');
+assertContains(qaTestbedWriter,'s.recordAgentCheckFailure(ctx,sess,"runtime_release",err)',
+ 'runtime cleanup failure must persist typed Agent Check evidence');
+assertContains(qaModel,'LEFT JOIN model_agentcheck_failure_observations f',
+ 'Agent Check QA projection must expose machine-coded stage evidence');
+assertContains(qaModel,'f2.deployment_id=s.deployment_id',
+ 'failure observation must be restricted by both session and deployment');
+assertContains(qaModel,'qaModelFailureCategory(category.String)',
+ 'unknown failure categories must be sanitized');
 const qaModel=read('internal/api/qa_model_evidence.go');
 const qaModelHandler=read('internal/api/qa_model_evidence_handler.go');
 const qaAgentCheckUI=read('internal/webui/static/model-agentcheck-diagnostics.js');

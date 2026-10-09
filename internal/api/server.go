@@ -528,6 +528,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /v1/projects/{projectID}", s.deleteProject)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library", s.listWorkspaceLibrary)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library/{assetID}/versions", s.listWorkspaceLibraryVersions)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library/{assetID}/versions/{version}/preview", s.previewWorkspaceLibraryVersion)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/published-outputs", s.listWorkspacePublishedOutputs)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/publication-reviews", s.listWorkspacePublicationReviews)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/runtime", s.getWorkspaceRuntime)

@@ -125,7 +125,33 @@ async function a46RenderLibrary(project,workspace,root){
     <strong>v${Number(v.version)}</strong>
     <span class="list-meta">${escapeHtml(v.content_hash)} · ${Number(v.size_bytes)} bytes</span>
     ${source?.id?`<a class="btn" href="${prefix}/library/${encodeURIComponent(id)}/versions/${Number(v.version)}/content?workspace_id=${encodeURIComponent(source.id)}" title="Permission rechecked when downloaded">Download v${Number(v.version)}</a>`:""}
+    ${source?.id && Number(v.size_bytes)<=262144 && /^(text\/|application\/(json|xml|javascript|x-yaml|yaml|toml))/.test(String(v.mime_type||"").toLowerCase())?`<button type="button" class="btn" data-a46-preview="${Number(v.version)}">Preview v${Number(v.version)}</button>`:""}
    </div>`).join(""):'<span class="list-meta">No versions.</span>';
+   // Version preview is Workspace-scoped and rechecked by the server on
+   // every read. Untrusted asset bytes must never be inserted as HTML.
+   section.querySelectorAll("[data-a46-preview]").forEach(previewButton=>previewButton.addEventListener("click",async()=>{
+    const row=previewButton.closest(".a46-library-version");
+    if(!row)return;
+    const existing=row.querySelector(".a46-library-preview");
+    if(existing){existing.remove();return}
+    previewButton.disabled=true;
+    try{
+     const version=Number(previewButton.dataset.a46Preview);
+     const uri=prefix+"/workspaces/"+encodeURIComponent(source.id)+
+      "/library/"+encodeURIComponent(id)+"/versions/"+version+"/preview";
+     const response=await fetch(uri,{method:"GET",credentials:"same-origin",cache:"no-store",
+      headers:{"Accept":"text/plain"}});
+     if(!response.ok)throw new Error("Preview denied or unavailable (HTTP "+response.status+")");
+     const content=await response.text();
+     if(!section.isConnected)return;
+     const pane=document.createElement("pre");
+     pane.className="a46-library-preview";
+     pane.setAttribute("aria-label","Plain text preview of Library version "+version);
+     pane.textContent=content;
+     row.append(pane);
+    }catch(err){notice("Library preview: "+err.message,"bad")}
+    finally{previewButton.disabled=false}
+   }));
   }catch(err){section.textContent="Version history unavailable: "+err.message}finally{b.disabled=false}
  }));
  root.querySelectorAll("[data-a46-grant]").forEach(b=>b.addEventListener("click",()=>{

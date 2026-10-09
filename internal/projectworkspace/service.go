@@ -56,6 +56,10 @@ func (s *Service) RuntimeByProject(ctx context.Context, id string) (ProjectRunti
 	}
 	return s.repo.RuntimeByProject(ctx, id)
 }
+func (s *Service) RuntimeByProjectWorkspace(ctx context.Context,projectID,workspaceID string) (ProjectRuntime,error){
+ if strings.TrimSpace(projectID)==""||strings.TrimSpace(workspaceID)==""{return ProjectRuntime{},ErrInvalidCommand}
+ return s.repo.RuntimeByProjectWorkspace(ctx,projectID,workspaceID)
+}
 func (s *Service) Application(ctx context.Context, id string) (Application, error) {
 	if strings.TrimSpace(id) == "" {
 		return Application{}, ErrInvalidCommand
@@ -325,7 +329,7 @@ func (s *Service) CreateRuntime(ctx context.Context, cmd CreateRuntimeCommand) (
 		return ProjectRuntime{}, err
 	}
 	now := s.clock.UnixMilli()
-	r := ProjectRuntime{ID: rid, ProjectID: cmd.ProjectID, NodeID: cmd.NodeID, IsolationMode: cmd.IsolationMode, Backend: "sandbox_runner", DesiredState: cmd.DesiredState, Status: RuntimeDefined, RuntimeSpecJSON: rs, ResourceLimitsJSON: rl, NetworkPolicyJSON: defaultNetworkPolicy(), FilesystemPolicyJSON: defaultFilesystemPolicy(), EnvironmentBindingsJSON: eb, Revision: 1, CreatedBy: cmd.CreatedBy, CreatedAt: now, UpdatedAt: now}
+	r := ProjectRuntime{ID: rid, ProjectID: cmd.ProjectID, ProjectWorkspaceID: cmd.ProjectWorkspaceID, NodeID: cmd.NodeID, IsolationMode: cmd.IsolationMode, Backend: "sandbox_runner", DesiredState: cmd.DesiredState, Status: RuntimeDefined, RuntimeSpecJSON: rs, ResourceLimitsJSON: rl, NetworkPolicyJSON: defaultNetworkPolicy(), FilesystemPolicyJSON: defaultFilesystemPolicy(), EnvironmentBindingsJSON: eb, Revision: 1, CreatedBy: cmd.CreatedBy, CreatedAt: now, UpdatedAt: now}
 	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
 		p, err := s.repo.ProjectTx(ctx, tx, cmd.ProjectID)
 		if err != nil {
@@ -336,6 +340,12 @@ func (s *Service) CreateRuntime(ctx context.Context, cmd CreateRuntimeCommand) (
 		}
 		if err := s.requireActor(ctx, tx, p.WorkspaceID, cmd.CreatedBy); err != nil {
 			return err
+		}
+		if cmd.ProjectWorkspaceID != nil {
+			var count int
+			err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_workspaces WHERE id=? AND project_id=? AND status='active'`,*cmd.ProjectWorkspaceID,cmd.ProjectID).Scan(&count)
+			if err!=nil{return err}
+			if count!=1{return ErrCrossWorkspace}
 		}
 		if cmd.NodeID != nil {
 			if strings.TrimSpace(*cmd.NodeID) == "" {

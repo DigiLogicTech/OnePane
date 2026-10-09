@@ -31,3 +31,15 @@
 .workspace-page #qa4AddComponent[hidden],
 .workspace-page #a43WorkspacePreset[hidden],
 .workspace-page #a35ResetWorkspaceLayout[hidden]{display:none!important}
+
+.a48-runtime{border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--panel-2)}
+.a48-runtime h3,.a48-runtime h4{margin:0 0 8px;color:var(--text)}
+.a48-runtime-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:10px}
+.a48-runtime-grid>.a44-environment-tile{padding:11px}
+.a48-runtime-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;padding:12px 0}
+.a48-install{display:flex;gap:10px;align-items:end;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:12px}
+.a48-install h4,.a48-install p{width:100%}
+.a48-install label{display:flex;flex-direction:column;gap:5px;min-width:min(230px,100%);flex:1 1 180px}
+.a48-install input{max-width:100%;box-sizing:border-box}
+.a48-app-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 0;border-bottom:1px solid var(--border)}
+@media(max-width:700px){.a48-runtime{padding:10px}.a48-runtime-grid{grid-template-columns:1fr}}

@@ -339,6 +339,14 @@ func (s *Service) handleTool(ctx context.Context, run Run, t task.Task, resp age
 		_ = s.journal(ctx, run.ID, "tool", "denied", nil, nil, strPtr("tool"), nil, map[string]any{"tool_id": p.ToolID, "resource_ref": p.ResourceRef, "reason": err.Error(), "policy": "project_workspace"})
 		return s.blockRun(ctx, run, res, "workspace policy denied tool: "+err.Error())
 	}
+	// The lease can authorize a generic resource pattern, but cannot authorize
+	// a model to select another Workspace's runtime, application or OCI image.
+	// Check persisted Task ownership before attempting to find/consume a lease.
+	if err := enforceSandboxToolOwnership(ctx, s.db, t, p.ToolID, p.ResourceRef, p.Input); err != nil {
+		_ = s.journal(ctx, run.ID, "tool", "denied", nil, nil, strPtr("tool"), nil,
+			map[string]any{"tool_id": p.ToolID, "resource_ref": p.ResourceRef, "reason": err.Error(), "policy": "sandbox_ownership"})
+		return s.blockRun(ctx, run, res, "sandbox scope denied tool: "+err.Error())
+	}
 	leaseID, err := s.findLease(ctx, run.WorkspaceID, run.TaskID, def.CapabilityID, def.Mode, p.ResourceRef)
 	if err != nil {
 		cont, _ := json.Marshal(map[string]any{"authority_required": map[string]any{"capability_id": def.CapabilityID, "action": def.Mode, "resource_ref": p.ResourceRef, "tool_id": p.ToolID, "tool_version": p.ToolVersion}})

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DigiLogicTech/OnePane/internal/tool"
 )
@@ -16,6 +17,7 @@ type fakeEngine struct {
 	profile                      EngineProfile
 	ensure                       ContainerSpec
 	pulls, ensures, stops, execs int
+	blockExec bool
 	inspectMount string
 	extraBind bool
 }
@@ -71,9 +73,13 @@ func (f *fakeEngine) StopContainer(context.Context, string, string) (ContainerSt
 	f.stops++
 	return ContainerState{Name: "c", Status: "stopped"}, nil
 }
-func (f *fakeEngine) ExecContainer(_ context.Context, _, _ string, command []string) (ExecResult, error) {
-	f.execs++
-	return ExecResult{Stdout: strings.Join(command, " ")}, nil
+func (f *fakeEngine) ExecContainer(ctx context.Context, _, _ string, command []string) (ExecResult, error) {
+ f.execs++
+ if f.blockExec {
+  <-ctx.Done()
+  return ExecResult{},ctx.Err()
+ }
+ return ExecResult{Stdout: strings.Join(command, " ")}, nil
 }
 func (f *fakeEngine) StopRuntime(context.Context, string) ([]ContainerState, error) {
 	f.stops++
@@ -272,4 +278,34 @@ func TestInspectDoesNotClaimIsolationWithForeignWorkspaceMount(t *testing.T){
  var allowed struct{Container ContainerState `json:"container"`}
  if err=json.Unmarshal(good.Result,&allowed);err!=nil{t.Fatal(err)}
  if !allowed.Container.IsolationVerified{t.Fatal("managed mount not verified")}
+}
+
+func TestAppExecRejectsUnboundedTimeoutsAndRespectsCancellation(t *testing.T){
+ eng:=&fakeEngine{profile:EngineProfile{Kind:"podman",Rootless:true}}
+ a:=NewAdapter(t.TempDir(),eng)
+ workspace,ok,err:=managedWorkspacePath(a.dataDir,"r",true)
+ if err!=nil||!ok{t.Fatal(err)}
+ eng.inspectMount=workspace
+ input:=func(timeout int) tool.AdapterRequest {
+  raw,_:=json.Marshal(map[string]any{
+   "runtime_id":"r","application_id":"a","command":[]string{"sh","-c","sleep 100"},
+   "timeout_seconds":timeout,
+  })
+  return tool.AdapterRequest{ToolID:ToolAppExec,Input:raw}
+ }
+ for _,timeout:=range []int{-1,7201}{
+  if _,err:=a.Invoke(context.Background(),input(timeout));!errors.Is(err,ErrInvalidInput){
+   t.Fatalf("invalid timeout %d was accepted: %v",timeout,err)
+  }
+ }
+ if eng.execs!=0{t.Fatalf("invalid requests dispatched to container: %d",eng.execs)}
+ eng.blockExec=true
+ ctx,cancel:=context.WithTimeout(context.Background(),25*time.Millisecond)
+ defer cancel()
+ started:=time.Now()
+ if _,err:=a.Invoke(ctx,input(7200));!errors.Is(err,context.DeadlineExceeded){
+  t.Fatalf("caller cancellation not propagated as deadline: %v",err)
+ }
+ if time.Since(started)>2*time.Second{t.Fatal("cancellation did not promptly return")}
+ if eng.execs!=1{t.Fatalf("expected one bounded exec, got %d",eng.execs)}
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/DigiLogicTech/OnePane/internal/authority"
 	"github.com/DigiLogicTech/OnePane/internal/policy"
@@ -51,6 +52,7 @@ type baseInput struct {
 	EnvironmentBindings json.RawMessage `json:"environment_bindings,omitempty"`
 	NetworkPolicy       json.RawMessage `json:"network_policy,omitempty"`
 	Command             []string        `json:"command,omitempty"`
+	TimeoutSeconds      int             `json:"timeout_seconds,omitempty"`
 	Endpoints           []PortSpec      `json:"endpoints,omitempty"`
 }
 type runtimeSpec struct {
@@ -146,6 +148,12 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 		}
 		return result(map[string]any{"runtime_id": in.RuntimeID, "image": state, "engine": profile}, "application image observed")
 	case ToolAppExec:
+		// A Task may take longer on local CPU, but cannot hold a sandbox exec
+		// indefinitely. The caller's shorter cancellation deadline still wins.
+		if in.TimeoutSeconds < 0 || in.TimeoutSeconds > 7200 {
+			return tool.AdapterResult{}, tool.KnownFailure(fmt.Errorf("%w: command timeout must be 1..7200 seconds", ErrInvalidInput))
+		}
+		if in.TimeoutSeconds == 0 { in.TimeoutSeconds = 900 }
 		if !safeID.MatchString(in.ApplicationID) || len(in.Command) == 0 || len(in.Command) > 128 {
 			return tool.AdapterResult{}, tool.KnownFailure(ErrInvalidInput)
 		}
@@ -163,11 +171,18 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 			state.SpecHash == "" || !exactWorkspaceMount(state, workspace) {
 			return tool.AdapterResult{}, tool.KnownFailure(fmt.Errorf("%w: application is not a verified running sandbox", ErrInvalidInput))
 		}
-		execResult, err := a.engine.ExecContainer(ctx, in.RuntimeID, in.ApplicationID, in.Command)
+		execCtx, cancel := context.WithTimeout(ctx, time.Duration(in.TimeoutSeconds)*time.Second)
+		defer cancel()
+		execResult, err := a.engine.ExecContainer(execCtx, in.RuntimeID, in.ApplicationID, in.Command)
+		// Return the cancellation cause (rather than an engine-specific
+		// "signal: killed") so the Gateway records timed_out/cancelled.
+		if execCtx.Err() != nil {
+			return tool.AdapterResult{}, execCtx.Err()
+		}
 		if err != nil {
 			return tool.AdapterResult{}, err
 		}
-		return result(map[string]any{"runtime_id": in.RuntimeID, "application_id": in.ApplicationID, "command": in.Command, "result": execResult, "container": state, "engine": profile}, "sandboxed application command executed")
+		return result(map[string]any{"runtime_id": in.RuntimeID, "application_id": in.ApplicationID, "command": in.Command, "timeout_seconds": in.TimeoutSeconds, "result": execResult, "container": state, "engine": profile}, "sandboxed application command executed")
 	case ToolRuntimeEnsure:
 		workspace, workspaceExists, err = managedWorkspacePath(a.dataDir, in.RuntimeID, true)
 		if err != nil || !workspaceExists {

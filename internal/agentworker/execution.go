@@ -409,7 +409,7 @@ func (s *Service) handleTool(ctx context.Context, run Run, t task.Task, resp age
 	if err := s.observations.VerifyIntegrity(ctx, obs.ID); err != nil {
 		return s.failRun(ctx, run, res, err)
 	}
-	cont, _ := json.Marshal(map[string]any{"tool_result": map[string]any{"tool_id": inv.ToolID, "invocation_id": inv.ID, "observation_id": obs.ID, "summary": inv.Summary, "result": boundedJSON(inv.Result, 16<<10)}})
+	cont, _ := json.Marshal(map[string]any{"tool_result": map[string]any{"tool_id": inv.ToolID, "invocation_id": inv.ID, "observation_id": obs.ID, "summary": inv.Summary, "result": boundedToolResult(inv.Result, 16<<10)}})
 	if err := s.updateRun(ctx, run.ID, run.Revision, RunRunning, cont, nil, 0, 0, nil, nil, nil); err != nil {
 		return failedResult(res, err)
 	}

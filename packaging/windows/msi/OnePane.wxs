@@ -7,7 +7,6 @@
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
     <Icon Id="OnePaneProductIcon" SourceFile="$(var.PayloadDir)\OnePane.ico"/>
     <Property Id="ARPPRODUCTICON" Value="OnePaneProductIcon"/>
-    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER"/>
     <!-- Public secure MSI properties support unattended enterprise installs.
          GUI installation offers the same Data root and storage paths. -->
     <Property Id="ONEPANE_DATA_ROOT" Secure="yes"/>

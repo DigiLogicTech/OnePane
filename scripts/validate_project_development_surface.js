@@ -24,6 +24,11 @@ assertContains(ui,'const a44RenderWorkspaceDashboard=renderWorkspaces','legacy d
 assertContains(ui,'||"development"','new Workspace defaults to Development view');
 assertContains(ui,'id="a44DashboardTab"','secondary dashboard must be reachable');
 assertContains(ui,'Legacy shared Project sandbox (compatibility)','no false Workspace-level runtime-isolation claim');
+assertContains(ui,'<details class="panel-card a44-legacy-runtime"','legacy shared sandbox must be collapsible, not the primary Workspace surface');
+assertContains(ui,'a44-development-shortcuts','direct Workspace development actions must remain discoverable');
+assert.ok(ui.indexOf('a44-development-shortcuts')<ui.indexOf('a44-legacy-runtime'),'Workspace action panel must precede legacy compatibility');
+assertContains(ui,'New development tools belong in the dedicated Workspace sandbox above.','legacy compatibility must not invite shared installations');
+assertContains(css,'.a44-legacy-runtime>summary','legacy disclosure control must use theme-aware styling');
 assertContains(ui,'/v1/projects/','runtime is read from the server');
 assertContains(ui,'/applications','application state is read from the server');
 assertContains(ui,'runtime?.status','use observed runtime status, not local UI checkbox');

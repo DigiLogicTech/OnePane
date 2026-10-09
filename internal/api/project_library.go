@@ -20,6 +20,7 @@ type projectLibraryService interface {
  LibraryAssets(context.Context,string)([]projectworkspace.LibraryAsset,error)
  LibraryVersions(context.Context,string,string)([]projectworkspace.LibraryVersion,error)
  GrantLibraryAsset(context.Context,projectworkspace.GrantLibraryAssetCommand)error
+ RevokeLibraryAsset(context.Context,string,string,string,string)error
  ResolveWorkspaceLibraryVersion(context.Context,string,string,string,int64)(projectworkspace.LibraryVersion,error)
 }
 func (s *Server) projectLibraryAccess(w http.ResponseWriter,r *http.Request,write bool)(projectLibraryService,projectworkspace.Project,string,bool) {
@@ -101,6 +102,11 @@ func (s *Server) grantProjectLibrary(w http.ResponseWriter,r *http.Request) {
   ProjectID:p.ID,AssetID:r.PathValue("assetID"),WorkspaceID:in.WorkspaceID,
   ActorPrincipalID:actor,VersionPolicy:in.VersionPolicy,PinnedVersion:in.PinnedVersion})
  respondDomain(w,map[string]any{"granted":err==nil},err,http.StatusOK)
+}
+func (s *Server) revokeProjectLibraryGrant(w http.ResponseWriter,r *http.Request){
+ lib,p,actor,ok:=s.projectLibraryAccess(w,r,true);if !ok{return}
+ err:=lib.RevokeLibraryAsset(r.Context(),p.ID,r.PathValue("assetID"),r.PathValue("workspaceID"),actor)
+ respondDomain(w,map[string]any{"revoked":err==nil},err,http.StatusOK)
 }
 func (s *Server) downloadWorkspaceLibraryVersion(w http.ResponseWriter,r *http.Request){
  lib,p,_,ok:=s.projectLibraryAccess(w,r,false);if !ok{return}

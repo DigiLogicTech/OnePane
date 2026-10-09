@@ -45,6 +45,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/routineworker"
 	"github.com/DigiLogicTech/OnePane/internal/runtimecoord"
 	"github.com/DigiLogicTech/OnePane/internal/sandboxrunner"
+	"github.com/DigiLogicTech/OnePane/internal/workspacepublisher"
 	"github.com/DigiLogicTech/OnePane/internal/scheduler"
 	"github.com/DigiLogicTech/OnePane/internal/skillcatalog"
 	"github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
@@ -356,6 +357,7 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("configure Project storage root: %w", err)
 	}
+	sandboxAdapter.SetPublisher(workspacepublisher.New(db.SQL(),artifactService,projectWorkspaceService,localNode.ID))
 	agentProfileService := agentprofile.NewService(db.SQL(), db, clk)
 	skillCatalogService := skillcatalog.NewService(db.SQL(), db, clk, cfg.Storage.DataDir)
 	projectOrchestratorService := projectorchestrator.NewService(db.SQL(), db, clk, schedulerService, inferenceService, artifactService, taskService, teamService)

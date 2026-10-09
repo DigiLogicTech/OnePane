@@ -352,6 +352,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/agent-profiles/{profileID}/archive", s.archiveAgentProfile)
 	s.mux.HandleFunc("GET /v1/agent-sessions", s.listAgentSessions)
 	// RC11 QA diagnostic foundation: explicitly requested, scoped and read-only.
+	s.mux.HandleFunc("GET /v1/qa/model-deployments/{deploymentID}/agent-check", s.qaAgentCheckEvidence)
 	s.mux.HandleFunc("GET /v1/qa/workspace-snapshot", s.qaWorkspaceSnapshot)
 	s.mux.HandleFunc("POST /v1/qa/workspace-bundle", s.qaWorkspaceBundle)
 	s.mux.HandleFunc("GET /v1/tasks", s.listTasks)

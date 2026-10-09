@@ -215,6 +215,29 @@ assertContains(qaPlan,'**First full code review:**','first code audit must prece
 assert.ok(qaPlan.indexOf('**First full code review:**')<qaPlan.indexOf('**Vision alignment interview:**')&&
  qaPlan.indexOf('**Vision alignment interview:**')<qaPlan.indexOf('**Second code review and realignment:**'),
  'review gate must preserve user-required audit → questions → second review order');
+const qaModel=read('internal/api/qa_model_evidence.go');
+const qaModelHandler=read('internal/api/qa_model_evidence_handler.go');
+const qaAgentCheckUI=read('internal/webui/static/model-agentcheck-diagnostics.js');
+assertContains(routes,'GET /v1/qa/model-deployments/{deploymentID}/agent-check',
+ 'QA Agent Check evidence must be routed through authenticated backend');
+assertContains(qaModelHandler,'s.authenticate(w,r)',
+ 'QA model report must authenticate principal');
+assertContains(qaModelHandler,'s.authorizeManagedDeployment(w,r,i,dep,"model.read")',
+ 'QA model report must honor managed deployment scope and policy');
+assertContains(qaModel,'qaModelSessionCap=10',
+ 'Agent Check QA session projection must be bounded');
+assertContains(qaModel,'WHERE s.deployment_id=?',
+ 'Agent Check QA must not enumerate other deployments');
+assert.ok(!qaModel.includes('request_json')&&!qaModel.includes('response_json')&&
+ !qaModel.includes('notes,')&&!qaModel.includes('placement_json')&&
+ !qaModel.includes('last_error'),
+ 'QA Agent Check projection must not read raw user/model content');
+assertContains(qaAgentCheckUI,'a55ShowAgentCheckEvidence(id)',
+ 'Agent Check UI must expose governed read-only evidence');
+assertContains(qaAgentCheckUI,'panel.textContent=report',
+ 'QA Agent Check evidence must be rendered as plain text');
+assertContains(qaAgentCheckUI,'Download reviewed JSON',
+ 'QA model export must be reviewed before download');
 const qaSource=read('internal/api/qa_snapshot.go');
 const qaAPI=read('internal/api/qa_snapshot_handler.go');
 const qaUI=read('internal/webui/static/workspace-ai-workflow.js');

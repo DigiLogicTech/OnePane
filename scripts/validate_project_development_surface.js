@@ -60,6 +60,9 @@ assertContains(workflowUI,'project_workspace_id:canonical.id','AI jobs must use 
 assertContains(ui,'a48MountWorkspaceRuntime','canonical Workspace sandbox must be mounted');
 assertContains(runtimeUI,'/desired-state','Workspace runtime lifecycle must use governed runtime endpoint');
 assertContains(runtimeUI,'@sha256:','toolchains must require pinned images');
+assertContains(runtimeUI,'data-a48-app-action','each provisioned tool must expose start/stop controls');
+assertContains(runtimeUI,'expected_revision','app state changes must be revision-checked');
+assertContains(routes,'s.setApplicationDesired','API must expose governed application lifecycle route');
 assertContains(ui,'a45MountCollaboration','Development renderer must mount collaboration explicitly');
 assertContains(ui,'a46MountWorkspaceLibrary','Development renderer must mount Library explicitly');
 assertContains(links,'async function a45MountCollaboration','collaboration must export a mount function');

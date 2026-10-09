@@ -333,29 +333,33 @@ func (s *Service) RunTestbedTurn(ctx context.Context, sessionID string, cmd Test
 	if s.supervisor != nil {
 		if _,err:=s.supervisor.Acquire(ctx,sess.DeploymentID);err!=nil{
 			s.markManualAgentCheckFailed(ctx,sess,err)
+			s.recordAgentCheckFailure(ctx,sess,"runtime_acquire",err)
 			return out,fmt.Errorf("acquire managed runtime for testbed: %w",err)
 		}
 		defer func(){
 			cleanupCtx,cancel:=context.WithTimeout(context.Background(),15*time.Second)
 			defer cancel()
 			if err:=s.supervisor.Release(cleanupCtx,sess.DeploymentID);err!=nil{
+				s.recordAgentCheckFailure(cleanupCtx,sess,"runtime_release",err)
 				resultErr=errors.Join(resultErr,fmt.Errorf("release Agent Check probe runtime: %w",err))
 			}
 		}()
 	}
 	dep, err := s.inference.Deployment(ctx, sess.DeploymentID)
 	if err != nil {
+		s.recordAgentCheckFailure(ctx,sess,"deployment_read",err)
 		return out, err
 	}
 	model, err := s.inference.Model(ctx, dep.ModelID)
 	if err != nil {
+		s.recordAgentCheckFailure(ctx,sess,"model_read",err)
 		return out, err
 	}
 	rid, _ := s.ids.New("tbreq")
 	start := time.Now()
 	transport := inference.LocalOpenAITransport{Resolver: s}
 	result, err := transport.Dispatch(ctx, inference.DispatchRequest{RequestID: rid, Model: model, Deployment: dep, RequestJSON: req}, nil)
- if err!=nil{s.markManualAgentCheckFailed(ctx,sess,err);return out,err}
+ if err!=nil{s.markManualAgentCheckFailed(ctx,sess,err);s.recordAgentCheckFailure(ctx,sess,"inference_dispatch",err);return out,err}
 	elapsed := time.Since(start)
 	metrics, _ := json.Marshal(map[string]any{"elapsed_ms": elapsed.Milliseconds(), "placement": sess.Placement, "synthetic_tool_probe": cmd.SyntheticToolProbe})
 	usage := result.UsageJSON
@@ -364,10 +368,13 @@ func (s *Service) RunTestbedTurn(ctx context.Context, sessionID string, cmd Test
 	}
 	resp := result.ResponseJSON
 	if len(resp) == 0 || !json.Valid(resp) {
-		return out, errors.New("testbed model returned invalid JSON")
+		err=errors.New("testbed model returned invalid JSON")
+		s.recordAgentCheckFailure(ctx,sess,"response_validation",err)
+		return out, err
 	}
 	var seq int64
 	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence_no),0)+1 FROM model_testbed_turns WHERE session_id=?`, sessionID).Scan(&seq); err != nil {
+		s.recordAgentCheckFailure(ctx,sess,"turn_store",err)
 		return out, err
 	}
 	tid, _ := s.ids.New("tbturn")
@@ -378,6 +385,7 @@ func (s *Service) RunTestbedTurn(ctx context.Context, sessionID string, cmd Test
 		probe = 1
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO model_testbed_turns(id,session_id,sequence_no,request_json,response_json,usage_json,metrics_json,synthetic_tool_probe,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, tid, sessionID, seq, string(req), string(resp), string(usage), string(metrics), probe, now)
+	if err!=nil{s.recordAgentCheckFailure(ctx,sess,"turn_store",err)}
 	return out, err
 }
 
@@ -425,7 +433,7 @@ func (s *Service) CompleteTestbed(ctx context.Context, sessionID string) error {
  sess,err:=s.TestbedSession(ctx,sessionID);if err!=nil{return err}
  if sess.Status!="active"{return errors.New("testbed session is not active")}
  turns,err:=s.ListTestbedTurns(ctx,sessionID);if err!=nil{return err}
- if len(turns)==0{return errors.New("cannot complete Agent Check: no successful model inference turns were recorded")}
+ if len(turns)==0{err=errors.New("cannot complete Agent Check: no successful model inference turns were recorded");s.recordAgentCheckFailure(ctx,sess,"completion_validation",err);return err}
  evidence:=map[string]any{"plain_ok":false,"json_ok":false,"schema_ok":false,"tools_ok":false,"context_probes":[]any{},"testbed_session_id":sessionID}
  plainChecked,jsonChecked,toolsChecked:=false,false,false
  var totalTokens int64
@@ -467,11 +475,12 @@ func (s *Service) CompleteTestbed(ctx context.Context, sessionID string) error {
   // Never promote admission or claim context verification from a manual probe.
   _,err=tx.ExecContext(ctx,`UPDATE model_spec_sheets SET qualification_json=?,updated_at=?,revision=revision+1 WHERE deployment_id=? AND hardware_profile_id=?`,string(raw),now,sess.DeploymentID,sess.HardwareProfileID)
   return err
- });err!=nil{return err}
+ });err!=nil{s.recordAgentCheckFailure(ctx,sess,"completion_persist",err);return err}
  // All probes and evidence are persisted. Release the model's CPU/GPU memory.
  // Do not evict concurrent inference, which is protected by StopIfIdle.
  if s.supervisor!=nil{
   if _,err:=s.supervisor.StopIfIdle(ctx,sess.DeploymentID);err!=nil{
+   s.recordAgentCheckFailure(ctx,sess,"runtime_unload",err)
    return fmt.Errorf("Agent Check evidence saved but runtime could not be unloaded: %w",err)
   }
  }
@@ -499,8 +508,9 @@ func (s *Service) AbortTestbed(ctx context.Context, sessionID string, cause stri
  n,err:=res.RowsAffected();if err!=nil{return err}
  if n!=1{return errors.New("Agent Check session was already finalized")}
  s.markManualAgentCheckFailed(ctx,sess,errors.New(cause))
+ s.recordAgentCheckFailure(ctx,sess,"session_abort",errors.New("Agent Check abort requested"))
  if s.supervisor!=nil{
-  if _,err:=s.supervisor.StopIfIdle(ctx,sess.DeploymentID);err!=nil{return fmt.Errorf("Agent Check stopped, but model unload failed: %w",err)}
+  if _,err:=s.supervisor.StopIfIdle(ctx,sess.DeploymentID);err!=nil{s.recordAgentCheckFailure(ctx,sess,"runtime_unload",err);return fmt.Errorf("Agent Check stopped, but model unload failed: %w",err)}
  }
  return nil
 }

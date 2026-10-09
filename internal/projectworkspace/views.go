@@ -206,6 +206,10 @@ func (s *Service) CreateWorkspaceView(ctx context.Context, cmd CreateWorkspaceVi
 	idv, _ := s.ids.New("pws")
 	now := s.clock.UnixMilli()
 	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		// Workspace creation is never an authority-free side effect of UI layout
+		// reconciliation. Apply the Project tenancy membership check at the
+		// transaction boundary as well as API authorization.
+		if err := s.requireActor(ctx,tx,p.WorkspaceID,cmd.ActorPrincipalID);err!=nil{return err}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO project_workspaces(id,project_id,name,description,status,layout_json,ai_settings_json,resource_scope_json,state_json,storage_root,revision,created_at,updated_at) VALUES(?,?,?,?,'active',?,?,?,?,?,1,?,?)`, idv, cmd.ProjectID, cmd.Name, cmd.Description, string(layout), string(ai), string(scope), string(state), cmd.StorageRoot, now, now); err != nil {
 			return err
 		}

@@ -259,31 +259,37 @@ function a41ProvisionWebCouncilTabs(result){
 }
 const A41_WEB_MODEL_CHOICES={chatgpt:["GPT-6","GPT-5.6","GPT-5.5"],claude:["Claude Opus","Claude Sonnet","Claude Haiku"],gemini:["Gemini Pro","Gemini Flash"]};
 const A41_WEB_ROLE_CHOICES=["Independent researcher","Critical analyst","Alternative researcher","Technical specialist","Domain expert","Evidence reviewer","Devil's advocate","Methodology reviewer","Synthesis specialist"];
-function a41SeatOptions(values,selected,custom=false){return `<option value="">Select…</option>${values.map(v=>`<option value="${escapeHtml(v)}" ${v===selected?"selected":""}>${escapeHtml(v)}</option>`).join("")}<option value="__custom" ${custom?"selected":""}>Other / Custom…</option>`;}
+function a41WebSeatRow(seat){
+ const key=Math.random().toString(36).slice(2,9);
+ return `<div class="a41-council-seat" data-a41-seat>
+  <div class="a41-council-seat-head"><strong>Web provider seat</strong><button type="button" class="btn" data-a41-remove-seat title="Remove this seat">Remove</button></div>
+  <div class="a41-council-seat-fields">
+   <label>Provider<select name="provider_id" required>
+    ${A39_WEB_PROVIDERS.map(p=>`<option value="${escapeHtml(p.id)}" ${seat.provider_id===p.id?"selected":""}>${escapeHtml(p.name)}</option>`).join("")}
+   </select></label>
+   <label>Model used<input name="model_label" required maxlength="128" list="a41-model-${key}" value="${escapeHtml(seat.model_label||"")}" placeholder="Choose or enter model"><datalist id="a41-model-${key}"></datalist></label>
+   <label>Role<input name="role_name" required maxlength="120" list="a41-role-${key}" value="${escapeHtml(seat.role_name||"Independent researcher")}" placeholder="Choose or enter role"><datalist id="a41-role-${key}">${A41_WEB_ROLE_CHOICES.map(role=>`<option value="${escapeHtml(role)}"></option>`).join("")}</datalist></label>
+  </div>
+ </div>`;
+}
 function a41BindSeatEditors(form){
  $$("[data-a41-seat]",form).forEach(row=>{
-  const provider=row.querySelector('[name="provider_id"]'),model=row.querySelector('[name="model_choice"]'),name=row.querySelector('[name="model_label"]');
-  const role=row.querySelector('[name="role_choice"]'),roleName=row.querySelector('[name="role_name"]');
-  if(model?.dataset.bound==="yes")return;
-  model.dataset.bound="yes";
-  const updateModels=()=>{const values=A41_WEB_MODEL_CHOICES[provider.value]||[];const old=name.value;model.innerHTML=a41SeatOptions(values,old,!!old&&!values.includes(old));if(!old)model.value="";name.hidden=model.value!=="__custom";};
-  provider.addEventListener("change",()=>{name.value="";updateModels();});
-  model.addEventListener("change",()=>{name.value=model.value==="__custom"?"":model.value;name.hidden=model.value!=="__custom";});
-  role.addEventListener("change",()=>{roleName.value=role.value==="__custom"?"":role.value;roleName.hidden=role.value!=="__custom";});
-  updateModels();
+  const provider=row.querySelector('[name="provider_id"]');
+  const field=row.querySelector('[name="model_label"]');
+  const list=row.querySelector("datalist[id^='a41-model-']");
+  if(provider.dataset.a41Bound==="1")return;
+  provider.dataset.a41Bound="1";
+  const update=()=>{list.innerHTML=(A41_WEB_MODEL_CHOICES[provider.value]||[]).map(name=>`<option value="${escapeHtml(name)}"></option>`).join("")};
+  provider.addEventListener("change",()=>{field.value="";update()});
+  update();
  });
 }
-function a41WebSeatRow(seat){
-  return `<div class="a41-council-seat" data-a41-seat>
-    <div class="a41-council-seat-head"><strong>Web provider seat</strong><button type="button" class="btn" data-a41-remove-seat title="Remove this seat">Remove</button></div>
-    <div class="a41-council-seat-fields">
-      <label>Provider<select name="provider_id" required>
-        ${A39_WEB_PROVIDERS.map(p=>`<option value="${escapeHtml(p.id)}" ${seat.provider_id===p.id?"selected":""}>${escapeHtml(p.name)}</option>`).join("")}
-      </select></label>
-      <label>Model used<select name="model_choice" aria-label="Model used"></select><input name="model_label" required maxlength="128" value="${escapeHtml(seat.model_label||"")}" placeholder="Exact model selected on provider site" ${(A41_WEB_MODEL_CHOICES[seat.provider_id]||[]).includes(seat.model_label)?"hidden":""}></label>
-      <label>Role<select name="role_choice">${a41SeatOptions(A41_WEB_ROLE_CHOICES,seat.role_name||"Independent researcher",!A41_WEB_ROLE_CHOICES.includes(seat.role_name||"Independent researcher"))}</select><input name="role_name" required maxlength="120" value="${escapeHtml(seat.role_name||"Independent researcher")}" ${A41_WEB_ROLE_CHOICES.includes(seat.role_name||"Independent researcher")?"hidden":""} placeholder="Custom Council role"></label>
-    </div>
-  </div>`;
+function a41BindChairModel(form){
+ const provider=form.elements.namedItem("chair_provider_id"),input=form.elements.namedItem("chair_model_label");
+ const list=$("#a41ChairModelOptions");
+ const update=()=>{list.innerHTML=(A41_WEB_MODEL_CHOICES[provider.value]||[]).map(name=>`<option value="${escapeHtml(name)}"></option>`).join("")};
+ provider.addEventListener("change",()=>{input.value="";update()});
+ update();
 }
 function a41CouncilWizardSnapshot(form){
   return {
@@ -332,7 +338,7 @@ function a41OpenWebOnlyCouncilWizard(){
         <label>Chair Web provider<select name="chair_provider_id">
           ${A39_WEB_PROVIDERS.map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("")}
         </select></label>
-        <label>Chair selected model<input name="chair_model_label" required maxlength="128" placeholder="Exact model selected on the provider website"></label>
+        <label>Chair model used<input name="chair_model_label" required maxlength="128" list="a41ChairModelOptions" placeholder="Choose or enter model"><datalist id="a41ChairModelOptions"></datalist></label>
       </div>
       <label class="inline-check" id="a41ChairApproval"><input type="checkbox" name="chair_require_approval" checked> Require my approval for the Chair agenda and follow-up questions</label>
       <div class="a41-council-seats-title"><strong>Manual web consultation seats (2–7 with Chair, 2–8 without)</strong><button class="btn" id="a41AddSeat" type="button">+ Add provider seat</button></div>
@@ -352,7 +358,7 @@ function a41OpenWebOnlyCouncilWizard(){
       syncChair();syncSynthesis();
     });
   };
-  bindRemove();a41BindSeatEditors(form);
+  bindRemove();a41BindSeatEditors(form);a41BindChairModel(form);
   const syncChair=()=>{
     const manual=$("#a41ChairMode").value==="manual";
     $("#a41ChairFields").hidden=!manual;
@@ -370,8 +376,10 @@ function a41OpenWebOnlyCouncilWizard(){
       return `<option value="${i}">${escapeHtml(provider+" · "+role)}</option>`;
     }).join("");
     control.value=String(selected>=0&&selected<control.options.length?selected:0);
+    control.disabled=!form.elements.namedItem("synthesis_pass").checked;
   };
   $("#a41ChairMode").onchange=()=>{syncChair();syncSynthesis()};
+  form.elements.namedItem("synthesis_pass").onchange=syncSynthesis;
   $("#a41CouncilSeats").addEventListener("change",syncSynthesis);
   $("#a41CouncilSeats").addEventListener("input",syncSynthesis);
   syncChair();syncSynthesis();

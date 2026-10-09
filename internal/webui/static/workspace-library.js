@@ -43,7 +43,29 @@ async function a46RenderLibrary(project,workspace,root){
   <button class="btn primary" type="submit" ${source?"":"disabled"}>${globalLibrary?"Upload to Project Library":"Upload into "+escapeHtml(workspace.name||"Workspace")+" Library"}</button>
  </form>
  ${!source?'<p class="list-meta">Register this Workspace under Workspace connections to enable uploads.</p>':""}
+ <div class="toolbar a46-recovery-toolbar"><button id="a46RecoverArtifact" type="button" class="btn">Adopt existing managed artifact</button></div>
  <div class="a46-library-items">${cards||'<div class="empty-state compact">No Project Library assets. Upload a document, source artifact or asset to begin.</div>'}</div>`;
+ root.querySelector("#a46RecoverArtifact")?.addEventListener("click",()=>{
+  openModal("Adopt existing OnePane artifact",`<form id="a46AdoptForm" class="qa-form">
+   <p class="list-meta">Recover a verified managed artifact already stored by OnePane. No file is moved or deleted, and artifacts from other Projects or tenants are not accepted.</p>
+   <label>Existing Artifact ID<input name="artifact_id" required placeholder="Managed artifact ID"></label>
+   <label>Library display name<input name="name" maxlength="240" placeholder="Recovered research or build artifact"></label>
+   <div id="a46AdoptError" class="error"></div><button type="submit" class="btn primary">Verify and adopt</button>
+  </form>`);
+  const af=document.querySelector("#a46AdoptForm");
+  af.onsubmit=async e=>{
+   e.preventDefault();const input=Object.fromEntries(new FormData(af));
+   const btn=af.querySelector('[type="submit"]');btn.disabled=true;
+   try{
+    const record=await apiRequest(prefix+"/library/import-managed",{
+     method:"POST",body:JSON.stringify({artifact_id:input.artifact_id,name:input.name,
+      source_workspace_id:source?.id||""})
+    });
+    closeModal();notice("Existing artifact adopted: "+(record.name||input.artifact_id));
+    await a46RenderLibrary(project,workspace,root);
+   }catch(err){btn.disabled=false;af.querySelector("#a46AdoptError").textContent=err.message}
+  };
+ });
  const form=root.querySelector("#a46UploadForm");
  form?.addEventListener("submit",async e=>{
   e.preventDefault();

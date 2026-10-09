@@ -51,6 +51,12 @@ assertContains(index,'/workspace-library.js','Project Library UI must be loaded'
 assertContains(index,'/project-library-route.js','first-class Library route must be loaded');
 assert.ok(index.indexOf('/workspace-collaboration.js')<index.indexOf('/workspace-library.js'),'Library loads after collaboration');
 assertContains(libRoute,'pages.library','global Library navigation must register');
+assertContains(ui,'a45MountCollaboration','Development renderer must mount collaboration explicitly');
+assertContains(ui,'a46MountWorkspaceLibrary','Development renderer must mount Library explicitly');
+assertContains(links,'async function a45MountCollaboration','collaboration must export a mount function');
+assertContains(lib,'async function a46MountWorkspaceLibrary','Library must export a mount function');
+assert.ok(!links.includes('a44LoadProjectEnvironment='),'collaboration cannot globally replace Development renderer');
+assert.ok(!lib.includes('a44LoadProjectEnvironment='),'Library cannot globally replace Development renderer');
 assertContains(links,'/workspace-links','connection source must use authorised API');
 assertContains(links,'legacy_workspace_id','connection cannot confuse dashboard and canonical Workspace IDs');
 assertContains(links,'/publications','publishers must use versioned channel publications');

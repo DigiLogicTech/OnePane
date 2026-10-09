@@ -70,6 +70,7 @@ func TestTypedAgentCheckFailureJournalIsImmutableAndRedacted(t *testing.T){
   if i>=len(expected)||stage+"|"+category!=expected[i]{t.Fatalf("unexpected typed observation %d: %s / %s",i,stage,category)}
  }
  if err:=rows.Err();err!=nil{t.Fatal(err)}
+ _=rows.Close()
  var all string
  if err:=db.QueryRowContext(ctx,`SELECT group_concat(stage||category) FROM model_agentcheck_failure_observations`).Scan(&all);err!=nil{t.Fatal(err)}
  if strings.Contains(all,secret){t.Fatal("raw error content leaked into journal")}

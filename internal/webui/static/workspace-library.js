@@ -14,15 +14,18 @@ async function a46MountWorkspaceLibrary(project,workspace,container){
 async function a46RenderLibrary(project,workspace,root){
  if(!root?.isConnected)return;
  const prefix=`/v1/projects/${encodeURIComponent(project.id)}`;
- let workspaces=[],assets=[];
+ const globalLibrary=root.dataset.globalLibrary==="true";
+ let workspaces=[],assets=[],source=null;
  try{
-  [workspaces,assets]=await Promise.all([apiRequest(prefix+"/workspaces"),apiRequest(prefix+"/library")]);
+  const list=await apiRequest(prefix+"/workspaces");
+  workspaces=Array.isArray(list)?list:[];
+  source=globalLibrary?{id:"",name:"Project Library"}:workspaces.find(w=>a45BackendLegacyID(w)===String(workspace.id));
+  // A Workspace may see ONLY its explicit grant/published inventory; the
+  // broader Project Library is accessible from the Project-owned Library page.
+  if(globalLibrary){const response=await apiRequest(prefix+"/library");assets=Array.isArray(response)?response:[]}
+  else if(source?.id){const response=await apiRequest(prefix+"/workspaces/"+encodeURIComponent(source.id)+"/library");assets=Array.isArray(response)?response:[]}
  }catch(e){if(root.isConnected)root.innerHTML=`<h3>Project Library</h3><div class="error" role="alert">${escapeHtml(e.message)}</div>`;return}
  if(!root.isConnected)return;
- workspaces=Array.isArray(workspaces)?workspaces:[];
- assets=Array.isArray(assets)?assets:[];
- const globalLibrary=root.dataset.globalLibrary==="true";
- const source=globalLibrary?{id:"",name:"Project Library"}:workspaces.find(w=>a45BackendLegacyID(w)===String(workspace.id));
  const labelOf=w=>escapeHtml(w.name||w.id||"Workspace");
  const targets=workspaces.filter(w=>w.status==="active");
  const options=targets.map(w=>`<option value="${escapeHtml(w.id)}" ${w.id===source?.id?"selected":""}>${labelOf(w)}</option>`).join("");

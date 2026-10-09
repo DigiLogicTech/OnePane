@@ -41,7 +41,7 @@ const good={
   backend_stdout:secret,placement_json:secret
  },
  node:{
-  schema_version:2,scope:"admin_authorised_local_control_plane",
+  schema_version:3,scope:"admin_authorised_local_control_plane",
   node_ref:hash("node"),registered_local_node:true,recorded_trust_state:"local",
   last_seen_at_ms:1700000000000,node_record_updated_at_ms:1700000000000,
   manifest_state:"not_recorded",pairing_status:"not_recorded",
@@ -49,6 +49,15 @@ const good={
   inference_receipts:{total_recorded:1,succeeded:1,failed:0,unknown:0,executing:0},
   operating_system_service_state:"running",
   local_service_observation:{manager:"systemd",collection:"observed",state:"running",observed_at_ms:1700000000000},
+  backend_readiness:{scope:"canonical_local_backend",
+   observed_at_ms:1700000000100,database_response:"responding_read_only",
+   schema_record_status:"recorded_versions_match_embedded",
+   recorded_schema_version:42,embedded_schema_version:42,
+   local_node_registration:"registered",
+   task_service_wiring:"configured_not_probed",model_service_wiring:"configured_not_probed",
+   vault_service_wiring:"configured_not_probed",federation_service_wiring:"not_configured",
+   sensitive_sqlite_path:secret,raw_error:secret,process_env:secret},
+
   endpoint:secret,manifest_json:secret,peer_certificate_pem:secret,config_file:secret
  }
 };
@@ -89,6 +98,10 @@ assert.equal(prepared.files["workspace.json"].attention_events["task.failed"],1)
 assert.equal(prepared.files["browser.json"].events[0].status,502);
 assert.equal(prepared.files["agent-check.json"].sessions[0].last_failure_stage,"inference_dispatch");
 assert.equal(prepared.files["node.json"].local_service_observation.state,"running");
+assert.equal(prepared.files["node.json"].backend_readiness.database_response,"responding_read_only");
+assert.equal(prepared.files["node.json"].backend_readiness.local_node_registration,"registered");
+assert.equal(prepared.files["node.json"].backend_readiness.recorded_schema_version,42);
+
 assert.ok(!prepared.json.includes(secret),"raw user information must not appear in preview");
 const bytes=support.zip(prepared);
 assert.ok(bytes.byteLength<262144);
@@ -115,7 +128,10 @@ const hostile={
  ...good,model:{...good.model,sessions:[{...good.model.sessions[0],
   status:secret,last_failure_stage:secret,last_failure_category:secret,session_ref:secret}]},
  node:{...good.node,recorded_trust_state:secret,pairing_status:secret,
-  local_service_observation:{manager:secret,collection:secret,state:secret,executable:secret}},
+  local_service_observation:{manager:secret,collection:secret,state:secret,executable:secret},
+  backend_readiness:{scope:"canonical_local_backend",database_response:secret,
+   schema_record_status:secret,recorded_schema_version:secret,
+   local_node_registration:secret,task_service_wiring:secret,raw_credentials:secret}},
  browser:{...good.browser,events:[{kind:"api",action:secret,subsystem:secret,method:secret,
   route:secret,request_body:secret,duration_ms:999999999}]}
 };
@@ -123,6 +139,10 @@ const attacker=support.prepare(hostile);
 assert.ok(!attacker.json.includes(secret));
 assert.equal(attacker.files["agent-check.json"].sessions[0].session_ref,"unavailable");
 assert.equal(attacker.files["node.json"].operating_system_service_state,"not_collected");
+assert.equal(attacker.files["node.json"].backend_readiness.database_response,"unavailable");
+assert.equal(attacker.files["node.json"].backend_readiness.schema_record_status,"unavailable");
+assert.equal(attacker.files["node.json"].backend_readiness.task_service_wiring,"unavailable");
+
 assert.equal(attacker.files["browser.json"].events[0].duration_ms,0);
 // The viewed JSON is a seal on ZIP contents; mutating a projected source
 // after review must prevent export (no accidental unreviewed data).

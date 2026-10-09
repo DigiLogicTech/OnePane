@@ -210,3 +210,27 @@ substitutions; its routing and artifact/evidence boundaries are separate.
    without automatically installing anything on the Windows host.
 6. An operator's paid provider, subscriptions, Vault secrets or Project Library
    documents are not silently used to overcome local hardware constraints.
+
+## Implemented cross-Workspace artifact exchange (feature branch, 2026-10-09)
+
+This section describes **code staged on the feature branch**, not a shipped RC-10 feature.
+
+- `migrations/0036_workspace_artifact_links.sql`: directional, explicitly enabled/revocable, same-Project `project_workspace_links` and hash-bound immutable `project_workspace_publications`. Two independent Workspaces can exchange a chosen artifact without sharing writable filesystem roots or secrets.
+- `internal/projectworkspace/workspace_links.go`: validates project/Workspace relationships, active source read+derivative grants, latest versus pinned version policies, revision-safe enable/disable and durable event provenance. A target Workspace may retrieve **only the exact published asset version** while the link remains enabled. Publication does not transitively grant another Workspace authority to re-publish.
+- `internal/projectworkspace/library.go`: Project Library assets and versions, per-Workspace direct grants and revocations, immutable resolution of pinned content, project-membership checks and separate read/access policies.
+- `internal/api/project_library.go`: streamed, bounded multipart uploads (initial 32 MiB limit) through the existing content-addressed ArtifactStore; downloads verify the hash and size and are always treated as attachments. Uploads are **untrusted content**, never sandbox-executable simply because a filename claims so.
+- `internal/api/workspace_links.go`: Project-authorised link and publication endpoints, and explicit reconciliation of legacy dashboard Workspace identifiers to canonical backend Workspace IDs.
+- Frontend: a top-level `Library` navigation route, Project Library and version/grant controls, plus Development-view inbound/outbound Workspace connections. Users can disable links and publish source versions via a Library dropdown. Existing Dashboard remains secondary.
+- CI: unit, migration/integration and static UI-contract tests cover source grants, three Workspace chain non-transitivity (Research → World → Story), enable/revoke, version/hash pinning, Source-target ownership, and existing sandbox tests.
+
+This delivers **controlled artifact/data interchange**, not live sandbox networking or a running game engine. Shared services, live API connections, Git patch promotion, toolchain installation and engine/IDE execution must each have separate explicit policy, traffic/content mediation and tests. The legacy runtime remains one *shared Project* runtime in RC-10; Workspace runtime isolation and a safe migration are still outstanding.
+
+### Remaining release blockers
+1. Canonical per-Workspace sandbox runtime ownership with independent stop/rebuild and isolated storage/network.
+2. Per-Workspace image/toolchain install (version locked), reproducible builds, governed terminal and restricted preview/GUI access on compatible Nodes.
+3. Agent execution of code-generation, build/test and publishing workflows with approvals, scoped Skills/tools, durable state and evidence.
+4. Real functional WebUI/Windows testing of all Library and connection controls, including dark/light/Graphite/Midnight and Inspector/drawer geometry.
+5. Library import/version updates, file preview/indexing/search, size-quota/retention and explicit global cross-Project tenancy (distinct from Project Library).
+6. Safe existing EXE→MSI and legacy Project/Workspace data migration; no data deletion or host-wide silent installs.
+
+**Do not merge or publish based on source tests alone.** The acceptance demonstration is a Game Development Project with separate executing World, Story and Art Workspaces, a versioned asset moving between approved Workspaces and independent sandbox lifecycle verification.

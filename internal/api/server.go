@@ -531,6 +531,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /v1/project-runtimes/{runtimeID}/policy", s.updateRuntimePolicy)
 	s.mux.HandleFunc("POST /v1/project-runtimes/{runtimeID}/applications", s.declareApplication)
 	s.mux.HandleFunc("GET /v1/project-runtimes/{runtimeID}/applications", s.listApplications)
+	s.mux.HandleFunc("POST /v1/project-runtimes/{runtimeID}/applications/{applicationID}/desired-state", s.setApplicationDesired)
 	s.mux.HandleFunc("POST /v1/project-runtimes/{runtimeID}/endpoints", s.declareEndpoint)
 	s.mux.HandleFunc("GET /v1/project-runtimes/{runtimeID}/endpoints", s.listEndpoints)
 	s.mux.HandleFunc("POST /v1/project-endpoints/{endpointID}/preview-session", s.createPreviewSession)

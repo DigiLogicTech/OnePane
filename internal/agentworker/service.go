@@ -155,26 +155,35 @@ func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
 		}
 		xs = append(xs, v)
 	}
-	n := 0
-	for _, v := range xs {
-		now := s.clock.UnixMilli()
-		res, err := s.db.ExecContext(ctx, `UPDATE agent_worker_runs SET status='interrupted',last_error='daemon restart during active worker step',revision=revision+1,updated_at=?,completed_at=? WHERE id=? AND status='running'`, now, now, v.run)
-		if err != nil {
-			return n, err
-		}
-		changed, err := res.RowsAffected()
-		if err != nil {
-			return n, err
-		}
-		if changed == 0 {
-			continue
-		}
-		actor := AuthorityPrincipal
-		if _, err := s.tasks.InterruptForRecovery(ctx, task.TransitionCommand{TaskID: v.task, ExpectedRevision: v.rev, ActorPrincipalID: &actor, Reason: "agent_worker_restart_unknown_step_outcome"}); err != nil && !task.IsRevisionConflict(err) {
-			return n, err
-		}
-		n++
-	}
+ n:=0
+ for _,v:=range xs {
+  // A crash is NOT evidence an external mutation failed or can be retried.
+  // Hold the Task/Attempt transition, recovery audit/outbox and run
+  // interruption in one durable commit. A revision race or missing attempt
+  // rolls back *all* records, leaving an explicit recovery error.
+  err:=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx) error{
+   var status string
+   if err:=tx.QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=? AND task_id=?`,v.run,v.task).Scan(&status);err!=nil{return err}
+   if status!=string(RunRunning){return fmt.Errorf("worker recovery run %s is no longer running",v.run)}
+   actor:=AuthorityPrincipal
+   if err:=s.tasks.InterruptForRecoveryInTransaction(ctx,tx,task.TransitionCommand{
+    TaskID:v.task,ExpectedRevision:v.rev,ActorPrincipalID:&actor,
+    Reason:"agent_worker_restart_unknown_step_outcome",
+   });err!=nil{return fmt.Errorf("interrupt Task %s for worker recovery: %w",v.task,err)}
+   now:=s.clock.UnixMilli()
+   result,err:=tx.ExecContext(ctx,`UPDATE agent_worker_runs SET status='interrupted',
+    last_error='daemon restart during active worker step',revision=revision+1,
+    updated_at=?,completed_at=? WHERE id=? AND task_id=? AND status='running'`,
+    now,now,v.run,v.task)
+   if err!=nil{return err}
+   affected,err:=result.RowsAffected()
+   if err!=nil{return err}
+   if affected!=1{return fmt.Errorf("worker recovery run %s lost ownership",v.run)}
+   return nil
+  })
+  if err!=nil{return n,err}
+  n++
+ }
 	return n, rows.Err()
 }
 

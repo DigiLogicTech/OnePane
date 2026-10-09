@@ -81,7 +81,11 @@ func qaLinuxServiceState(raw string)(string,bool){
  if load=="not-found"{return "not_installed",true}
  if load!="loaded"{return "",false}
  switch active{
- case "active":return "running",true // manager reports active, not app readiness
+ case "active":
+  // The packaged OnePane unit is Type=simple; only an active running
+  // process is represented as running. Active/exited is NOT running.
+  if properties["SubState"]=="running"{return "running",true}
+  return "",false
  case "inactive":return "stopped",true
  case "failed":return "failed",true
  case "activating":return "starting",true

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
-  <Package Name="DigiLogic OnePane Alpha 3.3 RC9" Manufacturer="DigiLogic" Version="3.3.9"
+  <Package Name="DigiLogic OnePane Alpha 3.3 RC10" Manufacturer="DigiLogic" Version="3.3.10"
            UpgradeCode="9F7D57AE-B2C4-44E2-96E4-F09E145AE235" Scope="perMachine" Language="1033">
     <SummaryInformation Description="DigiLogic OnePane native Windows desktop application" Manufacturer="DigiLogic" />
     <MajorUpgrade DowngradeErrorMessage="A newer OnePane MSI is already installed." />

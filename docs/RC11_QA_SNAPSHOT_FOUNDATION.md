@@ -46,3 +46,19 @@ The Development Workspace Task queue now also has **Browser incident capture**, 
 **Safety:** Capture expires after 600 seconds, retains only 120 recent events and discloses a count of events dropped if exceeded. Only same-origin `/v1/` request categories are observed, without paths, queries, headers, bodies or content. DOM listeners and the temporary browser fetch wrapper are removed when capture ends. The recorder does not change network requests, task permissions, local/cloud inference routing, agent tools, Workspace isolation or any backend policies.
 
 **Limits:** A browser-side incident timeline is not end-to-end server tracing and does not include installer logs, Node/container journals, Agent Check offload telemetry, Windows service logs, or user-entered reproduction notes. Neither the new incident JSON nor the older scoped Workspace ZIP is the complete consolidated support bundle. Those remain mandatory work in #85.
+
+## Local model Agent Check evidence (incremental #85)
+
+A read-only **QA evidence** button is available in the Local Model **Agent Check** review dialog. Selecting it opens a permission-checked preview; the operator can then choose **Download reviewed JSON** to save `onepane-agent-check-qa.json` locally. No upload or model inference occurs merely from viewing diagnostics.
+
+The endpoint is `GET /v1/qa/model-deployments/{deploymentID}/agent-check`. It authenticates the current user and enforces OnePane's existing `model.read`/managed-deployment authority before opening any evidence records. It does **not** enumerate other models or Nodes. Model deployments that belong to the Node-wide inventory continue to require the existing administrator authorization.
+
+The report includes only:
+- Opaque hashed deployment/session references (not the raw IDs).
+- Actual stored model deployment status, reported residency state and last update time.
+- Up to **10** latest testbed sessions, their known status (`active`, `completed` or `cancelled`), start/end timestamps and counts of *persisted successful* inference and synthetic tool-probe turns.
+- Explicit limitations and whether older sessions were truncated.
+
+**Important limits:** The Testbed schema stores full request/response JSON and arbitrary notes; the QA projector does not select them. A cancelled session is **not** proof of a particular inference error. A reported model residency value is *not* an independently measured CPU/GPU load or proof of model unload. Failed probes that never became persisted turns are not counted; absence of turn evidence is not success or failure evidence. No remote Node state, GPU telemetry, driver diagnostics, error text, installer log or raw model output is returned. Full correlation and redaction acceptance remain on Debug Centre issue #85.
+
+This feature is separate from the authorised Workspace Task ZIP and the opt-in browser incident JSON. A consolidated support bundle is **not yet built**.

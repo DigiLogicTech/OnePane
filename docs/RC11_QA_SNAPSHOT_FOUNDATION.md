@@ -97,3 +97,19 @@ Open **Project → Workspace → Tasks & AI development → Consolidated QA supp
 **Preview and export contract:** The entire projected JSON is shown as plain text (not HTML). The operator reviews this exact representation before a browser-local ZIP is produced. Any changed source selection, changed browser recorder contents, changed preview, or more than **two minutes elapsed** invalidates the review and requires a new one. The ZIP uses an internal dependency-free, uncompressed STORE format with CRC32 and a hard **256-KiB** maximum size. The combined preview is capped at 192 KiB, and each archive member at 128 KiB. Browser data is **never uploaded or sent back to any QA endpoint**.
 
 **Evidence limits:** The Workspace component is a *summary* of state and event types, not the entire existing independently authorised Workspace Task ZIP; operator may still separately download its detailed bounded Task/Worker archive. Model and Node reports are limited to server-side typed machine observations and expressly do not prove external side effects or full GPU/OS health. The combined file is a **diagnostic aid**, not system attestation, and physical Windows/Ubuntu acceptance remains open. Installer errors, filtered service logs and redaction of database remnants remain separate tasks on #85/#28; the two formal #86 code reviews with the user-led vision realignment remain pre-release gates.
+
+## Local backend readiness evidence (incremental #85)
+
+The **Nodes → Manage node → QA evidence** action now includes an additional `backend_readiness` object for the **canonical local Node only**. Its caller already has to pass Node Administrator access controls. The report is generated on demand, never background-polled, and the other Node reports remain devoid of host backend information.
+
+It checks only:
+- A bounded **1.5-second** read-only SQLite `PingContext`, reported as `responding_read_only` or `unavailable`. This is not a disk-integrity or write-transaction guarantee.
+- Actual recorded `schema_migrations` version numbers compared against the version identifiers embedded into the running OnePane binary. `recorded_versions_match_embedded` is a **coverage check only**; it is not a checksum comparison, schema correctness proof, or evidence that migrations ran successfully beyond their recorded state. Incomplete/unexpected versions are distinguished from unavailable reads.
+- Presence of the canonical local Node record, using the server's internal Node ID and the database `local=1` registration flag. Remote Node IDs, even forged locally marked ones, cannot trigger this probe.
+- Whether Tasks, Local AI, Vault and Federation service interfaces are **configured**, marked `configured_not_probed` or `not_configured`. These are dependency-wiring observations, not execution tests or access grants.
+
+No raw DB records, schema SQL, database location, user/host identifiers, migration checksum, config value, Vault content, log line, executable argument or exception message are returned.
+
+The independently reviewed **Consolidated QA support ZIP** also includes the bounded, field-projected readiness information in `node.json` if and only if optional Node evidence was explicitly selected and separately authorized. Its sanitiser accepts only the known schema and enums and never copies the raw server response.
+
+**Failure mode limits:** The API itself must be serving requests to obtain this report. A OnePane backend that failed before binding HTTP cannot report its own startup failure through this endpoint. The OS service-manager observation can report whether the service is running, but cannot establish end-to-end control-plane health. For pre-listener bootstrap crashes, installer failures, log retention, and rollback events, a separately redacted, offline startup/installer diagnostics mechanism and physical Windows/Ubuntu acceptance remain required. No attempt is made to retrieve old service journals or leak environment data.

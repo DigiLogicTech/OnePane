@@ -66,9 +66,11 @@ type qaExecution struct {
  LastStepKind string `json:"last_step_kind"`
  LastStepStatus string `json:"last_step_status"`
  ReviewRequired bool `json:"review_required"`
+ RunRef string `json:"run_ref"`
 }
 type qaTaskEntry struct {
  ID string `json:"id"`
+ TaskRef string `json:"task_ref"`
  State string `json:"state"`
  Revision int64 `json:"revision"`
  UpdatedAt int64 `json:"updated_at_ms"`
@@ -87,6 +89,10 @@ type qaSnapshot struct {
  SourceStatus string `json:"source_status"`
  ExcludedCategories []string `json:"excluded_categories"`
  Tasks []qaTaskEntry `json:"tasks"`
+ MaxTimelineEvents int `json:"max_timeline_events"`
+ CapturedTimelineEvents int `json:"captured_timeline_events"`
+ TimelineTruncated bool `json:"timeline_truncated"`
+ Timeline []qaTimelineEvent `json:"timeline"`
 }
 var qaExcluded=[]string{
  "credentials, cookies, OAuth and Vault material",
@@ -106,16 +112,17 @@ func makeQASnapshot(now time.Time,rows []task.Task,progress map[string]taskExecu
   GeneratedUTC:now.UTC().Format(time.RFC3339Nano),
   BuildVersion:qaIdentifier(buildinfo.Version),BuildRevision:qaIdentifier(buildinfo.Revision),
   MaxTasks:qaSnapshotTaskCap,SourceStatus:"read_only_observed_state",
+  MaxTimelineEvents:qaTimelineEventCap,Timeline:make([]qaTimelineEvent,0),
   ExcludedCategories:append([]string(nil),qaExcluded...),Tasks:make([]qaTaskEntry,0),
  }
  if len(rows)>qaSnapshotTaskCap{snap.Truncated=true;rows=rows[:qaSnapshotTaskCap]}
  for _,t:=range rows {
   // No objective, completion JSON, result, reasons, user names or text from
   // uncontrolled DB columns is ever copied into a debug export.
-  item:=qaTaskEntry{ID:qaIdentifier(t.ID),State:qaTaskState(t.State),Revision:t.Revision,UpdatedAt:t.UpdatedAt}
+  item:=qaTaskEntry{ID:qaIdentifier(t.ID),TaskRef:qaOpaqueRef("task",t.ID),State:qaTaskState(t.State),Revision:t.Revision,UpdatedAt:t.UpdatedAt}
   if p,ok:=progress[t.ID];ok&&p.MaxSteps>0&&p.StepsUsed>=0&&p.StepsUsed<=p.MaxSteps{
    item.Execution=&qaExecution{
-    Status:qaRunStatus(p.Status),RunID:qaIdentifier(p.RunID),
+    Status:qaRunStatus(p.Status),RunID:qaIdentifier(p.RunID),RunRef:qaOpaqueRef("run",p.RunID),
     StepsUsed:p.StepsUsed,MaxSteps:p.MaxSteps,
     LastStepKind:qaStepKind(p.LastStepKind),
     LastStepStatus:qaStepStatus(p.LastStepStatus),
@@ -147,7 +154,7 @@ func qaBundle(snapshot qaSnapshot)([]byte,error){
  snapshotJSON,err:=json.MarshalIndent(snapshot,"","  ")
  if err!=nil{return nil,err}
  if len(snapshotJSON)>64<<10{return nil,fmt.Errorf("QA snapshot exceeds safe bound")}
- const readme="OnePane RC11 QA snapshot (schema v1). This is a read-only, sanitised Task/Worker status extract, not a full Debug Centre capture. Missing physical Node/tool/installer evidence is unavailable. No raw logs, secrets, code, prompts or Workspace files are included. Review contents locally before sharing.\n"
+ const readme="OnePane RC11 QA snapshot (schema v1). This is a read-only, sanitised Task/Worker status and event chronology extract, not the full Debug Centre. Opaque refs correlate records without copying event payloads/trace IDs. Physical Node/tool/installer evidence, raw logs, secrets, code, prompts and Workspace files are excluded. Review contents locally before sharing.\n"
  files:=map[string][]byte{"snapshot.json":snapshotJSON,"README.txt":[]byte(readme)}
  hashes:=map[string]string{}
  for name,data:=range files{h:=sha256.Sum256(data);hashes[name]=hex.EncodeToString(h[:])}

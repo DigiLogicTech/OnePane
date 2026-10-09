@@ -42,12 +42,15 @@ async function a49MountDevelopmentTasks(project,workspace,container){
   <div id="a49TaskList"></div>
   <details class="a49-qa-snapshot" id="a49QASnapshot">
    <summary>QA diagnostic snapshot (read-only, opt-in)</summary>
-   <p class="list-meta">First Debug Centre slice: a sanitised, bounded snapshot of this canonical Workspace's Task states, hard dependencies and last Worker checkpoints only. Not a full capture of logs, installer errors or Node internals.</p>
+   <p class="list-meta">A limited sanitised snapshot of this canonical Workspace's Tasks, hard dependencies, Worker checkpoints and existing event metadata. Not a capture of raw logs, installer errors or Node internals.</p>
    <div class="a49-task-actions">
     <button class="btn" type="button" id="a49QAPreview">Review included data</button>
     <button class="btn" type="button" id="a49QADownload" disabled>Generate QA ZIP</button>
+    <button class="btn" type="button" id="a49QACopySummary" disabled>Copy sanitized QA summary</button>
    </div>
    <p class="list-meta" id="a49QAStatus" role="status">Preview before downloading. No data is sent off-device. Timeline includes only known Task/Worker event kinds, timestamps and pseudonymous correlation references.</p>
+   <p class="list-meta">Copyable QA summary (build, observed state counts and coverage only; Task objectives and identities omitted):</p>
+   <textarea id="a49QASummaryContent" rows="8" readonly aria-label="Sanitized QA summary" class="a49-qa-summary"></textarea>
    <pre class="a49-qa-snapshot-preview" id="a49QAPreviewContent" aria-label="Redacted QA snapshot preview"></pre>
   </details>
  </section>`;
@@ -164,18 +167,25 @@ async function a49MountDevelopmentTasks(project,workspace,container){
  };
  const qaPreview=section.querySelector("#a49QAPreview");
  const qaDownload=section.querySelector("#a49QADownload");
+ const qaCopySummary=section.querySelector("#a49QACopySummary");
+ const qaSummaryContent=section.querySelector("#a49QASummaryContent");
  const qaStatus=section.querySelector("#a49QAStatus");
  const qaPreviewContent=section.querySelector("#a49QAPreviewContent");
  const qaScope={workspace_id:onepaneWorkspace,project_id:project.id,project_workspace_id:canonical.id};
  const qaQuery=Object.entries(qaScope).map(([k,v])=>encodeURIComponent(k)+"="+encodeURIComponent(v)).join("&");
  let qaReviewed=false;
  qaPreview?.addEventListener("click",async()=>{
-  qaReviewed=false;qaDownload.disabled=true;
+  qaReviewed=false;qaDownload.disabled=true;qaCopySummary.disabled=true;
+  qaSummaryContent.value="";
   qaPreview.disabled=true;qaStatus.textContent="Loading permission-checked QA snapshot…";
   try{
    const snapshot=await apiRequest("/v1/qa/workspace-snapshot?"+qaQuery);
    if(!section.isConnected)return;
    qaPreviewContent.textContent=JSON.stringify(snapshot,null,2);
+   if(typeof a52MakeQASummary==="function"){
+    qaSummaryContent.value=a52MakeQASummary(snapshot);
+    qaCopySummary.disabled=false;
+   }
    const timelineCount=Number(snapshot.captured_timeline_events||0);
    const timelineLimit=Number(snapshot.max_timeline_events||0);
    const chronologyLabel="Scoped Task/Worker event chronology: "+timelineCount+
@@ -187,8 +197,21 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    qaReviewed=true;qaDownload.disabled=false;
   }catch(err){
    qaPreviewContent.textContent="";
+   qaSummaryContent.value="";qaCopySummary.disabled=true;
    qaStatus.textContent="QA snapshot unavailable: "+String(err.message||"Not authorised");
   }finally{qaPreview.disabled=false}
+ });
+ qaCopySummary?.addEventListener("click",async()=>{
+  if(!qaReviewed||qaCopySummary.disabled||!qaSummaryContent.value)return;
+  try{
+   if(!navigator.clipboard?.writeText)throw Error("Clipboard API unavailable");
+   await navigator.clipboard.writeText(qaSummaryContent.value);
+   qaStatus.textContent="Sanitized QA summary copied. It contains counts and build metadata only; attach the ZIP separately if useful.";
+  }catch(error){
+   // Manual copy still works on offline and restricted browser environments.
+   qaSummaryContent.focus();qaSummaryContent.select();
+   qaStatus.textContent="Automatic clipboard unavailable. The sanitized summary is selected; use Copy manually.";
+  }
  });
  qaDownload?.addEventListener("click",async()=>{
   if(!qaReviewed||!section.isConnected)return;

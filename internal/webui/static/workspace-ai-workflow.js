@@ -20,11 +20,12 @@ async function a49MountDevelopmentTasks(project,workspace,container){
   return;
  }
  section.innerHTML=`<h3>Workspace Tasks & AI development</h3>
- <p class="list-meta">Queue an objective to the governed Project Task engine. OnePane selects a qualified model and available compute, favouring local resources; a slow or busy machine may delay completion. Research mode uses separately pinned models.</p>
+ <p class="list-meta">Queue an objective to the governed Project Task engine. New Workspace Tasks run local-first by default: OnePane uses qualified local compute even when slower. Cloud routing requires an explicit choice. Research Council seats are separately pinned.</p>
  <form id="a49TaskForm" class="a49-task-form">
   <label>Development or research objective<textarea name="objective" required rows="3" maxlength="8000" placeholder="Create a world map generator and tests. Publish the verified map artifact into the Project Library."></textarea></label>
   <div class="a49-task-actions">
    <label>Execution priority<select name="priority"><option value="10">Normal</option><option value="20">High</option><option value="5">Background</option></select></label>
+   <label><input type="checkbox" name="allow_remote" value="yes"> Allow approved cloud models for this Task</label>
    <button type="submit" class="btn primary">Queue governed Task</button>
   </div><div id="a49TaskStatus" role="status"></div>
  </form>
@@ -85,7 +86,15 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    const created=await apiRequest("/v1/tasks",{method:"POST",body:JSON.stringify({
     workspace_id:onepaneWorkspace,project_id:project.id,project_workspace_id:canonical.id,
     objective,scheduling_class:"user_interactive",priority:Number(values.priority),
-    completion:{type:"operator_review"}
+    completion:{type:"operator_review",onepane_routing:{
+     project_workspace_id:canonical.id,
+     workspace_access:{
+      mode:"brokered",project_workspace_id:canonical.id,
+      remote_models:values.allow_remote==="yes",
+      filesystem:"workspace-only",internet:false,lan:false,
+      browser:false,computer:false,secrets:"none"
+     }
+    }}
    })});
    status.innerHTML='<span class="good">Queued '+escapeHtml(created.id||"Task")+' for this Workspace. Review progress in Tasks and Inspector.</span>';
    form.querySelector('[name="objective"]').value="";

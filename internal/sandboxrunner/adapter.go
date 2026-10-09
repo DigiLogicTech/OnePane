@@ -44,6 +44,7 @@ var safeID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 
 type baseInput struct {
 	Action              string          `json:"action"`
+	Path                string          `json:"path,omitempty"`
 	RuntimeID           string          `json:"runtime_id"`
 	ApplicationID       string          `json:"application_id,omitempty"`
 	Image               string          `json:"image,omitempty"`
@@ -82,6 +83,7 @@ func Register(reg *tool.Registry, adapter *Adapter) error {
 		{ID: ToolImageInspect, Version: "1", CapabilityID: CapabilityObserve, Mode: authority.ActionObserve, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskLow, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppExec, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppGitInspect, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
+		{ID: ToolAppFileInspect, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppGitMutate, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 	}
 	for _, d := range defs {
@@ -181,6 +183,44 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 			"runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
 			"action":in.Action,"succeeded":success,"result":observed,
 			"container":state,"engine":profile,
+		},summary)
+	case ToolAppFileInspect:
+		if !safeID.MatchString(in.ApplicationID)||len(in.Command)!=0||in.Image!=""||
+			in.TimeoutSeconds<0||in.TimeoutSeconds>60{
+			return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)
+		}
+		command,err:=fileInspectCommand(in.Action,in.Path)
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		if !workspaceExists{
+			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Workspace has not been provisioned",ErrInvalidInput))
+		}
+		state,err:=a.engine.InspectContainer(ctx,in.RuntimeID,in.ApplicationID)
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		if state.Status!="running"||!state.IsolationVerified||
+			state.RuntimeID!=in.RuntimeID||state.ApplicationID!=in.ApplicationID||
+			state.SpecHash==""||!exactWorkspaceMount(state,workspace){
+			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: file preview requires verified Workspace sandbox",ErrInvalidInput))
+		}
+		if in.Action=="preview_text"{
+			if err:=verifyWorkspacePreviewPath(workspace,in.Path);err!=nil{
+				return tool.AdapterResult{},tool.KnownFailure(err)
+			}
+		}
+		timeout:=in.TimeoutSeconds
+		if timeout==0{timeout=15}
+		execCtx,cancel:=context.WithTimeout(ctx,time.Duration(timeout)*time.Second)
+		defer cancel()
+		observed,err:=a.engine.ExecContainer(execCtx,in.RuntimeID,in.ApplicationID,command)
+		if execCtx.Err()!=nil{return tool.AdapterResult{},execCtx.Err()}
+		if err!=nil{return tool.AdapterResult{},err}
+		success:=observed.ExitCode==0
+		summary:="Workspace file "+in.Action+" observed"
+		if !success{summary=fmt.Sprintf("Workspace file %s exited with code %d",in.Action,observed.ExitCode)}
+		return result(map[string]any{
+			"runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
+			"action":in.Action,"path":in.Path,"preview_only":true,
+			"content_limit_bytes":65536,"succeeded":success,
+			"result":observed,"container":state,"engine":profile,
 		},summary)
 	case ToolAppGitInspect:
 		if !safeID.MatchString(in.ApplicationID)||len(in.Command)!=0||in.Image!=""||in.TimeoutSeconds<0||in.TimeoutSeconds>120 {

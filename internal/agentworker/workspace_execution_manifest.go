@@ -76,6 +76,20 @@ func workspaceExecutionManifest(ctx context.Context, db *sql.DB, t task.Task) (j
    },
    "note":"local Workspace repository only; no remote push/clone, no arbitrary Git flags or host execution",
   },
+  "file_inspect_tool":map[string]any{
+   "tool_id":"project.app.files.inspect",
+   "tool_version":"1",
+   "capability_id":"project.app.execute",
+   "actions":[]string{"list","preview_text"},
+   "input_schema":map[string]any{
+    "runtime_id":"registered runtime_id above",
+    "application_id":"one of the application_id values above",
+    "action":"list or preview_text",
+    "path":"Workspace-relative regular file path, required only for preview_text",
+    "timeout_seconds":"optional integer 1..60; default 15",
+   },
+   "note":"List limited to depth 4; preview_text limited to 64KiB, not a lossless edit source; .git internals, symlinks and host paths denied",
+  },
   "git_inspect_tool":map[string]any{
    "tool_id":"project.app.git.inspect",
    "tool_version":"1",

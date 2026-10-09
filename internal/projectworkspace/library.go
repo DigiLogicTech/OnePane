@@ -16,6 +16,7 @@ type LibraryAsset struct {
  Name string `json:"name"`
  AssetType string `json:"asset_type"`
  CurrentVersion int64 `json:"current_version"`
+ AccessibleVersion int64 `json:"accessible_version,omitempty"` // effective highest version permitted for this Workspace
  Archived bool `json:"archived"`
  CreatedAt int64 `json:"created_at"`
  UpdatedAt int64 `json:"updated_at"`
@@ -93,7 +94,19 @@ func (s *Service) WorkspaceLibraryAssets(ctx context.Context,projectID,workspace
  err:=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_workspaces WHERE id=? AND project_id=? AND status='active'`,workspaceID,projectID).Scan(&count)
  if err!=nil{return nil,err}
  if count!=1{return nil,ErrCrossWorkspace}
- rows,err:=s.db.QueryContext(ctx,`SELECT a.id,a.project_id,a.name,a.asset_type,a.current_version,a.archived,a.created_at,a.updated_at
+ rows,err:=s.db.QueryContext(ctx,`SELECT a.id,a.project_id,a.name,a.asset_type,a.current_version,a.archived,a.created_at,a.updated_at,
+  COALESCE((SELECT MAX(v.version) FROM project_library_asset_versions v
+    WHERE v.asset_id=a.id AND (
+      EXISTS(SELECT 1 FROM workspace_library_grants ag
+        WHERE ag.asset_id=a.id AND ag.project_workspace_id=? AND ag.enabled=1
+          AND json_extract(ag.permissions_json,'$.read')=1
+          AND ((ag.version_policy='latest' AND v.version=a.current_version)
+            OR (ag.version_policy='pinned' AND v.version=ag.pinned_version)))
+      OR EXISTS(SELECT 1 FROM project_workspace_publications ap
+        JOIN project_workspace_links al ON al.id=ap.link_id
+        WHERE ap.asset_id=a.id AND ap.asset_version=v.version AND ap.content_hash=v.content_hash
+          AND al.project_id=a.project_id AND al.target_workspace_id=? AND al.enabled=1)
+    )),0) AS accessible_version
   FROM project_library_assets a
   WHERE a.project_id=? AND a.archived=0 AND instr(lower(a.name),lower(?))>0
   AND (
@@ -107,12 +120,13 @@ func (s *Service) WorkspaceLibraryAssets(ctx context.Context,projectID,workspace
        JOIN project_library_asset_versions v ON v.asset_id=pub.asset_id AND v.version=pub.asset_version AND v.content_hash=pub.content_hash
        WHERE pub.asset_id=a.id AND l.project_id=a.project_id
         AND l.target_workspace_id=? AND l.enabled=1)
-  ) ORDER BY a.updated_at DESC,a.id LIMIT 100`,projectID,search,workspaceID,workspaceID)
+  ) ORDER BY a.updated_at DESC,a.id LIMIT 100`,workspaceID,workspaceID,projectID,search,workspaceID,workspaceID)
  if err!=nil{return nil,err}
  defer rows.Close()
  out:=[]LibraryAsset{}
  for rows.Next(){var x LibraryAsset;var archived int
-  if err=rows.Scan(&x.ID,&x.ProjectID,&x.Name,&x.AssetType,&x.CurrentVersion,&archived,&x.CreatedAt,&x.UpdatedAt);err!=nil{return nil,err}
+  if err=rows.Scan(&x.ID,&x.ProjectID,&x.Name,&x.AssetType,&x.CurrentVersion,&archived,&x.CreatedAt,&x.UpdatedAt,&x.AccessibleVersion);err!=nil{return nil,err}
+  if x.AccessibleVersion<1{return nil,ErrCrossWorkspace}
   x.Archived=archived!=0;out=append(out,x)
  }
  return out,rows.Err()

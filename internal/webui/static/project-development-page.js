@@ -65,6 +65,7 @@ async function a44LoadProjectEnvironment(project,workspace,container){
  if(typeof a48MountWorkspaceRuntime==="function")await a48MountWorkspaceRuntime(project,workspace,container);
  if(typeof a45MountCollaboration==="function")await a45MountCollaboration(project,workspace,container);
  if(typeof a46MountWorkspaceLibrary==="function")await a46MountWorkspaceLibrary(project,workspace,container);
+ if(typeof a49MountDevelopmentTasks==="function")await a49MountDevelopmentTasks(project,workspace,container);
 }
 
 renderWorkspaces=async function(){

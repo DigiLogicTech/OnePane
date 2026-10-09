@@ -83,6 +83,7 @@ assertContains(reconcilerSource,'if !localPlacementAllowed(r.localNodeID,runtime
  'remote-assigned sandbox must be refused before local OCI execution');
 assertContains(bootstrapSource,'verificationService, localNode.ID)',
  'OCI reconciler must receive its exact local Node identity from bootstrap');
+const tasksAPI=read('internal/api/server.go');
 const taskModelWaitProjection=read('internal/api/task_model_waits.go');
 const workspaceTaskQueue=read('internal/webui/static/workspace-ai-workflow.js');
 assertContains(tasksAPI,'loadTaskModelWaits(r.Context(),s.attentionDB,workspaceID,rows)',
@@ -91,7 +92,6 @@ assertContains(taskModelWaitProjection,"AND t.workspace_id=? AND r.task_id IN ("
  'Task wait status must be tenant-scoped before revealing model details');
 assertContains(workspaceTaskQueue,'Waiting for local model',
  'Workspace Task queue must distinguish model waits from dependency/approval waits');
-const tasksAPI=read('internal/api/server.go');
 const taskListMethod=tasksAPI.slice(tasksAPI.indexOf('func (s *Server) listTasks('),tasksAPI.indexOf('func (s *Server) createTask('));
 assertContains(taskListMethod,'reader.ListProjectWorkspace(', 'Tasks API must list scoped Tasks before applying row limit');
 assertContains(taskListMethod,'workspaceRow.ProjectID!=projectID','Tasks API must validate requested Workspace ownership');

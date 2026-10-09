@@ -81,3 +81,11 @@
  .a44-shortcut-actions{justify-content:stretch}
  .a44-shortcut-actions .btn{flex:1 1 120px}
 }
+
+/* Derived only from the durable Agent Worker journal, not live model claims. */
+.a49-task-checkpoint{display:flex;flex-direction:column;gap:3px;margin:8px 0 0;
+ padding:9px 11px;border:1px solid var(--border);border-radius:8px;
+ background:var(--panel-2);min-width:0;overflow-wrap:anywhere;font-size:12px}
+.a49-task-checkpoint strong{color:var(--text);font-size:12px}
+.a49-task-checkpoint .list-meta{line-height:1.45}
+.a49-checkpoint-review{color:var(--text)!important;font-weight:600}

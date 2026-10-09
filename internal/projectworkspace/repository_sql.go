@@ -202,6 +202,15 @@ func (r *sqlRepository) InsertApplication(ctx context.Context, tx storage.Tx, a 
 	}
 	return nil
 }
+// Optimistic concurrency prevents a stale UI from overwriting an observed
+// application revision or the operator's newer desired state.
+func (r *sqlRepository) UpdateApplicationDesired(ctx context.Context, tx storage.Tx, a Application, to AppDesiredState, now int64) error {
+ result, err := tx.ExecContext(ctx, `UPDATE project_applications SET desired_state=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?`,to,now,a.ID,a.Revision)
+ if err != nil {return err}
+ rows,err:=result.RowsAffected(); if err!=nil{return err}
+ if rows!=1{return ErrRevisionConflict}
+ return nil
+}
 func (r *sqlRepository) UpdateApplicationObserved(ctx context.Context, tx storage.Tx, a Application, to AppStatus, now int64) error {
 	res, err := tx.ExecContext(ctx, `UPDATE project_applications SET status=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?`, to, now, a.ID, a.Revision)
 	if err != nil {

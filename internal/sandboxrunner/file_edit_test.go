@@ -22,6 +22,7 @@ func TestFileEditCommandRequiresBoundedCanonicalPayloadAndExpectedRevision(t *te
  _,sha,n,err:=fileEditCommand("create","src/main.go",contents,"")
  if err!=nil||len(sha)!=64||n!=13 {t.Fatalf("valid content rejected: %q %d %v",sha,n,err)}
  if _,_,_,err:=fileEditCommand("replace","src/main.go",contents,sha);err!=nil{t.Fatal(err)}
+ if _,_,size,err:=fileEditCommand("mkdir","src/assets","","");err!=nil||size!=0{t.Fatalf("mkdir rejected: size=%d err=%v",size,err)}
  for _,tc:=range []struct{action,path,data,expected string}{
   {"remove","src/main.go",contents,""},
   {"create","../outside",contents,""},
@@ -31,6 +32,10 @@ func TestFileEditCommandRequiresBoundedCanonicalPayloadAndExpectedRevision(t *te
   {"create","src/main.go","",""},
   {"create","src/main.go","not-base64",""},
   {"create","src/main.go",contents,"0123"},
+  {"mkdir","src/assets",contents,""},
+  {"mkdir","src/assets","","bad-revision"},
+  {"mkdir","../elsewhere","",""},
+  {"mkdir",".git/objects","",""},
   {"replace","src/main.go",contents,""},
   {"replace","src/main.go",contents,strings.Repeat("x",64)},
   {"replace","src/main.go",contents,strings.ToUpper(sha)},
@@ -81,6 +86,12 @@ func TestFileEditPythonAtomicCreateReplaceAndSymlinkEscape(t *testing.T){
   if _,err:=os.Stat(filepath.Join(parentOutside,"escaped.txt"));!os.IsNotExist(err){
    t.Fatalf("symlink escaped into outside directory: %v",err)
   }
+ }
+ if code,out=run("mkdir","src/generated","","");code!=0{t.Fatalf("typed mkdir failed: %d %q",code,out)}
+ if code,out=run("mkdir","src/generated","","");code==0{t.Fatalf("typed mkdir reused existing directory: %q",out)}
+ if code,out=run("create","src/generated/index.txt","new file","");code!=0{t.Fatalf("create in typed folder failed: %d %q",code,out)}
+ if code,out=run("mkdir","src/link/escaped","","");code==0{
+  t.Fatalf("typed mkdir followed symlink into outside folder: %q",out)
  }
  if code,out=run("replace","src","replace directory",strings.Repeat("0",64));code==0{
   t.Fatalf("directory replace was allowed: %q",out)

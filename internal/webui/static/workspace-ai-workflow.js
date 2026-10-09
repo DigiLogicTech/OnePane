@@ -58,6 +58,18 @@ async function a49MountDevelopmentTasks(project,workspace,container){
     '<div class="list-meta">Local-first retry: '+escapeHtml(new Date(Number(wait.retry_at_ms)).toLocaleString())+
     ' · Attempt '+escapeHtml(String(wait.attempt||1))+
     (wait.reason?' · '+escapeHtml(wait.reason):'')+'</div>':'';
+   const x=t.execution&&typeof t.execution==="object"?t.execution:null;
+   const checkpoint=x&&Number.isSafeInteger(Number(x.steps_used))&&
+    Number.isSafeInteger(Number(x.max_steps))&&Number(x.max_steps)>0?
+    '<div class="a49-task-checkpoint" aria-label="Persisted execution checkpoint">'+
+     '<strong>Worker: '+escapeHtml(String(x.status||"unavailable"))+'</strong>'+
+     '<span class="list-meta">Journalled steps '+Number(x.steps_used)+' / '+Number(x.max_steps)+
+      (x.last_step_kind?' · Last '+escapeHtml(String(x.last_step_kind))+
+       ' ('+escapeHtml(String(x.last_step_status||"unobserved"))+')':'')+
+      ' · '+escapeHtml(Number(x.updated_at)>0?new Date(Number(x.updated_at)).toLocaleString():"Unknown time")+
+     '</span>'+
+     (x.review_required?'<span class="list-meta a49-checkpoint-review">Interrupted or uncertain execution: review Task evidence before any retry. External actions must not replay automatically.</span>':'')+
+    '</div>':'';
    const outputs=publishedOutputs.filter(o=>o.task_id===t.id);
    const published=outputs.length?'<div class="a49-published-outputs"><div class="list-meta">Verified Project Library outputs</div>'+
     outputs.map(o=>'<div class="a49-published-output"><span>'+
@@ -69,7 +81,7 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    return '<article class="a49-task-row panel-card"><div class="card-header"><strong>'+
     escapeHtml(t.objective||"Untitled objective")+'</strong><span class="pill">'+
     escapeHtml(displayState)+'</span></div><div class="list-meta">Task '+
-    escapeHtml(t.id)+" · "+escapeHtml(updated)+"</div>"+retry+published+"</article>";
+    escapeHtml(t.id)+" · "+escapeHtml(updated)+"</div>"+retry+checkpoint+published+"</article>";
   }).join(""):'<div class="empty-state compact">No Workspace Tasks match this filter.</div>';
  };
  const loadTasks=async()=>{

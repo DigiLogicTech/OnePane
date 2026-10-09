@@ -106,6 +106,16 @@ func TestPublishingOCIArtifactRequiresActiveOwnedTaskAndOnlyGrantsSourceWorkspac
  request.TaskID,request.Path,request.ContentHash).Scan(&ledgerCount);err!=nil||ledgerCount!=1{
   t.Fatalf("idempotency record not uniquely completed: count=%d err=%v",ledgerCount,err)
  }
+ outputs,err:=projects.WorkspacePublishedOutputs(ctx,p.ID,world.ID)
+ if err!=nil||len(outputs)!=1||outputs[0].TaskID!=request.TaskID||
+  outputs[0].RelativePath!=request.Path||outputs[0].AssetID!=published.LibraryAssetID||
+  outputs[0].Version!=1{
+  t.Fatalf("source Task output not attributed to its verified Library version: %+v %v",outputs,err)
+ }
+ storyOutputs,err:=projects.WorkspacePublishedOutputs(ctx,p.ID,story.ID)
+ if err!=nil||len(storyOutputs)!=0{
+  t.Fatalf("Story enumerated ungranted World Task outputs: %+v %v",storyOutputs,err)
+ }
  // A crash after committing the Library asset but before recording
  // complete is safely reconciled from the already verified managed blob.
  if _,err:=db.SQL().ExecContext(ctx,`UPDATE workspace_file_publications
@@ -137,6 +147,10 @@ func TestPublishingOCIArtifactRequiresActiveOwnedTaskAndOnlyGrantsSourceWorkspac
  if err!=nil||len(notGranted)!=0{
   t.Fatalf("Story acquired ungranted World artifact: %+v %v",notGranted,err)
  }
+ outputs,err=projects.WorkspacePublishedOutputs(ctx,p.ID,world.ID)
+ if err!=nil||len(outputs)!=1{
+  t.Fatalf("ambiguous in-progress ledger surfaced as completed output: %+v %v",outputs,err)
+ }
  // A subsequent changed build of the same source path appends an immutable
  // version of the *same* Library asset and retains source-only visibility.
  revised:=request
@@ -156,6 +170,11 @@ func TestPublishingOCIArtifactRequiresActiveOwnedTaskAndOnlyGrantsSourceWorkspac
  foreign,err:=projects.WorkspaceLibraryAssets(ctx,p.ID,story.ID,"")
  if err!=nil||len(foreign)!=0{
   t.Fatalf("new version implicitly exposed to Story without grant: %+v %v",foreign,err)
+ }
+ outputs,err=projects.WorkspacePublishedOutputs(ctx,p.ID,world.ID)
+ if err!=nil||len(outputs)!=1||outputs[0].Version!=2||
+  outputs[0].ContentHash!=revised.ContentHash{
+  t.Fatalf("old version incorrectly advertised after latest grant followed v2: %+v %v",outputs,err)
  }
  // A fresh Task publishing unchanged source bytes must not create another
  // artifact row or third Library version.
@@ -180,6 +199,18 @@ func TestPublishingOCIArtifactRequiresActiveOwnedTaskAndOnlyGrantsSourceWorkspac
  if err!=nil||again.LibraryAssetID!=v2.LibraryAssetID||again.Version!=2||
   again.ArtifactID!=v2.ArtifactID{
   t.Fatalf("unchanged file from new Task created duplicate artifact/version: %+v %v",again,err)
+ }
+ outputs,err=projects.WorkspacePublishedOutputs(ctx,p.ID,world.ID)
+ if err!=nil||len(outputs)!=2||outputs[0].Version!=2||outputs[1].Version!=2{
+  t.Fatalf("independent Task receipts for the same immutable v2 lost: %+v %v",outputs,err)
+ }
+ owners:=map[string]bool{}
+ for _,out:=range outputs{owners[out.TaskID]=true}
+ if !owners[request.TaskID]||!owners[nextTask.ID]{t.Fatalf("Task attribution lost: %+v",outputs)}
+ if err=projects.RevokeLibraryAsset(ctx,p.ID,published.LibraryAssetID,world.ID,"operator");err!=nil{t.Fatal(err)}
+ outputs,err=projects.WorkspacePublishedOutputs(ctx,p.ID,world.ID)
+ if err!=nil||len(outputs)!=0{
+  t.Fatalf("revoked direct source read grant still exposed Task outputs: %+v %v",outputs,err)
  }
  versions,err=projects.LibraryVersions(ctx,p.ID,published.LibraryAssetID)
  if err!=nil||len(versions)!=2{

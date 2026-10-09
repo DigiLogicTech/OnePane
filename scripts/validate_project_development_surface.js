@@ -77,6 +77,12 @@ assertContains(workspaceExecSource,'WHERE a.project_runtime_id=?','OCI applicati
 assertContains(workspaceExecSource,'"tool_id":"project.app.exec"','Workspace manifest must advertise actual governed sandbox command tool');
 assert.ok(!workspaceExecSource.includes('environment_bindings_json') &&
  !workspaceExecSource.includes('secrets_json'), 'The model may not see raw Workspace credential bindings');
+const reconcilerSource=read('internal/projectruntime/reconciler.go');
+const bootstrapSource=read('internal/bootstrap/bootstrap.go');
+assertContains(reconcilerSource,'if !localPlacementAllowed(r.localNodeID,runtime.NodeID)',
+ 'remote-assigned sandbox must be refused before local OCI execution');
+assertContains(bootstrapSource,'verificationService, localNode.ID)',
+ 'OCI reconciler must receive its exact local Node identity from bootstrap');
 const tasksAPI=read('internal/api/server.go');
 const taskListMethod=tasksAPI.slice(tasksAPI.indexOf('func (s *Server) listTasks('),tasksAPI.indexOf('func (s *Server) createTask('));
 assertContains(taskListMethod,'reader.ListProjectWorkspace(', 'Tasks API must list scoped Tasks before applying row limit');

@@ -154,7 +154,7 @@ func (s *Service) PublishWorkspaceAsset(ctx context.Context,c PublishWorkspaceAs
      AND g.project_workspace_id=? AND g.enabled=1
      AND json_extract(g.permissions_json,'$.read')=1
      AND json_extract(g.permissions_json,'$.create_derivative')=1
-     AND (g.version_policy='latest' OR (g.version_policy='pinned' AND g.pinned_version=?))`,
+     AND ((g.version_policy='latest' AND v.version=a.current_version) OR (g.version_policy='pinned' AND g.pinned_version=?))`,
    c.AssetID,c.Version,link.ProjectID,link.SourceWorkspaceID,c.Version).Scan(&name,&hash)
   if errors.Is(err,sql.ErrNoRows){return ErrCrossWorkspace}
   if err!=nil{return err}

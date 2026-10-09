@@ -1,8 +1,8 @@
-name: Alpha 3.3 RC8 QA Remediation
+name: Alpha 3.3 RC9 Native MSI Candidate
 
 on:
   push:
-    branches: [alpha3.2-integration, alpha3.2-windows-stabilization, alpha3.2-qa-round2-remediation, alpha3.2-qa-round3-remediation, alpha3.2-next-release-remediation, feature/colibri-tiered-inference, release/alpha3.3-consolidated-qa, fix/alpha3.3-qa-models-rc2, fix/alpha3.3-upgrade-startup-diagnostics, fix/alpha3.3-model-install-colibri-ux, fix/alpha3.3-qa-consolidated-rc3, fix/alpha3.3-rc4-migration-upgrade, feature/alpha3.3-rc5-approved-ux, release/alpha3.3-rc6-approved-ux, release/alpha3.3-rc7-complete-ux, release/alpha3.3-rc8-qa-remediation]
+    branches: [alpha3.2-integration, alpha3.2-windows-stabilization, alpha3.2-qa-round2-remediation, alpha3.2-qa-round3-remediation, alpha3.2-next-release-remediation, feature/colibri-tiered-inference, release/alpha3.3-consolidated-qa, fix/alpha3.3-qa-models-rc2, fix/alpha3.3-upgrade-startup-diagnostics, fix/alpha3.3-model-install-colibri-ux, fix/alpha3.3-qa-consolidated-rc3, fix/alpha3.3-rc4-migration-upgrade, feature/alpha3.3-rc5-approved-ux, release/alpha3.3-rc6-approved-ux, release/alpha3.3-rc7-complete-ux, release/alpha3.3-rc8-qa-remediation, release/alpha3.3-rc9-msi-qa]
   workflow_dispatch:
     inputs:
       run_hosted_smoke:
@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 env:
-  ONEPANE_VERSION: 0.1.0-alpha.3.3-rc.8
+  ONEPANE_VERSION: 0.1.0-alpha.3.3-rc.9
 
 jobs:
   validate:
@@ -153,6 +153,8 @@ jobs:
           go build -trimpath -ldflags "$BUILD_LDFLAGS" -o packaging/windows/setup/payload/OnePane.Service.exe ./packaging/windows/service
           go build -trimpath -ldflags "-H windowsgui $BUILD_LDFLAGS" -o packaging/windows/setup/payload/OnePane.Desktop.exe ./packaging/windows/desktop
           cp packaging/windows/assets/OnePane.ico packaging/windows/setup/payload/OnePane.ico
+          mkdir -p dist/windows-x64/msi-payload
+          cp packaging/windows/setup/payload/OnePane.Backend.exe packaging/windows/setup/payload/OnePane.Service.exe packaging/windows/setup/payload/OnePane.Desktop.exe packaging/windows/setup/payload/OnePane.ico dist/windows-x64/msi-payload/
           python3 - <<'PY'
           from pathlib import Path
           import hashlib, re
@@ -203,7 +205,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: OnePane-alpha3.3-rc8-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc9-source-native-${{ github.sha }}
           path: |
             dist/**
           if-no-files-found: warn
@@ -246,7 +248,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.3-rc8-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc9-source-native-${{ github.sha }}
           path: artifact
       - name: Install launch uninstall reinstall
         shell: pwsh
@@ -406,7 +408,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.3-rc8-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc9-source-native-${{ github.sha }}
           path: artifact
       - name: Install verify and preserve data
         shell: bash
@@ -436,10 +438,86 @@ jobs:
           test "$(sudo cat /var/lib/onepane/qa-preserve.txt | tr -d '\n')" = "preserve-alpha3.2"
 
 
+  msi-package:
+    name: Build first-class Windows MSI package
+    needs: [validate]
+    if: ${{ needs.validate.result == 'success' }}
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: OnePane-alpha3.3-rc9-source-native-${{ github.sha }}
+          path: source
+      - name: Install pinned WiX Toolset
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          & "$env:USERPROFILE\.dotnet\tools\wix.exe" extension add -g WixToolset.UI.wixext/5.0.2
+      - name: Build native signed-ready MSI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $wix = "$env:USERPROFILE\.dotnet\tools\wix.exe"
+          $payload = (Resolve-Path "source/windows-x64/msi-payload").Path
+          New-Item -ItemType Directory -Force "dist/windows-x64" | Out-Null
+          & $wix build "packaging/windows/msi/OnePane.wxs" -arch x64 -ext WixToolset.UI.wixext -d "PayloadDir=$payload" -o "dist/windows-x64/OnePane-$env:ONEPANE_VERSION-windows-x64.msi"
+          if ($LASTEXITCODE -ne 0) { throw "WiX MSI compilation failed" }
+          $msi = "dist/windows-x64/OnePane-$env:ONEPANE_VERSION-windows-x64.msi"
+          if (-not (Test-Path $msi)) { throw "MSI not created" }
+          $digest = (Get-FileHash -Algorithm SHA256 $msi).Hash.ToLowerInvariant()
+          "$digest  $(Split-Path $msi -Leaf)" | Set-Content -Encoding ascii "$msi.sha256"
+          Write-Host "Native MSI: $msi"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OnePane-alpha3.3-rc9-native-msi-${{ github.sha }}
+          path: dist/windows-x64/*.msi*
+          if-no-files-found: error
+          retention-days: 14
+
+  msi-installed-smoke:
+    name: Windows MSI install/uninstall and D-drive preservation
+    needs: [msi-package]
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: OnePane-alpha3.3-rc9-native-msi-${{ github.sha }}
+          path: artifact
+      - name: Silent MSI installation and durable external data root
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $msi = (Get-ChildItem artifact -Recurse -Filter *.msi | Select-Object -First 1).FullName
+          if (-not $msi) { throw "MSI artifact not found" }
+          $data = "D:\OnePaneQA\Data"
+          $models = "D:\OnePaneQA\Models"
+          $projects = "D:\OnePaneQA\Projects"
+          New-Item -ItemType Directory -Force $data, $models, $projects | Out-Null
+          $sentinel = Join-Path $data "preserve-before-install.txt"
+          "keep-my-data" | Set-Content -NoNewline $sentinel
+          $args = @("/i", "`"$msi`"", "/qn", "/norestart", "/l*v", "`"$env:RUNNER_TEMP\onepane-msi-install.log`"", "ONEPANE_DATA_ROOT=`"$data`"", "ONEPANE_MODEL_ROOT=`"$models`"", "ONEPANE_PROJECT_ROOT=`"$projects`"")
+          $p=Start-Process msiexec.exe -ArgumentList $args -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\onepane-msi-install.log" -Tail 100; throw "MSI install failed: $($p.ExitCode)" }
+          if (-not (Test-Path (Join-Path $data "config.yaml"))) { throw "MSI service did not generate config at selected external data root" }
+          if (-not (Test-Path (Join-Path $data "logs\onepane.log"))) { throw "Service logs not written to selected drive" }
+          if (-not (Test-Path $sentinel)) { throw "Existing data was overwritten" }
+          if ((Get-ItemProperty "HKLM:\SOFTWARE\DigiLogic\OnePane").DataRoot -ne $data) { throw "Installed data path registry mismatch" }
+          $svc=Get-Service -Name OnePane -ErrorAction Stop
+          if ($svc.Status -ne "Running") { throw "OnePane Windows service is not running" }
+          $p=Start-Process msiexec.exe -ArgumentList @("/x", "`"$msi`"", "/qn", "/norestart", "/l*v", "`"$env:RUNNER_TEMP\onepane-msi-uninstall.log`"") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "MSI uninstall failed: $($p.ExitCode)" }
+          if ((Get-Content -Raw $sentinel) -ne "keep-my-data") { throw "Uninstall damaged existing data" }
+          if (-not (Test-Path (Join-Path $data "config.yaml"))) { throw "Uninstall removed durable config" }
+          if (Get-Service -Name OnePane -ErrorAction SilentlyContinue) { throw "OnePane service survived MSI uninstall" }
+          Write-Host "MSI install, service startup, non-C data root, and uninstall-preserve: PASS"
+
   qa-prerelease:
-    name: Publish Alpha 3.3 RC8 for operator QA
-    needs: [validate, runtime_artifact_smoke, windows-installed-smoke, ubuntu-installed-smoke]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release/alpha3.3-rc8-qa-remediation' }}
+    name: Publish Alpha 3.3 RC9 for operator QA
+    needs: [validate, runtime_artifact_smoke, windows-installed-smoke, ubuntu-installed-smoke, msi-package, msi-installed-smoke]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release/alpha3.3-rc9-msi-qa' }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     permissions:
@@ -448,8 +526,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: OnePane-alpha3.3-rc8-source-native-${{ github.sha }}
+          name: OnePane-alpha3.3-rc9-source-native-${{ github.sha }}
           path: artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: OnePane-alpha3.3-rc9-native-msi-${{ github.sha }}
+          path: artifacts/msi
       - name: Verify manifest and publish immutable QA prerelease
         shell: bash
         env:
@@ -457,7 +539,7 @@ jobs:
         run: |
           set -euo pipefail
           test -f artifacts/candidate-manifest.json
-          test -n "$(find artifacts -type f -name '*-windows-x64-setup.exe' -print -quit)"
+          test -n "$(find artifacts -type f -name '*.msi' -print -quit)"
           test -n "$(find artifacts -type f -name '*.deb' -print -quit)"
           python3 - <<'PY'
           import json,os
@@ -467,13 +549,13 @@ jobs:
           PY
           tag="v${ONEPANE_VERSION}"
           mkdir -p prerelease-assets
-          find artifacts -type f \( -name '*.exe' -o -name '*.deb' -o -name '*.sha256' -o -name '*.json' \) -exec cp -v '{}' prerelease-assets/ \;
+          find artifacts -type f \( -name '*.msi' -o -name '*.deb' -o -name '*.sha256' -o -name '*.json' \) -exec cp -v '{}' prerelease-assets/ \;
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "::error::QA release tag already exists; refusing to overwrite immutable assets"
             exit 1
           fi
           gh release create "$tag" prerelease-assets/* \
             --target "$GITHUB_SHA" \
-            --title "OnePane Alpha 3.3 RC8 — RC7 QA remediation candidate" \
+            --title "OnePane Alpha 3.3 RC9 — Windows native MSI preview" \
             --prerelease \
-            --notes "Alpha 3.3 RC8 remediates RC7 QA findings: authenticated identity and toolbar toggles; Inspector tab drag; llama.cpp runtime discovery; safer native model deletion and queued-job cancellation; GPU backend ranking; responsive Nodes; local-node-only model navigation; Web Chat dialog, independent response saving and Council synthesis/model/role selectors; custom colour themes. RC7 remains the upgrade baseline and installed projects/models are preserved. Active download cancellation, device-level CUDA validation and provider website embedding require follow-up QA."
+            --notes "Alpha 3.3 RC9 introduces the first native Windows MSI with Windows Installer repair/uninstall, managed service and Start Menu registration and configurable external data/model/project roots. It also fixes RC8 theme actions, Settings groups, toolbar popover toggles and Council configuration UX. Windows MSI and legacy upgrade tests gate publication. Existing RC8 installations should be uninstalled with data preservation before installing this MSI."

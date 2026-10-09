@@ -8,7 +8,7 @@ import (
 )
 
 func TestOversizedBuildFailureKeepsExitCodeAndUsefulDiagnosticTail(t *testing.T){
- stderr:=strings.Repeat("old compiler warning\n",2500)+"error: unresolved symbol maçã\n"
+ stderr:="BEGIN VERY OLD COMPILER OUTPUT\n"+strings.Repeat("old compiler warning\n",2500)+"error: unresolved symbol maçã\n"
  stdout:=strings.Repeat("build output\n",2500)+"FAIL package/game/world\n"
  raw,err:=json.Marshal(map[string]any{
   "runtime_id":"world","application_id":"toolchain",
@@ -27,7 +27,7 @@ func TestOversizedBuildFailureKeepsExitCodeAndUsefulDiagnosticTail(t *testing.T)
  }
  errorsTail,ok:=metadata["stderr_tail"].(string)
  if !ok||!strings.HasSuffix(errorsTail,"error: unresolved symbol maçã\n")||
-  strings.HasPrefix(errorsTail,"old compiler warning\nold compiler warning\n"){
+  strings.Contains(errorsTail,"BEGIN VERY OLD COMPILER OUTPUT"){
   t.Fatalf("useful final compiler error not preserved: %q",errorsTail)
  }
  if !utf8.ValidString(errorsTail){t.Fatal("UTF-8 truncated across codepoint")}

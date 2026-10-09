@@ -26,7 +26,7 @@ try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise ValueError("preview requires regular file")
         content = os.read(fd, 65537)
-        if b'\\x00' in content:
+        if b'\x00' in content:
             raise ValueError("binary file cannot be text-previewed")
         content[:65536].decode("utf-8", errors="strict")
         sys.stdout.buffer.write(content[:65536])

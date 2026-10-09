@@ -25,3 +25,9 @@
  .a44-environment-note{margin:10px 12px}
  .a44-environment-subsection{margin:8px 12px 16px}
 }
+/* Existing dashboard edit controls must disappear completely in Development mode. */
+.workspace-page #qa4EditWorkspace[hidden],
+.workspace-page #a35CancelWorkspaceLayout[hidden],
+.workspace-page #qa4AddComponent[hidden],
+.workspace-page #a43WorkspacePreset[hidden],
+.workspace-page #a35ResetWorkspaceLayout[hidden]{display:none!important}

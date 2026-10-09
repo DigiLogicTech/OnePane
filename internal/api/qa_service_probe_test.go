@@ -13,6 +13,7 @@ func TestQAServiceStateParsersAreStrictAndRedacted(t *testing.T){
   ok bool
  }{
   {"LoadState=loaded\nActiveState=active\nSubState=running\nExecStart=/secret/BearerToken\n","running",true},
+  {"LoadState=loaded\nActiveState=active\nSubState=exited\n","",false},
   {"LoadState=loaded\nActiveState=failed\nSubState=failed\n","failed",true},
   {"LoadState=loaded\nActiveState=activating\n","starting",true},
   {"LoadState=loaded\nActiveState=inactive\n","stopped",true},

@@ -53,6 +53,20 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    <textarea id="a49QASummaryContent" rows="8" readonly aria-label="Sanitized QA summary" class="a49-qa-summary"></textarea>
    <pre class="a49-qa-snapshot-preview" id="a49QAPreviewContent" aria-label="Redacted QA snapshot preview"></pre>
   </details>
+  <details class="a49-qa-snapshot" id="a54IncidentCapture">
+   <summary>Browser incident capture (opt-in, maximum 10 minutes)</summary>
+   <p class="list-meta">Captures only generic OnePane route/button/form actions, broad API subsystems, HTTP status and duration, plus counts of browser errors. No typed text, URL paths, tokens, request bodies, model outputs or error messages. Captures across this browser tab's OnePane pages while enabled. Data stays in memory and is lost on reload.</p>
+   <div class="a49-task-actions">
+    <button class="btn" type="button" id="a54CaptureStart">Start capture</button>
+    <button class="btn" type="button" id="a54CaptureMark">Mark issue</button>
+    <button class="btn" type="button" id="a54CaptureStop">Stop capture</button>
+    <button class="btn" type="button" id="a54CapturePreview">Review incident trace</button>
+    <button class="btn" type="button" id="a54CaptureDownload" disabled>Download reviewed JSON</button>
+    <button class="btn" type="button" id="a54CaptureClear">Clear capture</button>
+   </div>
+   <p class="list-meta" id="a54CaptureStatus" role="status">Capture is off by default. This JSON is separate from the Workspace QA ZIP; nothing is automatically uploaded.</p>
+   <pre class="a49-qa-snapshot-preview" id="a54CaptureContent" aria-label="Sanitized browser incident trace preview"></pre>
+  </details>
  </section>`;
  let taskRows=[],publishedOutputs=[];
  const doneStates=new Set(["complete","failed","cancelled","blocked"]);
@@ -239,6 +253,78 @@ async function a49MountDevelopmentTasks(project,workspace,container){
   }catch(err){qaStatus.textContent="QA export failed: "+String(err.message||"Unavailable")}
   finally{qaDownload.disabled=false}
  });
+ // Browser-only incident capture never sends observations back through APIs.
+ // The recorder is global to this browser tab, so route changes do not end it;
+ // the operator's Stop/Clear or the ten-minute expiry does.
+ const incident=typeof a54QACapture!=="undefined"?a54QACapture:null;
+ const incidentActions={
+  start:section.querySelector("#a54CaptureStart"),
+  mark:section.querySelector("#a54CaptureMark"),
+  stop:section.querySelector("#a54CaptureStop"),
+  preview:section.querySelector("#a54CapturePreview"),
+  download:section.querySelector("#a54CaptureDownload"),
+  clear:section.querySelector("#a54CaptureClear")
+ };
+ const incidentStatus=section.querySelector("#a54CaptureStatus");
+ const incidentContent=section.querySelector("#a54CaptureContent");
+ let incidentReviewedJSON="";
+ const paintIncident=()=>{
+  if(!section.isConnected||!incident)return;
+  const state=incident.snapshot();
+  const active=state.status==="recording";
+  incidentActions.start.disabled=active;
+  incidentActions.mark.disabled=!active;
+  incidentActions.stop.disabled=!active;
+  incidentActions.preview.disabled=active||!state.events.length;
+  incidentActions.download.disabled=active||!incidentReviewedJSON;
+  incidentActions.clear.disabled=state.status==="idle";
+  incidentStatus.textContent="Browser capture: "+state.status+
+   " · "+state.events.length+" / "+state.max_events+" recent events"+
+   (state.dropped_events?" · "+state.dropped_events+" older events discarded":"")+
+   " · raw URLs, bodies, typed inputs, prompts and error messages excluded.";
+ };
+ if(incident){
+  incidentActions.start.onclick=()=>{
+   incidentReviewedJSON="";incidentContent.textContent="";
+   incident.start();paintIncident();
+  };
+  incidentActions.mark.onclick=()=>{incident.mark();paintIncident()};
+  incidentActions.stop.onclick=()=>{
+   incident.stop();incidentReviewedJSON="";incidentContent.textContent="";paintIncident();
+  };
+  incidentActions.preview.onclick=()=>{
+   const snapshot=incident.snapshot();
+   if(snapshot.status==="recording"||!snapshot.events.length)return;
+   incidentReviewedJSON=JSON.stringify(snapshot,null,2);
+   incidentContent.textContent=incidentReviewedJSON;
+   paintIncident();
+  };
+  incidentActions.download.onclick=()=>{
+   if(!incidentReviewedJSON||incident.snapshot().status==="recording")return;
+   // Export exactly what was previewed. A changed session requires review again.
+   if(JSON.stringify(incident.snapshot(),null,2)!==incidentReviewedJSON){
+    incidentReviewedJSON="";
+    incidentStatus.textContent="Capture changed. Review the trace again before downloading.";
+    paintIncident();return;
+   }
+   const blob=new Blob([incidentReviewedJSON],{type:"application/json"});
+   if(blob.size>65536){incidentStatus.textContent="Capture too large to export safely.";return}
+   const url=URL.createObjectURL(blob);
+   try{
+    const link=document.createElement("a");
+    link.href=url;link.download="onepane-browser-incident.json";
+    link.style.display="none";document.body.appendChild(link);link.click();link.remove();
+   }finally{URL.revokeObjectURL(url)}
+   incidentStatus.textContent="Sanitized incident trace downloaded locally. Review before sharing.";
+  };
+  incidentActions.clear.onclick=()=>{
+   incident.clear();incidentReviewedJSON="";incidentContent.textContent="";paintIncident();
+  };
+  paintIncident();
+ }else{
+  for(const button of Object.values(incidentActions))if(button)button.disabled=true;
+  incidentStatus.textContent="Browser incident recorder unavailable in this build.";
+ }
  section.querySelector("#a49RefreshTasks")?.addEventListener("click",loadTasks);
  section.querySelector("#a49TaskFilter")?.addEventListener("change",paintTasks);
  void loadTasks();

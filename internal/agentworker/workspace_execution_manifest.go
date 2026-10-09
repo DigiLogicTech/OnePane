@@ -76,6 +76,22 @@ func workspaceExecutionManifest(ctx context.Context, db *sql.DB, t task.Task) (j
    },
    "note":"local Workspace repository only; no remote push/clone, no arbitrary Git flags or host execution",
   },
+  "file_publish_tool":map[string]any{
+   "tool_id":"project.app.files.publish",
+   "tool_version":"1",
+   "capability_id":"project.app.execute",
+   "actions":[]string{"publish"},
+   "input_schema":map[string]any{
+    "runtime_id":"registered runtime_id above",
+    "application_id":"one of the application_id values above",
+    "action":"publish",
+    "path":"Workspace-relative regular file path, no symlinks or .git internals; max 256KiB",
+    "name":"optional published Library display name, max 240 characters",
+    "media_type":"optional MIME type; defaults to application/octet-stream",
+    "timeout_seconds":"optional 1..120, default 30",
+   },
+   "note":"Publishes source Workspace files as immutable managed Project Library assets, no cross-Workspace grants. Requires a running Task Attempt, independently verified OCI container, Python3 and normal ToolGateway lease. Bytes never enter reasoning context.",
+  },
   "file_edit_tool":map[string]any{
    "tool_id":"project.app.files.edit",
    "tool_version":"1",

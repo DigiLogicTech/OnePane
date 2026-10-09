@@ -23,7 +23,7 @@ assert.ok(index.indexOf('/project-workspace-page.js')<index.indexOf('/project-de
 assertContains(ui,'const a44RenderWorkspaceDashboard=renderWorkspaces','legacy dashboard must be retained');
 assertContains(ui,'||"development"','new Workspace defaults to Development view');
 assertContains(ui,'id="a44DashboardTab"','secondary dashboard must be reachable');
-assertContains(ui,'Current architecture: shared Project sandbox','no false Workspace-level runtime-isolation claim');
+assertContains(ui,'Legacy shared Project sandbox (compatibility)','no false Workspace-level runtime-isolation claim');
 assertContains(ui,'/v1/projects/','runtime is read from the server');
 assertContains(ui,'/applications','application state is read from the server');
 assertContains(ui,'runtime?.status','use observed runtime status, not local UI checkbox');

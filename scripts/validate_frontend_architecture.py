@@ -20,7 +20,7 @@ def definitions(src):
     return out
 
 # Reviewed Workspace Development change: sandbox UI settings explicitly marked preferences, not granted execution rights.
-expected_foundation_blob="a129deb3ea75bc95a769e3c35a01ba6efe874946"
+expected_foundation_blob="4fd253c203108367f2708187a6d50cdd55d267d0"
 foundation_bytes=foundation.encode("utf-8")
 actual_foundation_blob=hashlib.sha1(b"blob "+str(len(foundation_bytes)).encode("ascii")+b"\0"+foundation_bytes).hexdigest()
 

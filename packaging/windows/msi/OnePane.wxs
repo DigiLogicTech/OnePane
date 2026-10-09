@@ -9,9 +9,21 @@
     <Property Id="ARPPRODUCTICON" Value="OnePaneProductIcon"/>
     <!-- Public secure MSI properties support unattended enterprise installs.
          GUI installation offers the same Data root and storage paths. -->
-    <Property Id="ONEPANE_DATA_ROOT" Secure="yes"/>
-    <Property Id="ONEPANE_MODEL_ROOT" Secure="yes"/>
-    <Property Id="ONEPANE_PROJECT_ROOT" Secure="yes"/>
+    <Property Id="ONEPANE_DATA_ROOT" Secure="yes">
+      <RegistrySearch Id="ExistingOnePaneDataRoot" Root="HKLM" Key="SOFTWARE\DigiLogic\OnePane" Name="DataRoot" Type="raw"/>
+    </Property>
+    <Property Id="ONEPANE_MODEL_ROOT" Secure="yes">
+      <RegistrySearch Id="ExistingOnePaneModelRoot" Root="HKLM" Key="SOFTWARE\DigiLogic\OnePane" Name="ModelRoot" Type="raw"/>
+    </Property>
+    <Property Id="ONEPANE_PROJECT_ROOT" Secure="yes">
+      <RegistrySearch Id="ExistingOnePaneProjectRoot" Root="HKLM" Key="SOFTWARE\DigiLogic\OnePane" Name="ProjectRoot" Type="raw"/>
+    </Property>
+    <!-- The legacy EXE installer owns its own service registration. Removing it
+         with data preservation is required before switching to Windows Installer. -->
+    <Property Id="ONEPANE_LEGACY_EXE">
+      <RegistrySearch Id="ExistingLegacyExeInstall" Root="HKLM" Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\OnePane" Name="DisplayVersion" Type="raw"/>
+    </Property>
+    <Launch Condition="NOT ONEPANE_LEGACY_EXE" Message="An earlier OnePane EXE installation is present. Uninstall that version first (preserve its data), then run the native MSI." />
     <SetProperty Id="ONEPANE_DATA_ROOT" Value="[CommonAppDataFolder]OnePane" Before="CostFinalize"
                  Sequence="both" Condition="NOT ONEPANE_DATA_ROOT"/>
     <SetProperty Id="ONEPANE_MODEL_ROOT" Value="[ONEPANE_DATA_ROOT]\models" Before="CostFinalize"

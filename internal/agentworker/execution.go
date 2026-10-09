@@ -136,21 +136,27 @@ func (s *Service) compileContext(ctx context.Context, run Run, t task.Task) (con
 			sections = append(sections, contextcompiler.Section{ID: "project-current", Kind: "project", Trust: "AUTHORITATIVE_DATA", Authoritative: true, Priority: 70, Content: raw})
 		}
 	}
+	// Models must not guess a runtime/application identity. The manifest is
+	// populated from the exact persisted Project Workspace and contains only
+	// read-only OCI tool metadata; capability leases and independent runtime
+	// verification remain mandatory before every command.
+	if t.ProjectWorkspaceID != nil {
+		manifest,err:=workspaceExecutionManifest(ctx,s.db,t)
+		if err!=nil{return contextcompiler.Result{},err}
+		if len(manifest)>0{
+			sections=append(sections,contextcompiler.Section{
+				ID:"workspace-execution-manifest",Kind:"resource_manifest",
+				Trust:"AUTHORITATIVE_DATA",Authoritative:true,
+				Required:false,Priority:75,Content:manifest,
+			})
+		}
+	}
 	return contextcompiler.Compile(s.cfg.ContextMaxBytes, sections)
 }
 
 func (s *Service) dispatch(ctx context.Context, run Run, t task.Task, c scheduler.Candidate, compiled contextcompiler.Result, constraints json.RawMessage, label policy.DataLabel, reservationID string) (agentprotocol.Response, string, error) {
 	if c.Kind == scheduler.CandidateAgentRuntime {
-		permitted := append([]agentprotocol.ProposalType(nil), permittedProposals...)
-		if !c.ToolCallback {
-			filtered := permitted[:0]
-			for _, p := range permitted {
-				if p != agentprotocol.ProposalTool {
-					filtered = append(filtered, p)
-				}
-			}
-			permitted = filtered
-		}
+		permitted,_:=proposalsForCandidate(c)
 		taskID, attemptID := t.ID, run.AttemptID
 		result, err := s.runtimes.Invoke(ctx, agentruntime.InvokeCommand{WorkspaceID: run.WorkspaceID, TaskID: &taskID, AttemptID: &attemptID, PrincipalID: WorkerPrincipal, ConnectionID: c.ID, Role: run.RoleName, Objective: t.Objective, Constraints: constraints, Context: compiled.Sections, ContextManifest: compiled.ManifestJSON, PermittedProposalTypes: permitted, InputLabel: label, ActorPrincipalID: strPtr(WorkerPrincipal), BudgetReservationID: optionalString(reservationID)})
 		if err != nil {
@@ -162,17 +168,8 @@ func (s *Service) dispatch(ctx context.Context, run Run, t task.Task, c schedule
 		return *result.Response, result.Invocation.ID, nil
 	}
 	reqID, _ := s.ids.New("agentreq")
-	permitted := append([]agentprotocol.ProposalType(nil), permittedProposals...)
-	if !c.ToolCallback {
-		filtered := permitted[:0]
-		for _, p := range permitted {
-			if p != agentprotocol.ProposalTool {
-				filtered = append(filtered, p)
-			}
-		}
-		permitted = filtered
-	}
-	areq := agentprotocol.Request{ProtocolVersion: agentprotocol.Version, RequestID: reqID, WorkspaceID: run.WorkspaceID, TaskID: t.ID, AttemptID: run.AttemptID, PrincipalID: WorkerPrincipal, Role: run.RoleName, Objective: t.Objective, Constraints: constraints, Context: compiled.Sections, ContextManifest: compiled.ManifestJSON, PermittedProposalTypes: permitted, ToolCallback: c.ToolCallback}
+	permitted,structuredJSONTools:=proposalsForCandidate(c)
+	areq := agentprotocol.Request{ProtocolVersion: agentprotocol.Version, RequestID: reqID, WorkspaceID: run.WorkspaceID, TaskID: t.ID, AttemptID: run.AttemptID, PrincipalID: WorkerPrincipal, Role: run.RoleName, Objective: t.Objective, Constraints: constraints, Context: compiled.Sections, ContextManifest: compiled.ManifestJSON, PermittedProposalTypes: permitted, ToolCallback: c.ToolCallback, JSONToolProposals:structuredJSONTools}
 	if err := areq.Validate(); err != nil {
 		return agentprotocol.Response{}, "", err
 	}
@@ -409,7 +406,7 @@ func (s *Service) handleTool(ctx context.Context, run Run, t task.Task, resp age
 	if err := s.observations.VerifyIntegrity(ctx, obs.ID); err != nil {
 		return s.failRun(ctx, run, res, err)
 	}
-	cont, _ := json.Marshal(map[string]any{"tool_result": map[string]any{"tool_id": inv.ToolID, "invocation_id": inv.ID, "observation_id": obs.ID, "summary": inv.Summary, "result": boundedJSON(inv.Result, 16<<10)}})
+	cont, _ := json.Marshal(map[string]any{"tool_result": map[string]any{"tool_id": inv.ToolID, "invocation_id": inv.ID, "observation_id": obs.ID, "summary": inv.Summary, "result": boundedToolResult(inv.Result, 16<<10)}})
 	if err := s.updateRun(ctx, run.ID, run.Revision, RunRunning, cont, nil, 0, 0, nil, nil, nil); err != nil {
 		return failedResult(res, err)
 	}

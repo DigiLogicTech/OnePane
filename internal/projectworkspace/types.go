@@ -36,6 +36,7 @@ type Project struct {
 type ProjectRuntime struct {
 	ID                      string              `json:"id"`
 	ProjectID               string              `json:"project_id"`
+	ProjectWorkspaceID      *string             `json:"project_workspace_id,omitempty"`
 	NodeID                  *string             `json:"node_id,omitempty"`
 	IsolationMode           IsolationMode       `json:"isolation_mode"`
 	Backend                 string              `json:"backend"`
@@ -173,6 +174,7 @@ type ArchiveProjectCommand struct {
 
 type CreateRuntimeCommand struct {
 	ProjectID                                                    string
+	ProjectWorkspaceID                                           *string
 	NodeID                                                       *string
 	IsolationMode                                                IsolationMode
 	DesiredState                                                 RuntimeDesiredState

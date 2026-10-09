@@ -428,71 +428,72 @@ func (s *Service) RequestCancel(ctx context.Context, cmd TransitionCommand) (Tas
 // durable Task is blocked and an outbox job asks the future RecoveryCoordinator
 // to reconcile durable/external state before any new attempt is admitted.
 func (s *Service) InterruptForRecovery(ctx context.Context, cmd TransitionCommand) (Task, error) {
-	if strings.TrimSpace(cmd.TaskID) == "" || cmd.ExpectedRevision < 1 {
-		return Task{}, fmt.Errorf("%w: task id and expected revision are required", ErrInvalidCommand)
-	}
-	eventID, err := s.ids.New("evt")
-	if err != nil {
-		return Task{}, err
-	}
-	jobID, err := s.ids.New("job")
-	if err != nil {
-		return Task{}, err
-	}
-	now := s.clock.UnixMilli()
+ err:=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx) error{
+  return s.InterruptForRecoveryInTransaction(ctx,tx,cmd)
+ })
+ if err!=nil{return Task{},err}
+ return s.repo.Get(ctx,cmd.TaskID)
+}
 
-	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		t, err := s.repo.GetForUpdate(ctx, tx, cmd.TaskID)
-		if err != nil {
-			return err
-		}
-		if t.Revision != cmd.ExpectedRevision {
-			return ErrRevisionConflict
-		}
-		active, err := s.repo.ActiveAttempt(ctx, tx, t.ID)
-		if err != nil {
-			return err
-		}
-		if active == nil {
-			return ErrNoActiveAttempt
-		}
-		if active.State != AttemptRunning && active.State != AttemptWaiting && active.State != AttemptQueued && active.State != AttemptCreated {
-			return ErrNoActiveAttempt
-		}
-		if err := s.repo.TransitionAttempt(ctx, tx, active.ID, active.State, AttemptInterrupted, now); err != nil {
-			return err
-		}
-		// Recovery interruption is intentionally not an ordinary state transition:
-		// regardless of which active execution state was lost, the Task becomes
-		// BLOCKED until reconciliation decides it is safe to re-admit.
-		if err := s.repo.Transition(ctx, tx, transitionRecord{
-			TaskID: t.ID, ExpectedRevision: t.Revision, From: t.State, To: StateBlocked, UpdatedAt: now,
-		}); err != nil {
-			return err
-		}
-		payload, _ := json.Marshal(map[string]any{
-			"task_id": t.ID, "attempt_id": active.ID, "attempt_number": active.AttemptNumber,
-			"previous_task_state": t.State, "reason": cmd.Reason,
-		})
-		if err := s.events.Append(ctx, tx, event.Event{
-			ID: eventID, WorkspaceID: &t.WorkspaceID, Type: "task.attempt_interrupted",
-			AggregateType: "task", AggregateID: t.ID, ActorPrincipalID: cmd.ActorPrincipalID,
-			RequestID: cmd.RequestID, TraceID: cmd.TraceID, Payload: payload, OccurredAt: now,
-		}); err != nil {
-			return err
-		}
-		jobPayload, _ := json.Marshal(map[string]any{
-			"task_id": t.ID, "attempt_id": active.ID, "reason": cmd.Reason,
-		})
-		return s.outbox.Enqueue(ctx, tx, outbox.Job{
-			ID: jobID, WorkspaceID: &t.WorkspaceID, Type: "task.recovery.required",
-			Payload: jobPayload, AvailableAt: now, MaxAttempts: 10, CreatedAt: now,
-		})
-	})
+// InterruptForRecoveryInTransaction is a trusted control-plane primitive.
+// The caller can atomically mark the associated Worker run interrupted in
+// the SAME transaction as its Task, Attempt, audit event and recovery outbox.
+// Never expose this method through model-defined tools or direct API calls.
+func (s *Service) InterruptForRecoveryInTransaction(ctx context.Context,tx storage.Tx,cmd TransitionCommand) error{
+ if tx==nil||strings.TrimSpace(cmd.TaskID)==""||cmd.ExpectedRevision<1{
+  return fmt.Errorf("%w: transaction, task id and expected revision are required",ErrInvalidCommand)
+ }
+ eventID,err:=s.ids.New("evt")
+ if err!=nil{return err}
+ jobID,err:=s.ids.New("job")
+ if err!=nil{return err}
+ now:=s.clock.UnixMilli()
+	t, err := s.repo.GetForUpdate(ctx, tx, cmd.TaskID)
 	if err != nil {
-		return Task{}, err
+		return err
 	}
-	return s.repo.Get(ctx, cmd.TaskID)
+	if t.Revision != cmd.ExpectedRevision {
+		return ErrRevisionConflict
+	}
+	active, err := s.repo.ActiveAttempt(ctx, tx, t.ID)
+	if err != nil {
+		return err
+	}
+	if active == nil {
+		return ErrNoActiveAttempt
+	}
+	if active.State != AttemptRunning && active.State != AttemptWaiting && active.State != AttemptQueued && active.State != AttemptCreated {
+		return ErrNoActiveAttempt
+	}
+	if err := s.repo.TransitionAttempt(ctx, tx, active.ID, active.State, AttemptInterrupted, now); err != nil {
+		return err
+	}
+	// Recovery interruption is intentionally not an ordinary state transition:
+	// regardless of which active execution state was lost, the Task becomes
+	// BLOCKED until reconciliation decides it is safe to re-admit.
+	if err := s.repo.Transition(ctx, tx, transitionRecord{
+		TaskID: t.ID, ExpectedRevision: t.Revision, From: t.State, To: StateBlocked, UpdatedAt: now,
+	}); err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"task_id": t.ID, "attempt_id": active.ID, "attempt_number": active.AttemptNumber,
+		"previous_task_state": t.State, "reason": cmd.Reason,
+	})
+	if err := s.events.Append(ctx, tx, event.Event{
+		ID: eventID, WorkspaceID: &t.WorkspaceID, Type: "task.attempt_interrupted",
+		AggregateType: "task", AggregateID: t.ID, ActorPrincipalID: cmd.ActorPrincipalID,
+		RequestID: cmd.RequestID, TraceID: cmd.TraceID, Payload: payload, OccurredAt: now,
+	}); err != nil {
+		return err
+	}
+	jobPayload, _ := json.Marshal(map[string]any{
+		"task_id": t.ID, "attempt_id": active.ID, "reason": cmd.Reason,
+	})
+	return s.outbox.Enqueue(ctx, tx, outbox.Job{
+		ID: jobID, WorkspaceID: &t.WorkspaceID, Type: "task.recovery.required",
+		Payload: jobPayload, AvailableAt: now, MaxAttempts: 10, CreatedAt: now,
+	})
 }
 
 func (s *Service) transition(ctx context.Context, cmd TransitionCommand, next State, eventType string, mutate func(*transitionRecord, int64)) (Task, error) {

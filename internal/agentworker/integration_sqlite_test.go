@@ -135,7 +135,7 @@ func TestCrashRecoveryRollsBackWhenAttemptCannotBeInterrupted(t *testing.T){
  if taskRow.State!=task.StateRunning{t.Fatalf("Task mutated despite recovery rollback: %s",taskRow.State)}
  var events,jobs int
  if err:=db.SQL().QueryRowContext(ctx,`SELECT count(*) FROM events WHERE aggregate_id=? AND type='task.attempt_interrupted'`,created.ID).Scan(&events);err!=nil{t.Fatal(err)}
- if err:=db.SQL().QueryRowContext(ctx,`SELECT count(*) FROM outbox_jobs WHERE type='task.recovery.required' AND workspace_id='ws'`).Scan(&jobs);err!=nil{t.Fatal(err)}
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT count(*) FROM outbox_jobs WHERE job_type='task.recovery.required' AND workspace_id='ws'`).Scan(&jobs);err!=nil{t.Fatal(err)}
  if events!=0||jobs!=0{t.Fatalf("orphan recovery records events=%d jobs=%d",events,jobs)}
  // Once reconciliation restores the execution record, exactly one atomic
  // interruption is recorded and a repeat call does not duplicate the outbox.
@@ -145,6 +145,6 @@ func TestCrashRecoveryRollsBackWhenAttemptCannotBeInterrupted(t *testing.T){
  count,err=svc.RecoverLostRuns(ctx)
  if err!=nil||count!=0{t.Fatalf("recovery must be idempotent: count=%d err=%v",count,err)}
  if err:=db.SQL().QueryRowContext(ctx,`SELECT count(*) FROM events WHERE aggregate_id=? AND type='task.attempt_interrupted'`,created.ID).Scan(&events);err!=nil{t.Fatal(err)}
- if err:=db.SQL().QueryRowContext(ctx,`SELECT count(*) FROM outbox_jobs WHERE type='task.recovery.required' AND workspace_id='ws'`).Scan(&jobs);err!=nil{t.Fatal(err)}
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT count(*) FROM outbox_jobs WHERE job_type='task.recovery.required' AND workspace_id='ws'`).Scan(&jobs);err!=nil{t.Fatal(err)}
  if events!=1||jobs!=1{t.Fatalf("recovery records duplicated: events=%d jobs=%d",events,jobs)}
 }

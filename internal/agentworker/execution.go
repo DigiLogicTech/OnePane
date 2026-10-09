@@ -136,6 +136,21 @@ func (s *Service) compileContext(ctx context.Context, run Run, t task.Task) (con
 			sections = append(sections, contextcompiler.Section{ID: "project-current", Kind: "project", Trust: "AUTHORITATIVE_DATA", Authoritative: true, Priority: 70, Content: raw})
 		}
 	}
+	// Models must not guess a runtime/application identity. The manifest is
+	// populated from the exact persisted Project Workspace and contains only
+	// read-only OCI tool metadata; capability leases and independent runtime
+	// verification remain mandatory before every command.
+	if t.ProjectWorkspaceID != nil {
+		manifest,err:=workspaceExecutionManifest(ctx,s.db,t)
+		if err!=nil{return contextcompiler.Result{},err}
+		if len(manifest)>0{
+			sections=append(sections,contextcompiler.Section{
+				ID:"workspace-execution-manifest",Kind:"resource_manifest",
+				Trust:"AUTHORITATIVE_DATA",Authoritative:true,
+				Required:false,Priority:75,Content:manifest,
+			})
+		}
+	}
 	return contextcompiler.Compile(s.cfg.ContextMaxBytes, sections)
 }
 

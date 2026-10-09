@@ -19,6 +19,7 @@ const (
 	ToolAppInspect     = "project.app.inspect"
 	ToolImageInspect   = "project.image.inspect"
 	ToolAppExec        = "project.app.exec"
+	ToolAppGitInspect  = "project.app.git.inspect"
 	CapabilityObserve  = "project.runtime.observe"
 	CapabilityExecute  = "project.app.execute"
 )

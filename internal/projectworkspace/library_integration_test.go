@@ -59,6 +59,33 @@ func TestProjectLibraryImmutableArtifactScopedExchange(t *testing.T){
  if _,err=svc.ResolveWorkspaceLibraryVersion(ctx,project.ID,target.ID,lib.ID,1);err!=nil{t.Fatalf("direct pinned grant not honoured: %v",err)}
  if err=svc.RevokeLibraryAsset(ctx,project.ID,lib.ID,target.ID,"operator");err!=nil{t.Fatal(err)}
  if _,err=svc.ResolveWorkspaceLibraryVersion(ctx,project.ID,target.ID,lib.ID,1);err==nil{t.Fatal("direct grant revocation did not remove access")}
+ // A Workspace with a pinned older version must not be offered the newer
+ // Project head version it has no permission to download.
+ if err=svc.GrantLibraryAsset(ctx,GrantLibraryAssetCommand{
+  ProjectID:project.ID,AssetID:lib.ID,WorkspaceID:target.ID,
+  VersionPolicy:"pinned",PinnedVersion:1,ActorPrincipalID:"operator"});err!=nil{t.Fatal(err)}
+ _,err=store.SQL().ExecContext(ctx,`INSERT INTO project_library_asset_versions
+   (asset_id,version,content_hash,size_bytes,mime_type,storage_uri,provenance_json,created_at)
+   VALUES(?,?,?,?,?,?,?,?)`,
+   lib.ID,2,raw.ContentHash,raw.SizeBytes,"text/plain","artifact:"+raw.ID,`{"source":"versioned-test"}`,now+1)
+ if err!=nil{t.Fatal(err)}
+ _,err=store.SQL().ExecContext(ctx,`UPDATE project_library_assets
+   SET current_version=2,updated_at=? WHERE id=?`,now+1,lib.ID)
+ if err!=nil{t.Fatal(err)}
+ pinned,err:=svc.WorkspaceLibraryAssets(ctx,project.ID,target.ID,"castle")
+ if err!=nil||len(pinned)!=1||pinned[0].CurrentVersion!=2||pinned[0].AccessibleVersion!=1{
+  t.Fatalf("pinned Workspace must see download-eligible v1, not Project v2: %+v, %v",pinned,err)
+ }
+ latest,err:=svc.WorkspaceLibraryAssets(ctx,project.ID,source.ID,"castle")
+ if err!=nil||len(latest)!=1||latest[0].AccessibleVersion!=2{
+  t.Fatalf("uploader Workspace latest grant must follow v2: %+v, %v",latest,err)
+ }
+ if _,err=svc.ResolveWorkspaceLibraryVersion(ctx,project.ID,target.ID,lib.ID,2);err==nil{
+  t.Fatal("pinned Workspace was allowed to fetch ungranted newer version")
+ }
+ if _,err=svc.ResolveWorkspaceLibraryVersion(ctx,project.ID,target.ID,lib.ID,1);err!=nil{
+  t.Fatalf("pinned version v1 cannot be downloaded: %v",err)
+ }
  // Retention: revoking access never deletes the Project artifact itself.
  if err=artifactSvc.VerifyContent(ctx,raw.ID);err!=nil{t.Fatalf("revoking a link damaged immutable content: %v",err)}
 }

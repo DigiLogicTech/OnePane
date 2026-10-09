@@ -220,7 +220,9 @@ const qaAPI=read('internal/api/qa_snapshot_handler.go');
 const qaUI=read('internal/webui/static/workspace-ai-workflow.js');
 const incidentRecorder=read('internal/webui/static/qa-incident-capture.js');
 new vm.Script(incidentRecorder,{filename:'qa-incident-capture.js'});
-require('./validate_qa_incident_capture.js');
+require('node:child_process').execFileSync(process.execPath,
+ [path.join(root,'scripts/validate_qa_incident_capture.js')],
+ {cwd:root,stdio:'inherit'});
 assertContains(index,'/qa-incident-capture.js','QA capture module must be loaded in WebUI');
 assert.ok(index.indexOf('/qa-incident-capture.js')<index.indexOf('/workspace-ai-workflow.js'),
  'capture module must load before Workspace QA UI');

@@ -1045,6 +1045,13 @@ func (s *RuntimeSupervisor) Stop(ctx context.Context, deploymentID string) error
 	if n != 1 {
 		return fmt.Errorf("runtime instance stop state conflict")
 	}
+	// The managed process is now independently confirmed stopped. Keep the
+	// public deployment residency status aligned so Agent Check does not leave
+	// a false CPU/GPU "resident" indicator on an unloaded model.
+	_,err=s.db.ExecContext(ctx,`UPDATE model_deployments
+	 SET residency_state='stopped',updated_at=?,revision=revision+1
+	 WHERE id=? AND (residency_state IS NULL OR residency_state<>'stopped')`,now,deploymentID)
+	if err!=nil{return fmt.Errorf("persist stopped model residency: %w",err)}
 	return nil
 }
 

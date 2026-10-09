@@ -291,7 +291,17 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 			var c struct {
 				OperationID string `json:"operation_id"`
 			}
-			if json.Unmarshal([]byte(cont), &c) == nil && strings.TrimSpace(c.OperationID) != "" {
+			if json.Unmarshal([]byte(cont), &c) != nil {
+				return fmt.Errorf("invalid durable Agent Worker continuation for run %s",v.run)
+			}
+			// A model-resource wait is a real persisted suspension, not a
+			// dependency-free Task that should resume on every worker tick.
+			// Retain the same pinned model and local-only routing after wake.
+			if modelWait:=decodeModelWait(json.RawMessage(cont));modelWait!=nil &&
+				s.clock.UnixMilli()<modelWait.RetryAtMS {
+				ready=false
+			}
+			if strings.TrimSpace(c.OperationID) != "" {
 				var opState string
 				if err := s.db.QueryRowContext(ctx, `SELECT state FROM operations WHERE id=?`, c.OperationID).Scan(&opState); err != nil {
 					return err
@@ -299,7 +309,7 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 				ready = ready && opState == "committed"
 			}
 			if ready {
-				if _, err := s.tasks.Resume(ctx, task.TransitionCommand{TaskID: v.task, ExpectedRevision: v.rev, ActorPrincipalID: &actor, Reason: "worker dependencies verified complete"}); err != nil && !task.IsRevisionConflict(err) {
+				if _, err := s.tasks.Resume(ctx, task.TransitionCommand{TaskID: v.task, ExpectedRevision: v.rev, ActorPrincipalID: &actor, Reason: "worker dependencies/resources ready for retry"}); err != nil && !task.IsRevisionConflict(err) {
 					return err
 				}
 			}

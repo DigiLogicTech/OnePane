@@ -335,7 +335,7 @@ func (s *Service) handleTool(ctx context.Context, run Run, t task.Task, resp age
 	if err != nil {
 		return s.continueWithError(ctx, run, res, "tool_definition_error", err)
 	}
-	if err := workspaceToolAllowed(t.Completion, def.CapabilityID, def.Mode, p.ToolID, p.ResourceRef); err != nil {
+	if err := workspaceToolAllowedForTask(t, def.CapabilityID, def.Mode, p.ToolID, p.ResourceRef); err != nil {
 		_ = s.journal(ctx, run.ID, "tool", "denied", nil, nil, strPtr("tool"), nil, map[string]any{"tool_id": p.ToolID, "resource_ref": p.ResourceRef, "reason": err.Error(), "policy": "project_workspace"})
 		return s.blockRun(ctx, run, res, "workspace policy denied tool: "+err.Error())
 	}

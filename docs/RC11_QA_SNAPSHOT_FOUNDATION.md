@@ -75,3 +75,13 @@ Older OnePane manual Agent Check v2 qualification records could include raw exce
 **Data-remanence limitation:** This migration removes sensitive values from live logical records; it does **not** erase old database backups, copies already exported, retained WAL frames, SQLite free pages or files elsewhere on disk. Historical backup retention and storage-level secure-erasure policy need separate review during the pre-release code/security audit. No blanket VACUUM or filesystem deletion is performed automatically, to protect existing installations.
 
 This is a targeted data-privacy remediation, not final physical Windows/Ubuntu or installer validation.
+
+## Admin-only Node control-plane diagnostics (incremental #85)
+
+Open **Nodes → Manage node → QA evidence** to view the selected Node's persisted control-plane observations. The read-only route is `GET /v1/qa/nodes/{nodeID}/evidence` and reuses OnePane's existing **Node Administrator** check, not ordinary Workspace access. After viewing the plain-text report, use **Download reviewed JSON** to save `onepane-node-qa-evidence.json` locally. The report is never automatically uploaded.
+
+The report deliberately includes only machine-typed metadata: a pseudonymous Node reference, recorded local/remote trust state and last-seen timestamp, capability manifest receipt/expiry timestamps and sequence (never the manifest contents), known pairing state, aggregated historical wake attempt results and aggregate remote-inference receipt statuses. Every query uses the exact administrator-selected registered Node ID. Missing manifests and unrecorded events show explicit unavailable states rather than fabricated success.
+
+**Operational caveat:** The `operating_system_service_state` field is intentionally **`not_collected`**. Control-plane reachability timestamps and historical inference receipts do not establish live systemd/Windows service health or active container, GPU, filesystem and network integrity. There is no remote OS command, log read, discovery broadcast or privileged service probe behind the QA evidence button. Those probes need an explicit, separately governed, redactable Node agent contract and physical acceptance testing before #85 can close.
+
+Excluded: TLS keys and pairing codes/tokens/certificates, endpoint URLs, manifest payloads, wake targets, task IDs, remote request IDs, model inference outputs, error codes, log strings and raw service journals. This report is separate from the Workspace QA ZIP, browser incident trace and Agent Check JSON. Consolidated privacy-reviewed support-bundle packaging remains outstanding.

@@ -1,13 +1,9 @@
 package api
 
 import (
- "context"
- "errors"
  "net/http"
  "strings"
  "time"
-
- "github.com/DigiLogicTech/OnePane/internal/task"
 )
 
 // These endpoints are opt-in, local-only exports. They never persist captures,
@@ -109,8 +105,3 @@ func (s *Server) loadQASnapshot(w http.ResponseWriter,r *http.Request,in qaWorks
  }
  return makeQASnapshot(time.Now().UTC(),rows,progress,dependencies),true
 }
-
-// Compile-time contract: source context never becomes a raw Task serialization.
-var _ context.Context
-var _ = errors.Is
-var _ task.Task

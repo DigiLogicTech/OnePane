@@ -1,7 +1,6 @@
 package agentworker
 
 import (
- "context"
  "encoding/json"
  "errors"
  "testing"
@@ -66,5 +65,4 @@ func TestModelResourceWaitPersistsBoundedRetryAndPreviousAttempts(t *testing.T){
  if decodeModelWait(json.RawMessage(`{"model_wait":{"attempt":0,"retry_at_ms":0}}`))!=nil{
   t.Fatal("invalid wait record accepted")
  }
- _=context.Background()
 }

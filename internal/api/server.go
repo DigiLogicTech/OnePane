@@ -1661,10 +1661,22 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		writeError(w,http.StatusInternalServerError,"Workspace Task execution status unavailable")
 		return
 	}
+	// Execution progress derives only from durable Worker/Task state and
+	// canonical scoped rows. It does not expose raw model or tool journals.
+	var execution map[string]taskExecutionProgress
+	if scoped{
+		execution,err=loadTaskExecutionProgress(r.Context(),s.attentionDB,
+		 workspaceID,projectID,projectWorkspaceID,rows)
+		if err!=nil{
+		 writeError(w,http.StatusInternalServerError,"Workspace Task checkpoint status unavailable")
+		 return
+		}
+	}
 	out := make([]map[string]any, 0, len(rows))
 	for _, t := range rows {
 		entry:=taskResponse(t)
 		if wait,ok:=modelWaits[t.ID];ok{entry["wait"]=wait}
+		if progress,ok:=execution[t.ID];ok{entry["execution"]=progress}
 		out=append(out,entry)
 	}
 	writeJSON(w, http.StatusOK, out)

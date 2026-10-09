@@ -127,6 +127,19 @@ assertContains(workflowUI,'t.project_workspace_id===canonical.id',
  'Workspace queue must filter strictly to the canonical Project Workspace');
 assertContains(workflowUI,'t.project_id===project.id',
  'Workspace queue must exclude Tasks from other Projects');
+const dependencyAPI=read('internal/api/task_dependency_evidence.go');
+assertContains(routes,'loadWorkspaceTaskDependencies(r.Context(),s.attentionDB,',
+ 'canonical scoped Task list must derive durable dependency evidence from backend');
+assertContains(dependencyAPI,'t.project_workspace_id=?',
+ 'prerequisite parent query must remain bound to canonical Workspace');
+assertContains(dependencyAPI,'dep.project_workspace_id=t.project_workspace_id',
+ 'foreign child state must not be disclosed in prerequisite counts');
+assertContains(dependencyAPI,'d.dependency_type=\'hard\'',
+ 'dependency projection must not falsely treat soft edges as blockers');
+assertContains(workflowUI,'Other Workspace prerequisite identities and states are not disclosed here.',
+ 'Workspace queue must disclose restricted dependency scope without leaking private child states');
+assertContains(workflowUI,'The parent cannot safely complete until its dependencies are resolved.',
+ 'failed or blocked prerequisites must surface manual review');
 const checkpointAPI=read('internal/api/task_worker_progress.go');
 assertContains(routes,'loadTaskExecutionProgress(r.Context(),s.attentionDB,',
  'scoped Workspace Tasks must expose real persisted Worker progress');

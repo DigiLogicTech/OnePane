@@ -57,6 +57,13 @@ assert.ok(index.indexOf('/workspace-collaboration.js')<index.indexOf('/workspace
 assertContains(libRoute,'pages.library','global Library navigation must register');
 assertContains(ui,'a49MountDevelopmentTasks','Workspace must queue governed Project Tasks');
 assertContains(workflowUI,'project_workspace_id:canonical.id','AI jobs must use canonical Workspace identities');
+assertContains(workflowUI,'/v1/tasks?workspace_id=','Workspace queue must read actual Task API state');
+assertContains(workflowUI,'t.project_workspace_id===canonical.id',
+ 'Workspace queue must filter strictly to the canonical Project Workspace');
+assertContains(workflowUI,'t.project_id===project.id',
+ 'Workspace queue must exclude Tasks from other Projects');
+assertContains(workflowUI,'id="a49RefreshTasks"','Workspace task inventory must be manually refreshable');
+assertContains(workflowUI,'await loadTasks();','Task creation must refresh observed Task status');
 assertContains(ui,'a48MountWorkspaceRuntime','canonical Workspace sandbox must be mounted');
 assertContains(runtimeUI,'/desired-state','Workspace runtime lifecycle must use governed runtime endpoint');
 assertContains(runtimeUI,'@sha256:','toolchains must require pinned images');

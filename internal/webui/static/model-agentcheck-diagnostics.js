@@ -40,8 +40,14 @@ qa5AgentCheck=async function(dep){
   await qa5LoadManagedDeployments();
   const fresh=qa5ManagedDeployments.find(x=>String(x.deployment_id)===id)||current;
   await qa5InspectModel(fresh);
-  if(failures.length)notice("Agent Check completed with limitations: "+failures.join(" · "),"bad");
-  else notice("Agent Check completed; Spec Sheet updated and idle model unloaded.");
+  // Qualification is not residency: never claim memory was unloaded
+  // unless the backend confirms the managed runtime actually stopped.
+  const residency=String(fresh.residency_state||"unknown").toLowerCase();
+  const residencyNotice=residency==="stopped"?"idle model unloaded":
+   residency==="busy"?"runtime retained for active inference":
+   "model residency is "+residency+"; unload not confirmed";
+  if(failures.length)notice("Agent Check completed with limitations: "+failures.join(" · ")+" · "+residencyNotice,"bad");
+  else notice("Agent Check completed; Spec Sheet updated; "+residencyNotice+".");
   if(currentTab()?.route==="models")renderModels();
  }catch(ex){
   // Failed first probes never reach /complete. Explicitly close the testbed
@@ -92,7 +98,7 @@ qa5AgentCheck=async function(dep){
  }catch(e){/* Configuration read errors do not imply a placement change. */}
  const compute=String(policy.preference||current.compute_mode||"auto");
  const mode=String(policy.placement_mode||"automatic");
- openModal("Agent Check · "+String(current.display_name||current.model_ref||"Model"),`<div class="widget-body a43-agent-check-review"><p class="page-subtitle">Agent Check tests the configured deployment. Select compute separately if it needs changing; GPU Required must not silently fall back to CPU.</p><dl class="definition-grid"><dt>Quantization</dt><dd>${escapeHtml(current.quantization||"Unknown")}</dd><dt>Compute policy</dt><dd>${escapeHtml(compute)}</dd><dt>Planned placement</dt><dd>${escapeHtml(mode)} (not measured residency)</dd><dt>Current Agent Check</dt><dd>${escapeHtml(current.agent_check_status||"Not run")}</dd><dt>Production admission</dt><dd>${escapeHtml(current.admission_status||"pending")}</dd></dl><p class="list-meta">Completing this check tests inference and records evidence; it does not grant production admission or verify the full context window.</p><div class="toolbar"><button class="btn" id="a43AgentCheckCancel">Cancel</button><button class="btn" id="a43AgentCheckCompute">Configure compute</button><button class="btn primary" id="a43AgentCheckRun">Run Agent Check</button></div></div>`);
+ openModal("Agent Check · "+String(current.display_name||current.model_ref||"Model"),`<div class="widget-body a43-agent-check-review"><p class="page-subtitle">Agent Check tests the configured deployment. Select compute separately if it needs changing; GPU Required must not silently fall back to CPU.</p><dl class="definition-grid"><dt>Quantization</dt><dd>${escapeHtml(current.quantization||"Unknown")}</dd><dt>Compute policy</dt><dd>${escapeHtml(compute)}</dd><dt>Planned placement</dt><dd>${escapeHtml(mode)} (not measured residency)</dd><dt>Current Agent Check</dt><dd>${escapeHtml(current.agent_check_status||"Not run")}</dd><dt>Observed model residency</dt><dd>${escapeHtml(current.residency_state||"unknown")}</dd><dt>Production admission</dt><dd>${escapeHtml(current.admission_status||"pending")}</dd></dl><p class="list-meta">Completing this check tests inference and records evidence; it does not grant production admission or verify the full context window.</p><div class="toolbar"><button class="btn" id="a43AgentCheckCancel">Cancel</button><button class="btn" id="a43AgentCheckCompute">Configure compute</button><button class="btn primary" id="a43AgentCheckRun">Run Agent Check</button></div></div>`);
  $("#a43AgentCheckCancel").onclick=closeModal;
  $("#a43AgentCheckCompute").onclick=()=>{closeModal();a31OpenCompute(current)};
  $("#a43AgentCheckRun").onclick=async()=>{

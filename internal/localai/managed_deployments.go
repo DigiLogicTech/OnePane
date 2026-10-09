@@ -28,6 +28,7 @@ type ManagedDeploymentSummary struct {
 	LocalPath          string   `json:"local_path"`
 	Quantization       string   `json:"quantization,omitempty"`
 	Status             string   `json:"status"`
+	ResidencyState     string   `json:"residency_state"`
 	AdmissionStatus    string   `json:"admission_status,omitempty"`
 	AgentCheckStatus    string   `json:"agent_check_status,omitempty"`
 	ContextMaxReported *int64   `json:"context_max_reported,omitempty"`
@@ -43,7 +44,7 @@ type ManagedDeploymentSummary struct {
 }
 
 func (s *Service) ManagedDeployments(ctx context.Context, workspaceID string) ([]ManagedDeploymentSummary, error) {
-	q := `SELECT d.id,d.model_id,mm.model_ref,COALESCE(json_extract(m.static_metadata_json,'$.display_name'),mm.model_ref),COALESCE(d.runtime_name,''),COALESCE(d.runtime_version,''),COALESCE(json_extract(d.runtime_config_json,'$.runtime_backend'),''),mm.local_path,COALESCE(m.quantization,''),d.status,COALESCE(ms.admission_status,''),COALESCE(json_extract(ms.qualification_json,'$.status'),'not_run'),COALESCE(mis.investigation_state,'uninvestigated'),d.context_max_reported,d.context_max_verified,d.updated_at,p.plan_json,d.runtime_config_json
+	q := `SELECT d.id,d.model_id,mm.model_ref,COALESCE(json_extract(m.static_metadata_json,'$.display_name'),mm.model_ref),COALESCE(d.runtime_name,''),COALESCE(d.runtime_version,''),COALESCE(json_extract(d.runtime_config_json,'$.runtime_backend'),''),mm.local_path,COALESCE(m.quantization,''),d.status,COALESCE(d.residency_state,'stopped'),COALESCE(ms.admission_status,''),COALESCE(json_extract(ms.qualification_json,'$.status'),'not_run'),COALESCE(mis.investigation_state,'uninvestigated'),d.context_max_reported,d.context_max_verified,d.updated_at,p.plan_json,d.runtime_config_json
           FROM managed_local_models mm JOIN model_deployments d ON d.id=mm.deployment_id JOIN models m ON m.id=d.model_id JOIN local_model_install_plans p ON p.id=mm.plan_id LEFT JOIN model_spec_sheets ms ON ms.deployment_id=d.id LEFT JOIN model_identity_specs mis ON mis.model_uid=d.model_id
           WHERE mm.status<>'removed'`
 	args := []any{}
@@ -62,7 +63,7 @@ func (s *Service) ManagedDeployments(ctx context.Context, workspaceID string) ([
 		var x ManagedDeploymentSummary
 		var rep, ver sql.NullInt64
 		var planJSON, runtimeConfigJSON string
-		if err := rows.Scan(&x.DeploymentID, &x.ModelID, &x.ModelRef, &x.DisplayName, &x.RuntimeName, &x.RuntimeVersion, &x.RuntimeBackend, &x.LocalPath, &x.Quantization, &x.Status, &x.AdmissionStatus, &x.AgentCheckStatus, &x.InvestigationState, &rep, &ver, &x.UpdatedAt, &planJSON, &runtimeConfigJSON); err != nil {
+		if err := rows.Scan(&x.DeploymentID, &x.ModelID, &x.ModelRef, &x.DisplayName, &x.RuntimeName, &x.RuntimeVersion, &x.RuntimeBackend, &x.LocalPath, &x.Quantization, &x.Status, &x.ResidencyState, &x.AdmissionStatus, &x.AgentCheckStatus, &x.InvestigationState, &rep, &ver, &x.UpdatedAt, &planJSON, &runtimeConfigJSON); err != nil {
 			return nil, err
 		}
 		if rep.Valid {

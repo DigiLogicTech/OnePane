@@ -27,6 +27,7 @@ type qaNodeEvidence struct {
  WakeAttempts qaNodeWakeSummary `json:"wake_attempts"`
  InferenceReceipts qaNodeInferenceSummary `json:"inference_receipts"`
  ServiceState string `json:"operating_system_service_state"`
+ ServiceObservation *qaOSServiceObservation `json:"local_service_observation,omitempty"`
  CollectionLimits []string `json:"collection_limits"`
 }
 
@@ -73,7 +74,7 @@ func qaNodeWakeState(s string)string{
 func loadQANodeEvidence(ctx context.Context,db *sql.DB,nodeID string)(qaNodeEvidence,error){
  if db==nil||nodeID==""{return qaNodeEvidence{},errors.New("Node QA source unavailable")}
  out:=qaNodeEvidence{
-  SchemaVersion:1,Scope:"admin_authorised_local_control_plane",
+  SchemaVersion:2,Scope:"admin_authorised_local_control_plane",
   NodeRef:qaOpaqueRef("node",nodeID),
   ManifestState:"not_recorded",PairingStatus:"not_recorded",
   ServiceState:"not_collected",
@@ -83,7 +84,8 @@ func loadQANodeEvidence(ctx context.Context,db *sql.DB,nodeID string)(qaNodeEvid
    "manifest presence and expiry are not proof of current capabilities",
    "last-seen is a recorded timestamp, not proof a Node is online now",
    "wake and inference receipt totals are historical, not runtime health",
-   "Windows service, systemd, drivers, models, disks, thermal and GPU/CPU health are not collected",
+   "remote OS services, drivers, models, disks, thermal and GPU/CPU health are not collected",
+   "local OS service-manager state is queried on demand only for the canonical local Node",
    "network endpoints, identities, pairing material, raw errors, logs and model outputs are omitted",
   },
  }

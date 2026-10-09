@@ -1,7 +1,7 @@
 package api
 
 import (
- "context"
+ "errors"
  "io"
  "mime"
  "net/http"
@@ -10,7 +10,6 @@ import (
  "unicode/utf8"
 
  "github.com/DigiLogicTech/OnePane/internal/artifact"
- "github.com/DigiLogicTech/OnePane/internal/projectworkspace"
 )
 
 const workspaceLibraryTextPreviewLimit int64=256<<10
@@ -30,6 +29,19 @@ func previewableWorkspaceLibraryMIME(value string) bool {
  default:
   return false
  }
+}
+
+var errInvalidWorkspaceLibraryPreview=errors.New("invalid bounded UTF-8 Library preview")
+
+func readWorkspaceLibraryPreview(reader io.Reader,expected int64)([]byte,error) {
+ if expected<0||expected>workspaceLibraryTextPreviewLimit {
+  return nil,errInvalidWorkspaceLibraryPreview
+ }
+ body,err:=io.ReadAll(io.LimitReader(reader,workspaceLibraryTextPreviewLimit+1))
+ if err!=nil||int64(len(body))!=expected||!utf8.Valid(body) {
+  return nil,errInvalidWorkspaceLibraryPreview
+ }
+ return body,nil
 }
 
 // previewWorkspaceLibraryVersion is read-only and scoped to the same
@@ -71,8 +83,8 @@ func (s *Server) previewWorkspaceLibraryVersion(w http.ResponseWriter,r *http.Re
   raw.WorkspaceID!=p.WorkspaceID{
   writeError(w,http.StatusForbidden,"Library provenance mismatch");return
  }
- bytes,err:=io.ReadAll(io.LimitReader(reader,workspaceLibraryTextPreviewLimit+1))
- if err!=nil||int64(len(bytes))!=selected.SizeBytes||!utf8.Valid(bytes){
+ bytes,err:=readWorkspaceLibraryPreview(reader,selected.SizeBytes)
+ if err!=nil{
   writeError(w,http.StatusUnprocessableEntity,"Library content is not valid bounded UTF-8 text");return
  }
  w.Header().Set("Content-Type","text/plain; charset=utf-8")
@@ -83,9 +95,3 @@ func (s *Server) previewWorkspaceLibraryVersion(w http.ResponseWriter,r *http.Re
  w.WriteHeader(http.StatusOK)
  _,_=w.Write(bytes)
 }
-
-// Compile-time interface reference: keep preview entitlement identical to
-// the existing grant-scoped download rather than a Project-global reader.
-var _ interface{ ResolveWorkspaceLibraryVersion(
- context.Context,string,string,string,int64)(projectworkspace.LibraryVersion,error)
-} = (projectLibraryService)(nil)

@@ -138,7 +138,7 @@ func (s *Service) ensureWorkspaceAccess(ctx context.Context, workspaceID string)
 // consumed paid/subscription inference or initiated a gateway-mediated action;
 // after restart we do not infer that an in-flight step never happened.
 func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT r.id,t.id,t.revision FROM agent_worker_runs r JOIN tasks t ON t.id=r.task_id WHERE r.status='running'`)
+	rows, err := s.db.QueryContext(ctx, `SELECT r.id,t.id,t.revision FROM agent_worker_runs r JOIN tasks t ON t.id=r.task_id WHERE r.status='running' ORDER BY r.started_at,r.id`)
 	if err != nil {
 		return 0, err
 	}
@@ -155,7 +155,9 @@ func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
 		}
 		xs = append(xs, v)
 	}
+ if err:=rows.Err();err!=nil{return 0,err}
  n:=0
+ var problems []error
  for _,v:=range xs {
   // A crash is NOT evidence an external mutation failed or can be retried.
   // Hold the Task/Attempt transition, recovery audit/outbox and run
@@ -181,10 +183,15 @@ func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
    if affected!=1{return fmt.Errorf("worker recovery run %s lost ownership",v.run)}
    return nil
   })
-  if err!=nil{return n,err}
+  if err!=nil{
+   // Continue with independent Workers: a corrupt Task must never prevent
+   // other lost attempts from being safely blocked and journalled.
+   problems=append(problems,fmt.Errorf("run %s: %w",v.run,err))
+   continue
+  }
   n++
  }
-	return n, rows.Err()
+ return n,errors.Join(problems...)
 }
 
 func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {

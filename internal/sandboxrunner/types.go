@@ -100,9 +100,13 @@ type ImageState struct {
 	Digests   []string `json:"digests,omitempty"`
 }
 
+// ExecResult represents the program's exit status, not the container engine's
+// status. A nonzero exit code is a successfully observed command failure and
+// remains available to the agent for a fix/test/retry loop.
 type ExecResult struct {
-	Stdout string `json:"stdout,omitempty"`
-	Stderr string `json:"stderr,omitempty"`
+	Stdout   string `json:"stdout,omitempty"`
+	Stderr   string `json:"stderr,omitempty"`
+	ExitCode int    `json:"exit_code"`
 }
 
 type SecretResolver interface {

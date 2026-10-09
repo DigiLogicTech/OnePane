@@ -18,6 +18,8 @@ type fakeEngine struct {
 	ensure                       ContainerSpec
 	pulls, ensures, stops, execs int
 	blockExec bool
+	execExitCode int
+	execStderr string
 	inspectMount string
 	extraBind bool
 }
@@ -79,7 +81,7 @@ func (f *fakeEngine) ExecContainer(ctx context.Context, _, _ string, command []s
   <-ctx.Done()
   return ExecResult{},ctx.Err()
  }
- return ExecResult{Stdout: strings.Join(command, " ")}, nil
+ return ExecResult{Stdout: strings.Join(command, " "), Stderr: f.execStderr, ExitCode: f.execExitCode}, nil
 }
 func (f *fakeEngine) StopRuntime(context.Context, string) ([]ContainerState, error) {
 	f.stops++
@@ -308,4 +310,38 @@ func TestAppExecRejectsUnboundedTimeoutsAndRespectsCancellation(t *testing.T){
  }
  if time.Since(started)>2*time.Second{t.Fatal("cancellation did not promptly return")}
  if eng.execs!=1{t.Fatalf("expected one bounded exec, got %d",eng.execs)}
+}
+
+func TestSandboxExecReturnsNonzeroBuildOutputWithoutClaimingSuccess(t *testing.T) {
+ eng:=&fakeEngine{profile:EngineProfile{Kind:"podman",Rootless:true},
+  execExitCode:2,execStderr:"compiler: undefined variable"}
+ adapter:=NewAdapter(t.TempDir(),eng)
+ path,ok,err:=managedWorkspacePath(adapter.dataDir,"world",true)
+ if err!=nil||!ok{t.Fatal(err)}
+ eng.inspectMount=path
+ response,err:=adapter.Invoke(context.Background(),tool.AdapterRequest{
+  ToolID:ToolAppExec,
+  Input:json.RawMessage(`{"runtime_id":"world","application_id":"toolchain","command":["go","test","./..."]}`),
+ })
+ if err!=nil{t.Fatalf("failed build should be an observable command result, not a missing adapter result: %v",err)}
+ var result struct{
+  Succeeded bool `json:"succeeded"`
+  Result ExecResult `json:"result"`
+ }
+ if err:=json.Unmarshal(response.Result,&result);err!=nil{t.Fatal(err)}
+ if result.Succeeded||result.Result.ExitCode!=2||
+  result.Result.Stderr!="compiler: undefined variable"||
+  !strings.Contains(response.Summary,"code 2"){
+  t.Fatalf("compilation failed but tool output is misleading: %+v summary=%s",result,response.Summary)
+ }
+ eng.execExitCode=0
+ eng.execStderr=""
+ success,err:=adapter.Invoke(context.Background(),tool.AdapterRequest{
+  ToolID:ToolAppExec,
+  Input:json.RawMessage(`{"runtime_id":"world","application_id":"toolchain","command":["go","test","./..."]}`),
+ })
+ if err!=nil{t.Fatal(err)}
+ var okResult struct{Succeeded bool `json:"succeeded"`;Result ExecResult `json:"result"`}
+ if err:=json.Unmarshal(success.Result,&okResult);err!=nil{t.Fatal(err)}
+ if !okResult.Succeeded||okResult.Result.ExitCode!=0{t.Fatalf("successful build misclassified: %+v",okResult)}
 }

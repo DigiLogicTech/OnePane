@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -385,26 +386,34 @@ func (e *CLIEngine) ListRuntime(ctx context.Context, runtimeID string) ([]Contai
 	}
 	return states, nil
 }
+// classifyContainerExecResult distinguishes a failed *program* from a
+// failed/unavailable sandbox runtime. Nonzero test/build exit codes are
+// observations that autonomous agents can inspect and correct; a container
+// engine failure is an adapter error and must not be reported as a completed
+// command. Podman/Docker reserve exit status 125 for engine-level failures.
+func classifyContainerExecResult(stdout, stderr string, err error) (ExecResult, error) {
+ result:=ExecResult{Stdout:stdout,Stderr:stderr}
+ if err==nil{return result,nil}
+ var exit *exec.ExitError
+ if !errors.As(err,&exit) || exit.ExitCode()<0 || exit.ExitCode()==125 {
+  return ExecResult{},fmt.Errorf("sandbox command invocation failed: %w",err)
+ }
+ result.ExitCode=exit.ExitCode()
+ return result,nil
+}
+
 func (e *CLIEngine) ExecContainer(ctx context.Context, runtimeID, applicationID string, command []string) (ExecResult, error) {
-	if len(command) == 0 || len(command) > 128 {
-		return ExecResult{}, ErrInvalidInput
-	}
-	for _, arg := range command {
-		if strings.ContainsRune(arg, '\x00') {
-			return ExecResult{}, ErrInvalidInput
-		}
-	}
-	p, err := e.Probe(ctx)
-	if err != nil {
-		return ExecResult{}, err
-	}
-	name := containerName(runtimeID, applicationID)
-	args := append([]string{"exec", name}, command...)
-	stdout, stderr, err := runCLI(ctx, p.Executable, args...)
-	if err != nil {
-		return ExecResult{Stdout: stdout, Stderr: stderr}, fmt.Errorf("exec sandbox command: %v: %s", err, stderr)
-	}
-	return ExecResult{Stdout: stdout, Stderr: stderr}, nil
+ if len(command)==0||len(command)>128{return ExecResult{},ErrInvalidInput}
+ for _,arg:=range command{
+  if strings.ContainsRune(arg,'\x00'){return ExecResult{},ErrInvalidInput}
+ }
+ p,err:=e.Probe(ctx)
+ if err!=nil{return ExecResult{},err}
+ name:=containerName(runtimeID,applicationID)
+ args:=append([]string{"exec",name},command...)
+ stdout,stderr,err:=runCLI(ctx,p.Executable,args...)
+ if ctx.Err()!=nil{return ExecResult{},ctx.Err()}
+ return classifyContainerExecResult(stdout,stderr,err)
 }
 
 func (e *CLIEngine) StopContainer(ctx context.Context, runtimeID, applicationID string) (ContainerState, error) {

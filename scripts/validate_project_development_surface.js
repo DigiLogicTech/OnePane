@@ -88,7 +88,7 @@ assertContains(delegateSource,'return failedResult(res,err)',
 const taskTransitionSource=read('internal/task/service.go');
 assertContains(taskTransitionSource,'func (s *Service) WaitDependencyInTransaction(',
  'running Task/Attempt must expose a transaction-scoped dependency transition');
-assert.ok(/ProjectWorkspaceID:\\s*t\\.ProjectWorkspaceID/.test(delegateSource),
+assert.ok(delegateSource.replace(/\s+/g,'').includes('ProjectWorkspaceID:t.ProjectWorkspaceID'),
  'delegated child Tasks must retain canonical Project Workspace ownership');
 assertContains(delegateSource,'inheritOnePaneRouting(t.Completion, p.Completion)',
  'delegation must preserve parent model, sandbox and Vault restrictions');

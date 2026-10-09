@@ -145,7 +145,7 @@ func workspaceToolAllowedWithPolicy(p workspaceAccessPolicy, capabilityID string
 	// mount access before a lease lookup or container invocation.
 	if p.Filesystem=="none" {
 		switch toolID {
-		case "project.app.exec","project.app.ensure","project.runtime.ensure":
+		case "project.app.exec","project.app.git.inspect","project.app.ensure","project.runtime.ensure":
 			return fmt.Errorf("filesystem access is disabled for this workspace")
 		}
 	}

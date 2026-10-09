@@ -137,7 +137,7 @@ type qualificationEvidence struct {
 	Errors        []string `json:"errors,omitempty"`
 }
 
-func (q *Qualifier) Qualify(ctx context.Context, req QualificationRequest) (completed QualificationRun, resultErr error) {
+func (q *Qualifier) Qualify(ctx context.Context, req QualificationRequest) (qualificationResult QualificationRun, resultErr error) {
 	if q == nil || q.supervisor == nil || q.inference == nil || strings.TrimSpace(req.DeploymentID) == "" || strings.TrimSpace(req.HardwareProfileID) == "" || strings.TrimSpace(req.CapabilityID) == "" || req.RequestedContext <= 0 {
 		return QualificationRun{}, errors.New("invalid qualification request")
 	}

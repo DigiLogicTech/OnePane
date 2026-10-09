@@ -1,6 +1,6 @@
 # RC11 — Workspace QA diagnostic snapshot (foundation)
 
-This is an **initial, explicitly limited part** of [Debug & QA Diagnostics Centre #85](https://github.com/DigiLogicTech/OnePane/issues/85). It is not the final global Debug Centre or a replacement for system/installer/Node trace capture.
+This is an **incremental, explicitly limited part** of [Debug & QA Diagnostics Centre #85](https://github.com/DigiLogicTech/OnePane/issues/85). It is not the final global Debug Centre or a replacement for system/installer/Node trace capture.
 
 ## Operator flow
 
@@ -21,13 +21,13 @@ Both are denied when tenancy/Project/Workspace scope or permission is not valid.
 
 Contains exactly:
 - `manifest.json`: schema version, created UTC, origin, excluded categories and SHA-256 digests.
-- `snapshot.json`: sanitised Task IDs, state/revision/update time, permitted latest Worker status/counters and hard dependency counts. No objective, raw continuation, execution inputs, failure text or tool output.
+- `snapshot.json`: sanitised Task IDs and opaque Task/Run refs, state/revision/update time, permitted latest Worker status/counters, hard dependency counts, and **up to 96 recent Task/Worker event ledger entries**. The event timeline includes only a fixed known event-type vocabulary, timestamp, severity, and SHA-256-derived Task/Run/event/trace/request references; it excludes event payloads, principal IDs, messages and unknown event types. No objective, raw continuation, execution inputs, failure text or tool output.
 - `README.txt`: explicit limitations and sharing guidance.
 
-Up to **50 Tasks**; the ZIP is in-memory, maximum **128 KiB**, with fixed archive paths. It neither writes a temporary system log nor archives arbitrary folders. Source changes after preview may alter the fresh exported snapshot.
+Up to **50 Tasks and 96 timeline events** (sorted newest first); the ZIP is in-memory, maximum **128 KiB**, with fixed archive paths. It neither writes a temporary system log nor archives arbitrary folders. Source changes after preview may alter the fresh exported snapshot.
 
 ### What this version cannot diagnose
 
-It cannot yet capture per-click UI actions, full correlated HTTP traces, MSI setup logs, system resource snapshots, raw Node diagnostics, filtered timeline search, operator-entered reproduction notes or time-limited verbose instrumentation. These remain open in #85. A missing Worker run is reported as no execution entry—not as proof that execution occurred or succeeded.
+It can correlate existing Task/Worker event metadata but **cannot yet capture per-click UI actions, complete cross-component HTTP traces, MSI setup logs, system resource snapshots, raw Node diagnostics, interactive timeline filtering, operator-entered reproduction notes or time-limited verbose instrumentation. These remain open in #85. A missing Worker run is reported as no execution entry—not as proof that execution occurred or succeeded.
 
 **Release gate:** Finish #85 plus [three-phase code audit → vision questions → second code review #86](https://github.com/DigiLogicTech/OnePane/issues/86) before RC11 packaging. Preserve RC10 as the recovery baseline.

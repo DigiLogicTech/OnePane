@@ -76,6 +76,22 @@ func workspaceExecutionManifest(ctx context.Context, db *sql.DB, t task.Task) (j
    },
    "note":"local Workspace repository only; no remote push/clone, no arbitrary Git flags or host execution",
   },
+  "file_edit_tool":map[string]any{
+   "tool_id":"project.app.files.edit",
+   "tool_version":"1",
+   "capability_id":"project.app.execute",
+   "actions":[]string{"create","replace"},
+   "input_schema":map[string]any{
+    "runtime_id":"registered runtime_id above",
+    "application_id":"one of the application_id values above",
+    "action":"create new file or replace existing file via exact SHA-256 compare-and-swap",
+    "path":"Workspace-relative file path; existing parent directory required; no symlinks or .git internals",
+    "content_base64":"canonical standard base64 for 1..65536 bytes",
+    "expected_sha256":"required lowercase SHA-256 of current file for replace, omitted for create",
+    "timeout_seconds":"optional 1..120; default 30",
+   },
+   "note":"Requires Python3 in the registered digest-pinned OCI development image, no host shell, no implicit filesystem grants. A successful receipt is not independent completion verification.",
+  },
   "file_inspect_tool":map[string]any{
    "tool_id":"project.app.files.inspect",
    "tool_version":"1",

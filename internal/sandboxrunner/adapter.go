@@ -45,6 +45,8 @@ var safeID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 type baseInput struct {
 	Action              string          `json:"action"`
 	Path                string          `json:"path,omitempty"`
+	ContentBase64       string          `json:"content_base64,omitempty"`
+	ExpectedSHA256      string          `json:"expected_sha256,omitempty"`
 	RuntimeID           string          `json:"runtime_id"`
 	ApplicationID       string          `json:"application_id,omitempty"`
 	Image               string          `json:"image,omitempty"`
@@ -84,6 +86,7 @@ func Register(reg *tool.Registry, adapter *Adapter) error {
 		{ID: ToolAppExec, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppGitInspect, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppFileInspect, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
+		{ID: ToolAppFileEdit, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppGitMutate, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 	}
 	for _, d := range defs {
@@ -184,6 +187,58 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 			"action":in.Action,"succeeded":success,"result":observed,
 			"container":state,"engine":profile,
 		},summary)
+	case ToolAppFileEdit:
+		if !safeID.MatchString(in.ApplicationID)||len(in.Command)!=0||
+			in.Image!=""||in.Message!=""||in.TimeoutSeconds<0||in.TimeoutSeconds>120{
+			return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)
+		}
+		command,digest,size,err:=fileEditCommand(in.Action,in.Path,in.ContentBase64,in.ExpectedSHA256)
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		if !workspaceExists{
+			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Workspace not provisioned",ErrInvalidInput))
+		}
+		state,err:=a.engine.InspectContainer(ctx,in.RuntimeID,in.ApplicationID)
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		if state.Status!="running"||!state.IsolationVerified||
+			state.RuntimeID!=in.RuntimeID||state.ApplicationID!=in.ApplicationID||
+			state.SpecHash==""||!exactWorkspaceMount(state,workspace){
+			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: edit requires verified Workspace sandbox",ErrInvalidInput))
+		}
+		timeout:=in.TimeoutSeconds
+		if timeout==0{timeout=30}
+		execCtx,cancel:=context.WithTimeout(ctx,time.Duration(timeout)*time.Second)
+		defer cancel()
+		observed,err:=a.engine.ExecContainer(execCtx,in.RuntimeID,in.ApplicationID,command)
+		if execCtx.Err()!=nil{return tool.AdapterResult{},execCtx.Err()}
+		if err!=nil{return tool.AdapterResult{},err}
+		// The subprocess command line contains the encoded file bytes. Never
+		// return raw stdout/stderr or the command in a persisted observation.
+		// Validate an exact operation receipt instead of trusting exit code 0.
+		var receipt struct {
+			Action string `json:"action"`
+			Path string `json:"path"`
+			Bytes int `json:"bytes"`
+			SHA256 string `json:"sha256"`
+			Written bool `json:"written"`
+		}
+		succeeded:=observed.ExitCode==0&&json.Unmarshal([]byte(observed.Stdout),&receipt)==nil&&
+			receipt.Written&&receipt.Action==in.Action&&receipt.Path==in.Path&&
+			receipt.Bytes==size&&receipt.SHA256==digest
+		message:="Workspace file edit failed or returned an invalid content receipt"
+		if succeeded{message="Workspace file edit applied; independent Task verification remains required"}
+		failureReason:=""
+		if !succeeded {
+			var diagnostic struct{ Reason string `json:"reason"` }
+			if json.Unmarshal([]byte(observed.Stderr),&diagnostic)==nil{
+				failureReason=boundedEditorDiagnostic(diagnostic.Reason)
+			}
+		}
+		return result(map[string]any{
+			"runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
+			"action":in.Action,"path":in.Path,"content_sha256":digest,"size_bytes":size,
+			"succeeded":succeeded,"exit_code":observed.ExitCode,"failure_reason":failureReason,
+			"receipt_verified":succeeded,"container":state,"engine":profile,
+		},message)
 	case ToolAppFileInspect:
 		if !safeID.MatchString(in.ApplicationID)||len(in.Command)!=0||in.Image!=""||
 			in.TimeoutSeconds<0||in.TimeoutSeconds>60{

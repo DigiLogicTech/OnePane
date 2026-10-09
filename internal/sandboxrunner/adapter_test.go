@@ -20,6 +20,7 @@ type fakeEngine struct {
 	blockExec bool
 	execExitCode int
 	execStderr string
+	execStdout string
 	inspectMount string
 	extraBind bool
 }
@@ -81,7 +82,9 @@ func (f *fakeEngine) ExecContainer(ctx context.Context, _, _ string, command []s
   <-ctx.Done()
   return ExecResult{},ctx.Err()
  }
- return ExecResult{Stdout: strings.Join(command, " "), Stderr: f.execStderr, ExitCode: f.execExitCode}, nil
+ out:=f.execStdout
+ if out==""{out=strings.Join(command," ")}
+ return ExecResult{Stdout: out, Stderr: f.execStderr, ExitCode: f.execExitCode}, nil
 }
 func (f *fakeEngine) StopRuntime(context.Context, string) ([]ContainerState, error) {
 	f.stops++

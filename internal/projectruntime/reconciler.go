@@ -20,6 +20,7 @@ var (
 	ErrInvalidCommand               = errors.New("invalid project runtime reconciliation command")
 	ErrIndependentObserverRequired  = errors.New("project runtime verification requires an independent observer principal")
 	ErrUnsupportedBackend           = errors.New("project runtime backend is not supported by the active reconciler")
+	ErrNodePlacementUnsupported      = errors.New("project runtime is assigned to another Node; remote sandbox execution is not yet available")
 	ErrUnsupportedApplicationSource = errors.New("application source is declared but not executable by the current sandbox backend")
 	ErrPostcondition                = errors.New("sandbox mutation postcondition was not independently satisfied")
 	ErrRecoveryRequired             = errors.New("sandbox operation has an unknown outcome and requires reconciliation before retry")
@@ -64,10 +65,24 @@ type Reconciler struct {
 	tools         toolGateway
 	observations  observationService
 	verifications verificationService
+	localNodeID string
 }
 
-func New(projects workspaceService, operations operationCoordinator, tools toolGateway, observations observationService, verifications verificationService) *Reconciler {
-	return &Reconciler{projects: projects, operations: operations, tools: tools, observations: observations, verifications: verifications}
+// The optional local Node identity is supplied by the bootstrap control
+// plane. Historical unit callers with no Node placement remain compatible.
+func New(projects workspaceService, operations operationCoordinator, tools toolGateway, observations observationService, verifications verificationService, localNodeIDs ...string) *Reconciler {
+ localID:=""
+ if len(localNodeIDs)>0 {localID=strings.TrimSpace(localNodeIDs[0])}
+ return &Reconciler{projects:projects,operations:operations,tools:tools,observations:observations,verifications:verifications,localNodeID:localID}
+}
+
+// A local OCI adapter cannot execute on a different Node simply because a
+// runtime row contains that Node ID. Never silently substitute the service
+// host when explicitly assigned remote hardware is unavailable.
+func localPlacementAllowed(localNodeID string, assigned *string) bool {
+ if assigned==nil {return true}
+ if strings.TrimSpace(*assigned)=="" {return false}
+ return strings.TrimSpace(localNodeID)!="" && strings.TrimSpace(localNodeID)==strings.TrimSpace(*assigned)
 }
 
 type ReconcileCommand struct {
@@ -126,6 +141,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 	runtime, err := r.projects.Runtime(ctx, cmd.RuntimeID)
 	if err != nil {
 		return Result{}, err
+	}
+	if !localPlacementAllowed(r.localNodeID,runtime.NodeID){
+		return Result{},fmt.Errorf("%w: requested Node %q, service Node %q",ErrNodePlacementUnsupported,
+			func()string{if runtime.NodeID==nil{return ""};return *runtime.NodeID}(),r.localNodeID)
 	}
 	if runtime.Backend != "sandbox_runner" || runtime.IsolationMode != projectworkspace.IsolationSandboxedContainer {
 		return Result{}, ErrUnsupportedBackend

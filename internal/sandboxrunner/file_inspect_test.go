@@ -5,6 +5,8 @@ import (
  "encoding/json"
  "errors"
  "os"
+ "os/exec"
+ "strconv"
  "path/filepath"
  "strings"
  "testing"
@@ -73,7 +75,7 @@ func TestFileInspectionRequiresVerifiedRootlessSandboxAndBoundedPreview(t *testi
  }
  if err:=json.Unmarshal(v.Result,&result);err!=nil{t.Fatal(err)}
  if !result.Succeeded||result.Action!="preview_text"||!result.PreviewOnly||
-  !strings.Contains(result.Result.Stdout,"head -c 65536 -- /workspace/README.md"){
+  !strings.Contains(result.Result.Stdout,"python3 -I -S -c")||!strings.Contains(result.Result.Stdout,"README.md"){
   t.Fatalf("text preview not correctly bounded in Workspace: %+v",result)
  }
  before:=eng.execs
@@ -94,4 +96,45 @@ func TestFileInspectionRequiresVerifiedRootlessSandboxAndBoundedPreview(t *testi
   t.Fatalf("preview accepted host-mounted OCI container: %v",err)
  }
  if eng.execs!=before{t.Fatalf("denied file read reached engine: %d->%d",before,eng.execs)}
+}
+
+func TestActualOCITextPreviewUsesNoFollowAtOpen(t *testing.T){
+ python,err:=exec.LookPath("python3")
+ if err!=nil{t.Skip("Python3 toolchain not available on CI host")}
+ root:=t.TempDir()
+ if err:=os.Mkdir(filepath.Join(root,"src"),0o700);err!=nil{t.Fatal(err)}
+ if err:=os.WriteFile(filepath.Join(root,"src","valid.txt"),[]byte("hello\n"),0o600);err!=nil{t.Fatal(err)}
+ // The production interpreter can open ONLY /workspace. The test substitutes
+ // that fixed root with a temporary fixture to verify descriptor behaviour.
+ script:=strings.Replace(workspaceTextPreview,`os.open("/workspace",`,
+  "os.open("+strconv.Quote(root)+",",1)
+ run:=func(rel string)(int,string){
+  t.Helper()
+  output,err:=exec.Command(python,"-I","-S","-c",script,rel).CombinedOutput()
+  if err==nil{return 0,string(output)}
+  if ex,ok:=err.(*exec.ExitError);ok{return ex.ExitCode(),string(output)}
+  t.Fatal(err)
+  return -1,""
+ }
+ if code,out:=run("src/valid.txt");code!=0||out!="hello\n"{
+  t.Fatalf("valid descriptor-bounded preview failed: %d %q",code,out)
+ }
+ outside:=t.TempDir()
+ if err:=os.WriteFile(filepath.Join(outside,"secret.txt"),[]byte("top-secret"),0o600);err!=nil{t.Fatal(err)}
+ if err:=os.Symlink(outside,filepath.Join(root,"src","link"));err==nil{
+  if code,out:=run("src/link/secret.txt");code==0||strings.Contains(out,"top-secret"){
+   t.Fatalf("followed symlinked directory: %d %q",code,out)
+  }
+ }
+ if err:=os.Symlink(filepath.Join(outside,"secret.txt"),filepath.Join(root,"src","secret-link"));err==nil{
+  if code,out:=run("src/secret-link");code==0||strings.Contains(out,"top-secret"){
+   t.Fatalf("followed symlinked file: %d %q",code,out)
+  }
+ }
+ if err:=os.WriteFile(filepath.Join(root,"src","binary"),[]byte{0,1,2},0o600);err!=nil{t.Fatal(err)}
+ if code,_:=run("src/binary");code==0{t.Fatal("binary data passed text preview")}
+ if err:=os.WriteFile(filepath.Join(root,"src","large.txt"),[]byte(strings.Repeat("x",65537)),0o600);err!=nil{t.Fatal(err)}
+ if code,out:=run("src/large.txt");code!=0||len(out)!=65536{
+  t.Fatalf("preview exceeded text byte cap: %d %d bytes",code,len(out))
+ }
 }

@@ -47,7 +47,7 @@ async function a49MountDevelopmentTasks(project,workspace,container){
   const rows=taskRows.filter(t=>choice==="all"||(choice==="finished"?doneStates.has(t.state):!doneStates.has(t.state)));
   const count=section.querySelector("#a49TaskCount"),list=section.querySelector("#a49TaskList");
   if(!count||!list)return;
-  count.textContent=rows.length+" shown · "+taskRows.length+" Workspace Tasks in the most recent tenant Task inventory";
+  count.textContent=rows.length+" shown · "+taskRows.length+" recent Tasks in this Project Workspace (up to 15)";
   list.innerHTML=rows.length?rows.map(t=>{
    const updated=Number(t.updated_at)>0?new Date(Number(t.updated_at)).toLocaleString():"Unknown";
    return '<article class="a49-task-row panel-card"><div class="card-header"><strong>'+
@@ -61,7 +61,9 @@ async function a49MountDevelopmentTasks(project,workspace,container){
   const count=section.querySelector("#a49TaskCount");
   if(count)count.textContent="Refreshing verified Task inventory…";
   try{
-   const list=await apiRequest("/v1/tasks?workspace_id="+encodeURIComponent(onepaneWorkspace)+"&limit=200");
+   const list=await apiRequest("/v1/tasks?workspace_id="+encodeURIComponent(onepaneWorkspace)+
+    "&project_id="+encodeURIComponent(project.id)+
+    "&project_workspace_id="+encodeURIComponent(canonical.id)+"&limit=15");
    if(!section.isConnected||section.dataset.workspaceId!==String(workspace.id))return;
    taskRows=(Array.isArray(list)?list:[]).filter(t=>t.project_id===project.id&&
     t.project_workspace_id===canonical.id).sort((a,b)=>Number(b.updated_at||0)-Number(a.updated_at||0)).slice(0,15);

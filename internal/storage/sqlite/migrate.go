@@ -371,7 +371,7 @@ func (d *DB) applyMigration(ctx context.Context, m migration) error {
 	// installations that makes COMMIT fail with SQLITE_CONSTRAINT_FOREIGNKEY.
 	// Use a connection-pinned, FK-disabled transaction, validate every
 	// relationship before commit, then re-enable FK enforcement.
-	if m.version == 35 {
+	if m.version == 35 || m.version == 37 {
 		return d.applyReferencedParentRebuild(ctx, m)
 	}
 
@@ -397,9 +397,9 @@ func (d *DB) applyMigration(ctx context.Context, m migration) error {
 }
 
 
-// applyReferencedParentRebuild is deliberately limited to the reviewed v0035
-// schema rebuild, never to arbitrary future migrations. It preserves the
-// original migration bytes/checksum for RC3 databases where v0035 succeeded
+// applyReferencedParentRebuild is deliberately limited to reviewed v0035 and v0037
+// schema rebuilds, never to arbitrary future migrations. It preserves the
+// original migration bytes/checksum for existing databases where v0035 succeeded
 // on an empty store. FK enforcement changes are connection-local in SQLite,
 // so PRAGMA, transaction, verification and restoration share one connection.
 func (d *DB) applyReferencedParentRebuild(ctx context.Context, m migration) (resultErr error) {

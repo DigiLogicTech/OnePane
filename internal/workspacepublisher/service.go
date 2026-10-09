@@ -160,8 +160,31 @@ func (s *Service) reservePublication(ctx context.Context,c sandboxrunner.Workspa
  if err!=nil||p!=projectID||w!=workspaceID||r!=c.RuntimeID||a!=c.ApplicationID{
   return sandboxrunner.WorkspacePublication{},false,ErrPublishDenied
  }
+ recovered:=false
  if status!="complete"{
-  return sandboxrunner.WorkspacePublication{},false,ErrPublicationRecoveryRequired
+  // Recovery can only *recognize* a verified existing Library version:
+  // it must never create a second Artifact or Library asset on uncertainty.
+  if !artifactID.Valid{return sandboxrunner.WorkspacePublication{},false,ErrPublicationRecoveryRequired}
+  rows,err:=s.db.QueryContext(ctx,`SELECT v.asset_id,v.version
+   FROM project_library_asset_versions v JOIN project_library_assets a ON a.id=v.asset_id
+   WHERE v.storage_uri=? AND a.project_id=? AND a.archived=0`,
+   "artifact:"+artifactID.String,projectID)
+  if err!=nil{return sandboxrunner.WorkspacePublication{},false,err}
+  count:=0
+  var candidateID string
+  var candidateVersion int64
+  for rows.Next(){
+   if err=rows.Scan(&candidateID,&candidateVersion);err!=nil{break}
+   count++
+   if count>1{break}
+  }
+  if scanErr:=rows.Err();err==nil{err=scanErr}
+  _=rows.Close()
+  if err!=nil{return sandboxrunner.WorkspacePublication{},false,err}
+  if count!=1{return sandboxrunner.WorkspacePublication{},false,ErrPublicationRecoveryRequired}
+  assetID=sql.NullString{String:candidateID,Valid:true}
+  version=sql.NullInt64{Int64:candidateVersion,Valid:true}
+  recovered=true
  }
  if !artifactID.Valid||!assetID.Valid||!version.Valid||version.Int64<1{
   return sandboxrunner.WorkspacePublication{},false,ErrPublishDenied
@@ -178,6 +201,14 @@ func (s *Service) reservePublication(ctx context.Context,c sandboxrunner.Workspa
  v,err:=s.projects.ResolveWorkspaceLibraryVersion(ctx,projectID,workspaceID,assetID.String,version.Int64)
  if err!=nil||v.ContentHash!=c.ContentHash||v.Version!=version.Int64{
   return sandboxrunner.WorkspacePublication{},false,ErrPublishDenied
+ }
+ if recovered{
+  _,err=s.db.ExecContext(ctx,`UPDATE workspace_file_publications SET
+   status='complete',library_asset_id=?,asset_version=?,updated_at=?
+   WHERE task_id=? AND relative_path=? AND content_hash=?
+   AND status='in_progress' AND artifact_id=?`,
+   assetID.String,version.Int64,time.Now().UnixMilli(),c.TaskID,c.Path,c.ContentHash,artifactID.String)
+  if err!=nil{return sandboxrunner.WorkspacePublication{},false,err}
  }
  return sandboxrunner.WorkspacePublication{
   ArtifactID:artifactID.String,LibraryAssetID:assetID.String,Version:v.Version,

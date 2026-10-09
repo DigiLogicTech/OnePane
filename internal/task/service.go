@@ -130,6 +130,14 @@ func (s *Service) CreateInTransaction(ctx context.Context, tx storage.Tx, cmd Cr
 	if !json.Valid(cmd.Completion) {
 		return Task{}, fmt.Errorf("%w: completion criteria must be valid JSON", ErrInvalidCommand)
 	}
+	if cmd.ProjectWorkspaceID != nil {
+		if cmd.ProjectID == nil || strings.TrimSpace(*cmd.ProjectID)=="" {
+			return Task{}, fmt.Errorf("%w: named Workspace Tasks require a Project", ErrInvalidCommand)
+		}
+		var err error
+		cmd.Completion, err = scopeWorkspaceCompletion(cmd.Completion,*cmd.ProjectWorkspaceID)
+		if err!=nil {return Task{},err}
+	}
 	taskID, err := s.ids.New("task")
 	if err != nil {
 		return Task{}, err

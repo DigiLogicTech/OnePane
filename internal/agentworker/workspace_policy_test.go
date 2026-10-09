@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/DigiLogicTech/OnePane/internal/authority"
+	"github.com/DigiLogicTech/OnePane/internal/task"
 )
 
 func completionWithAccess(v any) json.RawMessage {
@@ -74,5 +75,22 @@ func TestExplicitWorkspaceLocalOnlyPolicyOverridesLegacyCloudDefaults(t *testing
  configured:=routingPolicyFromCompletion(cloudOptIn)
  if configured.WorkspaceAccess.RemoteModels==nil || !*configured.WorkspaceAccess.RemoteModels{
   t.Fatal("explicit cloud opt-in did not remain visible to governed scheduler")
+ }
+}
+
+func TestUnscopedHistoricWorkspaceTasksCannotImplicitlyUseCloud(t *testing.T) {
+ projectID, workspaceID := "p","world"
+ cases:=[]struct{name string;t task.Task;completion json.RawMessage;legacy bool;want bool}{
+  {"new_named_no_envelope",task.Task{ProjectID:&projectID,ProjectWorkspaceID:&workspaceID},json.RawMessage(`{}`),true,false},
+  {"named_explicit_false",task.Task{ProjectID:&projectID,ProjectWorkspaceID:&workspaceID},json.RawMessage(`{"onepane_routing":{"workspace_access":{"remote_models":false}}}`),true,false},
+  {"named_explicit_true",task.Task{ProjectID:&projectID,ProjectWorkspaceID:&workspaceID},json.RawMessage(`{"onepane_routing":{"workspace_access":{"remote_models":true}}}`),true,true},
+  {"legacy_project",task.Task{ProjectID:&projectID},json.RawMessage(`{}`),true,true},
+  {"legacy_disabled",task.Task{ProjectID:&projectID},json.RawMessage(`{}`),false,false},
+ }
+ for _,tc:=range cases {
+  t.Run(tc.name,func(t *testing.T){
+   v:=effectiveRemoteModelAllowance(tc.t,routingPolicyFromCompletion(tc.completion),tc.legacy)
+   if v!=tc.want{t.Fatalf("unexpected cloud eligibility: got %v want %v",v,tc.want)}
+  })
  }
 }

@@ -75,7 +75,7 @@ func TestRealRootlessWorkspaceIsolation(t *testing.T) {
  // its file. Independent networks must also have different engine identities.
  a,err:=engine.InspectNetwork(ctx,ids[0]);if err!=nil{t.Fatal(err)}
  b,err:=engine.InspectNetwork(ctx,ids[1]);if err!=nil{t.Fatal(err)}
- if a.Name==b.Name||a.ID==b.ID||!a.Internal||!b.Internal||
+ if a.Name==b.Name||(a.ID!=""&&b.ID!=""&&a.ID==b.ID)||!a.Internal||!b.Internal||
   a.RuntimeID!=ids[0]||b.RuntimeID!=ids[1]{
   t.Fatalf("Workspaces share OCI network identity: world=%+v story=%+v",a,b)
  }

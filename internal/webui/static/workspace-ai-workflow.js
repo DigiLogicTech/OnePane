@@ -58,6 +58,21 @@ async function a49MountDevelopmentTasks(project,workspace,container){
     '<div class="list-meta">Local-first retry: '+escapeHtml(new Date(Number(wait.retry_at_ms)).toLocaleString())+
     ' · Attempt '+escapeHtml(String(wait.attempt||1))+
     (wait.reason?' · '+escapeHtml(wait.reason):'')+'</div>':'';
+   const dep=t.dependencies&&typeof t.dependencies==="object"?t.dependencies:null;
+   const validDep=dep&&["total","completed","failed","blocked","restricted","remaining"].every(k=>
+    Number.isSafeInteger(Number(dep[k]))&&Number(dep[k])>=0);
+   const prerequisites=validDep&&Number(dep.total)>0?
+    '<div class="a49-task-prerequisites" aria-label="Durable Task dependencies">'+
+     '<strong>Hard prerequisites: '+Number(dep.completed)+' / '+Number(dep.total)+' complete</strong>'+
+     '<span class="list-meta">'+Number(dep.remaining)+' not complete · '+
+      Number(dep.failed)+' failed/cancelled · '+Number(dep.blocked)+' blocked'+
+      (Number(dep.restricted)>0?' · '+Number(dep.restricted)+' restricted Workspace links':'')+
+     '</span>'+
+     (Number(dep.failed)>0||Number(dep.blocked)>0?
+      '<span class="list-meta a49-checkpoint-review">A prerequisite failed or requires review. The parent cannot safely complete until its dependencies are resolved.</span>':'')+
+     (Number(dep.restricted)>0?
+      '<span class="list-meta">Other Workspace prerequisite identities and states are not disclosed here.</span>':'')+
+    '</div>':'';
    const x=t.execution&&typeof t.execution==="object"?t.execution:null;
    const checkpoint=x&&Number.isSafeInteger(Number(x.steps_used))&&
     Number.isSafeInteger(Number(x.max_steps))&&Number(x.max_steps)>0?
@@ -81,7 +96,7 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    return '<article class="a49-task-row panel-card"><div class="card-header"><strong>'+
     escapeHtml(t.objective||"Untitled objective")+'</strong><span class="pill">'+
     escapeHtml(displayState)+'</span></div><div class="list-meta">Task '+
-    escapeHtml(t.id)+" · "+escapeHtml(updated)+"</div>"+retry+checkpoint+published+"</article>";
+    escapeHtml(t.id)+" · "+escapeHtml(updated)+"</div>"+retry+prerequisites+checkpoint+published+"</article>";
   }).join(""):'<div class="empty-state compact">No Workspace Tasks match this filter.</div>';
  };
  const loadTasks=async()=>{

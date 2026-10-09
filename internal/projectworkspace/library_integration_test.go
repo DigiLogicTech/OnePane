@@ -86,6 +86,25 @@ func TestProjectLibraryImmutableArtifactScopedExchange(t *testing.T){
  if _,err=svc.ResolveWorkspaceLibraryVersion(ctx,project.ID,target.ID,lib.ID,1);err!=nil{
   t.Fatalf("pinned version v1 cannot be downloaded: %v",err)
  }
+ // Search uses bounded server-side Project metadata and enforces the same
+ // grant-filtered Workspace inventory, never scanning unapproved blob data.
+ byFilename,err:=svc.SearchLibraryAssets(ctx,project.ID,"CASTLE")
+ if err!=nil||len(byFilename)!=1||byFilename[0].ID!=lib.ID{
+  t.Fatalf("case-insensitive Project asset search failed: %+v %v",byFilename,err)
+ }
+ byType,err:=svc.SearchLibraryAssets(ctx,project.ID,"TEXT/PLAIN")
+ if err!=nil||len(byType)!=1||byType[0].ID!=lib.ID{
+  t.Fatalf("MIME metadata search failed: %+v %v",byType,err)
+ }
+ permitted,err:=svc.WorkspaceLibraryAssets(ctx,project.ID,target.ID,"TEXT/PLAIN")
+ if err!=nil||len(permitted)!=1||permitted[0].AccessibleVersion!=1{
+  t.Fatalf("Workspace MIME search must honour its pinned grant: %+v %v",permitted,err)
+ }
+ missing,err:=svc.SearchLibraryAssets(ctx,project.ID,"never-present")
+ if err!=nil||len(missing)!=0{t.Fatalf("search must not invent matches: %+v %v",missing,err)}
+ if _,err=svc.SearchLibraryAssets(ctx,project.ID,strings.Repeat("x",257));err!=ErrInvalidCommand{
+  t.Fatalf("oversized search must be rejected: %v",err)
+ }
  // Retention: revoking access never deletes the Project artifact itself.
  if err=artifactSvc.VerifyContent(ctx,raw.ID);err!=nil{t.Fatalf("revoking a link damaged immutable content: %v",err)}
 }

@@ -83,6 +83,28 @@ func (s *Service) LibraryAssets(ctx context.Context,projectID string)([]LibraryA
  }
  return out,rows.Err()
 }
+// SearchLibraryAssets searches only Project-owned, non-archived metadata.
+// It intentionally never indexes or reads file contents; content ingestion and
+// scoped evidence retrieval are separate, governed operations.
+func (s *Service) SearchLibraryAssets(ctx context.Context,projectID,search string)([]LibraryAsset,error){
+ if strings.TrimSpace(projectID)==""{return nil,ErrInvalidCommand}
+ search=strings.TrimSpace(search)
+ if len(search)>256{return nil,ErrInvalidCommand}
+ rows,err:=s.db.QueryContext(ctx,`SELECT id,project_id,name,asset_type,current_version,archived,created_at,updated_at
+ FROM project_library_assets WHERE project_id=? AND archived=0
+ AND (instr(lower(name),lower(?))>0 OR instr(lower(asset_type),lower(?))>0)
+ ORDER BY updated_at DESC,id LIMIT 200`,projectID,search,search)
+ if err!=nil{return nil,err}
+ defer rows.Close()
+ out:=[]LibraryAsset{}
+ for rows.Next(){
+  var asset LibraryAsset;var archived int
+  if err=rows.Scan(&asset.ID,&asset.ProjectID,&asset.Name,&asset.AssetType,&asset.CurrentVersion,&archived,&asset.CreatedAt,&asset.UpdatedAt);err!=nil{return nil,err}
+  asset.Archived=archived!=0;out=append(out,asset)
+ }
+ return out,rows.Err()
+}
+
 // WorkspaceLibraryAssets lists only assets visible through a direct grant or
 // an explicitly enabled, hash-pinned incoming publication. This is a metadata
 // inventory, not a capability to read arbitrary versions or artifact bytes.
@@ -108,7 +130,7 @@ func (s *Service) WorkspaceLibraryAssets(ctx context.Context,projectID,workspace
           AND al.project_id=a.project_id AND al.target_workspace_id=? AND al.enabled=1)
     )),0) AS accessible_version
   FROM project_library_assets a
-  WHERE a.project_id=? AND a.archived=0 AND instr(lower(a.name),lower(?))>0
+  WHERE a.project_id=? AND a.archived=0 AND (instr(lower(a.name),lower(?))>0 OR instr(lower(a.asset_type),lower(?))>0)
   AND (
     EXISTS(SELECT 1 FROM workspace_library_grants g
      WHERE g.asset_id=a.id AND g.project_workspace_id=? AND g.enabled=1
@@ -120,7 +142,7 @@ func (s *Service) WorkspaceLibraryAssets(ctx context.Context,projectID,workspace
        JOIN project_library_asset_versions v ON v.asset_id=pub.asset_id AND v.version=pub.asset_version AND v.content_hash=pub.content_hash
        WHERE pub.asset_id=a.id AND l.project_id=a.project_id
         AND l.target_workspace_id=? AND l.enabled=1)
-  ) ORDER BY a.updated_at DESC,a.id LIMIT 100`,workspaceID,workspaceID,projectID,search,workspaceID,workspaceID)
+  ) ORDER BY a.updated_at DESC,a.id LIMIT 100`,workspaceID,workspaceID,projectID,search,search,workspaceID,workspaceID)
  if err!=nil{return nil,err}
  defer rows.Close()
  out:=[]LibraryAsset{}

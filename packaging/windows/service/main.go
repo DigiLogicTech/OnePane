@@ -11,6 +11,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+ "strings"
+ "gopkg.in/yaml.v3"
+ "github.com/DigiLogicTech/OnePane/internal/config"
 	"sync"
 	"syscall"
 	"time"
@@ -215,6 +218,46 @@ func setStatus(state, accepted, checkpoint, waitHint, exitCode uint32) {
 	procSetServiceStatus.Call(statusHandle, uintptr(unsafe.Pointer(&s)))
 }
 
+// Registry configuration is written by the MSI, not by the desktop user.
+// A service launched under LocalSystem must use the same root selected by
+// the installation wizard and never fall back after a configured drive fails.
+func onePaneRegistryValue(name string) string {
+ output,err:=exec.Command("reg.exe","query",`HKLM\SOFTWARE\DigiLogic\OnePane`,"/v",name,"/reg:64").Output()
+ if err!=nil{return ""}
+ for _,line:=range strings.Split(string(output),"\n"){
+  if !strings.Contains(line,"REG_SZ"){continue}
+  columns:=strings.SplitN(line,"REG_SZ",2)
+  if len(columns)==2{return strings.TrimSpace(columns[1])}
+ }
+ return ""
+}
+func configuredOnePaneDataRoot(fallback string) string {
+ if value:=strings.TrimSpace(onePaneRegistryValue("DataRoot"));value!="" && filepath.IsAbs(value){return filepath.Clean(value)}
+ return fallback
+}
+func ensureOnePaneConfig(root string)error{
+ path:=filepath.Join(root,"config.yaml")
+ if _,err:=os.Stat(path);err==nil{return nil}else if !os.IsNotExist(err){return err}
+ if err:=os.MkdirAll(root,0700);err!=nil{return err}
+ cfg:=config.Default()
+ cfg.Server.Listen="127.0.0.1:18181"
+ cfg.Server.PreviewListen="127.0.0.1:18182"
+ cfg.Storage.DataDir=filepath.Join(root,"data")
+ cfg.Storage.ProjectRoot=onePaneRegistryValue("ProjectRoot")
+ if cfg.Storage.ProjectRoot==""{cfg.Storage.ProjectRoot=filepath.Join(root,"Projects")}
+ cfg.LocalAI.ModelPoolPath=onePaneRegistryValue("ModelRoot")
+ if cfg.LocalAI.ModelPoolPath==""{cfg.LocalAI.ModelPoolPath=filepath.Join(root,"models")}
+ if !filepath.IsAbs(cfg.Storage.ProjectRoot)||!filepath.IsAbs(cfg.LocalAI.ModelPoolPath){
+  return fmt.Errorf("installer configured relative model or project directory")
+ }
+ buf,err:=yaml.Marshal(cfg);if err!=nil{return err}
+ file,err:=os.OpenFile(path,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
+ if os.IsExist(err){return nil}
+ if err!=nil{return err}
+ defer file.Close()
+ if _,err:=file.Write(buf);err!=nil{_ = os.Remove(path);return err}
+ return file.Sync()
+}
 func runBackend() (retErr error) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -225,8 +268,9 @@ func runBackend() (retErr error) {
 	if programData == "" {
 		programData = `C:\ProgramData`
 	}
-	dataDir := filepath.Join(programData, "OnePane")
+	dataDir := configuredOnePaneDataRoot(filepath.Join(programData,"OnePane"))
 	logDir := filepath.Join(dataDir, "logs")
+	if err:=ensureOnePaneConfig(dataDir);err!=nil{return fmt.Errorf("prepare OnePane persistent configuration: %w",err)}
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return err
 	}

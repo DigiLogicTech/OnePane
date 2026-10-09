@@ -215,6 +215,33 @@ assertContains(qaPlan,'**First full code review:**','first code audit must prece
 assert.ok(qaPlan.indexOf('**First full code review:**')<qaPlan.indexOf('**Vision alignment interview:**')&&
  qaPlan.indexOf('**Vision alignment interview:**')<qaPlan.indexOf('**Second code review and realignment:**'),
  'review gate must preserve user-required audit → questions → second review order');
+const qaReadiness=read('internal/api/qa_backend_readiness.go');
+const qaReadinessTests=read('internal/api/qa_backend_readiness_test.go');
+const qaReadinessNodeHandler=read('internal/api/qa_node_evidence_handler.go');
+const qaSupportProjected=read('internal/webui/static/qa-consolidated-support.js');
+assertContains(qaReadiness,'qaReadinessTimeout = 1500*time.Millisecond',
+ 'on-demand readiness database queries must be time bounded');
+assertContains(qaReadiness,'db.PingContext(deadline)',
+ 'readiness must observe database responsiveness directly');
+assertContains(qaReadiness,'SELECT version FROM schema_migrations',
+ 'readiness must inspect recorded migrations, not assume bootstrap success');
+assertContains(qaReadiness,'migrations.FS.ReadDir(".")',
+ 'readiness must compare recorded migration versions to bundled version list');
+assertContains(qaReadiness,'WHERE id=? AND local=1',
+ 'readiness must check canonical local node registration');
+assertContains(qaReadiness,'requestedID!=serverLocalID',
+ 'remote and forged node IDs must never access backend readiness');
+assertContains(qaReadinessNodeHandler,'s.localNodeID,',
+ 'handler must use internal local Node identity, not user-provided Node ID');
+assertContains(qaReadinessTests,'TestQABackendReadinessNeverProbesDifferentNode',
+ 'readiness must have adversarial remote Node regression tests');
+assert.ok(!qaReadiness.includes('SELECT *')&&!qaReadiness.includes('os.Getenv')&&
+ !qaReadiness.includes('filepath.')&&!qaReadiness.includes('err.Error()'),
+ 'readiness must not export free-form SQL/environment/file information');
+assertContains(qaSupportProjected,'backend_readiness:safeReadiness',
+ 'consolidated bundle must include sanitized backend readiness');
+assertContains(qaSupportProjected,'enumOf(readiness.database_response',
+ 'readiness in reviewed support ZIP must be machine-enum allowlisted');
 const qaServiceProbe=read('internal/api/qa_service_probe.go');
 const qaLinuxServiceProbe=read('internal/api/qa_service_probe_linux.go');
 const qaWindowsServiceProbe=read('internal/api/qa_service_probe_windows.go');

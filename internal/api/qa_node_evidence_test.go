@@ -56,7 +56,7 @@ func TestQANodeEvidenceOnlyContainsAdminSelectedNodeMetadata(t *testing.T){
  }{if _,err:=db.ExecContext(ctx,q);err!=nil{t.Fatal(err)}}
  got,err:=loadQANodeEvidence(ctx,db,"node-a")
  if err!=nil{t.Fatal(err)}
- if got.SchemaVersion!=2||got.NodeRef==""||got.NodeRef=="node-a"||
+ if got.SchemaVersion!=3||got.NodeRef==""||got.NodeRef=="node-a"||
   got.TrustState!="paired"||got.IsLocal||got.LastSeenAt==nil||*got.LastSeenAt!=1000||
   got.ManifestState!="recorded_expiry_unverified"||
   got.ManifestSequence==nil||*got.ManifestSequence!=5||

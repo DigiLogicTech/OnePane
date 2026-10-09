@@ -13,6 +13,7 @@ import (
 // wake targets, task identifiers or remote inference content.
 type qaNodeEvidence struct {
  SchemaVersion int `json:"schema_version"`
+ BackendReadiness *qaBackendReadiness `json:"backend_readiness,omitempty"`
  Scope string `json:"scope"`
  NodeRef string `json:"node_ref"`
  TrustState string `json:"recorded_trust_state"`
@@ -74,7 +75,7 @@ func qaNodeWakeState(s string)string{
 func loadQANodeEvidence(ctx context.Context,db *sql.DB,nodeID string)(qaNodeEvidence,error){
  if db==nil||nodeID==""{return qaNodeEvidence{},errors.New("Node QA source unavailable")}
  out:=qaNodeEvidence{
-  SchemaVersion:2,Scope:"admin_authorised_local_control_plane",
+  SchemaVersion:3,Scope:"admin_authorised_local_control_plane",
   NodeRef:qaOpaqueRef("node",nodeID),
   ManifestState:"not_recorded",PairingStatus:"not_recorded",
   ServiceState:"not_collected",
@@ -86,6 +87,7 @@ func loadQANodeEvidence(ctx context.Context,db *sql.DB,nodeID string)(qaNodeEvid
    "wake and inference receipt totals are historical, not runtime health",
    "remote OS services, drivers, models, disks, thermal and GPU/CPU health are not collected",
    "local OS service-manager state is queried on demand only for the canonical local Node",
+   "local backend readiness is on-demand and does not attest to complete application operation",
    "network endpoints, identities, pairing material, raw errors, logs and model outputs are omitted",
   },
  }

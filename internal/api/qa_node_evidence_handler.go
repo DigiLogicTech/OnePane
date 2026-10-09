@@ -1,6 +1,7 @@
 package api
 
 import (
+ "context"
  "database/sql"
  "errors"
  "net/http"
@@ -34,6 +35,11 @@ func(s *Server)qaNodeEvidenceHandler(w http.ResponseWriter,r *http.Request){
  // canonical local Node ID can trigger this OS query. Remote nodes never
  // receive the server host's service status.
  qaAttachLocalServiceEvidence(r.Context(),&report,nodeID,s.localNodeID,probeLocalOnePaneService)
+ qaAttachBackendReadiness(r.Context(),&report,nodeID,s.localNodeID,
+  func(ctx context.Context)qaBackendReadiness{
+   return qaReadBackend(ctx,s.attentionDB,s.localNodeID,
+    s.tasks!=nil,s.localAI!=nil,s.vault!=nil,s.federation!=nil)
+  })
  w.Header().Set("Cache-Control","no-store")
  writeJSON(w,http.StatusOK,report)
 }

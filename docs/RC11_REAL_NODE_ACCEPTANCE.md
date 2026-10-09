@@ -48,10 +48,14 @@ These are nonsecret public image reference identifiers. Keep credentials in the
 Vault; no registry credentials are needed in test containers. No variable means
 the corresponding physical gate is **skipped, not passed**.
 
-For self-hosted runner security, the physical jobs are eligible **only on
-trusted pushes to** `feature/project-workspace-development-environments`.
-Pull-request workflows do not run third-party code on the self-hosted runner.
-Use the standard GitHub-hosted architecture CI to validate PRs before merge.
+For self-hosted runner security, the physical jobs live in the **separate**
+`.github/workflows/rc11-rootless-physical.yml` workflow and are eligible **only
+on trusted pushes to** `feature/project-workspace-development-environments`.
+The GitHub-hosted `.github/workflows/project-workspace-development-checks.yml`
+may validate pull requests but contains **no self-hosted jobs**. A contributor
+cannot enable self-hosted execution merely by editing a pull-request workflow
+in an unmerged branch. Validate and merge source changes using the
+GitHub-hosted checks first.
 
 ### General dual-Workspace evidence
 

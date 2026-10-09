@@ -508,6 +508,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/library", s.uploadProjectLibrary)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/library/{assetID}/versions", s.listProjectLibraryVersions)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/library/{assetID}/grants", s.grantProjectLibrary)
+	s.mux.HandleFunc("DELETE /v1/projects/{projectID}/library/{assetID}/grants/{workspaceID}", s.revokeProjectLibraryGrant)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/library/{assetID}/versions/{version}/content", s.downloadWorkspaceLibraryVersion)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspace-links", s.projectWorkspaceLinks)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspace-links", s.projectWorkspaceLinks)

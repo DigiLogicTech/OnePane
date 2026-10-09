@@ -73,10 +73,11 @@ jobs:
 
   physical-rootless-node:
     name: Rootless Workspace physical Node smoke (opt-in)
+    # Never run self-hosted physical tests from untrusted pull requests.
     # This gate is intentionally skipped until a repo administrator sets an
     # approved immutable digest already present in the unprivileged runner's
     # local OCI image pool. A skipped gate is not a physical QA pass.
-    if: ${{ vars.ONEPANE_ROOTLESS_SMOKE_IMAGE != '' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feature/project-workspace-development-environments' && vars.ONEPANE_ROOTLESS_SMOKE_IMAGE != '' }}
     runs-on: [self-hosted, linux, x64]
     timeout-minutes: 12
     env:
@@ -112,9 +113,10 @@ jobs:
 
   physical-rootless-godot:
     name: Rootless Godot 4 Workspace build (opt-in)
+    # Never run self-hosted physical tests from untrusted pull requests.
     # Never pull unspecified/mutable engine images onto user-managed Nodes.
     # Approval means a pre-pulled digest and deliberate repository variable.
-    if: ${{ vars.ONEPANE_GODOT_SMOKE_IMAGE != '' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feature/project-workspace-development-environments' && vars.ONEPANE_GODOT_SMOKE_IMAGE != '' }}
     runs-on: [self-hosted, linux, x64]
     timeout-minutes: 12
     env:

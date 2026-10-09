@@ -2,9 +2,7 @@
  * explicit Workspace grants. Content is kept in the configured artifact store.
  * No model obtains broad Library access from rendering this page.
  */
-const a46LoadWorkspaceBase=a44LoadProjectEnvironment;
-a44LoadProjectEnvironment=async function(project,workspace,container) {
- await a46LoadWorkspaceBase(project,workspace,container);
+async function a46MountWorkspaceLibrary(project,workspace,container){
  if(!container.isConnected)return;
  const slot=document.createElement("section");
  slot.className="a46-library a44-environment-subsection";
@@ -12,7 +10,7 @@ a44LoadProjectEnvironment=async function(project,workspace,container) {
  slot.innerHTML="<h3>Project Library</h3><p class='list-meta'>Loading versioned assets…</p>";
  container.append(slot);
  await a46RenderLibrary(project,workspace,slot);
-};
+}
 async function a46RenderLibrary(project,workspace,root){
  if(!root?.isConnected)return;
  const prefix=`/v1/projects/${encodeURIComponent(project.id)}`;

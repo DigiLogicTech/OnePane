@@ -52,9 +52,18 @@ func TestProjectLibraryImmutableArtifactScopedExchange(t *testing.T){
  if err!=nil{t.Fatal(err)}
  granted,err:=svc.ResolveWorkspaceLibraryVersion(ctx,project.ID,target.ID,lib.ID,1)
  if err!=nil||granted.ContentHash!=pub.ContentHash{t.Fatalf("published exact version not readable: %v %+v",err,granted)}
+ // Version enumeration follows the same direct-grant and directional-link
+ // permissions as the content download endpoint, not Project-wide history.
+ publishedVersions,err:=svc.WorkspaceLibraryVersions(ctx,project.ID,target.ID,lib.ID)
+ if err!=nil||len(publishedVersions)!=1||publishedVersions[0].Version!=1{
+  t.Fatalf("enabled publication must expose exact pinned version: %+v %v",publishedVersions,err)
+ }
  disabled,err:=svc.SetWorkspaceLinkEnabled(ctx,ToggleWorkspaceLinkCommand{LinkID:link.ID,ExpectedRevision:link.Revision,ActorPrincipalID:"operator",Enabled:false})
  if err!=nil||disabled.Enabled{t.Fatal(err)}
  if _,err=svc.ResolveWorkspaceLibraryVersion(ctx,project.ID,target.ID,lib.ID,1);err==nil{t.Fatal("link revocation did not revoke publication-based access")}
+ if versions,err:=svc.WorkspaceLibraryVersions(ctx,project.ID,target.ID,lib.ID);err!=ErrCrossWorkspace||len(versions)!=0{
+  t.Fatalf("disabled link still exposed immutable history: %+v %v",versions,err)
+ }
  if err=svc.GrantLibraryAsset(ctx,GrantLibraryAssetCommand{ProjectID:project.ID,AssetID:lib.ID,WorkspaceID:target.ID,VersionPolicy:"pinned",PinnedVersion:1,ActorPrincipalID:"operator"});err!=nil{t.Fatal(err)}
  if _,err=svc.ResolveWorkspaceLibraryVersion(ctx,project.ID,target.ID,lib.ID,1);err!=nil{t.Fatalf("direct pinned grant not honoured: %v",err)}
  if err=svc.RevokeLibraryAsset(ctx,project.ID,lib.ID,target.ID,"operator");err!=nil{t.Fatal(err)}
@@ -86,6 +95,22 @@ func TestProjectLibraryImmutableArtifactScopedExchange(t *testing.T){
  if _,err=svc.ResolveWorkspaceLibraryVersion(ctx,project.ID,target.ID,lib.ID,1);err!=nil{
   t.Fatalf("pinned version v1 cannot be downloaded: %v",err)
  }
+ // An older pinned grant cannot enumerate (or fetch) a newer build, while
+ // the source Workspace's latest grant follows the new head only.
+ targetVersions,err:=svc.WorkspaceLibraryVersions(ctx,project.ID,target.ID,lib.ID)
+ if err!=nil||len(targetVersions)!=1||targetVersions[0].Version!=1{
+  t.Fatalf("target pinned history leaked v2: %+v %v",targetVersions,err)
+ }
+ sourceVersions,err:=svc.WorkspaceLibraryVersions(ctx,project.ID,source.ID,lib.ID)
+ if err!=nil||len(sourceVersions)!=1||sourceVersions[0].Version!=2{
+  t.Fatalf("source latest history must contain only v2: %+v %v",sourceVersions,err)
+ }
+ if versions,err:=svc.WorkspaceLibraryVersions(ctx,project.ID,"foreign-workspace",lib.ID);err!=ErrCrossWorkspace||len(versions)!=0{
+  t.Fatalf("foreign Workspace enumerated Library metadata: %+v %v",versions,err)
+ }
+ if versions,err:=svc.WorkspaceLibraryVersions(ctx,project.ID,target.ID,"foreign-asset");err!=ErrCrossWorkspace||len(versions)!=0{
+  t.Fatalf("unknown/foreign asset disclosed history: %+v %v",versions,err)
+ }
  // Search uses bounded server-side Project metadata and enforces the same
  // grant-filtered Workspace inventory, never scanning unapproved blob data.
  byFilename,err:=svc.SearchLibraryAssets(ctx,project.ID,"CASTLE")
@@ -104,6 +129,10 @@ func TestProjectLibraryImmutableArtifactScopedExchange(t *testing.T){
  if err!=nil||len(missing)!=0{t.Fatalf("search must not invent matches: %+v %v",missing,err)}
  if _,err=svc.SearchLibraryAssets(ctx,project.ID,strings.Repeat("x",257));err!=ErrInvalidCommand{
   t.Fatalf("oversized search must be rejected: %v",err)
+ }
+ if err=svc.RevokeLibraryAsset(ctx,project.ID,lib.ID,target.ID,"operator");err!=nil{t.Fatal(err)}
+ if versions,err:=svc.WorkspaceLibraryVersions(ctx,project.ID,target.ID,lib.ID);err!=ErrCrossWorkspace||len(versions)!=0{
+  t.Fatalf("revoked pinned grant still exposes version list: %+v %v",versions,err)
  }
  // Retention: revoking access never deletes the Project artifact itself.
  if err=artifactSvc.VerifyContent(ctx,raw.ID);err!=nil{t.Fatalf("revoking a link damaged immutable content: %v",err)}

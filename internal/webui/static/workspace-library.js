@@ -36,7 +36,7 @@ async function a46RenderLibrary(project,workspace,root){
     <div class="list-meta">${escapeHtml(a.asset_type)} · v${Number(globalLibrary?a.current_version:(a.accessible_version||a.current_version))} · ${escapeHtml(a.id)}</div></div>
     <span class="pill">Versioned</span></div>
   <div class="toolbar a45-link-actions">
-   ${globalLibrary?`<button type="button" class="btn" data-a46-versions="${escapeHtml(a.id)}">Versions</button>`:""}
+   ${globalLibrary||source?.id?`<button type="button" class="btn" data-a46-versions="${escapeHtml(a.id)}">Versions</button>`:""}
    ${globalLibrary?`<button type="button" class="btn" data-a46-grant="${escapeHtml(a.id)}">Grant Workspace access</button>`:""}
    ${source?.id?`<a class="btn" href="${prefix}/library/${encodeURIComponent(a.id)}/versions/${Number(a.accessible_version||a.current_version)}/content?workspace_id=${encodeURIComponent(source.id)}" title="Rechecked against current Workspace grants when downloaded">Download authorised version</a>`:""}
   </div><div class="a46-versions" data-a46-version-list="${escapeHtml(a.id)}" hidden></div>
@@ -117,9 +117,14 @@ async function a46RenderLibrary(project,workspace,root){
   if(!section.hidden){section.hidden=true;return}
   b.disabled=true;section.hidden=false;section.textContent="Loading versions…";
   try{
-   const versions=await apiRequest(prefix+"/library/"+encodeURIComponent(id)+"/versions");
+   const versionsURL=source?.id
+    ?prefix+"/workspaces/"+encodeURIComponent(source.id)+"/library/"+encodeURIComponent(id)+"/versions"
+    :prefix+"/library/"+encodeURIComponent(id)+"/versions";
+   const versions=await apiRequest(versionsURL);
    section.innerHTML=Array.isArray(versions)&&versions.length?versions.map(v=>`<div class="a46-library-version">
-    <strong>v${Number(v.version)}</strong><span class="list-meta">${escapeHtml(v.content_hash)} · ${Number(v.size_bytes)} bytes</span>
+    <strong>v${Number(v.version)}</strong>
+    <span class="list-meta">${escapeHtml(v.content_hash)} · ${Number(v.size_bytes)} bytes</span>
+    ${source?.id?`<a class="btn" href="${prefix}/library/${encodeURIComponent(id)}/versions/${Number(v.version)}/content?workspace_id=${encodeURIComponent(source.id)}" title="Permission rechecked when downloaded">Download v${Number(v.version)}</a>`:""}
    </div>`).join(""):'<span class="list-meta">No versions.</span>';
   }catch(err){section.textContent="Version history unavailable: "+err.message}finally{b.disabled=false}
  }));

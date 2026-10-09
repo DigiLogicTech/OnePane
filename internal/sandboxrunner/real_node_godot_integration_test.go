@@ -62,7 +62,7 @@ func _ready() -> void:
         push_error("Unable to publish World build output")
         get_tree().quit(2)
         return
-    output.store_string("OnePane Godot World build v1\\n")
+    output.store_string("OnePane Godot World build v1\n")
     output.close()
     print("ONEPANE_GODOT_WORLD_BUILD_OK")
     get_tree().quit(0)

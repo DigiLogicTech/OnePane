@@ -218,6 +218,25 @@ assert.ok(qaPlan.indexOf('**First full code review:**')<qaPlan.indexOf('**Vision
 const qaSource=read('internal/api/qa_snapshot.go');
 const qaAPI=read('internal/api/qa_snapshot_handler.go');
 const qaUI=read('internal/webui/static/workspace-ai-workflow.js');
+const incidentRecorder=read('internal/webui/static/qa-incident-capture.js');
+new vm.Script(incidentRecorder,{filename:'qa-incident-capture.js'});
+require('./validate_qa_incident_capture.js');
+assertContains(index,'/qa-incident-capture.js','QA capture module must be loaded in WebUI');
+assert.ok(index.indexOf('/qa-incident-capture.js')<index.indexOf('/workspace-ai-workflow.js'),
+ 'capture module must load before Workspace QA UI');
+assertContains(incidentRecorder,'MAX_EVENTS=120','capture must have a bounded in-memory event buffer');
+assertContains(incidentRecorder,'MAX_DURATION_MS=10*60*1000','capture must automatically expire');
+assertContains(incidentRecorder,'u.origin!==origin','cross-origin fetches must be excluded');
+assertContains(incidentRecorder,'listeners=[]','capture lifecycle must restore DOM listeners');
+assertContains(incidentRecorder,'if(wrappedFetch&&win.fetch===wrappedFetch)win.fetch=restoreFetch',
+ 'capture must restore the original fetch implementation');
+assertContains(qaUI,'incident.start();paintIncident()','capture requires explicit user action');
+assertContains(qaUI,'incident.mark();paintIncident()','QA operator must be able to mark a defect');
+assertContains(qaUI,'incident.stop();','QA operator must be able to stop a capture');
+assertContains(qaUI,'incident.clear();','QA operator must be able to clear a capture');
+assertContains(qaUI,'incidentReviewedJSON=JSON.stringify(snapshot,null,2)',
+ 'QA incident trace must be previewed before export');
+assertContains(qaUI,'onepane-browser-incident.json','local incident report must be user-initiated');
 const qaSummary=read('internal/webui/static/qa-report-summary.js');
 new vm.Script(qaSummary,{filename:'qa-report-summary.js'});
 require('./validate_qa_report_summary.js');

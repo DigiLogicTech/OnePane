@@ -527,6 +527,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /v1/projects/{projectID}", s.updateProjectPolicy)
 	s.mux.HandleFunc("DELETE /v1/projects/{projectID}", s.deleteProject)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library", s.listWorkspaceLibrary)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library/{assetID}/versions", s.listWorkspaceLibraryVersions)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/runtime", s.getWorkspaceRuntime)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces/{workspaceID}/runtime", s.createWorkspaceRuntime)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/runtime", s.createRuntime)

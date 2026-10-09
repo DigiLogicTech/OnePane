@@ -114,7 +114,7 @@
  const wakeStates=["requested","wake_sent","reconnecting","preparing","ready","failed","timed_out","not_recorded"];
  const serviceStates=["running","stopped","starting","stopping","failed","paused","not_installed","not_collected"];
  function node(n){
-  requireShape(n,2,"admin_authorised_local_control_plane");
+  requireShape(n,3,"admin_authorised_local_control_plane");
   const w=n.wake_attempts||{},f=n.inference_receipts||{},local=n.local_service_observation;
   let service=null;
   if(n.registered_local_node===true&&local&&typeof local==="object"){
@@ -124,6 +124,26 @@
     observed_at_ms:timestamp(local.observed_at_ms)};
    if(service.collection!=="observed")service.state="not_collected";
   }
+  const readiness=n.registered_local_node===true&&n.backend_readiness&&
+   typeof n.backend_readiness==="object"&&!Array.isArray(n.backend_readiness)&&
+   n.backend_readiness.scope==="canonical_local_backend"?n.backend_readiness:null;
+  const safeReadiness=readiness?{
+   scope:"canonical_local_backend",
+   observed_at_ms:timestamp(readiness.observed_at_ms),
+   database_response:enumOf(readiness.database_response,["responding_read_only","unavailable"]),
+   schema_record_status:enumOf(readiness.schema_record_status,
+    ["recorded_versions_match_embedded","recorded_versions_incomplete_or_extra","unavailable"]),
+   recorded_schema_version:count(readiness.recorded_schema_version,9999),
+   embedded_schema_version:count(readiness.embedded_schema_version,9999),
+   local_node_registration:enumOf(readiness.local_node_registration,
+    ["registered","missing","not_verified"]),
+   task_service_wiring:enumOf(readiness.task_service_wiring,["configured_not_probed","not_configured"]),
+   model_service_wiring:enumOf(readiness.model_service_wiring,["configured_not_probed","not_configured"]),
+   vault_service_wiring:enumOf(readiness.vault_service_wiring,["configured_not_probed","not_configured"]),
+   federation_service_wiring:enumOf(readiness.federation_service_wiring,
+    ["configured_not_probed","not_configured"]),
+   evidence_limit:"read-only DB/schema registration observations; no write, integrity or operational attestation"
+  }:null;
   return {schema_version:1,source:"admin_authorised_node_control_plane",
    node_ref:hash(n.node_ref,"node"),registered_local_node:n.registered_local_node===true,
    recorded_trust_state:enumOf(n.recorded_trust_state,trust),
@@ -139,6 +159,7 @@
     failed:count(f.failed),unknown:count(f.unknown),executing:count(f.executing)},
    operating_system_service_state:service?service.state:"not_collected",
    local_service_observation:service,
+   backend_readiness:safeReadiness,
    evidence_limit:"service manager state only for actual local Node; remote services and end-to-end health unverified"};
  }
  function prepare(sources){

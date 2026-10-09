@@ -21,6 +21,11 @@ func (s *Server) workspaceRuntimeContext(w http.ResponseWriter,r *http.Request,w
  if err!=nil{respondDomain(w,nil,err,0);return projectworkspace.Project{},"","",false}
  permission:="project.read";if write{permission="project.write"}
  if !s.authorize(w,r,i,p.WorkspaceID,permission){return projectworkspace.Project{},"","",false}
+ // Workspace runtime provisioning is an execution-capable operation: editing
+ // Project settings must never be sufficient to allocate/start a sandbox.
+ if write && !s.authorize(w,r,i,p.WorkspaceID,"project.run"){
+  return projectworkspace.Project{},"","",false
+ }
  reader,ok:=s.projects.(projectWorkspaceViewReader)
  if !ok{writeError(w,http.StatusServiceUnavailable,"Project Workspace registry unavailable");return projectworkspace.Project{},"","",false}
  workspace,err:=reader.WorkspaceView(r.Context(),workspaceID)

@@ -46,10 +46,19 @@ func exactWorkspaceMount(state ContainerState, expectedPath string) bool {
  if err != nil || expectedPath == "" { return false }
  count := 0
  for _, mount := range state.Mounts {
-  if mount.Type != "bind" { continue }
-  count++
-  if count > 1 || mount.Destination != "/workspace" || !mount.RW ||
-   !filepath.IsAbs(mount.Source) || filepath.Clean(mount.Source) != expected {
+  switch mount.Type {
+  case "tmpfs":
+   // /tmp is the only additional ephemeral mount the managed CLI provisions.
+   if mount.Destination != "/tmp" {return false}
+  case "bind":
+   count++
+   if count > 1 || mount.Destination != "/workspace" || !mount.RW ||
+    !filepath.IsAbs(mount.Source) || filepath.Clean(mount.Source) != expected {
+    return false
+   }
+  default:
+   // Named/anonymous volumes and other mount types are not part of the
+   // approved runtime specification and cannot be silently inherited.
    return false
   }
  }

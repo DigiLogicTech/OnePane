@@ -528,10 +528,10 @@ func writeEnvFile(workspacePath string, env map[string]string) (string, error) {
  if err=f.Chmod(0o600);err!=nil{cleanup();return "",err}
  for _,k:=range keys{
   v:=env[k]
-  if strings.ContainsAny(k,"=\\x00\\r\\n")||strings.ContainsAny(v,"\\x00\\r\\n"){
+  if strings.ContainsAny(k,"=\x00\r\n")||strings.ContainsAny(v,"\x00\r\n"){
    cleanup();return "",ErrInvalidInput
   }
-  if _,err=f.WriteString(k+"="+v+"\\n");err!=nil{cleanup();return "",err}
+  if _,err=f.WriteString(k+"="+v+"\n");err!=nil{cleanup();return "",err}
  }
  if err=f.Close();err!=nil{_=os.Remove(path);return "",err}
  return path,nil

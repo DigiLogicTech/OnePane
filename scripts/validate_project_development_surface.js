@@ -218,6 +218,17 @@ assert.ok(qaPlan.indexOf('**First full code review:**')<qaPlan.indexOf('**Vision
 const qaSource=read('internal/api/qa_snapshot.go');
 const qaAPI=read('internal/api/qa_snapshot_handler.go');
 const qaUI=read('internal/webui/static/workspace-ai-workflow.js');
+const qaSummary=read('internal/webui/static/qa-report-summary.js');
+new vm.Script(qaSummary,{filename:'qa-report-summary.js'});
+require('./validate_qa_report_summary.js');
+assertContains(index,'/qa-report-summary.js','QA summary must be loaded in WebUI before Task controls');
+assert.ok(index.indexOf('/qa-report-summary.js')<index.indexOf('/workspace-ai-workflow.js'),
+ 'QA summary formatter must be loaded before Workspace development UI');
+assertContains(qaUI,'a52MakeQASummary(snapshot)','copyable summary must derive from authorised preview only');
+assertContains(qaUI,'qaCopySummary.disabled=true','QA summary copy must remain disabled before review');
+assertContains(qaUI,'navigator.clipboard.writeText(qaSummaryContent.value)',
+ 'manual user gesture must initiate sanitized QA summary copy');
+
 new vm.Script(qaUI,{filename:'workspace-ai-workflow.js'});
 assertContains(routes,'GET /v1/qa/workspace-snapshot','explicit QA preview route must be registered');
 assertContains(routes,'POST /v1/qa/workspace-bundle','explicit QA export route must be registered');

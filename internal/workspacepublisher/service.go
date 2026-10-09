@@ -50,11 +50,11 @@ func (s *Service) PublishWorkspaceFile(ctx context.Context,c sandboxrunner.Works
   return sandboxrunner.WorkspacePublication{},fmt.Errorf("%w: content checksum mismatch",ErrPublishDenied)
  }
  var tenant,projectID,projectWorkspaceID,taskState,attemptState string
- var runtimeProject,runtimeWorkspace,projectTenant,projectStatus,workspaceStatus,appRuntime,appStatus,appSource string
+ var runtimeProject,runtimeWorkspace,runtimeStatus,projectTenant,projectStatus,workspaceStatus,appRuntime,appStatus,appSource string
  var worker sql.NullString
  var node sql.NullString
  err:=s.db.QueryRowContext(ctx,`SELECT t.workspace_id,t.project_id,t.project_workspace_id,t.state,
- a.status,a.worker_principal_id,r.project_id,r.project_workspace_id,r.node_id,
+ a.status,a.worker_principal_id,r.project_id,r.project_workspace_id,r.node_id,r.status,
  p.workspace_id,p.status,pw.status,app.project_runtime_id,app.status,app.source_kind
  FROM tasks t
  JOIN task_attempts a ON a.task_id=t.id AND a.id=?
@@ -64,13 +64,13 @@ func (s *Service) PublishWorkspaceFile(ctx context.Context,c sandboxrunner.Works
  JOIN project_applications app ON app.id=? AND app.project_runtime_id=r.id
  WHERE t.id=?`,c.AttemptID,c.RuntimeID,c.ApplicationID,c.TaskID).
  Scan(&tenant,&projectID,&projectWorkspaceID,&taskState,
- &attemptState,&worker,&runtimeProject,&runtimeWorkspace,&node,
+ &attemptState,&worker,&runtimeProject,&runtimeWorkspace,&node,&runtimeStatus,
  &projectTenant,&projectStatus,&workspaceStatus,&appRuntime,&appStatus,&appSource)
  if err!=nil{return sandboxrunner.WorkspacePublication{},fmt.Errorf("%w: source ownership cannot be verified",ErrPublishDenied)}
  if tenant!=c.WorkspaceID||tenant!=projectTenant||projectID==""||
   projectID!=runtimeProject||projectWorkspaceID==""||
   projectWorkspaceID!=runtimeWorkspace||appRuntime!=c.RuntimeID||
-  taskState!="running"||attemptState!="running"||!worker.Valid||
+  taskState!="running"||attemptState!="running"||runtimeStatus!="running"||!worker.Valid||
   worker.String==""||projectStatus!="active"||workspaceStatus!="active"||
   appStatus!="running"||appSource!="oci_image"||
   (node.Valid&&node.String!=""&&node.String!=s.localNodeID){

@@ -62,6 +62,18 @@ func workspaceExecutionManifest(ctx context.Context, db *sql.DB, t task.Task) (j
   "runtime_observed_status":observed,
   "runtime_desired_state":desired,
   "applications":apps,
+  "git_inspect_tool":map[string]any{
+   "tool_id":"project.app.git.inspect",
+   "tool_version":"1",
+   "capability_id":"project.app.execute",
+   "actions":[]string{"status","diff","log","tracked_files"},
+   "input_schema":map[string]any{
+    "runtime_id":"registered runtime_id above",
+    "application_id":"one of the application_id values above",
+    "action":"one of the four fixed read-only Git inspections",
+    "timeout_seconds":"optional integer 1..120; default 30",
+   },
+  },
   "command_tool":map[string]any{
    "tool_id":"project.app.exec",
    "tool_version":"1",

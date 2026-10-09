@@ -8,7 +8,8 @@ This is an **incremental, explicitly limited part** of [Debug & QA Diagnostics C
 2. Expand **QA diagnostic snapshot (read-only, opt-in)**.
 3. Choose **Review included data**. OnePane checks the current logged-in principal's `project.read` and `task.read` rights, resolves the exact Project and canonical Workspace and returns up to 50 recent scoped Task status summaries.
 4. Inspect the shown JSON, excluded categories and status. **Generate QA ZIP** becomes available only after successful preview.
-5. Choose **Generate QA ZIP**, then inspect the locally saved `onepane-workspace-qa-snapshot.zip` before deliberately attaching it to a bug report. OnePane does not automatically upload it to a server or vendor.
+5. Optionally choose **Copy sanitized QA summary** to copy a short text report (build version/revision when format-valid, UTC time, Task-state counts and error-event totals). It does **not** copy Task names/objectives, IDs, source paths, prompts, raw traces or log payloads. If the browser blocks Clipboard access, the read-only text area is selected for manual copying. No automatic upload.
+6. Choose **Generate QA ZIP**, then inspect the locally saved `onepane-workspace-qa-snapshot.zip` before deliberately attaching it to a bug report. OnePane does not automatically upload it to a server or vendor.
 
 ### API
 

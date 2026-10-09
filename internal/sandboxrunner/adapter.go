@@ -45,6 +45,8 @@ var safeID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 type baseInput struct {
 	Action              string          `json:"action"`
 	Path                string          `json:"path,omitempty"`
+	ContentBase64       string          `json:"content_base64,omitempty"`
+	ExpectedSHA256      string          `json:"expected_sha256,omitempty"`
 	RuntimeID           string          `json:"runtime_id"`
 	ApplicationID       string          `json:"application_id,omitempty"`
 	Image               string          `json:"image,omitempty"`
@@ -84,6 +86,7 @@ func Register(reg *tool.Registry, adapter *Adapter) error {
 		{ID: ToolAppExec, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppGitInspect, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppFileInspect, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
+		{ID: ToolAppFileEdit, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppGitMutate, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 	}
 	for _, d := range defs {
@@ -183,6 +186,40 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 			"runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
 			"action":in.Action,"succeeded":success,"result":observed,
 			"container":state,"engine":profile,
+		},summary)
+	case ToolAppFileEdit:
+		if !safeID.MatchString(in.ApplicationID)||len(in.Command)!=0||
+			in.Image!=""||in.Message!=""||in.TimeoutSeconds<0||in.TimeoutSeconds>120{
+			return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)
+		}
+		command,digest,size,err:=fileEditCommand(in.Action,in.Path,in.ContentBase64,in.ExpectedSHA256)
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		if !workspaceExists{
+			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Workspace not provisioned",ErrInvalidInput))
+		}
+		state,err:=a.engine.InspectContainer(ctx,in.RuntimeID,in.ApplicationID)
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		if state.Status!="running"||!state.IsolationVerified||
+			state.RuntimeID!=in.RuntimeID||state.ApplicationID!=in.ApplicationID||
+			state.SpecHash==""||!exactWorkspaceMount(state,workspace){
+			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: edit requires verified Workspace sandbox",ErrInvalidInput))
+		}
+		timeout:=in.TimeoutSeconds
+		if timeout==0{timeout=30}
+		execCtx,cancel:=context.WithTimeout(ctx,time.Duration(timeout)*time.Second)
+		defer cancel()
+		observed,err:=a.engine.ExecContainer(execCtx,in.RuntimeID,in.ApplicationID,command)
+		if execCtx.Err()!=nil{return tool.AdapterResult{},execCtx.Err()}
+		if err!=nil{return tool.AdapterResult{},err}
+		// The raw base64 content and argv are never included in the outward
+		// observation. The immutable requested SHA and execution outcome are.
+		succeeded:=observed.ExitCode==0
+		summary:="Workspace file edit returned without applying the requested change"
+		if succeeded{summary="Workspace file edit completed; independent verification remains required"}
+		return result(map[string]any{
+			"runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
+			"action":in.Action,"path":in.Path,"content_sha256":digest,"size_bytes":size,
+			"succeeded":succeeded,"result":observed,"container":state,"engine":profile,
 		},summary)
 	case ToolAppFileInspect:
 		if !safeID.MatchString(in.ApplicationID)||len(in.Command)!=0||in.Image!=""||

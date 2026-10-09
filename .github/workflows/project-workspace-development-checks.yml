@@ -40,10 +40,11 @@ jobs:
       - name: Frontend syntax and runtime-boundary contract
         run: |
           node --check internal/webui/static/project-development-page.js
+          node --check internal/webui/static/workspace-collaboration.js
           node --check internal/webui/static/project-workspace-page.js
           node --check internal/webui/static/app-foundation.js
           node scripts/validate_project_development_surface.js
       - name: Existing sandbox and Project contract tests
         run: |
-          go test ./internal/projectworkspace ./internal/projectruntime ./internal/sandboxrunner ./internal/agentworker ./internal/scheduler ./internal/localai
+          go test ./internal/projectworkspace ./internal/projectruntime ./internal/sandboxrunner ./internal/agentworker ./internal/scheduler ./internal/localai ./internal/api
           go test -tags integration ./internal/projectworkspace

@@ -2,6 +2,7 @@
 "use strict";
 const assert=require("node:assert/strict");
 const {createRecorder,classifyRequest}=require("../internal/webui/static/qa-incident-capture.js");
+async function main(){
 const secret="SECRET_TOKEN_ALPHA_qwerty_987654";
 let time=1710000000000;
 const active=new Map(),timers=new Map(),calls=[];
@@ -98,3 +99,6 @@ assert.equal(controller.start(),true,"expired capture may be restarted only by e
 controller.clear();
 assert.equal(controller.snapshot().status,"idle");
 console.log("PASS: incident capture is bounded, local, opt-in, redacted and auto-expiring");
+
+}
+main().catch(error=>{console.error(error);process.exitCode=1});

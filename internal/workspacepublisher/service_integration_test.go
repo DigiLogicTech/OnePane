@@ -106,6 +106,17 @@ func TestPublishingOCIArtifactRequiresActiveOwnedTaskAndOnlyGrantsSourceWorkspac
  request.TaskID,request.Path,request.ContentHash).Scan(&ledgerCount);err!=nil||ledgerCount!=1{
   t.Fatalf("idempotency record not uniquely completed: count=%d err=%v",ledgerCount,err)
  }
+ // A crash after committing the Library asset but before recording
+ // complete is safely reconciled from the already verified managed blob.
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE workspace_file_publications
+ SET status='in_progress',library_asset_id=NULL,asset_version=NULL
+ WHERE task_id=? AND relative_path=? AND content_hash=?`,
+ request.TaskID,request.Path,request.ContentHash);err!=nil{t.Fatal(err)}
+ reconciled,err:=publisher.PublishWorkspaceFile(ctx,request)
+ if err!=nil||reconciled.ArtifactID!=published.ArtifactID||
+  reconciled.LibraryAssetID!=published.LibraryAssetID||reconciled.Version!=published.Version{
+  t.Fatalf("verified crash-recovery created duplicate: %+v %v",reconciled,err)
+ }
  // An interrupted publication may have written a blob or Library version.
  // Do not re-run an ambiguous external side effect until recovery verifies it.
  interrupted:=request

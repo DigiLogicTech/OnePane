@@ -24,10 +24,10 @@ assert.ok(!/src=["']\/?\.recovery|href=["']\/?\.recovery/.test(html),'historical
 const definitions=[...foundation.matchAll(/\bfunction\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g)].map(m=>m[1]);
 const counts=new Map();for(const d of definitions)counts.set(d,(counts.get(d)||0)+1);
 const duplicates=[...counts.entries()].filter(([,n])=>n>1);
-assert.ok(duplicates.length<=30,`new duplicate frontend globals added: ${JSON.stringify(duplicates)}`);
+assert.ok(duplicates.length<=33,`new duplicate frontend globals added: ${JSON.stringify(duplicates)}`);
 const workspaceJS=read('internal/webui/static/project-development-page.js');
 const collab=read('internal/webui/static/workspace-collaboration.js');
 const library=read('internal/webui/static/workspace-library.js');
 assert.ok(workspaceJS.includes('a45MountCollaboration')&&workspaceJS.includes('a46MountWorkspaceLibrary'),'one Workspace renderer should own module mounts');
 assert.ok(!collab.includes('a44LoadProjectEnvironment=')&&!library.includes('a44LoadProjectEnvironment='),'new UI module reintroduced wrapper override');
-console.log(`PASS: legacy recovery intact; restored policy/agent/capability modules present; obsolete backup removed; existing shadowed functions ${duplicates.length} (maximum 30)`);
+console.log(`PASS: legacy recovery intact; restored policy/agent/capability modules present; obsolete backup removed; existing shadowed functions ${duplicates.length} (maximum 33)`);

@@ -108,8 +108,7 @@ jobs:
             exit 1
           fi
       - name: Real OCI network, command, filesystem and teardown acceptance
-        run: go test -tags integration ./internal/sandboxrunner -run '^(TestRealRootlessNodeSmoke|TestRealRootlessWorkspaceIsolation)
- -v -count=1 -timeout 9m
+        run: go test -tags integration ./internal/sandboxrunner -run '^(TestRealRootlessNodeSmoke|TestRealRootlessWorkspaceIsolation)$' -v -count=1 -timeout 9m
 
   physical-rootless-godot:
     name: Rootless Godot 4 Workspace build (opt-in)

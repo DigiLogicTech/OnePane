@@ -40,6 +40,8 @@ assertContains(css,'var(--text)','development view must use shared theme text');
 const links=read('internal/webui/static/workspace-collaboration.js');
 const lib=read('internal/webui/static/workspace-library.js');
 const libRoute=read('internal/webui/static/project-library-route.js');
+const runtimeUI=read('internal/webui/static/workspace-runtime-controls.js');
+new vm.Script(runtimeUI,{filename:'workspace-runtime-controls.js'});
 const api=read('internal/api/project_library.go');
 const routes=read('internal/api/server.go');
 const migration=read('migrations/0036_workspace_artifact_links.sql');
@@ -51,6 +53,9 @@ assertContains(index,'/workspace-library.js','Project Library UI must be loaded'
 assertContains(index,'/project-library-route.js','first-class Library route must be loaded');
 assert.ok(index.indexOf('/workspace-collaboration.js')<index.indexOf('/workspace-library.js'),'Library loads after collaboration');
 assertContains(libRoute,'pages.library','global Library navigation must register');
+assertContains(ui,'a48MountWorkspaceRuntime','canonical Workspace sandbox must be mounted');
+assertContains(runtimeUI,'/desired-state','Workspace runtime lifecycle must use governed runtime endpoint');
+assertContains(runtimeUI,'@sha256:','toolchains must require pinned images');
 assertContains(ui,'a45MountCollaboration','Development renderer must mount collaboration explicitly');
 assertContains(ui,'a46MountWorkspaceLibrary','Development renderer must mount Library explicitly');
 assertContains(links,'async function a45MountCollaboration','collaboration must export a mount function');

@@ -38,6 +38,7 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    <option value="finished">Completed, blocked or failed</option></select></label>
   <p class="list-meta" id="a49TaskCount" role="status">Loading Workspace Tasks…</p>
   <p class="list-meta" id="a49OutputStatus" role="status"></p>
+  <div id="a49PublicationReviews" role="status"></div>
   <div id="a49TaskList"></div>
  </section>`;
  let taskRows=[],publishedOutputs=[];
@@ -95,6 +96,26 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    }catch(error){
     publishedOutputs=[];
     if(outputStatus)outputStatus.textContent="Published output inventory unavailable: "+
+     String(error.message||"Permission denied");
+   }
+   const reviewHost=section.querySelector("#a49PublicationReviews");
+   try{
+    const reviews=await apiRequest("/v1/projects/"+encodeURIComponent(project.id)+
+     "/workspaces/"+encodeURIComponent(canonical.id)+"/publication-reviews");
+    if(!section.isConnected||section.dataset.workspaceId!==String(workspace.id))return;
+    const pending=Array.isArray(reviews)?reviews:[];
+    if(reviewHost)reviewHost.innerHTML=pending.length?
+     '<section class="a49-publication-review" aria-label="Publication recovery review">'+
+     '<strong>Publication review needed</strong>'+
+     '<p class="list-meta">These records have been incomplete for at least five minutes. A write may still be in progress or its outcome may be unknown. Inspect Task evidence and logs before any retry.</p>'+
+     pending.map(v=>'<div class="a49-publication-review-row"><strong>'+
+       escapeHtml(v.relative_path)+'</strong><span>Task '+escapeHtml(v.task_id)+
+       ' · '+escapeHtml(v.stage==="artifact_recorded"?"Managed artifact recorded":"Reserved; artifact status unknown")+
+       ' · Last update '+escapeHtml(Number(v.last_updated_at)>0?
+        new Date(Number(v.last_updated_at)).toLocaleString():"Unknown")+
+       '</span></div>').join("")+'</section>':"";
+   }catch(error){
+    if(reviewHost)reviewHost.textContent="Publication review status unavailable: "+
      String(error.message||"Permission denied");
    }
    paintTasks();

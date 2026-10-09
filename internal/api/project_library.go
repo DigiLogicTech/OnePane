@@ -21,6 +21,7 @@ type projectLibraryService interface {
  WorkspaceLibraryAssets(context.Context,string,string,string)([]projectworkspace.LibraryAsset,error)
  WorkspaceLibraryVersions(context.Context,string,string,string)([]projectworkspace.LibraryVersion,error)
  WorkspacePublishedOutputs(context.Context,string,string)([]projectworkspace.WorkspacePublishedOutput,error)
+ WorkspacePublicationReviews(context.Context,string,string)([]projectworkspace.WorkspacePublicationReview,error)
  LibraryVersions(context.Context,string,string)([]projectworkspace.LibraryVersion,error)
  GrantLibraryAsset(context.Context,projectworkspace.GrantLibraryAssetCommand)error
  RevokeLibraryAsset(context.Context,string,string,string,string)error
@@ -64,6 +65,16 @@ func (s *Server) listWorkspacePublishedOutputs(w http.ResponseWriter,r *http.Req
  if !ok{writeError(w,http.StatusServiceUnavailable,"Workspace Task outputs unavailable");return}
  outputs,err:=lib.WorkspacePublishedOutputs(r.Context(),p.ID,workspaceID)
  respondDomain(w,outputs,err,http.StatusOK)
+}
+
+// Read-only operator visibility for aged unresolved Workspace publications.
+// This endpoint never starts a Task, reuses credentials or retries a blob write.
+func (s *Server) listWorkspacePublicationReviews(w http.ResponseWriter,r *http.Request) {
+ p,workspaceID,_,ok:=s.workspaceRuntimeContext(w,r,false);if !ok{return}
+ lib,ok:=s.projects.(projectLibraryService)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Workspace publication reviews unavailable");return}
+ reviews,err:=lib.WorkspacePublicationReviews(r.Context(),p.ID,workspaceID)
+ respondDomain(w,reviews,err,http.StatusOK)
 }
 
 func (s *Server) listProjectLibrary(w http.ResponseWriter,r *http.Request) {

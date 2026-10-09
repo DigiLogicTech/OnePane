@@ -122,10 +122,23 @@ func TestPublishingOCIArtifactRequiresActiveOwnedTaskAndOnlyGrantsSourceWorkspac
  SET status='in_progress',library_asset_id=NULL,asset_version=NULL
  WHERE task_id=? AND relative_path=? AND content_hash=?`,
  request.TaskID,request.Path,request.ContentHash);err!=nil{t.Fatal(err)}
+ // A five-minute-old reservation with a previously recorded Artifact must
+ // be visible for review, but not treated as proof a retry is safe.
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE workspace_file_publications
+ SET updated_at=? WHERE task_id=? AND relative_path=? AND content_hash=?`,
+ now-6*60*1000,request.TaskID,request.Path,request.ContentHash);err!=nil{t.Fatal(err)}
+ reviews,err:=projects.WorkspacePublicationReviews(ctx,p.ID,world.ID)
+ if err!=nil||len(reviews)!=1||reviews[0].Stage!="artifact_recorded"{
+  t.Fatalf("stale staged Artifact publication not visible for review: %+v %v",reviews,err)
+ }
  reconciled,err:=publisher.PublishWorkspaceFile(ctx,request)
  if err!=nil||reconciled.ArtifactID!=published.ArtifactID||
   reconciled.LibraryAssetID!=published.LibraryAssetID||reconciled.Version!=published.Version{
   t.Fatalf("verified crash-recovery created duplicate: %+v %v",reconciled,err)
+ }
+ reviews,err=projects.WorkspacePublicationReviews(ctx,p.ID,world.ID)
+ if err!=nil||len(reviews)!=0{
+  t.Fatalf("reconciled publication still flagged incomplete: %+v %v",reviews,err)
  }
  // An interrupted publication may have written a blob or Library version.
  // Do not re-run an ambiguous external side effect until recovery verifies it.
@@ -136,6 +149,22 @@ func TestPublishingOCIArtifactRequiresActiveOwnedTaskAndOnlyGrantsSourceWorkspac
  relative_path,content_hash,status,created_at,updated_at)
  VALUES(?,?,?,?,?,?,?,'in_progress',?,?)`,
  interrupted.TaskID,p.ID,world.ID,runtime.ID,app.ID,interrupted.Path,interrupted.ContentHash,now,now);err!=nil{t.Fatal(err)}
+ reviews,err=projects.WorkspacePublicationReviews(ctx,p.ID,world.ID)
+ if err!=nil||len(reviews)!=0{
+  t.Fatalf("fresh reservation must not be mistaken for a stale failure: %+v %v",reviews,err)
+ }
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE workspace_file_publications
+ SET updated_at=? WHERE task_id=? AND relative_path=? AND content_hash=?`,
+ now-6*60*1000,interrupted.TaskID,interrupted.Path,interrupted.ContentHash);err!=nil{t.Fatal(err)}
+ reviews,err=projects.WorkspacePublicationReviews(ctx,p.ID,world.ID)
+ if err!=nil||len(reviews)!=1||reviews[0].RelativePath!=interrupted.Path||
+  reviews[0].Stage!="reserved"{
+  t.Fatalf("unknown-outcome reservation missing from scoped review: %+v %v",reviews,err)
+ }
+ storyReviews,err:=projects.WorkspacePublicationReviews(ctx,p.ID,story.ID)
+ if err!=nil||len(storyReviews)!=0{
+  t.Fatalf("Story leaked World publication recovery metadata: %+v %v",storyReviews,err)
+ }
  if _,err:=publisher.PublishWorkspaceFile(ctx,interrupted);err!=ErrPublicationRecoveryRequired{
   t.Fatalf("uncertain publication outcome silently retried: %v",err)
  }

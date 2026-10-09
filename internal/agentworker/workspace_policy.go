@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/DigiLogicTech/OnePane/internal/authority"
+	"github.com/DigiLogicTech/OnePane/internal/task"
 )
 
 type workspaceAccessPolicy struct {
@@ -36,6 +37,20 @@ func routingPolicyFromCompletion(raw json.RawMessage) onePaneRoutingPolicy {
 	}
 	_ = json.Unmarshal(raw, &envelope)
 	return envelope.OnePaneRouting
+}
+
+// effectiveRemoteModelAllowance preserves legacy Project-only routing while
+// preventing pre-policy named Workspace Tasks from silently selecting cloud.
+// A deliberate Workspace remote_models=true remains governed by scheduler,
+// provider approval and budget checks.
+func effectiveRemoteModelAllowance(t task.Task, p onePaneRoutingPolicy, legacyDefault bool) bool {
+	if p.WorkspaceAccess.RemoteModels != nil {
+		return *p.WorkspaceAccess.RemoteModels
+	}
+	if t.ProjectWorkspaceID != nil {
+		return false
+	}
+	return legacyDefault
 }
 
 // inheritOnePaneRouting preserves the parent workspace routing/access envelope for

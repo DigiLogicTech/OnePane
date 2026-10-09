@@ -90,6 +90,7 @@ type mockWorkspacePublicationSink struct{
 }
 func (p *mockWorkspacePublicationSink) PublishWorkspaceFile(_ context.Context,r WorkspacePublicationRequest)(WorkspacePublication,error){
  p.called++;p.req=r
+ p.req.Content=append([]byte(nil),r.Content...) // consume synchronously, not an alias of the adapter scrub buffer
  return p.outcome,nil
 }
 func TestPublishedOCIContentNeverAppearsInToolObservations(t *testing.T){

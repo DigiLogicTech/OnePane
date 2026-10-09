@@ -19,6 +19,7 @@ type Adapter struct {
 	dataDir string
 	engine  Engine
 	secrets SecretResolver
+	publisher WorkspacePublicationSink
 }
 
 func NewAdapter(dataDir string, engine Engine, resolvers ...SecretResolver) *Adapter {
@@ -37,6 +38,8 @@ func (a *Adapter) SetSecretResolver(r SecretResolver) {
 	}
 }
 
+func (a *Adapter) SetPublisher(p WorkspacePublicationSink){if a!=nil{a.publisher=p}}
+
 func (a *Adapter) ID() string      { return AdapterID }
 func (a *Adapter) Version() string { return AdapterVersion }
 
@@ -45,6 +48,8 @@ var safeID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 type baseInput struct {
 	Action              string          `json:"action"`
 	Path                string          `json:"path,omitempty"`
+	Name                string          `json:"name,omitempty"`
+	MediaType           string          `json:"media_type,omitempty"`
 	ContentBase64       string          `json:"content_base64,omitempty"`
 	ExpectedSHA256      string          `json:"expected_sha256,omitempty"`
 	RuntimeID           string          `json:"runtime_id"`
@@ -87,6 +92,7 @@ func Register(reg *tool.Registry, adapter *Adapter) error {
 		{ID: ToolAppGitInspect, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppFileInspect, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppFileEdit, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
+		{ID: ToolAppFilePublish, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppGitMutate, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 	}
 	for _, d := range defs {
@@ -187,6 +193,49 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 			"action":in.Action,"succeeded":success,"result":observed,
 			"container":state,"engine":profile,
 		},summary)
+	case ToolAppFilePublish:
+		if req.TaskID==nil||req.AttemptID==nil||a.publisher==nil||
+			!safeID.MatchString(in.ApplicationID)||in.Action!="publish"||
+			len(in.Command)!=0||in.Image!=""||in.Message!=""||
+			in.ContentBase64!=""||in.ExpectedSHA256!=""||
+			in.TimeoutSeconds<0||in.TimeoutSeconds>120{
+			return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)
+		}
+		command,err:=publicationReadCommand(in.Path)
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		if !workspaceExists{return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)}
+		state,err:=a.engine.InspectContainer(ctx,in.RuntimeID,in.ApplicationID)
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		if state.Status!="running"||!state.IsolationVerified||
+			state.RuntimeID!=in.RuntimeID||state.ApplicationID!=in.ApplicationID||
+			state.SpecHash==""||!exactWorkspaceMount(state,workspace){
+			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: publication requires verified Workspace OCI application",ErrInvalidInput))
+		}
+		timeout:=in.TimeoutSeconds
+		if timeout==0{timeout=30}
+		execCtx,cancel:=context.WithTimeout(ctx,time.Duration(timeout)*time.Second)
+		defer cancel()
+		observed,err:=a.engine.ExecContainer(execCtx,in.RuntimeID,in.ApplicationID,command)
+		if execCtx.Err()!=nil{return tool.AdapterResult{},execCtx.Err()}
+		if err!=nil{return tool.AdapterResult{},err}
+		if observed.ExitCode!=0{
+			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: OCI publication source unavailable or not a regular bounded file",ErrInvalidInput))
+		}
+		bytes,sha,err:=decodePublicationRead(observed.Stdout)
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		publication,err:=a.publisher.PublishWorkspaceFile(ctx,WorkspacePublicationRequest{
+			WorkspaceID:req.WorkspaceID,TaskID:*req.TaskID,AttemptID:*req.AttemptID,
+			RuntimeID:in.RuntimeID,ApplicationID:in.ApplicationID,
+			Path:in.Path,Name:in.Name,MediaType:in.MediaType,
+			Content:bytes,ContentHash:sha,
+		})
+		for i:=range bytes{bytes[i]=0}
+		if err!=nil{return tool.AdapterResult{},err}
+		return result(map[string]any{
+			"runtime_id":in.RuntimeID,"application_id":in.ApplicationID,"path":in.Path,
+			"publication":publication,"succeeded":true,
+			"note":"content verified by immutable artifact blob; other Workspaces require explicit Library grants",
+		}, "Workspace artefact published to Project Library")
 	case ToolAppFileEdit:
 		if !safeID.MatchString(in.ApplicationID)||len(in.Command)!=0||
 			in.Image!=""||in.Message!=""||in.TimeoutSeconds<0||in.TimeoutSeconds>120{

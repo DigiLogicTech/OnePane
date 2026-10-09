@@ -216,6 +216,27 @@ assert.ok(qaPlan.indexOf('**First full code review:**')<qaPlan.indexOf('**Vision
  qaPlan.indexOf('**Vision alignment interview:**')<qaPlan.indexOf('**Second code review and realignment:**'),
  'review gate must preserve user-required audit → questions → second review order');
 const qaModel=read('internal/api/qa_model_evidence.go');
+const qaRedactionMigration=read('migrations/0042_redact_legacy_agentcheck_errors.sql');
+const qaLegacyTestbed=read('internal/localai/testbed.go');
+const qaLegacyMigrationTests=read('internal/localai/agentcheck_failure_test.go');
+assertContains(qaRedactionMigration,"json_remove(qualification_json,'$.evidence.errors')",
+ 'legacy local model qualification must have raw free-text errors redacted');
+assertContains(qaRedactionMigration,"json_remove(qualification_json,'$.qualification.evidence.errors')",
+ 'copied model identity qualification must have raw error text redacted');
+assertContains(qaRedactionMigration,"onepane.manual-agent-check/v2",
+ 'legacy redaction must only touch known unsafe manual evidence format');
+assert.ok(!qaRedactionMigration.includes('DELETE FROM model_testbed_sessions')&&
+ !qaRedactionMigration.includes('DELETE FROM model_spec_sheets'),
+ 'redaction must preserve all models, admissions and sessions');
+assertContains(qaLegacyTestbed,'onepane.manual-agent-check/v3',
+ 'new failed Agent Checks must never write the vulnerable v2 qualification format');
+assertContains(qaLegacyTestbed,'structured_failure_observations',
+ 'successful completion must retain the typed count of observed failures');
+assert.ok(!qaLegacyTestbed.includes('failure.Error()')&&
+ !qaLegacyTestbed.includes('evidence["errors"]'),
+ 'no raw Agent Check errors may be written or copied to a qualification report');
+assertContains(qaLegacyMigrationTests,'TestLegacyAgentCheckErrorMigrationSelectivelyRedacts',
+ 'migration must be regression-tested for preservation of unrelated qualification evidence');
 const qaFailureMigration=read('migrations/0041_agentcheck_failure_observations.sql');
 const qaFailureWriter=read('internal/localai/agentcheck_failure.go');
 const qaTestbedWriter=read('internal/localai/testbed.go');

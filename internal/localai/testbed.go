@@ -292,9 +292,18 @@ func (s *Service) TestbedSession(ctx context.Context, idv string) (TestbedSessio
 // An unsuccessful run never changes admission or invents a benchmark.
 func (s *Service) markManualAgentCheckFailed(ctx context.Context, sess TestbedSession, failure error) {
  if failure==nil{return}
- msg:=strings.TrimSpace(failure.Error())
- if len(msg)>500{msg=msg[:500]+"…"}
- raw,_:=json.Marshal(map[string]any{"status":"blocked","profile_version":"onepane.manual-agent-check/v2","evidence":map[string]any{"errors":[]string{msg},"infrastructure_error":true},"session_id":sess.ID})
+ // The former v2 qualification stored raw runtime error text, potentially
+ // exposing local model paths, prompts, bearer tokens or process output to
+ // any Spec Sheet reader. The v3 record includes only fixed labels; the
+ // separately authorized QA evidence endpoint provides observed stages.
+ raw,_:=json.Marshal(map[string]any{
+  "status":"blocked","profile_version":"onepane.manual-agent-check/v3",
+  "evidence":map[string]any{
+   "infrastructure_error":true,
+   "failure_details":"inspect_structured_agentcheck_evidence",
+  },
+  "session_id":sess.ID,
+ })
  _,_=s.db.ExecContext(ctx,`UPDATE model_spec_sheets SET qualification_json=?,updated_at=?,revision=revision+1 WHERE deployment_id=? AND hardware_profile_id=?`,string(raw),s.clock.UnixMilli(),sess.DeploymentID,sess.HardwareProfileID)
 }
 func (s *Service) RunTestbedTurn(ctx context.Context, sessionID string, cmd TestbedTurnCommand) (completed TestbedTurn, resultErr error) {
@@ -456,14 +465,16 @@ func (s *Service) CompleteTestbed(ctx context.Context, sessionID string) error {
   }
  }
  evidence["plain_tested"]=plainChecked;evidence["json_tested"]=jsonChecked;evidence["tools_tested"]=toolsChecked
- // Retain errors from unsuccessful probes in the same session; do not
- // confuse a failed network/runtime request with a capability rejection.
- if sheet,err:=s.SpecSheet(ctx,sess.DeploymentID);err==nil {
-  var prior struct {SessionID string `json:"session_id"`;Evidence struct{Errors []string `json:"errors"`} `json:"evidence"`}
-  if json.Unmarshal(sheet.Qualification,&prior)==nil&&prior.SessionID==sessionID&&len(prior.Evidence.Errors)>0{evidence["errors"]=prior.Evidence.Errors}
- }
+ // Read the separate typed, immutable failure journal rather than copying
+ // legacy qualification errors (which could contain arbitrary runtime text).
+ // An eventually-successful probe after an earlier infrastructure failure
+ // remains limited; it must not be silently promoted to fully passed.
+ var observedFailures int64
+ if err:=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM model_agentcheck_failure_observations
+   WHERE session_id=? AND deployment_id=?`,sessionID,sess.DeploymentID).Scan(&observedFailures);err!=nil{return err}
+ evidence["structured_failure_observations"]=observedFailures
  status:="limited"
- if evidence["plain_ok"]==true&&evidence["json_ok"]==true&&evidence["schema_ok"]==true&&evidence["tools_ok"]==true{status="passed"}
+ if observedFailures==0&&evidence["plain_ok"]==true&&evidence["json_ok"]==true&&evidence["schema_ok"]==true&&evidence["tools_ok"]==true{status="passed"}
  metrics:=map[string]any{"successful_turns":len(turns)}
  if totalTokens>0&&totalElapsed>0{metrics["completion_tokens_per_second"]=float64(totalTokens)*1000/float64(totalElapsed)}
  quality:=map[string]any{"status":status,"profile_version":"onepane.manual-agent-check/v2","evidence":evidence,"metrics":metrics}

@@ -83,8 +83,17 @@ func TestSQLiteManualTestbedRequiredForProductionAdmission(t *testing.T) {
 	if aborted.Status != "cancelled" { t.Fatalf("failed testbed should be cancelled, got %q",aborted.Status) }
 	sheetAfterAbort,err:=svc.SpecSheet(ctx,"dep")
 	if err!=nil {t.Fatal(err)}
-	if !strings.Contains(string(sheetAfterAbort.Qualification),"CUDA executable was missing"){
-	 t.Fatalf("missing failed Agent Check diagnostic evidence: %s",sheetAfterAbort.Qualification)
+	if strings.Contains(string(sheetAfterAbort.Qualification),"CUDA executable was missing") ||
+     strings.Contains(string(sheetAfterAbort.Qualification),`"errors"`){
+	 t.Fatalf("Agent Check legacy qualification leaked raw error content: %s",sheetAfterAbort.Qualification)
+	}
+	if !strings.Contains(string(sheetAfterAbort.Qualification),"onepane.manual-agent-check/v3") ||
+     !strings.Contains(string(sheetAfterAbort.Qualification),"inspect_structured_agentcheck_evidence"){
+	 t.Fatalf("missing safe v3 Agent Check diagnostic guidance: %s",sheetAfterAbort.Qualification)
+	}
+	var typedCount int
+	if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM model_agentcheck_failure_observations WHERE session_id=? AND stage='session_abort' AND category='abort_requested'`,failed.ID).Scan(&typedCount);err!=nil||typedCount!=1{
+	 t.Fatalf("expected one machine-coded abort observation; count=%d error=%v",typedCount,err)
 	}
 	allowTools := false
 	sheet, err := svc.AdmitModel(ctx, "dep", AdmissionCommand{Status: AdmissionRestricted, ActorPrincipalID: "admin", Restrictions: ModelRestrictions{MaxContextTokens: 8192, DenyCapabilities: []string{"agent.tool"}, AllowToolUse: &allowTools, Notes: []string{"manual trial found weak tool calling"}}})

@@ -33,7 +33,7 @@ async function a48MountWorkspaceRuntime(project,workspace,container){
  const buttons=runtime?
   '<button type="button" class="btn" id="a48Start" '+(desired==="running"?"disabled":"")+'>Start</button> <button type="button" class="btn" id="a48Stop" '+(desired==="stopped"?"disabled":"")+'>Stop</button>':
   '<button type="button" class="btn primary" id="a48Create">Create isolated sandbox</button>';
- section.innerHTML='<div class="card-header"><div><h3>Workspace sandbox</h3><p class="list-meta">Dedicated execution identity; independently requested and observed.</p></div>'+
+ section.innerHTML='<div class="card-header"><div><h3>Workspace sandbox</h3><p class="list-meta">Dedicated execution identity. Actual execution requires a compatible rootless Podman/Docker host; remote Node placement is not yet verified.</p></div>'+
  '<span class="pill '+(verified?"good":"")+'">'+escapeHtml(status)+'</span></div>'+
  '<div class="a48-runtime-grid">'+
  a44DevelopmentSection("Requested state",desired,"Operations may remain queued until capacity is available")+

@@ -183,6 +183,16 @@ type CreateRuntimeCommand struct {
 	RequestID, TraceID                                           *string
 }
 
+// SetApplicationDesiredStateCommand changes the requested application lifecycle.
+ // Observed state is updated ONLY by the existing independent observer.
+type SetApplicationDesiredStateCommand struct {
+ ApplicationID string
+ ExpectedRevision int64
+ DesiredState AppDesiredState
+ ActorPrincipalID string
+ RequestID, TraceID *string
+}
+
 type SetRuntimeDesiredStateCommand struct {
 	RuntimeID          string
 	ExpectedRevision   int64

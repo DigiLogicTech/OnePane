@@ -52,6 +52,8 @@ func TestAgentWorkerSandboxToolOwnershipIsBoundToTaskWorkspace(t *testing.T) {
  runtimeInput:=json.RawMessage(`{"runtime_id":"`+worldRun.ID+`"}`)
  for _,tc:=range []struct{name,tool,ref string;input json.RawMessage}{
   {"exec",sandboxrunner.ToolAppExec,ref,execInput},
+  {"git_inspect",sandboxrunner.ToolAppGitInspect,ref,
+   json.RawMessage(`{"runtime_id":"`+worldRun.ID+`","application_id":"`+app.ID+`","action":"status"}`)},
   {"pull",sandboxrunner.ToolAppPull,ref,imageInput},
   {"image_inspect",sandboxrunner.ToolImageInspect,ref,imageInput},
   {"runtime_inspect",sandboxrunner.ToolRuntimeInspect,ref,runtimeInput},
@@ -66,6 +68,8 @@ func TestAgentWorkerSandboxToolOwnershipIsBoundToTaskWorkspace(t *testing.T) {
  var denied=[]struct{name string;task task.Task;tool,ref string;input json.RawMessage}{
   {"foreign_workspace_runtime",taskWorld,sandboxrunner.ToolRuntimeInspect,"project_runtime:"+storyRun.ID,
    json.RawMessage(`{"runtime_id":"`+storyRun.ID+`"}`)},
+  {"foreign_git_app",taskWorld,sandboxrunner.ToolAppGitInspect,ref,
+   json.RawMessage(`{"runtime_id":"`+worldRun.ID+`","application_id":"`+storyApp.ID+`","action":"status"}`)},
   {"foreign_workspace_app",taskWorld,sandboxrunner.ToolAppExec,ref,
    json.RawMessage(`{"runtime_id":"`+worldRun.ID+`","application_id":"`+storyApp.ID+`"}`)},
   {"resource_input_mismatch",taskWorld,sandboxrunner.ToolAppExec,"project_runtime:"+storyRun.ID,execInput},

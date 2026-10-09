@@ -34,7 +34,7 @@ async function a44LoadProjectEnvironment(project,workspace,container){
    <div class="card-header"><div><div class="card-title">Development environment</div>
    <div class="list-meta">Observed Project runtime and available development tools — not dashboard settings.</div></div>
    <span class="pill ${observed==="running"?"good":observed==="failed"?"bad":""}">${safe(a44RuntimeStatusLabel(observed))}</span></div>
-   <div class="a44-environment-note"><strong>Current architecture: shared Project sandbox</strong>
+   <div class="a44-environment-note"><strong>Legacy shared Project sandbox (compatibility)</strong>
    <p>This runtime belongs to <strong>${safe(project.name||"the Project")}</strong>, not exclusively to the
    <strong>${safe(workspace.name||"current")}</strong> Workspace. Installing an engine here would be visible to
    other Workspaces. Separate Workspace sandboxes are the next required backend milestone.</p></div>
@@ -62,6 +62,7 @@ async function a44LoadProjectEnvironment(project,workspace,container){
  container.querySelector("#a44OpenProjectModels")?.addEventListener("click",()=>openRoute("models"));
  // One canonical renderer owns the Workspace view: feature modules provide
  // explicit mount functions rather than stacking global function overrides.
+ if(typeof a48MountWorkspaceRuntime==="function")await a48MountWorkspaceRuntime(project,workspace,container);
  if(typeof a45MountCollaboration==="function")await a45MountCollaboration(project,workspace,container);
  if(typeof a46MountWorkspaceLibrary==="function")await a46MountWorkspaceLibrary(project,workspace,container);
 }

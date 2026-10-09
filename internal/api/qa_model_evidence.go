@@ -9,7 +9,7 @@ import (
 
 // A strictly field-allowlisted, *read-only* view of observed local Agent Check
 // state. Testbed turns contain full prompts and responses; this query must
-// never read or serialise those columns, placement JSON, notes or last_error.
+// never read or serialise those columns, placement data or free-text errors.
 const qaModelSessionCap=10
 
 type qaModelSession struct {

@@ -158,3 +158,41 @@ func TestHistoricalProjectOnlyToolCompatibilityIsPreserved(t *testing.T){
   t.Fatalf("legacy Project-only Task unexpectedly restricted: %v",err)
  }
 }
+
+func TestFilesystemNoneDeniesImplicitOCIWorkspaceMount(t *testing.T){
+ noFilesystem:=completionWithAccess(map[string]any{
+  "mode":"brokered","project_workspace_id":"world","filesystem":"none",
+  "internet":false,"lan":false,"browser":false,"computer":false,"secrets":"none",
+ })
+ for _,tc:=range []struct{name,tool string;mode authority.ActionMode}{
+  {"command","project.app.exec",authority.ActionExecuteSandboxed},
+  {"start_app","project.app.ensure",authority.ActionMutate},
+  {"create_runtime","project.runtime.ensure",authority.ActionMutate},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   if err:=workspaceToolAllowed(noFilesystem,"project.app.execute",tc.mode,
+    tc.tool,"project_runtime:world");err==nil{
+    t.Fatal("filesystem:none allowed implicitly writable OCI Workspace mount")
+   }
+  })
+ }
+ if err:=workspaceToolAllowed(noFilesystem,"project.runtime.observe",
+  authority.ActionObserve,"project.app.inspect","project_runtime:world");err!=nil{
+  t.Fatalf("read-only OCI state observation incorrectly treated as file access: %v",err)
+ }
+ workspaceOnly:=completionWithAccess(map[string]any{
+  "mode":"brokered","project_workspace_id":"world","filesystem":"workspace-only",
+  "internet":false,"lan":false,"browser":false,"computer":false,"secrets":"none",
+ })
+ if err:=workspaceToolAllowed(workspaceOnly,"project.app.execute",authority.ActionExecuteSandboxed,
+  "project.app.exec","project_runtime:world");err!=nil{
+  t.Fatalf("legitimate Workspace-only sandbox command denied: %v",err)
+ }
+ pid,wid:="project","world"
+ scoped:=task.Task{ProjectID:&pid,ProjectWorkspaceID:&wid,
+  Completion:noFilesystem}
+ if err:=workspaceToolAllowedForTask(scoped,"project.app.execute",
+  authority.ActionExecuteSandboxed,"project.app.exec","project_runtime:world");err==nil{
+  t.Fatal("persisted Task filesystem:none policy did not survive historical Task boundary")
+ }
+}

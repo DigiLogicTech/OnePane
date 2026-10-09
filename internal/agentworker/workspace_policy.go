@@ -139,6 +139,16 @@ func workspaceToolAllowedWithPolicy(p workspaceAccessPolicy, capabilityID string
 	if !p.LAN && (strings.Contains(hay, "network.lan") || strings.Contains(hay, "lan://")) {
 		return fmt.Errorf("LAN access is disabled for this workspace")
 	}
+	// OCI application execution/creation always uses a read-write managed
+	// /workspace bind even when neither the tool ID nor resource_ref mentions
+	// a filename. An explicit filesystem:none policy must deny that implicit
+	// mount access before a lease lookup or container invocation.
+	if p.Filesystem=="none" {
+		switch toolID {
+		case "project.app.exec","project.app.ensure","project.runtime.ensure":
+			return fmt.Errorf("filesystem access is disabled for this workspace")
+		}
+	}
 	if p.Filesystem == "none" && (strings.Contains(hay, "file") || strings.Contains(hay, "filesystem") || strings.Contains(hay, "/workspace")) {
 		return fmt.Errorf("filesystem access is disabled for this workspace")
 	}

@@ -234,3 +234,29 @@ This delivers **controlled artifact/data interchange**, not live sandbox network
 6. Safe existing EXE→MSI and legacy Project/Workspace data migration; no data deletion or host-wide silent installs.
 
 **Do not merge or publish based on source tests alone.** The acceptance demonstration is a Game Development Project with separate executing World, Story and Art Workspaces, a versioned asset moving between approved Workspaces and independent sandbox lifecycle verification.
+
+## Additional implementation — Workspace runtimes, recovered source & artifacts (2026-10-09)
+
+**Source-implemented, not yet operator-verified.** This section supersedes earlier "schema not implemented" text in this evolving RFC:
+
+- `migrations/0037_project_workspace_owned_runtimes.sql` rebuilds the referenced `project_runtimes` parent using the pre-migration backup/FK-safe migration path. Existing legacy Project runtime rows retain every ID and associated application/endpoint/Task reference, and remain distinguishable with `project_workspace_id IS NULL`. New rows can own one Project Workspace each. Unrelated Workspaces can independently request states. No blind migration of the legacy shared runtime to an arbitrary child Workspace.
+- `internal/projectworkspace/service.go` and `repository_sql.go` manage canonical Workspace runtime IDs, Project ownership and separate runtime lookup. `internal/projectruntime` retains its existing mediated sandbox-runner/observation/reconciliation mechanism.
+- `/v1/projects/{projectID}/workspaces/{workspaceID}/runtime` supports creating/querying independently owned environments. Existing `/v1/project-runtimes/{runtimeID}/desired-state` and application declaration APIs preserve their operation/approval model.
+- Workspace Development has separate create/start/stop/refresh, runtime status and pinned OCI toolchain declaration controls. The UI does not claim a model or engine has been installed until the trusted backend reports an observed state. The host runs tools only through the sandbox adapter.
+- Workspace Task submission now uses **canonical** `project_workspace_id` to send governed objectives to the durable local-first Task engine instead of issuing raw shell commands.
+- First-class Project Library, scoped per-Workspace asset inventory/search and explicit versioned publication/revocation use the existing content-addressed artifact storage.
+- `/v1/projects/{projectID}/library/import-managed` supports adopting prior managed artifacts after verifying tenancy/Project scope, status and on-disk integrity. No copying, overwriting or deleting old user data.
+- Recovered original `featurepolicy`, `agentrole` and `deploymentcap` types and their tests from the Alpha 3.1 source snapshot. They are **foundations only**; actual runtime policy/agent identity must be integrated before claiming these are active user-facing capabilities. See `docs/LEGACY_RECOVERY_INVENTORY.md`.
+- Removed one noncompiled `.orig` source backup and added `scripts/validate_legacy_cleanup.js` to prevent newly duplicated global declarations and loss of historic recovery bundles. It sets the baseline to **33** duplicate function names in RC-10, with no increases allowed.
+
+### Still not implemented / must not be advertised as complete
+
+1. A universal, safe terminal/editor and Git worktree workflow: the sandbox adapter can execute *approved argv tools* and retain its per-runtime /workspace volume, but there is no finished IDE/editor, Git source-control UX, diff/merge workflow or generic shell access for agents.
+2. Interactive desktop engine streaming, GUI Godot editing, remote GPU/display and graphical previews: rootless Podman/Docker execution is supported on **compatible nodes only**; Windows MSI alone is not a Linux OCI host.
+3. Controlled live service links between Workspaces: current links transfer **immutable artifact versions**, not network sockets or shared writable mounts. Do not silently open egress.
+4. Full document extraction, PDF/DOCX previews, semantic indexing, retrieval-augmented Council evidence and Library-wide dedup/retention policies.
+5. Durable resource-wait Task statuses, checkpoint/resume logic, automatic model-specific context compaction and full long-running recovery. Ordinary limited-model admission improvement is committed but these recovery paths remain outstanding.
+6. Complete first-class Windows EXE→MSI data migration, exhaustive UI/theme accessibility tests, signed binaries, and installation on real Windows/Ubuntu/WSL/Node targets.
+
+### Proof standard before user QA
+Run full `go test ./...`, `go test -tags integration ./internal/projectworkspace`, frontend source checks, Windows cross-build, then deploy to a **real compatible sandbox Node**. Demonstrate that World/Story/Art can each provision an independent runtime, start and stop without mutual interference, run an approved pinned container tool, persist file/artifact output, publish an immutable version over an explicit link, revoke read access, and survive a service restart. CI passing alone does not prove this workload.

@@ -229,7 +229,7 @@ func (e *CLIEngine) EnsureContainer(ctx context.Context, s ContainerSpec) (Conta
 		}
 		args = append(args, "--publish", fmt.Sprintf("127.0.0.1::%d/%s", port.InternalPort, proto))
 	}
-	envFile, err := writeEnvFile(s.Environment)
+	envFile, err := writeEnvFile(s.WorkspacePath, s.Environment)
 	if err != nil {
 		return ContainerState{}, err
 	}
@@ -498,44 +498,43 @@ func runtimeNetworkName(runtimeID string) string {
 	return trimName("harness-"+sanitize(runtimeID)+"-net", 63)
 }
 
-func writeEnvFile(env map[string]string) (string, error) {
-	if len(env) == 0 {
-		return "", nil
-	}
-	keys := make([]string, 0, len(env))
-	for k := range env {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	f, err := os.CreateTemp("", "onepane-sandbox-env-*")
-	if err != nil {
-		return "", err
-	}
-	path := f.Name()
-	cleanup := func() {
-		_ = f.Close()
-		_ = os.Remove(path)
-	}
-	if err := f.Chmod(0o600); err != nil {
-		cleanup()
-		return "", err
-	}
-	for _, k := range keys {
-		v := env[k]
-		if strings.ContainsAny(k, "=\x00\r\n") || strings.ContainsAny(v, "\x00\r\n") {
-			cleanup()
-			return "", ErrInvalidInput
-		}
-		if _, err := f.WriteString(k + "=" + v + "\n"); err != nil {
-			cleanup()
-			return "", err
-		}
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(path)
-		return "", err
-	}
-	return path, nil
+// writeEnvFile stages credentials outside the container-mounted Workspace,
+// under the configured OnePane runtime root instead of global/system TMP.
+// Only the trusted rootless service account may read the 0700 staging folder.
+func writeEnvFile(workspacePath string, env map[string]string) (string, error) {
+ if len(env)==0{return "",nil}
+ workspacePath,err:=filepath.Abs(workspacePath)
+ if err!=nil{return "",err}
+ root:=filepath.Dir(workspacePath)
+ for _,path:=range []string{root,workspacePath}{
+  st,err:=os.Lstat(path)
+  if err!=nil{return "",err}
+  if !st.IsDir()||st.Mode()&os.ModeSymlink!=0{return "",ErrInvalidInput}
+ }
+ staging:=filepath.Join(root,".onepane-private-env")
+ if err:=os.Mkdir(staging,0o700);err!=nil&&!os.IsExist(err){return "",err}
+ info,err:=os.Lstat(staging)
+ if err!=nil{return "",err}
+ if !info.IsDir()||info.Mode()&os.ModeSymlink!=0||info.Mode().Perm()&0o077!=0{
+  return "",ErrInvalidInput
+ }
+ keys:=make([]string,0,len(env))
+ for key:=range env{keys=append(keys,key)}
+ sort.Strings(keys)
+ f,err:=os.CreateTemp(staging,"onepane-sandbox-env-*")
+ if err!=nil{return "",err}
+ path:=f.Name()
+ cleanup:=func(){_=f.Close();_=os.Remove(path)}
+ if err=f.Chmod(0o600);err!=nil{cleanup();return "",err}
+ for _,k:=range keys{
+  v:=env[k]
+  if strings.ContainsAny(k,"=\\x00\\r\\n")||strings.ContainsAny(v,"\\x00\\r\\n"){
+   cleanup();return "",ErrInvalidInput
+  }
+  if _,err=f.WriteString(k+"="+v+"\\n");err!=nil{cleanup();return "",err}
+ }
+ if err=f.Close();err!=nil{_=os.Remove(path);return "",err}
+ return path,nil
 }
 func containerNotFound(stderr string) bool {
 	v := strings.ToLower(stderr)

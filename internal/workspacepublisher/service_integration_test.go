@@ -137,4 +137,52 @@ func TestPublishingOCIArtifactRequiresActiveOwnedTaskAndOnlyGrantsSourceWorkspac
  if err!=nil||len(notGranted)!=0{
   t.Fatalf("Story acquired ungranted World artifact: %+v %v",notGranted,err)
  }
+ // A subsequent changed build of the same source path appends an immutable
+ // version of the *same* Library asset and retains source-only visibility.
+ revised:=request
+ revised.Content=[]byte("world-asset-content-v2")
+ revisedHash:=sha256.Sum256(revised.Content)
+ revised.ContentHash=hex.EncodeToString(revisedHash[:])
+ v2,err:=publisher.PublishWorkspaceFile(ctx,revised)
+ if err!=nil{t.Fatal(err)}
+ if v2.LibraryAssetID!=published.LibraryAssetID||v2.Version!=2||
+  v2.ArtifactID==published.ArtifactID||v2.ContentHash!=revised.ContentHash{
+  t.Fatalf("updated build did not extend stable Library asset: initial=%+v updated=%+v",published,v2)
+ }
+ versions,err:=projects.LibraryVersions(ctx,p.ID,published.LibraryAssetID)
+ if err!=nil||len(versions)!=2||versions[0].ContentHash==versions[1].ContentHash{
+  t.Fatalf("immutable previous version was lost or not appended: %+v %v",versions,err)
+ }
+ foreign,err:=projects.WorkspaceLibraryAssets(ctx,p.ID,story.ID,"")
+ if err!=nil||len(foreign)!=0{
+  t.Fatalf("new version implicitly exposed to Story without grant: %+v %v",foreign,err)
+ }
+ // A fresh Task publishing unchanged source bytes must not create another
+ // artifact row or third Library version.
+ nextTask,err:=tasks.Create(ctx,task.CreateCommand{
+  WorkspaceID:"tenant",ProjectID:&p.ID,ProjectWorkspaceID:&world.ID,
+  Objective:"Republish unchanged World map",SchedulingClass:task.ClassNormal,
+ })
+ if err!=nil{t.Fatal(err)}
+ nextTask,err=tasks.MarkReady(ctx,task.TransitionCommand{
+  TaskID:nextTask.ID,ExpectedRevision:nextTask.Revision,
+ })
+ if err!=nil{t.Fatal(err)}
+ _,nextAttempt,err:=tasks.Start(ctx,task.StartCommand{
+  TaskID:nextTask.ID,ExpectedRevision:nextTask.Revision,
+  WorkerPrincipalID:&actor,ActorPrincipalID:&actor,
+ })
+ if err!=nil{t.Fatal(err)}
+ same:=revised
+ same.TaskID=nextTask.ID
+ same.AttemptID=nextAttempt.ID
+ again,err:=publisher.PublishWorkspaceFile(ctx,same)
+ if err!=nil||again.LibraryAssetID!=v2.LibraryAssetID||again.Version!=2||
+  again.ArtifactID!=v2.ArtifactID{
+  t.Fatalf("unchanged file from new Task created duplicate artifact/version: %+v %v",again,err)
+ }
+ versions,err=projects.LibraryVersions(ctx,p.ID,published.LibraryAssetID)
+ if err!=nil||len(versions)!=2{
+  t.Fatalf("duplicate unchanged version created: %d %v",len(versions),err)
+ }
 }

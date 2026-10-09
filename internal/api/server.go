@@ -506,6 +506,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces", s.createCanonicalProjectWorkspace)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/library", s.listProjectLibrary)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/library", s.uploadProjectLibrary)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/library/import-managed", s.adoptManagedProjectArtifact)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/library/{assetID}/versions", s.listProjectLibraryVersions)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/library/{assetID}/grants", s.grantProjectLibrary)
 	s.mux.HandleFunc("DELETE /v1/projects/{projectID}/library/{assetID}/grants/{workspaceID}", s.revokeProjectLibraryGrant)

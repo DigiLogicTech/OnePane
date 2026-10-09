@@ -104,6 +104,19 @@ assertContains(workflowUI,'t.project_workspace_id===canonical.id',
  'Workspace queue must filter strictly to the canonical Project Workspace');
 assertContains(workflowUI,'t.project_id===project.id',
  'Workspace queue must exclude Tasks from other Projects');
+const checkpointAPI=read('internal/api/task_worker_progress.go');
+assertContains(routes,'loadTaskExecutionProgress(r.Context(),s.attentionDB,',
+ 'scoped Workspace Tasks must expose real persisted Worker progress');
+assertContains(checkpointAPI,'t.project_workspace_id=?',
+ 'Task checkpoint SQL must independently enforce canonical Workspace scope');
+assertContains(checkpointAPI,'r.workspace_id=?',
+ 'Task checkpoint SQL must confirm run tenant ownership');
+assertContains(checkpointAPI,'t.workspace_id=r.workspace_id',
+ 'Task checkpoint may never use a mismatched Worker run tenancy');
+assertContains(workflowUI,'Persisted execution checkpoint',
+ 'Workspace Task UI must label journal progress as persisted, not a successful action');
+assertContains(workflowUI,'External actions must not replay automatically.',
+ 'Interrupted Task must give operator a recovery integrity warning');
 assertContains(workflowUI,'id="a49RefreshTasks"','Workspace task inventory must be manually refreshable');
 assertContains(workflowUI,'await loadTasks();','Task creation must refresh observed Task status');
 assertContains(ui,'a48MountWorkspaceRuntime','canonical Workspace sandbox must be mounted');

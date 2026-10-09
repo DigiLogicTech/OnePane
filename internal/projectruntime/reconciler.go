@@ -397,11 +397,11 @@ func (r *Reconciler) applyAndVerify(ctx context.Context, workspaceID string, cmd
 func runtimeEnsurePlan(r projectworkspace.ProjectRuntime) mutationPlan {
 	input := mustJSON(map[string]any{"runtime_id": r.ID, "network_policy": rawOrObject(r.NetworkPolicyJSON), "action": "ensure"})
 	expectInternal := runtimeNetworkInternal(r.NetworkPolicyJSON)
-	return mutationPlan{ToolID: sandboxrunner.ToolRuntimeEnsure, InspectToolID: sandboxrunner.ToolRuntimeInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_runtime:" + r.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID}), DesiredState: mustJSON(map[string]any{"workspace_exists": true, "rootless": true, "network_internal": expectInternal}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolRuntimeInspect}), IdempotencyKey: fmt.Sprintf("project-runtime:%s:rev:%d:ensure", r.ID, r.Revision), ObservationType: "project_runtime_state", Postcondition: func(raw json.RawMessage) bool { return runtimeWorkspacePresent(raw, expectInternal) }}
+	return mutationPlan{ToolID: sandboxrunner.ToolRuntimeEnsure, InspectToolID: sandboxrunner.ToolRuntimeInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_runtime:" + r.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID}), DesiredState: mustJSON(map[string]any{"workspace_exists": true, "rootless": true, "network_internal": expectInternal}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolRuntimeInspect}), IdempotencyKey: fmt.Sprintf("project-runtime:%s:rev:%d:ensure", r.ID, r.Revision), ObservationType: "project_runtime_state", Postcondition: func(raw json.RawMessage) bool { return runtimeWorkspacePresent(raw, r.ID, expectInternal) }}
 }
 func runtimeStopPlan(r projectworkspace.ProjectRuntime) mutationPlan {
 	input := mustJSON(map[string]any{"runtime_id": r.ID, "action": "stop"})
-	return mutationPlan{ToolID: sandboxrunner.ToolRuntimeStop, InspectToolID: sandboxrunner.ToolRuntimeInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_runtime:" + r.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID}), DesiredState: mustJSON(map[string]any{"all_containers_stopped": true}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolRuntimeInspect}), IdempotencyKey: fmt.Sprintf("project-runtime:%s:rev:%d:stop", r.ID, r.Revision), ObservationType: "project_runtime_state", Postcondition: runtimeStopped}
+	return mutationPlan{ToolID: sandboxrunner.ToolRuntimeStop, InspectToolID: sandboxrunner.ToolRuntimeInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_runtime:" + r.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID}), DesiredState: mustJSON(map[string]any{"all_containers_stopped": true}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolRuntimeInspect}), IdempotencyKey: fmt.Sprintf("project-runtime:%s:rev:%d:stop", r.ID, r.Revision), ObservationType: "project_runtime_state", Postcondition: func(raw json.RawMessage) bool { return runtimeStopped(raw, r.ID) }}
 }
 func appPullPlan(r projectworkspace.ProjectRuntime, a projectworkspace.Application) mutationPlan {
 	input := mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID, "image": a.SourceRef, "action": "pull"})
@@ -410,11 +410,11 @@ func appPullPlan(r projectworkspace.ProjectRuntime, a projectworkspace.Applicati
 }
 func appEnsurePlan(r projectworkspace.ProjectRuntime, a projectworkspace.Application, endpoints []sandboxrunner.PortSpec) mutationPlan {
 	input := mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID, "image": a.SourceRef, "runtime_spec": rawOrObject(a.RuntimeSpecJSON), "resource_limits": rawOrObject(r.ResourceLimitsJSON), "environment_bindings": rawOrObject(a.EnvironmentBindingsJSON), "network_policy": rawOrObject(r.NetworkPolicyJSON), "endpoints": endpoints, "action": "ensure"})
-	return mutationPlan{ToolID: sandboxrunner.ToolAppEnsure, InspectToolID: sandboxrunner.ToolAppInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_app:" + a.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID}), DesiredState: mustJSON(map[string]any{"status": "running", "isolation_verified": true}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppInspect}), Compensation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppStop, "runtime_id": r.ID, "application_id": a.ID}), IdempotencyKey: fmt.Sprintf("project-app:%s:rev:%d:ensure", a.ID, a.Revision), ObservationType: "project_application_state", Postcondition: appRunningIsolated}
+	return mutationPlan{ToolID: sandboxrunner.ToolAppEnsure, InspectToolID: sandboxrunner.ToolAppInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_app:" + a.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID}), DesiredState: mustJSON(map[string]any{"status": "running", "isolation_verified": true}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppInspect}), Compensation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppStop, "runtime_id": r.ID, "application_id": a.ID}), IdempotencyKey: fmt.Sprintf("project-app:%s:rev:%d:ensure", a.ID, a.Revision), ObservationType: "project_application_state", Postcondition: func(raw json.RawMessage) bool { return appRunningIsolated(raw, r.ID, a.ID) }}
 }
 func appStopPlan(r projectworkspace.ProjectRuntime, a projectworkspace.Application) mutationPlan {
 	input := mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID, "action": "stop"})
-	return mutationPlan{ToolID: sandboxrunner.ToolAppStop, InspectToolID: sandboxrunner.ToolAppInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_app:" + a.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID}), DesiredState: mustJSON(map[string]any{"status": []string{"stopped", "exited", "absent"}}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppInspect}), IdempotencyKey: fmt.Sprintf("project-app:%s:rev:%d:stop", a.ID, a.Revision), ObservationType: "project_application_state", Postcondition: appStopped}
+	return mutationPlan{ToolID: sandboxrunner.ToolAppStop, InspectToolID: sandboxrunner.ToolAppInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_app:" + a.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID}), DesiredState: mustJSON(map[string]any{"status": []string{"stopped", "exited", "absent"}}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppInspect}), IdempotencyKey: fmt.Sprintf("project-app:%s:rev:%d:stop", a.ID, a.Revision), ObservationType: "project_application_state", Postcondition: func(raw json.RawMessage) bool { return appStopped(raw, r.ID, a.ID) }}
 }
 
 func runtimeNetworkInternal(raw json.RawMessage) bool {
@@ -426,49 +426,67 @@ func runtimeNetworkInternal(raw json.RawMessage) bool {
 	}
 	return v.Mode != "external"
 }
-func runtimeWorkspacePresent(raw json.RawMessage, expectInternal bool) bool {
-	var v struct {
-		WorkspaceExists bool                        `json:"workspace_exists"`
-		Network         sandboxrunner.NetworkState  `json:"network"`
-		Engine          sandboxrunner.EngineProfile `json:"engine"`
-	}
-	return json.Unmarshal(raw, &v) == nil && v.WorkspaceExists && v.Engine.Rootless && v.Network.Internal == expectInternal
+func runtimeWorkspacePresent(raw json.RawMessage, runtimeID string, expectInternal bool) bool {
+ var v struct {
+  RuntimeID string `json:"runtime_id"`
+  WorkspaceExists bool `json:"workspace_exists"`
+  Network sandboxrunner.NetworkState `json:"network"`
+  Engine sandboxrunner.EngineProfile `json:"engine"`
+ }
+ return json.Unmarshal(raw,&v)==nil && runtimeID!="" && v.RuntimeID==runtimeID &&
+  v.WorkspaceExists && v.Engine.Rootless && v.Network.RuntimeID==runtimeID &&
+  v.Network.Name!="" && v.Network.Internal==expectInternal
 }
-func runtimeStopped(raw json.RawMessage) bool {
-	var v struct {
-		Containers []sandboxrunner.ContainerState `json:"containers"`
-		Engine     sandboxrunner.EngineProfile    `json:"engine"`
-	}
-	if json.Unmarshal(raw, &v) != nil || !v.Engine.Rootless {
-		return false
-	}
-	for _, c := range v.Containers {
-		if c.Status == "running" || c.Status == "starting" || c.Status == "restarting" {
-			return false
-		}
-	}
-	return true
+func runtimeStopped(raw json.RawMessage, runtimeID string) bool {
+ var v struct {
+  RuntimeID string `json:"runtime_id"`
+  Containers []sandboxrunner.ContainerState `json:"containers"`
+  Engine sandboxrunner.EngineProfile `json:"engine"`
+ }
+ if json.Unmarshal(raw,&v)!=nil || !v.Engine.Rootless || runtimeID=="" || v.RuntimeID!=runtimeID {
+  return false
+ }
+ // Unknown, paused and transitional states are NOT a verified stop.
+ for _,container:=range v.Containers {
+  switch container.Status {
+  case "stopped","exited","absent","created","configured":
+  default:
+   return false
+  }
+ }
+ return true
 }
-func appRunningIsolated(raw json.RawMessage) bool {
-	var v struct {
-		Container sandboxrunner.ContainerState `json:"container"`
-		Engine    sandboxrunner.EngineProfile  `json:"engine"`
-	}
-	return json.Unmarshal(raw, &v) == nil && v.Engine.Rootless && v.Container.Status == "running" && v.Container.IsolationVerified
+func appRunningIsolated(raw json.RawMessage, runtimeID, applicationID string) bool {
+ var v struct {
+  RuntimeID string `json:"runtime_id"`
+  ApplicationID string `json:"application_id"`
+  Container sandboxrunner.ContainerState `json:"container"`
+  Engine sandboxrunner.EngineProfile `json:"engine"`
+ }
+ return json.Unmarshal(raw,&v)==nil && runtimeID!="" && applicationID!="" &&
+  v.RuntimeID==runtimeID && v.ApplicationID==applicationID &&
+  v.Container.RuntimeID==runtimeID && v.Container.ApplicationID==applicationID &&
+  v.Container.SpecHash!="" && v.Engine.Rootless &&
+  v.Container.Status=="running" && v.Container.IsolationVerified
 }
-func appStopped(raw json.RawMessage) bool {
-	var v struct {
-		Container sandboxrunner.ContainerState `json:"container"`
-		Engine    sandboxrunner.EngineProfile  `json:"engine"`
-	}
-	if json.Unmarshal(raw, &v) != nil || !v.Engine.Rootless {
-		return false
-	}
-	switch v.Container.Status {
-	case "stopped", "exited", "absent", "created":
-		return true
-	}
-	return false
+func appStopped(raw json.RawMessage, runtimeID, applicationID string) bool {
+ var v struct {
+  RuntimeID string `json:"runtime_id"`
+  ApplicationID string `json:"application_id"`
+  Container sandboxrunner.ContainerState `json:"container"`
+  Engine sandboxrunner.EngineProfile `json:"engine"`
+ }
+ if json.Unmarshal(raw,&v)!=nil || !v.Engine.Rootless || runtimeID=="" ||
+   applicationID=="" || v.RuntimeID!=runtimeID || v.ApplicationID!=applicationID {
+  return false
+ }
+ if v.Container.RuntimeID!="" && v.Container.RuntimeID!=runtimeID {return false}
+ if v.Container.ApplicationID!="" && v.Container.ApplicationID!=applicationID {return false}
+ switch v.Container.Status {
+ case "stopped","exited","absent","created":
+  return true
+ }
+ return false
 }
 func imagePresent(raw json.RawMessage, ref string) bool {
 	var v struct {

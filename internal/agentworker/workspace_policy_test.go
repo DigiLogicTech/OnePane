@@ -170,6 +170,7 @@ func TestFilesystemNoneDeniesImplicitOCIWorkspaceMount(t *testing.T){
   {"git_mutation","project.app.git.mutate",authority.ActionExecuteSandboxed},
   {"files_read","project.app.files.inspect",authority.ActionExecuteSandboxed},
   {"files_edit","project.app.files.edit",authority.ActionExecuteSandboxed},
+  {"files_publish","project.app.files.publish",authority.ActionExecuteSandboxed},
   {"start_app","project.app.ensure",authority.ActionMutate},
   {"create_runtime","project.runtime.ensure",authority.ActionMutate},
  }{

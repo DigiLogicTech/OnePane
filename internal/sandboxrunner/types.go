@@ -22,6 +22,7 @@ const (
 	ToolAppGitInspect  = "project.app.git.inspect"
 	ToolAppFileInspect = "project.app.files.inspect"
 	ToolAppFileEdit    = "project.app.files.edit"
+	ToolAppFilePublish = "project.app.files.publish"
 	ToolAppGitMutate   = "project.app.git.mutate"
 	CapabilityObserve  = "project.runtime.observe"
 	CapabilityExecute  = "project.app.execute"

@@ -234,7 +234,7 @@ assert.ok(!qaFailureWriter.includes('cause.Error()'),
  'error messages must never be stored in typed QA observations');
 assertContains(qaTestbedWriter,'s.recordAgentCheckFailure(ctx,sess,"inference_dispatch",err)',
  'inference error code path must persist typed Agent Check evidence');
-assertContains(qaTestbedWriter,'s.recordAgentCheckFailure(ctx,sess,"runtime_release",err)',
+assertContains(qaTestbedWriter,'s.recordAgentCheckFailure(cleanupCtx,sess,"runtime_release",err)',
  'runtime cleanup failure must persist typed Agent Check evidence');
 assertContains(qaModel,'LEFT JOIN model_agentcheck_failure_observations f',
  'Agent Check QA projection must expose machine-coded stage evidence');

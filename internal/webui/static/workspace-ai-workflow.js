@@ -47,7 +47,7 @@ async function a49MountDevelopmentTasks(project,workspace,container){
     <button class="btn" type="button" id="a49QAPreview">Review included data</button>
     <button class="btn" type="button" id="a49QADownload" disabled>Generate QA ZIP</button>
    </div>
-   <p class="list-meta" id="a49QAStatus" role="status">Preview before downloading. No data is sent off-device.</p>
+   <p class="list-meta" id="a49QAStatus" role="status">Preview before downloading. No data is sent off-device. Timeline includes only known Task/Worker event kinds, timestamps and pseudonymous correlation references.</p>
    <pre class="a49-qa-snapshot-preview" id="a49QAPreviewContent" aria-label="Redacted QA snapshot preview"></pre>
   </details>
  </section>`;
@@ -176,7 +176,12 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    const snapshot=await apiRequest("/v1/qa/workspace-snapshot?"+qaQuery);
    if(!section.isConnected)return;
    qaPreviewContent.textContent=JSON.stringify(snapshot,null,2);
-   qaStatus.textContent="Review the categories and Task metadata above before export. "+
+   const timelineCount=Number(snapshot.captured_timeline_events||0);
+   const timelineLimit=Number(snapshot.max_timeline_events||0);
+   const chronologyLabel="Scoped Task/Worker event chronology: "+timelineCount+
+    " of up to "+timelineLimit+" recent entries"+
+    (snapshot.timeline_truncated?" (older events omitted)":"")+". ";
+   qaStatus.textContent=chronologyLabel+"Review the categories and Task metadata above before export. "+
     "Excluded: raw logs, prompts, model output, credentials, source code, private files and Node data. "+
     "Export creates a fresh snapshot; Task status may change between preview and download.";
    qaReviewed=true;qaDownload.disabled=false;

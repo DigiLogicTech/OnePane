@@ -229,6 +229,25 @@ assertContains(qaSource,'qaSnapshotTaskCap=50','QA snapshot Task count must rema
 assertContains(qaSource,'qaSnapshotArchiveCap=128<<10','QA ZIP size must remain bounded');
 assertContains(qaSource,'zip.NewWriter(&buf)','QA ZIP must remain on-device without filesystem temp churn');
 assertContains(qaSource,'ExcludedCategories','QA ZIP must advertise deliberately omitted sensitive data');
+const qaTimeline=read('internal/api/qa_event_timeline.go');
+assertContains(qaTimeline,'qaTimelineEventCap = 96',
+ 'diagnostic event chronology must remain bounded');
+assertContains(qaTimeline,"JOIN scoped s ON s.id=r.task_id",
+ 'Worker event lookup must re-authorise its persisted owning Task');
+assertContains(qaTimeline,"AND t.workspace_id=?",
+ 'Worker event lookup must respect tenant ownership');
+assertContains(qaTimeline,'qaKnownEventType(eventType)',
+ 'diagnostic export must allowlist event names');
+assertContains(qaTimeline,'qaOpaqueRef("trace",traceID.String)',
+ 'diagnostic export must pseudonymise trace values');
+assert.ok(!qaTimeline.includes('payload_json')&&!qaTimeline.includes('actor_principal_id'),
+ 'diagnostic chronology must not select raw audit payloads or actor identity');
+assertContains(qaAPI,'loadQATimeline(r.Context(),s.attentionDB,',
+ 'QA preview and ZIP must include scoped Task/Worker chronology');
+assertContains(qaSource,'CapturedTimelineEvents',
+ 'QA report schema must disclose timeline count and truncation');
+assertContains(qaUI,'snapshot.timeline_truncated',
+ 'QA UI must disclose omitted older history');
 assertContains(qaUI,'Review included data','export must present a reviewed preview');
 assertContains(qaUI,'qaDownload.disabled=true','ZIP must remain disabled until review');
 assertContains(qaUI,'"X-OnePane-CSRF":csrfCookie()','QA bundle request must send CSRF header');

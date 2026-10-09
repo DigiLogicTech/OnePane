@@ -103,5 +103,18 @@ func (s *Server) loadQASnapshot(w http.ResponseWriter,r *http.Request,in qaWorks
   writeError(w,http.StatusServiceUnavailable,"Task dependency evidence unavailable")
   return qaSnapshot{},false
  }
- return makeQASnapshot(time.Now().UTC(),rows,progress,dependencies),true
+ // Use only the same newest 50 Tasks that the final snapshot exposes.
+ // Event lookups independently recheck the canonical scope in SQL.
+ timelineRows:=rows
+ if len(timelineRows)>qaSnapshotTaskCap{timelineRows=timelineRows[:qaSnapshotTaskCap]}
+ timeline,truncated,err:=loadQATimeline(r.Context(),s.attentionDB,tenant,projectID,workspaceID,timelineRows)
+ if err!=nil{
+  writeError(w,http.StatusServiceUnavailable,"Task/Worker event chronology unavailable")
+  return qaSnapshot{},false
+ }
+ snapshot:=makeQASnapshot(time.Now().UTC(),rows,progress,dependencies)
+ snapshot.Timeline=timeline
+ snapshot.CapturedTimelineEvents=len(timeline)
+ snapshot.TimelineTruncated=truncated
+ return snapshot,true
 }

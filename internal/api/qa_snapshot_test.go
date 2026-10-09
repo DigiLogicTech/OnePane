@@ -51,6 +51,19 @@ func TestQASnapshotIsStrictlyAllowlistedAndBundleIsBounded(t *testing.T){
    snap.Tasks[1].Execution.Status!="unavailable"{
   t.Fatalf("unknown DB text escaped sanitisation: %+v",snap.Tasks[1])
  }
+ snap.Timeline=[]qaTimelineEvent{{
+  EventRef:qaOpaqueRef("event","event-id"),
+  TaskRef:qaOpaqueRef("task","task-safe"),
+  RunRef:qaOpaqueRef("run","run-safe"),
+  EventType:"task.attempt_interrupted",
+  Severity:"attention",OccurredAt:1001,
+  TraceRef:qaOpaqueRef("trace","trace-VERY_SECRET_BEARER_CANARY"),
+ }}
+ snap.CapturedTimelineEvents=len(snap.Timeline)
+ if snap.Timeline[0].TaskRef!=snap.Tasks[0].TaskRef||
+    snap.Timeline[0].RunRef!=snap.Tasks[0].Execution.RunRef{
+  t.Fatal("chronology cannot correlate with the Task/Run snapshot")
+ }
  raw,err:=json.Marshal(snap)
  if err!=nil{t.Fatal(err)}
  if bytes.Contains(raw,[]byte(secret)){t.Fatal("secret leaked in preview")}

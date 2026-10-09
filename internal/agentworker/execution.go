@@ -63,6 +63,9 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 			err = scheduler.ErrNoEligibleCandidate
 		}
 		_ = s.journal(ctx, run.ID, "route", "failed", nil, nil, nil, nil, map[string]any{"error": err.Error(), "rejected": decision.Rejected})
+		if shouldWaitForLocalModel(t,err,decision.Rejected) {
+			return s.waitForLocalModel(ctx,run,res,"awaiting qualified local model: "+err.Error())
+		}
 		return s.blockRun(ctx, run, res, "no eligible inference/agent runtime: "+err.Error())
 	}
 	cand := decision.Selected.Candidate

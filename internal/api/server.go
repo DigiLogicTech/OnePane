@@ -981,10 +981,9 @@ func (s *Server) declareApplication(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &in) {
 		return
 	}
-	// Initial Running requests are execution, not a harmless declaration.
-	// Without this guard, project.write could bypass the run-only endpoint.
-	if in.DesiredState == projectworkspace.AppDesiredRunning &&
-		!s.authorize(w, r, i, p.WorkspaceID, "project.run") {
+	// Declaring/installing an application enqueues sandbox reconciliation
+	// even if it is initially stopped; it requires explicit execution rights.
+	if !s.authorize(w, r, i, p.WorkspaceID, "project.run") {
 		return
 	}
 	out, err := s.projects.DeclareApplication(r.Context(), projectworkspace.DeclareApplicationCommand{RuntimeID: x.ID, Name: in.Name, SourceKind: in.SourceKind, SourceRef: in.SourceRef, VersionRef: in.VersionRef, InstallSpecJSON: in.InstallSpecJSON, RuntimeSpecJSON: in.RuntimeSpecJSON, EnvironmentBindingsJSON: in.EnvironmentBindingsJSON, DesiredState: in.DesiredState, CreatedBy: i.PrincipalID, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})

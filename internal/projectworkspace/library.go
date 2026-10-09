@@ -125,6 +125,30 @@ func (s *Service) GrantLibraryAsset(ctx context.Context,c GrantLibraryAssetComma
  })
 }
 
+// RevokeLibraryAsset removes direct Workspace access without deleting the
+// immutable Project asset, breaking historical evidence references.
+func (s *Service) RevokeLibraryAsset(ctx context.Context,projectID,assetID,workspaceID,actor string)error{
+ if projectID==""||assetID==""||workspaceID==""||actor==""{return ErrInvalidCommand}
+ eventID,err:=s.ids.New("evt");if err!=nil{return err}
+ now:=s.clock.UnixMilli()
+ return s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+  p,err:=s.repo.ProjectTx(ctx,tx,projectID);if err!=nil{return err}
+  if err=s.requireActor(ctx,tx,p.WorkspaceID,actor);err!=nil{return err}
+  // Project/Workspace/asset ownership are checked together before revocation.
+  var valid int
+  err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM workspace_library_grants g
+    JOIN project_library_assets a ON a.id=g.asset_id
+    JOIN project_workspaces w ON w.id=g.project_workspace_id
+    WHERE a.id=? AND a.project_id=? AND w.id=? AND w.project_id=a.project_id`,
+   assetID,projectID,workspaceID).Scan(&valid)
+  if err!=nil{return err};if valid!=1{return ErrCrossWorkspace}
+  _,err=tx.ExecContext(ctx,`UPDATE workspace_library_grants SET enabled=0,updated_at=? WHERE asset_id=? AND project_workspace_id=?`,now,assetID,workspaceID)
+  if err!=nil{return err}
+  payload,_:=json.Marshal(map[string]any{"asset_id":assetID,"workspace_id":workspaceID})
+  return s.events.Append(ctx,tx,event.Event{ID:eventID,WorkspaceID:&p.WorkspaceID,Type:"project.library_asset_revoked",AggregateType:"library_asset",AggregateID:assetID,ActorPrincipalID:&actor,Payload:payload,OccurredAt:now})
+ })
+}
+
 // ResolveWorkspaceLibraryVersion enforces an active explicit Library grant OR
 // an exact hash-pinned publication on an enabled source -> target channel.
 // It exposes a blob reference to the authorised server, not to an AI model.

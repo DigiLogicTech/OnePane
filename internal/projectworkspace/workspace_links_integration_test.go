@@ -52,7 +52,24 @@ func TestWorkspaceArtifactChannelsEnforceProjectAndVersionBoundaries(t *testing.
  if published.ContentHash!="sha256-new"||published.AssetVersion!=2{t.Fatalf("source hash/version mismatch: %+v",published)}
  visible,err:=svc.WorkspacePublications(ctx,link.ID)
  if err!=nil||len(visible)!=1{t.Fatalf("channel read: %v %+v",err,visible)}
- if _,err=svc.CreateWorkspaceLink(ctx,CreateWorkspaceLinkCommand{ProjectID:p.ID,SourceWorkspaceID:world.ID,TargetWorkspaceID:story.ID,Name:"World -> Story",ActorPrincipalID:"owner",Enable:false});err!=nil{t.Fatal(err)}
+ worldLink,err:=svc.CreateWorkspaceLink(ctx,CreateWorkspaceLinkCommand{ProjectID:p.ID,SourceWorkspaceID:world.ID,TargetWorkspaceID:story.ID,Name:"World -> Story",ActorPrincipalID:"owner",Enable:true})
+ if err!=nil{t.Fatal(err)}
+ // Seeing an upstream publication does NOT let the World Workspace forward
+ // someone else's work to Storyline without its own source derivative grant.
+ if _,err=svc.PublishWorkspaceAsset(ctx,PublishWorkspaceAssetCommand{LinkID:worldLink.ID,AssetID:assetID,Version:2,ActorPrincipalID:"owner"});err==nil{
+  t.Fatal("ungranted re-publication to downstream Workspace succeeded")
+ }
+ worldAsset:="asset-world-build"
+ if _,err=db.SQL().ExecContext(ctx,`INSERT INTO project_library_assets(id,project_id,name,asset_type,current_version,created_at,updated_at) VALUES(?,?,?,?,1,?,?)`,worldAsset,p.ID,"World scene","application/json",now,now);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`INSERT INTO project_library_asset_versions(asset_id,version,content_hash,mime_type,storage_uri,created_at) VALUES(?,1,'sha256-world','application/json','artifact:world',?)`,worldAsset,now);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`INSERT INTO workspace_library_grants(id,project_workspace_id,asset_id,permissions_json,created_at,updated_at) VALUES(?,?,?,'{"read":true,"create_derivative":true}',?,?)`,
+  "grant-world",world.ID,worldAsset,now,now);err!=nil{t.Fatal(err)}
+ if _,err=svc.PublishWorkspaceAsset(ctx,PublishWorkspaceAssetCommand{LinkID:worldLink.ID,AssetID:worldAsset,Version:1,ActorPrincipalID:"owner"});err!=nil{t.Fatal(err)}
+ visibleStory,err:=svc.WorkspacePublications(ctx,worldLink.ID)
+ if err!=nil||len(visibleStory)!=1||visibleStory[0].AssetID!=worldAsset{t.Fatalf("World -> Storyline publication: %v %+v",err,visibleStory)}
+ if _,err=svc.ResolveWorkspaceLibraryVersion(ctx,p.ID,story.ID,worldAsset,1);err!=nil{t.Fatalf("Storyline should receive explicitly published World artifact: %v",err)}
+ if _,err=svc.ResolveWorkspaceLibraryVersion(ctx,p.ID,story.ID,assetID,2);err==nil{t.Fatal("upstream research asset leaked transitively into Storyline")}
+
  disabled,err:=svc.SetWorkspaceLinkEnabled(ctx,ToggleWorkspaceLinkCommand{LinkID:link.ID,ActorPrincipalID:"owner",ExpectedRevision:link.Revision,Enabled:false})
  if err!=nil||disabled.Enabled{t.Fatalf("revoke: %v %+v",err,disabled)}
  if _,err=svc.WorkspacePublications(ctx,link.ID);err==nil{t.Fatal("revoked link exposed publications")}

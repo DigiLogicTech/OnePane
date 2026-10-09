@@ -414,13 +414,7 @@ func (s *Service) startRun(ctx context.Context, t task.Task) (Run, TickResult) {
 		route.RoutingEnabled = *workspaceRouting.Enabled
 		route.AllowDelegation = *workspaceRouting.Enabled
 	}
-	if workspaceRouting.WorkspaceAccess.RemoteModels != nil {
-		route.AllowRemote = *workspaceRouting.WorkspaceAccess.RemoteModels
-	} else if t.ProjectWorkspaceID != nil {
-		// Historical Workspace Tasks created before the persisted policy
-		// invariant must not silently inherit the legacy cloud-enabled default.
-		route.AllowRemote = false
-	}
+	route.AllowRemote = effectiveRemoteModelAllowance(t, workspaceRouting, route.AllowRemote)
 	ids := make([]string, 0, 1+len(workspaceRouting.FallbackCandidateIDs))
 	if v := strings.TrimSpace(workspaceRouting.CandidateID); v != "" {
 		ids = append(ids, v)

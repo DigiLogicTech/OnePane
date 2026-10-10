@@ -76,9 +76,9 @@ raising the command-output limit or trusting CLI output truncation. The
   fingerprint, followed by 512 KiB chunks encoded as bounded receipts, then a
   second full-file hash/fingerprint. The host independently verifies every
   chunk and final SHA-256 before publication.
-- Maximum file size is **32 MiB** for now, with explicit 15-minute default?
-  **Actual default is 600 seconds** and a user-configured maximum of 1200
-  seconds, still subject to the shorter Task cancellation deadline. Larger
+- Maximum file size is **32 MiB** for now, with a **600-second default**
+  transfer timeout and a configurable maximum of 1200 seconds, still subject
+  to the shorter Task cancellation deadline. Larger
   files, changed sources, malformed/chopped OCI replies, wrong digests,
   unsafe paths, symlinks and extra host mounts fail closed.
 - A second authority boundary rechecks the active Task and Attempt, Project,

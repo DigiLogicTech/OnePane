@@ -2,7 +2,27 @@ package sandboxrunner
 
 import (
  "fmt"
+ "encoding/json"
 )
+
+// Strictly restrict this Tool's input object, rather than relying only
+// on Go JSON struct decoding (which otherwise silently ignores unknown keys).
+// This prevents operators or agents from assuming a supplied host path,
+// environment, image, mount or shell command was actually honoured.
+func validGodotEnvelope(raw json.RawMessage)bool{
+ var m map[string]json.RawMessage
+ if err:=json.Unmarshal(raw,&m);err!=nil||len(m)<3||len(m)>4{return false}
+ for k:=range m{
+  switch k {
+  case "runtime_id","application_id","action","timeout_seconds":
+  default:return false
+  }
+ }
+ for _,required:=range []string{"runtime_id","application_id","action"}{
+  if _,ok:=m[required];!ok{return false}
+ }
+ return true
+}
 
 // godotBuildCommand is a fixed, rootless OCI toolchain command. The caller
 // chooses only a documented action, never an executable, project path,

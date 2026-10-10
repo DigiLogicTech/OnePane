@@ -61,15 +61,21 @@ func inheritOnePaneRouting(parent, child json.RawMessage) json.RawMessage {
 	if json.Unmarshal(parent, &parentEnvelope) != nil {
 		return child
 	}
-	routing, ok := parentEnvelope["onepane_routing"]
-	if !ok || len(routing) == 0 {
+	routing, hasRouting := parentEnvelope["onepane_routing"]
+	pinnedManifest, hasManifest := parentEnvelope["toolchain_manifest_sha256"]
+	if (!hasRouting || len(routing)==0) && (!hasManifest || len(pinnedManifest)==0){
 		return child
 	}
 	childEnvelope := map[string]json.RawMessage{}
 	if len(child) > 0 {
 		_ = json.Unmarshal(child, &childEnvelope)
 	}
-	childEnvelope["onepane_routing"] = routing
+	if hasRouting && len(routing)>0{childEnvelope["onepane_routing"]=routing}
+	// A child Task must inherit its parent's reviewed toolchain digest.
+	// Model-authored delegation cannot remove or replace that approval pin.
+	if hasManifest && len(pinnedManifest)>0{
+		childEnvelope["toolchain_manifest_sha256"]=pinnedManifest
+	}
 	b, err := json.Marshal(childEnvelope)
 	if err != nil {
 		return child

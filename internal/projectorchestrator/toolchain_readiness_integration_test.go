@@ -115,6 +115,40 @@ func TestProjectOrchestratorUsesCanonicalWorkspaceToolchainReadinessAndPinnedTas
  if err!=nil||ready.Status!="ready_for_preflight"||len(ready.Requirements)!=1{
   t.Fatalf("approved running OCI not eligible for live prereq check: %+v %v",ready,err)
  }
+ // No remote sandbox executor exists. A paired peer's stale running
+ // claim must not turn a local Toolchain into a "ready for preflight" plan.
+ if _,err=db.SQL().ExecContext(ctx,`INSERT INTO harness_nodes(
+  id,name,local,identity_fingerprint,trust_state,trust_zone,
+  protocol_json,capabilities_json,last_seen_at,revision,created_at,updated_at)
+  VALUES('remote','Other Node',0,'remote-fp','paired','PAIRED_MTLS',
+   '{}','{}',?,1,?,?)`,now,now,now);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_runtimes SET
+  node_id='remote' WHERE id=?`,runtime.ID);err!=nil{t.Fatal(err)}
+ remotePlacement,err:=inspectWorkspaceToolchain(ctx,db.SQL(),p.ID,build.ID)
+ if err!=nil||remotePlacement.Status!="unsupported_node_placement"||
+  remotePlacement.NodePlacement!="remote_unsupported"||
+  remotePlacement.ManifestSHA256!=approved.ManifestSHA256{
+  t.Fatalf("remote assigned Workspace was treated as local: %+v %v",remotePlacement,err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`INSERT INTO harness_nodes(
+  id,name,local,identity_fingerprint,trust_state,trust_zone,
+  protocol_json,capabilities_json,last_seen_at,revision,created_at,updated_at)
+  VALUES('origin','Origin Node',1,'origin-fp','local','LOCAL_TRUSTED',
+   '{}','{}',?,1,?,?)`,now,now,now);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_runtimes SET
+  node_id='origin' WHERE id=?`,runtime.ID);err!=nil{t.Fatal(err)}
+ localPlacement,err:=inspectWorkspaceToolchain(ctx,db.SQL(),p.ID,build.ID)
+ if err!=nil||localPlacement.Status!="ready_for_preflight"||
+  localPlacement.NodePlacement!="origin_node"{
+  t.Fatalf("origin-owned runtime incorrectly blocked: %+v %v",localPlacement,err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_runtimes
+  SET node_id=NULL WHERE id=?`,runtime.ID);err!=nil{t.Fatal(err)}
+ legacyPlacement,err:=inspectWorkspaceToolchain(ctx,db.SQL(),p.ID,build.ID)
+ if err!=nil||legacyPlacement.NodePlacement!="legacy_local"||
+  legacyPlacement.Status!="ready_for_preflight"{
+  t.Fatalf("legacy-origin runtime changed behavior: %+v %v",legacyPlacement,err)
+ }
  if _,err=db.SQL().ExecContext(ctx,`UPDATE project_applications
  SET revision=revision+1 WHERE id=?`,app.ID);err!=nil{t.Fatal(err)}
  stale,err:=inspectWorkspaceToolchain(ctx,db.SQL(),p.ID,build.ID)

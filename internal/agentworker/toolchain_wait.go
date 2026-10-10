@@ -131,9 +131,13 @@ func (s *Service) deferWorkspaceToolchainWait(
  next.RetryAtMS=s.clock.UnixMilli()+15000
  encoded,err:=json.Marshal(toolchainWaitEnvelope{ToolchainWait:&next})
  if err!=nil{return err}
- _,err=s.db.ExecContext(ctx,`UPDATE agent_worker_runs
+ changed,err:=s.db.ExecContext(ctx,`UPDATE agent_worker_runs
  SET continuation_json=?,revision=revision+1,updated_at=?
  WHERE id=? AND status='waiting' AND continuation_json=?`,
   string(encoded),s.clock.UnixMilli(),runID,previousContinuation)
- return err
+ if err!=nil{return err}
+ affected,err:=changed.RowsAffected()
+ if err!=nil{return err}
+ if affected!=1{return ErrInvalidWorkerState}
+ return nil
 }

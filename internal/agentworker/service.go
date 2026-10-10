@@ -332,7 +332,10 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
                         // Advance the persisted deadline atomically: an
                         // unavailable approved runtime must not be rechecked
                         // on every Worker tick after the first expiry.
-                        if err:=s.deferWorkspaceToolchainWait(ctx,v.run,cont,toolchainWait);err!=nil{
+                        if err:=s.deferWorkspaceToolchainWait(ctx,v.run,cont,toolchainWait);err!=nil&&
+                            !errors.Is(err,ErrInvalidWorkerState){
+                            // A stale CAS means another Worker or operator
+                            // already changed this wait; do not overwrite it.
                             return fmt.Errorf("defer approved Workspace runtime recheck: %w",err)
                         }
                     }

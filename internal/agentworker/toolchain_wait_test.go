@@ -3,6 +3,7 @@ package agentworker
 import (
  "context"
  "encoding/json"
+ "errors"
  "path/filepath"
  "strings"
  "testing"
@@ -143,6 +144,19 @@ func TestApprovedWorkspaceToolchainWaitSurvivesRestartAndAvoidsDuplicateAttempt(
  if again:=decodeToolchainWait(stillDeferred.Continuation);again==nil||again.RetryAtMS!=next.RetryAtMS{
   t.Fatalf("resource wait got repeatedly polled before deadline: %+v",again)
  }
+ // A stale poller must see its lost compare-and-swap. It must not report
+ // a successful retry checkpoint or bump the live Worker revision.
+ revBefore:=stillDeferred.Revision
+ if err:=restarted.deferWorkspaceToolchainWait(ctx,run.ID,string(saved.Continuation),savedWait);
+    !errors.Is(err,ErrInvalidWorkerState){
+  t.Fatalf("stale previous continuation looked persisted: %v",err)
+ }
+ noChange,err:=restarted.getRun(ctx,run.ID)
+ if err!=nil||noChange.Revision!=revBefore||
+  string(noChange.Continuation)!=string(stillDeferred.Continuation){
+  t.Fatalf("stale CAS mutated a newer wait: %+v %v",noChange,err)
+ }
+
  if _,err:=db.SQL().ExecContext(ctx,
   `UPDATE project_runtimes SET desired_state='running',status='running' WHERE id=?`,runtime.ID);err!=nil{t.Fatal(err)}
  if _,err:=db.SQL().ExecContext(ctx,
@@ -168,6 +182,18 @@ func TestApprovedWorkspaceToolchainWaitSurvivesRestartAndAvoidsDuplicateAttempt(
  if err!=nil||r.Status!=RunRunning{
   t.Fatalf("resumed worker created a different run: %+v %v",r,err)
  }
+ // A retry deadline observed before the Task resumed cannot clobber a
+ // now-active Worker, even if the old continuation bytes still match.
+ revRunning:=r.Revision
+ if err:=restarted.deferWorkspaceToolchainWait(ctx,run.ID,string(r.Continuation),savedWait);
+    !errors.Is(err,ErrInvalidWorkerState){
+  t.Fatalf("resumed Worker accepted a stale waiting checkpoint: %v",err)
+ }
+ activeAgain,err:=restarted.getRun(ctx,run.ID)
+ if err!=nil||activeAgain.Status!=RunRunning||activeAgain.Revision!=revRunning{
+  t.Fatalf("stale retry changed active Worker: %+v %v",activeAgain,err)
+ }
+
  var attempts int
  if err:=db.SQL().QueryRowContext(ctx,
   `SELECT COUNT(*) FROM task_attempts WHERE task_id=?`,created.ID).Scan(&attempts);err!=nil{t.Fatal(err)}

@@ -46,6 +46,11 @@ func TestPairedNodeManifestBecomesSchedulerCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A discovered Node is not eligible for remote compute until there is
+	// an explicitly confirmed pairing, not merely a TRUST_STATE string.
+	if _, err := db.SQL().ExecContext(ctx, `INSERT INTO node_pairings(id,peer_node_id,direction,status,pairing_token,pairing_token_hash,pairing_code,pairing_code_hash,local_confirmed,peer_confirmed,peer_tls_fingerprint,peer_certificate_pem,expires_at,paired_at,revision,created_at,updated_at) VALUES('pair-peer','peer','outbound','paired','token','hashed','000000','hashed',1,1,'sha256:dead','',?,?,1,?,?)`, now+60000, now, now, now); err != nil {
+		t.Fatal(err)
+	}
 	ident, err := EnsureIdentity(t.TempDir(), "origin")
 	if err != nil {
 		t.Fatal(err)
@@ -80,6 +85,31 @@ func TestPairedNodeManifestBecomesSchedulerCandidate(t *testing.T) {
 	if !found {
 		t.Fatal("remote model candidate not imported")
 	}
+	// A READY deployment is only a stored historical record. Eligibility
+	// requires a live paired peer with a nonexpired capability manifest.
+	check := func(label string, schedulable bool) {
+		t.Helper()
+		items, err := cat.Candidates(ctx, ws, "reasoning", "")
+		if err != nil { t.Fatal(err) }
+		for _, candidate := range items {
+			if candidate.DisplayName == "example/remote" {
+				if candidate.Schedulable != schedulable {
+					t.Fatalf("%s: remote was schedulable=%t, want %t", label, candidate.Schedulable, schedulable)
+				}
+				return
+			}
+		}
+		t.Fatalf("%s: imported remote missing", label)
+	}
+	if _, err := db.SQL().ExecContext(ctx, `UPDATE node_capability_manifests SET expires_at=? WHERE peer_node_id='peer'`, now-1000); err != nil { t.Fatal(err) }
+	check("expired heartbeat", false)
+	if _, err := db.SQL().ExecContext(ctx, `UPDATE node_capability_manifests SET expires_at=? WHERE peer_node_id='peer'`, now+3600000); err != nil { t.Fatal(err) }
+	check("fresh paired heartbeat", true)
+	if _, err := db.SQL().ExecContext(ctx, `UPDATE node_pairings SET status='revoked' WHERE peer_node_id='peer'`); err != nil { t.Fatal(err) }
+	check("revoked pairing", false)
+	if _, err := db.SQL().ExecContext(ctx, `UPDATE node_pairings SET status='paired' WHERE peer_node_id='peer'`); err != nil { t.Fatal(err) }
+	if _, err := db.SQL().ExecContext(ctx, `UPDATE harness_nodes SET trust_state='unavailable' WHERE id='peer'`); err != nil { t.Fatal(err) }
+	check("unavailable peer", false)
 }
 
 func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {

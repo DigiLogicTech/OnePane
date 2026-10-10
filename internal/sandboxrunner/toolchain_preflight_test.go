@@ -177,3 +177,91 @@ func TestToolchainPreflightCancelledNeverReportsReady(t *testing.T){
   Input:json.RawMessage(`{"runtime_id":"world","application_id":"builder","required":["go"]}`)})
  if !errors.Is(err,context.DeadlineExceeded){t.Fatalf("timed-out preflight claimed readiness: %v",err)}
 }
+
+func TestTaskExecOptionalPreflightBlocksMissingToolsBeforeLaunch(t *testing.T){
+ eng:=&fakeEngine{profile:EngineProfile{Kind:"podman",Rootless:true}}
+ a:=NewAdapter(t.TempDir(),eng)
+ root,exists,err:=managedWorkspacePath(a.dataDir,"world",true)
+ if err!=nil||!exists{t.Fatal(err)}
+ eng.inspectMount=root
+ var builds,checks int
+ eng.execHandler=func(_ context.Context,cmd []string)(ExecResult,error){
+  if len(cmd)>4&&cmd[0]=="sh"&&cmd[1]=="-c"&&cmd[3]=="onepane-preflight"{
+   checks++
+   if len(cmd)!=6||cmd[4]!="go"||cmd[5]!="python3"{
+    t.Fatalf("tool requirements were not sorted or checked: %q",cmd)
+   }
+   return ExecResult{Stdout:"go\\t1\\npython3\\t1"},nil
+  }
+  builds++
+  if strings.Join(cmd," ")!="go version"{
+   t.Fatalf("unapproved exec command: %q",cmd)
+  }
+  return ExecResult{Stdout:"go1.23",ExitCode:0},nil
+ }
+ request:=tool.AdapterRequest{ToolID:ToolAppExec,Input:json.RawMessage(
+  `{"runtime_id":"world","application_id":"builder","command":["go","version"],"required_executables":["python3","go"]}`)}
+ result,err:=a.Invoke(context.Background(),request)
+ if err!=nil{t.Fatal(err)}
+ var out struct{
+  Succeeded bool `json:"succeeded"`
+  ToolchainPreflight string `json:"toolchain_preflight"`
+  RequirementsRef string `json:"toolchain_requirements_sha256"`
+ }
+ if err=json.Unmarshal(result.Result,&out);err!=nil{t.Fatal(err)}
+ if !out.Succeeded||out.ToolchainPreflight!="ready"||len(out.RequirementsRef)!=64||
+  builds!=1||checks!=1{
+  t.Fatalf("approved prerequisite/build order not preserved: %+v builds=%d checks=%d",out,builds,checks)
+ }
+ // A non-empty missing list fails at the requirement boundary. It never
+ // executes the Agent's requested compiler, even if the interpreter exists.
+ eng.execHandler=func(_ context.Context,cmd []string)(ExecResult,error){
+  if len(cmd)>4&&cmd[0]=="sh"{
+   checks++
+   return ExecResult{Stdout:"go\\t1\\npython3\\t0"},nil
+  }
+  builds++
+  return ExecResult{},nil
+ }
+ _,err=a.Invoke(context.Background(),request)
+ if !errors.Is(err,ErrInvalidInput)||!strings.Contains(err.Error(),"python3")||
+  builds!=1{
+  t.Fatalf("missing requirement allowed build: err=%v builds=%d",err,builds)
+ }
+ // Missing scanner (distroless/minimal image) is UNKNOWN, not ready.
+ eng.execHandler=func(_ context.Context,cmd []string)(ExecResult,error){
+  if cmd[0]=="sh"{checks++;return ExecResult{ExitCode:127},nil}
+  builds++;return ExecResult{},nil
+ }
+ _,err=a.Invoke(context.Background(),request)
+ if !errors.Is(err,ErrInvalidInput)||builds!=1{
+  t.Fatalf("unavailable in-container probe incorrectly allowed build: %v",err)
+ }
+ // Malformed/bogus prerequisites cannot be silently dropped.
+ before:=eng.execs
+ for _,invalid:=range []string{
+  `{"runtime_id":"world","application_id":"builder","command":["go","version"],"required_executables":[]}`,
+  `{"runtime_id":"world","application_id":"builder","command":["go","version"],"required_executables":null}`,
+  `{"runtime_id":"world","application_id":"builder","command":["go","version"],"required_executables":["go","go"]}`,
+  `{"runtime_id":"world","application_id":"builder","command":["go","version"],"required_executables":["go;rm -rf /"]}`,
+  `{"runtime_id":"world","application_id":"builder","command":["go","version"],"required_executables":"go"}`,
+ }{
+  _,err=a.Invoke(context.Background(),tool.AdapterRequest{ToolID:ToolAppExec,Input:json.RawMessage(invalid)})
+  if !errors.Is(err,ErrInvalidInput){t.Fatalf("untrusted pre-execution requirements accepted: %s %v",invalid,err)}
+ }
+ if before!=eng.execs{t.Fatal("invalid prerequisite list ran a program")}
+ // Existing call sites with no declared prerequisites are not broken;
+ // their separately leased/sandboxed execution path stays unchanged.
+ eng.execHandler=func(_ context.Context,cmd []string)(ExecResult,error){
+  builds++
+  if len(cmd)!=2||cmd[0]!="go"||cmd[1]!="version"{t.Fatalf("legacy command changed: %v",cmd)}
+  return ExecResult{Stdout:"go1.23"},nil
+ }
+ request.Input=json.RawMessage(`{"runtime_id":"world","application_id":"builder","command":["go","version"]}`)
+ result,err=a.Invoke(context.Background(),request)
+ if err!=nil{t.Fatal(err)}
+ if err=json.Unmarshal(result.Result,&out);err!=nil||out.ToolchainPreflight!="not_requested"||
+  out.RequirementsRef!=""||builds!=2{
+  t.Fatalf("legacy execution not backwards compatible: %+v %v",out,err)
+ }
+}

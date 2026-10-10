@@ -538,6 +538,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/orchestrator", s.getProjectOrchestrator)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/orchestrator/turns", s.listProjectOrchestratorTurns)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/orchestrator/turns", s.submitProjectOrchestratorTurn)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/orchestrator/task-graphs", s.createProjectTaskGraph)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/orchestrator/task-graphs/{graphID}", s.getProjectTaskGraph)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/orchestrator/handoffs", s.listProjectHandoffs)
 	s.mux.HandleFunc("PATCH /v1/projects/{projectID}", s.updateProjectPolicy)
 	s.mux.HandleFunc("DELETE /v1/projects/{projectID}", s.deleteProject)

@@ -485,14 +485,27 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 	}
 	content,err:=json.Marshal(messageContent)
 	if err!=nil{return s.fail(ctx,res,err)}
-	msg, err := s.teams.PostMessage(ctx, team.PostMessageCommand{SessionID: ss.ID, AuthorPrincipalID: WorkerPrincipal, AuthorMemberID: &member.ID, Kind: "agent", Content: content})
-	if err != nil {
-		return s.fail(ctx, res, err)
-	}
-	completed := s.clock.UnixMilli()
-	_, err = s.db.ExecContext(ctx, `UPDATE team_turn_requests SET status='succeeded',response_message_id=?,updated_at=?,completed_at=? WHERE id=? AND status='running'`, msg.ID, completed, completed, turnID)
-	if err != nil {
-		return s.fail(ctx, res, err)
+	if evidenceConsent.Active{
+		// Local inference may have completed after a human revoked approval.
+		// The result is discarded, and no Council message or successful turn
+		// is persisted unless BOTH pass the same SQLite write transaction.
+		_,completeErr:=s.completeProtectedResearchTurn(ctx,ws,ss.ID,turnID,member.ID,
+			manifestRecord.SnapshotSHA256,evidenceConsent.EvidenceSHA256,turnRound,content)
+		if completeErr!=nil{
+			return s.pauseResearch(ctx,res,ss,turnID,
+				fmt.Errorf("protected Research response discarded: %w",completeErr))
+		}
+	}else{
+		msg,postErr:=s.teams.PostMessage(ctx,team.PostMessageCommand{
+			SessionID:ss.ID,AuthorPrincipalID:WorkerPrincipal,
+			AuthorMemberID:&member.ID,Kind:"agent",Content:content,
+		})
+		if postErr!=nil{return s.fail(ctx,res,postErr)}
+		completed:=s.clock.UnixMilli()
+		_,err=s.db.ExecContext(ctx,`UPDATE team_turn_requests
+		 SET status='succeeded',response_message_id=?,updated_at=?,completed_at=?
+		 WHERE id=? AND status='running'`,msg.ID,completed,completed,turnID)
+		if err!=nil{return s.fail(ctx,res,err)}
 	}
 	res.Status = "succeeded"
 	return res

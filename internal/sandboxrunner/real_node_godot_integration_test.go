@@ -5,6 +5,7 @@ package sandboxrunner
 import (
  "context"
  "crypto/sha256"
+ "encoding/json"
  "encoding/hex"
  "fmt"
  "os"
@@ -13,6 +14,8 @@ import (
  "strings"
  "testing"
  "time"
+
+ "github.com/DigiLogicTech/OnePane/internal/tool"
 )
 
 // TestRealRootlessGodotWorldBuild is a separately approved, opt-in execution
@@ -36,8 +39,9 @@ func TestRealRootlessGodotWorldBuild(t *testing.T) {
  }
  runID:=fmt.Sprintf("opqa-godot-%d",time.Now().UnixNano())
  const appID="godot"
- workspace:=filepath.Join(t.TempDir(),"workspace")
- if err:=os.MkdirAll(workspace,0o700);err!=nil{t.Fatal(err)}
+ dataRoot:=t.TempDir()
+ workspace,exists,err:=managedWorkspacePath(dataRoot,runID,true)
+ if err!=nil||!exists{t.Fatalf("approved managed Workspace cannot be created: %v",err)}
  // A Godot 4 scene with a real GDScript. Output bytes are deterministic so
  // the host independently verifies that the engine executed the project.
  sources:=map[string]string{
@@ -90,15 +94,24 @@ func _ready() -> void:
   state.SpecHash!=specHash(spec)||!exactWorkspaceMount(state,workspace) {
   t.Fatalf("Godot OCI isolation not verified: %+v %v",state,err)
  }
- // Import real scene/resources (no external registry access), then execute.
- for _,command:=range [][]string{
-  {"sh","-c","godot --headless --path /workspace --editor --import"},
-  {"sh","-c","godot --headless --path /workspace --quit-after 30"},
- } {
-  observed,err:=engine.ExecContainer(ctx,runID,appID,command)
-  if err!=nil||observed.ExitCode!=0{
-   t.Fatalf("Godot import/build command failed: command=%v stdout=%q stderr=%q exit=%d err=%v",
-    command,observed.Stdout,observed.Stderr,observed.ExitCode,err)
+ // Exercise the same fixed command and verified OCI adapter boundary
+ // exposed to the authorised Tool Gateway (not raw host/engine exec).
+ adapter:=NewAdapter(dataRoot,engine)
+ for _,action:=range []string{"import","run"}{
+  body,_:=json.Marshal(map[string]any{
+   "runtime_id":runID,"application_id":appID,"action":action,
+   "timeout_seconds":180,
+  })
+  out,err:=adapter.Invoke(ctx,tool.AdapterRequest{ToolID:ToolAppGodotBuild,Input:body})
+  if err!=nil{t.Fatalf("Godot %s tool rejected verified rootless Workspace: %v",action,err)}
+  var response struct{
+   Succeeded bool `json:"succeeded"`
+   ArtifactVerified bool `json:"artifact_verified"`
+   Result ExecResult `json:"result"`
+  }
+  if err:=json.Unmarshal(out.Result,&response);err!=nil{t.Fatal(err)}
+  if !response.Succeeded||response.Result.ExitCode!=0||response.ArtifactVerified{
+   t.Fatalf("Godot %s reported wrong tool result: %+v",action,response)
   }
  }
  const expected="OnePane Godot World build v1\n"
@@ -117,5 +130,5 @@ func _ready() -> void:
  if err!=nil||stopped.Status=="running"||stopped.Status=="restarting"{
   t.Fatalf("Godot runtime stop unverified: %+v %v",stopped,err)
  }
- t.Logf("Godot 4 scene executed in isolated rootless Workspace; verified artifact SHA-256: %s",digest)
+ t.Logf("Godot 4 scene executed through fixed-authority sandbox tool in isolated rootless Workspace; host independently verified generated file SHA-256: %s (Library publication remains separate)",digest)
 }

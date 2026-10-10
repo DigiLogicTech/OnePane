@@ -56,7 +56,7 @@ async function a48MountWorkspaceRuntime(project,workspace,container){
  a44DevelopmentSection("Installed applications",String(apps.length),"Only observed application states are reported")+'</div>'+
  '<div class="toolbar a48-runtime-actions">'+buttons+'<button type="button" class="btn" id="a48Refresh">Refresh</button></div>'+
  (runtime?'<form id="a48Install" class="a48-install"><h4>Install a toolchain / OCI application</h4>'+
- '<p class="list-meta">Supply a reviewed image pinned to its sha256 digest. Installs are governed and executed only on a compatible Sandbox Node, never on the Windows desktop host.</p>'+
+ '<p class="list-meta">Supply a reviewed image pinned to its sha256 digest. Installs are governed and executed only on a compatible Sandbox Node, never on the Windows desktop host.</p>'+ '<p class="list-meta">Game engines: Godot 4 supports governed headless import/run. Unreal Engine 5.8 has an experimental same-container MCP identity probe only; editor mutation is not enabled. UEFN integration is planned. No automatic remote MCP exposure or engine fallback.</p>'+
  '<label>Application name<input name="name" required maxlength="120" placeholder="Godot headless"></label>'+
  '<label>OCI image digest<input name="source_ref" required placeholder="registry.example/engine@sha256:…" pattern=".+@sha256:[0-9a-fA-F]{64}"></label>'+
  '<button type="submit" class="btn" '+(runtime.status==="running"?"":"disabled")+' >Declare pinned tool</button></form>':'')+

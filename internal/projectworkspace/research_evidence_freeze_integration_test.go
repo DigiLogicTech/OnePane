@@ -115,5 +115,27 @@ func TestResearchSessionFrozenEvidenceApprovalAndRevocation(t *testing.T){
  if _,err=svc.ResearchEvidence(ctx,session.ID,"human");err!=nil{
   t.Fatalf("operator could not inspect prior metadata after round: %v",err)
  }
- _=research
+ // Separate Research Workspace remains isolated from World Library,
+ // even if its Task and Council belong to the same parent Project.
+ other,err:=tasks.Create(ctx,task.CreateCommand{
+  WorkspaceID:"tenant",ProjectID:&p.ID,ProjectWorkspaceID:&research.ID,
+  Objective:"Independent scoped evidence",
+ })
+ if err!=nil{t.Fatal(err)}
+ otherSession,err:=council.StartSession(ctx,team.StartSessionCommand{
+  TaskID:other.ID,TeamID:registered.ID,CreatedBy:"human",ExecutionMode:"council",
+ })
+ if err!=nil{t.Fatal(err)}
+ if _,err=svc.FreezeResearchEvidence(ctx,otherSession.ID,"human",requested);
+  !errors.Is(err,ErrCrossWorkspace){
+  t.Fatalf("Research Workspace inherited World evidence: %v",err)
+ }
+ // A recorded approval never becomes a perpetual read lease.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_library_grants
+  SET enabled=0 WHERE asset_id=? AND project_workspace_id=?`,a.ID,world.ID);
+  err!=nil{t.Fatal(err)}
+ if _,err=svc.ResearchEvidence(ctx,session.ID,"human");
+  !errors.Is(err,ErrCrossWorkspace){
+  t.Fatalf("revoked evidence selection was still readable: %v",err)
+ }
 }

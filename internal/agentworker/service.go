@@ -289,7 +289,6 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 		}
 		xs = append(xs, v)
 	}
-	actor := AuthorityPrincipal
 	for _, v := range xs {
 		if v.state == string(task.StateWaitingDependency) {
 			var blocked int
@@ -344,22 +343,74 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 				ready = ready && opState == "committed"
 			}
 			if ready {
-				if _, err := s.tasks.Resume(ctx, task.TransitionCommand{TaskID: v.task, ExpectedRevision: v.rev, ActorPrincipalID: &actor, Reason: "worker dependencies/resources ready for retry"}); err != nil && !task.IsRevisionConflict(err) {
-					return err
-				}
-			}
+                // Task, existing Attempt, Worker and outbox either all wake
+                // or all remain suspended after a failed resume.
+                if err:=s.resumeWaitingWorkerAndAttempt(ctx,v.run,v.task,v.rev,cont);err!=nil &&
+                    !task.IsRevisionConflict(err)&&!errors.Is(err,ErrInvalidWorkerState) {
+                    return fmt.Errorf("resume waiting Worker/Task/Attempt: %w",err)
+                }
+            }
 		}
 		var state string
 		if err := s.db.QueryRowContext(ctx, `SELECT state FROM tasks WHERE id=?`, v.task).Scan(&state); err != nil {
 			return err
 		}
 		if state == string(task.StateRunning) {
-			if _, err := s.db.ExecContext(ctx, `UPDATE agent_worker_runs SET status='running',revision=revision+1,updated_at=? WHERE id=? AND status='waiting'`, s.clock.UnixMilli(), v.run); err != nil {
-				return err
-			}
-		}
+            // Externally authorised Task resume: require its matching
+            // original Attempt to be running before reconciling the Worker.
+            if _,err:=s.db.ExecContext(ctx,`UPDATE agent_worker_runs
+             SET status='running',revision=revision+1,updated_at=?
+             WHERE id=? AND task_id=? AND status='waiting'
+             AND EXISTS(SELECT 1 FROM tasks t WHERE t.id=agent_worker_runs.task_id
+               AND t.workspace_id=agent_worker_runs.workspace_id AND t.state='running')
+             AND EXISTS(SELECT 1 FROM task_attempts a WHERE a.id=agent_worker_runs.attempt_id
+               AND a.task_id=agent_worker_runs.task_id AND a.status='running')`,
+               s.clock.UnixMilli(),v.run,v.task);err!=nil{return err}
+        }
 	}
 	return rows.Err()
+}
+
+// resumeWaitingWorkerAndAttempt is the atomic counterpart of
+// suspendForResource. The Task event/outbox, Attempt and Worker resume commit
+// together; stale revisions and journal failures roll back all transitions.
+func (s *Service) resumeWaitingWorkerAndAttempt(
+ ctx context.Context,runID,taskID string,expectedTaskRevision int64,expectedContinuation string,
+) error {
+ if s==nil||s.tx==nil||s.tasks==nil||runID==""||taskID==""||
+    expectedTaskRevision<1||expectedContinuation=="" {return ErrInvalidWorkerState}
+ return s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+  var workspaceID,attemptID string
+  var runRevision int64
+  err:=tx.QueryRowContext(ctx,`SELECT workspace_id,attempt_id,revision
+    FROM agent_worker_runs WHERE id=? AND task_id=? AND status='waiting'
+    AND continuation_json=?`,runID,taskID,expectedContinuation).
+    Scan(&workspaceID,&attemptID,&runRevision)
+  if errors.Is(err,sql.ErrNoRows){return ErrInvalidWorkerState}
+  if err!=nil{return err}
+  var taskWorkspace string
+  err=tx.QueryRowContext(ctx,`SELECT workspace_id FROM tasks WHERE id=?
+   AND state='waiting_dependency' AND revision=?`,
+   taskID,expectedTaskRevision).Scan(&taskWorkspace)
+  if errors.Is(err,sql.ErrNoRows){return task.ErrRevisionConflict}
+  if err!=nil{return err}
+  if taskWorkspace!=workspaceID{return ErrInvalidWorkerState}
+  changed,err:=tx.ExecContext(ctx,`UPDATE agent_worker_runs
+   SET status='running',revision=revision+1,updated_at=?
+   WHERE id=? AND task_id=? AND workspace_id=? AND attempt_id=?
+   AND revision=? AND status='waiting' AND continuation_json=?`,
+   s.clock.UnixMilli(),runID,taskID,workspaceID,attemptID,
+   runRevision,expectedContinuation)
+  if err!=nil{return err}
+  affected,err:=changed.RowsAffected()
+  if err!=nil{return err}
+  if affected!=1{return ErrInvalidWorkerState}
+  actor:=AuthorityPrincipal
+  return s.tasks.ResumeWaitingAttemptInTransaction(ctx,tx,task.TransitionCommand{
+   TaskID:taskID,ExpectedRevision:expectedTaskRevision,ActorPrincipalID:&actor,
+   Reason:"worker dependencies/resources ready for retry",
+  },attemptID)
+ })
 }
 
 func (s *Service) activeRuns(ctx context.Context, limit int) ([]Run, error) {

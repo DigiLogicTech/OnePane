@@ -24,6 +24,13 @@ on:
       - 'internal/storage/sqlite/**'
       - 'migrations/**'
       - 'internal/api/**'
+      - 'internal/startupevidence/**'
+      - 'cmd/harnessd/**'
+      - 'packaging/windows/service/**'
+      - 'packaging/windows/setup/**'
+      - 'packaging/debian/onepane.service'
+      - 'packaging/systemd/onepane.service'
+      - 'scripts/install-ubuntu.sh'
       - 'internal/scheduler/**'
       - 'internal/localai/**'
       - 'docs/PROJECT_WORKSPACE_DEVELOPMENT_ENVIRONMENTS_RFC.md'
@@ -70,3 +77,5 @@ jobs:
         run: |
           go test ./...
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-harnessd.exe ./cmd/harnessd
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-service.exe ./packaging/windows/service
+          bash -n scripts/install-ubuntu.sh

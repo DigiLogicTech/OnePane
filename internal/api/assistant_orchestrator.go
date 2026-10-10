@@ -162,6 +162,24 @@ func(s *Server) listProjectTaskGraphs(w http.ResponseWriter,r *http.Request){
  out,err:=graph.TaskGraphs(r.Context(),p.ID,limit)
  respondDomain(w,out,err,http.StatusOK)
 }
+type taskGraphRecoveryService interface{
+ TaskGraphRecoveryCheckpoint(context.Context,string,string)(
+  projectorchestrator.RecoveryCheckpoint,error)
+}
+func(s *Server) getProjectTaskGraphRecoveryCheckpoint(w http.ResponseWriter,r *http.Request){
+ i,ok:=s.authenticate(w,r)
+ if !ok{return}
+ p,err:=s.projects.Project(r.Context(),r.PathValue("projectID"))
+ if err!=nil{respondDomain(w,nil,err,0);return}
+ if !s.authorize(w,r,i,p.WorkspaceID,"project.read"){return}
+ recovery,ok:=s.projectOrchestrator.(taskGraphRecoveryService)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Recovery checkpoint unavailable");return}
+ out,err:=recovery.TaskGraphRecoveryCheckpoint(r.Context(),p.ID,r.PathValue("graphID"))
+ if err!=nil{respondDomain(w,nil,err,0);return}
+ w.Header().Set("Cache-Control","no-store, private")
+ writeJSON(w,http.StatusOK,out)
+}
+
 func(s *Server) getProjectTaskGraph(w http.ResponseWriter,r *http.Request){
  i,ok:=s.authenticate(w,r);if !ok{return}
  p,err:=s.projects.Project(r.Context(),r.PathValue("projectID"))

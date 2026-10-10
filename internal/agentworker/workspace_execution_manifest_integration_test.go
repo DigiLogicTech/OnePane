@@ -66,7 +66,7 @@ func TestWorkspaceExecutionManifestListsOnlyTaskOwnedOCIApplications(t *testing.
   manifest.GitInspectTool.ID!="project.app.git.inspect"||manifest.GitInspectTool.Version!="1"||len(manifest.GitInspectTool.Actions)!=4||
   manifest.FileInspectTool.ID!="project.app.files.inspect"||manifest.FileInspectTool.Version!="1"||len(manifest.FileInspectTool.Actions)!=2||
   manifest.FileEditTool.ID!="project.app.files.edit"||manifest.FileEditTool.Version!="1"||len(manifest.FileEditTool.Actions)!=3||
-  manifest.FilePublishTool.ID!="project.app.files.publish"||manifest.FilePublishTool.Version!="1"||len(manifest.FilePublishTool.Actions)!=1||
+  manifest.FilePublishTool.ID!="project.app.files.publish"||manifest.FilePublishTool.Version!="1"||(len(manifest.FilePublishTool.Actions)!=2||manifest.FilePublishTool.Actions[0]!="publish"||manifest.FilePublishTool.Actions[1]!="publish_large")||
   manifest.GitMutationTool.ID!="project.app.git.mutate"||manifest.GitMutationTool.Version!="1"||len(manifest.GitMutationTool.Actions)!=3||
   len(manifest.Applications)!=1||manifest.Applications[0].ID!=appWorld.ID {
   t.Fatalf("incorrect Task-owned Workspace execution manifest: %s",raw)
@@ -74,6 +74,42 @@ func TestWorkspaceExecutionManifestListsOnlyTaskOwnedOCIApplications(t *testing.
  if strings.Contains(string(raw),storyRun.ID)||strings.Contains(string(raw),appStory.ID)||
   strings.Contains(string(raw),"environment_bindings")||strings.Contains(string(raw),"secret_ref"){
   t.Fatalf("foreign Workspace identity or secret scope leaked: %s",raw)
+ }
+ // An explicit human-approved toolchain manifest becomes available only
+ // to Tasks in the matching Workspace, and is never considered a live
+ // package/version or physical build attestation.
+ approved,err:=svc.ApproveWorkspaceToolchainManifest(ctx,projectworkspace.ApproveToolchainManifestCommand{
+  ProjectID:project.ID,ProjectWorkspaceID:world.ID,ApplicationID:appWorld.ID,
+  ActorPrincipalID:"operator",Requirements:[]projectworkspace.ToolchainRequirement{
+   {Executable:"go",VersionConstraint:">=1.23"},
+   {Executable:"python3",VersionConstraint:">=3.12"},
+  },
+ })
+ if err!=nil{t.Fatalf("approve Workspace toolchain: %v",err)}
+ approvedRaw,err:=workspaceExecutionManifest(ctx,db.SQL(),owned)
+ if err!=nil{t.Fatal(err)}
+ var scoped struct{
+  Approved struct{
+   Status string `json:"status"`
+   Digest string `json:"manifest_sha256"`
+   ApplicationID string `json:"application_id"`
+   Requirements []projectworkspace.ToolchainRequirement `json:"requirements"`
+  } `json:"approved_toolchain_manifest"`
+  PreflightTool struct{ID string `json:"tool_id"`} `json:"toolchain_preflight_tool"`
+ }
+ if err:=json.Unmarshal(approvedRaw,&scoped);err!=nil{t.Fatal(err)}
+ if scoped.Approved.Status!="approved_unverified"||
+  scoped.Approved.Digest!=approved.ManifestSHA256||
+  scoped.Approved.ApplicationID!=appWorld.ID||
+  len(scoped.Approved.Requirements)!=2||
+  scoped.PreflightTool.ID!="project.app.toolchain.preflight"{
+  t.Fatalf("approved toolchain absent or falsely qualified: %s",approvedRaw)
+ }
+ storyTask:=task.Task{WorkspaceID:"tenant",ProjectID:&project.ID,ProjectWorkspaceID:&story.ID}
+ storyRaw,err:=workspaceExecutionManifest(ctx,db.SQL(),storyTask)
+ if err!=nil||strings.Contains(string(storyRaw),approved.ManifestSHA256)||
+  strings.Contains(string(storyRaw),appWorld.ID){
+  t.Fatalf("Story Task inherited ungranted World software approval: %s %v",storyRaw,err)
  }
  absent:=task.Task{WorkspaceID:"tenant",ProjectID:&project.ID,ProjectWorkspaceID:ptr("not-a-workspace")}
  missing,err:=workspaceExecutionManifest(ctx,db.SQL(),absent)

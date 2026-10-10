@@ -19,12 +19,16 @@ async function a48MountWorkspaceRuntime(project,workspace,container){
   return;
  }
  const runtimeURI=prefix+"/workspaces/"+encodeURIComponent(canonical.id)+"/runtime";
- let runtime=null,apps=[],err="";
+ let runtime=null,apps=[],approvedToolchain=null,err="";
  try{runtime=await apiRequest(runtimeURI)}
  catch(e){if(!/404|not found|no rows/i.test(String(e.message)))err=e.message}
  if(runtime){
   try{const list=await apiRequest("/v1/project-runtimes/"+encodeURIComponent(runtime.id)+"/applications");apps=Array.isArray(list)?list:[]}
   catch(e){err="Application inventory unavailable: "+e.message}
+ }
+ if(runtime){
+  try{approvedToolchain=await apiRequest(prefix+"/workspaces/"+encodeURIComponent(canonical.id)+"/toolchain-manifest")}
+  catch(e){if(!/404|not found|no rows/i.test(String(e.message)))err="Toolchain approval unavailable: "+e.message}
  }
  if(!section.isConnected||section.dataset.workspaceId!==String(workspace.id))return;
  const verified=runtime?.status==="running";
@@ -44,6 +48,29 @@ async function a48MountWorkspaceRuntime(project,workspace,container){
    ' data-a48-revision="'+Number(a.revision)+'" data-a48-target="'+next+'" '+
    (disabled?'disabled title="Start Workspace sandbox first"':'')+'>'+action+'</button></div>';
  }).join("");
+ const approvedApps=apps.filter(a=>a.source_kind==="oci_image"&&
+   /@sha256:[a-fA-F0-9]{64}$/.test(String(a.source_ref||"")));
+ const approvedApp=approvedToolchain?.application_id||approvedApps[0]?.id||"";
+ const approvedStatus=approvedToolchain?.status||"not approved";
+ const approvedReqs=Array.isArray(approvedToolchain?.requirements)?
+   approvedToolchain.requirements.map(r=>String(r.executable||"")+
+     (r.version_constraint?":"+String(r.version_constraint):"")).join(", "):"";
+ const manifestBox=runtime?'<section class="a48-toolchain-approval">'+
+  '<h4>Approved Workspace toolchain</h4>'+
+  '<p class="list-meta">A human operator can approve required executables, version constraints and a registered digest-pinned OCI application. Approval is versioned and persisted; OnePane still checks actual tool availability before executing Tasks.</p>'+
+  '<p class="list-meta">Approval: <strong>'+escapeHtml(approvedStatus)+
+  '</strong> · revision '+Number(approvedToolchain?.revision||0)+
+  (approvedToolchain?.manifest_sha256?' · SHA-256 '+escapeHtml(approvedToolchain.manifest_sha256.slice(0,12))+'…':'')+
+  '</p>'+
+  '<form id="a48ToolchainApprove">'+
+  '<label>Approved OCI application<select name="application_id" required>'+
+   approvedApps.map(a=>'<option value="'+escapeHtml(a.id)+'"'+
+   (String(a.id)===String(approvedApp)?' selected':'')+'>'+
+   escapeHtml(a.name)+' — '+escapeHtml(a.source_ref)+'</option>').join("")+
+  '</select></label>'+
+  '<label>Required executables and optional version constraints (comma-separated)<input name="requirements" maxlength="2500" required placeholder="go:>=1.23, python3:>=3.12" value="'+escapeHtml(approvedReqs)+'"></label>'+
+  '<button type="submit" class="btn" '+(!approvedApps.length?'disabled':'')+'>Approve toolchain revision</button>'+
+  '</form></section>':"";
  const buttons=runtime?
   '<button type="button" class="btn" id="a48Start" '+(desired==="running"?"disabled":"")+'>Start</button> <button type="button" class="btn" id="a48Stop" '+(desired==="stopped"?"disabled":"")+'>Stop</button>':
   '<button type="button" class="btn primary" id="a48Create">Create isolated sandbox</button>';
@@ -61,6 +88,7 @@ async function a48MountWorkspaceRuntime(project,workspace,container){
  '<label>OCI image digest<input name="source_ref" required placeholder="registry.example/toolchain@sha256:…" pattern=".+@sha256:[0-9a-fA-F]{64}"></label>'+
  '<button type="submit" class="btn" '+(runtime.status==="running"?"":"disabled")+' >Declare pinned tool</button></form>':'')+
  (tools?'<div class="a48-app-list"><h4>Workspace tools</h4>'+tools+'</div>':'')+
+ manifestBox+
  (err?'<p class="error" role="alert">'+escapeHtml(err)+'</p>':'');
  const refresh=()=>a48MountWorkspaceRuntime(project,workspace,container).then(()=>{
   if(section.isConnected)section.remove();
@@ -69,6 +97,32 @@ async function a48MountWorkspaceRuntime(project,workspace,container){
   try{await apiRequest(uri,{method:"POST",body:JSON.stringify(body)});notice("Workspace runtime change requested.");await refresh()}
   catch(e){notice("Workspace runtime: "+e.message,"bad")}
  };
+ section.querySelector("#a48ToolchainApprove")?.addEventListener("submit",async event=>{
+  event.preventDefault();
+  const form=event.currentTarget;
+  const chosen=String(new FormData(form).get("application_id")||"");
+  const raw=String(new FormData(form).get("requirements")||"");
+  const parts=raw.split(",").map(v=>v.trim()).filter(Boolean);
+  const requirements=parts.map(v=>{
+    const colon=v.indexOf(":");
+    return {executable:colon<0?v:v.slice(0,colon),
+      version_constraint:colon<0?"":v.slice(colon+1).trim()};
+  });
+  if(!chosen||requirements.length<1||requirements.length>32){
+    notice("Select a pinned application and 1–32 executable requirements.","bad");return;
+  }
+  const button=form.querySelector("button[type=submit]");
+  if(button)button.disabled=true;
+  try{
+    await apiRequest(prefix+"/workspaces/"+encodeURIComponent(canonical.id)+"/toolchain-manifest",{
+      method:"PUT",body:JSON.stringify({
+        application_id:chosen,expected_revision:Number(approvedToolchain?.revision||0),requirements
+      })
+    });
+    notice("Human-approved Workspace toolchain revision saved. Live software and version qualification is still required.");
+    await refresh();
+  }catch(e){if(button)button.disabled=false;notice("Toolchain approval not saved: "+e.message,"bad")}
+ });
  section.querySelector("#a48Create")?.addEventListener("click",()=>mutate(runtimeURI,{
   desired_state:"stopped",isolation_mode:"sandboxed_container"
  }));

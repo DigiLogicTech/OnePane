@@ -36,3 +36,15 @@ These are interdependent workstreams, not a promise that each must be completed 
 - **[RC11-12 #30](https://github.com/DigiLogicTech/OnePane/issues/30):** complete end-to-end application/Node/Research/Model/Debug regressions, immutable QA artifacts, explicit unsupported-environment list and operator test checklist.
 
 **No default cloud inference fallback; no invisible Project Workspace authority escalation; no physical test claim without physical execution.** The RC10 release branch remains untouched until operator acceptance.
+
+## Rootless two-Workspace physical acceptance expansion (RC11-01/02)
+
+The separately approved, digest-pinned **rootless Node** integration test `TestRealRootlessWorkspaceIsolation` now checks more than an initial stop:
+
+- World and Story must start as distinct real OCI containers with independently inspected rootless isolation, private internal networks and writable Workspace roots.
+- Stopping **World** must leave **Story** executing and reading its private file.
+- Restarting World's **exact original runtime spec** must preserve its independently verified OCI identity and its pre-existing file.
+- Rebuilding World's **versioned command spec** must replace only its originally verified owned container identity, preserve World's writable file, and leave Story's original process, file and isolated network unchanged.
+- Both Workspaces must stop cleanly without image pruning, uncontrolled host-shell commands, or deletion of existing user roots. The explicit trusted test uses only fresh generated OCI names and disposable temporary directories.
+
+This added acceptance is source-compiled by integration CI, but physical results remain **unverified** while the trusted self-hosted rootless job is **skipped**. The physical workflow still requires a deliberate repository administrator-provided digest-pinned pre-pulled image and verified unprivileged Podman identity. Do not substitute a hosted/unit simulation or a green source-compilation run for the actual rootless acceptance check. After the approved Node/image become available, run the existing opt-in workflow and record the actual result before closing #19/#20 or packaging RC11.

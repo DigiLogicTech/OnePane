@@ -75,8 +75,8 @@ func TestProjectOrchestratorUsesCanonicalWorkspaceToolchainReadinessAndPinnedTas
  if _,err:=inspectWorkspaceToolchain(ctx,db.SQL(),"other-project",build.ID);err==nil{
   t.Fatal("foreign Project was able to inspect private Workspace")
  }
- orch:=NewService(db.SQL(),db,clock.Real(),unavailableOrchestratorReasoning{},nil,nil,
-  task.NewService(db.SQL(),db,clock.Real()),nil)
+ orch:=NewService(db.SQL(),db,clock.Real{},unavailableOrchestratorReasoning{},nil,nil,
+  task.NewService(db.SQL(),db,clock.Real{}),nil)
  snapshot,selected,_,_,err:=orch.contextSnapshot(ctx,p.ID,build.ID)
  if err!=nil||selected!=build.ID{t.Fatalf("orchestrator context failed: %v",err)}
  var doc struct{
@@ -93,7 +93,7 @@ func TestProjectOrchestratorUsesCanonicalWorkspaceToolchainReadinessAndPinnedTas
   Objective:"Compile this program",ForceTask:true,
  })
  if err!=nil||forced.TaskID==nil{t.Fatalf("forced Task failed: %+v %v",forced,err)}
- persisted,err:=task.NewService(db.SQL(),db,clock.Real()).Get(ctx,*forced.TaskID)
+ persisted,err:=task.NewService(db.SQL(),db,clock.Real{}).Get(ctx,*forced.TaskID)
  if err!=nil||persisted.ProjectWorkspaceID==nil||*persisted.ProjectWorkspaceID!=build.ID{
   t.Fatalf("Project Orchestrator Task escaped Workspace ownership: %+v %v",persisted,err)
  }

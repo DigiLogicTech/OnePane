@@ -50,6 +50,22 @@ func TestNamedWorkspaceModelWaitSurvivesWorkerRestartWithoutDuplicateAttempt(t *
  if err!=nil{t.Fatal(err)}
  run,started:=svc.startRun(ctx,ready)
  if started.Error!=""{t.Fatal(started.Error)}
+ stale:=run
+ stale.Revision++
+ rejected:=svc.waitForLocalModel(ctx,stale,
+  TickResult{TaskID:created.ID,RunID:run.ID},"awaiting eligible local model")
+ if rejected.Status=="waiting_model"||rejected.Error==""{
+  t.Fatalf("stale Worker incarnation suspended Task: %+v",rejected)
+ }
+ unchangedTask,err:=taskService.Get(ctx,created.ID)
+ if err!=nil||unchangedTask.State!=task.StateRunning{
+  t.Fatalf("stale Worker transitioned Task despite failed CAS: %+v %v",unchangedTask,err)
+ }
+ unchangedRun,err:=svc.getRun(ctx,run.ID)
+ if err!=nil||unchangedRun.Status!=RunRunning||unchangedRun.Revision!=run.Revision{
+  t.Fatalf("stale Worker changed persisted run: %+v %v",unchangedRun,err)
+ }
+
  waiting:=svc.waitForLocalModel(ctx,run,TickResult{TaskID:created.ID,RunID:run.ID},
   "awaiting eligible local model")
  if waiting.Status!="waiting_model"||waiting.Error==""{

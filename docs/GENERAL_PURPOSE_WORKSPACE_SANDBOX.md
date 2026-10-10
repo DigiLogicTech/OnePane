@@ -305,3 +305,22 @@ This is visibility only: refreshing a Task does not start the runtime,
 approve a new image, retry an external action or attest tool availability.
 The original Task Attempt remains intact while waiting; physical rootless
 OCI inspection and executable checks happen at execution admission.
+
+
+## RC11 atomic Worker resource suspensions
+
+Local-model and approved-toolchain waits now persist the **existing** Task
+revision transition, active Attempt waiting transition, Worker continuation
+and the matching audit journal in one SQLite transaction. Every suspension
+checks the exact running Worker ID, Attempt, tenancy and optimistic revision;
+stale or interrupted attempts cannot write half a wait or silently create a
+replacement Attempt. A failed journal insert rolls back Task, Attempt and
+Worker status together. Wake-up still reevaluates the original pinned local
+model route or exact approved OCI application and never automatically replays
+a previously proposed external action.
+
+Regression tests inject a journal write failure to prove rollback, reject
+stale Worker revisions and preserve the original Task Attempt across restart.
+This is database crash consistency, **not** proof that a physical OCI Node is
+running, that installed tool versions match a desired manifest, or that
+artifact publication succeeded.

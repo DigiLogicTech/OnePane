@@ -93,9 +93,7 @@ func collectVerifiedWorkspaceEvidence(
   if err=artifacts.VerifyContent(ctx,artifactID);err!=nil{return verifiedWorkspaceEvidence{},errEvidenceUnsafe}
   reader,raw,e:=artifacts.Open(ctx,artifactID)
   if e!=nil{return verifiedWorkspaceEvidence{},errEvidenceUnsafe}
-  if raw.Status!=artifact.StatusActive||raw.ContentHash!=selected.ContentHash||
-   raw.SizeBytes!=selected.SizeBytes||raw.ProjectID==nil||*raw.ProjectID!=projectID||
-   raw.WorkspaceID!=tenantWorkspaceID{
+  if !libraryArtifactMatchesProject(selected,raw,projectID,tenantWorkspaceID){
    _=reader.Close()
    return verifiedWorkspaceEvidence{},errEvidenceUnsafe
   }

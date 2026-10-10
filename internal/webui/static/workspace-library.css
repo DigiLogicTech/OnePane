@@ -40,3 +40,6 @@
 
 /* Read-only verified evidence appears as literal text, never HTML. */
 .a62-evidence-panel [data-a63-result]{max-height:360px;user-select:text}
+
+.a64-search-label{display:flex;flex-direction:column;gap:6px;margin:10px 0;color:var(--text);max-width:100%;overflow-wrap:anywhere}
+.a64-search-label input{width:100%;max-width:100%;box-sizing:border-box}

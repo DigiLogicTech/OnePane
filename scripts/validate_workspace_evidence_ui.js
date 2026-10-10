@@ -39,3 +39,14 @@ assert(retrieval.includes('lib.ResolveWorkspaceLibraryVersion(ctx,projectID,work
 assert(retrieval.includes('latest,err:=lib.BuildWorkspaceEvidencePacket('));
 assert(retrieval.includes('untrusted_library_content'));
 console.log("PASS: bounded verified-text retrieval rechecks permissions, hashes and textContent rendering");
+
+const search=fs.readFileSync("internal/api/workspace_evidence_search.go","utf8");
+assert(routes.includes('POST /v1/projects/{projectID}/workspaces/{workspaceID}/evidence-packets/search-text'));
+assert(ui.includes('/evidence-packets/search-text'));
+assert(ui.includes("data-a64-search"));
+assert(ui.includes('output.textContent=JSON.stringify(result,null,2)'));
+assert(search.includes('collectVerifiedWorkspaceEvidence(r.Context()'));
+assert(search.includes('verifiedEvidenceSearchMaxHits=12'));
+assert(search.includes('verifiedEvidenceSearchHitsPerVersion=3'));
+assert(search.includes('untrusted_library_content'));
+console.log("PASS: explicit bounded selected-text search reuses verified Workspace evidence");

@@ -446,6 +446,23 @@ assertContains(qaUI,'JSON.stringify(incident.snapshot())!==reviewed.browserFinge
  'updated browser incident captures must require new review');
 assertContains(qaUI,'a56SupportBundle.zip(reviewed.prepared)',
  'only the reviewed locally sanitized sources may enter ZIP');
+assertContains(qaUI,'let supportEpoch=0;',
+ 'pending QA reviews and exports must have a revocation generation');
+assertContains(qaUI,'const reauthorizeSupportSources=async selected=>',
+ 'export must use a fresh live backend permission check');
+assertContains(qaUI,'await reauthorizeSupportSources(supportOptions());',
+ 'the final download path must recheck all selected scoped sources');
+assertContains(qaUI,'if(selected.model)await apiRequest("/v1/qa/model-deployments/"',
+ 'the export recheck must authorise the optional model source');
+assertContains(qaUI,'if(selected.node)await apiRequest("/v1/qa/nodes/"',
+ 'the export recheck must authorise the optional Node source');
+assertContains(qaUI,'if(!supportReviewStillValid(reviewed,epoch)){',
+ 'the export must validate scope, expiry and stale UI state after async reauthorization');
+assertContains(qaUI,'epoch!==supportEpoch||signature!==supportSignature()',
+ 'a stale in-flight QA review must not resurrect previously discarded evidence');
+assertContains(qaUI,'supportExport.onclick=async()=>',
+ 'export must await the required reauthorization calls');
+
 assert.ok(!supportBundleSource.includes('fetch(')&&!supportBundleSource.includes('XMLHttpRequest')&&
  !supportBundleSource.includes('localStorage')&&!supportBundleSource.includes('sessionStorage'),
  'ZIP module must be pure; it cannot fetch/upload or persist support data');

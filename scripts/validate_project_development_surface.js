@@ -411,6 +411,15 @@ assertContains(qaUI,'navigator.clipboard.writeText(qaSummaryContent.value)',
 
 const supportBundleSource=read('internal/webui/static/qa-consolidated-support.js');
 new vm.Script(supportBundleSource,{filename:'qa-consolidated-support.js'});
+const qaBundleSHA=read('internal/webui/static/qa-consolidated-support.js');
+assertContains(qaBundleSHA,'manifest.integrity_algorithm="SHA-256"',
+ 'reviewed local support ZIP must specify SHA-256 member hashing');
+assertContains(qaBundleSHA,'manifest.member_sha256[name]=sha256Bytes(bytes)',
+ 'support archive manifest must hash the projected member bytes');
+assertContains(qaBundleSHA,'throw Error("Source integrity digest changed")',
+ 'ZIP creation must refuse member digest mismatch');
+assertContains(qaBundleSHA,'const qaJSONBytes=(value)',
+ 'manifest SHA-256 input must match exact JSON member bytes');
 require('./validate_consolidated_qa_support.js');
 assertContains(index,'/qa-consolidated-support.js',
  'multi-source QA bundle module must load in the browser');

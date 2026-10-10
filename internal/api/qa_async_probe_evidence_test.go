@@ -152,3 +152,38 @@ func TestQAAsyncLineageReturnsExplicitTruncation(t *testing.T){
  got,truncated,err:=loadQAAsyncLineage(context.Background(),db,"tenant","game","world",visible)
  if err!=nil||!truncated||len(got)!=24{t.Fatalf("bounded lineage: len=%d truncated=%v err=%v",len(got),truncated,err)}
 }
+
+func TestQAProbeWitnessRequiresVerifierSeparationAndOperationExecutionTime(t *testing.T){
+ db,visible:=qaAsyncFixture(t);defer db.Close()
+ ctx:=context.Background()
+ if _,err:=db.Exec(`UPDATE verifications SET verified_by='agent-worker' WHERE id='verify-world'`);err!=nil{t.Fatal(err)}
+ witnesses,_,err:=loadQAProbeWitnesses(ctx,db,"tenant","game","world",visible)
+ if err!=nil{t.Fatal(err)}
+ for _,w:=range witnesses{
+  if w.RecordedAssurancePass||w.CorroboratingIntegrationProbe{
+   t.Fatalf("worker self-verification was treated as independent assurance: %+v",w)
+  }
+ }
+ if _,err:=db.Exec(`UPDATE verifications SET verified_by='assurance-verifier',operation_id='op-not-observed' WHERE id='verify-world'`);err!=nil{t.Fatal(err)}
+ if _,err:=db.Exec(`UPDATE assurance_runs SET operation_id='op-not-observed' WHERE verification_id='verify-world'`);err!=nil{t.Fatal(err)}
+ witnesses,_,err=loadQAProbeWitnesses(ctx,db,"tenant","game","world",visible)
+ if err!=nil{t.Fatal(err)}
+ for _,w:=range witnesses{
+  if w.ObservedAfterOperationStart||w.CorroboratingIntegrationProbe{
+   t.Fatalf("operation without a persisted execution marker was accepted: %+v",w)
+  }
+ }
+ if _,err:=db.Exec(`INSERT INTO events VALUES('tenant','operation','op-not-observed','operation.executing',220)`);err!=nil{t.Fatal(err)}
+ witnesses,_,err=loadQAProbeWitnesses(ctx,db,"tenant","game","world",visible)
+ if err!=nil{t.Fatal(err)}
+ var matched bool
+ for _,w:=range witnesses{
+  if w.ObservationRef==qaOpaqueRef("observation","obs-good"){
+   matched=true
+   if !w.ObservedAfterOperationStart||!w.CorroboratingIntegrationProbe{
+    t.Fatalf("fresh independently sourced observation wrongly failed operation timestamp check: %+v",w)
+   }
+  }
+ }
+ if !matched{t.Fatal("missing intended matched observation")}
+}

@@ -3,6 +3,7 @@ package api
 import (
  "net/http"
  "strings"
+ "time"
  "unicode"
  "unicode/utf8"
 
@@ -114,7 +115,7 @@ func(s *Server) searchVerifiedWorkspaceEvidence(w http.ResponseWriter,r *http.Re
   writeError(w,http.StatusBadRequest,"Search needs 2–64 non-control characters and 1–8 selected versions");return
  }
  verified,err:=collectVerifiedWorkspaceEvidence(r.Context(),library,s.libraryArtifacts,
-  p.ID,workspaceID,p.WorkspaceID,input.Selections,0)
+  p.ID,workspaceID,p.WorkspaceID,input.Selections,time.Now().UnixMilli())
  if err!=nil{
   writeError(w,http.StatusUnprocessableEntity,"Evidence selection denied or failed integrity checks");return
  }

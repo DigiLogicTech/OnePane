@@ -4,7 +4,6 @@ import (
  "context"
  "database/sql"
  "fmt"
- "strings"
  "time"
 
  "github.com/DigiLogicTech/OnePane/internal/observation"

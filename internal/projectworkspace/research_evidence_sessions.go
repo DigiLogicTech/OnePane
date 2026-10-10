@@ -25,9 +25,9 @@ func(s *Service) EligibleResearchEvidenceSessions(
  FROM team_sessions ss
  JOIN team_session_manifests m ON m.session_id=ss.id
   AND m.research_mode=1 AND m.execution_mode='council'
- JOIN teams tm ON tm.id=ss.team_id AND tm.status='active'
+ JOIN teams tm ON tm.id=ss.team_id AND tm.workspace_id=ss.workspace_id AND tm.status='active'
  JOIN tasks t ON t.id=ss.task_id AND t.workspace_id=ss.workspace_id
-  AND t.project_id=? AND t.project_workspace_id=? AND t.state='created'
+  AND t.project_id=? AND t.project_workspace_id=?
  JOIN projects p ON p.id=t.project_id AND p.workspace_id=t.workspace_id AND p.status='active'
  JOIN project_workspaces w ON w.id=t.project_workspace_id
   AND w.project_id=p.id AND w.status='active'

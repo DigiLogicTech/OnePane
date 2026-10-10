@@ -12,12 +12,13 @@ const A36_SETTINGS_META={
  providers:{label:"Providers & Auth",icon:"⌁",group:"Infrastructure",description:"OAuth provider configurations and credential entry points.",scope:"Workspace providers",keywords:"oauth api key credential provider auth secrets"},
  nodes:{label:"Nodes & Federation",icon:"⬡",group:"Infrastructure",description:"Device enrollment and remote model management.",scope:"Fleet administration",keywords:"nodes federation remote pairing compute"},
  skills:{label:"Skills & Tools",icon:"✦",group:"Infrastructure",description:"Skill packages, capability packs and tool permissions.",scope:"Governed tools",keywords:"skills tools package upload bundle"},
- updates:{label:"Updates & Diagnostics",icon:"▤",group:"Maintenance",description:"Release channel, diagnostic logs and product tour.",scope:"Application",keywords:"update releases channel diagnostics logs help support"}
+ updates:{label:"Updates",icon:"▤",group:"Maintenance",description:"Release channel and product tour.",scope:"Application",keywords:"update releases channel tour"},
+ diagnostics:{label:"Debug & Diagnostics",icon:"⊙",group:"Maintenance",description:"Opt-in browser incident capture and links to authorised backend evidence.",scope:"Browser-local and per-source",keywords:"debug qa incident capture support zip logs troubleshooting browser"
 };
 let a36SettingsQuery="";
 let a36SettingsRequest=0;
 function a36SettingsList(){
- return ["overview","general","appearance","defaults","agents","security","models","providers","nodes","skills","updates"].map(id=>[id,A36_SETTINGS_META[id]]).filter(x=>x[1]);
+ return ["overview","general","appearance","defaults","agents","security","models","providers","nodes","skills","diagnostics","updates"].map(id=>[id,A36_SETTINGS_META[id]]).filter(x=>x[1]);
 }
 function a36SettingsNav(){
  const rows=a36SettingsList();

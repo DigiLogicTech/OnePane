@@ -13,7 +13,7 @@ const A36_SETTINGS_META={
  nodes:{label:"Nodes & Federation",icon:"⬡",group:"Infrastructure",description:"Device enrollment and remote model management.",scope:"Fleet administration",keywords:"nodes federation remote pairing compute"},
  skills:{label:"Skills & Tools",icon:"✦",group:"Infrastructure",description:"Skill packages, capability packs and tool permissions.",scope:"Governed tools",keywords:"skills tools package upload bundle"},
  updates:{label:"Updates",icon:"▤",group:"Maintenance",description:"Release channel and product tour.",scope:"Application",keywords:"update releases channel tour"},
- diagnostics:{label:"Debug & Diagnostics",icon:"⊙",group:"Maintenance",description:"Opt-in browser incident capture and links to authorised backend evidence.",scope:"Browser-local and per-source",keywords:"debug qa incident capture support zip logs troubleshooting browser"
+ diagnostics:{label:"Debug & Diagnostics",icon:"⊙",group:"Maintenance",description:"Opt-in browser incident capture and links to authorised backend evidence.",scope:"Browser-local and per-source",keywords:"debug qa incident capture support zip logs troubleshooting browser"}
 };
 let a36SettingsQuery="";
 let a36SettingsRequest=0;

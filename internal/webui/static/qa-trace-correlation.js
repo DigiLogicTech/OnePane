@@ -129,7 +129,7 @@
    "Independent verification: persisted verification statuses only, not attestation of external effects",
    "Execution source coverage: "+report.execution_source_status+
     (report.execution_sources_truncated?" (additional source groups omitted)":""),
-   "Execution groups: "+report.execution_sources_shown,
+   "Execution groups: "+report.execution_sources_shown+" (source counts are not severity-filtered)",
    "Filter: "+chosen
   ];
   for(const g of rows){

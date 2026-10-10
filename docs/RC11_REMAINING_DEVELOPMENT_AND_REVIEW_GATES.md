@@ -217,3 +217,34 @@ request. CI compilation and synthetic success remain distinct from actual
 physical execution. Even physical success does not authorise a general
 network proxy or Agent Tool; Task Gateway binding/lease, continuous
 revalidation and rigorous UI/installer acceptance are still required.
+
+## RC11-03 — Task Gateway–bound service health probe admission
+
+A narrowly scoped `project.workspace.service.health@1` tool adapter is now
+implemented as a **disabled, unregistered integration seam**. Production
+bootstrap does not register this tool or enable its broker. A future trusted
+Node start-up may do so *only after* physical acceptance and a separate
+authorisation review; declaring a service link in the UI cannot turn it on.
+
+The explicit integration code uses the existing Tool Gateway to consume a
+per-invocation capability lease for the exact
+`project_workspace_service_link:<link_id>` resource, and then verifies the
+stored tool invocation's running state, canonical input hash, matching
+Tool/Adapter identity, tenant and principal membership, and exact persisted
+running Task/Attempt/Agent Worker incarnation. Critically, the running Task
+must belong to the **target named Project Workspace** of the active
+operator-approved link. A model cannot supply Project ID, Workspace ID,
+URL, host, port or HTTP headers through the tool input.
+
+The same durable invocation and Workspace authority constraints are checked
+again after the 6-second, declassified Node-local health probe and before
+returning any status. A revoked/expired grant, completed/cancelled Task,
+revoked principal or changed Attempt/Worker blocks the result. Tests exercise
+the *actual* `tool.Gateway` and `authority.Service` lease consumption, not
+just an adapter mock, while using a fake probe to avoid claiming physical
+verification.
+
+**Still blocked:** actual provisioning of the registry entry, enabling the
+adapter in bootstrap, granting agent profiles permission to use it, trusted
+Node identity and remote broker routing, and physical Podman multi-Workspace
+acceptance. Keep all of these disabled until approval and #19/#21/#86 gates.

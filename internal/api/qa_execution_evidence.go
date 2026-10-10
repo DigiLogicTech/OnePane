@@ -13,7 +13,7 @@ import (
 // A read-only, scoped observation of persisted execution rows. These rows
 // are joined by Task identity, NOT by inferred request/trace causality. No
 // model names, tool IDs, operation resources, prompts, results, or error text.
-const qaExecutionSourceCap=qaSnapshotTaskCap*4
+const qaExecutionSourceCap=64
 const qaExecutionQueryTimeout=2*time.Second
 const qaExecutionCountMax int64=65535
 
@@ -34,9 +34,9 @@ type qaExecutionSource struct {
 // Workspace in BOTH the provided page and the current persisted database.
 // Every side-effect table row must independently match the tenant.
 func loadQAExecutionSources(ctx context.Context,db *sql.DB,tenant,projectID,workspaceID string,
- visible []task.Task)([]qaExecutionSource,error){
+ visible []task.Task)([]qaExecutionSource,bool,error){
  out:=make([]qaExecutionSource,0)
- if db==nil||tenant==""||projectID==""||workspaceID==""||len(visible)==0{return out,nil}
+ if db==nil||tenant==""||projectID==""||workspaceID==""||len(visible)==0{return out,false,nil}
  ids:=make([]string,0,qaSnapshotTaskCap)
  seen:=map[string]bool{}
  for _,t:=range visible{
@@ -46,7 +46,7 @@ func loadQAExecutionSources(ctx context.Context,db *sql.DB,tenant,projectID,work
   ids=append(ids,t.ID)
   if len(ids)>=qaSnapshotTaskCap{break}
  }
- if len(ids)==0{return out,nil}
+ if len(ids)==0{return out,false,nil}
  marks:=strings.TrimSuffix(strings.Repeat("?,",len(ids)),",")
  // Static source/status vocabulary only. Bind all IDs and scope, and avoid
  // untrusted strings from any of the model/tool/operation/verification rows.
@@ -93,17 +93,17 @@ func loadQAExecutionSources(ctx context.Context,db *sql.DB,tenant,projectID,work
  bounded,cancel:=context.WithTimeout(ctx,qaExecutionQueryTimeout)
  defer cancel()
  rows,err:=db.QueryContext(bounded,q,args...)
- if err!=nil{return nil,fmt.Errorf("load scoped execution evidence: %w",err)}
+ if err!=nil{return nil,false,fmt.Errorf("load scoped execution evidence: %w",err)}
  defer rows.Close()
  for rows.Next(){
   var kind,taskID string
   var n,success,failed,uncertain,pending int64
-  if err:=rows.Scan(&kind,&taskID,&n,&success,&failed,&uncertain,&pending);err!=nil{return nil,err}
-  if len(out)>=qaExecutionSourceCap{return nil,fmt.Errorf("execution evidence exceeded source bound")}
+  if err:=rows.Scan(&kind,&taskID,&n,&success,&failed,&uncertain,&pending);err!=nil{return nil,false,err}
+  if len(out)>=qaExecutionSourceCap{return out,true,nil}
   if n<0||success<0||failed<0||uncertain<0||pending<0||
-   success+failed+uncertain+pending>n{return nil,fmt.Errorf("invalid execution evidence counters")}
+   success+failed+uncertain+pending>n{return nil,false,fmt.Errorf("invalid execution evidence counters")}
   if kind!="model"&&kind!="tool"&&kind!="operation"&&kind!="verification"{
-   return nil,fmt.Errorf("invalid execution evidence source")
+   return nil,false,fmt.Errorf("invalid execution evidence source")
   }
   capped:=n>qaExecutionCountMax
   clamp:=func(x int64)int64{if x>qaExecutionCountMax{return qaExecutionCountMax};return x}
@@ -114,6 +114,6 @@ func loadQAExecutionSources(ctx context.Context,db *sql.DB,tenant,projectID,work
    Unclassified:clamp(n-success-failed-uncertain-pending),Capped:capped,
   })
  }
- if err:=rows.Err();err!=nil{return nil,err}
- return out,nil
+ if err:=rows.Err();err!=nil{return nil,false,err}
+ return out,false,nil
 }

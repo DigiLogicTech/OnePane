@@ -177,8 +177,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 	} else if runtime.DesiredState == projectworkspace.RuntimeDesiredSuspended {
 		runtimeStatus = projectworkspace.RuntimeSuspended
 	}
-	runtime, err = r.projects.Runtime(ctx, runtime.ID)
-	if err != nil {
+	// Tool/verification may have taken time: never attach its result to
+	// a changed Node assignment, Workspace policy or desired state.
+	if err := r.requireRuntimeRevision(ctx, runtime); err != nil {
 		return result, err
 	}
 	runtime, err = r.projects.ApplyRuntimeObservation(ctx, projectworkspace.ApplyRuntimeObservationCommand{RuntimeID: runtime.ID, ExpectedRevision: runtime.Revision, Status: runtimeStatus, ObservationID: ev.observation.ID, VerificationID: ev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
@@ -196,6 +197,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 		return result, err
 	}
 	for _, app := range apps {
+		// Recheck pinned runtime and app intent before every external effect.
+		if err := r.requireRuntimeRevision(ctx, runtime); err != nil {
+			return result, err
+		}
+		if err := r.requireApplicationRevision(ctx, app); err != nil {
+			return result, err
+		}
 		if app.SourceKind != projectworkspace.AppOCIImage {
 			return result, fmt.Errorf("%w: %s (%s)", ErrUnsupportedApplicationSource, app.ID, app.SourceKind)
 		}
@@ -208,11 +216,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			result.Operations = append(result.Operations, aev.operation.ID)
 			result.Observations = append(result.Observations, aev.observation.ID)
 			result.Verifications = append(result.Verifications, aev.verification.ID)
-			cur, e := r.projects.Application(ctx, app.ID)
-			if e != nil {
+			// Do not treat an old inspection as proof of changed desired state.
+			if e := r.requireRuntimeRevision(ctx, runtime); e != nil {
 				return result, e
 			}
-			cur, e = r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: cur.ID, ExpectedRevision: cur.Revision, Status: projectworkspace.AppStopped, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+			if e := r.requireApplicationRevision(ctx, app); e != nil {
+				return result, e
+			}
+			cur, e := r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: app.ID, ExpectedRevision: app.Revision, Status: projectworkspace.AppStopped, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 			if e != nil {
 				return result, e
 			}
@@ -229,6 +240,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			result.Operations = append(result.Operations, pev.operation.ID)
 			result.Observations = append(result.Observations, pev.observation.ID)
 			result.Verifications = append(result.Verifications, pev.verification.ID)
+			// An image pull is itself a long-running external action. If
+			// operator changed its OCI reference, Node or environment while
+			// pulling, no stale container ensure may follow.
+			if e := r.requireRuntimeRevision(ctx, runtime); e != nil {
+				return result, e
+			}
+			if e := r.requireApplicationRevision(ctx, app); e != nil {
+				return result, e
+			}
 			ensure := appEnsurePlan(runtime, app, endpointSpecsForApp(endpoints, app.ID))
 			aev, e := r.applyAndVerify(ctx, project.WorkspaceID, cmd, ensure)
 			if e != nil {
@@ -237,11 +257,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			result.Operations = append(result.Operations, aev.operation.ID)
 			result.Observations = append(result.Observations, aev.observation.ID)
 			result.Verifications = append(result.Verifications, aev.verification.ID)
-			cur, e := r.projects.Application(ctx, app.ID)
-			if e != nil {
+			// Do not treat an old inspection as proof of changed desired state.
+			if e := r.requireRuntimeRevision(ctx, runtime); e != nil {
 				return result, e
 			}
-			cur, e = r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: cur.ID, ExpectedRevision: cur.Revision, Status: projectworkspace.AppRunning, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+			if e := r.requireApplicationRevision(ctx, app); e != nil {
+				return result, e
+			}
+			cur, e := r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: app.ID, ExpectedRevision: app.Revision, Status: projectworkspace.AppRunning, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 			if e != nil {
 				return result, e
 			}
@@ -259,11 +282,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			result.Operations = append(result.Operations, pev.operation.ID)
 			result.Observations = append(result.Observations, pev.observation.ID)
 			result.Verifications = append(result.Verifications, pev.verification.ID)
-			cur, e := r.projects.Application(ctx, app.ID)
-			if e != nil {
+			// Do not treat an old inspection as proof of changed desired state.
+			if e := r.requireRuntimeRevision(ctx, runtime); e != nil {
 				return result, e
 			}
-			cur, e = r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: cur.ID, ExpectedRevision: cur.Revision, Status: projectworkspace.AppInstalled, ObservationID: pev.observation.ID, VerificationID: pev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+			if e := r.requireApplicationRevision(ctx, app); e != nil {
+				return result, e
+			}
+			cur, e := r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: app.ID, ExpectedRevision: app.Revision, Status: projectworkspace.AppInstalled, ObservationID: pev.observation.ID, VerificationID: pev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 			if e != nil {
 				return result, e
 			}
@@ -276,11 +302,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			result.Operations = append(result.Operations, aev.operation.ID)
 			result.Observations = append(result.Observations, aev.observation.ID)
 			result.Verifications = append(result.Verifications, aev.verification.ID)
-			cur, e := r.projects.Application(ctx, app.ID)
-			if e != nil {
+			// Do not treat an old inspection as proof of changed desired state.
+			if e := r.requireRuntimeRevision(ctx, runtime); e != nil {
 				return result, e
 			}
-			cur, e = r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: cur.ID, ExpectedRevision: cur.Revision, Status: projectworkspace.AppStopped, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+			if e := r.requireApplicationRevision(ctx, app); e != nil {
+				return result, e
+			}
+			cur, e := r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: app.ID, ExpectedRevision: app.Revision, Status: projectworkspace.AppStopped, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 			if e != nil {
 				return result, e
 			}

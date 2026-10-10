@@ -41,6 +41,7 @@ type ManagedDeploymentSummary struct {
 	VRAMBytes          int64    `json:"vram_bytes,omitempty"`
 	Qualified          bool     `json:"qualified"`
 	InvestigationState string   `json:"investigation_state,omitempty"`
+	ColibriPinned bool `json:"colibri_pinned"`
 }
 
 func (s *Service) ManagedDeployments(ctx context.Context, workspaceID string) ([]ManagedDeploymentSummary, error) {
@@ -78,7 +79,11 @@ func (s *Service) ManagedDeployments(ctx context.Context, workspaceID string) ([
 		var runtimeCfg struct {
 			Placement PlacementPlan `json:"placement"`
 		}
-		if json.Unmarshal([]byte(runtimeConfigJSON), &runtimeCfg) == nil && runtimeCfg.Placement.Mode != "" {
+		var pinConfig struct { ColibriPinned bool `json:"colibri_pinned"` }
+        if json.Unmarshal([]byte(runtimeConfigJSON),&pinConfig)==nil {
+            x.ColibriPinned=pinConfig.ColibriPinned&&strings.EqualFold(x.RuntimeName,"colibri")
+        }
+        if json.Unmarshal([]byte(runtimeConfigJSON), &runtimeCfg) == nil && runtimeCfg.Placement.Mode != "" {
 			rec.Placement = runtimeCfg.Placement
 		}
 		if rec.Placement.Mode != "" {

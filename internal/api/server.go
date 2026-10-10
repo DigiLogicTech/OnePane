@@ -398,6 +398,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/manual-web/chair-turns/{chairID}/approve", s.approveManualChairTurn)
 	s.mux.HandleFunc("POST /v1/manual-web/turns/{turnID}/submit", s.submitManualWebTurn)
 	s.mux.HandleFunc("POST /v1/manual-web/turns/{turnID}/new-conversation", s.restartManualWebTurn)
+	s.mux.HandleFunc("GET /v1/local-ai/deployments/{deploymentID}/colibri-pin", s.getColibriPin)
+	s.mux.HandleFunc("PATCH /v1/local-ai/deployments/{deploymentID}/colibri-pin", s.setColibriPin)
 	s.mux.HandleFunc("GET /v1/local-ai/deployments/{deploymentID}/colibri-tier", s.getColibriTier)
 	s.mux.HandleFunc("PATCH /v1/local-ai/deployments/{deploymentID}/colibri-tier", s.setColibriTier)
 	s.mux.HandleFunc("GET /v1/local-ai/deployments/{deploymentID}/colibri-plan", s.planColibriTier)

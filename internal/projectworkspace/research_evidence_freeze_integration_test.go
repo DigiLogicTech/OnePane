@@ -150,6 +150,34 @@ func TestResearchSessionFrozenEvidenceApprovalAndRevocation(t *testing.T){
  if err!=nil||len(eligible)!=1||eligible[0].ID!=otherSession.ID{
   t.Fatalf("sibling Workspace picker mixed scoped Council sessions: %+v %v",eligible,err)
  }
+ // Revoked/suspended human access and archived Team rows must disappear
+ // from discovery immediately, not remain valid via a stale picker snapshot.
+ checkHidden:=func(reason string){
+  t.Helper()
+  candidates,e:=svc.EligibleResearchEvidenceSessions(ctx,p.ID,research.ID,"human")
+  if e!=nil||len(candidates)!=0{
+   t.Fatalf("%s leaked eligible Research session: %+v %v",reason,candidates,e)
+  }
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships SET status='suspended'
+  WHERE workspace_id='tenant' AND principal_id='human'`);err!=nil{t.Fatal(err)}
+ checkHidden("suspended tenant membership")
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships SET status='active'
+  WHERE workspace_id='tenant' AND principal_id='human'`);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE principals SET status='disabled'
+  WHERE id='human'`);err!=nil{t.Fatal(err)}
+ checkHidden("disabled human principal")
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE principals SET status='active'
+  WHERE id='human'`);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE teams SET status='archived'
+  WHERE id=?`,registered.ID);err!=nil{t.Fatal(err)}
+ checkHidden("archived Council Team")
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE teams SET status='active'
+  WHERE id=?`,registered.ID);err!=nil{t.Fatal(err)}
+ eligible,err=svc.EligibleResearchEvidenceSessions(ctx,p.ID,research.ID,"human")
+ if err!=nil||len(eligible)!=1||eligible[0].ID!=otherSession.ID{
+  t.Fatalf("restored scope did not restore eligible Research session: %+v %v",eligible,err)
+ }
  if _,err=db.SQL().ExecContext(ctx,"UPDATE team_sessions SET round_number=1 WHERE id=?",otherSession.ID);err!=nil{
   t.Fatal(err)
  }

@@ -53,6 +53,19 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    <textarea id="a49QASummaryContent" rows="8" readonly aria-label="Sanitized QA summary" class="a49-qa-summary"></textarea>
    <pre class="a49-qa-snapshot-preview" id="a49QAPreviewContent" aria-label="Redacted QA snapshot preview"></pre>
   </details>
+  <details class="a49-qa-snapshot" id="a59ScopedTraceCorrelation">
+   <summary>Correlate observed Task and Worker events (authorised Workspace only)</summary>
+   <p class="list-meta">Read the latest 96 bounded, already scoped Task/Worker events. Match only observed opaque trace/request references within the same canonical Workspace and Task. Tool Gateway, model inference and external verification are explicitly unavailable in this evidence source. Browser events do not carry a shared backend trace.</p>
+   <div class="a49-task-actions">
+    <button class="btn" id="a59Correlate" type="button">Load and correlate observed events</button>
+    <label>Severity <select id="a59Severity" aria-label="Observed event severity filter">
+     <option value="all">All</option><option value="attention">Attention</option>
+     <option value="waiting">Waiting</option><option value="information">Information</option>
+    </select></label>
+   </div>
+   <p class="list-meta" id="a59CorrelationStatus" role="status">Not loaded. No diagnostics fetched automatically.</p>
+   <pre class="a49-qa-snapshot-preview a59-correlation-preview" id="a59CorrelationPreview" aria-label="Scoped Task Worker correlation" aria-live="polite"></pre>
+  </details>
   <details class="a49-qa-snapshot" id="a54IncidentCapture">
    <summary>Browser incident capture (opt-in, maximum 10 minutes)</summary>
    <p class="list-meta">Captures only generic OnePane route/button/form actions, broad API subsystems, HTTP status and duration, plus counts of browser errors. No typed text, URL paths, tokens, request bodies, model outputs or error messages. Captures across this browser tab's OnePane pages while enabled. Data stays in memory and is lost on reload.</p>
@@ -197,6 +210,43 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    if(list)list.innerHTML='<div class="error" role="alert">'+escapeHtml(error.message||"Unable to read Workspace Tasks")+'</div>';
   }
  };
+ // Opt-in, scope-preserving Task ↔ Worker linkage. This is a derived view
+ // of the SAME authenticated canonical Workspace snapshot, never a new API.
+ const correlationLoad=section.querySelector("#a59Correlate");
+ const correlationSeverity=section.querySelector("#a59Severity");
+ const correlationStatus=section.querySelector("#a59CorrelationStatus");
+ const correlationPreview=section.querySelector("#a59CorrelationPreview");
+ let correlationReport=null,correlationEpoch=0;
+ const paintCorrelation=()=>{
+  if(!section.isConnected)return;
+  if(!correlationReport||typeof a59ScopedCorrelation==="undefined"){
+   correlationPreview.textContent="";return;
+  }
+  correlationPreview.textContent=a59ScopedCorrelation.format(
+   correlationReport,correlationSeverity.value);
+ };
+ correlationSeverity.addEventListener("change",paintCorrelation);
+ correlationLoad.addEventListener("click",async()=>{
+  const epoch=++correlationEpoch;
+  correlationReport=null;correlationPreview.textContent="";
+  correlationLoad.disabled=true;
+  correlationStatus.textContent="Loading a fresh, permission-checked canonical Workspace QA timeline…";
+  try{
+   const snapshot=await apiRequest("/v1/qa/workspace-snapshot?"+qaQuery,{cache:"no-store"});
+   if(!section.isConnected||epoch!==correlationEpoch)return;
+   if(typeof a59ScopedCorrelation==="undefined")throw Error("Unavailable");
+   correlationReport=a59ScopedCorrelation.correlate(snapshot);
+   paintCorrelation();
+   correlationStatus.textContent="Correlated "+correlationReport.groups_shown+
+    " scoped groups from "+correlationReport.events_considered+" recent events"+
+    (correlationReport.timeline_truncated?" (older chronology omitted)":"")+
+    ". Shared refs are observations, not proof of successful tools, model results or independent verification.";
+  }catch(_){
+   if(!section.isConnected||epoch!==correlationEpoch)return;
+   correlationReport=null;correlationPreview.textContent="";
+   correlationStatus.textContent="Scoped correlation unavailable or access denied. No events have been shown.";
+  }finally{if(section.isConnected&&epoch===correlationEpoch)correlationLoad.disabled=false}
+ });
  const qaPreview=section.querySelector("#a49QAPreview");
  const qaDownload=section.querySelector("#a49QADownload");
  const qaCopySummary=section.querySelector("#a49QACopySummary");

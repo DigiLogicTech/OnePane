@@ -7,6 +7,7 @@ import (
  "context"
  "crypto/sha256"
  "encoding/hex"
+ "io"
  "path/filepath"
  "testing"
 
@@ -87,11 +88,10 @@ func TestLargeWorkspaceArtifactPublicationIsImmutableAndNotCrossGranted(t *testi
  if err:=artifacts.VerifyContent(ctx,published.ArtifactID);err!=nil{t.Fatal(err)}
  opened,_,err:=artifacts.Open(ctx,published.ArtifactID)
  if err!=nil{t.Fatal(err)}
- data:=make([]byte,len(binary))
- n,err:=opened.Read(data)
+ data,err:=io.ReadAll(opened)
  _=opened.Close()
- if err!=nil&&n!=len(binary){t.Fatalf("immutable artifact read truncated: %d %v",n,err)}
- if !bytes.Equal(data[:n],binary[:n]){t.Fatal("published binary differs from approved OCI file")}
+ if err!=nil||len(data)!=len(binary){t.Fatalf("immutable artifact read truncated: %d %v",len(data),err)}
+ if !bytes.Equal(data,binary){t.Fatal("published binary differs from approved OCI file")}
  again,err:=publisher.PublishWorkspaceFile(ctx,request)
  if err!=nil||again.ArtifactID!=published.ArtifactID||
   again.LibraryAssetID!=published.LibraryAssetID||again.Version!=1{

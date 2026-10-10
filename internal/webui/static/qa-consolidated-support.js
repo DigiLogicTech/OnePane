@@ -205,7 +205,7 @@
   }
   return H.map(v=>v.toString(16).padStart(8,"0")).join("");
  }
- const qaJSONBytes=(value)=>new TextEncoder().encode(JSON.stringify(value,null,2)+"\\n");
+ const qaJSONBytes=(value)=>new TextEncoder().encode(JSON.stringify(value,null,2)+"\n");
  function prepare(sources){
   if(!sources||!sources.workspace)throw Error("Workspace scope and preview required");
   const files={"workspace.json":workspace(sources.workspace)};

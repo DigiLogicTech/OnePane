@@ -183,7 +183,15 @@ func TestResearchSessionFrozenEvidenceApprovalAndRevocation(t *testing.T){
  if _,err=svc.ResearchSeatEvidenceApproval(ctx,session.ID,"agent");err==nil{
   t.Fatal("agent could inspect frozen seat evidence sharing intent")
  }
+ // Revocation must remain available even if the source Workspace Library
+ // grant was withdrawn after the human sharing approval.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_library_grants
+  SET enabled=0 WHERE asset_id=? AND project_workspace_id=?`,
+  a.ID,world.ID);err!=nil{t.Fatal(err)}
  revoked,err:=svc.RevokeResearchSeatEvidence(ctx,session.ID,"human")
+ if _,restoreErr:=db.SQL().ExecContext(ctx,`UPDATE workspace_library_grants
+  SET enabled=1 WHERE asset_id=? AND project_workspace_id=?`,
+  a.ID,world.ID);restoreErr!=nil{t.Fatal(restoreErr)}
  if err!=nil||revoked.State!="revoked"||revoked.RevokedBy==nil||
   *revoked.RevokedBy!="human"||revoked.DispatchEnabled{
   t.Fatalf("seat evidence revocation missing: %+v %v",revoked,err)
@@ -239,6 +247,9 @@ func TestResearchSessionFrozenEvidenceApprovalAndRevocation(t *testing.T){
   frozenCandidates,e:=svc.FrozenResearchEvidenceSessions(ctx,p.ID,world.ID,"human")
   if e!=nil||len(frozenCandidates)!=0{
    t.Fatalf("%s disclosed frozen Research session: %+v %v",reason,frozenCandidates,e)
+  }
+  if _,e=svc.ResearchSeatEvidenceApproval(ctx,session.ID,"human");e==nil{
+   t.Fatalf("%s disclosed revoked Research seat approval",reason)
   }
  }
  if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships SET status='suspended'

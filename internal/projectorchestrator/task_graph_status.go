@@ -46,6 +46,9 @@ func evaluateTaskGraph(graph *TaskGraph)(TaskGraphProgress,string){
    }
   }
   switch{
+  case n.ScopeDrift:
+   n.Readiness="needs_attention"
+   n.NextAction="Persisted Task no longer belongs to its approved Project Workspace; review identity and isolate execution."
   case n.Archived:
    n.Readiness="needs_attention"
    n.NextAction="Archived Task cannot satisfy the approved graph; operator must review restoration or replacement."

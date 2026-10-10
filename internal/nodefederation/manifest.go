@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -293,32 +294,78 @@ func qualificationRank(v string) int {
 	}
 }
 
+// ErrHeartbeatReplay rejects obsolete or conflicting mTLS-authenticated
+// capability announcements. A replay cannot extend Node liveness or replace
+// the newer model catalog under the same immutable sequence.
+var ErrHeartbeatReplay=fmt.Errorf("stale or conflicting paired Node heartbeat")
+
 func (s *Service) ReceiveHeartbeat(ctx context.Context, peerID string, h Heartbeat) error {
-	if h.Protocol != ProtocolVersion || h.NodeID != peerID || h.Manifest.NodeID != peerID || h.Manifest.Protocol != ProtocolVersion {
-		return fmt.Errorf("invalid heartbeat")
-	}
-	now := s.clock.UnixMilli()
-	expires := now + s.staleAfter.Milliseconds()
-	return s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		var trust string
-		if err := tx.QueryRowContext(ctx, `SELECT trust_state FROM harness_nodes WHERE id=?`, peerID).Scan(&trust); err != nil {
-			return err
-		}
-		if trust != "paired" && trust != "unavailable" {
-			return ErrNodeNotPaired
-		}
-		manifestJSON, _ := json.Marshal(h.Manifest)
-		_, err := tx.ExecContext(ctx, `INSERT INTO node_capability_manifests(peer_node_id,sequence,manifest_json,received_at,expires_at,revision,updated_at) VALUES(?,?,?,?,?,1,?)
-ON CONFLICT(peer_node_id) DO UPDATE SET sequence=excluded.sequence,manifest_json=excluded.manifest_json,received_at=excluded.received_at,expires_at=excluded.expires_at,revision=node_capability_manifests.revision+1,updated_at=excluded.updated_at
-WHERE excluded.sequence>=node_capability_manifests.sequence`, peerID, h.Manifest.Sequence, string(manifestJSON), now, expires, now)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE harness_nodes SET trust_state='paired',last_seen_at=?,capabilities_json=?,revision=revision+1,updated_at=? WHERE id=?`, now, string(manifestJSON), now, peerID); err != nil {
-			return err
-		}
-		return s.importManifestTx(ctx, tx, peerID, h.Manifest, now)
-	})
+ if h.Protocol!=ProtocolVersion||peerID==""||h.NodeID!=peerID||
+  h.Manifest.NodeID!=peerID||h.Manifest.Protocol!=ProtocolVersion||
+  h.Manifest.Sequence<=0 {
+  return fmt.Errorf("invalid heartbeat")
+ }
+ manifestJSON,err:=json.Marshal(h.Manifest)
+ if err!=nil{return err}
+ now:=s.clock.UnixMilli()
+ expires:=now+s.staleAfter.Milliseconds()
+ return s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+  var trust string
+  if err:=tx.QueryRowContext(ctx,`SELECT trust_state FROM harness_nodes
+   WHERE id=?`,peerID).Scan(&trust);err!=nil{return err}
+  if trust!="paired"&&trust!="unavailable"{return ErrNodeNotPaired}
+  var previousSeq int64
+  var previousJSON string
+  oldErr:=tx.QueryRowContext(ctx,`SELECT sequence,manifest_json
+   FROM node_capability_manifests WHERE peer_node_id=?`,peerID).
+   Scan(&previousSeq,&previousJSON)
+  if oldErr!=nil&&!errors.Is(oldErr,sql.ErrNoRows){return oldErr}
+  if oldErr==nil{
+   if h.Manifest.Sequence<previousSeq||
+    (h.Manifest.Sequence==previousSeq&&string(manifestJSON)!=previousJSON){
+    // Do not extend liveness, re-qualify Models or roll back the
+    // capability table with a stale/equivocated peer manifest.
+    return ErrHeartbeatReplay
+   }
+   if h.Manifest.Sequence==previousSeq{
+    // Exact duplicate = a liveness refresh, not another import of the
+    // same model capabilities. Keep the original manifest immutable.
+    if _,err:=tx.ExecContext(ctx,`UPDATE node_capability_manifests
+     SET received_at=?,expires_at=?,updated_at=?
+     WHERE peer_node_id=? AND sequence=? AND manifest_json=?`,
+     now,expires,now,peerID,previousSeq,previousJSON);err!=nil{return err}
+    result,err:=tx.ExecContext(ctx,`UPDATE harness_nodes SET
+     trust_state='paired',last_seen_at=?,revision=revision+1,updated_at=?
+     WHERE id=? AND trust_state IN ('paired','unavailable')`,now,now,peerID)
+    if err!=nil{return err}
+    changed,_:=result.RowsAffected()
+    if changed!=1{return ErrNodeNotPaired}
+    return nil
+   }
+  }
+  result,err:=tx.ExecContext(ctx,`INSERT INTO node_capability_manifests(
+   peer_node_id,sequence,manifest_json,received_at,expires_at,revision,updated_at)
+   VALUES(?,?,?,?,?,1,?)
+   ON CONFLICT(peer_node_id) DO UPDATE SET
+    sequence=excluded.sequence,manifest_json=excluded.manifest_json,
+    received_at=excluded.received_at,expires_at=excluded.expires_at,
+    revision=node_capability_manifests.revision+1,
+    updated_at=excluded.updated_at
+   WHERE excluded.sequence>node_capability_manifests.sequence`,
+   peerID,h.Manifest.Sequence,string(manifestJSON),now,expires,now)
+  if err!=nil{return err}
+  changed,_:=result.RowsAffected()
+  if changed!=1{return ErrHeartbeatReplay}
+  result,err=tx.ExecContext(ctx,`UPDATE harness_nodes SET
+   trust_state='paired',last_seen_at=?,capabilities_json=?,
+   revision=revision+1,updated_at=?
+   WHERE id=? AND trust_state IN ('paired','unavailable')`,
+   now,string(manifestJSON),now,peerID)
+  if err!=nil{return err}
+  changed,_=result.RowsAffected()
+  if changed!=1{return ErrNodeNotPaired}
+  return s.importManifestTx(ctx,tx,peerID,h.Manifest,now)
+ })
 }
 
 func (s *Service) importManifestTx(ctx context.Context, tx storage.Tx, peerID string, m CapabilityManifest, now int64) error {

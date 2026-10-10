@@ -876,3 +876,23 @@ remain the final commit fence. The Operator must reconcile the observed
 external state under the newly approved desired revision. This does not
 establish successful physical Node smoke acceptance or remote sandbox
 execution.
+
+## Paired Node heartbeat — monotonic capability and liveness reconciliation
+
+Federation heartbeats are mTLS-authenticated but previously allowed a stale
+capability sequence to refresh Node liveness and reimport withdrawn models
+after the manifest upsert correctly rejected the old sequence. The
+`ReceiveHeartbeat` control-plane transaction now compares the persisted
+sequence **before** any Node trust/liveness or model import writes.
+Older sequences and different content under an identical sequence are
+rejected with `ErrHeartbeatReplay`, rolling back all effects. An exact
+duplicate refreshes the Node/manifest heartbeat expiry without
+requalifying any model or changing the persisted manifest revision.
+Only a strictly newer capability sequence imports model availability.
+
+The Project checks workflow includes the Node federation SQLite integration
+suite, including model withdrawal, stale/equivocated heartbeat rejection,
+immutable duplicate behavior and a new monotonic heartbeat recovering an
+unavailable-but-still-paired Node. This proves control-plane replay
+invariants; it does **not** establish physical Node or external network
+acceptance, remote sandbox scheduling or process lease fencing.

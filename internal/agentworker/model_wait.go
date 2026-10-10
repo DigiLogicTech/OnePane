@@ -22,6 +22,16 @@ type modelWaitEnvelope struct {
  ModelWait *modelWaitRecord `json:"model_wait,omitempty"`
 }
 
+// A malformed saved resource-wait envelope cannot be treated as an ordinary
+// dependency with no resource precondition. In particular, JSON null or a
+// wrong-type model_wait must never let a Task wake on the next Worker tick.
+func hasModelWaitField(raw json.RawMessage) bool {
+ var fields map[string]json.RawMessage
+ if err:=json.Unmarshal(raw,&fields);err!=nil{return true}
+ _,ok:=fields["model_wait"]
+ return ok
+}
+
 func decodeModelWait(raw json.RawMessage) *modelWaitRecord {
  var state modelWaitEnvelope
  if len(raw)==0||json.Unmarshal(raw,&state)!=nil{return nil}

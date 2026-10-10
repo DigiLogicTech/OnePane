@@ -434,6 +434,19 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 	// Last practical permission check before locally dispatching plaintext.
 	// Existing Team routing has already enforced an origin-node model.
 	if evidenceConsent.Active{
+		// Candidate classification and live eligibility can change after the
+		// first scheduler decision. Re-route only the exact already selected
+		// deployment; never substitute another seat or cloud provider.
+		recheck:=request
+		recheck.IncludeCandidateIDs=[]string{cand.ID}
+		live,routeErr:=s.scheduler.Route(ctx,recheck)
+		if routeErr!=nil||live.Selected==nil||
+			live.Selected.Candidate.ID!=cand.ID||
+			!researchEvidenceCandidateAllowed(live.Selected.Candidate){
+			s.release(ctx,reservationID)
+			return s.pauseResearch(ctx,res,ss,turnID,
+				fmt.Errorf("Research evidence route is no longer pinned to an eligible origin-node model"))
+		}
 		fresh,freshErr:=s.consentForSeat(ctx,ws,ss.ID,member.ID,manifestRecord.SnapshotSHA256)
 		if freshErr!=nil||!fresh.Active||fresh.EvidenceSHA256!=evidenceConsent.EvidenceSHA256{
 			s.release(ctx,reservationID)

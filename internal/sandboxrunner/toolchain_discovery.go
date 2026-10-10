@@ -115,6 +115,7 @@ func decodeWorkspaceToolDiscovery(stdout string)(WorkspaceToolInventory,error){
  }
  names:=map[string]bool{}
  truncated:=false
+ if stdout==""{return WorkspaceToolInventory{Tools:[]WorkspaceTool{},Source:"fixed_in_container_path_scan",Note:"No executable names observed inside this Workspace image; no host fallback."},nil}
  for _,line:=range strings.Split(strings.TrimSuffix(stdout,"\n"),"\n"){
   if line=="__ONEPANE_TRUNCATED__"{truncated=true;continue}
   if !allowedToolName(line){

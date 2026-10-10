@@ -89,3 +89,42 @@ jobs:
           fi
       - name: Godot 4 scene import and hash-verified sandbox output
         run: go test -tags integration ./internal/sandboxrunner -run '^TestRealRootlessGodotWorldBuild$' -v -count=1 -timeout 7m
+
+  physical-rootless-large-artifact:
+    name: Rootless general-purpose multi-MiB publication (opt-in)
+    # Never execute physical Node workflows from untrusted pull requests.
+    # The approved immutable Python 3 + POSIX sh image must already exist
+    # under the self-hosted unprivileged runner's OCI image identity.
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feature/project-workspace-development-environments' && vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE != '' }}
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 12
+    env:
+      ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE: ${{ vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Verify trusted rootless runner and approved immutable Python image
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE" =~ ^[^[:space:]]+@sha256:[[:xdigit:]]{64}$ ]]; then
+            echo '::error::ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE requires an immutable OCI SHA-256 reference'
+            exit 1
+          fi
+          if ! command -v podman >/dev/null; then
+            echo '::error::Rootless Podman is required for physical publication QA'
+            exit 1
+          fi
+          if [[ "$(podman info --format '{{.Host.Security.Rootless}}')" != "true" ]]; then
+            echo '::error::Physical artifact tests must run as a rootless Podman user'
+            exit 1
+          fi
+          if ! podman image exists "$ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE"; then
+            echo '::error::Approved Python image is not present under runner identity'
+            exit 1
+          fi
+      - name: Produce and independently verify real 2.5 MiB Workspace output
+        run: go test -tags integration ./internal/sandboxrunner -run '^TestRealRootlessLargeArtifactPublication$' -v -count=1 -timeout 9m

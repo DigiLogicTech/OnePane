@@ -13,6 +13,18 @@ assert(src.includes('name="approved"'));
 assert(src.includes("operator-approved"));
 assert(src.includes('orchestrator/task-graphs'));
 assert(!src.includes("window.open("));
+assert(src.includes('data-a69-recovery'));
+assert(src.includes('/recovery-checkpoint'));
+assert(src.includes('output.textContent=JSON.stringify(checkpoint,null,2)'));
+assert(!src.includes("eval("));
+const routes=fs.readFileSync("internal/api/server.go","utf8");
+const recovery=fs.readFileSync("internal/projectorchestrator/task_graph_recovery_checkpoint.go","utf8");
+const api=fs.readFileSync("internal/api/assistant_orchestrator.go","utf8");
+assert(routes.includes("task-graphs/{graphID}/recovery-checkpoint"));
+assert(api.includes('s.authorize(w,r,i,p.WorkspaceID,"project.read")'));
+assert(recovery.includes('AutomaticRetryAllowed:false'));
+assert(recovery.includes('s.TaskGraph(ctx,projectID,graphID)'));
+
 const escapeHtml=value=>String(value).replace(/&/g,"&amp;").replace(/</g,"&lt;")
  .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 const scope=vm.runInNewContext(src+"\n({a61NodesFromDraft,a61GraphCard,a61GraphBuilderMarkup})",

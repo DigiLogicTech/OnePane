@@ -753,3 +753,25 @@ started before revocation. It does not imply that the local runtime cancels
 in-flight generation instantly. Existing non-protected Council/Team paths
 retain their own behavior. SQLite regression tests cover success,
 idempotency/replay, Library permission withdrawal, and revoked human consent.
+
+## Project Orchestrator — read-only recovery checkpoints
+
+Each operator-approved Task DAG now supports
+`GET /v1/projects/{projectID}/orchestrator/task-graphs/{graphID}/recovery-checkpoint`
+with authenticated `project.read` permission. Its snapshot is derived from
+the canonical graph's consistent SQLite read transaction and binds the
+original manifest to a deterministic observation SHA-256 over persisted
+Task states, dependencies and recovery classifications.
+
+The UI offers an on-demand **Inspect recovery checkpoint** action for each
+graph. It renders the result with `textContent` and never invokes a
+task-transition, retry or model fallback. Failed, cancelled, blocked,
+scope-drifted or dependency-regressed Tasks demand operator review; a healthy
+independent branch remains eligible for the **existing governed Task Worker**.
+Running, verifying and resource-waiting attempts remain observations of their
+persisted continuation, not instructions to re-run unknown side effects.
+All checkpoints explicitly record `automatic_retry_allowed:false`.
+
+These are recovery *observations*, not execution checkpoints from inside
+containers. Real crash-safe interrupted attempt reconciliation, lease expiry,
+and physical Node acceptance still require separate implementation/QA.

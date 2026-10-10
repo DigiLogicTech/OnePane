@@ -775,3 +775,23 @@ All checkpoints explicitly record `automatic_retry_allowed:false`.
 These are recovery *observations*, not execution checkpoints from inside
 containers. Real crash-safe interrupted attempt reconciliation, lease expiry,
 and physical Node acceptance still require separate implementation/QA.
+
+## Research Council — bounded timer retries and permanent consent-fence
+
+The Research retry path now rechecks the original immutable frozen evidence
+approval, exact manifest binding, active Team, Project Workspace, tenant,
+and approving human membership **inside the same SQLite transaction**
+that requeues blocked turns. A previously protected session may never be
+restarted as ordinary unrestricted Research after the original consent is
+revoked or its authority is lost. The Worker independently performs fresh
+Library-version and origin-node model eligibility checks upon each retry.
+
+Unattended provider reset-time retries are capped at **two automatic
+attempts** per unresolved seat; every blocked/failed seat must have an elapsed
+provider timer and be within this cap before *any* automatically resumed
+round. Other errors remain paused for manual human retry. Provider-timer
+eligibility is rechecked inside the write transaction to prevent stale
+scheduler observations. The original Research seat model pin remains in
+force, and the system never silently substitutes another model on retry.
+These constraints prevent a rate-limit loop from regenerating a round
+indefinitely without the operator.

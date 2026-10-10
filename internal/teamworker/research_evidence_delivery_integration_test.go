@@ -181,13 +181,68 @@ func TestResearchSeatVerifiedTextDeliveryUsesRealLibraryAndArtifactGrants(t *tes
   t.Fatal("withdrawn Library grant permitted protected reply persistence")
  }
  assertMessages(1)
+ // Even manual retry cannot reinstate a session whose frozen version lost
+ // its read grant. The whole round stays parked.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_sessions SET
+  status='paused_for_deliberation' WHERE id=?`,session.ID);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_turn_requests SET
+  status='blocked',attempt_count=1,retry_after=? WHERE id=?`,
+  clock.Real{}.UnixMilli()-1,secondTurn.ID);err!=nil{t.Fatal(err)}
+ if _,err=council.RetryResearchRound(ctx,team.RetryResearchRoundCommand{
+  SessionID:session.ID,RequestedByPrincipalID:"human",
+ });err==nil{t.Fatal("revoked frozen Library grant permitted manual Research retry")}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_sessions SET
+  status='deliberating' WHERE id=?`,session.ID);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_turn_requests SET
+  status='running' WHERE id=?`,secondTurn.ID);err!=nil{t.Fatal(err)}
  if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_library_grants
   SET enabled=1 WHERE project_workspace_id=? AND asset_id=?`,workspaceID,asset.ID);err!=nil{t.Fatal(err)}
+ // Timed rate-limit retries are bounded: two automatic attempts,
+ // then explicit operator intervention. Success preserves existing seats.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_sessions SET
+  status='paused_for_deliberation' WHERE id=?`,session.ID);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_turn_requests
+  SET status='blocked',attempt_count=3,retry_after=?
+  WHERE id=?`,clock.Real{}.UnixMilli()-1,secondTurn.ID);err!=nil{t.Fatal(err)}
+ automatic:=team.RetryResearchRoundCommand{
+  SessionID:session.ID,RequestedByPrincipalID:"human",Automatic:true,
+ }
+ if _,err=council.RetryResearchRound(ctx,automatic);err==nil{
+  t.Fatal("third unattended provider retry was accepted")
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_turn_requests
+  SET attempt_count=2 WHERE id=?`,secondTurn.ID);err!=nil{t.Fatal(err)}
+ if _,err=council.RetryResearchRound(ctx,automatic);err!=nil{
+  t.Fatalf("bounded same-Council timed retry denied: %v",err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_turn_requests
+  SET status='running' WHERE id=? AND status='pending'`,secondTurn.ID);err!=nil{t.Fatal(err)}
  if _,err=projectService.RevokeResearchSeatEvidence(ctx,session.ID,"human");err!=nil{t.Fatal(err)}
  if _,e:=worker.completeProtectedResearchTurn(ctx,"tenant",session.ID,secondTurn.ID,
   second.ID,manifest.SnapshotSHA256,frozen.Evidence.ManifestSHA256,
   1,makeResponse("must not persist after human consent revocation"));e==nil{
   t.Fatal("revoked human consent permitted protected reply persistence")
+ }
+ assertMessages(1)
+ // A previously protected, paused Council cannot be resurrected by
+ // either provider-timer auto retry or an operator retry after revocation.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_sessions
+  SET status='paused_for_deliberation' WHERE id=?`,session.ID);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_turn_requests
+  SET status='blocked',attempt_count=1,retry_after=?,response_message_id=NULL
+  WHERE id=?`,clock.Real{}.UnixMilli()-1,secondTurn.ID);err!=nil{t.Fatal(err)}
+ for _,retry:=range []team.RetryResearchRoundCommand{
+  {SessionID:session.ID,RequestedByPrincipalID:"human",Automatic:false},
+  {SessionID:session.ID,RequestedByPrincipalID:"human",Automatic:true},
+ }{
+  if _,err=council.RetryResearchRound(ctx,retry);err==nil{
+   t.Fatalf("revoked protected Council retry was accepted: %+v",retry)
+  }
+ }
+ var status string
+ if err=db.SQL().QueryRowContext(ctx,`SELECT status FROM team_sessions WHERE id=?`,
+  session.ID).Scan(&status);err!=nil||status!="paused_for_deliberation"{
+  t.Fatalf("revoked Council resumed despite retry denial: %s %v",status,err)
  }
  assertMessages(1)
  if _,err=worker.consentForSeat(ctx,"tenant",session.ID,second.ID,manifest.SnapshotSHA256);err==nil{

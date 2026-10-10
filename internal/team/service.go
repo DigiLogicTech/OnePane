@@ -944,18 +944,35 @@ func (s *Service) RetryResearchRound(ctx context.Context, c RetryResearchRoundCo
 	}
 	now := s.clock.UnixMilli()
 	if c.Automatic {
-		var eligible int
-		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_turn_requests
-			WHERE session_id=? AND round_number=? AND response_message_id IS NULL
-			AND status IN ('blocked','failed') AND retry_after IS NOT NULL AND retry_after<=?`,
-			ss.ID, ss.RoundNumber, now).Scan(&eligible); err != nil {
-			return Session{}, err
-		}
-		if eligible == 0 {
+		var total,eligible int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*),
+		 COALESCE(SUM(CASE WHEN retry_after IS NOT NULL AND retry_after<=?
+		  AND attempt_count BETWEEN 1 AND ? THEN 1 ELSE 0 END),0)
+		 FROM team_turn_requests
+		 WHERE session_id=? AND round_number=? AND response_message_id IS NULL
+		  AND status IN ('blocked','failed')`,
+			now,maxAutomaticResearchRetryAttempts,ss.ID,ss.RoundNumber).
+			Scan(&total,&eligible);err!=nil{return Session{},err}
+		if !researchAutomaticRetryAllowed(total,eligible){
 			return Session{}, ErrSessionState
 		}
 	}
 	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		if e:=s.researchRetryConsentTx(ctx,tx,ss.ID,ss.WorkspaceID);e!=nil{return e}
+		// An automatic retry must not be issued after a competing pause or
+		// provider timer changed between the read and this write transaction.
+		if c.Automatic{
+			var total,eligible int
+			e:=tx.QueryRowContext(ctx,`SELECT COUNT(*),
+			 COALESCE(SUM(CASE WHEN retry_after IS NOT NULL AND retry_after<=?
+			  AND attempt_count BETWEEN 1 AND ? THEN 1 ELSE 0 END),0)
+			 FROM team_turn_requests WHERE session_id=? AND round_number=?
+			  AND response_message_id IS NULL AND status IN ('blocked','failed')`,
+			 now,maxAutomaticResearchRetryAttempts,ss.ID,ss.RoundNumber).
+			 Scan(&total,&eligible)
+			if e!=nil{return e}
+			if !researchAutomaticRetryAllowed(total,eligible){return ErrSessionState}
+		}
 		if _, e := tx.ExecContext(ctx, `UPDATE team_turn_requests
 			SET status='pending',error_text=NULL,retry_after=NULL,completed_at=NULL,updated_at=?
 			WHERE session_id=? AND round_number=? AND response_message_id IS NULL

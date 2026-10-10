@@ -15,3 +15,10 @@
 .a45-publication+.a45-publication{border-top:1px solid var(--border)}
 .a45-publication .list-meta{overflow-wrap:anywhere}
 @media(max-width:680px){.a45-connection-form{grid-template-columns:1fr}.a45-connection-form button{width:100%}}
+
+/* Explicitly show service approvals as pending transport, not live routes. */
+.a46-service-grants{margin-top:18px;padding-top:14px;border-top:1px solid var(--border);min-width:0}
+.a46-service-grants>h4{margin:0 0 6px}
+.a46-service-grants>.list-meta{margin-bottom:12px;max-width:75ch}
+.a46-service-grants .a45-link-card{min-width:0}
+.a46-service-grants .pill{white-space:nowrap}

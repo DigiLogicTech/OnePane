@@ -4,6 +4,7 @@ import (
  "context"
  "database/sql"
  "encoding/json"
+ "fmt"
  "path/filepath"
  "strings"
  "testing"
@@ -106,4 +107,39 @@ func TestQAExecutionEvidenceFailsClosedIfSourceUnavailable(t *testing.T){
  _,_,err=loadQAExecutionSources(context.Background(),db,"tenant",project,world,
   []task.Task{{ID:"world",WorkspaceID:"tenant",ProjectID:&project,ProjectWorkspaceID:&world}})
  if err==nil{t.Fatal("partial evidence falsely returned when model/tool/verification sources are missing")}
+}
+
+func TestQAExecutionEvidenceCapTruthfullyReportsOmittedTaskGroups(t *testing.T){
+ db,err:=sql.Open("sqlite",filepath.Join(t.TempDir(),"cap.db"))
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ for _,q:=range []string{
+  `CREATE TABLE tasks(id TEXT PRIMARY KEY,workspace_id TEXT,project_id TEXT,project_workspace_id TEXT)`,
+  `CREATE TABLE inference_requests(id TEXT PRIMARY KEY,workspace_id TEXT,task_id TEXT,status TEXT)`,
+  `CREATE TABLE tool_invocations(id TEXT PRIMARY KEY,workspace_id TEXT,task_id TEXT,status TEXT)`,
+  `CREATE TABLE operations(id TEXT PRIMARY KEY,workspace_id TEXT,task_id TEXT,state TEXT)`,
+  `CREATE TABLE verifications(id TEXT PRIMARY KEY,workspace_id TEXT,task_id TEXT,status TEXT)`,
+ }{if _,err:=db.Exec(q);err!=nil{t.Fatal(err)}}
+ project,workspace:="project","world"
+ visible:=make([]task.Task,0,18)
+ for n:=0;n<18;n++{
+  id:=fmt.Sprintf("task-%02d",n)
+  visible=append(visible,task.Task{ID:id,WorkspaceID:"tenant",ProjectID:&project,ProjectWorkspaceID:&workspace})
+  for _,q:=range []string{
+   `INSERT INTO tasks VALUES(?,'tenant','project','world')`,
+   `INSERT INTO inference_requests VALUES(?,'tenant',?,'succeeded')`,
+   `INSERT INTO tool_invocations VALUES(?,'tenant',?,'succeeded')`,
+   `INSERT INTO operations VALUES(?,'tenant',?,'committed')`,
+   `INSERT INTO verifications VALUES(?,'tenant',?,'pass')`,
+  }{
+   if strings.HasPrefix(q,"INSERT INTO tasks"){
+    if _,err:=db.Exec(q,id);err!=nil{t.Fatal(err)}
+   }else{
+    if _,err:=db.Exec(q,fmt.Sprintf("%s-%s",id,q[12:15]),id);err!=nil{t.Fatal(err)}
+   }
+  }
+ }
+ rows,truncated,err:=loadQAExecutionSources(context.Background(),db,"tenant",project,workspace,visible)
+ if err!=nil{t.Fatal(err)}
+ if len(rows)!=qaExecutionSourceCap||!truncated{t.Fatalf("must advertise source truncation; rows=%d cap=%d truncated=%v",len(rows),qaExecutionSourceCap,truncated)}
 }

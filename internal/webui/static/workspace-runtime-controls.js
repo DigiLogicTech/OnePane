@@ -55,10 +55,10 @@ async function a48MountWorkspaceRuntime(project,workspace,container){
  a44DevelopmentSection("Runtime scope",canonical.name,"Dedicated to this Workspace, not the legacy shared Project runtime")+
  a44DevelopmentSection("Installed applications",String(apps.length),"Only observed application states are reported")+'</div>'+
  '<div class="toolbar a48-runtime-actions">'+buttons+'<button type="button" class="btn" id="a48Refresh">Refresh</button></div>'+
- (runtime?'<form id="a48Install" class="a48-install"><h4>Install a toolchain / OCI application</h4>'+
- '<p class="list-meta">Supply a reviewed image pinned to its sha256 digest. Installs are governed and executed only on a compatible Sandbox Node, never on the Windows desktop host.</p>'+ '<p class="list-meta">Game engines: Godot 4 supports governed headless import/run. Unreal Engine 5.8 has an experimental same-container MCP identity probe only; editor mutation is not enabled. UEFN integration is planned. No automatic remote MCP exposure or engine fallback.</p>'+
- '<label>Application name<input name="name" required maxlength="120" placeholder="Godot headless"></label>'+
- '<label>OCI image digest<input name="source_ref" required placeholder="registry.example/engine@sha256:…" pattern=".+@sha256:[0-9a-fA-F]{64}"></label>'+
+ (runtime?'<form id="a48Install" class="a48-install"><h4>Configure a general-purpose toolchain / OCI application</h4>'+
+ '<p class="list-meta">A Workspace can run any compatible software included in its reviewed, digest-pinned OCI image: development languages, compilers, test frameworks, data tools, media tools, documentation systems, automation and game engines. OnePane executes commands inside the verified sandbox through scoped Task capabilities, never through unrestricted host-shell access.</p>'+ '<p class="list-meta">Use the governed Workspace tools inventory to inspect available executables; an observed binary is not an execution grant or proof of correct operation. Installation and network access still follow Workspace approval and Node policy. Specialist integrations include Godot headless build and experimental loopback-only Unreal MCP readiness; unrestricted MCP editor calls are not enabled.</p>'+
+ '<label>Application name<input name="name" required maxlength="120" placeholder="Python / Go / Blender / Godot / research tools"></label>'+
+ '<label>OCI image digest<input name="source_ref" required placeholder="registry.example/toolchain@sha256:…" pattern=".+@sha256:[0-9a-fA-F]{64}"></label>'+
  '<button type="submit" class="btn" '+(runtime.status==="running"?"":"disabled")+' >Declare pinned tool</button></form>':'')+
  (tools?'<div class="a48-app-list"><h4>Workspace tools</h4>'+tools+'</div>':'')+
  (err?'<p class="error" role="alert">'+escapeHtml(err)+'</p>':'');

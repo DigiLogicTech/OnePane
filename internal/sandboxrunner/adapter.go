@@ -61,6 +61,7 @@ type baseInput struct {
 	EnvironmentBindings json.RawMessage `json:"environment_bindings,omitempty"`
 	NetworkPolicy       json.RawMessage `json:"network_policy,omitempty"`
 	Command             []string        `json:"command,omitempty"`
+	RequiredExecutables json.RawMessage `json:"required_executables,omitempty"`
 	Message             string          `json:"message,omitempty"`
 	TimeoutSeconds      int             `json:"timeout_seconds,omitempty"`
 	Endpoints           []PortSpec      `json:"endpoints,omitempty"`
@@ -578,6 +579,34 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 		}
 		execCtx, cancel := context.WithTimeout(ctx, time.Duration(in.TimeoutSeconds)*time.Second)
 		defer cancel()
+        preflightStatus:="not_requested"
+        preflightFingerprint:=""
+        if len(in.RequiredExecutables)>0{
+            var names []string
+            if err:=json.Unmarshal(in.RequiredExecutables,&names);err!=nil{
+                return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: invalid required_executables",ErrInvalidInput))
+            }
+            required,err:=normalizeToolchainPrerequisites(names)
+            if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+            checkRequest:=ToolchainRequirements{
+                RuntimeID:in.RuntimeID,ApplicationID:in.ApplicationID,Required:required,
+            }
+            preflightFingerprint=fingerprintToolchainRequirements(required)
+            observed,err:=a.engine.ExecContainer(execCtx,in.RuntimeID,in.ApplicationID,
+                workspaceToolchainPreflightCommand(checkRequest))
+            if execCtx.Err()!=nil{return tool.AdapterResult{},execCtx.Err()}
+            if err!=nil{return tool.AdapterResult{},err}
+            if observed.ExitCode!=0{
+                return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: toolchain prerequisites could not be inspected inside the approved OCI image; no command executed",ErrInvalidInput))
+            }
+            preflight,err:=parseToolchainPreflight(observed.Stdout,checkRequest,state.SpecHash)
+            if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+            if len(preflight.Missing)>0{
+                return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: missing Workspace toolchain executables: %s; no build command executed",
+                    ErrInvalidInput,strings.Join(preflight.Missing,", ")))
+            }
+            preflightStatus="ready"
+        }
 		execResult, err := a.engine.ExecContainer(execCtx, in.RuntimeID, in.ApplicationID, in.Command)
 		// Return the cancellation cause (rather than an engine-specific
 		// "signal: killed") so the Gateway records timed_out/cancelled.
@@ -597,6 +626,7 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 		}
 		return result(map[string]any{"runtime_id": in.RuntimeID, "application_id": in.ApplicationID,
 			"command": in.Command, "timeout_seconds": in.TimeoutSeconds,
+            "toolchain_preflight": preflightStatus, "toolchain_requirements_sha256": preflightFingerprint,
 			"succeeded": succeeded, "result": execResult, "container": state, "engine": profile}, summary)
 	case ToolRuntimeEnsure:
 		workspace, workspaceExists, err = managedWorkspacePath(a.dataDir, in.RuntimeID, true)

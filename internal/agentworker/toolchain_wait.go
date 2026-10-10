@@ -115,3 +115,25 @@ func (s *Service) waitForWorkspaceToolchain(ctx context.Context,run Run,res Tick
  res.Error="approved Workspace toolchain runtime unavailable; awaiting resource reconciliation"
  return res
 }
+
+// deferWorkspaceToolchainWait enforces the 15-second interval *between*
+// resource checks, including after a Worker restart. The original run/Attempt
+// remains suspended; only the trusted retry timestamp is changed. Compare
+// and swap against the exact persisted continuation so a concurrently resumed
+// or rewritten run can never be overwritten by a stale poller.
+func (s *Service) deferWorkspaceToolchainWait(
+ ctx context.Context, runID, previousContinuation string, record *toolchainWaitRecord,
+) error {
+ if s==nil||s.db==nil||runID==""||record==nil||previousContinuation==""{
+  return fmt.Errorf("invalid approved Workspace runtime retry checkpoint")
+ }
+ next:=*record
+ next.RetryAtMS=s.clock.UnixMilli()+15000
+ encoded,err:=json.Marshal(toolchainWaitEnvelope{ToolchainWait:&next})
+ if err!=nil{return err}
+ _,err=s.db.ExecContext(ctx,`UPDATE agent_worker_runs
+ SET continuation_json=?,revision=revision+1,updated_at=?
+ WHERE id=? AND status='waiting' AND continuation_json=?`,
+  string(encoded),s.clock.UnixMilli(),runID,previousContinuation)
+ return err
+}

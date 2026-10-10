@@ -6,7 +6,8 @@ import (
 
 // ResearchEvidenceEligibleSession is an eligible pre-first-round Research
 // Council session associated with an exact active Project Workspace.
-// The service requires active human tenant membership. The API also checks\n// the existing Project and Team read capabilities.
+// The service requires active human tenant membership. The API also checks
+// the existing Project and Team read capabilities.
 type ResearchEvidenceEligibleSession struct {
  ID string `json:"id"`
  TaskID string `json:"task_id"`

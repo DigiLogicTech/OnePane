@@ -33,6 +33,18 @@ Windows interactive desktop by installing a tool name.
   and Project/Workspace Library grants continue to control artifact production,
   evidence and sharing. A compiler returning status 0 does **not** prove output
   integrity or publication.
+- Substantial build outputs can opt into `project.app.files.publish` action
+  `publish_large`: a fixed, no-follow OCI read plan streams 512 KiB chunks
+  into a maximum 32 MiB **in-memory** assembly, verifying each chunk against
+  source device/inode/size/mtime/ctime metadata. It compares SHA-256 of the
+  full file before and after transfer to the independently recomputed host
+  digest, then invokes the **same Task-owned, idempotent, immutable**
+  publisher. The original `publish` 256 KiB path stays unchanged; neither
+  mode accepts a host filename, transfer command or arbitrary destination.
+  The Tool result contains a receipt, never actual file bytes.
+- This is a bounded first large-artifact step, not infinite streaming,
+  resumable multi-GiB transfers or automatic project-directory packaging.
+  File size, number of OCI reads and task deadlines remain constrained.
 - `project.app.tools.discover` is a new **read-only inventory** requiring the
   existing `project.app.execute` capability and an independently verified OCI
   mount/identity. The tool runs a fixed POSIX sh script inside the container,

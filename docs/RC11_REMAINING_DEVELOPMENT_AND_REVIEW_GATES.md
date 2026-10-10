@@ -996,3 +996,24 @@ without changing the model's READY deployment state. It also checks
 revoked pairing and unavailable Node trust. This is a local
 control-plane scheduling fence, not proof of remote physical health
 or the absence of all races between admission and network dispatch.
+
+## Remote inference — pre-send admission of the exact resolved peer model
+
+Scheduler selection may precede network dispatch. The federated remote
+transport now rechecks the **exact locally imported deployment ID**,
+current model trust and deployment status, remote Node trust, approved
+mTLS pairing, unexpired capability-manifest receipt, manifest Node and
+protocol, and the advertised immutable remote deployment ID immediately
+before opening the paired TLS endpoint. The local deployment's current
+federation routing configuration must match the selected peer and
+remote deployment. A rejected check yields the explicit known-outcome
+`remote_node_not_admitted` transport failure; **no prompt payload is
+sent and no other model is substituted**.
+
+The real SQLite negative suite checks expired manifests, revoked
+pairings, unavailable peers, withdrawn advertised models, disabled
+deployments, revoked model trust and remapped federation configuration.
+Because this is a local DB-to-network preflight rather than a distributed
+transaction, an unavoidable race can still occur if the peer goes
+offline after admission; ordinary transport timeout/unknown-outcome
+semantics remain in force.

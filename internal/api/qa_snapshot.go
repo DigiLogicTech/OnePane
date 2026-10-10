@@ -94,6 +94,7 @@ type qaSnapshot struct {
  TimelineTruncated bool `json:"timeline_truncated"`
  Timeline []qaTimelineEvent `json:"timeline"`
  ExecutionSources []qaExecutionSource `json:"execution_sources"`
+ ExecutionSourcesTruncated bool `json:"execution_sources_truncated"`
 }
 var qaExcluded=[]string{
  "credentials, cookies, OAuth and Vault material",

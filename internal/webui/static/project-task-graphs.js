@@ -8,7 +8,7 @@ function a61GraphDraft(projectId,workspaces){
  let draft=a61TaskGraphDrafts.get(projectId);
  if(!draft){
   draft={name:"Development workstream",idempotency_key:"review-"+Date.now().toString(36),
-   nodes:[{project_workspace_id:workspaces[0]?.id||"",objective:"",depends:"",priority:0}],approved:false};
+   nodes:[{project_workspace_id:workspaces[0]?.id||"",objective:"",depends:"",priority:0,compute_preference:"auto"}],approved:false};
   a61TaskGraphDrafts.set(projectId,draft);
  }
  return draft;
@@ -22,7 +22,8 @@ function a61ReadGraphForm(form,draft){
   project_workspace_id:String(data.get("workspace_"+i)||""),
   objective:String(data.get("objective_"+i)||""),
   depends:String(data.get("depends_"+i)||""),
-  priority:Number(data.get("priority_"+i)||0)
+  priority:Number(data.get("priority_"+i)||0),
+  compute_preference:String(data.get("compute_"+i)||"auto")
  }));
  draft.approved=!!form.querySelector('[name="approved"]:checked');
 }
@@ -38,8 +39,11 @@ function a61NodesFromDraft(draft){
    throw Error(key+": dependencies must be up to eight distinct, other step keys.");
   if(!Number.isInteger(node.priority)||node.priority<0||node.priority>100)
    throw Error(key+": priority must be between 0 and 100.");
+  const compute=node.compute_preference||"auto";
+  if(!["auto","prefer_cpu","cpu_only","prefer_gpu","gpu_only"].includes(compute))
+   throw Error(key+": unsupported compute placement.");
   return {key,project_workspace_id:node.project_workspace_id,objective:node.objective.trim(),
-   depends_on:dependencies,priority:node.priority};
+   depends_on:dependencies,priority:node.priority,compute_preference:compute};
  });
 }
 function a61GraphBuilderMarkup(draft,workspaces){
@@ -54,6 +58,11 @@ function a61GraphBuilderMarkup(draft,workspaces){
    '</select></label>'+
   '<label>Priority<input type="number" min="0" max="100" name="priority_'+i+
    '" value="'+a61Safe(n.priority)+'"></label>'+
+  '<label>Compute placement<select name="compute_'+i+'">'+
+   [["auto","Auto (local-first)"],["prefer_cpu","Prefer CPU"],["cpu_only","CPU only"],
+    ["prefer_gpu","Prefer GPU"],["gpu_only","GPU only"]].map(([value,label])=>
+    '<option value="'+value+'"'+(value===(n.compute_preference||"auto")?' selected':'')+
+     '>'+label+'</option>').join("")+'</select></label>'+
   '<label class="a61-objective">Objective<textarea required rows="2" maxlength="4096" name="objective_'+i+
    '" placeholder="Describe one independently verifiable task">'+a61Safe(n.objective)+'</textarea></label>'+
   '<label class="a61-depends">Hard prerequisites (step keys, comma-separated)<input name="depends_'+i+
@@ -88,6 +97,7 @@ function a61GraphCard(graph){
   '<div><strong>'+a61Safe(n.key)+'</strong> <span class="list-meta">'+
     a61Safe(n.project_workspace_id)+'</span></div>'+
   '<span class="pill">'+a61Safe(n.readiness||n.state||"unknown")+'</span>'+
+  '<span class="list-meta">Compute: '+a61Safe(n.compute_preference||"auto")+'</span>'+
   '<div class="list-meta">'+a61Safe(n.next_action||"Pending Task assessment")+'</div>'+
   (n.blocked_by?.length?'<div class="list-meta">Waiting on: '+
    a61Safe(n.blocked_by.join(", "))+'</div>':"")+
@@ -133,7 +143,7 @@ async function a61MountProjectTaskGraphs(project,workspace,container){
    capture();
    if(draft.nodes.length>=32)return;
    draft.nodes.push({project_workspace_id:workspaces[0]?.id||"",
-    objective:"",depends:"",priority:0});
+    objective:"",depends:"",priority:0,compute_preference:"auto"});
    renderBuilder();
   });
   form.querySelector("[data-a61-remove]")?.addEventListener("click",()=>{

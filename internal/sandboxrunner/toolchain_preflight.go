@@ -110,7 +110,8 @@ func parseToolchainPreflight(raw string,r ToolchainRequirements,specHash string)
   ExecutionGranted:false,InstallationGranted:false,
   Note:"Presence was checked without invoking listed executables. Versions and dependencies are unverified; execution, package installation and network access require separate Workspace authority.",
  }
- if len(raw)>maxToolchainPreflightStdout||raw==""||!strings.HasSuffix(raw,"\n"){
+ // The OCI command transport trims terminal whitespace, including final newlines.
+ if len(raw)>maxToolchainPreflightStdout||raw==""{
   return ToolchainPreflightResult{},fmt.Errorf("%w: incomplete toolchain preflight result",ErrInvalidInput)
  }
  lines:=strings.Split(strings.TrimSuffix(raw,"\n"),"\n")

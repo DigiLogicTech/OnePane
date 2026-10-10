@@ -54,6 +54,11 @@ const card=scope.a61GraphCard({name:attack,status:attack,progress:{},nodes:[{
  blocked_by:[attack],failed_or_intervened_on:[attack]}]});
 assert(!card.includes("<img"));
 assert(card.includes("&lt;img"));
+const healthCard=scope.a61GraphCard({id:"graph",name:"Recovery",nodes:[{
+ key:"orphan",readiness:"needs_attention",attempt_health:attack
+}]});
+assert(healthCard.includes("Execution record: &lt;img"));
+assert(!healthCard.includes("<img"));
 const builder=scope.a61GraphBuilderMarkup({
  name:attack,idempotency_key:"safe-key",approved:false,
  nodes:[{project_workspace_id:"canonical-world",objective:attack,depends:"",priority:0}]

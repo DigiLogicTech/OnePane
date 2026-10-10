@@ -98,6 +98,8 @@ function a61GraphCard(graph){
     a61Safe(n.project_workspace_id)+'</span></div>'+
   '<span class="pill">'+a61Safe(n.readiness||n.state||"unknown")+'</span>'+
   '<span class="list-meta">Compute: '+a61Safe(n.compute_preference||"auto")+'</span>'+
+  (n.attempt_health&&n.attempt_health!=="none"?
+   '<div class="list-meta">Execution record: '+a61Safe(n.attempt_health)+'</div>':"")+
   '<div class="list-meta">'+a61Safe(n.next_action||"Pending Task assessment")+'</div>'+
   (n.blocked_by?.length?'<div class="list-meta">Waiting on: '+
    a61Safe(n.blocked_by.join(", "))+'</div>':"")+

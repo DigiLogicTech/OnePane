@@ -41,6 +41,7 @@ type TaskGraphNode struct {
  ComputePreference string `json:"compute_preference"`
  Archived bool `json:"archived"`
  ScopeDrift bool `json:"scope_drift,omitempty"`
+ AttemptHealth string `json:"attempt_health,omitempty"`
  BlockedBy []string `json:"blocked_by"`
  FailedOrIntervenedOn []string `json:"failed_or_intervened_on"`
  Readiness string `json:"readiness"`
@@ -315,6 +316,11 @@ func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGra
   if depErr==nil{depErr=depRows.Err()}
   _=depRows.Close()
   if depErr!=nil{return TaskGraph{},depErr}
+  // Capture Attempt/Worker ownership in the very same SQLite snapshot as
+  // graph scope and hard dependency edges. Do not treat an orphan as running.
+  health,healthErr:=taskAttemptHealthTx(ctx,tx,x.Nodes[i].TaskID,x.WorkspaceID,x.Nodes[i].State)
+  if healthErr!=nil{return TaskGraph{},healthErr}
+  x.Nodes[i].AttemptHealth=health
  }
  x.Progress,x.Status=evaluateTaskGraph(&x)
  if err:=tx.Commit();err!=nil{return TaskGraph{},err}

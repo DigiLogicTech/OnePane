@@ -23,6 +23,14 @@ type qaResearchEvidenceState struct {
  RoundStarted bool `json:"round_started"`
 }
 
+func qaResearchSHARecorded(value string)bool{
+ if len(value)!=64{return false}
+ for _,c:=range value{
+  if !((c>='0'&&c<='9')||(c>='a'&&c<='f')){return false}
+ }
+ return true
+}
+
 func loadQAResearchEvidence(
  ctx context.Context,db *sql.DB,tenant,projectID,workspaceID string,
  visible []task.Task,
@@ -59,8 +67,8 @@ func loadQAResearchEvidence(
   if err=rows.Scan(&id,&session,&count,&researchSHA,&evidenceSHA,
    &approved,&round);err!=nil{return nil,false,err}
   if len(result)>=qaDeepEvidenceCap{return result,true,nil}
-  researchRecorded:=len(researchSHA)==64
-  evidenceRecorded:=len(evidenceSHA)==71 && evidenceSHA[:7]=="sha256:"
+  researchRecorded:=qaResearchSHARecorded(researchSHA)
+  evidenceRecorded:=qaDigestRecorded(sql.NullString{String:evidenceSHA,Valid:true})
   state:="metadata_approval_only"
   if count==0||!researchRecorded||!evidenceRecorded{
    state="invalid_recorded_provenance"

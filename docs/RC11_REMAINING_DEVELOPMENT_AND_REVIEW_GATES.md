@@ -564,3 +564,30 @@ consumption; this receipt is neither an attachment nor proof of perpetual
 access. Automated evidence integrity/isolated-scope checks do not substitute
 for external physical Node and installed-product QA. The user review
 sequence and protected RC10 baseline remain unchanged.
+
+## Research approval history — recheck frozen evidence after leaving the dialog
+
+Workspace Library operators may explicitly select **Show saved approvals** to
+list up to 40 formerly approved Research Council Task sessions from the exact
+canonical Project Workspace. The new read-only `GET
+/v1/projects/{projectID}/workspaces/{workspaceID}/research/frozen-evidence-sessions`
+requires Project read and Team read, active Project/Team/tenant ownership and
+active human tenant membership. Rows contain only session/Task/Team identity,
+Task objective, session state, round and approval timestamp. They include no
+Library asset IDs, selected names, content hashes, plaintext, storage paths,
+tokens or reusable permissions. Sibling Workspaces and other tenant Projects
+never appear.
+
+Each listed session has **Reverify frozen text**, which invokes the separate
+CSRF-protected, bounded, human-authorised, no-store preflight implemented
+earlier. Loading history never fetches document bytes. Reverification requires
+a fresh operator click and rechecks current Library version grants,
+content-addressed managed artifact hashes, tenant and Project ownership and
+the frozen session manifest; unavailable/revoked records fail closed.
+Results render as literal text, not executable HTML. This does **not** attach
+documents to Research prompts or bypass Council seat isolation.
+
+The integration tests include pre-approval invisibility, exact approved
+Workspace isolation, agent/unknown-human denial, account suspension, Team
+archive and restored eligibility. External installed UI and physical Node QA
+and the mandatory code-review/vision-review sequence remain unresolved.

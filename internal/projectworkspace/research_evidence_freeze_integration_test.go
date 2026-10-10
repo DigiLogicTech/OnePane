@@ -96,12 +96,29 @@ func TestResearchSessionFrozenEvidenceApprovalAndRevocation(t *testing.T){
    t.Fatalf("unauthorised picker disclosure for %+v: %+v %v",tc,candidates,e)
   }
  }
+ history,err:=svc.FrozenResearchEvidenceSessions(ctx,p.ID,world.ID,"human")
+ if err!=nil||len(history)!=0{
+  t.Fatalf("unapproved Research session appeared in frozen history: %+v %v",history,err)
+ }
  requested:=[]WorkspaceEvidenceSelection{{AssetID:a.ID,Version:1}}
  frozen,err:=svc.FreezeResearchEvidence(ctx,session.ID,"human",requested)
  if err!=nil{t.Fatal(err)}
  eligible,err=svc.EligibleResearchEvidenceSessions(ctx,p.ID,world.ID,"human")
  if err!=nil||len(eligible)!=0{
   t.Fatalf("frozen Research session still listed: %+v %v",eligible,err)
+ }
+ history,err=svc.FrozenResearchEvidenceSessions(ctx,p.ID,world.ID,"human")
+ if err!=nil||len(history)!=1||history[0].ID!=session.ID||
+  history[0].TaskID!=job.ID||history[0].ApprovedAt<1{
+  t.Fatalf("exact frozen Research approval missing: %+v %v",history,err)
+ }
+ for _,tc:=range []struct{workspace,actor string}{
+  {research.ID,"human"},{world.ID,"agent"},{world.ID,"unknown-human"},
+ }{
+  candidates,e:=svc.FrozenResearchEvidenceSessions(ctx,p.ID,tc.workspace,tc.actor)
+  if e!=nil||len(candidates)!=0{
+   t.Fatalf("frozen history leaked to %+v: %+v %v",tc,candidates,e)
+  }
  }
  if frozen.ProjectID!=p.ID||frozen.ProjectWorkspaceID!=world.ID||
   frozen.ResearchManifestSHA256==""||frozen.Evidence.ManifestSHA256==""||
@@ -157,6 +174,10 @@ func TestResearchSessionFrozenEvidenceApprovalAndRevocation(t *testing.T){
   candidates,e:=svc.EligibleResearchEvidenceSessions(ctx,p.ID,research.ID,"human")
   if e!=nil||len(candidates)!=0{
    t.Fatalf("%s leaked eligible Research session: %+v %v",reason,candidates,e)
+  }
+  frozenCandidates,e:=svc.FrozenResearchEvidenceSessions(ctx,p.ID,world.ID,"human")
+  if e!=nil||len(frozenCandidates)!=0{
+   t.Fatalf("%s disclosed frozen Research session: %+v %v",reason,frozenCandidates,e)
   }
  }
  if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships SET status='suspended'

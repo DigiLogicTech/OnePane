@@ -550,6 +550,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library", s.listWorkspaceLibrary)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces/{workspaceID}/evidence-packets", s.buildWorkspaceEvidencePacket)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/research/evidence-sessions", s.listEligibleResearchEvidenceSessions)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/research/frozen-evidence-sessions", s.listFrozenResearchEvidenceSessions)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces/{workspaceID}/evidence-packets/verified-text", s.readVerifiedWorkspaceEvidence)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces/{workspaceID}/evidence-packets/search-text", s.searchVerifiedWorkspaceEvidence)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library/{assetID}/versions", s.listWorkspaceLibraryVersions)

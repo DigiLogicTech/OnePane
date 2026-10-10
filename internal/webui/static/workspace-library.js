@@ -59,6 +59,18 @@ async function a46RenderLibrary(project,workspace,root){
  </form>
  <div class="a46-library-items">${cards||'<div class="empty-state compact">No Project Library assets. Upload a document, source artifact or asset to begin.</div>'}</div>
  ${source?.id?'<div class="a62-evidence-panel"><div class="toolbar"><button type="button" class="btn" data-a62-build disabled>Build scoped evidence manifest</button><button type="button" class="btn" data-a63-read disabled>Read verified text (up to 8)</button><button type="button" class="btn" data-a65-freeze disabled>Approve Research evidence metadata</button></div><p class="list-meta">Metadata: choose up to 16 exact versions. Text retrieval: choose up to 8 UTF-8 documents, 64 KiB each, 256 KiB total. Every read is hash checked and permissions are rechecked. Untrusted text is for operator review only: it is not sent to the Orchestrator or Council.</p><pre class="a62-evidence-receipt" data-a62-result hidden aria-label="Scoped Workspace evidence metadata manifest"></pre><pre class="a62-evidence-receipt" data-a63-result hidden aria-label="Verified untrusted Workspace Library text"></pre><label class="a64-search-label">Search selected verified text (2–64 characters)<input type="search" data-a64-query maxlength="64" placeholder="Phrase to find in approved versions"></label><div class="toolbar"><button type="button" class="btn" data-a64-search disabled>Search selected text</button></div><pre class="a62-evidence-receipt" data-a64-results hidden aria-label="Permission-checked evidence search snippets"></pre></div>':""}`;
+ // An operator can reopen previously frozen Research approvals without
+ // copying opaque Council IDs, including after leaving the approval dialog.
+ if(source?.id){
+  const historyPanel=document.createElement("section");
+  historyPanel.className="a62-evidence-panel";
+  historyPanel.innerHTML='<div class="toolbar"><strong>Frozen Research approvals</strong>'+
+   '<button type="button" class="btn" data-a67-load>Show saved approvals</button></div>'+
+   '<p class="list-meta">Review exact Research sessions and optionally recheck frozen text integrity. Saved metadata is not a model attachment, and no Library content is loaded automatically.</p>'+
+   '<div data-a67-results aria-live="polite"></div>';
+  root.appendChild(historyPanel);
+  a67BindFrozenResearchHistory(historyPanel,prefix,source.id);
+ }
  // Evidence selection is deliberate and read-only. Server revalidates each
  // selected immutable version against the current direct grant/publication.
  const build=root.querySelector("[data-a62-build]");
@@ -337,4 +349,66 @@ async function a46RenderLibrary(project,workspace,root){
    }catch(err){submit.disabled=false;gf.querySelector("#a46GrantError").textContent=err.message}
   };
  }));
+}
+
+function a67BindFrozenResearchHistory(panel,prefix,workspaceID){
+ const load=panel.querySelector("[data-a67-load]");
+ const output=panel.querySelector("[data-a67-results]");
+ if(!load||!output)return;
+ load.addEventListener("click",async()=>{
+  load.disabled=true;
+  output.textContent="Loading scoped Research approval metadata…";
+  try{
+   const rows=await apiRequest(prefix+"/workspaces/"+
+    encodeURIComponent(workspaceID)+"/research/frozen-evidence-sessions");
+   if(!panel.isConnected)return;
+   if(!Array.isArray(rows))throw Error("Unexpected Research history response");
+   output.textContent="";
+   if(!rows.length){
+    output.textContent="No frozen Research approvals in this Workspace.";
+    return;
+   }
+   for(const item of rows){
+    const wrapper=document.createElement("div");
+    wrapper.className="a46-library-asset";
+    const title=document.createElement("strong");
+    title.textContent=String(item.team_name||"Research Council");
+    const context=document.createElement("p");
+    context.className="list-meta";
+    context.textContent=String(item.task_objective||"Research Task")+
+     " · "+String(item.status||"unknown")+" · round "+Number(item.round_number||0);
+    const verify=document.createElement("button");
+    verify.type="button";
+    verify.className="btn";
+    verify.textContent="Reverify frozen text";
+    const receipt=document.createElement("pre");
+    receipt.className="a62-evidence-receipt";
+    receipt.hidden=true;
+    receipt.setAttribute("aria-label","Research evidence re-verification receipt");
+    verify.addEventListener("click",async()=>{
+     verify.disabled=true;
+     receipt.hidden=true;
+     receipt.textContent="";
+     try{
+      const checked=await apiRequest("/v1/team-sessions/"+
+       encodeURIComponent(String(item.id||""))+"/research/evidence-preflight",{
+       method:"POST"
+      });
+      if(!panel.isConnected)return;
+      receipt.textContent=JSON.stringify(checked,null,2);
+      receipt.hidden=false;
+      notice("Research text reverified for this operator only. No model access was granted.");
+     }catch(ex){
+      if(!panel.isConnected)return;
+      receipt.textContent="Verification denied: "+ex.message;
+      receipt.hidden=false;
+     }finally{verify.disabled=false;}
+    });
+    wrapper.append(title,context,verify,receipt);
+    output.appendChild(wrapper);
+   }
+  }catch(ex){
+   if(panel.isConnected)output.textContent="Research approvals unavailable: "+ex.message;
+  }finally{load.disabled=false;}
+ });
 }

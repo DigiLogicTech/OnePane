@@ -35,6 +35,8 @@ async function a46RenderLibrary(project,workspace,root){
   <div class="a45-link-header"><div><strong>${escapeHtml(a.name)}</strong>
     <div class="list-meta">${escapeHtml(a.asset_type)} · v${Number(globalLibrary?a.current_version:(a.accessible_version||a.current_version))} · ${escapeHtml(a.id)}</div></div>
     <span class="pill">Versioned</span></div>
+  ${source?.id?'<label class="inline-check a62-evidence-pick"><input type="checkbox" data-a62-asset="'+escapeHtml(a.id)+
+   '" data-a62-version="'+Number(a.accessible_version||a.current_version)+'"> Include this exact version in an evidence manifest</label>':""}
   <div class="toolbar a45-link-actions">
    ${globalLibrary||source?.id?`<button type="button" class="btn" data-a46-versions="${escapeHtml(a.id)}">Versions</button>`:""}
    ${globalLibrary?`<button type="button" class="btn" data-a46-grant="${escapeHtml(a.id)}">Grant Workspace access</button>`:""}
@@ -55,7 +57,38 @@ async function a46RenderLibrary(project,workspace,root){
    <button class="btn" type="submit">Search Library</button>
    <button class="btn" type="button" id="a46ClearSearch" ${query?"":"disabled"}>Clear</button>
  </form>
- <div class="a46-library-items">${cards||'<div class="empty-state compact">No Project Library assets. Upload a document, source artifact or asset to begin.</div>'}</div>`;
+ <div class="a46-library-items">${cards||'<div class="empty-state compact">No Project Library assets. Upload a document, source artifact or asset to begin.</div>'}</div>
+ ${source?.id?'<div class="a62-evidence-panel"><div class="toolbar"><button type="button" class="btn" data-a62-build disabled>Build scoped evidence manifest</button></div><p class="list-meta">Select up to 16 exact authorised versions. Generates only a permission-checked hash and metadata receipt, not document bytes or a transferable read grant.</p><pre class="a62-evidence-receipt" data-a62-result hidden aria-label="Scoped Workspace evidence metadata manifest"></pre></div>':""}`;
+ // Evidence selection is deliberate and read-only. Server revalidates each
+ // selected immutable version against the current direct grant/publication.
+ const build=root.querySelector("[data-a62-build]");
+ if(build && source?.id){
+  const selected=()=>Array.from(root.querySelectorAll('[data-a62-asset]:checked')).map(el=>({
+   asset_id:String(el.dataset.a62Asset||""),
+   version:Number(el.dataset.a62Version||0)
+  }));
+  const update=()=>{build.disabled=selected().length===0};
+  root.querySelectorAll("[data-a62-asset]").forEach(input=>input.addEventListener("change",update));
+  build.addEventListener("click",async()=>{
+   const selections=selected();
+   if(selections.length<1||selections.length>16){
+    notice("Select between one and sixteen authorised asset versions.","bad");return;
+   }
+   build.disabled=true;
+   try{
+    const packet=await apiRequest(prefix+"/workspaces/"+encodeURIComponent(source.id)+"/evidence-packets",{
+     method:"POST",body:JSON.stringify({selections})
+    });
+    const output=root.querySelector("[data-a62-result]");
+    if(output&&root.isConnected){
+     output.hidden=false;
+     output.textContent=JSON.stringify(packet,null,2);
+    }
+    notice("Scoped evidence metadata assembled; no document content or new access was granted.");
+   }catch(err){notice("Evidence selection denied: "+err.message,"bad")}
+   finally{update()}
+  });
+ }
  root.querySelector("#a46RecoverArtifact")?.addEventListener("click",()=>{
   openModal("Adopt existing OnePane artifact",`<form id="a46AdoptForm" class="qa-form">
    <p class="list-meta">Recover a verified managed artifact already stored by OnePane. No file is moved or deleted, and artifacts from other Projects or tenants are not accepted.</p>

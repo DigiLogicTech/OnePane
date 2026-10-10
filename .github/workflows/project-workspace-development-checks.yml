@@ -131,6 +131,7 @@ jobs:
         run: |
           node --check internal/webui/static/project-development-page.js
           node --check internal/webui/static/project-task-graphs.js
+          node scripts/validate_project_task_graphs_ui.js
           node --check internal/webui/static/workspace-collaboration.js
           node --check internal/webui/static/workspace-library.js
           node --check internal/webui/static/workspace-runtime-controls.js

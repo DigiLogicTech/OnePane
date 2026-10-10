@@ -362,7 +362,7 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
         // Godot must be part of the operator-approved immutable image.
         // No on-demand downloads, host shell, arbitrary flags or model-supplied
         // file paths are permitted by this specialised Tool Gateway entry.
-        if !safeID.MatchString(in.ApplicationID) ||
+        if !validGodotEnvelope(req.Input)||!safeID.MatchString(in.ApplicationID) ||
            in.Image!=""||in.Path!=""||in.Name!=""||in.MediaType!=""||
            in.ContentBase64!=""||in.ExpectedSHA256!=""||in.Message!=""||
            len(in.Command)!=0||len(in.Endpoints)!=0||

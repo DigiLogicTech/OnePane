@@ -959,3 +959,21 @@ boundary, not OS reboot, actual harnessd orchestration lease fencing or
 remote Node restart. The workflow remains SKIPPED without the explicitly
 approved image and must never be represented as a physical pass while
 skipped.
+
+## Physical Node — adversarial OCI name/label collision test
+
+The opt-in trusted rootless smoke suite also creates a **new generated
+test-owned OCI container** with a deliberate canonical OnePane-looking
+name and forged Runtime/Application/spec labels but without the required
+OnePane-managed internal network, mount or sandbox restrictions. Using
+the same low-level CLI backend, it must refuse `ExecContainer`,
+`StopContainer`, and `StopRuntime` with `ErrInvalidInput`; independent
+inspection must prove the colliding container remains running with its
+original OCI ID. Teardown targets only the generated test name.
+
+The test runs only when an administrator has approved a digest-pinned,
+pre-pulled image on an unprivileged physical runner; ordinary PR and
+software CI never exercise the actual container engine. This proves the
+specific negative case only after that opt-in physical job succeeds. It
+does not assert complete Node trust or general protection from
+unprivileged users with OCI engine access.

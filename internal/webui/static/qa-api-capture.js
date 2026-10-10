@@ -38,7 +38,9 @@
     /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z$/.test(item.at_utc)?item.at_utc:"unavailable";
    rows.push({subsystem:item.subsystem,method:item.method,
     status_code:item.status_code,duration_ms:safeInt(item.duration_ms,60000),
-    at_utc:timestamp});
+    at_utc:timestamp,
+    ...(typeof item.trace_ref==="string"&&/^trace-[a-f0-9]{24}$/.test(item.trace_ref)?
+       {trace_ref:item.trace_ref}:{})});
   }
   const counts=[];
   for(const item of raw.counters){
@@ -63,7 +65,8 @@
    "Counts by fixed subsystem/HTTP outcome:",
    ...v.counters.map(c=>"  "+c.subsystem+" / "+c.outcome+": "+c.count),
    "Recent per-request observations (verbose only, max 64):",
-   ...v.observations.map(e=>"  "+e.at_utc+" "+e.subsystem+" "+e.method+" status="+e.status_code+" duration_ms="+e.duration_ms),
+   ...v.observations.map(e=>"  "+e.at_utc+" "+e.subsystem+" "+e.method+" status="+e.status_code+" duration_ms="+e.duration_ms+
+     (e.trace_ref?" Task creation trace="+e.trace_ref:"")),
    "Unobserved: Task/Worker internals, independent tool success, model outputs, requests not tagged by this operator",
    "Excluded: paths, URLs, bodies, headers, credentials and other administrator sessions"
   ].join("\n");

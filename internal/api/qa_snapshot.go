@@ -95,6 +95,10 @@ type qaSnapshot struct {
  Timeline []qaTimelineEvent `json:"timeline"`
  ExecutionSources []qaExecutionSource `json:"execution_sources"`
  ExecutionSourcesTruncated bool `json:"execution_sources_truncated"`
+ WorkerToolLinks []qaWorkerToolEvidence `json:"worker_tool_links"`
+ WorkerToolLinksTruncated bool `json:"worker_tool_links_truncated"`
+ AssuranceEvidence []qaAssuranceEvidence `json:"assurance_evidence"`
+ AssuranceEvidenceTruncated bool `json:"assurance_evidence_truncated"`
 }
 var qaExcluded=[]string{
  "credentials, cookies, OAuth and Vault material",
@@ -116,6 +120,8 @@ func makeQASnapshot(now time.Time,rows []task.Task,progress map[string]taskExecu
   MaxTasks:qaSnapshotTaskCap,SourceStatus:"read_only_observed_state",
   MaxTimelineEvents:qaTimelineEventCap,Timeline:make([]qaTimelineEvent,0),
   ExecutionSources:make([]qaExecutionSource,0),
+  WorkerToolLinks:make([]qaWorkerToolEvidence,0),
+  AssuranceEvidence:make([]qaAssuranceEvidence,0),
   ExcludedCategories:append([]string(nil),qaExcluded...),Tasks:make([]qaTaskEntry,0),
  }
  if len(rows)>qaSnapshotTaskCap{snap.Truncated=true;rows=rows[:qaSnapshotTaskCap]}
@@ -157,7 +163,7 @@ func qaBundle(snapshot qaSnapshot)([]byte,error){
  snapshotJSON,err:=json.MarshalIndent(snapshot,"","  ")
  if err!=nil{return nil,err}
  if len(snapshotJSON)>64<<10{return nil,fmt.Errorf("QA snapshot exceeds safe bound")}
- const readme="OnePane RC11 QA snapshot (schema v2). This is a read-only, sanitised Task/Worker status and event chronology extract, not the full Debug Centre. Opaque refs correlate records without copying event payloads/trace IDs. Physical Node/tool/installer evidence, raw logs, secrets, code, prompts and Workspace files are excluded. Review contents locally before sharing.\n"
+ const readme="OnePane RC11 QA snapshot (schema v2). Typed, scoped Task/Worker chronology and persisted Tool/operation/assurance metadata, not a raw log or external-effect attestation. Opaque refs correlate observed persisted links without copying raw event payloads, trace IDs, Tool results or evidence digests. Physical Node/installer evidence, secrets, prompts and Workspace files are excluded. Review locally before sharing.\n"
  files:=map[string][]byte{"snapshot.json":snapshotJSON,"README.txt":[]byte(readme)}
  hashes:=map[string]string{}
  for name,data:=range files{h:=sha256.Sum256(data);hashes[name]=hex.EncodeToString(h[:])}

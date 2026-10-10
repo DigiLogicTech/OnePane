@@ -55,15 +55,16 @@ async function a49MountDevelopmentTasks(project,workspace,container){
   </details>
   <details class="a49-qa-snapshot" id="a59ScopedTraceCorrelation">
    <summary>Correlate observed Task and Worker events (authorised Workspace only)</summary>
-   <p class="list-meta">Read the latest 96 bounded, already scoped Task/Worker events. Match only observed opaque trace/request references within the same canonical Workspace and Task. Related persisted model requests, Tool invocations, operations and verification statuses can be joined by the same authorised Task identity. These are not end-to-end trace links or proof of external success. Browser events do not carry a shared backend trace.</p>
+   <p class="list-meta">Read the latest 96 bounded, already scoped Task/Worker events. Match only observed opaque trace/request references within the same canonical Workspace and Task. Related persisted model requests, Tool invocations, operations and verification statuses can be joined by the same authorised Task identity. These are not end-to-end trace links or proof of external success. Only explicitly tagged Task creation can carry a server-minted trace; other API calls are not linked to asynchronous Worker events. Independently recorded Tool and assurance outcomes remain distinct from physical effect verification.</p>
    <div class="a49-task-actions">
     <button class="btn" id="a59Correlate" type="button">Load and correlate observed events</button>
+    <label><input type="checkbox" id="a63IncludeCapture"> Include my Node Admin-owned HTTP capture (separate permission check)</label>
     <label>Severity <select id="a59Severity" aria-label="Observed event severity filter">
      <option value="all">All</option><option value="attention">Attention</option>
      <option value="waiting">Waiting</option><option value="information">Information</option>
     </select></label>
    </div>
-   <p class="list-meta" id="a59CorrelationStatus" role="status">Not loaded. No diagnostics fetched automatically.</p>
+   <p class="list-meta" id="a59CorrelationStatus" role="status">Not loaded. No diagnostics fetched automatically. The optional HTTP capture is only accessible to the administrator credential that started it.</p>
    <pre class="a49-qa-snapshot-preview a59-correlation-preview" id="a59CorrelationPreview" aria-label="Scoped Task Worker correlation" aria-live="polite"></pre>
   </details>
   <details class="a49-qa-snapshot" id="a54IncidentCapture">
@@ -216,6 +217,8 @@ async function a49MountDevelopmentTasks(project,workspace,container){
  const correlationSeverity=section.querySelector("#a59Severity");
  const correlationStatus=section.querySelector("#a59CorrelationStatus");
  const correlationPreview=section.querySelector("#a59CorrelationPreview");
+ const correlationCapture=section.querySelector("#a63IncludeCapture");
+ let executionReport=null;
  let correlationReport=null,correlationEpoch=0;
  const paintCorrelation=()=>{
   if(!section.isConnected)return;
@@ -224,18 +227,27 @@ async function a49MountDevelopmentTasks(project,workspace,container){
   }
   correlationPreview.textContent=a59ScopedCorrelation.format(
    correlationReport,correlationSeverity.value);
+  if(executionReport&&typeof a63ExecutionProvenance!=="undefined")
+   correlationPreview.textContent+="\n"+a63ExecutionProvenance.format(executionReport);
  };
  correlationSeverity.addEventListener("change",paintCorrelation);
  correlationLoad.addEventListener("click",async()=>{
   const epoch=++correlationEpoch;
-  correlationReport=null;correlationPreview.textContent="";
+  correlationReport=null;executionReport=null;correlationPreview.textContent="";
   correlationLoad.disabled=true;
   correlationStatus.textContent="Loading a fresh, permission-checked canonical Workspace QA timeline…";
   try{
    const snapshot=await apiRequest("/v1/qa/workspace-snapshot?"+qaQuery,{cache:"no-store"});
    if(!section.isConnected||epoch!==correlationEpoch)return;
    if(typeof a59ScopedCorrelation==="undefined")throw Error("Unavailable");
+   if(typeof a63ExecutionProvenance==="undefined")throw Error("Provenance projection unavailable");
+   // The optional capture requires its own separate Node Admin permission,
+   // and is never silently fetched or combined with another Workspace.
+   const capture=correlationCapture.checked?
+    await apiRequest("/v1/qa/api-capture",{cache:"no-store"}):undefined;
+   if(!section.isConnected||epoch!==correlationEpoch)return;
    correlationReport=a59ScopedCorrelation.correlate(snapshot);
+   executionReport=a63ExecutionProvenance.project(snapshot,capture);
    paintCorrelation();
    correlationStatus.textContent="Correlated "+correlationReport.groups_shown+
     " scoped groups from "+correlationReport.events_considered+" recent events"+

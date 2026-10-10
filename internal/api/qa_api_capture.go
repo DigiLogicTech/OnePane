@@ -2,6 +2,7 @@ package api
 
 import (
  "crypto/rand"
+ "context"
  "encoding/hex"
  "net/http"
  "strings"
@@ -32,6 +33,7 @@ type qaAPIObservation struct{
  Method string `json:"method"`
  StatusCode int `json:"status_code"`
  DurationMS int64 `json:"duration_ms"`
+ TraceRef string `json:"trace_ref,omitempty"`
 }
 type qaAPICaptureView struct{
  SchemaVersion int `json:"schema_version"`
@@ -145,6 +147,9 @@ func(c *qaAPICapture) accepts(now time.Time,id,principal,credential string)bool{
  return ok&&s.status=="recording"&&id!=""&&id==s.id
 }
 func(c *qaAPICapture) observe(now time.Time,id,principal,credential,path,method string,status int,elapsed time.Duration){
+ c.observeWithTrace(now,id,principal,credential,path,method,status,elapsed,"")
+}
+func(c *qaAPICapture) observeWithTrace(now time.Time,id,principal,credential,path,method string,status int,elapsed time.Duration,traceRef string){
  started:=time.Now()
  c.mu.Lock();defer c.mu.Unlock()
  s,ok:=c.authorized(now,principal,credential)
@@ -156,6 +161,8 @@ func(c *qaAPICapture) observe(now time.Time,id,principal,credential,path,method 
   ev:=qaAPIObservation{AtUTC:now.UTC().Format(time.RFC3339Nano),
    Subsystem:qaAPIClasses[cls],Method:qaAPIMethod(method),
    StatusCode:status,DurationMS:qaAPIMs(elapsed)}
+  if method=="POST"&&path=="/v1/tasks"&&status==http.StatusCreated&&
+   qaSafeTraceRef(traceRef){ev.TraceRef=traceRef}
   if len(s.observations)>=qaAPIMaxEvents{
    copy(s.observations,s.observations[1:]);s.observations[len(s.observations)-1]=ev
    if s.dropped<65535{s.dropped++}
@@ -203,6 +210,21 @@ func(w *qaAPIStatusWriter)Unwrap()http.ResponseWriter{return w.ResponseWriter}
 func(w *qaAPIStatusWriter)Flush(){
  if f,ok:=w.ResponseWriter.(http.Flusher);ok{f.Flush()}
 }
+// The context marker only originates in the already authenticated, operator-
+ // owned capture middleware; untrusted X-Trace-ID request headers cannot make
+ // themselves a trusted QA trace. IDs are random and never authorization tokens.
+type qaTrustedTraceContextKey struct{}
+func qaTrustedTaskTrace(r *http.Request)*string{
+ if r==nil{return nil}
+ v,ok:=r.Context().Value(qaTrustedTraceContextKey{}).(string)
+ if !ok||len(v)!=48{return nil}
+ return &v
+}
+func qaSafeTraceRef(s string)bool{
+ if len(s)!=30||!strings.HasPrefix(s,"trace-"){return false}
+ for _,c:=range s[6:]{if !((c>='0'&&c<='9')||(c>='a'&&c<='f')){return false}}
+ return true
+}
 func(s *Server)qaCaptureMiddleware(next http.Handler)http.Handler{
  return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
   // Uninstrumented requests have no further work, identity lookups or
@@ -220,12 +242,23 @@ func(s *Server)qaCaptureMiddleware(next http.Handler)http.Handler{
    !s.apiCapture.accepts(time.Now(),token,i.PrincipalID,i.CredentialID){
    next.ServeHTTP(w,r);return
   }
+  traceID,traceRef:="",""
+  if r.Method=="POST"&&r.URL.Path=="/v1/tasks"{
+   // This is the only trusted HTTP -> durable Task event trace insertion
+   // in this increment. No timing-based links or untrusted caller trace IDs.
+   if minted,e:=qaAPIRandomID();e==nil{
+    traceID=minted
+    traceRef=qaOpaqueRef("trace",traceID)
+    r=r.WithContext(context.WithValue(r.Context(),qaTrustedTraceContextKey{},traceID))
+   }
+  }
   wrapped:=&qaAPIStatusWriter{ResponseWriter:w}
   started:=time.Now()
   next.ServeHTTP(wrapped,r)
   status:=wrapped.status
   if status==0{status=200}
-  s.apiCapture.observe(time.Now(),token,i.PrincipalID,i.CredentialID,
-   r.URL.Path,r.Method,status,time.Since(started))
+  if status!=http.StatusCreated{traceRef=""}
+  s.apiCapture.observeWithTrace(time.Now(),token,i.PrincipalID,i.CredentialID,
+   r.URL.Path,r.Method,status,time.Since(started),traceRef)
  })
 }

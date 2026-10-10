@@ -69,3 +69,16 @@ assert(researchCheck.includes("actorType!=\"human\""));
 assert(researchCheck.includes("link.enabled=1"));
 assert(researchFreeze.includes("return s.ResearchEvidence(ctx,sessionID,actor)"));
 console.log("PASS: explicitly reviewed Research Council evidence metadata freeze, no implicit seat access");
+const sessionPicker=fs.readFileSync("internal/projectworkspace/research_evidence_sessions.go","utf8");
+const sessionHandler=fs.readFileSync("internal/api/research_evidence_sessions.go","utf8");
+assert(ui.includes("/research/evidence-sessions"));
+assert(ui.includes("sessions.some(row=>row.id===sid)"));
+assert(ui.includes('name="session_id" required'));
+assert(sessionPicker.includes("m.research_mode=1"));
+assert(sessionPicker.includes("ss.round_number=0"));
+assert(sessionPicker.includes("principal_type='human'"));
+assert(sessionPicker.includes("t.project_workspace_id=?"));
+assert(sessionPicker.includes("NOT EXISTS(SELECT 1 FROM research_session_evidence_metadata"));
+assert(sessionHandler.includes('team.read'));
+console.log("PASS: scoped human-only pre-round Research Council session picker");
+

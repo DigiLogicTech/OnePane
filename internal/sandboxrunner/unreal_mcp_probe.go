@@ -4,6 +4,7 @@ import (
  "encoding/json"
  "fmt"
  "strings"
+ "io"
 )
 
 // The Unreal 5.8 Experimental ModelContextProtocol plugin is unauthenticated
@@ -88,7 +89,7 @@ func parseUnrealMCPProbe(stdout string)(bool,error){
  decoder.DisallowUnknownFields()
  if err:=decoder.Decode(&out);err!=nil{return false,fmt.Errorf("%w: invalid Unreal MCP handshake",ErrInvalidInput)}
  var trailing any
- if decoder.Decode(&trailing)==nil{return false,fmt.Errorf("%w: duplicate Unreal MCP output",ErrInvalidInput)}
+ if err:=decoder.Decode(&trailing);err!=io.EOF{return false,fmt.Errorf("%w: malformed or duplicate Unreal MCP output",ErrInvalidInput)}
  if out.Available&&out.Server=="unreal-mcp"{return true,nil}
  if !out.Available&&out.Server=="unavailable"{return false,nil}
  return false,fmt.Errorf("%w: unexpected Unreal MCP server identity",ErrInvalidInput)

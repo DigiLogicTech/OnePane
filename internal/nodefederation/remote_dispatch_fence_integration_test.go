@@ -17,25 +17,20 @@ func TestRemoteInferenceRequiresCurrentExactPairedNodeManifestAtDispatch(t *test
  ctx:=context.Background()
  db,now:=seedNodeDB(t,"origin","origin-fingerprint")
  defer db.Close()
- for _,q:=range []string{
-  `INSERT INTO harness_nodes(id,name,local,identity_fingerprint,trust_state,trust_zone,
-  endpoint_json,protocol_json,capabilities_json,last_seen_at,revision,created_at,updated_at)
+ if _,err:=db.SQL().ExecContext(ctx,`INSERT INTO harness_nodes(
+  id,name,local,identity_fingerprint,trust_state,trust_zone,
+  endpoint_json,protocol_json,capabilities_json,last_seen_at,
+  revision,created_at,updated_at)
   VALUES('peer','Peer',0,'peer-fp','paired','PAIRED_MTLS','{}','{}','{}',?,1,?,?)`,
-  `INSERT INTO node_pairings(id,peer_node_id,direction,status,pairing_token,
-  pairing_token_hash,pairing_code,pairing_code_hash,local_confirmed,
-  peer_confirmed,peer_tls_fingerprint,peer_certificate_pem,
-  expires_at,paired_at,revision,created_at,updated_at)
-  VALUES('pair','peer','outbound','paired','token','hashed','000000','hashed',
-  1,1,'sha256:cert','',?, ?,1,?,?)`,
- }{
-  var err error
-  if q[0:24]=="INSERT INTO harness_nodes"{
-   _,err=db.SQL().ExecContext(ctx,q,now,now,now)
-  }else{
-   _,err=db.SQL().ExecContext(ctx,q,now+60000,now,now,now)
-  }
-  if err!=nil{t.Fatal(err)}
- }
+  now,now,now);err!=nil{t.Fatal(err)}
+ if _,err:=db.SQL().ExecContext(ctx,`INSERT INTO node_pairings(
+  id,peer_node_id,direction,status,pairing_token,pairing_token_hash,
+  pairing_code,pairing_code_hash,local_confirmed,peer_confirmed,
+  peer_tls_fingerprint,peer_certificate_pem,expires_at,paired_at,
+  revision,created_at,updated_at)
+  VALUES('pair','peer','outbound','paired','token','hashed','000000',
+  'hashed',1,1,'sha256:cert','',?,?,1,?,?)`,
+  now+60000,now,now,now);err!=nil{t.Fatal(err)}
  manifest:=`{"protocol":"onepane-federation-v1","node_id":"peer","models":[{"deployment_id":"remote-dep"}]}`
  if _,err:=db.SQL().ExecContext(ctx,`INSERT INTO node_capability_manifests(
   peer_node_id,sequence,manifest_json,received_at,expires_at,revision,updated_at)

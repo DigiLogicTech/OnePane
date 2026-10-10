@@ -913,3 +913,25 @@ identifier or a remote execution route. Integration tests assert that an
 approved remote-assigned runtime cannot claim readiness even if its status
 and application status were persisted as running, and that moving back to
 the origin restores only the bounded preflight eligibility claim.
+
+## Physical Node security — immutable OCI command and stop ownership
+
+The low-level CLI adapter no longer executes or stops a container solely
+because a deterministic name can be guessed. Exec and single-application
+stop now independently inspect the actual rootless container, require the
+requested Runtime/Application identity, verified isolation, full OCI ID
+and nonempty spec hash, then address the **inspected immutable OCI ID**
+rather than its mutable name. A stop independently re-inspects postconditions.
+
+Runtime-wide stop now enumerates full, nontruncated OCI IDs, verifies
+**every** candidate's runtime/application labels, canonical name, OCI
+ID, isolation and spec hash before stopping **any** of them. A forged
+runtime label cannot cause a label-only destructive sweep. Each stop is
+addressed by the inspected OCI ID and subsequently verified.
+Unknown/transitional container states do not qualify for stopping by
+this automated path.
+
+The unit tests exercise ownership, isolation, missing ID, name and
+foreign Workspace denial. Existing opt-in real rootless smoke checks
+remain necessary to validate actual Docker/Podman flags and Node process
+behaviour; a green software test does not establish physical acceptance.

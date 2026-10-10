@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Disposable, deliberately non-product MSI fixture. DO NOT DISTRIBUTE. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="F2284ED9-320B-4325-9D7A-FD1AE1FEA7EB"
+           UpgradeCode="EE27943B-0C91-4DBD-9923-111848B32E1B"
+           Name="DigiLogic Wixl Toolchain Probe - DO NOT INSTALL"
+           Language="1033" Version="0.0.1" Manufacturer="DigiLogic">
+    <Package InstallerVersion="200" Compressed="yes"/>
+    <Media Id="1" Cabinet="Probe.cab" EmbedCab="yes"/>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLDIR" Name="DigiLogicWixlProbe">
+          <Component Id="ProbeComponent" Guid="13BA1B62-2F1E-4F11-963D-4217A3E6ABCD">
+            <File Id="ProbePayload" Name="probe.txt" Source="probe.txt" KeyPath="yes"/>
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+    <Feature Id="ProbeFeature" Title="Toolchain Test" Level="1">
+      <ComponentRef Id="ProbeComponent"/>
+    </Feature>
+  </Product>
+</Wix>

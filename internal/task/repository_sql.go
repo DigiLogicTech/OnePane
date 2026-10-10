@@ -301,6 +301,16 @@ func scanAttempt(row rowScanner) (Attempt, error) {
 	return a, nil
 }
 
+// The dependency predicate must use the caller's write transaction, so
+// predecessor completion and the new Attempt cannot race.
+func (r *sqlRepository) HardDependenciesSatisfied(ctx context.Context,tx storage.Tx,taskID string)(bool,error){
+ var blocked int
+ err:=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM task_dependencies d
+  JOIN tasks dep ON dep.id=d.depends_on_task_id
+  WHERE d.task_id=? AND d.dependency_type='hard'
+  AND (dep.state<>'complete' OR dep.archived_at IS NOT NULL)`,taskID).Scan(&blocked)
+ return blocked==0,err
+}
 func (r *sqlRepository) ActiveAttempt(ctx context.Context, tx storage.Tx, taskID string) (*Attempt, error) {
 	a, err := scanAttempt(tx.QueryRowContext(ctx, `
 SELECT id,task_id,attempt_number,worker_principal_id,status,recovery_snapshot_id,

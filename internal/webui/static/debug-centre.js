@@ -51,7 +51,7 @@
       <h3>Scoped backend evidence</h3>
       <p class="list-meta">Use the existing authorised source views. This centre cannot grant access to another Project, Workspace, model or Node.</p>
       <div class="a58-debug-links">
-       <button class="btn" type="button" data-a58-destination="workspaces">Workspace: Task/Worker snapshot, timeline, reviewed QA ZIP</button>
+       <button class="btn" type="button" data-a58-destination="workspaces">Workspace: scoped Task/Worker trace correlation and reviewed QA ZIP</button>
        <button class="btn" type="button" data-a58-destination="models">Models: Agent Check and residency evidence</button>
        <button class="btn" type="button" data-a58-destination="nodes">Nodes: admin-only service and backend readiness</button>
        <button class="btn" type="button" data-a58-destination="operations">Operations: Logs, activity and recovery</button>

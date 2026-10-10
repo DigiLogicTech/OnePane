@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Candidate only: distinct Product/UpgradeCode, service name, directory and registry.
+     It cannot replace or upgrade an installed OnePane production MSI. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="C771A020-BC81-46D6-92C3-35B80E101101"
+    Name="OnePane Linux wixl Candidate - DO NOT INSTALL"
+    Language="1033" Version="3.3.10" Manufacturer="DigiLogic"
+    UpgradeCode="C771A020-BC81-46D6-92C3-35B80E101102">
+    <Package InstallerVersion="200" Compressed="yes"
+      InstallScope="perMachine" Platform="x64"/>
+    <Media Id="1" Cabinet="OnePaneCandidate.cab" EmbedCab="yes"/>
+    <MajorUpgrade DowngradeErrorMessage="A newer test candidate already exists."/>
+    <Icon Id="CandidateIcon" SourceFile="$(var.PayloadDir)/OnePane.ico"/>
+    <Property Id="ARPPRODUCTICON" Value="CandidateIcon"/>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="VendorDir" Name="DigiLogic">
+          <Directory Id="INSTALLDIR" Name="OnePaneWixlCandidate">
+            <Component Id="CandidateServiceComponent" Guid="C771A020-BC81-46D6-92C3-35B80E101111" Win64="yes">
+              <File Id="ServiceExecutable" Name="OnePane.Service.exe" Source="$(var.PayloadDir)/OnePane.Service.exe" KeyPath="yes"/>
+              <ServiceInstall Id="CandidateServiceInstall"
+                Name="OnePaneWixlCandidate" DisplayName="OnePane Wixl Candidate (DO NOT INSTALL)"
+                Description="Non-release OnePane MSI packaging test"
+                Start="auto" Type="ownProcess" ErrorControl="normal" Account="LocalSystem"/>
+              <ServiceControl Id="CandidateServiceControl"
+                Name="OnePaneWixlCandidate" Start="install" Stop="both" Remove="uninstall" Wait="yes"/>
+            </Component>
+            <Component Id="CandidateBackendComponent" Guid="C771A020-BC81-46D6-92C3-35B80E101112" Win64="yes">
+              <File Id="BackendExecutable" Name="OnePane.Backend.exe" Source="$(var.PayloadDir)/OnePane.Backend.exe" KeyPath="yes"/>
+            </Component>
+            <Component Id="CandidateDesktopComponent" Guid="C771A020-BC81-46D6-92C3-35B80E101113" Win64="yes">
+              <File Id="DesktopExecutable" Name="OnePane.Desktop.exe" Source="$(var.PayloadDir)/OnePane.Desktop.exe" KeyPath="yes"/>
+            </Component>
+            <Component Id="CandidateIconComponent" Guid="C771A020-BC81-46D6-92C3-35B80E101114" Win64="yes">
+              <File Id="IconFile" Name="OnePane.ico" Source="$(var.PayloadDir)/OnePane.ico" KeyPath="yes"/>
+            </Component>
+            <Component Id="CandidateRegistryComponent" Guid="C771A020-BC81-46D6-92C3-35B80E101115" Win64="yes">
+              <RegistryValue Root="HKLM" Key="SOFTWARE\DigiLogic\OnePaneWixlCandidate"
+                Name="CandidateOnly" Type="string" Value="NOT_FOR_INSTALL" KeyPath="yes"/>
+            </Component>
+          </Directory>
+        </Directory>
+      </Directory>
+    </Directory>
+    <Feature Id="CandidateFeature" Title="OnePane candidate payload only" Level="1">
+      <ComponentRef Id="CandidateServiceComponent"/>
+      <ComponentRef Id="CandidateBackendComponent"/>
+      <ComponentRef Id="CandidateDesktopComponent"/>
+      <ComponentRef Id="CandidateIconComponent"/>
+      <ComponentRef Id="CandidateRegistryComponent"/>
+    </Feature>
+  </Product>
+</Wix>

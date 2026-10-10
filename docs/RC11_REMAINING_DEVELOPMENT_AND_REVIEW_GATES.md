@@ -289,3 +289,37 @@ policy. **Not yet delivered:** automatic DAG planning/synthesis from AI,
 graph-specific UI, terminal-failure policy/recovery actions and physical
 CPU-only completion acceptance. These remain separate governed work, not
 inferred from passing source tests.
+
+## RC11-04 — read-only Task graph recovery assessment
+
+The operator's Project Task graph API now exposes a bounded
+`GET /v1/projects/{projectID}/orchestrator/task-graphs` inventory and
+enhanced scoped per-graph reads. Each graph read evaluates Task states,
+archives and every hard prerequisite from one consistent SQLite read
+transaction, and returns an advisory, node-by-node readiness classification.
+
+- `admission_eligible`: existing Task Worker may attempt governed admission.
+  It does not imply an available CPU model, approved toolchain or proof of
+  physical execution.
+- `waiting_prerequisites`: one or more hard predecessors still need
+  independently verified completion.
+- `waiting_resources`: Task is already suspended; inspect the persisted
+  Worker continuation (local model/toolchain/approval) rather than silently
+  restarting a new Attempt.
+- `running` and `verifying`: existing execution/assurance is underway.
+- `needs_attention`: failed, cancelled, blocked or archived Task; affected
+  downstream Task; unreviewed extra hard dependency; or an execution that
+  already started before its predecessor regressed.
+- `complete`: only the persisted completed Task state, not a model claim.
+
+Failed/intervened-on prerequisites propagate through the reviewed DAG;
+unrelated parallel branches retain admission eligibility. Unreviewed edges
+are displayed only as a generic `unscoped_dependency` flag, never revealing
+another Task's identifier. The graph's aggregate status and counts remain
+informational: the Task Gateway and Worker still revalidate dependencies in
+the write transaction before starting any Attempt.
+
+The graph evaluator **never** auto-retries a possibly side-effecting Task,
+silently replaces an approved model, skips a prerequisite, or claims a
+failed Node has recovered. Human-led reconciliation and safe retry policies
+are separate upcoming work, together with Project Orchestrator GUI support.

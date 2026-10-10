@@ -352,6 +352,9 @@ async function a49MountDevelopmentTasks(project,workspace,container){
  const supportStatus=section.querySelector("#a56Status");
  const supportPreview=section.querySelector("#a56Preview");
  let supportReviewed=null;
+ // Invalidates asynchronous review and export when a selector changes or
+ // the user discards their review; stale requests must never restore it.
+ let supportEpoch=0;
  const supportOptions=()=>({
   browser:section.querySelector("#a56IncludeBrowser").checked,
   model:section.querySelector("#a56IncludeModel").checked,
@@ -361,9 +364,28 @@ async function a49MountDevelopmentTasks(project,workspace,container){
  });
  const supportSignature=()=>JSON.stringify(supportOptions());
  const discardSupport=()=>{
+  supportEpoch++;
   supportReviewed=null;supportExport.disabled=true;
   supportPreview.textContent="";
  };
+ // All selected backend permissions are checked again at export, not only at
+ // preview. No new data enters the ZIP: only the exact prepared preview does.
+ // This requires a live authenticated backend; an offline/revoked session fails closed.
+ const reauthorizeSupportSources=async selected=>{
+  await apiRequest("/v1/qa/workspace-snapshot?"+qaQuery);
+  if(selected.model)await apiRequest("/v1/qa/model-deployments/"+
+   encodeURIComponent(selected.modelID)+"/agent-check");
+  if(selected.node)await apiRequest("/v1/qa/nodes/"+
+   encodeURIComponent(selected.nodeID)+"/evidence");
+ };
+ const supportReviewStillValid=(reviewed,epoch)=>Boolean(
+  reviewed&&supportReviewed===reviewed&&supportEpoch===epoch&&section.isConnected&&
+  reviewed.signature===supportSignature()&&
+  Date.now()>=reviewed.reviewedAt&&Date.now()-reviewed.reviewedAt<=120000&&
+  supportPreview.textContent===reviewed.prepared.json&&
+  (reviewed.browserFingerprint===null||
+   (incident&&JSON.stringify(incident.snapshot())===reviewed.browserFingerprint))
+ );
  supportDiscard.onclick=()=>{
   discardSupport();
   supportStatus.textContent="Reviewed support evidence discarded from this panel. No files uploaded.";
@@ -374,6 +396,7 @@ async function a49MountDevelopmentTasks(project,workspace,container){
  }
  supportReview.onclick=async()=>{
   discardSupport();
+  const epoch=supportEpoch;
   supportReview.disabled=true;supportStatus.textContent="Checking access and sanitising selected QA sources…";
   const selected=supportOptions(),signature=supportSignature();
   try{
@@ -393,7 +416,7 @@ async function a49MountDevelopmentTasks(project,workspace,container){
       encodeURIComponent(selected.modelID)+"/agent-check");
    if(selected.node)sources.node=await apiRequest("/v1/qa/nodes/"+
       encodeURIComponent(selected.nodeID)+"/evidence");
-   if(!section.isConnected||signature!==supportSignature())return;
+   if(!section.isConnected||epoch!==supportEpoch||signature!==supportSignature())return;
    const prepared=a56SupportBundle.prepare(sources);
    supportPreview.textContent=prepared.json;
    supportReviewed={prepared,signature,reviewedAt:Date.now(),
@@ -401,22 +424,32 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    supportExport.disabled=false;
    supportStatus.textContent="Review every included field. Export uses exactly this preview, does not re-fetch sources or upload data, and expires after two minutes. Missing source permissions fail closed.";
   }catch(_){
+   if(epoch!==supportEpoch)return;
    discardSupport();
    supportStatus.textContent="Unable to create the reviewed bundle. Check Workspace read permissions, selected optional source IDs and Node Admin/model.read access. No partial export is available.";
   }finally{supportReview.disabled=false}
  };
- supportExport.onclick=()=>{
-  const reviewed=supportReviewed;
+ supportExport.onclick=async()=>{
+  const reviewed=supportReviewed,epoch=supportEpoch;
   if(!reviewed||!section.isConnected)return;
-  if(reviewed.signature!==supportSignature()||Date.now()-reviewed.reviewedAt>120000||
-     supportPreview.textContent!==reviewed.prepared.json||
-     (reviewed.browserFingerprint!==null&&
-      (!incident||JSON.stringify(incident.snapshot())!==reviewed.browserFingerprint))){
+  if(!supportReviewStillValid(reviewed,epoch)){
    discardSupport();
    supportStatus.textContent="Selected sources, browser capture, review or review expiry changed. Review again before export.";
    return;
   }
+  supportExport.disabled=true;supportReview.disabled=true;
+  supportStatus.textContent="Rechecking current Workspace, model and Node permissions before local export…";
   try{
+   await reauthorizeSupportSources(supportOptions());
+   // Selection, capture, review or permission state may change during the
+   // asynchronous GETs. Never let a stale in-flight export download a ZIP.
+   if(!supportReviewStillValid(reviewed,epoch)){
+    if(epoch===supportEpoch){
+     discardSupport();
+     supportStatus.textContent="Review changed or expired during the access check. Review again.";
+    }
+    return;
+   }
    const bytes=a56SupportBundle.zip(reviewed.prepared);
    if(bytes.byteLength>262144||!bytes.byteLength)throw Error("Invalid support ZIP size");
    const blob=new Blob([bytes],{type:"application/zip"});
@@ -426,12 +459,14 @@ async function a49MountDevelopmentTasks(project,workspace,container){
     link.href=url;link.download="onepane-reviewed-qa-support.zip";
     link.style.display="none";document.body.appendChild(link);link.click();link.remove();
    }finally{URL.revokeObjectURL(url)}
-   supportStatus.textContent="Reviewed local support ZIP downloaded. Inspect before sharing; raw logs and external service health are excluded.";
+   supportStatus.textContent="Reviewed local support ZIP downloaded after fresh access checks. Inspect before sharing.";
    discardSupport();
   }catch(_){
-   discardSupport();
-   supportStatus.textContent="Support export exceeded the safe bounds or the review changed. Review again.";
-  }
+   if(epoch===supportEpoch){
+    discardSupport();
+    supportStatus.textContent="Support export denied or unavailable. Permissions may have changed, the backend may be offline, or the review expired. Review again.";
+   }
+  }finally{supportReview.disabled=false}
  };
  section.querySelector("#a49RefreshTasks")?.addEventListener("click",loadTasks);
  section.querySelector("#a49TaskFilter")?.addEventListener("change",paintTasks);

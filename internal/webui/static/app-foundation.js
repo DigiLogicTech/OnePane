@@ -665,6 +665,16 @@ async function apiRequest(path,opts={}){
   const headers={...(opts.headers||{})};
   if(opts.body && !headers['content-type'] && !headers['Content-Type']) headers['content-type']='application/json';
   if(!['GET','HEAD','OPTIONS'].includes(method)) headers['X-OnePane-CSRF']=csrfCookie();
+  // Tag ONLY calls from the existing same-origin JSON API helper and ONLY
+  // during a user-started, time-bounded backend diagnostic session. Never
+  // attach the capture token to external URLs, diagnostic controls or SSE.
+  const captureID=typeof a61APICapture!=="undefined"?a61APICapture.id():"";
+  if(captureID&&typeof path==="string"&&path.startsWith("/v1/")&&
+     !path.startsWith("/v1/qa/")&&
+     !headers.Accept&&!headers.accept){
+    headers.Accept="application/json";
+    headers["X-OnePane-QA-Capture"]=captureID;
+  }
   const res=await fetch(path,{credentials:'same-origin',...opts,method,headers});
   const text=await res.text(); let body={};
   try{body=text?JSON.parse(text):{}}catch{body={error:text}}

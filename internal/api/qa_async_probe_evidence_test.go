@@ -22,7 +22,7 @@ func qaAsyncFixture(t *testing.T)(*sql.DB,[]task.Task){
   `CREATE TABLE tasks(id TEXT PRIMARY KEY,workspace_id TEXT,project_id TEXT,project_workspace_id TEXT)`,
   `CREATE TABLE task_attempts(id TEXT PRIMARY KEY,task_id TEXT,status TEXT,started_at INTEGER)`,
   `CREATE TABLE agent_worker_runs(id TEXT PRIMARY KEY,workspace_id TEXT,task_id TEXT,attempt_id TEXT,status TEXT,step_count INTEGER,started_at INTEGER,worker_principal_id TEXT)`,
-  `CREATE TABLE verifications(id TEXT PRIMARY KEY,workspace_id TEXT,task_id TEXT,status TEXT,required_level TEXT,achieved_level TEXT,operation_id TEXT,started_at INTEGER)`,
+  `CREATE TABLE verifications(id TEXT PRIMARY KEY,workspace_id TEXT,task_id TEXT,status TEXT,required_level TEXT,achieved_level TEXT,operation_id TEXT,started_at INTEGER,verified_by TEXT)`,
   `CREATE TABLE assurance_runs(verification_id TEXT,workspace_id TEXT,task_id TEXT,operation_id TEXT,worker_run_id TEXT,status TEXT,evidence_hash TEXT,achieved_level TEXT,result_json TEXT)`,
   `CREATE TABLE events(workspace_id TEXT,aggregate_type TEXT,aggregate_id TEXT,event_type TEXT,occurred_at INTEGER)`,
   `CREATE TABLE observations(id TEXT PRIMARY KEY,workspace_id TEXT,subject_ref TEXT,observation_type TEXT,probe_tool_id TEXT,probe_tool_version TEXT,
@@ -38,9 +38,9 @@ func qaAsyncFixture(t *testing.T)(*sql.DB,[]task.Task){
    ('run-other','different','task-other','attempt-other','running',1,300,'agent-worker'),
    ('run-forged','tenant','task-world','wrong-attempt','running',1,201,'agent-worker')`,
   `INSERT INTO verifications VALUES
-   ('verify-world','tenant','task-world','pass','V2','V3',NULL,400),
-   ('verify-story','tenant','task-story','pass','V2','V2',NULL,405),
-   ('verify-other','different','task-other','pass','V2','V2',NULL,405)`,
+   ('verify-world','tenant','task-world','pass','V2','V3',NULL,400,'assurance-verifier'),
+   ('verify-story','tenant','task-story','pass','V2','V2',NULL,405,'assurance-verifier'),
+   ('verify-other','different','task-other','pass','V2','V2',NULL,405,'assurance-verifier')`,
  }
  for _,q:=range queries{if _,err:=db.Exec(q);err!=nil{t.Fatalf("fixture: %v (%s)",err,q)}}
  type probe struct{id,source,workspace,subject string;observed int64;badHash bool}

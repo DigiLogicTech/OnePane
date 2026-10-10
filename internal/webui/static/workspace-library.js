@@ -80,16 +80,34 @@ async function a46RenderLibrary(project,workspace,root){
   };
   root.querySelectorAll("[data-a62-asset]").forEach(input=>input.addEventListener("change",update));
   searchInput?.addEventListener("input",update);
-  freeze?.addEventListener("click",()=>{
+  freeze?.addEventListener("click",async()=>{
    const selections=selected();
    if(!selections.length||selections.length>16){
     notice("Select between one and sixteen permitted evidence versions.","bad");return;
    }
+   freeze.disabled=true;
+   let sessions;
+   try{
+    sessions=await apiRequest(prefix+"/workspaces/"+encodeURIComponent(source.id)+
+     "/research/evidence-sessions");
+   }catch(ex){
+    notice("Cannot list eligible Research Council sessions: "+ex.message,"bad");
+    update();return;
+   }
+   update();
+   if(!Array.isArray(sessions)||!sessions.length){
+    notice("No eligible pre-round Research Council sessions for this Project Workspace. Create a Research session from a Workspace Task first.","bad");
+    return;
+   }
+   const options=sessions.map(row=>'<option value="'+escapeHtml(row.id)+'">'+
+    escapeHtml((row.team_name||"Research Council")+" — "+(row.task_objective||row.task_id||"Task"))+
+    '</option>').join("");
    openModal("Approve Research evidence selection",
     '<form id="a65FreezeEvidenceForm" class="qa-form">'+
-    '<p class="list-meta">Freeze these exact Library versions for a Research Council session before its first round. This records hash-pinned metadata only. No raw documents, snippets or Library permissions are delivered to model seats.</p>'+
-    '<label>Research Council session ID<input name="session_id" required maxlength="128" autocomplete="off" placeholder="Session created for a Project Workspace Task"></label>'+
-    '<label class="inline-check"><input type="checkbox" name="reviewed" required> I reviewed all '+selections.length+' selected versions and approve this immutable metadata selection.</label>'+
+    '<p class="list-meta">Select the Research Council Task for this exact Project Workspace. Freeze these '+selections.length+
+    ' authorised Library versions before its first round. This stores hash-pinned metadata only; no document content reaches a Council seat.</p>'+
+    '<label>Eligible Research session<select name="session_id" required>'+options+'</select></label>'+
+    '<label class="inline-check"><input type="checkbox" name="reviewed" required> I reviewed this immutable metadata selection and its destination Council session.</label>'+
     '<div class="error" id="a65FreezeError" role="alert"></div>'+
     '<button type="submit" class="btn primary">Freeze approved metadata</button></form>');
    const form=document.querySelector("#a65FreezeEvidenceForm");
@@ -98,15 +116,16 @@ async function a46RenderLibrary(project,workspace,root){
     e.preventDefault();
     if(!form.elements.reviewed?.checked)return;
     const sid=String(form.elements.session_id?.value||"").trim();
-    if(!sid)return;
+    if(!sid||!sessions.some(row=>row.id===sid))return;
     const button=form.querySelector('[type="submit"]');
     button.disabled=true;
     try{
-     await apiRequest("/v1/team-sessions/"+encodeURIComponent(sid)+"/research/evidence-selection",{
+     await apiRequest("/v1/team-sessions/"+encodeURIComponent(sid)+
+      "/research/evidence-selection",{
       method:"POST",body:JSON.stringify({selections})
      });
      closeModal();
-     notice("Research evidence metadata frozen for this Council session. No content was sent to any model.");
+     notice("Research evidence metadata frozen for this Council session. No document content was sent to any model.");
     }catch(ex){
      button.disabled=false;
      form.querySelector("#a65FreezeError").textContent=ex.message;

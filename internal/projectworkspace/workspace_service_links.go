@@ -135,6 +135,15 @@ func (s *Service) sourceWorkspaceServiceRoute(ctx context.Context,projectID,sour
  return route,nil
 }
 
+func requireHumanWorkspaceServiceApprover(ctx context.Context,tx storage.Tx,actor string)error{
+ var principalType string
+ err:=tx.QueryRowContext(ctx,`SELECT principal_type FROM principals
+  WHERE id=? AND status='active'`,actor).Scan(&principalType)
+ if err!=nil{return err}
+ if principalType!="human"{return ErrPrincipalIneligible}
+ return nil
+}
+
 func (s *Service) CreateWorkspaceServiceLink(ctx context.Context,c CreateWorkspaceServiceLinkCommand)(WorkspaceServiceLink,error){
  now:=s.clock.UnixMilli()
  c.Name=strings.TrimSpace(c.Name)
@@ -153,6 +162,7 @@ func (s *Service) CreateWorkspaceServiceLink(ctx context.Context,c CreateWorkspa
   if err!=nil{return err}
   if p.Status!="active"{return ErrProjectInactive}
   if err=s.requireActor(ctx,tx,p.WorkspaceID,c.ActorPrincipalID);err!=nil{return err}
+  if err=requireHumanWorkspaceServiceApprover(ctx,tx,c.ActorPrincipalID);err!=nil{return err}
   var active int
   err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_workspaces
    WHERE id IN (?,?) AND project_id=? AND status='active'`,
@@ -228,6 +238,7 @@ func (s *Service) SetWorkspaceServiceLink(ctx context.Context,c SetWorkspaceServ
   if err!=nil{return err}
   if p.Status!="active"{return ErrProjectInactive}
   if err=s.requireActor(ctx,tx,p.WorkspaceID,c.ActorPrincipalID);err!=nil{return err}
+  if err=requireHumanWorkspaceServiceApprover(ctx,tx,c.ActorPrincipalID);err!=nil{return err}
   expiry:=old.ExpiresAtMS
   if c.ExpiresAtMS!=0{expiry=c.ExpiresAtMS}
   if c.Enabled{

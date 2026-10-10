@@ -135,3 +135,27 @@ func TestGeneralWorkspaceDiscoveryRequiresVerifiedTaskSandbox(t *testing.T){
  }
  if engine.execs!=before{t.Fatal("rejected tool discovery executed a command")}
 }
+
+func TestGeneralWorkspaceCapabilityFamiliesAreConditionalAndNotAllowlist(t *testing.T){
+ families:=GeneralWorkspaceCapabilities()
+ if len(families)<7{t.Fatalf("game engine only catalog: %d",len(families))}
+ seen:=map[string]bool{}
+ for _,f:=range families{
+  if f.ID==""||seen[f.ID]||len(f.Examples)==0||f.Name==""{
+   t.Fatalf("invalid multi-domain profile: %+v",f)
+  }
+  seen[f.ID]=true
+  if f.ID!="mcp_integrations"&&(f.Execution!="project.app.exec"||
+   f.Availability!="requires_approved_installed_toolchain"){
+   t.Fatalf("advertised unsupported privileged capability: %+v",f)
+  }
+ }
+ for _,id:=range []string{"software_development","web_applications","data_research",
+  "creative_media","automation","infrastructure","documents","mcp_integrations"}{
+  if !seen[id]{t.Fatalf("missing general Workspace category %s",id)}
+ }
+ if knownToolCategory("random-homelab-test")==""||
+  knownToolCategory("random-homelab-test")=="unsupported"{
+  t.Fatal("generic tools wrongly excluded from Workspace execution")
+ }
+}

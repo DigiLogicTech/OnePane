@@ -43,7 +43,49 @@ const capture={schema_version:1,source:"operator_tagged_local_http",
   {trace_ref:"trace-"+"f".repeat(24),subsystem:"tasks",method:"POST",status_code:201},
   {trace_ref:canary,subsystem:"tasks",method:"POST",status_code:201}
  ]};
+const extra={
+ async_lineage:[
+  {task_ref:t,attempt_ref:"attempt-"+"f".repeat(24),worker_run_ref:run,
+   attempt_state:"running",worker_state:"running",steps_recorded:4,
+   link_kind:"persisted_task_attempt_worker_foreign_keys",raw_task:canary},
+  {task_ref:other,attempt_ref:"attempt-"+"e".repeat(24),worker_run_ref:run,
+   attempt_state:"running",worker_state:"running",steps_recorded:1,
+   link_kind:"persisted_task_attempt_worker_foreign_keys"}
+ ],
+ probe_witnesses:[
+  {task_ref:t,verification_ref:assurance.verification_ref,
+   observation_ref:"observation-"+"a".repeat(24),
+   role:"integration",source_trust:"unverified_derived",
+   observed_after_attempt:true,observed_after_operation_start:true,
+   integrity_rechecked:true,independent_source:true,
+   recorded_assurance_pass:true,corroborating_integration_probe:true,
+   evidence_class:"recorded_probe_observation_not_external_effect_attestation",
+   raw_probe:canary},
+  {task_ref:t,verification_ref:assurance.verification_ref,
+   observation_ref:"observation-"+"b".repeat(24),
+   role:"integration",source_trust:"unverified_derived",
+   observed_after_attempt:false,observed_after_operation_start:true,
+   integrity_rechecked:true,independent_source:true,
+   recorded_assurance_pass:true,corroborating_integration_probe:true,
+   evidence_class:"recorded_probe_observation_not_external_effect_attestation"},
+  {task_ref:other,verification_ref:assurance.verification_ref,
+   observation_ref:"observation-"+"c".repeat(24),role:"integration",
+   integrity_rechecked:true,independent_source:true,
+   recorded_assurance_pass:true,corroborating_integration_probe:true,
+   evidence_class:"recorded_probe_observation_not_external_effect_attestation"}
+ ],
+ async_lineage_truncated:true,probe_witnesses_truncated:false
+};
+Object.assign(snapshot,extra);
 const safe=project(snapshot,capture);
+assert.equal(safe.lineage.length,1);
+assert.equal(safe.lineage[0].worker_run_ref,run);
+assert.equal(safe.probes.length,2);
+assert.equal(safe.probes[0].corroborating_integration_probe,true);
+assert.equal(safe.probes[1].corroborating_integration_probe,false,"stale observation must not corroborate");
+assert.equal(safe.lineage_truncated,true);
+assert.ok(format(safe).includes("Asynchronous persisted Task"));
+assert.ok(format(safe).includes("not a new external probe"));
 assert.equal(safe.created.length,1);
 assert.equal(safe.created[0].task_ref,t);
 assert.equal(safe.created[0].trace_ref,trace);
@@ -64,6 +106,10 @@ for(const output of [JSON.stringify(safe),format(safe)]){
 assert.ok(format(safe).includes("Trusted HTTP → Task creation matches: 1"));
 assert.ok(format(safe).includes("recorded-assurance-pass=true"));
 assert.ok(format(safe).includes("NOT proof of correct model answers"));
+assert.throws(()=>project({...snapshot,async_lineage:Array(25).fill(extra.async_lineage[0])}));
+assert.throws(()=>project({...snapshot,probe_witnesses:Array(25).fill(extra.probe_witnesses[0])}));
+assert.equal(project({...snapshot,probe_witnesses:[
+ {...extra.probe_witnesses[0],integrity_rechecked:false}]}).probes[0].corroborating_integration_probe,false);
 assert.throws(()=>project({...snapshot,scope:"other"}));
 assert.throws(()=>project({...snapshot,worker_tool_links:Array(25).fill(tool)}));
 assert.throws(()=>project({...snapshot,assurance_evidence:Array(25).fill(assurance)}));

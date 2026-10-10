@@ -396,6 +396,43 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 			"action":in.Action,"succeeded":success,"result":observed,
 			"container":state,"engine":profile,
 		},summary)
+	case ToolAppToolchainPreflight:
+        // This is a user/Task-declared requirements check, not an installation
+        // operation or proof of permission to execute any binary. Unknown
+        // executable names are supported, but command/options/host paths are
+        // never accepted as requirements.
+        declared,err:=decodeToolchainRequirements(req.Input)
+        if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        if !workspaceExists{
+            return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Workspace not provisioned",ErrInvalidInput))
+        }
+        state,err:=a.engine.InspectContainer(ctx,declared.RuntimeID,declared.ApplicationID)
+        if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        if state.Status!="running"||!state.IsolationVerified||
+           state.RuntimeID!=declared.RuntimeID||state.ApplicationID!=declared.ApplicationID||
+           state.SpecHash==""||!exactWorkspaceMount(state,workspace){
+            return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: preflight requires a running and independently verified Workspace OCI application",ErrInvalidInput))
+        }
+        checkCtx,cancel:=context.WithTimeout(ctx,12*time.Second)
+        defer cancel()
+        observed,err:=a.engine.ExecContainer(checkCtx,declared.RuntimeID,declared.ApplicationID,
+            workspaceToolchainPreflightCommand(declared))
+        if checkCtx.Err()!=nil{return tool.AdapterResult{},checkCtx.Err()}
+        if err!=nil{return tool.AdapterResult{},err}
+        var check ToolchainPreflightResult
+        if observed.ExitCode!=0{
+            // Distroless/no POSIX shell (or inability to inspect) is an
+            // unknown preflight, never evidence that dependencies are absent.
+            check=toolchainPreflightUnavailable(declared,state.SpecHash)
+        }else{
+            check,err=parseToolchainPreflight(observed.Stdout,declared,state.SpecHash)
+            if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        }
+        return result(map[string]any{
+            "runtime_id":declared.RuntimeID,"application_id":declared.ApplicationID,
+            "preflight":check,"sandbox_verified":true,
+            "note":"Executable presence is not package/version qualification, successful execution, or an authority grant. Missing prerequisites require an explicitly approved toolchain image.",
+        },"Workspace toolchain preflight: "+check.Status)
 	case ToolAppToolsDiscover:
         // Broad, read-only toolchain discovery executes a *fixed* scanner in
         // the same verified rootless application as project.app.exec.

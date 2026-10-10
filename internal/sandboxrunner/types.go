@@ -19,6 +19,7 @@ const (
 	ToolAppInspect     = "project.app.inspect"
 	ToolImageInspect   = "project.image.inspect"
 	ToolAppExec        = "project.app.exec"
+	ToolAppGodotBuild = "project.app.godot.build"
 	ToolAppGitInspect  = "project.app.git.inspect"
 	ToolAppFileInspect = "project.app.files.inspect"
 	ToolAppFileEdit    = "project.app.files.edit"

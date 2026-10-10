@@ -359,6 +359,43 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 			"action":in.Action,"succeeded":success,"result":observed,
 			"container":state,"engine":profile,
 		},summary)
+	case ToolAppUnrealMCPProbe:
+        // Editor MCP in UE 5.8 is experimental and unauthenticated. Always
+        // probe from the owned rootless application network namespace, never
+        // from the host, a remote Node endpoint or a shared OnePane proxy.
+        // This tool has no methods for tools/call or editor mutations.
+        if !validUnrealMCPEnvelope(req.Input)||!workspaceExists{
+            return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)
+        }
+        state,err:=a.engine.InspectContainer(ctx,in.RuntimeID,in.ApplicationID)
+        if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        if state.Status!="running"||!state.IsolationVerified||
+           state.RuntimeID!=in.RuntimeID||state.ApplicationID!=in.ApplicationID||
+           state.SpecHash==""||!exactWorkspaceMount(state,workspace){
+            return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Unreal MCP inspection requires verified rootless Workspace ownership",ErrInvalidInput))
+        }
+        timeout:=in.TimeoutSeconds
+        if timeout==0{timeout=8}
+        probeCtx,cancel:=context.WithTimeout(ctx,time.Duration(timeout)*time.Second)
+        defer cancel()
+        observed,err:=a.engine.ExecContainer(probeCtx,in.RuntimeID,in.ApplicationID,unrealMCPProbeCommand())
+        if probeCtx.Err()!=nil{return tool.AdapterResult{},probeCtx.Err()}
+        if err!=nil{return tool.AdapterResult{},err}
+        available:=false
+        if observed.ExitCode==0{
+            verified,parseErr:=parseUnrealMCPProbe(observed.Stdout)
+            if parseErr!=nil{return tool.AdapterResult{},tool.KnownFailure(parseErr)}
+            available=verified
+        }
+        status:="unavailable"
+        if available{status="ready"}
+        return result(map[string]any{
+            "runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
+            "engine_id":"unreal_engine","transport":"same_container_loopback_mcp",
+            "status":status,"identity_verified":available,
+            "editor_tool_calls_enabled":false,"artifact_verified":false,
+            "note":"Experimental Unreal 5.8 local-editor MCP identity handshake only. No dynamic tools, remote forwarding or external-effect proof.",
+        },"Unreal MCP same-Workspace editor readiness: "+status)
 	case ToolAppGodotBuild:
         // Godot must be part of the operator-approved immutable image.
         // No on-demand downloads, host shell, arbitrary flags or model-supplied

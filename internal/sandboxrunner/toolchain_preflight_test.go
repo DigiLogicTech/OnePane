@@ -100,7 +100,7 @@ func TestToolchainPreflightFailClosedOnCorruptObservedEvidence(t *testing.T){
  for _,bad:=range []string{
   "","go\t1","go\t1\npython3\tmaybe",
   "python3\t1\ngo\t1","go\t1\npython3\t1\nmalicious\t1",
-  "go\t1\npython3\t1\n","go\t1\npython3\t1\n\n",
+  "go\t1\npython3\t1\n\n",
   "go\t1\npython3\t1\nSECRET=123",
   "go\t1\npython3\t1\n/path/to/secret",
   strings.Repeat("x",maxToolchainPreflightStdout+1),

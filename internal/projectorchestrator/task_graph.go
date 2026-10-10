@@ -135,7 +135,12 @@ func(s *Service) CreateTaskGraph(ctx context.Context,c CreateTaskGraphCommand)(T
  c.Name=strings.TrimSpace(c.Name)
  c.IdempotencyKey=strings.TrimSpace(c.IdempotencyKey)
  c.ActorPrincipalID=strings.TrimSpace(c.ActorPrincipalID)
- for i:=range c.Nodes{c.Nodes[i].Objective=strings.TrimSpace(c.Nodes[i].Objective)}
+ for i:=range c.Nodes{
+  c.Nodes[i].Objective=strings.TrimSpace(c.Nodes[i].Objective)
+  // Old API clients omit placement. Normalize before hashing and Task
+  // creation so retries with explicit auto remain idempotent.
+  if c.Nodes[i].ComputePreference==""{c.Nodes[i].ComputePreference="auto"}
+ }
  order,hash,err:=graphCreationPlan(c)
  if err!=nil{return TaskGraph{},err}
  if s==nil||s.db==nil||s.tx==nil{return TaskGraph{},ErrInvalid}

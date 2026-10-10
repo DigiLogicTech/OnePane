@@ -66,3 +66,22 @@ func TestModelResourceWaitPersistsBoundedRetryAndPreviousAttempts(t *testing.T){
   t.Fatal("invalid wait record accepted")
  }
 }
+
+func TestCPUOnlyResourceWaitDoesNotSubstituteCloud(t *testing.T){
+ wid:="world"
+ job:=task.Task{ProjectWorkspaceID:&wid}
+ for _,reason:=range []string{"workspace requires CPU placement",
+  "workspace requires GPU placement"}{
+  if !shouldWaitForLocalModel(job,scheduler.ErrNoEligibleCandidate,
+   []scheduler.Rejection{{CandidateID:"pinned-local",Reason:reason}}){
+   t.Fatalf("temporary local placement denial should wait: %s",reason)
+  }
+ }
+ for _,reason:=range []string{"candidate is incompatible",
+  "candidate qualification is limited","context exceeds candidate limit"}{
+  if shouldWaitForLocalModel(job,scheduler.ErrNoEligibleCandidate,
+   []scheduler.Rejection{{CandidateID:"bad",Reason:reason}}){
+   t.Fatalf("permanent resource mismatch incorrectly retries: %s",reason)
+  }
+ }
+}

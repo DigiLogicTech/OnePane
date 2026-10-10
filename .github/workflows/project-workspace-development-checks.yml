@@ -130,6 +130,7 @@ jobs:
       - name: Frontend syntax and runtime-boundary contract
         run: |
           node --check internal/webui/static/project-development-page.js
+          node --check internal/webui/static/project-task-graphs.js
           node --check internal/webui/static/workspace-collaboration.js
           node --check internal/webui/static/workspace-library.js
           node --check internal/webui/static/workspace-runtime-controls.js

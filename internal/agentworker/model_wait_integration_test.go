@@ -81,6 +81,42 @@ func TestNamedWorkspaceModelWaitSurvivesWorkerRestartWithoutDuplicateAttempt(t *
  if workerState.Status!=RunWaiting||decodeModelWait(workerState.Continuation)==nil{
   t.Fatalf("wait continuation not durable: %+v",workerState)
  }
+ // Corrupt persisted model waits must fail closed. JSON null previously
+ // decoded as no resource requirement, waking a Task without checking
+ // local model availability. No Worker or Attempt may be rescheduled.
+ for _,malformed:=range []string{
+  `{"model_wait":null}`,
+  `{"model_wait":"invalid"}`,
+  `{"model_wait":{"attempt":0,"retry_at_ms":1}}`,
+  `{"model_wait":{"attempt":1,"retry_at_ms":0}}`,
+ }{
+  if _,err:=db.SQL().ExecContext(ctx,
+   `UPDATE agent_worker_runs SET continuation_json=? WHERE id=?`,
+   malformed,run.ID);err!=nil{t.Fatal(err)}
+  if err:=svc.syncResumedRuns(ctx);err==nil{
+   t.Fatalf("invalid model wait unexpectedly resumed: %s",malformed)
+  }
+  held,err:=taskService.Get(ctx,created.ID)
+  if err!=nil||held.State!=task.StateWaitingDependency{
+   t.Fatalf("corrupt model wait advanced Task: %+v %v",held,err)
+  }
+  var attemptState string
+  if err:=db.SQL().QueryRowContext(ctx,
+   `SELECT status FROM task_attempts WHERE id=?`,run.AttemptID).
+   Scan(&attemptState);err!=nil||attemptState!="waiting"{
+   t.Fatalf("corrupt model wait advanced Attempt: %q %v",attemptState,err)
+  }
+  heldRun,err:=svc.getRun(ctx,run.ID)
+  if err!=nil||heldRun.Status!=RunWaiting{
+   t.Fatalf("corrupt model wait advanced Worker: %+v %v",heldRun,err)
+  }
+ }
+ if _,err:=db.SQL().ExecContext(ctx,
+  `UPDATE agent_worker_runs SET continuation_json=? WHERE id=?`,
+  string(workerState.Continuation),run.ID);err!=nil{t.Fatal(err)}
+ if hasModelWaitField(json.RawMessage(`{}`)){
+  t.Fatal("unrelated dependency continuation treated as model wait")
+ }
  // A new service instance simulates an ordinary worker/service restart.
  restarted:=New(db.SQL(),db,clock.Real{},"local",taskService,nil,nil,nil,nil,nil,nil,nil,nil,nil,nil)
  if err:=restarted.syncResumedRuns(ctx);err!=nil{t.Fatal(err)}

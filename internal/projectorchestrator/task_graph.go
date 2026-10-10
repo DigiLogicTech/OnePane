@@ -38,6 +38,7 @@ type TaskGraphNode struct {
  DependsOn []string `json:"depends_on"`
  State task.State `json:"state"`
  Archived bool `json:"archived"`
+ ScopeDrift bool `json:"scope_drift,omitempty"`
  BlockedBy []string `json:"blocked_by"`
  FailedOrIntervenedOn []string `json:"failed_or_intervened_on"`
  Readiness string `json:"readiness"`
@@ -232,16 +233,17 @@ func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGra
  if err!=nil{return TaskGraph{},err}
  defer tx.Rollback()
  var x TaskGraph
+ var expectedNodeCount int
  err=tx.QueryRowContext(ctx,`SELECT g.id,g.project_id,g.workspace_id,
-  g.name,g.idempotency_key,g.manifest_sha256,g.created_by,g.created_at
+  g.name,g.idempotency_key,g.manifest_sha256,g.created_by,g.created_at,g.node_count
   FROM project_orchestrator_task_graphs g
   JOIN projects p ON p.id=g.project_id AND p.status='active'
   WHERE g.id=? AND g.project_id=?`,graphID,projectID).
   Scan(&x.ID,&x.ProjectID,&x.WorkspaceID,&x.Name,&x.IdempotencyKey,
-   &x.ManifestSHA256,&x.CreatedBy,&x.CreatedAt)
+   &x.ManifestSHA256,&x.CreatedBy,&x.CreatedAt,&expectedNodeCount)
  if err!=nil{return TaskGraph{},err}
  rows,err:=tx.QueryContext(ctx,`SELECT n.node_key,n.task_id,
-  n.project_workspace_id,t.state,t.archived_at
+  n.project_workspace_id,t.project_workspace_id,t.state,t.archived_at
   FROM project_orchestrator_task_graph_nodes n
   JOIN tasks t ON t.id=n.task_id AND t.project_id=?
   WHERE n.graph_id=? ORDER BY n.position`,projectID,graphID)
@@ -250,8 +252,10 @@ func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGra
  for rows.Next(){
   var n TaskGraphNode
   var archived sql.NullInt64
-  if err=rows.Scan(&n.Key,&n.TaskID,&n.ProjectWorkspaceID,&n.State,&archived);err!=nil{break}
+  var actualWorkspace sql.NullString
+  if err=rows.Scan(&n.Key,&n.TaskID,&n.ProjectWorkspaceID,&actualWorkspace,&n.State,&archived);err!=nil{break}
   n.Archived=archived.Valid
+  n.ScopeDrift=!actualWorkspace.Valid||actualWorkspace.String!=n.ProjectWorkspaceID
   n.DependsOn=[]string{}
   n.BlockedBy=[]string{}
   n.FailedOrIntervenedOn=[]string{}
@@ -260,6 +264,7 @@ func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGra
  if err==nil{err=rows.Err()}
  _=rows.Close()
  if err!=nil{return TaskGraph{},err}
+ if len(x.Nodes)!=expectedNodeCount{return TaskGraph{},ErrGraphConflict}
  for i:=range x.Nodes{
   depRows,depErr:=tx.QueryContext(ctx,`SELECT COALESCE(pred.node_key,''),
    dep.state,dep.archived_at

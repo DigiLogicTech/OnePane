@@ -8,6 +8,7 @@ import (
  "errors"
  "fmt"
  "io"
+ "mime"
  "strings"
  "unicode/utf8"
 
@@ -21,6 +22,20 @@ const researchSeatDeliveryMaxFileBytes int64=64<<10
 // A deliberately narrower delivery cap than the 256 KiB operator preflight:
 // 32 KiB keeps bounded, provenance-verifiable seat prompts practical for CPU.
 const researchSeatDeliveryMaxTotalBytes int64=32<<10
+
+func researchSeatTextAllowed(mediaType string,size int64)bool{
+ if size<0||size>researchSeatDeliveryMaxFileBytes{return false}
+ kind,_,err:=mime.ParseMediaType(strings.TrimSpace(mediaType))
+ if err!=nil{return false}
+ kind=strings.ToLower(kind)
+ if strings.HasPrefix(kind,"text/"){return true}
+ switch kind{
+ case "application/json","application/xml","application/javascript",
+  "application/x-yaml","application/yaml","application/toml":
+  return true
+ }
+ return false
+}
 
 type researchSeatEvidenceInput struct{
  Sections []agentprotocol.ContextSection
@@ -76,7 +91,7 @@ func(s *Service) loadResearchSeatEvidence(
  var total int64
  for i,e:=range entries{
   if packet.Entries[i]!=e||e.ContentHash==""||
-   e.SizeBytes<0||e.SizeBytes>researchSeatDeliveryMaxFileBytes{
+   !researchSeatTextAllowed(e.MIMEType,e.SizeBytes){
    return empty,errors.New("frozen Research version metadata no longer matches")
   }
   total+=e.SizeBytes

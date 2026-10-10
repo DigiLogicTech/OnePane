@@ -141,7 +141,12 @@ async function a61MountProjectTaskGraphs(project,workspace,container){
    if(draft.nodes.length>1)draft.nodes.pop();
    renderBuilder();
   });
-  form.addEventListener("input",()=>{draft.approved=false;const box=form.querySelector('[name="approved"]');if(box)box.checked=false;});
+  form.addEventListener("input",event=>{
+   if(event.target?.name==="approved")return;
+   draft.approved=false;
+   const box=form.querySelector('[name="approved"]');
+   if(box)box.checked=false;
+  });
   form.addEventListener("submit",async e=>{
    e.preventDefault();
    a61ReadGraphForm(form,draft);

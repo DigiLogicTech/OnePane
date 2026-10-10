@@ -114,4 +114,4 @@ jobs:
       - uses: actions/checkout@v4
       - name: Test allowlisted MSI analysis against synthetic secret-bearing logs
         shell: powershell
-        run: .\\scripts\\test_offline_msi_evidence.ps1
+        run: .\scripts\test_offline_msi_evidence.ps1

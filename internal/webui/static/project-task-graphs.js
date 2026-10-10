@@ -100,6 +100,8 @@ function a61GraphCard(graph){
   '<span class="list-meta">Compute: '+a61Safe(n.compute_preference||"auto")+'</span>'+
   (n.attempt_health&&n.attempt_health!=="none"?
    '<div class="list-meta">Execution record: '+a61Safe(n.attempt_health)+'</div>':"")+
+  (n.external_effect_health&&n.external_effect_health!=="none"?
+   '<div class="list-meta">External operation: '+a61Safe(n.external_effect_health)+'</div>':"")+
   '<div class="list-meta">'+a61Safe(n.next_action||"Pending Task assessment")+'</div>'+
   (n.blocked_by?.length?'<div class="list-meta">Waiting on: '+
    a61Safe(n.blocked_by.join(", "))+'</div>':"")+

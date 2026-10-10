@@ -59,6 +59,33 @@
       <p class="list-meta">The consolidated support ZIP is generated inside a selected canonical Workspace after per-source authorisation and a human review. Export rechecks current permissions.</p>
      </article>
     </div>
+    <article class="panel-card a58-debug-tile a60-reproduction" aria-label="Operator authored QA reproduction report">
+     <h3>Reproduction report</h3>
+     <p class="list-meta">Type a minimal QA report below. These are YOUR notes, not automatically redacted data. Do not include credentials, tokens, personal information or private Project contents. Nothing is uploaded, stored persistently or added to a support ZIP.</p>
+     <div class="a60-reproduction-fields">
+      <label>Subsystem <select id="a60Category"><option value="ui">Interface</option><option value="workspace">Workspace</option><option value="task">Tasks</option><option value="model">Models</option><option value="node">Nodes</option><option value="installer">Installer</option><option value="provider">Provider</option><option value="other">Other</option></select></label>
+      <label>Impact <select id="a60Impact"><option value="medium">Medium</option><option value="blocker">Release blocker</option><option value="high">High</option><option value="low">Low</option></select></label>
+      <label>Short title <input id="a60Title" type="text" maxlength="120" autocomplete="off" placeholder="What is failing?"></label>
+      <label>Steps to reproduce <textarea id="a60Steps" maxlength="1600" rows="3" placeholder="Numbered steps that reproduce the behaviour"></textarea></label>
+      <label>Expected behaviour <textarea id="a60Expected" maxlength="800" rows="2"></textarea></label>
+      <label>Actual behaviour <textarea id="a60Actual" maxlength="800" rows="2"></textarea></label>
+     </div>
+     <div class="a58-debug-actions">
+      <button class="btn primary" type="button" id="a60Review">Review my report</button>
+      <button class="btn" type="button" id="a60Discard">Discard review</button>
+     </div>
+     <div class="a60-consent">
+      <label><input id="a60Consent" type="checkbox" disabled> I reviewed the exact text and confirm it contains no information I do not intend to share.</label>
+     </div>
+     <div class="a58-debug-actions">
+      <button class="btn" type="button" id="a60Copy" disabled>Copy reviewed report</button>
+      <button class="btn" type="button" id="a60Download" disabled>Download reviewed text</button>
+     </div>
+     <p class="list-meta" role="status" id="a60ReportStatus">No report reviewed. Nothing will be uploaded or automatically attached.</p>
+     <details id="a60ReportDetails"><summary>Exact operator-authored report preview</summary>
+      <pre id="a60ReportPreview" class="a49-qa-snapshot-preview a58-debug-preview" aria-label="Exact reproduction report before explicit copy or download"></pre>
+     </details>
+    </article>
     <section class="a58-debug-offline" aria-label="Offline diagnostic guidance">
      <h3>If OnePane cannot start</h3>
      <p>The Windows service and Ubuntu backend can retain bounded, typed startup events outside the WebUI. A standalone, opt-in MSI log reader is also available in the source tree. These tools do not run automatically here, and raw installer/service logs are never silently included in a QA ZIP.</p>
@@ -126,6 +153,70 @@
     clearReview();message.textContent="Reviewed browser evidence exported locally. Inspect before sharing.";paint();
    };
   }
+  // Operator notes are a separate consent boundary from auto-sanitised
+  // browser evidence. Nothing enters the combined QA ZIP or an API endpoint.
+  const note=root.a60QAReproduction;
+  const reportFields={
+   category:get("a60Category"),impact:get("a60Impact"),title:get("a60Title"),
+   steps:get("a60Steps"),expected:get("a60Expected"),actual:get("a60Actual")
+  };
+  const noteReview=get("a60Review"),noteDiscard=get("a60Discard");
+  const noteConsent=get("a60Consent"),noteCopy=get("a60Copy");
+  const noteDownload=get("a60Download"),notePreview=get("a60ReportPreview");
+  const noteStatus=get("a60ReportStatus"),noteDetails=get("a60ReportDetails");
+  const noteData=()=>Object.fromEntries(Object.entries(reportFields).map(([key,el])=>[key,el.value]));
+  let noteReviewed=null;
+  const discardNote=()=>{
+   noteReviewed=null;notePreview.textContent="";noteConsent.checked=false;
+   noteConsent.disabled=true;noteCopy.disabled=true;noteDownload.disabled=true;
+  };
+  const noteValid=()=>note&&note.stillValid(noteReviewed,noteData(),notePreview.textContent,Date.now(),noteConsent.checked);
+  for(const input of Object.values(reportFields)){
+   input.addEventListener("input",()=>{discardNote();noteStatus.textContent="Fields changed. Review again before copying or downloading.";});
+   input.addEventListener("change",()=>{discardNote();noteStatus.textContent="Fields changed. Review again before copying or downloading.";});
+  }
+  noteConsent.addEventListener("change",()=>{
+   noteCopy.disabled=!noteValid();noteDownload.disabled=!noteValid();
+  });
+  noteDiscard.onclick=()=>{
+   discardNote();noteStatus.textContent="Report review discarded. Your draft fields remain only on this page.";
+  };
+  noteReview.onclick=()=>{
+   discardNote();
+   try{
+    if(!note)throw Error("Unavailable");
+    noteReviewed=note.prepare(noteData(),Date.now());
+    notePreview.textContent=noteReviewed.text;noteDetails.open=true;
+    noteConsent.disabled=false;
+    noteStatus.textContent="Read the exact text, then tick the explicit privacy acknowledgement. Review expires after two minutes.";
+   }catch(_){
+    discardNote();noteStatus.textContent="Enter title, reproduction steps, expected and actual behaviour within the size limits.";
+   }
+  };
+  noteCopy.onclick=async()=>{
+   if(!noteValid()){discardNote();noteStatus.textContent="Review changed or expired. Review again.";return}
+   const text=noteReviewed.text;
+   try {
+    if(!navigator.clipboard?.writeText)throw Error("Unavailable");
+    await navigator.clipboard.writeText(text);
+    discardNote();
+    noteStatus.textContent="Operator-reviewed report copied. No data uploaded by OnePane.";
+   }catch(_){
+    if(!noteValid()){discardNote();noteStatus.textContent="Review changed or expired. Review again.";return}
+    noteStatus.textContent="Clipboard unavailable. Select the preview text to copy manually after checking its contents.";
+   }
+  };
+  noteDownload.onclick=()=>{
+   if(!noteValid()){discardNote();noteStatus.textContent="Review changed or expired. Review again.";return}
+   const bytes=new TextEncoder().encode(noteReviewed.text);
+   if(bytes.length>8192){discardNote();noteStatus.textContent="Safe local report limit exceeded.";return}
+   const url=URL.createObjectURL(new Blob([bytes],{type:"text/plain;charset=utf-8"}));
+   try{
+    const link=document.createElement("a");link.href=url;link.download="onepane-qa-reproduction.txt";
+    link.style.display="none";document.body.appendChild(link);link.click();link.remove();
+   }finally{URL.revokeObjectURL(url)}
+   discardNote();noteStatus.textContent="Operator-reviewed text downloaded locally. Inspect before sharing.";
+  };
   for(const b of host.querySelectorAll("[data-a58-destination]")) {
    b.onclick=()=>nav(b.dataset.a58Destination);
   }

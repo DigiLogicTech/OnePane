@@ -317,6 +317,14 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 				s.clock.UnixMilli()<modelWait.RetryAtMS {
 				ready=false
 			}
+			if toolchainWait:=decodeToolchainWait(json.RawMessage(cont));toolchainWait!=nil{
+				ready=false
+				if s.clock.UnixMilli()>=toolchainWait.RetryAtMS{
+					registered,checkErr:=isApprovedToolchainRegisteredRunning(ctx,s.db,toolchainWait)
+					if checkErr!=nil{return fmt.Errorf("recheck persisted Workspace toolchain wait: %w",checkErr)}
+					ready=blocked==0&&registered
+				}
+			}
 			if strings.TrimSpace(c.OperationID) != "" {
 				var opState string
 				if err := s.db.QueryRowContext(ctx, `SELECT state FROM operations WHERE id=?`, c.OperationID).Scan(&opState); err != nil {

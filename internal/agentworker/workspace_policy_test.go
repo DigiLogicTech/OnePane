@@ -220,3 +220,24 @@ func TestDelegatedTaskRetainsPinnedHumanApprovedToolchainWithoutRoutingEnvelope(
   t.Fatalf("delegated Task dropped or substituted parent approval: %s",got)
  }
 }
+
+func TestComputePlacementPreservedForDelegatedLocalWorkspaceTasks(t *testing.T){
+ parent:=json.RawMessage(`{"onepane_routing":{"compute_preference":"cpu_only","workspace_access":{"mode":"brokered","project_workspace_id":"world","remote_models":false}}}`)
+ child:=json.RawMessage(`{"onepane_routing":{"compute_preference":"gpu_only","workspace_access":{"remote_models":true}}}`)
+ inherited:=inheritOnePaneRouting(parent,child)
+ parsed:=routingPolicyFromCompletion(inherited)
+ if parsed.ComputePreference!="cpu_only"||
+  parsed.WorkspaceAccess.RemoteModels==nil||*parsed.WorkspaceAccess.RemoteModels{
+  t.Fatalf("delegation changed CPU pin or remote authority: %+v",parsed)
+ }
+ for _,tc:=range []struct{raw string;good bool}{
+  {`{"onepane_routing":{"compute_preference":"cpu_only"}}`,true},
+  {`{"onepane_routing":{"compute_preference":"prefer_cpu"}}`,true},
+  {`{"onepane_routing":{"compute_preference":"unknown"}}`,false},
+ }{
+  result,err:=computePlacementForTask(task.Task{Completion:json.RawMessage(tc.raw)})
+  if (err==nil)!=tc.good||(tc.good&&result==""){
+   t.Fatalf("invalid compute route state %q => %q %v",tc.raw,result,err)
+  }
+ }
+}

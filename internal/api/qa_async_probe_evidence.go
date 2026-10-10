@@ -97,7 +97,7 @@ func loadQAProbeWitnesses(ctx context.Context,db *sql.DB,tenant,projectID,worksp
  if !ok{return out,false,nil}
  query:=prefix+`SELECT v.task_id,v.id,ob.id,
   json_extract(e.value,'$.role') role,ob.trust,ob.observed_at,
-  ob.source_principal_id,r.worker_principal_id,
+  ob.source_principal_id,r.worker_principal_id,v.verified_by,v.operation_id,
   v.status,a.status,v.required_level,v.achieved_level,a.achieved_level,a.evidence_hash,
   COALESCE((SELECT MAX(ta.started_at) FROM task_attempts ta WHERE ta.task_id=v.task_id),0),
   COALESCE((SELECT MAX(ev.occurred_at) FROM events ev
@@ -123,14 +123,14 @@ func loadQAProbeWitnesses(ctx context.Context,db *sql.DB,tenant,projectID,worksp
  type observationRow struct{
   taskID,verificationID,observationID,role,trust,verificationStatus,assuranceStatus,required string
   observedAt,minAttempt,minOperation int64
-  source,worker,achieved,assuranceAchieved,digest sql.NullString
+  source,worker,verifier,operationID,achieved,assuranceAchieved,digest sql.NullString
  }
  collected:=make([]observationRow,0,qaDeepEvidenceCap)
  truncated:=false
  for rows.Next(){
   var x observationRow
   if err:=rows.Scan(&x.taskID,&x.verificationID,&x.observationID,&x.role,&x.trust,&x.observedAt,
-   &x.source,&x.worker,&x.verificationStatus,&x.assuranceStatus,&x.required,&x.achieved,
+   &x.source,&x.worker,&x.verifier,&x.operationID,&x.verificationStatus,&x.assuranceStatus,&x.required,&x.achieved,
    &x.assuranceAchieved,&x.digest,&x.minAttempt,&x.minOperation);err!=nil{
    rows.Close();return nil,false,err
   }
@@ -145,11 +145,12 @@ func loadQAProbeWitnesses(ctx context.Context,db *sql.DB,tenant,projectID,worksp
  for _,x:=range collected{
   intact:=verifier.VerifyIntegrity(bounded,x.observationID)==nil
   afterAttempt:=x.minAttempt>0&&x.observedAt>=x.minAttempt
-  afterOperation:=x.minOperation==0||x.observedAt>=x.minOperation
+  afterOperation:=!x.operationID.Valid||(x.minOperation>0&&x.observedAt>=x.minOperation)
   independent:=x.worker.Valid&&x.worker.String!=""&&x.source.Valid&&x.source.String!=""&&x.source.String!=x.worker.String
   achievedLevel:="";if x.achieved.Valid{achievedLevel=x.achieved.String}
   assuranceLevel:="";if x.assuranceAchieved.Valid{assuranceLevel=x.assuranceAchieved.String}
-  recordedPass:=x.verificationStatus=="pass"&&x.assuranceStatus=="passed"&&qaDigestRecorded(x.digest)&&
+  verifierDistinct:=x.worker.Valid&&x.worker.String!=""&&x.verifier.Valid&&x.verifier.String!=""&&x.verifier.String!=x.worker.String
+  recordedPass:=x.verificationStatus=="pass"&&x.assuranceStatus=="passed"&&verifierDistinct&&qaDigestRecorded(x.digest)&&
    qaLevelRank(x.required)>=1&&qaLevelRank(achievedLevel)>=qaLevelRank(x.required)&&
    qaLevelRank(assuranceLevel)>=qaLevelRank(x.required)
   corroborates:=x.role=="integration"&&recordedPass&&intact&&afterAttempt&&afterOperation&&independent

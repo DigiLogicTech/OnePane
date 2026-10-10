@@ -113,6 +113,13 @@ func (s *Server) loadQASnapshot(w http.ResponseWriter,r *http.Request,in qaWorks
   return qaSnapshot{},false
  }
  snapshot:=makeQASnapshot(time.Now().UTC(),rows,progress,dependencies)
+ executionSources,sourcesTruncated,err:=loadQAExecutionSources(r.Context(),s.attentionDB,tenant,projectID,workspaceID,timelineRows)
+ if err!=nil{
+  writeError(w,http.StatusServiceUnavailable,"scoped execution evidence unavailable")
+  return qaSnapshot{},false
+ }
+ snapshot.ExecutionSources=executionSources
+ snapshot.ExecutionSourcesTruncated=sourcesTruncated
  snapshot.Timeline=timeline
  snapshot.CapturedTimelineEvents=len(timeline)
  snapshot.TimelineTruncated=truncated

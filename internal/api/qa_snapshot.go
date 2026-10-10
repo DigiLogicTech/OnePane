@@ -93,6 +93,8 @@ type qaSnapshot struct {
  CapturedTimelineEvents int `json:"captured_timeline_events"`
  TimelineTruncated bool `json:"timeline_truncated"`
  Timeline []qaTimelineEvent `json:"timeline"`
+ ExecutionSources []qaExecutionSource `json:"execution_sources"`
+ ExecutionSourcesTruncated bool `json:"execution_sources_truncated"`
 }
 var qaExcluded=[]string{
  "credentials, cookies, OAuth and Vault material",
@@ -113,6 +115,7 @@ func makeQASnapshot(now time.Time,rows []task.Task,progress map[string]taskExecu
   BuildVersion:qaIdentifier(buildinfo.Version),BuildRevision:qaIdentifier(buildinfo.Revision),
   MaxTasks:qaSnapshotTaskCap,SourceStatus:"read_only_observed_state",
   MaxTimelineEvents:qaTimelineEventCap,Timeline:make([]qaTimelineEvent,0),
+  ExecutionSources:make([]qaExecutionSource,0),
   ExcludedCategories:append([]string(nil),qaExcluded...),Tasks:make([]qaTaskEntry,0),
  }
  if len(rows)>qaSnapshotTaskCap{snap.Truncated=true;rows=rows[:qaSnapshotTaskCap]}

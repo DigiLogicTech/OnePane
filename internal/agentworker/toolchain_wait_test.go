@@ -96,6 +96,15 @@ func TestApprovedWorkspaceToolchainWaitSurvivesRestartAndAvoidsDuplicateAttempt(
 
  waiting:=original.waitForWorkspaceToolchain(ctx,run,TickResult{TaskID:created.ID,RunID:run.ID},waitingOn)
  if waiting.Status!="waiting_toolchain"{t.Fatalf("no durable resource wait: %+v",waiting)}
+ var recordedWait int
+ if err:=db.SQL().QueryRowContext(ctx,
+  `SELECT COUNT(*) FROM agent_worker_steps
+   WHERE run_id=? AND step_kind='wait' AND status='waiting'`,run.ID).
+   Scan(&recordedWait);err!=nil||recordedWait!=1{
+  t.Fatalf("approved OCI wait did not persist schema-valid audit journal: count=%d err=%v",
+   recordedWait,err)
+ }
+
  suspended,err:=tasks.Get(ctx,created.ID)
  if err!=nil||suspended.State!=task.StateWaitingDependency{
   t.Fatalf("Task should wait on existing Attempt: %+v %v",suspended,err)

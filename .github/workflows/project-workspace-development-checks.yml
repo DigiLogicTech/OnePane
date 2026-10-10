@@ -13,6 +13,8 @@ on:
       - 'internal/webui/static/model-agentcheck-diagnostics.js'
       - 'internal/webui/static/app-foundation.js'
       - 'internal/webui/static/index.html'
+      - 'internal/webui/static/qa-trace-correlation.js'
+      - 'scripts/validate_qa_trace_correlation.js'
       - 'internal/webui/static/debug-centre.js'
       - 'internal/webui/static/debug-centre.css'
       - 'internal/webui/static/settings-redesign.js'
@@ -76,6 +78,8 @@ jobs:
           node --check internal/webui/static/app.js
           node --check internal/webui/static/settings-redesign.js
           node --check internal/webui/static/debug-centre.js
+          node --check internal/webui/static/qa-trace-correlation.js
+          node scripts/validate_qa_trace_correlation.js
           node scripts/validate_debug_centre.js
           node scripts/validate_project_development_surface.js
           node scripts/validate_model_agentcheck_residency.js

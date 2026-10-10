@@ -41,10 +41,11 @@ type fakeRepo struct {
 	tasks              map[string]Task
 	attempts           map[string]Attempt
 	completionEvidence bool
+	hardPredecessors map[string][]string
 }
 
 func newFakeRepo() *fakeRepo {
-	return &fakeRepo{tasks: map[string]Task{}, attempts: map[string]Attempt{}}
+	return &fakeRepo{tasks: map[string]Task{}, attempts: map[string]Attempt{}, hardPredecessors: map[string][]string{}}
 }
 func (r *fakeRepo) Get(_ context.Context, id string) (Task, error) {
 	t, ok := r.tasks[id]
@@ -122,6 +123,13 @@ func (r *fakeRepo) Transition(_ context.Context, _ storage.Tx, tr transitionReco
 	}
 	r.tasks[t.ID] = t
 	return nil
+}
+func (r *fakeRepo) HardDependenciesSatisfied(_ context.Context,_ storage.Tx,taskID string)(bool,error){
+ for _,depID:=range r.hardPredecessors[taskID]{
+  t,exists:=r.tasks[depID]
+  if !exists||t.State!=StateComplete||t.ArchivedAt!=nil{return false,nil}
+ }
+ return true,nil
 }
 func (r *fakeRepo) NextAttemptNumber(_ context.Context, _ storage.Tx, taskID string) (int64, error) {
 	var max int64
@@ -262,6 +270,26 @@ func TestStartCreatesOneExecutionAttemptAndRejectsDuplicateStart(t *testing.T) {
 	}
 }
 
+func TestStartRejectsHardPredecessorBeforeCreatingAttempt(t *testing.T){
+ s,r,_,_:=newTestService(1_700_000_000_000)
+ ctx:=context.Background()
+ predecessor,err:=s.Create(ctx,CreateCommand{WorkspaceID:"ws",Objective:"Predecessor"})
+ if err!=nil{t.Fatal(err)}
+ child,err:=s.Create(ctx,CreateCommand{WorkspaceID:"ws",Objective:"Dependent"})
+ if err!=nil{t.Fatal(err)}
+ r.hardPredecessors[child.ID]=[]string{predecessor.ID}
+ child,err=s.MarkReady(ctx,TransitionCommand{TaskID:child.ID,ExpectedRevision:1})
+ if err!=nil{t.Fatal(err)}
+ if _,_,err=s.Start(ctx,StartCommand{TaskID:child.ID,ExpectedRevision:child.Revision});
+  !errors.Is(err,ErrHardDependencyUnsatisfied){t.Fatalf("hard dependency bypassed: %v",err)}
+ if len(r.attempts)!=0{t.Fatal("failed start created Attempt")}
+ predecessor.State=StateComplete
+ r.tasks[predecessor.ID]=predecessor
+ started,attempt,err:=s.Start(ctx,StartCommand{TaskID:child.ID,ExpectedRevision:child.Revision})
+ if err!=nil||started.State!=StateRunning||attempt.ID==""{
+  t.Fatalf("completed predecessor did not admit child: %+v %+v %v",started,attempt,err)
+ }
+}
 func TestPauseAndResumeKeepsSameAttempt(t *testing.T) {
 	s, r, _, _ := newTestService(1_700_000_000_000)
 	task, _ := s.Create(context.Background(), CreateCommand{WorkspaceID: "ws", Objective: "x"})

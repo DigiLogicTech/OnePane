@@ -190,6 +190,27 @@ func TestResearchSeatVerifiedTextDeliveryUsesRealLibraryAndArtifactGrants(t *tes
   t.Fatal("revoked human consent permitted protected reply persistence")
  }
  assertMessages(1)
+ // A previously protected, paused Council cannot be resurrected by
+ // either provider-timer auto retry or an operator retry after revocation.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_sessions
+  SET status='paused_for_deliberation' WHERE id=?`,session.ID);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_turn_requests
+  SET status='blocked',attempt_count=1,retry_after=?,response_message_id=NULL
+  WHERE id=?`,clock.Real{}.UnixMilli()-1,secondTurn.ID);err!=nil{t.Fatal(err)}
+ for _,retry:=range []team.RetryResearchRoundCommand{
+  {SessionID:session.ID,RequestedByPrincipalID:"human",Automatic:false},
+  {SessionID:session.ID,RequestedByPrincipalID:"human",Automatic:true},
+ }{
+  if _,err=council.RetryResearchRound(ctx,retry);err==nil{
+   t.Fatalf("revoked protected Council retry was accepted: %+v",retry)
+  }
+ }
+ var status string
+ if err=db.SQL().QueryRowContext(ctx,`SELECT status FROM team_sessions WHERE id=?`,
+  session.ID).Scan(&status);err!=nil||status!="paused_for_deliberation"{
+  t.Fatalf("revoked Council resumed despite retry denial: %s %v",status,err)
+ }
+ assertMessages(1)
  if _,err=worker.consentForSeat(ctx,"tenant",session.ID,second.ID,manifest.SnapshotSHA256);err==nil{
   t.Fatal("revoked Council silently restarted without local evidence protection")
  }

@@ -181,6 +181,20 @@ func TestResearchSeatVerifiedTextDeliveryUsesRealLibraryAndArtifactGrants(t *tes
   t.Fatal("withdrawn Library grant permitted protected reply persistence")
  }
  assertMessages(1)
+ // Even manual retry cannot reinstate a session whose frozen version lost
+ // its read grant. The whole round stays parked.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_sessions SET
+  status='paused_for_deliberation' WHERE id=?`,session.ID);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_turn_requests SET
+  status='blocked',attempt_count=1,retry_after=? WHERE id=?`,
+  clock.Real{}.UnixMilli()-1,secondTurn.ID);err!=nil{t.Fatal(err)}
+ if _,err=council.RetryResearchRound(ctx,team.RetryResearchRoundCommand{
+  SessionID:session.ID,RequestedByPrincipalID:"human",
+ });err==nil{t.Fatal("revoked frozen Library grant permitted manual Research retry")}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_sessions SET
+  status='deliberating' WHERE id=?`,session.ID);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_turn_requests SET
+  status='running' WHERE id=?`,secondTurn.ID);err!=nil{t.Fatal(err)}
  if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_library_grants
   SET enabled=1 WHERE project_workspace_id=? AND asset_id=?`,workspaceID,asset.ID);err!=nil{t.Fatal(err)}
  // Timed rate-limit retries are bounded: two automatic attempts,

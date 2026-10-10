@@ -393,7 +393,7 @@ func (e *CLIEngine) ListRuntime(ctx context.Context, runtimeID string) ([]Contai
 	if err != nil {
 		return nil, err
 	}
-	out, stderr, err := runCLI(ctx, p.Executable, "ps", "-a", "--filter", "label=io.harness.runtime-id="+runtimeID, "--format", `{{.Names}}|{{.Status}}|{{.ID}}`)
+	out, stderr, err := runCLI(ctx, p.Executable, "ps", "-a", "--no-trunc", "--filter", "label=io.harness.runtime-id="+runtimeID, "--format", `{{.Names}}|{{.Status}}|{{.ID}}`)
 	if err != nil {
 		return nil, fmt.Errorf("list runtime containers: %v: %s", err, stderr)
 	}
@@ -496,25 +496,73 @@ func (e *CLIEngine) StopContainer(ctx context.Context, runtimeID, applicationID 
  }
  return verified,nil
 }
+// verifiedRuntimeStopTarget refuses to rely on a name or a caller-writable
+// OCI label alone. Both the full container ID and independent configured
+// runtime/app isolation must agree before a destructive engine command.
+func (e *CLIEngine) verifiedRuntimeStopTarget(ctx context.Context,p EngineProfile,runtimeID string,listed ContainerState)(ContainerState,error){
+ if listed.ID==""||listed.Name==""{
+  return ContainerState{},fmt.Errorf("%w: malformed runtime container enumeration",ErrInvalidInput)
+ }
+ raw,stderr,err:=runCLI(ctx,p.Executable,"container","inspect",listed.ID)
+ if err!=nil{return ContainerState{},fmt.Errorf("inspect runtime container: %v: %s",err,stderr)}
+ var records []struct{
+  ID string `json:"Id"`
+  Config struct{Labels map[string]string `json:"Labels"`} `json:"Config"`
+ }
+ if json.Unmarshal([]byte(raw),&records)!=nil||len(records)!=1||
+  records[0].ID!=listed.ID{
+  return ContainerState{},fmt.Errorf("%w: OCI enumeration identity changed",ErrInvalidInput)
+ }
+ labels:=records[0].Config.Labels
+ appID:=labels["io.harness.application-id"]
+ if appID==""||labels["io.harness.runtime-id"]!=runtimeID||
+  listed.Name!=containerName(runtimeID,appID){
+  return ContainerState{},fmt.Errorf("%w: runtime container ownership mismatch",ErrInvalidInput)
+ }
+ observed,err:=e.InspectContainer(ctx,runtimeID,appID)
+ if err!=nil{return ContainerState{},err}
+ if observed.ID!=listed.ID||observed.Name!=listed.Name||
+  observed.RuntimeID!=runtimeID||observed.ApplicationID!=appID||
+  observed.SpecHash==""||!observed.IsolationVerified{
+  return ContainerState{},fmt.Errorf("%w: runtime OCI isolation/identity not verified",ErrInvalidInput)
+ }
+ return observed,nil
+}
+
 func (e *CLIEngine) StopRuntime(ctx context.Context, runtimeID string) ([]ContainerState, error) {
-	p, err := e.Probe(ctx)
-	if err != nil {
-		return nil, err
-	}
-	states, err := e.ListRuntime(ctx, runtimeID)
-	if err != nil {
-		return nil, err
-	}
-	for i := range states {
-		if states[i].Status != "running" {
-			continue
-		}
-		if _, stderr, err := runCLI(ctx, p.Executable, "stop", "--time", "10", states[i].Name); err != nil && !strings.Contains(strings.ToLower(stderr), "not running") {
-			return states, fmt.Errorf("stop runtime container %s: %v: %s", states[i].Name, err, stderr)
-		}
-		states[i].Status = "stopped"
-	}
-	return states, nil
+ p,err:=e.Probe(ctx)
+ if err!=nil{return nil,err}
+ if !p.Rootless{return nil,ErrRootlessRequired}
+ states,err:=e.ListRuntime(ctx,runtimeID)
+ if err!=nil{return nil,err}
+ // Preflight the entire candidate set before stopping any container.
+ // Even a forged/foreign label must not trigger a partial destructive sweep.
+ verified:=make([]ContainerState,0,len(states))
+ for _,candidate:=range states{
+  st,err:=e.verifiedRuntimeStopTarget(ctx,p,runtimeID,candidate)
+  if err!=nil{return nil,err}
+  if st.Status!="running"&&st.Status!="exited"&&
+   st.Status!="stopped"&&st.Status!="created"{
+   return nil,fmt.Errorf("%w: unsupported runtime container state",ErrInvalidInput)
+  }
+  verified=append(verified,st)
+ }
+ for i:=range verified{
+  if verified[i].Status!="running"{continue}
+  if _,stderr,err:=runCLI(ctx,p.Executable,"stop","--time","10",verified[i].ID);err!=nil{
+   return verified,fmt.Errorf("stop runtime container by pinned OCI ID: %v: %s",err,stderr)
+  }
+  // Re-observe before declaring success. A mismatched ID cannot be silently
+  // accepted as a stopped managed container after an external replacement.
+  observed,err:=e.InspectContainer(ctx,runtimeID,verified[i].ApplicationID)
+  if err!=nil{return verified,err}
+  if observed.ID!=verified[i].ID||!observed.IsolationVerified||
+   observed.Status=="running"||observed.Status=="restarting"{
+   return verified,fmt.Errorf("%w: runtime stop postcondition failed",ErrInvalidInput)
+  }
+  verified[i]=observed
+ }
+ return verified,nil
 }
 func containerName(runtimeID, appID string) string {
 	return trimName("harness-"+sanitize(runtimeID)+"-"+sanitize(appID), 63)

@@ -106,7 +106,7 @@ func (s *Service) waitForWorkspaceToolchain(ctx context.Context,run Run,res Tick
  if err!=nil{return failedResult(res,err)}
  err=s.suspendForResource(ctx,run,state,
   "waiting for the explicitly approved Workspace toolchain runtime",
-  "toolchain",map[string]any{
+  "wait",map[string]any{
    "kind":"approved_toolchain_resources","manifest_sha256":wait.ManifestSHA256,
    "retry_at_ms":wait.RetryAtMS,
   },nil)

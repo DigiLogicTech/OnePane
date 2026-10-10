@@ -125,6 +125,53 @@ func (s *Server) submitProjectOrchestratorTurn(w http.ResponseWriter,r *http.Req
 	out,err:=s.projectOrchestrator.Turn(r.Context(),projectorchestrator.TurnCommand{ProjectID:p.ID,Objective:in.Objective,ActorPrincipalID:i.PrincipalID,ProjectWorkspaceID:in.ProjectWorkspaceID,ForceTask:in.ForceTask,AllowTaskCreation:allow})
 	respondDomain(w,out,err,http.StatusOK)
 }
+// Graph writes require a human-authored request and task.write, independent
+// of the Orchestrator's text-generation turn. The Task graph service validates
+// canonical per-Workspace ownership and atomically persists all hard edges.
+type projectTaskGraphService interface {
+ CreateTaskGraph(context.Context,projectorchestrator.CreateTaskGraphCommand)(projectorchestrator.TaskGraph,error)
+ TaskGraph(context.Context,string,string)(projectorchestrator.TaskGraph,error)
+ TaskGraphs(context.Context,string,int)([]projectorchestrator.TaskGraph,error)
+}
+func(s *Server) projectTaskGraphService(w http.ResponseWriter)(projectTaskGraphService,bool){
+ graph,ok:=s.projectOrchestrator.(projectTaskGraphService)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Project Task graph unavailable")}
+ return graph,ok
+}
+func(s *Server) createProjectTaskGraph(w http.ResponseWriter,r *http.Request){
+ i,ok:=s.authenticate(w,r);if !ok{return}
+ p,err:=s.projects.Project(r.Context(),r.PathValue("projectID"))
+ if err!=nil{respondDomain(w,nil,err,0);return}
+ if !s.authorize(w,r,i,p.WorkspaceID,"task.write"){return}
+ graph,ok:=s.projectTaskGraphService(w);if !ok{return}
+ var input projectorchestrator.CreateTaskGraphCommand
+ if !decodeJSON(w,r,&input){return}
+ input.ProjectID=p.ID
+ input.ActorPrincipalID=i.PrincipalID
+ created,err:=graph.CreateTaskGraph(r.Context(),input)
+ respondDomain(w,created,err,http.StatusCreated)
+}
+func(s *Server) listProjectTaskGraphs(w http.ResponseWriter,r *http.Request){
+ i,ok:=s.authenticate(w,r);if !ok{return}
+ p,err:=s.projects.Project(r.Context(),r.PathValue("projectID"))
+ if err!=nil{respondDomain(w,nil,err,0);return}
+ if !s.authorize(w,r,i,p.WorkspaceID,"project.read"){return}
+ graph,ok:=s.projectTaskGraphService(w);if !ok{return}
+ limit:=parseLimit(r,20)
+ if limit>50{limit=50}
+ out,err:=graph.TaskGraphs(r.Context(),p.ID,limit)
+ respondDomain(w,out,err,http.StatusOK)
+}
+func(s *Server) getProjectTaskGraph(w http.ResponseWriter,r *http.Request){
+ i,ok:=s.authenticate(w,r);if !ok{return}
+ p,err:=s.projects.Project(r.Context(),r.PathValue("projectID"))
+ if err!=nil{respondDomain(w,nil,err,0);return}
+ if !s.authorize(w,r,i,p.WorkspaceID,"project.read"){return}
+ graph,ok:=s.projectTaskGraphService(w);if !ok{return}
+ out,err:=graph.TaskGraph(r.Context(),p.ID,r.PathValue("graphID"))
+ respondDomain(w,out,err,http.StatusOK)
+}
+
 func (s *Server) listProjectHandoffs(w http.ResponseWriter,r *http.Request){
 	i,ok:=s.authenticate(w,r);if !ok{return};p,err:=s.projects.Project(r.Context(),r.PathValue("projectID"));if err!=nil{respondDomain(w,nil,err,0);return}
 	if !s.authorize(w,r,i,p.WorkspaceID,"project.read"){return};rows,err:=s.assistant.ProjectHandoffs(r.Context(),p.ID,parseLimit(r,100));respondDomain(w,rows,err,http.StatusOK)

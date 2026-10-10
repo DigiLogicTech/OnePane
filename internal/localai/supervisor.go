@@ -1045,6 +1045,13 @@ func (s *RuntimeSupervisor) Stop(ctx context.Context, deploymentID string) error
 	if n != 1 {
 		return fmt.Errorf("runtime instance stop state conflict")
 	}
+	// The managed process is now independently confirmed stopped. Keep the
+	// public deployment residency status aligned so Agent Check does not leave
+	// a false CPU/GPU "resident" indicator on an unloaded model.
+	_,err=s.db.ExecContext(ctx,`UPDATE model_deployments
+	 SET residency_state='stopped',updated_at=?,revision=revision+1
+	 WHERE id=? AND (residency_state IS NULL OR residency_state<>'stopped')`,now,deploymentID)
+	if err!=nil{return fmt.Errorf("persist stopped model residency: %w",err)}
 	return nil
 }
 
@@ -1204,7 +1211,7 @@ func (s *RuntimeSupervisor) ReapIdle(ctx context.Context, idle time.Duration, li
 		limit = 10
 	}
 	cutoff := s.clock.UnixMilli() - idle.Milliseconds()
-	rows, err := s.db.QueryContext(ctx, `SELECT deployment_id FROM local_runtime_instances WHERE status='healthy' AND COALESCE(last_seen_at,started_at,updated_at) < ? ORDER BY COALESCE(last_seen_at,started_at,updated_at) ASC LIMIT ?`, cutoff, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT i.deployment_id FROM local_runtime_instances i JOIN model_deployments d ON d.id=i.deployment_id WHERE i.status='healthy' AND COALESCE(json_extract(d.runtime_config_json,'$.colibri_pinned'),0)<>1 AND COALESCE(i.last_seen_at,i.started_at,i.updated_at) < ? ORDER BY COALESCE(i.last_seen_at,i.started_at,i.updated_at) ASC LIMIT ?`, cutoff, limit)
 	if err != nil {
 		return 0, err
 	}

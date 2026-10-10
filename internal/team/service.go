@@ -314,7 +314,9 @@ func researchConfiguration(raw json.RawMessage) (bool, ResearchSettings) {
 	}
 	_ = json.Unmarshal(raw, &cfg)
 	if cfg.ResearchMode {
-		cfg.Research = NormalizeResearchSettings(cfg.Research)
+		// Research integrity cannot depend on optional UI checkboxes. Frozen
+		// manifests capture the strict seat/round policy at session creation.
+		cfg.Research = StrictResearchSettings(cfg.Research)
 	}
 	return cfg.ResearchMode, cfg.Research
 }

@@ -91,3 +91,23 @@ func TestApplicationSourcesCannotEscapeToHost(t *testing.T) {
 		}
 	}
 }
+
+func TestNewWorkspaceOCIRequiresFullImmutableSHA256(t *testing.T){
+ digest:="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+ for _,ref:=range []string{
+  "ghcr.io/company/godot@sha256:"+digest,
+  "registry.example:5000/namespace/godot@sha256:"+digest,
+ }{
+  if !pinnedOCIImageSource(ref){t.Fatalf("valid digest rejected: %s",ref)}
+ }
+ for _,ref:=range []string{
+  "ghcr.io/company/godot:latest","ghcr.io/company/godot:v4",
+  "ghcr.io/company/godot@sha256:abc",
+  "ghcr.io/company/godot@sha256:"+digest[:63]+"z",
+  "ghcr.io/company/godot@other:0123",
+  "@sha256:"+digest,
+  "ghcr.io/company/godot@tag@sha256:"+digest,
+ }{
+  if pinnedOCIImageSource(ref){t.Fatalf("unpinned or malformed image accepted: %s",ref)}
+ }
+}

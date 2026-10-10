@@ -56,6 +56,10 @@ func (s *Service) RuntimeByProject(ctx context.Context, id string) (ProjectRunti
 	}
 	return s.repo.RuntimeByProject(ctx, id)
 }
+func (s *Service) RuntimeByProjectWorkspace(ctx context.Context,projectID,workspaceID string) (ProjectRuntime,error){
+ if strings.TrimSpace(projectID)==""||strings.TrimSpace(workspaceID)==""{return ProjectRuntime{},ErrInvalidCommand}
+ return s.repo.RuntimeByProjectWorkspace(ctx,projectID,workspaceID)
+}
 func (s *Service) Application(ctx context.Context, id string) (Application, error) {
 	if strings.TrimSpace(id) == "" {
 		return Application{}, ErrInvalidCommand
@@ -325,7 +329,7 @@ func (s *Service) CreateRuntime(ctx context.Context, cmd CreateRuntimeCommand) (
 		return ProjectRuntime{}, err
 	}
 	now := s.clock.UnixMilli()
-	r := ProjectRuntime{ID: rid, ProjectID: cmd.ProjectID, NodeID: cmd.NodeID, IsolationMode: cmd.IsolationMode, Backend: "sandbox_runner", DesiredState: cmd.DesiredState, Status: RuntimeDefined, RuntimeSpecJSON: rs, ResourceLimitsJSON: rl, NetworkPolicyJSON: defaultNetworkPolicy(), FilesystemPolicyJSON: defaultFilesystemPolicy(), EnvironmentBindingsJSON: eb, Revision: 1, CreatedBy: cmd.CreatedBy, CreatedAt: now, UpdatedAt: now}
+	r := ProjectRuntime{ID: rid, ProjectID: cmd.ProjectID, ProjectWorkspaceID: cmd.ProjectWorkspaceID, NodeID: cmd.NodeID, IsolationMode: cmd.IsolationMode, Backend: "sandbox_runner", DesiredState: cmd.DesiredState, Status: RuntimeDefined, RuntimeSpecJSON: rs, ResourceLimitsJSON: rl, NetworkPolicyJSON: defaultNetworkPolicy(), FilesystemPolicyJSON: defaultFilesystemPolicy(), EnvironmentBindingsJSON: eb, Revision: 1, CreatedBy: cmd.CreatedBy, CreatedAt: now, UpdatedAt: now}
 	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
 		p, err := s.repo.ProjectTx(ctx, tx, cmd.ProjectID)
 		if err != nil {
@@ -336,6 +340,12 @@ func (s *Service) CreateRuntime(ctx context.Context, cmd CreateRuntimeCommand) (
 		}
 		if err := s.requireActor(ctx, tx, p.WorkspaceID, cmd.CreatedBy); err != nil {
 			return err
+		}
+		if cmd.ProjectWorkspaceID != nil {
+			var count int
+			err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_workspaces WHERE id=? AND project_id=? AND status='active'`,*cmd.ProjectWorkspaceID,cmd.ProjectID).Scan(&count)
+			if err!=nil{return err}
+			if count!=1{return ErrCrossWorkspace}
 		}
 		if cmd.NodeID != nil {
 			if strings.TrimSpace(*cmd.NodeID) == "" {
@@ -404,6 +414,45 @@ func (s *Service) SetRuntimeDesiredState(ctx context.Context, cmd SetRuntimeDesi
 		return ProjectRuntime{}, err
 	}
 	return s.repo.Runtime(ctx, cmd.RuntimeID)
+}
+
+// SetApplicationDesiredState requests a lifecycle transition through the
+// existing reconciler. It never equates an operator request with a running
+// container, and never executes the tool on the OnePane host.
+func (s *Service) SetApplicationDesiredState(ctx context.Context, cmd SetApplicationDesiredStateCommand) (Application,error) {
+ if strings.TrimSpace(cmd.ApplicationID)=="" || cmd.ExpectedRevision<1 ||
+  strings.TrimSpace(cmd.ActorPrincipalID)=="" || !validAppDesired(cmd.DesiredState) {
+  return Application{},ErrInvalidCommand
+ }
+ eventID,err:=s.ids.New("evt");if err!=nil{return Application{},err}
+ jobID,err:=s.ids.New("job");if err!=nil{return Application{},err}
+ now:=s.clock.UnixMilli()
+ err=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+  app,err:=s.repo.ApplicationTx(ctx,tx,cmd.ApplicationID);if err!=nil{return err}
+  if app.Revision!=cmd.ExpectedRevision{return ErrRevisionConflict}
+  runtime,err:=s.repo.RuntimeTx(ctx,tx,app.ProjectRuntimeID);if err!=nil{return err}
+  project,err:=s.repo.ProjectTx(ctx,tx,runtime.ProjectID);if err!=nil{return err}
+  if project.Status!="active"{return ErrProjectInactive}
+  if err=s.requireActor(ctx,tx,project.WorkspaceID,cmd.ActorPrincipalID);err!=nil{return err}
+  if app.DesiredState==cmd.DesiredState {return nil}
+  if err=s.repo.UpdateApplicationDesired(ctx,tx,app,cmd.DesiredState,now);err!=nil{return err}
+  payload,_:=json.Marshal(map[string]any{
+   "runtime_id":runtime.ID,"application_id":app.ID,"from":app.DesiredState,
+   "to":cmd.DesiredState,"observed_status":app.Status,"revision":app.Revision+1,
+  })
+  if err=s.events.Append(ctx,tx,event.Event{
+   ID:eventID,WorkspaceID:&project.WorkspaceID,Type:"project_application.desired_state_changed",
+   AggregateType:"project_application",AggregateID:app.ID,ActorPrincipalID:&cmd.ActorPrincipalID,
+   RequestID:cmd.RequestID,TraceID:cmd.TraceID,Payload:payload,OccurredAt:now,
+  });err!=nil{return err}
+  jobPayload,_:=json.Marshal(map[string]any{"project_runtime_id":runtime.ID,"application_id":app.ID,"reason":"application_desired_state"})
+  return s.outbox.Enqueue(ctx,tx,outbox.Job{
+   ID:jobID,WorkspaceID:&project.WorkspaceID,Type:"project_runtime.reconcile",
+   Payload:jobPayload,AvailableAt:now,MaxAttempts:10,CreatedAt:now,
+  })
+ })
+ if err!=nil{return Application{},err}
+ return s.repo.Application(ctx,cmd.ApplicationID)
 }
 
 func normalizeRuntimeNetworkPolicy(raw json.RawMessage) (json.RawMessage, error) {
@@ -691,6 +740,12 @@ func (s *Service) DeclareApplication(ctx context.Context, cmd DeclareApplication
 		r, err := s.repo.RuntimeTx(ctx, tx, cmd.RuntimeID)
 		if err != nil {
 			return err
+		}
+		// Only new independently owned Workspace toolchains require an immutable
+		// OCI digest. Historic Project-scoped applications are preserved and
+		// remain subject to the existing reconciliation security controls.
+		if r.ProjectWorkspaceID != nil && cmd.SourceKind == AppOCIImage && !pinnedOCIImageSource(sourceRef) {
+			return fmt.Errorf("%w: Workspace OCI tools require an immutable sha256 image digest", ErrInvalidCommand)
 		}
 		p, err := s.repo.ProjectTx(ctx, tx, r.ProjectID)
 		if err != nil {

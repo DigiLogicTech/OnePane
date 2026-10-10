@@ -1,15 +1,15 @@
 package sandboxrunner
 
 import (
+	"errors"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/DigiLogicTech/OnePane/internal/authority"
 	"github.com/DigiLogicTech/OnePane/internal/policy"
@@ -20,6 +20,7 @@ type Adapter struct {
 	dataDir string
 	engine  Engine
 	secrets SecretResolver
+	publisher WorkspacePublicationSink
 }
 
 func NewAdapter(dataDir string, engine Engine, resolvers ...SecretResolver) *Adapter {
@@ -38,6 +39,8 @@ func (a *Adapter) SetSecretResolver(r SecretResolver) {
 	}
 }
 
+func (a *Adapter) SetPublisher(p WorkspacePublicationSink){if a!=nil{a.publisher=p}}
+
 func (a *Adapter) ID() string      { return AdapterID }
 func (a *Adapter) Version() string { return AdapterVersion }
 
@@ -45,6 +48,11 @@ var safeID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 
 type baseInput struct {
 	Action              string          `json:"action"`
+	Path                string          `json:"path,omitempty"`
+	Name                string          `json:"name,omitempty"`
+	MediaType           string          `json:"media_type,omitempty"`
+	ContentBase64       string          `json:"content_base64,omitempty"`
+	ExpectedSHA256      string          `json:"expected_sha256,omitempty"`
 	RuntimeID           string          `json:"runtime_id"`
 	ApplicationID       string          `json:"application_id,omitempty"`
 	Image               string          `json:"image,omitempty"`
@@ -53,6 +61,9 @@ type baseInput struct {
 	EnvironmentBindings json.RawMessage `json:"environment_bindings,omitempty"`
 	NetworkPolicy       json.RawMessage `json:"network_policy,omitempty"`
 	Command             []string        `json:"command,omitempty"`
+	RequiredExecutables json.RawMessage `json:"required_executables,omitempty"`
+	Message             string          `json:"message,omitempty"`
+	TimeoutSeconds      int             `json:"timeout_seconds,omitempty"`
 	Endpoints           []PortSpec      `json:"endpoints,omitempty"`
 }
 type runtimeSpec struct {
@@ -80,6 +91,15 @@ func Register(reg *tool.Registry, adapter *Adapter) error {
 		{ID: ToolAppInspect, Version: "1", CapabilityID: CapabilityObserve, Mode: authority.ActionObserve, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskLow, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolImageInspect, Version: "1", CapabilityID: CapabilityObserve, Mode: authority.ActionObserve, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskLow, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppExec, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
+		{ID: ToolAppToolsDiscover, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskLow, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
+		{ID: ToolAppToolchainPreflight, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskLow, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
+		{ID: ToolAppGodotBuild, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
+		{ID: ToolAppUnrealMCPProbe, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskLow, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
+		{ID: ToolAppGitInspect, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
+		{ID: ToolAppFileInspect, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
+		{ID: ToolAppFileEdit, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
+		{ID: ToolAppFilePublish, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
+		{ID: ToolAppGitMutate, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 	}
 	for _, d := range defs {
 		if err := reg.Register(d, adapter); err != nil {
@@ -107,7 +127,10 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 	if !profile.Rootless {
 		return tool.AdapterResult{}, tool.KnownFailure(ErrRootlessRequired)
 	}
-	workspace := filepath.Join(a.dataDir, "projects", in.RuntimeID, "workspace")
+	workspace, workspaceExists, err := managedWorkspacePath(a.dataDir, in.RuntimeID, false)
+	if err != nil {
+		return tool.AdapterResult{}, tool.KnownFailure(err)
+	}
 	switch req.ToolID {
 	case ToolRuntimeInspect:
 		states, err := a.engine.ListRuntime(ctx, in.RuntimeID)
@@ -118,11 +141,6 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 		if err != nil {
 			return tool.AdapterResult{}, err
 		}
-		_, statErr := os.Stat(workspace)
-		workspaceExists := statErr == nil
-		if statErr != nil && !os.IsNotExist(statErr) {
-			return tool.AdapterResult{}, statErr
-		}
 		return result(map[string]any{"runtime_id": in.RuntimeID, "workspace_path": workspace, "workspace_exists": workspaceExists, "containers": states, "network": network, "engine": profile}, "project runtime observed")
 	case ToolAppInspect:
 		if !safeID.MatchString(in.ApplicationID) {
@@ -132,6 +150,9 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 		if err != nil {
 			return tool.AdapterResult{}, err
 		}
+		state.IsolationVerified = state.IsolationVerified && workspaceExists &&
+			state.RuntimeID == in.RuntimeID && state.ApplicationID == in.ApplicationID &&
+			state.SpecHash != "" && exactWorkspaceMount(state, workspace)
 		network, err := a.engine.InspectNetwork(ctx, in.RuntimeID)
 		if err != nil {
 			return tool.AdapterResult{}, err
@@ -146,7 +167,404 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 			return tool.AdapterResult{}, err
 		}
 		return result(map[string]any{"runtime_id": in.RuntimeID, "image": state, "engine": profile}, "application image observed")
-	case ToolAppExec:
+	case ToolAppGitMutate:
+		if !safeID.MatchString(in.ApplicationID)||len(in.Command)!=0||in.Image!=""||
+			in.TimeoutSeconds<0||in.TimeoutSeconds>120{
+			return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)
+		}
+		command,err:=gitMutateCommand(in.Action,in.Message)
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		if !workspaceExists{
+			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Workspace not provisioned",ErrInvalidInput))
+		}
+		state,err:=a.engine.InspectContainer(ctx,in.RuntimeID,in.ApplicationID)
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		if state.Status!="running"||!state.IsolationVerified||
+			state.RuntimeID!=in.RuntimeID||state.ApplicationID!=in.ApplicationID||
+			state.SpecHash==""||!exactWorkspaceMount(state,workspace){
+			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Git mutation requires verified Workspace sandbox",ErrInvalidInput))
+		}
+		timeout:=in.TimeoutSeconds
+		if timeout==0{timeout=30}
+		execCtx,cancel:=context.WithTimeout(ctx,time.Duration(timeout)*time.Second)
+		defer cancel()
+		observed,err:=a.engine.ExecContainer(execCtx,in.RuntimeID,in.ApplicationID,command)
+		if execCtx.Err()!=nil{return tool.AdapterResult{},execCtx.Err()}
+		if err!=nil{return tool.AdapterResult{},err}
+		success:=observed.ExitCode==0
+		summary:="Workspace Git "+in.Action+" completed; independent Task verification remains required"
+		if !success{summary=fmt.Sprintf("Workspace Git %s exited with code %d",in.Action,observed.ExitCode)}
+		return result(map[string]any{
+			"runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
+			"action":in.Action,"succeeded":success,"result":observed,
+			"container":state,"engine":profile,
+		},summary)
+	case ToolAppFilePublish:
+        large:=in.Action=="publish_large"
+        limitSeconds:=120
+        if large{limitSeconds=1200}
+		if req.TaskID==nil||req.AttemptID==nil||a.publisher==nil||
+			!safeID.MatchString(in.ApplicationID)||
+            (in.Action!="publish"&&!large)||
+			len(in.Command)!=0||in.Image!=""||in.Message!=""||
+			in.ContentBase64!=""||in.ExpectedSHA256!=""||
+            (large&&(len(in.RuntimeSpec)!=0||len(in.ResourceLimits)!=0||
+             len(in.EnvironmentBindings)!=0||len(in.NetworkPolicy)!=0||
+             len(in.Endpoints)!=0))||
+			in.TimeoutSeconds<0||in.TimeoutSeconds>limitSeconds{
+			return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)
+		}
+        // Both publishing modes use the same registered, Task-owned,
+        // independently inspected rootless OCI Workspace; substantial output
+        // is transferred only through fixed-size, source-revalidated chunks.
+        var command []string
+        var err error
+        if !large{
+            command,err=publicationReadCommand(in.Path)
+        }else{
+            command,err=publicationLargeReadCommand(in.Path,"manifest",0)
+        }
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		if !workspaceExists{return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)}
+		state,err:=a.engine.InspectContainer(ctx,in.RuntimeID,in.ApplicationID)
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		if state.Status!="running"||!state.IsolationVerified||
+			state.RuntimeID!=in.RuntimeID||state.ApplicationID!=in.ApplicationID||
+			state.SpecHash==""||!exactWorkspaceMount(state,workspace){
+			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: publication requires verified Workspace OCI application",ErrInvalidInput))
+		}
+		timeout:=in.TimeoutSeconds
+        if timeout==0{
+           timeout=30
+           if large{timeout=600}
+        }
+		execCtx,cancel:=context.WithTimeout(ctx,time.Duration(timeout)*time.Second)
+		defer cancel()
+        var bytes []byte
+        var sha string
+        if large{
+            // The Agent cannot supply host paths, transfer offsets, commands
+            // or a target hash. The adapter alone owns the read plan.
+            bytes,sha,err=readWorkspaceLargePublication(execCtx,in.Path,
+                func(stageCtx context.Context,stageCommand []string)(ExecResult,error){
+                    return a.engine.ExecContainer(stageCtx,in.RuntimeID,in.ApplicationID,stageCommand)
+                })
+            if err!=nil{
+                if errors.Is(err,ErrInvalidInput){return tool.AdapterResult{},tool.KnownFailure(err)}
+                return tool.AdapterResult{},err
+            }
+        }else{
+		    observed,execErr:=a.engine.ExecContainer(execCtx,in.RuntimeID,in.ApplicationID,command)
+		    if execCtx.Err()!=nil{return tool.AdapterResult{},execCtx.Err()}
+		    if execErr!=nil{return tool.AdapterResult{},execErr}
+		    if observed.ExitCode!=0{
+			    return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: OCI publication source unavailable or not a regular bounded file",ErrInvalidInput))
+		    }
+		    bytes,sha,err=decodePublicationRead(observed.Stdout)
+		    if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        }
+		publication,err:=a.publisher.PublishWorkspaceFile(ctx,WorkspacePublicationRequest{
+			WorkspaceID:req.WorkspaceID,TaskID:*req.TaskID,AttemptID:*req.AttemptID,
+			RuntimeID:in.RuntimeID,ApplicationID:in.ApplicationID,
+			Path:in.Path,Name:in.Name,MediaType:in.MediaType,
+			Content:bytes,ContentHash:sha,
+		})
+		for i:=range bytes{bytes[i]=0}
+		if err!=nil{return tool.AdapterResult{},err}
+		return result(map[string]any{
+			"runtime_id":in.RuntimeID,"application_id":in.ApplicationID,"path":in.Path,
+			"publication":publication,"succeeded":true,
+			"note":"content verified by immutable artifact blob; other Workspaces require explicit Library grants",
+		}, "Workspace artefact published to Project Library")
+	case ToolAppFileEdit:
+		if !safeID.MatchString(in.ApplicationID)||len(in.Command)!=0||
+			in.Image!=""||in.Message!=""||in.TimeoutSeconds<0||in.TimeoutSeconds>120{
+			return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)
+		}
+		command,digest,size,err:=fileEditCommand(in.Action,in.Path,in.ContentBase64,in.ExpectedSHA256)
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		if !workspaceExists{
+			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Workspace not provisioned",ErrInvalidInput))
+		}
+		state,err:=a.engine.InspectContainer(ctx,in.RuntimeID,in.ApplicationID)
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		if state.Status!="running"||!state.IsolationVerified||
+			state.RuntimeID!=in.RuntimeID||state.ApplicationID!=in.ApplicationID||
+			state.SpecHash==""||!exactWorkspaceMount(state,workspace){
+			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: edit requires verified Workspace sandbox",ErrInvalidInput))
+		}
+		timeout:=in.TimeoutSeconds
+		if timeout==0{timeout=30}
+		execCtx,cancel:=context.WithTimeout(ctx,time.Duration(timeout)*time.Second)
+		defer cancel()
+		observed,err:=a.engine.ExecContainer(execCtx,in.RuntimeID,in.ApplicationID,command)
+		if execCtx.Err()!=nil{return tool.AdapterResult{},execCtx.Err()}
+		if err!=nil{return tool.AdapterResult{},err}
+		// The subprocess command line contains the encoded file bytes. Never
+		// return raw stdout/stderr or the command in a persisted observation.
+		// Validate an exact operation receipt instead of trusting exit code 0.
+		var receipt struct {
+			Action string `json:"action"`
+			Path string `json:"path"`
+			Bytes int `json:"bytes"`
+			SHA256 string `json:"sha256"`
+			Written bool `json:"written"`
+		}
+		succeeded:=observed.ExitCode==0&&json.Unmarshal([]byte(observed.Stdout),&receipt)==nil&&
+			receipt.Written&&receipt.Action==in.Action&&receipt.Path==in.Path&&
+			receipt.Bytes==size&&receipt.SHA256==digest
+		message:="Workspace file edit failed or returned an invalid content receipt"
+		if succeeded{message="Workspace file edit applied; independent Task verification remains required"}
+		failureReason:=""
+		if !succeeded {
+			var diagnostic struct{ Reason string `json:"reason"` }
+			if json.Unmarshal([]byte(observed.Stderr),&diagnostic)==nil{
+				failureReason=boundedEditorDiagnostic(diagnostic.Reason)
+			}
+		}
+		return result(map[string]any{
+			"runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
+			"action":in.Action,"path":in.Path,"content_sha256":digest,"size_bytes":size,
+			"succeeded":succeeded,"exit_code":observed.ExitCode,"failure_reason":failureReason,
+			"receipt_verified":succeeded,"container":state,"engine":profile,
+		},message)
+	case ToolAppFileInspect:
+		if !safeID.MatchString(in.ApplicationID)||len(in.Command)!=0||in.Image!=""||
+			in.TimeoutSeconds<0||in.TimeoutSeconds>60{
+			return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)
+		}
+		command,err:=fileInspectCommand(in.Action,in.Path)
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		if !workspaceExists{
+			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Workspace has not been provisioned",ErrInvalidInput))
+		}
+		state,err:=a.engine.InspectContainer(ctx,in.RuntimeID,in.ApplicationID)
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		if state.Status!="running"||!state.IsolationVerified||
+			state.RuntimeID!=in.RuntimeID||state.ApplicationID!=in.ApplicationID||
+			state.SpecHash==""||!exactWorkspaceMount(state,workspace){
+			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: file preview requires verified Workspace sandbox",ErrInvalidInput))
+		}
+		if in.Action=="preview_text"{
+			if err:=verifyWorkspacePreviewPath(workspace,in.Path);err!=nil{
+				return tool.AdapterResult{},tool.KnownFailure(err)
+			}
+		}
+		timeout:=in.TimeoutSeconds
+		if timeout==0{timeout=15}
+		execCtx,cancel:=context.WithTimeout(ctx,time.Duration(timeout)*time.Second)
+		defer cancel()
+		observed,err:=a.engine.ExecContainer(execCtx,in.RuntimeID,in.ApplicationID,command)
+		if execCtx.Err()!=nil{return tool.AdapterResult{},execCtx.Err()}
+		if err!=nil{return tool.AdapterResult{},err}
+		success:=observed.ExitCode==0
+		summary:="Workspace file "+in.Action+" observed"
+		if !success{summary=fmt.Sprintf("Workspace file %s exited with code %d",in.Action,observed.ExitCode)}
+		return result(map[string]any{
+			"runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
+			"action":in.Action,"path":in.Path,"preview_only":true,
+			"content_limit_bytes":65536,"succeeded":success,
+			"result":observed,"container":state,"engine":profile,
+		},summary)
+	case ToolAppGitInspect:
+		if !safeID.MatchString(in.ApplicationID)||len(in.Command)!=0||in.Image!=""||in.TimeoutSeconds<0||in.TimeoutSeconds>120 {
+			return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)
+		}
+		command,err:=gitInspectCommand(in.Action)
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		if !workspaceExists {
+			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Workspace has not been provisioned",ErrInvalidInput))
+		}
+		state,err:=a.engine.InspectContainer(ctx,in.RuntimeID,in.ApplicationID)
+		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+		if state.Status!="running"||!state.IsolationVerified||
+			state.RuntimeID!=in.RuntimeID||state.ApplicationID!=in.ApplicationID||
+			state.SpecHash==""||!exactWorkspaceMount(state,workspace){
+			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Git inspection requires verified Workspace sandbox",ErrInvalidInput))
+		}
+		timeout:=in.TimeoutSeconds
+		if timeout==0{timeout=30}
+		execCtx,cancel:=context.WithTimeout(ctx,time.Duration(timeout)*time.Second)
+		defer cancel()
+		observed,err:=a.engine.ExecContainer(execCtx,in.RuntimeID,in.ApplicationID,command)
+		if execCtx.Err()!=nil{return tool.AdapterResult{},execCtx.Err()}
+		if err!=nil{return tool.AdapterResult{},err}
+		success:=observed.ExitCode==0
+		summary:="Workspace Git "+in.Action+" inspected"
+		if !success{summary=fmt.Sprintf("Workspace Git %s exited with code %d",in.Action,observed.ExitCode)}
+		return result(map[string]any{
+			"runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
+			"action":in.Action,"succeeded":success,"result":observed,
+			"container":state,"engine":profile,
+		},summary)
+	case ToolAppToolchainPreflight:
+        // This is a user/Task-declared requirements check, not an installation
+        // operation or proof of permission to execute any binary. Unknown
+        // executable names are supported, but command/options/host paths are
+        // never accepted as requirements.
+        declared,err:=decodeToolchainRequirements(req.Input)
+        if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        if !workspaceExists{
+            return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Workspace not provisioned",ErrInvalidInput))
+        }
+        state,err:=a.engine.InspectContainer(ctx,declared.RuntimeID,declared.ApplicationID)
+        if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        if state.Status!="running"||!state.IsolationVerified||
+           state.RuntimeID!=declared.RuntimeID||state.ApplicationID!=declared.ApplicationID||
+           state.SpecHash==""||!exactWorkspaceMount(state,workspace){
+            return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: preflight requires a running and independently verified Workspace OCI application",ErrInvalidInput))
+        }
+        checkCtx,cancel:=context.WithTimeout(ctx,12*time.Second)
+        defer cancel()
+        observed,err:=a.engine.ExecContainer(checkCtx,declared.RuntimeID,declared.ApplicationID,
+            workspaceToolchainPreflightCommand(declared))
+        if checkCtx.Err()!=nil{return tool.AdapterResult{},checkCtx.Err()}
+        if err!=nil{return tool.AdapterResult{},err}
+        var check ToolchainPreflightResult
+        if observed.ExitCode!=0{
+            // Distroless/no POSIX shell (or inability to inspect) is an
+            // unknown preflight, never evidence that dependencies are absent.
+            check=toolchainPreflightUnavailable(declared,state.SpecHash)
+        }else{
+            check,err=parseToolchainPreflight(observed.Stdout,declared,state.SpecHash)
+            if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        }
+        return result(map[string]any{
+            "runtime_id":declared.RuntimeID,"application_id":declared.ApplicationID,
+            "preflight":check,"sandbox_verified":true,
+            "note":"Executable presence is not package/version qualification, successful execution, or an authority grant. Missing prerequisites require an explicitly approved toolchain image.",
+        },"Workspace toolchain preflight: "+check.Status)
+	case ToolAppToolsDiscover:
+        // Broad, read-only toolchain discovery executes a *fixed* scanner in
+        // the same verified rootless application as project.app.exec.
+        // Its response is an inventory of executable names, not permission to
+        // execute those programs or install system-level dependencies.
+        if !validToolDiscoveryEnvelope(req.Input)||!workspaceExists{
+            return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)
+        }
+        state,err:=a.engine.InspectContainer(ctx,in.RuntimeID,in.ApplicationID)
+        if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        if state.Status!="running"||!state.IsolationVerified||
+           state.RuntimeID!=in.RuntimeID||state.ApplicationID!=in.ApplicationID||
+           state.SpecHash==""||!exactWorkspaceMount(state,workspace){
+            return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Workspace discovery requires a verified rootless OCI application",ErrInvalidInput))
+        }
+        discoveryCtx,cancel:=context.WithTimeout(ctx,15*time.Second)
+        defer cancel()
+        scanned,err:=a.engine.ExecContainer(discoveryCtx,in.RuntimeID,in.ApplicationID,workspaceToolDiscoveryCommand())
+        if discoveryCtx.Err()!=nil{return tool.AdapterResult{},discoveryCtx.Err()}
+        if err!=nil{return tool.AdapterResult{},err}
+        if scanned.ExitCode!=0{
+            // A distroless image without POSIX sh, or a scanner error, must
+            // be visible as unavailable; no fallback host inventory.
+            return result(map[string]any{
+                "runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
+                "status":"unavailable","reason":"approved OCI image does not support the bounded POSIX tool scanner",
+                "tools":[]WorkspaceTool{},"count":0,
+                "note":"No host fallback; use a compatible toolchain image or authorised project.app.exec instead.",
+            },"Workspace toolchain discovery unavailable inside this image")
+        }
+        inventory,err:=decodeWorkspaceToolDiscovery(scanned.Stdout)
+        if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        return result(map[string]any{
+            "runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
+            "status":"observed","inventory":inventory,
+            "execution_enabled":false,"installation_permitted":false,
+            "sandbox_verified":true,
+        },"Observed executable names within the independently verified Workspace")
+	case ToolAppUnrealMCPProbe:
+        // Editor MCP in UE 5.8 is experimental and unauthenticated. Always
+        // probe from the owned rootless application network namespace, never
+        // from the host, a remote Node endpoint or a shared OnePane proxy.
+        // This tool has no methods for tools/call or editor mutations.
+        if !validUnrealMCPEnvelope(req.Input)||!workspaceExists{
+            return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)
+        }
+        state,err:=a.engine.InspectContainer(ctx,in.RuntimeID,in.ApplicationID)
+        if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        if state.Status!="running"||!state.IsolationVerified||
+           state.RuntimeID!=in.RuntimeID||state.ApplicationID!=in.ApplicationID||
+           state.SpecHash==""||!exactWorkspaceMount(state,workspace){
+            return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Unreal MCP inspection requires verified rootless Workspace ownership",ErrInvalidInput))
+        }
+        timeout:=in.TimeoutSeconds
+        if timeout==0{timeout=8}
+        probeCtx,cancel:=context.WithTimeout(ctx,time.Duration(timeout)*time.Second)
+        defer cancel()
+        observed,err:=a.engine.ExecContainer(probeCtx,in.RuntimeID,in.ApplicationID,unrealMCPProbeCommand())
+        if probeCtx.Err()!=nil{return tool.AdapterResult{},probeCtx.Err()}
+        if err!=nil{return tool.AdapterResult{},err}
+        available:=false
+        if observed.ExitCode==0{
+            verified,parseErr:=parseUnrealMCPProbe(observed.Stdout)
+            if parseErr!=nil{return tool.AdapterResult{},tool.KnownFailure(parseErr)}
+            available=verified
+        }
+        status:="unavailable"
+        if available{status="ready"}
+        return result(map[string]any{
+            "runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
+            "engine_id":"unreal_engine","transport":"same_container_loopback_mcp",
+            "status":status,"identity_verified":available,
+            "editor_tool_calls_enabled":false,"artifact_verified":false,
+            "note":"Experimental Unreal 5.8 local-editor MCP identity handshake only. No dynamic tools, remote forwarding or external-effect proof.",
+        },"Unreal MCP same-Workspace editor readiness: "+status)
+	case ToolAppGodotBuild:
+        // Godot must be part of the operator-approved immutable image.
+        // No on-demand downloads, host shell, arbitrary flags or model-supplied
+        // file paths are permitted by this specialised Tool Gateway entry.
+        if !validGodotEnvelope(req.Input)||!safeID.MatchString(in.ApplicationID) ||
+           in.Image!=""||in.Path!=""||in.Name!=""||in.MediaType!=""||
+           in.ContentBase64!=""||in.ExpectedSHA256!=""||in.Message!=""||
+           len(in.Command)!=0||len(in.Endpoints)!=0||
+           len(in.RuntimeSpec)!=0||len(in.ResourceLimits)!=0||
+           len(in.EnvironmentBindings)!=0||len(in.NetworkPolicy)!=0||
+           in.TimeoutSeconds<0||in.TimeoutSeconds>3600 {
+            return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)
+        }
+        command,err:=godotBuildCommand(in.Action)
+        if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        if !workspaceExists{
+            return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Workspace not provisioned",ErrInvalidInput))
+        }
+        state,err:=a.engine.InspectContainer(ctx,in.RuntimeID,in.ApplicationID)
+        if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        if state.Status!="running"||!state.IsolationVerified||
+           state.RuntimeID!=in.RuntimeID||state.ApplicationID!=in.ApplicationID||
+           state.SpecHash==""||!exactWorkspaceMount(state,workspace){
+            return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Godot build requires an independently verified running Workspace sandbox",ErrInvalidInput))
+        }
+        timeout:=in.TimeoutSeconds
+        if timeout==0{timeout=600}
+        execCtx,cancel:=context.WithTimeout(ctx,time.Duration(timeout)*time.Second)
+        defer cancel()
+        // A failed, missing or spoofed prerequisite check cannot launch Godot.
+        preflightStatus,preflightFingerprint,err:=a.checkExecutablePrerequisites(
+            execCtx,in.RuntimeID,in.ApplicationID,state.SpecHash,in.RequiredExecutables)
+        if err!=nil{return tool.AdapterResult{},err}
+        observed,err:=a.engine.ExecContainer(execCtx,in.RuntimeID,in.ApplicationID,command)
+        if execCtx.Err()!=nil{return tool.AdapterResult{},execCtx.Err()}
+        if err!=nil{return tool.AdapterResult{},err}
+        succeeded:=observed.ExitCode==0
+        summary:="Godot "+in.Action+" completed inside verified Workspace; artifact verification/publication remains separate"
+        if !succeeded{
+            summary=fmt.Sprintf("Godot %s exited with code %d; no build success is claimed",in.Action,observed.ExitCode)
+        }
+        return result(map[string]any{
+            "runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
+            "action":in.Action,"succeeded":succeeded,"result":observed,
+            "container":state,"engine":profile,
+            "toolchain_preflight":preflightStatus,"toolchain_requirements_sha256":preflightFingerprint,
+            "artifact_verified":false,
+            "note":"Use Task-owned project.app.files.publish for immutable hash-verified output; build exit code is not artifact proof",
+        },summary)
+    case ToolAppExec:
+		// A Task may take longer on local CPU, but cannot hold a sandbox exec
+		// indefinitely. The caller's shorter cancellation deadline still wins.
+		if in.TimeoutSeconds < 0 || in.TimeoutSeconds > 7200 {
+			return tool.AdapterResult{}, tool.KnownFailure(fmt.Errorf("%w: command timeout must be 1..7200 seconds", ErrInvalidInput))
+		}
+		if in.TimeoutSeconds == 0 { in.TimeoutSeconds = 900 }
 		if !safeID.MatchString(in.ApplicationID) || len(in.Command) == 0 || len(in.Command) > 128 {
 			return tool.AdapterResult{}, tool.KnownFailure(ErrInvalidInput)
 		}
@@ -159,17 +577,41 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 		if err != nil {
 			return tool.AdapterResult{}, tool.KnownFailure(err)
 		}
-		if state.Status != "running" || !state.IsolationVerified {
+		if state.Status != "running" || !state.IsolationVerified || !workspaceExists ||
+			state.RuntimeID != in.RuntimeID || state.ApplicationID != in.ApplicationID ||
+			state.SpecHash == "" || !exactWorkspaceMount(state, workspace) {
 			return tool.AdapterResult{}, tool.KnownFailure(fmt.Errorf("%w: application is not a verified running sandbox", ErrInvalidInput))
 		}
-		execResult, err := a.engine.ExecContainer(ctx, in.RuntimeID, in.ApplicationID, in.Command)
+		execCtx, cancel := context.WithTimeout(ctx, time.Duration(in.TimeoutSeconds)*time.Second)
+		defer cancel()
+        preflightStatus,preflightFingerprint,err:=a.checkExecutablePrerequisites(
+            execCtx,in.RuntimeID,in.ApplicationID,state.SpecHash,in.RequiredExecutables)
+        if err!=nil{return tool.AdapterResult{},err}
+		execResult, err := a.engine.ExecContainer(execCtx, in.RuntimeID, in.ApplicationID, in.Command)
+		// Return the cancellation cause (rather than an engine-specific
+		// "signal: killed") so the Gateway records timed_out/cancelled.
+		if execCtx.Err() != nil {
+			return tool.AdapterResult{}, execCtx.Err()
+		}
 		if err != nil {
 			return tool.AdapterResult{}, err
 		}
-		return result(map[string]any{"runtime_id": in.RuntimeID, "application_id": in.ApplicationID, "command": in.Command, "result": execResult, "container": state, "engine": profile}, "sandboxed application command executed")
+		// The transport/tool invocation completed even if compilation/tests
+		// failed. Preserve the nonzero exit code and diagnostic output so the
+		// agent can diagnose and retry. Never label a failed build as successful.
+		succeeded := execResult.ExitCode == 0
+		summary := "sandboxed application command completed successfully"
+		if !succeeded {
+			summary = fmt.Sprintf("sandboxed application command exited with code %d", execResult.ExitCode)
+		}
+		return result(map[string]any{"runtime_id": in.RuntimeID, "application_id": in.ApplicationID,
+			"command": in.Command, "timeout_seconds": in.TimeoutSeconds,
+            "toolchain_preflight": preflightStatus, "toolchain_requirements_sha256": preflightFingerprint,
+			"succeeded": succeeded, "result": execResult, "container": state, "engine": profile}, summary)
 	case ToolRuntimeEnsure:
-		if err := os.MkdirAll(workspace, 0o700); err != nil {
-			return tool.AdapterResult{}, err
+		workspace, workspaceExists, err = managedWorkspacePath(a.dataDir, in.RuntimeID, true)
+		if err != nil || !workspaceExists {
+			return tool.AdapterResult{}, tool.KnownFailure(err)
 		}
 		networkInternal, err := networkInternalFromPolicy(in.NetworkPolicy)
 		if err != nil {
@@ -202,8 +644,9 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 		if !safeID.MatchString(in.ApplicationID) || !validImage(in.Image) {
 			return tool.AdapterResult{}, tool.KnownFailure(ErrInvalidInput)
 		}
-		if err := os.MkdirAll(workspace, 0o700); err != nil {
-			return tool.AdapterResult{}, err
+		workspace, workspaceExists, err = managedWorkspacePath(a.dataDir, in.RuntimeID, true)
+		if err != nil || !workspaceExists {
+			return tool.AdapterResult{}, tool.KnownFailure(err)
 		}
 		spec, err := decodeRuntimeSpec(in.RuntimeSpec)
 		if err != nil {

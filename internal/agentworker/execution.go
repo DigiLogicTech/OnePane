@@ -52,17 +52,23 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	}
 	rp := defaultRoutePolicy()
 	_ = json.Unmarshal(run.RoutePolicy, &rp)
+ if !validComputePlacement(rp.ComputePreference){
+  return s.blockRun(ctx,run,res,"persisted Worker compute placement is invalid")
+ }
 	label := policy.DataLabel{WorkspaceID: run.WorkspaceID, Confidentiality: policy.ConfidentialityInternal, Residency: policy.ResidencyAny, Trust: policy.TrustUserInstruction}
 	tokens := int64((compiled.Manifest.UsedBytes + 3) / 4)
 	if tokens < 1 {
 		tokens = 1
 	}
-	decision, err := s.scheduler.Route(ctx, scheduler.RouteRequest{WorkspaceID: run.WorkspaceID, CapabilityID: run.CapabilityID, RoleName: run.RoleName, ProtocolLevel: run.ProtocolLevel, ContextTokens: tokens, DataLabel: label, AllowUntested: rp.AllowUntested, AllowLimited: rp.AllowLimited, AllowMediated: rp.AllowMediated, AllowDegraded: rp.AllowDegraded, RequireZeroIncrementalCost: rp.RequireZeroIncrementalCost, PreferZeroIncrementalCost: rp.PreferZeroIncrementalCost, AllowSubscriptionUsage: rp.AllowSubscriptionUsage, AllowPotentialMonetarySpend: rp.AllowPotentialMonetarySpend, LocalOnly: !rp.AllowRemote, IncludeCandidateIDs: rp.IncludeCandidateIDs, ExcludeCandidateIDs: rp.ExcludedCandidateIDs})
+	decision, err := s.scheduler.Route(ctx, scheduler.RouteRequest{WorkspaceID: run.WorkspaceID, CapabilityID: run.CapabilityID, RoleName: run.RoleName, ProtocolLevel: run.ProtocolLevel, ContextTokens: tokens, DataLabel: label, AllowUntested: rp.AllowUntested, AllowLimited: rp.AllowLimited, AllowMediated: rp.AllowMediated, AllowDegraded: rp.AllowDegraded, RequireZeroIncrementalCost: rp.RequireZeroIncrementalCost, PreferZeroIncrementalCost: rp.PreferZeroIncrementalCost, AllowSubscriptionUsage: rp.AllowSubscriptionUsage, AllowPotentialMonetarySpend: rp.AllowPotentialMonetarySpend, LocalOnly: !rp.AllowRemote, ComputePreference:rp.ComputePreference, IncludeCandidateIDs: rp.IncludeCandidateIDs, ExcludeCandidateIDs: rp.ExcludedCandidateIDs})
 	if err != nil || decision.Selected == nil {
 		if err == nil {
 			err = scheduler.ErrNoEligibleCandidate
 		}
 		_ = s.journal(ctx, run.ID, "route", "failed", nil, nil, nil, nil, map[string]any{"error": err.Error(), "rejected": decision.Rejected})
+		if shouldWaitForLocalModel(t,err,decision.Rejected) {
+			return s.waitForLocalModel(ctx,run,res,"awaiting qualified local model: "+err.Error())
+		}
 		return s.blockRun(ctx, run, res, "no eligible inference/agent runtime: "+err.Error())
 	}
 	cand := decision.Selected.Candidate
@@ -111,7 +117,10 @@ func (s *Service) compileContext(ctx context.Context, run Run, t task.Task) (con
 		profileRaw,_:=json.Marshal(map[string]any{"profile_id":profileID,"name":profileName,"role":profileRole,"revision":profileRevision,"instructions":profileInstructions,"authority":false,"note":"Profile instructions affect reasoning only and grant no capabilities or permissions."})
 		sections=append(sections,contextcompiler.Section{ID:"agent-profile",Kind:"agent_profile",Trust:"USER_INSTRUCTION",Authoritative:false,Required:true,Priority:99,Content:profileRaw})
 	} else if !errors.Is(err,sql.ErrNoRows) { return contextcompiler.Result{},err }
-	if len(run.Continuation) > 0 && string(run.Continuation) != "{}" {
+	// Resource backoff is internal scheduler bookkeeping, not an instruction
+	// to the model. Once it becomes available, don't tell the model that it is
+	// still unavailable or let historical wait data bias tool selection.
+	if len(run.Continuation) > 0 && string(run.Continuation) != "{}" && decodeModelWait(run.Continuation)==nil {
 		sections = append(sections, contextcompiler.Section{ID: "worker-continuation", Kind: "continuation", Trust: "UNVERIFIED_DERIVED", Authoritative: false, Required: false, Priority: 80, Content: run.Continuation})
 	}
 	if cp, err := s.verification.LatestValidCheckpoint(ctx, t.ID); err == nil {
@@ -136,21 +145,27 @@ func (s *Service) compileContext(ctx context.Context, run Run, t task.Task) (con
 			sections = append(sections, contextcompiler.Section{ID: "project-current", Kind: "project", Trust: "AUTHORITATIVE_DATA", Authoritative: true, Priority: 70, Content: raw})
 		}
 	}
+	// Models must not guess a runtime/application identity. The manifest is
+	// populated from the exact persisted Project Workspace and contains only
+	// read-only OCI tool metadata; capability leases and independent runtime
+	// verification remain mandatory before every command.
+	if t.ProjectWorkspaceID != nil {
+		manifest,err:=workspaceExecutionManifest(ctx,s.db,t)
+		if err!=nil{return contextcompiler.Result{},err}
+		if len(manifest)>0{
+			sections=append(sections,contextcompiler.Section{
+				ID:"workspace-execution-manifest",Kind:"resource_manifest",
+				Trust:"AUTHORITATIVE_DATA",Authoritative:true,
+				Required:false,Priority:75,Content:manifest,
+			})
+		}
+	}
 	return contextcompiler.Compile(s.cfg.ContextMaxBytes, sections)
 }
 
 func (s *Service) dispatch(ctx context.Context, run Run, t task.Task, c scheduler.Candidate, compiled contextcompiler.Result, constraints json.RawMessage, label policy.DataLabel, reservationID string) (agentprotocol.Response, string, error) {
 	if c.Kind == scheduler.CandidateAgentRuntime {
-		permitted := append([]agentprotocol.ProposalType(nil), permittedProposals...)
-		if !c.ToolCallback {
-			filtered := permitted[:0]
-			for _, p := range permitted {
-				if p != agentprotocol.ProposalTool {
-					filtered = append(filtered, p)
-				}
-			}
-			permitted = filtered
-		}
+		permitted,_:=proposalsForCandidate(c)
 		taskID, attemptID := t.ID, run.AttemptID
 		result, err := s.runtimes.Invoke(ctx, agentruntime.InvokeCommand{WorkspaceID: run.WorkspaceID, TaskID: &taskID, AttemptID: &attemptID, PrincipalID: WorkerPrincipal, ConnectionID: c.ID, Role: run.RoleName, Objective: t.Objective, Constraints: constraints, Context: compiled.Sections, ContextManifest: compiled.ManifestJSON, PermittedProposalTypes: permitted, InputLabel: label, ActorPrincipalID: strPtr(WorkerPrincipal), BudgetReservationID: optionalString(reservationID)})
 		if err != nil {
@@ -162,17 +177,8 @@ func (s *Service) dispatch(ctx context.Context, run Run, t task.Task, c schedule
 		return *result.Response, result.Invocation.ID, nil
 	}
 	reqID, _ := s.ids.New("agentreq")
-	permitted := append([]agentprotocol.ProposalType(nil), permittedProposals...)
-	if !c.ToolCallback {
-		filtered := permitted[:0]
-		for _, p := range permitted {
-			if p != agentprotocol.ProposalTool {
-				filtered = append(filtered, p)
-			}
-		}
-		permitted = filtered
-	}
-	areq := agentprotocol.Request{ProtocolVersion: agentprotocol.Version, RequestID: reqID, WorkspaceID: run.WorkspaceID, TaskID: t.ID, AttemptID: run.AttemptID, PrincipalID: WorkerPrincipal, Role: run.RoleName, Objective: t.Objective, Constraints: constraints, Context: compiled.Sections, ContextManifest: compiled.ManifestJSON, PermittedProposalTypes: permitted, ToolCallback: c.ToolCallback}
+	permitted,structuredJSONTools:=proposalsForCandidate(c)
+	areq := agentprotocol.Request{ProtocolVersion: agentprotocol.Version, RequestID: reqID, WorkspaceID: run.WorkspaceID, TaskID: t.ID, AttemptID: run.AttemptID, PrincipalID: WorkerPrincipal, Role: run.RoleName, Objective: t.Objective, Constraints: constraints, Context: compiled.Sections, ContextManifest: compiled.ManifestJSON, PermittedProposalTypes: permitted, ToolCallback: c.ToolCallback, JSONToolProposals:structuredJSONTools}
 	if err := areq.Validate(); err != nil {
 		return agentprotocol.Response{}, "", err
 	}
@@ -335,9 +341,39 @@ func (s *Service) handleTool(ctx context.Context, run Run, t task.Task, resp age
 	if err != nil {
 		return s.continueWithError(ctx, run, res, "tool_definition_error", err)
 	}
-	if err := workspaceToolAllowed(t.Completion, def.CapabilityID, def.Mode, p.ToolID, p.ResourceRef); err != nil {
+	if err := workspaceToolAllowedForTask(t, def.CapabilityID, def.Mode, p.ToolID, p.ResourceRef); err != nil {
 		_ = s.journal(ctx, run.ID, "tool", "denied", nil, nil, strPtr("tool"), nil, map[string]any{"tool_id": p.ToolID, "resource_ref": p.ResourceRef, "reason": err.Error(), "policy": "project_workspace"})
 		return s.blockRun(ctx, run, res, "workspace policy denied tool: "+err.Error())
+	}
+	// The lease can authorize a generic resource pattern, but cannot authorize
+	// a model to select another Workspace's runtime, application or OCI image.
+	// Check persisted Task ownership before attempting to find/consume a lease.
+	if err := enforceSandboxToolOwnership(ctx, s.db, t, p.ToolID, p.ResourceRef, p.Input); err != nil {
+		_ = s.journal(ctx, run.ID, "tool", "denied", nil, nil, strPtr("tool"), nil,
+			map[string]any{"tool_id": p.ToolID, "resource_ref": p.ResourceRef, "reason": err.Error(), "policy": "sandbox_ownership"})
+		return s.blockRun(ctx, run, res, "sandbox scope denied tool: "+err.Error())
+	}
+	// A human-approved Workspace toolchain cannot be bypassed by leaving
+	// required_executables empty or naming another registered OCI application.
+	// Validate before consulting any authority lease or invoking a tool.
+	if p.ToolID=="project.app.exec"||p.ToolID=="project.app.godot.build"{
+		p.Input,err=applyApprovedWorkspaceToolchain(ctx,s.db,t,p.Input)
+		if err!=nil{
+			_ = s.journal(ctx,run.ID,"tool","denied",nil,nil,strPtr("tool"),nil,
+				map[string]any{"tool_id":p.ToolID,"resource_ref":p.ResourceRef,
+				"reason":err.Error(),"policy":"approved_workspace_toolchain"})
+			return s.blockRun(ctx,run,res,"Workspace toolchain admission denied: "+err.Error())
+		}
+	}
+	if p.ToolID=="project.app.exec"||p.ToolID=="project.app.godot.build"{
+		// Preserve this same Task/Attempt if the exact human-approved OCI
+		// application has not yet been started by the Node reconciler.
+		// Planning/approval may continue separately, but a blocked build
+		// never runs on a substitute image or consumes another model turn.
+		wait,waitErr:=approvedToolchainWaitCandidate(ctx,s.db,t,p.Input)
+		if waitErr!=nil{return s.blockRun(ctx,run,res,
+			"Workspace toolchain resource admission denied: "+waitErr.Error())}
+		if wait!=nil{return s.waitForWorkspaceToolchain(ctx,run,res,wait)}
 	}
 	leaseID, err := s.findLease(ctx, run.WorkspaceID, run.TaskID, def.CapabilityID, def.Mode, p.ResourceRef)
 	if err != nil {
@@ -401,7 +437,7 @@ func (s *Service) handleTool(ctx context.Context, run Run, t task.Task, resp age
 	if err := s.observations.VerifyIntegrity(ctx, obs.ID); err != nil {
 		return s.failRun(ctx, run, res, err)
 	}
-	cont, _ := json.Marshal(map[string]any{"tool_result": map[string]any{"tool_id": inv.ToolID, "invocation_id": inv.ID, "observation_id": obs.ID, "summary": inv.Summary, "result": boundedJSON(inv.Result, 16<<10)}})
+	cont, _ := json.Marshal(map[string]any{"tool_result": map[string]any{"tool_id": inv.ToolID, "invocation_id": inv.ID, "observation_id": obs.ID, "summary": inv.Summary, "result": boundedToolResult(inv.Result, 16<<10)}})
 	if err := s.updateRun(ctx, run.ID, run.Revision, RunRunning, cont, nil, 0, 0, nil, nil, nil); err != nil {
 		return failedResult(res, err)
 	}
@@ -426,35 +462,70 @@ func (s *Service) handleDelegate(ctx context.Context, run Run, t task.Task, resp
 	if !json.Valid(p.Completion) {
 		return s.failRun(ctx, run, res, fmt.Errorf("delegate completion JSON invalid"))
 	}
+	// Canonical ProjectWorkspaceID is an authoritative relational boundary,
+	// not merely a model-visible JSON hint. It MUST survive delegation so the
+	// child cannot disappear from the Workspace queue or lose OCI tool scoping.
 	// Child work inherits the parent's OnePane workspace routing/access policy.
 	// This prevents delegated workers from escaping the originating workspace's
 	// model-routing, remote-access, sandbox, or secret boundaries.
 	p.Completion = inheritOnePaneRouting(t.Completion, p.Completion)
 	actor := WorkerPrincipal
 	var child task.Task
+	// A model response cannot be considered a committed delegation until the
+	// entire child/edge/Task/Attempt/Worker/journal checkpoint is durable.
+	// Every mutation below is in ONE transaction: crash/retry cannot leave an
+	// orphaned child or duplicate its work in another Workspace.
 	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		var e error
-		child, e = s.tasks.CreateInTransaction(ctx, tx, task.CreateCommand{WorkspaceID: t.WorkspaceID, ProjectID: t.ProjectID, ArtifactSessionID: t.ArtifactSessionID, PlanID: t.PlanID, ParentTaskID: &t.ID, Objective: p.Objective, SchedulingClass: t.SchedulingClass, Priority: t.Priority, Completion: p.Completion, ActorPrincipalID: &actor})
-		if e != nil {
-			return e
+		var observedStatus string
+		var revision int64
+		if err:=tx.QueryRowContext(ctx,`SELECT status,revision FROM agent_worker_runs
+		 WHERE id=? AND task_id=? AND attempt_id=? AND workspace_id=?`,
+		 run.ID,t.ID,run.AttemptID,t.WorkspaceID).Scan(&observedStatus,&revision);err!=nil{return err}
+		if observedStatus!=string(RunRunning)||revision!=run.Revision {
+			return fmt.Errorf("%w: delegation Worker incarnation changed",ErrInvalidWorkerState)
 		}
-		meta, _ := json.Marshal(map[string]any{"source": "agent_delegate", "run_id": run.ID})
-		_, e = tx.ExecContext(ctx, `INSERT INTO task_dependencies(task_id,depends_on_task_id,dependency_type,dependency_mode,metadata_json) VALUES(?,?,'hard','all',?)`, t.ID, child.ID, string(meta))
-		return e
+		// Validate persisted ancestry inside the write transaction before
+		// allocating any child ID, event, dependency or admission outbox job.
+		if err:=verifyDelegationAncestry(ctx,tx,t);err!=nil{return err}
+		var e error
+		child, e = s.tasks.CreateInTransaction(ctx, tx, task.CreateCommand{
+			WorkspaceID:t.WorkspaceID,ProjectID:t.ProjectID,ProjectWorkspaceID:t.ProjectWorkspaceID,
+			ArtifactSessionID:t.ArtifactSessionID,PlanID:t.PlanID,ParentTaskID:&t.ID,
+			Objective:p.Objective,SchedulingClass:t.SchedulingClass,Priority:t.Priority,
+			Completion:p.Completion,ActorPrincipalID:&actor,
+		})
+		if e!=nil{return e}
+		meta,_:=json.Marshal(map[string]any{"source":"agent_delegate","run_id":run.ID})
+		if _,e=tx.ExecContext(ctx,`INSERT INTO task_dependencies
+		 (task_id,depends_on_task_id,dependency_type,dependency_mode,metadata_json)
+		 VALUES(?,?,'hard','all',?)`,t.ID,child.ID,string(meta));e!=nil{return e}
+		if e=s.tasks.WaitDependencyInTransaction(ctx,tx,task.TransitionCommand{
+			TaskID:t.ID,ExpectedRevision:t.Revision,ActorPrincipalID:&actor,
+			Reason:"waiting for delegated child task "+child.ID,
+		});e!=nil{return e}
+		cont,_:=json.Marshal(map[string]any{"delegated_task_id":child.ID,"objective":child.Objective})
+		now:=s.clock.UnixMilli()
+		updated,e:=tx.ExecContext(ctx,`UPDATE agent_worker_runs
+		 SET status='waiting',continuation_json=?,last_error=NULL,revision=revision+1,updated_at=?
+		 WHERE id=? AND task_id=? AND attempt_id=? AND workspace_id=?
+		 AND status='running' AND revision=?`,string(cont),now,
+		 run.ID,t.ID,run.AttemptID,t.WorkspaceID,run.Revision)
+		if e!=nil{return e}
+		n,e:=updated.RowsAffected()
+		if e!=nil{return e}
+		if n!=1{return fmt.Errorf("%w: concurrent Worker delegation",ErrInvalidWorkerState)}
+		return s.journalInTransaction(ctx,tx,run.ID,"delegate","waiting",nil,nil,
+		 strPtr("delegate"),strPtr(child.ID),map[string]any{"child_task_id":child.ID})
 	})
-	if err != nil {
-		return s.failRun(ctx, run, res, err)
+	if errors.Is(err,ErrDelegationDepthLimit)||errors.Is(err,ErrDelegationAncestry){
+		return s.blockRun(ctx,run,res,err.Error())
 	}
-	cont, _ := json.Marshal(map[string]any{"delegated_task_id": child.ID, "objective": child.Objective})
-	if err := s.updateRun(ctx, run.ID, run.Revision, RunWaiting, cont, nil, 0, 0, nil, nil, nil); err != nil {
-		return failedResult(res, err)
+	if err!=nil{
+		// The transaction rolled back all state. Do not call failRun here:
+		// a concurrent Worker may now own this incarnation, and failing it
+		// would destroy the safe optimistic-concurrency boundary.
+		return failedResult(res,err)
 	}
-	cur, _ := s.tasks.Get(ctx, t.ID)
-	_, err = s.tasks.WaitDependency(ctx, task.TransitionCommand{TaskID: cur.ID, ExpectedRevision: cur.Revision, ActorPrincipalID: &actor, Reason: "waiting for delegated child task " + child.ID})
-	if err != nil {
-		return s.failRun(ctx, run, res, err)
-	}
-	_ = s.journal(ctx, run.ID, "delegate", "waiting", nil, nil, strPtr("delegate"), strPtr(child.ID), map[string]any{"child_task_id": child.ID})
 	res.Status = "waiting_dependency"
 	return res
 }

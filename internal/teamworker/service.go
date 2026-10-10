@@ -395,7 +395,24 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		}
 		return s.fail(ctx, res, err)
 	}
-	content, _ := json.Marshal(map[string]any{"text": response.Message, "proposal_type": response.ProposalType, "proposal": json.RawMessage(response.Proposal), "candidate_kind": kind, "candidate_id": cid, "research_phase": researchPhase, "round": turnRound})
+	// Record immutable input/seat/response fingerprints in the durable
+	// Council message. This metadata is created only *after* the seat responds,
+	// and same-round/independent-pass visibility filters still apply.
+	messageContent:=map[string]any{"text": response.Message, "proposal_type": response.ProposalType,
+		"proposal": json.RawMessage(response.Proposal), "candidate_kind": kind,
+		"candidate_id": cid, "research_phase": researchPhase, "round": turnRound}
+	if researchMode {
+		provenance,provenanceErr:=buildCouncilTurnProvenance(
+			s.clock.UnixMilli(),manifestRecord.SnapshotSHA256,contextHash,
+			areq,response,cand,profileID,profileRevision,turnRound,researchPhase,
+			seatBinding.CandidateID)
+		if provenanceErr!=nil {
+			return s.fail(ctx,res,fmt.Errorf("capture Research Council provenance: %w",provenanceErr))
+		}
+		messageContent["research_provenance"]=provenance
+	}
+	content,err:=json.Marshal(messageContent)
+	if err!=nil{return s.fail(ctx,res,err)}
 	msg, err := s.teams.PostMessage(ctx, team.PostMessageCommand{SessionID: ss.ID, AuthorPrincipalID: WorkerPrincipal, AuthorMemberID: &member.ID, Kind: "agent", Content: content})
 	if err != nil {
 		return s.fail(ctx, res, err)

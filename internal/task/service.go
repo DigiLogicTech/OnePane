@@ -68,6 +68,20 @@ func (s *Service) List(ctx context.Context, workspaceID string, limit int) ([]Ta
 	return s.repo.List(ctx, workspaceID, limit)
 }
 
+// ListProjectWorkspace exposes the authorised backend-scoped Task inventory.
+// The API independently authenticates the tenancy, Project and Workspace
+// relationships. This selector cannot accidentally return other Workspaces.
+func (s *Service) ListProjectWorkspace(ctx context.Context, tenancyID, projectID, projectWorkspaceID string, limit int) ([]Task,error) {
+ if strings.TrimSpace(tenancyID)==""||strings.TrimSpace(projectID)==""||strings.TrimSpace(projectWorkspaceID)==""{
+  return nil,fmt.Errorf("%w: tenancy, Project and Workspace required",ErrInvalidCommand)
+ }
+ reader,ok:=s.repo.(interface{
+  ListProjectWorkspace(context.Context,string,string,string,int)([]Task,error)
+ })
+ if !ok{return nil,fmt.Errorf("%w: scoped Task repository is unavailable",ErrInvalidCommand)}
+ return reader.ListProjectWorkspace(ctx,tenancyID,projectID,projectWorkspaceID,limit)
+}
+
 func (s *Service) ListArchived(ctx context.Context, workspaceID string, limit int) ([]Task, error) {
 	workspaceID = strings.TrimSpace(workspaceID)
 	if workspaceID == "" {
@@ -115,6 +129,14 @@ func (s *Service) CreateInTransaction(ctx context.Context, tx storage.Tx, cmd Cr
 	}
 	if !json.Valid(cmd.Completion) {
 		return Task{}, fmt.Errorf("%w: completion criteria must be valid JSON", ErrInvalidCommand)
+	}
+	if cmd.ProjectWorkspaceID != nil {
+		if cmd.ProjectID == nil || strings.TrimSpace(*cmd.ProjectID)=="" {
+			return Task{}, fmt.Errorf("%w: named Workspace Tasks require a Project", ErrInvalidCommand)
+		}
+		var err error
+		cmd.Completion, err = scopeWorkspaceCompletion(cmd.Completion,*cmd.ProjectWorkspaceID)
+		if err!=nil {return Task{},err}
 	}
 	taskID, err := s.ids.New("task")
 	if err != nil {
@@ -215,90 +237,176 @@ func (s *Service) MarkReady(ctx context.Context, cmd TransitionCommand) (Task, e
 	return s.transition(ctx, cmd, StateReady, "task.ready", func(tr *transitionRecord, now int64) { tr.ReadyAt = &now })
 }
 
+// CheckStartAdmission preserves the ordinary admission guard before a trusted
+// caller opens a multi-subsystem transaction. A guard can query other services
+// through the database and must not be called from inside an SQLite write
+// transaction (which could deadlock on the pooled connection).
+func (s *Service) CheckStartAdmission(ctx context.Context, cmd StartCommand) error {
+ if strings.TrimSpace(cmd.TaskID)==""||cmd.ExpectedRevision<1{
+  return fmt.Errorf("%w: task id and expected revision are required",ErrInvalidCommand)
+ }
+ if s.guard!=nil{
+  current,err:=s.repo.Get(ctx,cmd.TaskID)
+  if err!=nil{return err}
+  if err:=s.guard.AllowStart(ctx,current);err!=nil{return err}
+ }
+ return nil
+}
+
+// Start retains the public Task lifecycle: callers observe an already
+// committed Task and Attempt, with the same guard and event semantics.
 func (s *Service) Start(ctx context.Context, cmd StartCommand) (Task, Attempt, error) {
-	if strings.TrimSpace(cmd.TaskID) == "" || cmd.ExpectedRevision < 1 {
-		return Task{}, Attempt{}, fmt.Errorf("%w: task id and expected revision are required", ErrInvalidCommand)
-	}
-	if s.guard != nil {
-		t, err := s.repo.Get(ctx, cmd.TaskID)
-		if err != nil {
-			return Task{}, Attempt{}, err
-		}
-		if err := s.guard.AllowStart(ctx, t); err != nil {
-			return Task{}, Attempt{}, err
-		}
-	}
-	if len(cmd.Metadata) == 0 {
-		cmd.Metadata = json.RawMessage(`{}`)
-	}
-	if !json.Valid(cmd.Metadata) {
-		return Task{}, Attempt{}, fmt.Errorf("%w: attempt metadata must be valid JSON", ErrInvalidCommand)
-	}
+ if err:=s.CheckStartAdmission(ctx,cmd);err!=nil{return Task{},Attempt{},err}
+ var started Task
+ var created Attempt
+ err:=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+  var startErr error
+  started,created,startErr=s.StartInTransaction(ctx,tx,cmd)
+  return startErr
+ })
+ if err!=nil{return Task{},Attempt{},err}
+ return started,created,nil
+}
 
-	attemptID, err := s.ids.New("attempt")
-	if err != nil {
-		return Task{}, Attempt{}, err
-	}
-	eventID, err := s.ids.New("evt")
-	if err != nil {
-		return Task{}, Attempt{}, err
-	}
-	now := s.clock.UnixMilli()
-	var created Attempt
-
-	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		t, err := s.repo.GetForUpdate(ctx, tx, cmd.TaskID)
-		if err != nil {
-			return err
-		}
-		if t.Revision != cmd.ExpectedRevision {
-			return ErrRevisionConflict
-		}
-		if !CanTransition(t.State, StateRunning) {
-			return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, t.State, StateRunning)
-		}
-		active, err := s.repo.ActiveAttempt(ctx, tx, t.ID)
-		if err != nil {
-			return err
-		}
-		if active != nil {
-			return ErrActiveAttempt
-		}
-		n, err := s.repo.NextAttemptNumber(ctx, tx, t.ID)
-		if err != nil {
-			return err
-		}
-		created = Attempt{
-			ID: attemptID, TaskID: t.ID, AttemptNumber: n, WorkerPrincipalID: cmd.WorkerPrincipalID,
-			State: AttemptRunning, StartedAt: &now, Metadata: cloneJSON(cmd.Metadata),
-		}
-		if err := s.repo.InsertAttempt(ctx, tx, created); err != nil {
-			return err
-		}
-		if err := s.repo.Transition(ctx, tx, transitionRecord{
-			TaskID: t.ID, ExpectedRevision: t.Revision, From: t.State, To: StateRunning, UpdatedAt: now,
-		}); err != nil {
-			return err
-		}
-		payload, _ := json.Marshal(map[string]any{
-			"task_id": t.ID, "attempt_id": attemptID, "attempt_number": n,
-			"from": t.State, "to": StateRunning, "revision": t.Revision + 1,
-		})
-		return s.events.Append(ctx, tx, event.Event{
-			ID: eventID, WorkspaceID: &t.WorkspaceID, Type: "task.started",
-			AggregateType: "task", AggregateID: t.ID, ActorPrincipalID: cmd.ActorPrincipalID,
-			RequestID: cmd.RequestID, TraceID: cmd.TraceID, Payload: payload, OccurredAt: now,
-		})
-	})
-	if err != nil {
-		return Task{}, Attempt{}, err
-	}
-	t, err := s.repo.Get(ctx, cmd.TaskID)
-	return t, created, err
+// StartInTransaction permits trusted control-plane Worker admission to commit
+// Task start, the *original* Attempt, Worker run and both events in one atomic
+// transaction. Its caller MUST first call CheckStartAdmission before opening
+// the transaction. This method cannot grant admission on its own; Task
+// revision/state and active Attempt checks are repeated inside the write
+// transaction to reject races.
+func (s *Service) StartInTransaction(ctx context.Context, tx storage.Tx, cmd StartCommand) (Task, Attempt, error) {
+ if tx==nil||strings.TrimSpace(cmd.TaskID)==""||cmd.ExpectedRevision<1{
+  return Task{},Attempt{},fmt.Errorf("%w: transaction, task id and expected revision are required",ErrInvalidCommand)
+ }
+ if len(cmd.Metadata)==0{cmd.Metadata=json.RawMessage(`{}`)}
+ if !json.Valid(cmd.Metadata){
+  return Task{},Attempt{},fmt.Errorf("%w: attempt metadata must be valid JSON",ErrInvalidCommand)
+ }
+ attemptID,err:=s.ids.New("attempt")
+ if err!=nil{return Task{},Attempt{},err}
+ eventID,err:=s.ids.New("evt")
+ if err!=nil{return Task{},Attempt{},err}
+ now:=s.clock.UnixMilli()
+ t,err:=s.repo.GetForUpdate(ctx,tx,cmd.TaskID)
+ if err!=nil{return Task{},Attempt{},err}
+ if t.Revision!=cmd.ExpectedRevision{return Task{},Attempt{},ErrRevisionConflict}
+ if !CanTransition(t.State,StateRunning){
+  return Task{},Attempt{},fmt.Errorf("%w: %s -> %s",ErrInvalidTransition,t.State,StateRunning)
+ }
+ active,err:=s.repo.ActiveAttempt(ctx,tx,t.ID)
+ if err!=nil{return Task{},Attempt{},err}
+ if active!=nil{return Task{},Attempt{},ErrActiveAttempt}
+ // Revalidate hard predecessors inside the same write transaction as Task
+ // and Attempt start. Ready is not a substitute for dependency completion:
+ // external transitions, restarts or competing workers must not bypass DAG.
+ satisfied,err:=s.repo.HardDependenciesSatisfied(ctx,tx,t.ID)
+ if err!=nil{return Task{},Attempt{},err}
+ if !satisfied{return Task{},Attempt{},ErrHardDependencyUnsatisfied}
+ n,err:=s.repo.NextAttemptNumber(ctx,tx,t.ID)
+ if err!=nil{return Task{},Attempt{},err}
+ created:=Attempt{
+  ID:attemptID,TaskID:t.ID,AttemptNumber:n,WorkerPrincipalID:cmd.WorkerPrincipalID,
+  State:AttemptRunning,StartedAt:&now,Metadata:cloneJSON(cmd.Metadata),
+ }
+ if err:=s.repo.InsertAttempt(ctx,tx,created);err!=nil{return Task{},Attempt{},err}
+ if err:=s.repo.Transition(ctx,tx,transitionRecord{
+  TaskID:t.ID,ExpectedRevision:t.Revision,From:t.State,To:StateRunning,UpdatedAt:now,
+ });err!=nil{return Task{},Attempt{},err}
+ payload,_:=json.Marshal(map[string]any{
+  "task_id":t.ID,"attempt_id":attemptID,"attempt_number":n,
+  "from":t.State,"to":StateRunning,"revision":t.Revision+1,
+ })
+ if err:=s.events.Append(ctx,tx,event.Event{
+  ID:eventID,WorkspaceID:&t.WorkspaceID,Type:"task.started",
+  AggregateType:"task",AggregateID:t.ID,ActorPrincipalID:cmd.ActorPrincipalID,
+  RequestID:cmd.RequestID,TraceID:cmd.TraceID,Payload:payload,OccurredAt:now,
+ });err!=nil{return Task{},Attempt{},err}
+ t.State=StateRunning
+ t.Revision++
+ t.UpdatedAt=now
+ return t,created,nil
 }
 
 func (s *Service) WaitDependency(ctx context.Context, cmd TransitionCommand) (Task, error) {
 	return s.transitionWithAttempt(ctx, cmd, StateWaitingDependency, AttemptWaiting, "task.waiting_dependency")
+}
+
+// WaitDependencyInTransaction is for trusted Agent Worker delegation.
+// Callers may atomically write the delegated child, dependency edge, Worker
+// continuation and step journal alongside this Task/Attempt transition.
+// Unlike the public WaitDependency method this requires an actively running
+// attempt; it cannot re-admit a previously blocked or completed operation.
+func (s *Service) WaitDependencyInTransaction(ctx context.Context, tx storage.Tx, cmd TransitionCommand) error {
+ if tx==nil || strings.TrimSpace(cmd.TaskID)=="" || cmd.ExpectedRevision<1 {
+  return fmt.Errorf("%w: transaction, Task identity and revision required",ErrInvalidCommand)
+ }
+ t,err:=s.repo.GetForUpdate(ctx,tx,cmd.TaskID)
+ if err!=nil{return err}
+ if t.Revision!=cmd.ExpectedRevision{return ErrRevisionConflict}
+ if t.State!=StateRunning || !CanTransition(t.State,StateWaitingDependency) {
+  return fmt.Errorf("%w: delegation requires running Task, found %s",ErrInvalidTransition,t.State)
+ }
+ active,err:=s.repo.ActiveAttempt(ctx,tx,t.ID)
+ if err!=nil{return err}
+ if active==nil {return ErrNoActiveAttempt}
+ if active.State!=AttemptRunning {
+  return fmt.Errorf("%w: delegation requires running Attempt, found %s",ErrInvalidAttempt,active.State)
+ }
+ now:=s.clock.UnixMilli()
+ if err:=s.repo.TransitionAttempt(ctx,tx,active.ID,AttemptRunning,AttemptWaiting,now);err!=nil{return err}
+ if err:=s.repo.Transition(ctx,tx,transitionRecord{
+  TaskID:t.ID,ExpectedRevision:t.Revision,From:t.State,To:StateWaitingDependency,UpdatedAt:now,
+ });err!=nil{return err}
+ eid,err:=s.ids.New("evt")
+ if err!=nil{return err}
+ payload,_:=json.Marshal(map[string]any{
+  "task_id":t.ID,"from":t.State,"to":StateWaitingDependency,
+  "reason":cmd.Reason,"revision":t.Revision+1,
+ })
+ return s.events.Append(ctx,tx,event.Event{
+  ID:eid,WorkspaceID:&t.WorkspaceID,Type:"task.waiting_dependency",
+  AggregateType:"task",AggregateID:t.ID,ActorPrincipalID:cmd.ActorPrincipalID,
+  RequestID:cmd.RequestID,TraceID:cmd.TraceID,Payload:payload,OccurredAt:now,
+ })
+}
+
+// ResumeWaitingAttemptInTransaction is the trusted autonomous Worker wake path.
+// It is deliberately narrower than operator Resume: only a dependency/resource
+// wait with the *same* active Attempt may be reactivated. Callers commit the
+// matching Worker status in the same transaction; failed journal/outbox writes
+// or stale revisions roll back the Task, Attempt and Worker together.
+func (s *Service) ResumeWaitingAttemptInTransaction(ctx context.Context, tx storage.Tx, cmd TransitionCommand, attemptID string) error {
+ if tx==nil||strings.TrimSpace(cmd.TaskID)==""||cmd.ExpectedRevision<1||
+  strings.TrimSpace(attemptID)==""{
+  return fmt.Errorf("%w: transaction, Task revision and Attempt identity required",ErrInvalidCommand)
+ }
+ t,err:=s.repo.GetForUpdate(ctx,tx,cmd.TaskID)
+ if err!=nil{return err}
+ if t.Revision!=cmd.ExpectedRevision{return ErrRevisionConflict}
+ if t.State!=StateWaitingDependency||!CanTransition(t.State,StateRunning){
+  return fmt.Errorf("%w: autonomous wake requires dependency-waiting Task, found %s",ErrInvalidTransition,t.State)
+ }
+ active,err:=s.repo.ActiveAttempt(ctx,tx,t.ID)
+ if err!=nil{return err}
+ if active==nil||active.ID!=attemptID||active.State!=AttemptWaiting{
+  return fmt.Errorf("%w: autonomous wake requires the original waiting Attempt",ErrInvalidAttempt)
+ }
+ now:=s.clock.UnixMilli()
+ if err:=s.repo.TransitionAttempt(ctx,tx,active.ID,AttemptWaiting,AttemptRunning,now);err!=nil{return err}
+ if err:=s.repo.Transition(ctx,tx,transitionRecord{
+  TaskID:t.ID,ExpectedRevision:t.Revision,From:StateWaitingDependency,To:StateRunning,UpdatedAt:now,
+ });err!=nil{return err}
+ eid,err:=s.ids.New("evt")
+ if err!=nil{return err}
+ payload,_:=json.Marshal(map[string]any{
+  "task_id":t.ID,"from":StateWaitingDependency,"to":StateRunning,
+  "attempt_id":attemptID,"reason":cmd.Reason,"revision":t.Revision+1,
+ })
+ return s.events.Append(ctx,tx,event.Event{
+  ID:eid,WorkspaceID:&t.WorkspaceID,Type:"task.resumed",
+  AggregateType:"task",AggregateID:t.ID,ActorPrincipalID:cmd.ActorPrincipalID,
+  RequestID:cmd.RequestID,TraceID:cmd.TraceID,Payload:payload,OccurredAt:now,
+ })
 }
 
 func (s *Service) WaitApproval(ctx context.Context, cmd TransitionCommand) (Task, error) {
@@ -406,71 +514,72 @@ func (s *Service) RequestCancel(ctx context.Context, cmd TransitionCommand) (Tas
 // durable Task is blocked and an outbox job asks the future RecoveryCoordinator
 // to reconcile durable/external state before any new attempt is admitted.
 func (s *Service) InterruptForRecovery(ctx context.Context, cmd TransitionCommand) (Task, error) {
-	if strings.TrimSpace(cmd.TaskID) == "" || cmd.ExpectedRevision < 1 {
-		return Task{}, fmt.Errorf("%w: task id and expected revision are required", ErrInvalidCommand)
-	}
-	eventID, err := s.ids.New("evt")
-	if err != nil {
-		return Task{}, err
-	}
-	jobID, err := s.ids.New("job")
-	if err != nil {
-		return Task{}, err
-	}
-	now := s.clock.UnixMilli()
+ err:=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx) error{
+  return s.InterruptForRecoveryInTransaction(ctx,tx,cmd)
+ })
+ if err!=nil{return Task{},err}
+ return s.repo.Get(ctx,cmd.TaskID)
+}
 
-	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		t, err := s.repo.GetForUpdate(ctx, tx, cmd.TaskID)
-		if err != nil {
-			return err
-		}
-		if t.Revision != cmd.ExpectedRevision {
-			return ErrRevisionConflict
-		}
-		active, err := s.repo.ActiveAttempt(ctx, tx, t.ID)
-		if err != nil {
-			return err
-		}
-		if active == nil {
-			return ErrNoActiveAttempt
-		}
-		if active.State != AttemptRunning && active.State != AttemptWaiting && active.State != AttemptQueued && active.State != AttemptCreated {
-			return ErrNoActiveAttempt
-		}
-		if err := s.repo.TransitionAttempt(ctx, tx, active.ID, active.State, AttemptInterrupted, now); err != nil {
-			return err
-		}
-		// Recovery interruption is intentionally not an ordinary state transition:
-		// regardless of which active execution state was lost, the Task becomes
-		// BLOCKED until reconciliation decides it is safe to re-admit.
-		if err := s.repo.Transition(ctx, tx, transitionRecord{
-			TaskID: t.ID, ExpectedRevision: t.Revision, From: t.State, To: StateBlocked, UpdatedAt: now,
-		}); err != nil {
-			return err
-		}
-		payload, _ := json.Marshal(map[string]any{
-			"task_id": t.ID, "attempt_id": active.ID, "attempt_number": active.AttemptNumber,
-			"previous_task_state": t.State, "reason": cmd.Reason,
-		})
-		if err := s.events.Append(ctx, tx, event.Event{
-			ID: eventID, WorkspaceID: &t.WorkspaceID, Type: "task.attempt_interrupted",
-			AggregateType: "task", AggregateID: t.ID, ActorPrincipalID: cmd.ActorPrincipalID,
-			RequestID: cmd.RequestID, TraceID: cmd.TraceID, Payload: payload, OccurredAt: now,
-		}); err != nil {
-			return err
-		}
-		jobPayload, _ := json.Marshal(map[string]any{
-			"task_id": t.ID, "attempt_id": active.ID, "reason": cmd.Reason,
-		})
-		return s.outbox.Enqueue(ctx, tx, outbox.Job{
-			ID: jobID, WorkspaceID: &t.WorkspaceID, Type: "task.recovery.required",
-			Payload: jobPayload, AvailableAt: now, MaxAttempts: 10, CreatedAt: now,
-		})
-	})
+// InterruptForRecoveryInTransaction is a trusted control-plane primitive.
+// The caller can atomically mark the associated Worker run interrupted in
+// the SAME transaction as its Task, Attempt, audit event and recovery outbox.
+// Never expose this method through model-defined tools or direct API calls.
+func (s *Service) InterruptForRecoveryInTransaction(ctx context.Context,tx storage.Tx,cmd TransitionCommand) error{
+ if tx==nil||strings.TrimSpace(cmd.TaskID)==""||cmd.ExpectedRevision<1{
+  return fmt.Errorf("%w: transaction, task id and expected revision are required",ErrInvalidCommand)
+ }
+ eventID,err:=s.ids.New("evt")
+ if err!=nil{return err}
+ jobID,err:=s.ids.New("job")
+ if err!=nil{return err}
+ now:=s.clock.UnixMilli()
+	t, err := s.repo.GetForUpdate(ctx, tx, cmd.TaskID)
 	if err != nil {
-		return Task{}, err
+		return err
 	}
-	return s.repo.Get(ctx, cmd.TaskID)
+	if t.Revision != cmd.ExpectedRevision {
+		return ErrRevisionConflict
+	}
+	active, err := s.repo.ActiveAttempt(ctx, tx, t.ID)
+	if err != nil {
+		return err
+	}
+	if active == nil {
+		return ErrNoActiveAttempt
+	}
+	if active.State != AttemptRunning && active.State != AttemptWaiting && active.State != AttemptQueued && active.State != AttemptCreated {
+		return ErrNoActiveAttempt
+	}
+	if err := s.repo.TransitionAttempt(ctx, tx, active.ID, active.State, AttemptInterrupted, now); err != nil {
+		return err
+	}
+	// Recovery interruption is intentionally not an ordinary state transition:
+	// regardless of which active execution state was lost, the Task becomes
+	// BLOCKED until reconciliation decides it is safe to re-admit.
+	if err := s.repo.Transition(ctx, tx, transitionRecord{
+		TaskID: t.ID, ExpectedRevision: t.Revision, From: t.State, To: StateBlocked, UpdatedAt: now,
+	}); err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"task_id": t.ID, "attempt_id": active.ID, "attempt_number": active.AttemptNumber,
+		"previous_task_state": t.State, "reason": cmd.Reason,
+	})
+	if err := s.events.Append(ctx, tx, event.Event{
+		ID: eventID, WorkspaceID: &t.WorkspaceID, Type: "task.attempt_interrupted",
+		AggregateType: "task", AggregateID: t.ID, ActorPrincipalID: cmd.ActorPrincipalID,
+		RequestID: cmd.RequestID, TraceID: cmd.TraceID, Payload: payload, OccurredAt: now,
+	}); err != nil {
+		return err
+	}
+	jobPayload, _ := json.Marshal(map[string]any{
+		"task_id": t.ID, "attempt_id": active.ID, "reason": cmd.Reason,
+	})
+	return s.outbox.Enqueue(ctx, tx, outbox.Job{
+		ID: jobID, WorkspaceID: &t.WorkspaceID, Type: "task.recovery.required",
+		Payload: jobPayload, AvailableAt: now, MaxAttempts: 10, CreatedAt: now,
+	})
 }
 
 func (s *Service) transition(ctx context.Context, cmd TransitionCommand, next State, eventType string, mutate func(*transitionRecord, int64)) (Task, error) {

@@ -1,0 +1,39 @@
+/* RC11 Debug Centre — all colours inherited from active OnePane theme. */
+.a58-debug-centre{min-width:0}
+.a58-debug-centre h3{margin:0;font-size:14px}
+.a58-debug-centre p{margin:0}
+.a58-debug-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start}
+.a58-debug-tile{display:flex;flex-direction:column;gap:12px;min-width:0;padding:16px}
+.a58-debug-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.a58-debug-state{padding:9px 11px;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;overflow-wrap:anywhere}
+.a58-debug-links{display:grid;gap:8px}
+.a58-debug-links .btn{text-align:left;white-space:normal;min-height:35px}
+.a58-debug-preview{max-height:260px;max-width:100%;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0 0}
+.a58-debug-tile details{min-width:0}
+.a58-debug-tile summary{cursor:pointer}
+.a58-debug-offline{display:grid;gap:8px;border-top:1px solid var(--border);padding-top:14px}
+.a58-drawer-debug{flex:0 0 auto;font-size:12px;padding:5px 10px}
+@media(max-width:920px){.a58-debug-grid{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:600px){.a58-drawer-debug{font-size:11px;padding:4px 7px}.a58-debug-tile{padding:12px}}
+
+/* User-authored reproduction notes; no stored state or theme-specific colours. */
+.a60-reproduction{width:100%}
+.a60-reproduction-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.a60-reproduction-fields label{display:grid;gap:5px;min-width:0}
+.a60-reproduction-fields label:nth-child(n+3){grid-column:1 / -1}
+.a60-reproduction-fields input,.a60-reproduction-fields textarea,.a60-reproduction-fields select{
+ width:100%;min-width:0;box-sizing:border-box;border:1px solid var(--border);border-radius:7px;
+ background:var(--panel-2);padding:8px;resize:vertical
+}
+.a60-consent{display:flex;gap:8px;align-items:flex-start}
+.a60-consent label{display:flex;align-items:flex-start;gap:9px}
+@media(max-width:680px){.a60-reproduction-fields{grid-template-columns:minmax(0,1fr)}}
+
+/* RC11 owned backend diagnostics: themed and responsive without using global logs. */
+.a61-api-panel{width:100%}
+.a61-api-controls{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap}
+.a61-api-controls label{display:grid;gap:5px;min-width:min(100%,150px)}
+.a61-api-controls select{background:var(--panel-2);border:1px solid var(--border);padding:7px;border-radius:7px;min-width:0}
+.a61-api-controls button{min-height:34px}
+.a61-api-panel .a58-debug-preview{white-space:pre-wrap;max-height:340px}
+@media(max-width:620px){.a61-api-controls{align-items:stretch}.a61-api-controls label{width:100%}.a61-api-controls button{width:100%}}

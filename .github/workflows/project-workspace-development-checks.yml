@@ -1,0 +1,205 @@
+name: Project Workspace Development Architecture
+
+on:
+  push:
+    branches:
+      - feature/project-workspace-development-environments
+  pull_request:
+    paths:
+      - 'internal/webui/static/project-*.js'
+      - 'internal/webui/static/project-*.css'
+      - 'internal/webui/static/workspace-*.js'
+      - 'internal/webui/static/models-page.js'
+      - 'scripts/validate_colibri_pin.js'
+      - 'internal/webui/static/model-agentcheck-diagnostics.js'
+      - 'internal/webui/static/app-foundation.js'
+      - 'internal/webui/static/index.html'
+      - 'internal/api/qa_execution_evidence.go'
+      - 'internal/api/qa_execution_evidence_test.go'
+      - 'internal/api/qa_snapshot.go'
+      - 'internal/api/qa_snapshot_handler.go'
+      - 'internal/webui/static/workspace-ai-workflow.js'
+      - 'internal/webui/static/qa-trace-correlation.js'
+      - 'scripts/validate_qa_trace_correlation.js'
+      - 'internal/api/qa_async_probe_evidence.go'
+      - 'internal/api/qa_async_probe_evidence_test.go'
+      - 'internal/api/qa_deep_provenance.go'
+      - 'internal/api/qa_deep_provenance_test.go'
+      - 'internal/api/qa_trusted_trace_test.go'
+      - 'internal/webui/static/qa-execution-provenance.js'
+      - 'scripts/validate_qa_execution_provenance.js'
+      - 'internal/api/qa_api_capture.go'
+      - 'internal/api/qa_api_capture_handler.go'
+      - 'internal/api/qa_api_capture_test.go'
+      - 'internal/webui/static/qa-api-capture.js'
+      - 'scripts/validate_qa_api_capture.js'
+      - 'internal/webui/static/qa-reproduction-note.js'
+      - 'scripts/validate_qa_reproduction.js'
+      - 'internal/webui/static/debug-centre.js'
+      - 'internal/webui/static/debug-centre.css'
+      - 'internal/webui/static/settings-redesign.js'
+      - 'internal/webui/static/app.js'
+      - 'scripts/validate_debug_centre.js'
+      - 'internal/projectworkspace/**'
+      - 'internal/projectruntime/**'
+      - 'internal/sandboxrunner/**'
+      - 'internal/workspacebroker/**'
+      - 'internal/nodepreflight/**'
+      - 'cmd/onepane-node-preflight/**'
+      - '.github/workflows/rc11-rootless-physical.yml'
+      - 'docs/GENERAL_PURPOSE_WORKSPACE_SANDBOX.md'
+      - 'internal/agentworker/**'
+      - 'internal/team/**'
+      - 'internal/teamworker/**'
+      - 'internal/agentprotocol/**'
+      - 'internal/task/**'
+      - 'internal/storage/sqlite/**'
+      - 'migrations/**'
+      - 'internal/api/**'
+      - 'internal/startupevidence/**'
+      - 'cmd/harnessd/**'
+      - 'packaging/windows/service/**'
+      - 'packaging/windows/setup/**'
+      - 'packaging/windows/Read-OnePaneMsiLog.ps1'
+      - 'scripts/test_offline_msi_evidence.ps1'
+      - 'packaging/debian/onepane.service'
+      - 'packaging/systemd/onepane.service'
+      - 'scripts/install-ubuntu.sh'
+      - 'internal/scheduler/**'
+      - 'internal/localai/**'
+      - 'docs/PROJECT_WORKSPACE_DEVELOPMENT_ENVIRONMENTS_RFC.md'
+      - 'scripts/validate_project_development_surface.js'
+      - '.github/workflows/project-workspace-development-checks.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  physical-readiness-report:
+    name: Physical Node approval status (informational only)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/project-workspace-development-environments'
+    # Uses a hosted runner, never connects to an unapproved self-hosted Node.
+    # Shows only whether admin variables exist; never prints their values.
+    # A successful report job is NOT physical execution or approval.
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Record truthful physical QA blockers
+        shell: bash
+        env:
+          ROOTLESS_APPROVED: ${{ vars.ONEPANE_ROOTLESS_SMOKE_IMAGE != '' }}
+          GODOT_APPROVED: ${{ vars.ONEPANE_GODOT_SMOKE_IMAGE != '' }}
+          PYTHON_APPROVED: ${{ vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE != '' }}
+        run: |
+          {
+            echo '### RC11 physical Node acceptance — approval-only readiness'
+            echo ''
+            echo '**No physical acceptance is established by this job.**'
+            echo 'Approval variables indicate eligibility to run a self-hosted job, not image validity, OCI runtime readiness, or test success.'
+            echo ''
+            echo '| Opt-in family | Admin approval configured |'
+            echo '| --- | --- |'
+            for item in 'Rootless Workspace:ROOTLESS_APPROVED' 'Godot 4:GODOT_APPROVED' 'Python, Library and HTTP Broker:PYTHON_APPROVED'; do
+              label="${item%:*}"
+              variable="${item#*:}"
+              if [[ "${!variable}" == 'true' ]]; then
+                state='Configured — physical test must still pass'
+              else
+                state='Not configured — physical jobs skipped'
+              fi
+              printf '| %s | %s |\n' "$label" "$state"
+            done
+            echo ''
+            echo 'On the intended unprivileged Node run: `go run ./cmd/onepane-node-preflight`.'
+            echo 'Preflight reads only rootless Podman status and approved local image presence. No images are pulled or containers changed.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  development-contract:
+    name: Validate honest Workspace runtime boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Frontend syntax and runtime-boundary contract
+        run: |
+          node --check internal/webui/static/project-development-page.js
+          node --check internal/webui/static/project-task-graphs.js
+          node scripts/validate_project_task_graphs_ui.js
+          node --check internal/webui/static/workspace-collaboration.js
+          node --check internal/webui/static/workspace-library.js
+          node scripts/validate_workspace_evidence_ui.js
+          node --check internal/webui/static/workspace-runtime-controls.js
+          node --check internal/webui/static/workspace-ai-workflow.js
+          node --check internal/webui/static/models-page.js
+          node scripts/validate_colibri_pin.js
+          node --check internal/webui/static/model-agentcheck-diagnostics.js
+          node --check internal/webui/static/project-library-route.js
+          node --check internal/webui/static/project-workspace-page.js
+          node --check internal/webui/static/app-foundation.js
+          node --check internal/webui/static/app.js
+          node --check internal/webui/static/settings-redesign.js
+          node --check internal/webui/static/qa-execution-provenance.js
+          node scripts/validate_qa_execution_provenance.js
+          node --check internal/webui/static/qa-api-capture.js
+          node scripts/validate_qa_api_capture.js
+          node --check internal/webui/static/qa-reproduction-note.js
+          node scripts/validate_qa_reproduction.js
+          node --check internal/webui/static/debug-centre.js
+          node --check internal/webui/static/qa-trace-correlation.js
+          node scripts/validate_qa_trace_correlation.js
+          node scripts/validate_debug_centre.js
+          node scripts/validate_project_development_surface.js
+          node scripts/validate_model_agentcheck_residency.js
+          node scripts/validate_legacy_cleanup.js
+      - name: Existing sandbox and Project contract tests
+        run: |
+          go test ./internal/projectworkspace ./internal/projectruntime ./internal/sandboxrunner ./internal/agentprotocol ./internal/agentworker ./internal/team ./internal/teamworker ./internal/task ./internal/storage/sqlite ./internal/scheduler ./internal/localai ./internal/api
+          go test -tags integration ./internal/projectworkspace ./internal/sandboxrunner ./internal/agentworker ./internal/task ./internal/workspacepublisher ./internal/projectorchestrator ./internal/workspacebroker
+      - name: Full Go regression and cross-platform compilation
+        run: |
+          go test ./...
+          # Exercise a real pre-config, pre-HTTP backend failure and the
+          # offline-only reader without a running OnePane API or database.
+          go build -o /tmp/onepane-qa-bootstrap ./cmd/harnessd
+          evidence_root="$(mktemp -d)"
+          if ONEPANE_STARTUP_EVIDENCE_ROOT="$evidence_root" /tmp/onepane-qa-bootstrap -config "$evidence_root/nonexistent.yaml" >/dev/null 2>&1; then
+            echo "Deliberately invalid configuration unexpectedly passed"
+            exit 1
+          fi
+          /tmp/onepane-qa-bootstrap -startup-evidence-root "$evidence_root" |
+            node -e 'let data="";process.stdin.on("data",x=>data+=x).on("end",()=>{
+              const events=JSON.parse(data);
+              if(!events.some(e=>e.schema===1 && e.component==="backend" &&
+                 e.stage==="configuration" && e.outcome==="failed"))process.exit(1);
+              for(const e of events){
+                if(Object.keys(e).some(k=>!["schema","at_utc","component","stage","outcome"].includes(k)))
+                  process.exit(2);
+              }
+            })'
+          rm -rf -- "$evidence_root"
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-node-preflight.exe ./cmd/onepane-node-preflight
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-harnessd.exe ./cmd/harnessd
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-service.exe ./packaging/windows/service
+          # Compile the legacy setup source without a real distributable payload.
+          # No installer is packaged or released by this compilation check.
+          mkdir -p packaging/windows/setup/payload
+          printf 'CI compile fixture' > packaging/windows/setup/payload/qa-compile-fixture.bin
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-legacy-setup.exe ./packaging/windows/setup
+          bash -n scripts/install-ubuntu.sh
+
+  offline-msi-evidence:
+    name: Validate opt-in Windows MSI log reader
+    runs-on: windows-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test allowlisted MSI analysis against synthetic secret-bearing logs
+        shell: powershell
+        run: .\scripts\test_offline_msi_evidence.ps1

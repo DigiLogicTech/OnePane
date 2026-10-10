@@ -7,6 +7,7 @@ var (
 	ErrInvalidTransition    = errors.New("invalid task state transition")
 	ErrInvalidAttempt       = errors.New("invalid task attempt state transition")
 	ErrActiveAttempt        = errors.New("task already has an active attempt")
+	ErrHardDependencyUnsatisfied = errors.New("hard Task dependency has not completed")
 	ErrNoActiveAttempt      = errors.New("task has no active attempt")
 	ErrInvalidCommand       = errors.New("invalid task command")
 	ErrVerificationRequired = errors.New("valid verified checkpoint required for task completion")

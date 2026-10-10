@@ -36,6 +36,7 @@ type Project struct {
 type ProjectRuntime struct {
 	ID                      string              `json:"id"`
 	ProjectID               string              `json:"project_id"`
+	ProjectWorkspaceID      *string             `json:"project_workspace_id,omitempty"`
 	NodeID                  *string             `json:"node_id,omitempty"`
 	IsolationMode           IsolationMode       `json:"isolation_mode"`
 	Backend                 string              `json:"backend"`
@@ -173,12 +174,23 @@ type ArchiveProjectCommand struct {
 
 type CreateRuntimeCommand struct {
 	ProjectID                                                    string
+	ProjectWorkspaceID                                           *string
 	NodeID                                                       *string
 	IsolationMode                                                IsolationMode
 	DesiredState                                                 RuntimeDesiredState
 	RuntimeSpecJSON, ResourceLimitsJSON, EnvironmentBindingsJSON json.RawMessage
 	CreatedBy                                                    string
 	RequestID, TraceID                                           *string
+}
+
+// SetApplicationDesiredStateCommand changes the requested application lifecycle.
+ // Observed state is updated ONLY by the existing independent observer.
+type SetApplicationDesiredStateCommand struct {
+ ApplicationID string
+ ExpectedRevision int64
+ DesiredState AppDesiredState
+ ActorPrincipalID string
+ RequestID, TraceID *string
 }
 
 type SetRuntimeDesiredStateCommand struct {

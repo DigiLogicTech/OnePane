@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/DigiLogicTech/OnePane/internal/agentruntime"
+	"github.com/DigiLogicTech/OnePane/internal/artifact"
 	"github.com/DigiLogicTech/OnePane/internal/assurance"
 	"github.com/DigiLogicTech/OnePane/internal/botruntime"
 	"github.com/DigiLogicTech/OnePane/internal/buildinfo"
@@ -40,6 +41,10 @@ import (
 type taskService interface {
 	Create(context.Context, task.CreateCommand) (task.Task, error)
 	List(context.Context, string, int) ([]task.Task, error)
+}
+
+type scopedWorkspaceTaskReader interface {
+ ListProjectWorkspace(context.Context,string,string,string,int)([]task.Task,error)
 }
 
 type taskArchiveService interface {
@@ -245,6 +250,7 @@ type gatewayService interface {
 type Server struct {
 	mux             *http.ServeMux
 	attentionDB     *sql.DB
+	libraryArtifacts *artifact.Service
 	projects        projectService
 	events          eventReader
 	auth            Authorizer
@@ -274,10 +280,11 @@ type Server struct {
 	providerOAuth   providerOAuthService
 	configPath      string
 	modelPoolPath   string
+	apiCapture      *qaAPICapture
 }
 
 func NewServer(projects projectService, events eventReader, auth Authorizer) *Server {
-	s := &Server{mux: http.NewServeMux(), projects: projects, events: events, auth: auth}
+	s := &Server{mux: http.NewServeMux(), projects: projects, events: events, auth: auth, apiCapture: &qaAPICapture{}}
 	if routes, ok := any(projects).(ingressRouteResolver); ok {
 		s.ingressRoutes = routes
 	}
@@ -285,6 +292,7 @@ func NewServer(projects projectService, events eventReader, auth Authorizer) *Se
 	return s
 }
 func (s *Server) SetAttentionDB(db *sql.DB) { s.attentionDB = db }
+func (s *Server) SetLibraryArtifacts(a *artifact.Service) { s.libraryArtifacts = a }
 func (s *Server) SetPreviewSessions(m previewSessionMinter) { s.previewSessions = m }
 func (s *Server) SetWebAuth(a *webauth.Service, secureCookies bool) {
 	s.webAuth = a
@@ -316,7 +324,7 @@ func (s *Server) SetRuntimeConfig(path, modelPoolPath string) {
 	s.configPath = strings.TrimSpace(path)
 	s.modelPoolPath = strings.TrimSpace(modelPoolPath)
 }
-func (s *Server) Handler() http.Handler { return s.securityHeaders(s.mux) }
+func (s *Server) Handler() http.Handler { return s.securityHeaders(s.qaCaptureMiddleware(s.mux)) }
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/system/metrics", s.hostMetricsRequest)
@@ -344,6 +352,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /v1/agent-profiles/{profileID}", s.updateAgentProfile)
 	s.mux.HandleFunc("POST /v1/agent-profiles/{profileID}/archive", s.archiveAgentProfile)
 	s.mux.HandleFunc("GET /v1/agent-sessions", s.listAgentSessions)
+	// RC11 QA diagnostic foundation: explicitly requested, scoped and read-only.
+	s.mux.HandleFunc("GET /v1/qa/model-deployments/{deploymentID}/agent-check", s.qaAgentCheckEvidence)
+	s.mux.HandleFunc("GET /v1/qa/nodes/{nodeID}/evidence", s.qaNodeEvidenceHandler)
+	s.mux.HandleFunc("GET /v1/qa/workspace-snapshot", s.qaWorkspaceSnapshot)
+	s.mux.HandleFunc("POST /v1/qa/workspace-bundle", s.qaWorkspaceBundle)
+	// RC11: administrator-owned, off-by-default, explicitly tagged HTTP diagnostics.
+	s.mux.HandleFunc("POST /v1/qa/api-capture/start", s.qaAPICaptureStart)
+	s.mux.HandleFunc("GET /v1/qa/api-capture", s.qaAPICaptureStatus)
+	s.mux.HandleFunc("POST /v1/qa/api-capture/stop", s.qaAPICaptureStop)
 	s.mux.HandleFunc("GET /v1/tasks", s.listTasks)
 	s.mux.HandleFunc("POST /v1/tasks", s.createTask)
 	s.mux.HandleFunc("POST /v1/tasks/{taskID}/archive", s.archiveTask)
@@ -381,6 +398,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/manual-web/chair-turns/{chairID}/approve", s.approveManualChairTurn)
 	s.mux.HandleFunc("POST /v1/manual-web/turns/{turnID}/submit", s.submitManualWebTurn)
 	s.mux.HandleFunc("POST /v1/manual-web/turns/{turnID}/new-conversation", s.restartManualWebTurn)
+	s.mux.HandleFunc("GET /v1/local-ai/deployments/{deploymentID}/colibri-pin", s.getColibriPin)
+	s.mux.HandleFunc("PATCH /v1/local-ai/deployments/{deploymentID}/colibri-pin", s.setColibriPin)
 	s.mux.HandleFunc("GET /v1/local-ai/deployments/{deploymentID}/colibri-tier", s.getColibriTier)
 	s.mux.HandleFunc("PATCH /v1/local-ai/deployments/{deploymentID}/colibri-tier", s.setColibriTier)
 	s.mux.HandleFunc("GET /v1/local-ai/deployments/{deploymentID}/colibri-plan", s.planColibriTier)
@@ -500,18 +519,50 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/projects", s.createProject)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}", s.getProject)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces", s.listProjectWorkspaces)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces", s.createCanonicalProjectWorkspace)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/library", s.listProjectLibrary)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/library", s.uploadProjectLibrary)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/library/import-managed", s.adoptManagedProjectArtifact)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/library/{assetID}/versions", s.listProjectLibraryVersions)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/library/{assetID}/grants", s.grantProjectLibrary)
+	s.mux.HandleFunc("DELETE /v1/projects/{projectID}/library/{assetID}/grants/{workspaceID}", s.revokeProjectLibraryGrant)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/library/{assetID}/versions/{version}/content", s.downloadWorkspaceLibraryVersion)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspace-service-links", s.projectWorkspaceServiceLinks)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspace-service-links", s.projectWorkspaceServiceLinks)
+	s.mux.HandleFunc("PATCH /v1/workspace-service-links/{linkID}", s.projectWorkspaceServiceLinkUpdate)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspace-links", s.projectWorkspaceLinks)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspace-links", s.projectWorkspaceLinks)
+	s.mux.HandleFunc("PATCH /v1/workspace-links/{linkID}", s.toggleWorkspaceLink)
+	s.mux.HandleFunc("POST /v1/workspace-links/{linkID}/publications", s.publishWorkspaceAsset)
+	s.mux.HandleFunc("GET /v1/workspace-links/{linkID}/publications", s.listWorkspacePublications)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/orchestrator", s.getProjectOrchestrator)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/orchestrator/turns", s.listProjectOrchestratorTurns)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/orchestrator/turns", s.submitProjectOrchestratorTurn)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/orchestrator/task-graphs", s.listProjectTaskGraphs)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/orchestrator/task-graphs", s.createProjectTaskGraph)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/orchestrator/task-graphs/{graphID}", s.getProjectTaskGraph)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/orchestrator/handoffs", s.listProjectHandoffs)
 	s.mux.HandleFunc("PATCH /v1/projects/{projectID}", s.updateProjectPolicy)
 	s.mux.HandleFunc("DELETE /v1/projects/{projectID}", s.deleteProject)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library", s.listWorkspaceLibrary)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces/{workspaceID}/evidence-packets", s.buildWorkspaceEvidencePacket)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces/{workspaceID}/evidence-packets/verified-text", s.readVerifiedWorkspaceEvidence)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces/{workspaceID}/evidence-packets/search-text", s.searchVerifiedWorkspaceEvidence)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library/{assetID}/versions", s.listWorkspaceLibraryVersions)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library/{assetID}/versions/{version}/preview", s.previewWorkspaceLibraryVersion)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/published-outputs", s.listWorkspacePublishedOutputs)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/publication-reviews", s.listWorkspacePublicationReviews)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/toolchain-manifest", s.getWorkspaceToolchainManifest)
+	s.mux.HandleFunc("PUT /v1/projects/{projectID}/workspaces/{workspaceID}/toolchain-manifest", s.approveWorkspaceToolchainManifest)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/runtime", s.getWorkspaceRuntime)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces/{workspaceID}/runtime", s.createWorkspaceRuntime)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/runtime", s.createRuntime)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/runtime", s.getRuntimeByProject)
 	s.mux.HandleFunc("POST /v1/project-runtimes/{runtimeID}/desired-state", s.setRuntimeDesired)
 	s.mux.HandleFunc("PATCH /v1/project-runtimes/{runtimeID}/policy", s.updateRuntimePolicy)
 	s.mux.HandleFunc("POST /v1/project-runtimes/{runtimeID}/applications", s.declareApplication)
 	s.mux.HandleFunc("GET /v1/project-runtimes/{runtimeID}/applications", s.listApplications)
+	s.mux.HandleFunc("POST /v1/project-runtimes/{runtimeID}/applications/{applicationID}/desired-state", s.setApplicationDesired)
 	s.mux.HandleFunc("POST /v1/project-runtimes/{runtimeID}/endpoints", s.declareEndpoint)
 	s.mux.HandleFunc("GET /v1/project-runtimes/{runtimeID}/endpoints", s.listEndpoints)
 	s.mux.HandleFunc("POST /v1/project-endpoints/{endpointID}/preview-session", s.createPreviewSession)
@@ -847,6 +898,12 @@ func (s *Server) createRuntime(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &in) {
 		return
 	}
+	// Creating a runtime directly in Running must not bypass the project.run
+	// check used by subsequent desired-state transitions.
+	if in.DesiredState == projectworkspace.RuntimeDesiredRunning &&
+		!s.authorize(w, r, i, p.WorkspaceID, "project.run") {
+		return
+	}
 	x, err := s.projects.CreateRuntime(r.Context(), projectworkspace.CreateRuntimeCommand{ProjectID: p.ID, NodeID: in.NodeID, IsolationMode: in.IsolationMode, DesiredState: in.DesiredState, RuntimeSpecJSON: in.RuntimeSpecJSON, ResourceLimitsJSON: in.ResourceLimitsJSON, EnvironmentBindingsJSON: in.EnvironmentBindingsJSON, CreatedBy: i.PrincipalID, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
 	respondDomain(w, x, err, http.StatusCreated)
 }
@@ -953,6 +1010,11 @@ func (s *Server) declareApplication(w http.ResponseWriter, r *http.Request) {
 		DesiredState            projectworkspace.AppDesiredState `json:"desired_state"`
 	}
 	if !decodeJSON(w, r, &in) {
+		return
+	}
+	// Declaring/installing an application enqueues sandbox reconciliation
+	// even if it is initially stopped; it requires explicit execution rights.
+	if !s.authorize(w, r, i, p.WorkspaceID, "project.run") {
 		return
 	}
 	out, err := s.projects.DeclareApplication(r.Context(), projectworkspace.DeclareApplicationCommand{RuntimeID: x.ID, Name: in.Name, SourceKind: in.SourceKind, SourceRef: in.SourceRef, VersionRef: in.VersionRef, InstallSpecJSON: in.InstallSpecJSON, RuntimeSpecJSON: in.RuntimeSpecJSON, EnvironmentBindingsJSON: in.EnvironmentBindingsJSON, DesiredState: in.DesiredState, CreatedBy: i.PrincipalID, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
@@ -1565,7 +1627,45 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	var rows []task.Task
 	var err error
-	if r.URL.Query().Get("archived") == "1" || strings.EqualFold(r.URL.Query().Get("archived"), "true") {
+	projectID:=strings.TrimSpace(r.URL.Query().Get("project_id"))
+	projectWorkspaceID:=strings.TrimSpace(r.URL.Query().Get("project_workspace_id"))
+	scoped:=projectID!=""||projectWorkspaceID!=""
+	archived:=r.URL.Query().Get("archived")=="1"||strings.EqualFold(r.URL.Query().Get("archived"),"true")
+	if scoped {
+		if projectID==""||projectWorkspaceID==""{
+			writeError(w,http.StatusBadRequest,"scoped Task inventory requires both project_id and project_workspace_id")
+			return
+		}
+		if archived{
+			writeError(w,http.StatusBadRequest,"archived scoped Task inventory is not yet available")
+			return
+		}
+		if s.projects==nil{
+			writeError(w,http.StatusServiceUnavailable,"Project Workspace service unavailable")
+			return
+		}
+		projectRow,e:=s.projects.Project(r.Context(),projectID)
+		if e!=nil||projectRow.WorkspaceID!=workspaceID||projectRow.Status=="archived"{
+			writeError(w,http.StatusBadRequest,"Project is not available in the requested tenancy")
+			return
+		}
+		workspaceReader,ok:=s.projects.(projectWorkspaceViewReader)
+		if !ok{
+			writeError(w,http.StatusServiceUnavailable,"Project Workspace service unavailable")
+			return
+		}
+		workspaceRow,e:=workspaceReader.WorkspaceView(r.Context(),projectWorkspaceID)
+		if e!=nil||workspaceRow.ProjectID!=projectID||workspaceRow.Status=="archived"{
+			writeError(w,http.StatusBadRequest,"Project Workspace is not part of this Project")
+			return
+		}
+		reader,ok:=s.tasks.(scopedWorkspaceTaskReader)
+		if !ok{
+			writeError(w,http.StatusServiceUnavailable,"scoped Task listing unavailable")
+			return
+		}
+		rows,err=reader.ListProjectWorkspace(r.Context(),workspaceID,projectID,projectWorkspaceID,limit)
+	} else if archived {
 		archiver, ok := s.tasks.(taskArchiveService)
 		if !ok {
 			writeError(w, http.StatusServiceUnavailable, "task archive service unavailable")
@@ -1579,9 +1679,40 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	modelWaits,err:=loadTaskModelWaits(r.Context(),s.attentionDB,workspaceID,rows)
+	if err!=nil{
+		writeError(w,http.StatusInternalServerError,"Workspace Task execution status unavailable")
+		return
+	}
+	// Execution progress derives only from durable Worker/Task state and
+	// canonical scoped rows. It does not expose raw model or tool journals.
+	var execution map[string]taskExecutionProgress
+	if scoped{
+		execution,err=loadTaskExecutionProgress(r.Context(),s.attentionDB,
+		 workspaceID,projectID,projectWorkspaceID,rows)
+		if err!=nil{
+		 writeError(w,http.StatusInternalServerError,"Workspace Task checkpoint status unavailable")
+		 return
+		}
+	}
+	// Only scoped Task pages may receive dependency evidence. The helper
+	// never reveals foreign Workspace child Task identity or state.
+	var dependencies map[string]taskDependencyEvidence
+	if scoped{
+		dependencies,err=loadWorkspaceTaskDependencies(r.Context(),s.attentionDB,
+		 workspaceID,projectID,projectWorkspaceID,rows)
+		if err!=nil{
+		 writeError(w,http.StatusInternalServerError,"Workspace Task prerequisite status unavailable")
+		 return
+		}
+	}
 	out := make([]map[string]any, 0, len(rows))
 	for _, t := range rows {
-		out = append(out, taskResponse(t))
+		entry:=taskResponse(t)
+		if wait,ok:=modelWaits[t.ID];ok{entry["wait"]=wait}
+		if progress,ok:=execution[t.ID];ok{entry["execution"]=progress}
+		if prerequisites,ok:=dependencies[t.ID];ok{entry["dependencies"]=prerequisites}
+		out=append(out,entry)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -1660,7 +1791,12 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		in.Completion = json.RawMessage(`{"type":"operator_review"}`)
 	}
 	actor := i.PrincipalID
-	out, err := s.tasks.Create(r.Context(), task.CreateCommand{WorkspaceID: in.WorkspaceID, ProjectID: in.ProjectID, ProjectWorkspaceID: in.ProjectWorkspaceID, Objective: in.Objective, SchedulingClass: in.SchedulingClass, Priority: in.Priority, Completion: in.Completion, ActorPrincipalID: &actor, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
+	// During an explicitly tagged, authenticated QA capture the server-minted
+	// trace overrides any caller-supplied X-Trace-ID; caller headers cannot
+	// impersonate another Task creation diagnostic trace.
+	traceID := qaTrustedTaskTrace(r)
+	if traceID == nil { traceID=headerPtr(r,"X-Trace-ID") }
+	out, err := s.tasks.Create(r.Context(), task.CreateCommand{WorkspaceID: in.WorkspaceID, ProjectID: in.ProjectID, ProjectWorkspaceID: in.ProjectWorkspaceID, Objective: in.Objective, SchedulingClass: in.SchedulingClass, Priority: in.Priority, Completion: in.Completion, ActorPrincipalID: &actor, RequestID: headerPtr(r, "X-Request-ID"), TraceID: traceID})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

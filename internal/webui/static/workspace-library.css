@@ -1,0 +1,45 @@
+/* Shared semantic tokens: Library never overrides the selected theme. */
+.a46-library{min-width:0;overflow-wrap:anywhere}
+.a46-library>h3{margin-bottom:6px}
+.a46-upload{display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:12px 0;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--panel-2)}
+.a46-upload>label{display:flex;flex:1 1 180px;min-width:0;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)}
+.a46-upload input[type=file]{max-width:100%;color:var(--text)}
+.a46-library-items{display:flex;flex-direction:column;gap:8px}
+.a46-library-asset{padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--panel-2)}
+.a46-library-asset .btn{text-decoration:none;color:var(--text)}
+.a46-versions{padding-top:9px;border-top:1px solid var(--border)}
+.a46-versions[hidden]{display:none!important}
+.a46-library-version{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:6px 0}
+.a46-library-version .list-meta{overflow-wrap:anywhere}
+@media(max-width:680px){.a46-upload>button{width:100%}}
+
+.a47-library-toolbar{display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:12px 0}
+.a47-library-toolbar>label{display:flex;flex-direction:column;gap:5px;min-width:min(270px,100%);color:var(--muted);font-size:12px}
+.a47-library-toolbar select{color:var(--text);max-width:100%}
+.a47-library-page #a47LibraryContent{padding:12px;max-width:100%;overflow:hidden}
+
+.a46-library-filter{display:flex;flex-direction:column;gap:5px;min-width:0;max-width:400px;margin:12px 0;color:var(--muted);font-size:12px}
+.a46-library-filter input{color:var(--text);width:100%;box-sizing:border-box}
+.a46-library-asset[hidden]{display:none!important}
+
+/* Read-only, bounded UTF-8 Library preview. The browser receives no
+   executable markup, and selected theme tokens control its appearance. */
+.a46-library-preview{display:block;flex:1 1 100%;width:100%;max-height:320px;overflow:auto;
+ white-space:pre-wrap;overflow-wrap:anywhere;box-sizing:border-box;margin:8px 0 0;
+ padding:12px;border:1px solid var(--border);border-radius:8px;
+ background:var(--panel);color:var(--text);font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}
+
+/* Explicit, nontransferable evidence metadata selection */
+.a62-evidence-pick{display:flex;align-items:center;gap:9px;margin:8px 0;overflow-wrap:anywhere;font-size:12px}
+.a62-evidence-pick input{flex:0 0 auto}
+.a62-evidence-panel{border-top:1px solid var(--border);margin-top:12px;padding-top:12px;min-width:0}
+.a62-evidence-panel>.toolbar{display:flex;justify-content:flex-end;flex-wrap:wrap}
+.a62-evidence-panel>p{margin:8px 0}
+.a62-evidence-receipt{max-width:100%;max-height:260px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:12px}
+.a62-evidence-receipt[hidden]{display:none!important}
+
+/* Read-only verified evidence appears as literal text, never HTML. */
+.a62-evidence-panel [data-a63-result]{max-height:360px;user-select:text}
+
+.a64-search-label{display:flex;flex-direction:column;gap:6px;margin:10px 0;color:var(--text);max-width:100%;overflow-wrap:anywhere}
+.a64-search-label input{width:100%;max-width:100%;box-sizing:border-box}

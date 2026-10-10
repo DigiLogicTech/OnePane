@@ -1,0 +1,135 @@
+/* Workspace development surface — intentionally uses the shared OnePane tokens. */
+.a44-development-tabs{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:10px 0 16px;padding:0 2px}
+.a44-development-tabs>.subtab{min-width:115px}
+.a44-development-panel{min-height:0;max-width:100%;box-sizing:border-box}
+.a44-development-panel[hidden],#qa4WorkspaceGrid[hidden]{display:none!important}
+.a44-environment-shell{min-height:240px;overflow:hidden}
+.a44-environment-shell .card-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.a44-environment-note{margin:12px 16px;padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--panel-2);color:var(--text)}
+.a44-environment-note p{font-size:13px;margin:5px 0 0;color:var(--muted);line-height:1.5}
+.a44-environment-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(205px,100%),1fr));gap:10px;padding:12px 16px}
+.a44-environment-tile{background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:14px;min-width:0;overflow-wrap:anywhere}
+.a44-environment-tile strong{display:block;margin-top:6px;font-size:15px;color:var(--text)}
+.a44-environment-tile p{margin:7px 0 0;line-height:1.45}
+.a44-environment-subsection{margin:8px 16px 18px;border-top:1px solid var(--border);padding-top:13px}
+.a44-environment-subsection>h3{font-size:15px;font-weight:650;margin:0 0 5px;color:var(--text)}
+.a44-environment-subsection>.a44-environment-grid{padding:12px 0}
+.a44-app-list{padding-top:8px}
+.a44-installed-app{display:flex;justify-content:space-between;gap:16px;align-items:center;border-bottom:1px solid var(--border);padding:12px 2px;overflow-wrap:anywhere}
+.a44-installed-app .pill{flex-shrink:0}
+.a44-environment-subsection>.toolbar{display:flex;justify-content:flex-end;flex-wrap:wrap;margin-top:8px}
+@media(max-width:700px){
+ .a44-development-tabs>.subtab{min-width:0;flex:1 1 120px}
+ .a44-environment-shell .card-header{flex-wrap:wrap}
+ .a44-environment-grid{grid-template-columns:1fr;padding:8px 12px}
+ .a44-environment-note{margin:10px 12px}
+ .a44-environment-subsection{margin:8px 12px 16px}
+}
+/* Existing dashboard edit controls must disappear completely in Development mode. */
+.workspace-page #qa4EditWorkspace[hidden],
+.workspace-page #a35CancelWorkspaceLayout[hidden],
+.workspace-page #qa4AddComponent[hidden],
+.workspace-page #a43WorkspacePreset[hidden],
+.workspace-page #a35ResetWorkspaceLayout[hidden]{display:none!important}
+
+.a48-runtime{border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--panel-2)}
+.a48-runtime h3,.a48-runtime h4{margin:0 0 8px;color:var(--text)}
+.a48-runtime-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:10px}
+.a48-runtime-grid>.a44-environment-tile{padding:11px}
+.a48-runtime-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;padding:12px 0}
+.a48-install{display:flex;gap:10px;align-items:end;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:12px}
+.a48-install h4,.a48-install p{width:100%}
+.a48-install label{display:flex;flex-direction:column;gap:5px;min-width:min(230px,100%);flex:1 1 180px}
+.a48-install input{max-width:100%;box-sizing:border-box}
+.a48-app-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 0;border-bottom:1px solid var(--border)}
+@media(max-width:700px){.a48-runtime{padding:10px}.a48-runtime-grid{grid-template-columns:1fr}}
+
+.a49-workflow{padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--panel-2)}
+.a49-workflow h3{margin:0 0 6px;color:var(--text)}
+.a49-task-form{display:flex;flex-direction:column;gap:9px;margin-top:12px}
+.a49-task-form>label{display:flex;flex-direction:column;gap:6px}
+.a49-task-form textarea{resize:vertical;max-width:100%;box-sizing:border-box;color:var(--text)}
+.a49-task-actions{display:flex;align-items:end;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.a49-task-actions label{display:flex;flex-direction:column;gap:5px}
+
+.a49-published-outputs{display:flex;flex-direction:column;gap:7px;min-width:0;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
+.a49-published-output{display:flex;gap:10px;justify-content:space-between;align-items:center;flex-wrap:wrap;overflow-wrap:anywhere;font-size:12px}
+.a49-published-output>span{flex:1 1 180px;min-width:0;color:var(--text)}
+.a49-published-output>.btn{flex-shrink:0;text-decoration:none;color:var(--text)}
+
+.a49-publication-review{margin:10px 0;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--panel-2)}
+.a49-publication-review>strong{display:block;margin-bottom:5px;color:var(--text)}
+.a49-publication-review p{line-height:1.5}
+.a49-publication-review-row{display:flex;flex-direction:column;gap:3px;padding:8px 0;border-top:1px solid var(--border);overflow-wrap:anywhere}
+.a49-publication-review-row>strong{color:var(--text);font-size:12px}
+.a49-publication-review-row>span{color:var(--muted);font-size:12px}
+
+/* The independent Workspace sandbox is the primary environment; the legacy
+   shared Project runtime remains accessible only as optional compatibility. */
+.a44-development-shortcuts{padding:14px 16px;margin-bottom:12px}
+.a44-development-shortcuts .card-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.a44-development-shortcuts .list-meta{margin:5px 0 0;line-height:1.45}
+.a44-shortcut-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:10px}
+.a44-legacy-runtime{margin:12px 0;padding:0;min-width:0;overflow:hidden;border:1px solid var(--border);border-radius:10px;background:var(--panel)}
+.a44-legacy-runtime>summary{cursor:pointer;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:12px 16px;color:var(--text);font-weight:600}
+.a44-legacy-runtime>summary::marker{color:var(--muted)}
+.a44-legacy-runtime[open]>summary{border-bottom:1px solid var(--border)}
+.a44-legacy-runtime .a44-environment-grid{padding:12px 16px}
+@media(max-width:700px){
+ .a44-development-shortcuts{padding:12px}
+ .a44-legacy-runtime>summary{padding:10px 12px}
+ .a44-shortcut-actions{justify-content:stretch}
+ .a44-shortcut-actions .btn{flex:1 1 120px}
+}
+
+/* Derived only from the durable Agent Worker journal, not live model claims. */
+.a49-task-checkpoint{display:flex;flex-direction:column;gap:3px;margin:8px 0 0;
+ padding:9px 11px;border:1px solid var(--border);border-radius:8px;
+ background:var(--panel-2);min-width:0;overflow-wrap:anywhere;font-size:12px}
+.a49-task-checkpoint strong{color:var(--text);font-size:12px}
+.a49-task-checkpoint .list-meta{line-height:1.45}
+.a49-checkpoint-review{color:var(--text)!important;font-weight:600}
+
+/* Read-only bounded prerequisite evidence, same shared OnePane theme tokens. */
+.a49-task-prerequisites{display:flex;flex-direction:column;gap:4px;min-width:0;
+ overflow-wrap:anywhere;margin-top:8px;padding:9px 11px;border:1px solid var(--border);
+ border-radius:8px;background:var(--panel-2);font-size:12px}
+.a49-task-prerequisites strong{color:var(--text);font-size:12px}
+.a49-task-prerequisites>.list-meta{line-height:1.45}
+
+/* RC11 opt-in QA snapshot uses existing theme tokens, bounded preview. */
+.a49-qa-snapshot{margin-top:12px;padding:12px;border:1px solid var(--border);
+ border-radius:8px;max-width:100%;min-width:0}
+.a49-qa-snapshot summary{cursor:pointer;font-weight:600}
+.a49-qa-snapshot-preview{max-height:320px;overflow:auto;white-space:pre-wrap;
+ overflow-wrap:anywhere;tab-size:2;font-size:12px;line-height:1.5;
+ max-width:100%;background:var(--panel-2);padding:9px;border-radius:6px}
+.a49-qa-snapshot .a49-task-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+/* QA summary is local, readonly and selectable, with no user-content upload. */
+.a49-qa-summary{display:block;width:100%;max-width:100%;min-width:0;
+ min-height:175px;box-sizing:border-box;resize:vertical;overflow:auto;
+ padding:10px;margin:8px 0 12px;border:1px solid var(--border);
+ border-radius:8px;background:var(--panel-2);color:var(--text);
+ font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}
+
+/* RC11 operator-reviewed Project Task graphs: themed and drawer-responsive. */
+.a61-task-graphs{min-width:0}
+.a61-task-graphs>h3{margin:0 0 6px}
+.a61-graph-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin:8px 0}
+.a61-graph-card,.a61-create-graph{background:var(--panel-2);border:1px solid var(--border);border-radius:10px;margin:10px 0;min-width:0}
+.a61-graph-card>summary,.a61-create-graph>summary{display:flex;align-items:center;flex-wrap:wrap;gap:10px;cursor:pointer;padding:12px;color:var(--text)}
+.a61-graph-card .list-meta{overflow-wrap:anywhere}
+.a61-graph-nodes{display:grid;gap:8px;padding:8px 12px 12px}
+.a61-graph-node{border:1px solid var(--border);border-radius:8px;padding:10px;display:grid;gap:5px;min-width:0}
+.a61-graph-node>div,.a61-graph-node strong{overflow-wrap:anywhere}
+.a61-graph-node>.pill{justify-self:start}
+.a61-graph-form{padding:12px;display:grid;gap:12px}
+.a61-graph-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:10px}
+.a61-graph-fields label{display:flex;flex-direction:column;gap:5px;min-width:0;overflow-wrap:anywhere}
+.a61-graph-fields input,.a61-graph-fields textarea,.a61-graph-fields select{box-sizing:border-box;max-width:100%;min-width:0;width:100%}
+.a61-graph-step{border:1px solid var(--border);border-radius:8px;min-width:0}
+.a61-graph-step legend{padding:0 5px;font-weight:600}
+.a61-objective,.a61-depends{grid-column:1/-1}
+.a61-graph-form .inline-check{display:flex;align-items:flex-start;gap:9px;line-height:1.45}
+.a61-graph-form .inline-check input{flex:none;margin-top:2px}

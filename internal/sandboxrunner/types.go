@@ -19,6 +19,15 @@ const (
 	ToolAppInspect     = "project.app.inspect"
 	ToolImageInspect   = "project.image.inspect"
 	ToolAppExec        = "project.app.exec"
+	ToolAppToolsDiscover = "project.app.tools.discover"
+	ToolAppToolchainPreflight = "project.app.toolchain.preflight"
+	ToolAppGodotBuild = "project.app.godot.build"
+	ToolAppUnrealMCPProbe = "project.app.unreal.mcp.probe"
+	ToolAppGitInspect  = "project.app.git.inspect"
+	ToolAppFileInspect = "project.app.files.inspect"
+	ToolAppFileEdit    = "project.app.files.edit"
+	ToolAppFilePublish = "project.app.files.publish"
+	ToolAppGitMutate   = "project.app.git.mutate"
 	CapabilityObserve  = "project.runtime.observe"
 	CapabilityExecute  = "project.app.execute"
 )
@@ -100,9 +109,13 @@ type ImageState struct {
 	Digests   []string `json:"digests,omitempty"`
 }
 
+// ExecResult represents the program's exit status, not the container engine's
+// status. A nonzero exit code is a successfully observed command failure and
+// remains available to the agent for a fix/test/retry loop.
 type ExecResult struct {
-	Stdout string `json:"stdout,omitempty"`
-	Stderr string `json:"stderr,omitempty"`
+	Stdout   string `json:"stdout,omitempty"`
+	Stderr   string `json:"stderr,omitempty"`
+	ExitCode int    `json:"exit_code"`
 }
 
 type SecretResolver interface {

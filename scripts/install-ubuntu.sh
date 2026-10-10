@@ -117,6 +117,7 @@ UMask=0077
 RuntimeDirectory=onepane
 RuntimeDirectoryMode=0700
 Environment=HOME=$DATA_DIR
+Environment=ONEPANE_STARTUP_EVIDENCE_ROOT=$DATA_DIR
 Environment=XDG_CONFIG_HOME=$DATA_DIR/.config
 Environment=XDG_DATA_HOME=$DATA_DIR/.local/share
 Environment=XDG_RUNTIME_DIR=/run/onepane

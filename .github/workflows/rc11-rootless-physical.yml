@@ -1,0 +1,188 @@
+name: RC11 Trusted Rootless Node Acceptance
+
+# Self-hosted Node code must never run from a pull_request event.
+# Only an authorised push to the RC11 integration branch can schedule it.
+on:
+  push:
+    branches:
+      - feature/project-workspace-development-environments
+
+permissions:
+  contents: read
+
+jobs:
+  physical-rootless-node:
+    name: Rootless Workspace physical Node smoke (opt-in)
+    # Never run self-hosted physical tests from untrusted pull requests.
+    # This gate is intentionally skipped until a repo administrator sets an
+    # approved immutable digest already present in the unprivileged runner's
+    # local OCI image pool. A skipped gate is not a physical QA pass.
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feature/project-workspace-development-environments' && vars.ONEPANE_ROOTLESS_SMOKE_IMAGE != '' }}
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 12
+    env:
+      ONEPANE_SANDBOX_SMOKE_IMAGE: ${{ vars.ONEPANE_ROOTLESS_SMOKE_IMAGE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Confirm approved rootless Node and pre-pulled image
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$ONEPANE_SANDBOX_SMOKE_IMAGE" =~ ^[^[:space:]]+@sha256:[[:xdigit:]]{64}$ ]]; then
+            echo "::error::ONEPANE_ROOTLESS_SMOKE_IMAGE must be an immutable 64-digit sha256 OCI reference"
+            exit 1
+          fi
+          if ! command -v podman >/dev/null; then
+            echo "::error::Runner has no rootless Podman; physical smoke not complete"
+            exit 1
+          fi
+          if [[ "$(podman info --format '{{.Host.Security.Rootless}}')" != "true" ]]; then
+            echo "::error::The runner must execute as an unprivileged rootless Podman user"
+            exit 1
+          fi
+          if ! podman image exists "$ONEPANE_SANDBOX_SMOKE_IMAGE"; then
+            echo "::error::Approved digest-pinned OCI image not pre-pulled under runner identity"
+            exit 1
+          fi
+      - name: Real OCI network, command, filesystem and teardown acceptance
+        run: go test -tags integration ./internal/sandboxrunner -run '^(TestRealRootlessNodeSmoke|TestRealRootlessWorkspaceIsolation)$' -v -count=1 -timeout 9m
+
+  physical-rootless-godot:
+    name: Rootless Godot 4 Workspace build (opt-in)
+    # Never run self-hosted physical tests from untrusted pull requests.
+    # Never pull unspecified/mutable engine images onto user-managed Nodes.
+    # Approval means a pre-pulled digest and deliberate repository variable.
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feature/project-workspace-development-environments' && vars.ONEPANE_GODOT_SMOKE_IMAGE != '' }}
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 12
+    env:
+      ONEPANE_GODOT_SMOKE_IMAGE: ${{ vars.ONEPANE_GODOT_SMOKE_IMAGE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Confirm explicit digest and rootless pre-pulled Godot image
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$ONEPANE_GODOT_SMOKE_IMAGE" =~ ^[^[:space:]]+@sha256:[[:xdigit:]]{64}$ ]]; then
+            echo '::error::ONEPANE_GODOT_SMOKE_IMAGE must use an immutable 64-digit OCI SHA-256'
+            exit 1
+          fi
+          if ! command -v podman >/dev/null; then
+            echo '::error::Rootless Podman is required for physical Godot QA'
+            exit 1
+          fi
+          if [[ "$(podman info --format '{{.Host.Security.Rootless}}')" != "true" ]]; then
+            echo '::error::Do not run engine smoke tests as root'
+            exit 1
+          fi
+          if ! podman image exists "$ONEPANE_GODOT_SMOKE_IMAGE"; then
+            echo '::error::Approved Godot image was not pre-pulled under runner identity'
+            exit 1
+          fi
+      - name: Godot 4 scene import and hash-verified sandbox output
+        run: go test -tags integration ./internal/sandboxrunner -run '^TestRealRootlessGodotWorldBuild$' -v -count=1 -timeout 7m
+
+  physical-rootless-large-artifact:
+    name: Rootless general-purpose multi-MiB publication (opt-in)
+    # Never execute physical Node workflows from untrusted pull requests.
+    # The approved immutable Python 3 + POSIX sh image must already exist
+    # under the self-hosted unprivileged runner's OCI image identity.
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feature/project-workspace-development-environments' && vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE != '' }}
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 12
+    env:
+      ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE: ${{ vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Verify trusted rootless runner and approved immutable Python image
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE" =~ ^[^[:space:]]+@sha256:[[:xdigit:]]{64}$ ]]; then
+            echo '::error::ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE requires an immutable OCI SHA-256 reference'
+            exit 1
+          fi
+          if ! command -v podman >/dev/null; then
+            echo '::error::Rootless Podman is required for physical publication QA'
+            exit 1
+          fi
+          if [[ "$(podman info --format '{{.Host.Security.Rootless}}')" != "true" ]]; then
+            echo '::error::Physical artifact tests must run as a rootless Podman user'
+            exit 1
+          fi
+          if ! podman image exists "$ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE"; then
+            echo '::error::Approved Python image is not present under runner identity'
+            exit 1
+          fi
+      - name: Produce and independently verify real 2.5 MiB Workspace output
+        run: go test -tags integration ./internal/sandboxrunner -run '^TestRealRootlessLargeArtifactPublication$' -v -count=1 -timeout 9m
+
+  physical-rootless-library-e2e:
+    name: Real rootless build to immutable Project Library (opt-in)
+    # The existing large-transfer smoke uses a mock publisher. This one
+    # checks real SQLite, blob persistence, source-only grants and revocation.
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feature/project-workspace-development-environments' && vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE != '' }}
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 12
+    env:
+      ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE: ${{ vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Confirm approved rootless Podman and immutable pre-pulled Python image
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE" =~ ^[^[:space:]]+@sha256:[[:xdigit:]]{64}$ ]]; then
+            echo '::error::Full immutable OCI sha256 reference required for physical Library QA'
+            exit 1
+          fi
+          if ! command -v podman >/dev/null; then
+            echo '::error::Trusted unprivileged Podman runner is required'
+            exit 1
+          fi
+          if [[ "$(podman info --format '{{.Host.Security.Rootless}}')" != "true" ]]; then
+            echo '::error::Refusing physical publication as privileged/rootful OCI'
+            exit 1
+          fi
+          if ! podman image exists "$ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE"; then
+            echo '::error::Approved digest-pinned Python image must be pre-pulled under this user'
+            exit 1
+          fi
+      - name: Execute real OCI Python build and verify immutable Library publication
+        run: go test -tags integration ./internal/workspacepublisher -run '^TestRealRootlessEndToEndLibraryPublication$' -v -count=1 -timeout 9m
+
+  physical-rootless-workspace-service:
+    name: Real rootless Workspace HTTP broker (opt-in)
+    # Isolated from PR triggers; no approved digest => skipped, not passed.
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feature/project-workspace-development-environments' && vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE != '' }}
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 12
+    env:
+      ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE: ${{ vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Inspect local rootless Podman and approved immutable image (read-only)
+        shell: bash
+        run: go run ./cmd/onepane-node-preflight -require ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE -strict
+      - name: Verify real OCI health response, sibling denial and revocation
+        run: go test -tags integration ./internal/workspacebroker -run '^TestRealRootlessWorkspaceHealthBroker$' -v -count=1 -timeout 9m

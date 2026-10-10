@@ -1,0 +1,165 @@
+/* Canonical Workspace runtime management.
+ * No direct host commands: all writes go through the existing Project runtime
+ * operation coordinator, capability leases, observation & verification.
+ */
+async function a48MountWorkspaceRuntime(project,workspace,container){
+ const section=document.createElement("section");
+ section.className="a44-environment-subsection a48-runtime";
+ section.dataset.workspaceId=String(workspace.id);
+ section.innerHTML='<h3>Workspace sandbox</h3><p class="list-meta">Resolving canonical execution environment…</p>';
+ container.prepend(section);
+ const prefix="/v1/projects/"+encodeURIComponent(project.id);
+ let views=[];
+ try{const result=await apiRequest(prefix+"/workspaces");views=Array.isArray(result)?result:[]}
+ catch(e){section.innerHTML='<h3>Workspace sandbox</h3><div class="error" role="alert">'+escapeHtml(e.message)+'</div>';return}
+ const canonical=views.find(w=>a45BackendLegacyID(w)===String(workspace.id));
+ if(!section.isConnected)return;
+ if(!canonical){
+  section.innerHTML='<h3>Workspace sandbox</h3><p class="list-meta">Register this Workspace in Workspace connections before provisioning an isolated environment.</p>';
+  return;
+ }
+ const runtimeURI=prefix+"/workspaces/"+encodeURIComponent(canonical.id)+"/runtime";
+ let runtime=null,apps=[],approvedToolchain=null,err="";
+ try{runtime=await apiRequest(runtimeURI)}
+ catch(e){if(!/404|not found|no rows/i.test(String(e.message)))err=e.message}
+ if(runtime){
+  try{const list=await apiRequest("/v1/project-runtimes/"+encodeURIComponent(runtime.id)+"/applications");apps=Array.isArray(list)?list:[]}
+  catch(e){err="Application inventory unavailable: "+e.message}
+ }
+ if(runtime){
+  try{approvedToolchain=await apiRequest(prefix+"/workspaces/"+encodeURIComponent(canonical.id)+"/toolchain-manifest")}
+  catch(e){if(!/404|not found|no rows/i.test(String(e.message)))err="Toolchain approval unavailable: "+e.message}
+ }
+ if(!section.isConnected||section.dataset.workspaceId!==String(workspace.id))return;
+ const verified=runtime?.status==="running";
+ const status=runtime?.status||"not provisioned",desired=runtime?.desired_state||"stopped";
+ const tools=apps.map(a=>{
+  const current=String(a.desired_state||"installed");
+  const next=current==="running"?"stopped":"running";
+  const action=next==="running"?"Start tool":"Stop tool";
+  const canStart=runtime?.status==="running";
+  const disabled=next==="running"&&!canStart;
+  return '<div class="a48-app-row" data-a48-app="'+escapeHtml(a.id)+'">'+
+   '<strong>'+escapeHtml(a.name)+'</strong>'+
+   '<span class="pill">'+escapeHtml(a.status||"declared")+'</span>'+
+   '<span class="list-meta">Requested: '+escapeHtml(current)+'</span>'+
+   '<span class="list-meta">'+escapeHtml(a.source_ref||"")+'</span>'+
+   '<button type="button" class="btn" data-a48-app-action="'+escapeHtml(a.id)+'"'+
+   ' data-a48-revision="'+Number(a.revision)+'" data-a48-target="'+next+'" '+
+   (disabled?'disabled title="Start Workspace sandbox first"':'')+'>'+action+'</button></div>';
+ }).join("");
+ const approvedApps=apps.filter(a=>a.source_kind==="oci_image"&&
+   /@sha256:[a-fA-F0-9]{64}$/.test(String(a.source_ref||"")));
+ const approvedApp=approvedToolchain?.application_id||approvedApps[0]?.id||"";
+ const approvedStatus=approvedToolchain?.status||"not approved";
+ const approvedReqs=Array.isArray(approvedToolchain?.requirements)?
+   approvedToolchain.requirements.map(r=>String(r.executable||"")+
+     (r.version_constraint?":"+String(r.version_constraint):"")).join(", "):"";
+ const manifestBox=runtime?'<section class="a48-toolchain-approval">'+
+  '<h4>Approved Workspace toolchain</h4>'+
+  '<p class="list-meta">A human operator can approve required executables, version constraints and a registered digest-pinned OCI application. Approval is versioned and persisted; OnePane still checks actual tool availability before executing Tasks.</p>'+
+  '<p class="list-meta">Approval: <strong>'+escapeHtml(approvedStatus)+
+  '</strong> · revision '+Number(approvedToolchain?.revision||0)+
+  (approvedToolchain?.manifest_sha256?' · SHA-256 '+escapeHtml(approvedToolchain.manifest_sha256.slice(0,12))+'…':'')+
+  '</p>'+
+  '<form id="a48ToolchainApprove">'+
+  '<label>Approved OCI application<select name="application_id" required>'+
+   approvedApps.map(a=>'<option value="'+escapeHtml(a.id)+'"'+
+   (String(a.id)===String(approvedApp)?' selected':'')+'>'+
+   escapeHtml(a.name)+' — '+escapeHtml(a.source_ref)+'</option>').join("")+
+  '</select></label>'+
+  '<label>Required executables and optional version constraints (comma-separated)<input name="requirements" maxlength="2500" required placeholder="go:>=1.23, python3:>=3.12" value="'+escapeHtml(approvedReqs)+'"></label>'+
+  '<button type="submit" class="btn" '+(!approvedApps.length?'disabled':'')+'>Approve toolchain revision</button>'+
+  '</form></section>':"";
+ const buttons=runtime?
+  '<button type="button" class="btn" id="a48Start" '+(desired==="running"?"disabled":"")+'>Start</button> <button type="button" class="btn" id="a48Stop" '+(desired==="stopped"?"disabled":"")+'>Stop</button>':
+  '<button type="button" class="btn primary" id="a48Create">Create isolated sandbox</button>';
+ section.innerHTML='<div class="card-header"><div><h3>Workspace sandbox</h3><p class="list-meta">Dedicated execution identity. Actual execution requires a compatible rootless Podman/Docker host; remote Node placement is not yet verified.</p></div>'+
+ '<span class="pill '+(verified?"good":"")+'">'+escapeHtml(status)+'</span></div>'+
+ '<div class="a48-runtime-grid">'+
+ a44DevelopmentSection("Requested state",desired,"Operations may remain queued until capacity is available")+
+ a44DevelopmentSection("Observed state",status,verified?"Verified running status from backend":"Not confirmed running")+
+ a44DevelopmentSection("Runtime scope",canonical.name,"Dedicated to this Workspace, not the legacy shared Project runtime")+
+ a44DevelopmentSection("Installed applications",String(apps.length),"Only observed application states are reported")+'</div>'+
+ '<div class="toolbar a48-runtime-actions">'+buttons+'<button type="button" class="btn" id="a48Refresh">Refresh</button></div>'+
+ (runtime?'<form id="a48Install" class="a48-install"><h4>Configure a general-purpose toolchain / OCI application</h4>'+
+ '<p class="list-meta">A Workspace can run any compatible software included in its reviewed, digest-pinned OCI image: development languages, compilers, test frameworks, data tools, media tools, documentation systems, automation and game engines. OnePane executes commands inside the verified sandbox through scoped Task capabilities, never through unrestricted host-shell access.</p>'+ '<p class="list-meta">Use the governed Workspace tools inventory to inspect available executables; an observed binary is not an execution grant or proof of correct operation. Installation and network access still follow Workspace approval and Node policy. Specialist integrations include Godot headless build and experimental loopback-only Unreal MCP readiness; unrestricted MCP editor calls are not enabled.</p>'+
+ '<label>Application name<input name="name" required maxlength="120" placeholder="Python / Go / Blender / Godot / research tools"></label>'+
+ '<label>OCI image digest<input name="source_ref" required placeholder="registry.example/toolchain@sha256:…" pattern=".+@sha256:[0-9a-fA-F]{64}"></label>'+
+ '<button type="submit" class="btn" '+(runtime.status==="running"?"":"disabled")+' >Declare pinned tool</button></form>':'')+
+ (tools?'<div class="a48-app-list"><h4>Workspace tools</h4>'+tools+'</div>':'')+
+ manifestBox+
+ (err?'<p class="error" role="alert">'+escapeHtml(err)+'</p>':'');
+ const refresh=()=>a48MountWorkspaceRuntime(project,workspace,container).then(()=>{
+  if(section.isConnected)section.remove();
+ });
+ const mutate=async(uri,body)=>{
+  try{await apiRequest(uri,{method:"POST",body:JSON.stringify(body)});notice("Workspace runtime change requested.");await refresh()}
+  catch(e){notice("Workspace runtime: "+e.message,"bad")}
+ };
+ section.querySelector("#a48ToolchainApprove")?.addEventListener("submit",async event=>{
+  event.preventDefault();
+  const form=event.currentTarget;
+  const chosen=String(new FormData(form).get("application_id")||"");
+  const raw=String(new FormData(form).get("requirements")||"");
+  const parts=raw.split(",").map(v=>v.trim()).filter(Boolean);
+  const requirements=parts.map(v=>{
+    const colon=v.indexOf(":");
+    return {executable:colon<0?v:v.slice(0,colon),
+      version_constraint:colon<0?"":v.slice(colon+1).trim()};
+  });
+  if(!chosen||requirements.length<1||requirements.length>32){
+    notice("Select a pinned application and 1–32 executable requirements.","bad");return;
+  }
+  const button=form.querySelector("button[type=submit]");
+  if(button)button.disabled=true;
+  try{
+    await apiRequest(prefix+"/workspaces/"+encodeURIComponent(canonical.id)+"/toolchain-manifest",{
+      method:"PUT",body:JSON.stringify({
+        application_id:chosen,expected_revision:Number(approvedToolchain?.revision||0),requirements
+      })
+    });
+    notice("Human-approved Workspace toolchain revision saved. Live software and version qualification is still required.");
+    await refresh();
+  }catch(e){if(button)button.disabled=false;notice("Toolchain approval not saved: "+e.message,"bad")}
+ });
+ section.querySelector("#a48Create")?.addEventListener("click",()=>mutate(runtimeURI,{
+  desired_state:"stopped",isolation_mode:"sandboxed_container"
+ }));
+ section.querySelector("#a48Start")?.addEventListener("click",()=>mutate("/v1/project-runtimes/"+encodeURIComponent(runtime.id)+"/desired-state",{expected_revision:runtime.revision,desired_state:"running"}));
+ section.querySelector("#a48Stop")?.addEventListener("click",()=>mutate("/v1/project-runtimes/"+encodeURIComponent(runtime.id)+"/desired-state",{expected_revision:runtime.revision,desired_state:"stopped"}));
+ section.querySelector("#a48Refresh")?.addEventListener("click",refresh);
+ // App start and stop are requested states, never a claim that the
+ // image is installed or executing until the independent observer confirms.
+ section.querySelectorAll("[data-a48-app-action]").forEach(button=>button.addEventListener("click",async()=>{
+  const id=button.dataset.a48AppAction,target=button.dataset.a48Target;
+  if(!["running","stopped"].includes(target))return;
+  button.disabled=true;
+  try{
+   await apiRequest("/v1/project-runtimes/"+encodeURIComponent(runtime.id)+
+    "/applications/"+encodeURIComponent(id)+"/desired-state",{
+     method:"POST",body:JSON.stringify({
+      expected_revision:Number(button.dataset.a48Revision),desired_state:target
+     })
+   });
+   notice("Tool "+(target==="running"?"start":"stop")+" requested; awaiting verification.");
+   await refresh();
+  }catch(e){
+   button.disabled=false;
+   notice("Tool lifecycle request failed: "+e.message,"bad");
+  }
+ }));
+ section.querySelector("#a48Install")?.addEventListener("submit",async e=>{
+  e.preventDefault();
+  const form=e.currentTarget;const btn=form.querySelector('button[type="submit"]');btn.disabled=true;
+  const data=Object.fromEntries(new FormData(form));
+  if(!/^.+@sha256:[0-9a-fA-F]{64}$/.test(data.source_ref)){notice("A pinned OCI image SHA-256 digest is required.","bad");btn.disabled=false;return}
+  try{
+   await apiRequest("/v1/project-runtimes/"+encodeURIComponent(runtime.id)+"/applications",{
+    method:"POST",body:JSON.stringify({name:data.name,source_kind:"oci_image",source_ref:data.source_ref,desired_state:"installed",install_spec:{},runtime_spec:{},environment_bindings:{}})
+   });
+   notice("Pinned toolchain registered. Runtime reconciliation will verify installation.");
+   await refresh();
+  }catch(e){btn.disabled=false;notice("Tool registration failed: "+e.message,"bad")}
+ });
+}

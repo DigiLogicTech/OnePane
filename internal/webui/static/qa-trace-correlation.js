@@ -11,7 +11,6 @@
   "task.blocked","task.failed","task.cancel_requested","task.attempt_interrupted",
   "task.archived","task.unarchived","agent_worker.started","agent_worker.step"
  ]);
- const severities=new Set(["information","waiting","attention"]);
  const taskPattern=/^task-[a-f0-9]{24}$/;
  const refs={
   trace:/^trace-[a-f0-9]{24}$/,
@@ -26,9 +25,9 @@
    !Array.isArray(snapshot.timeline)||snapshot.timeline.length>CAP_EVENTS||
    !Array.isArray(snapshot.tasks)||snapshot.tasks.length>50)
    throw Error("Unrecognised or oversized canonical Workspace QA evidence");
-  const groups=new Map(),orphans=[];
+  const groups=new Map();
   let omitted=0,attention=0,weak=0;
-  for(const e of snapshot.timeline){
+  for(const [index,e] of snapshot.timeline.entries()){
    if(!e||!KNOWN_TYPES.has(e.event_type)||!timeValue(e.occurred_at_ms))continue;
    const task=safeRef(e.task_ref,taskPattern);
    if(!task){omitted++;continue}
@@ -36,14 +35,17 @@
    const request=safeRef(e.request_ref,refs.request);
    const run=safeRef(e.run_ref,refs.run);
    const isWorker=e.event_type.startsWith("agent_worker.");
-   const severity=severities.has(e.severity)?e.severity:"information";
+   // Severity is derived from the known event type, not an externally
+   // supplied free-form severity field.
+   const severity=["task.failed","task.blocked","task.attempt_interrupted"].includes(e.event_type)?"attention":
+    ["task.waiting_approval","task.waiting_dependency","task.cancel_requested"].includes(e.event_type)?"waiting":"information";
    const event={type:e.event_type,severity,at:e.occurred_at_ms,
     source:isWorker?"worker":"task"};
    if(severity==="attention")attention++;
    // Trace is strongest. A shared request is weaker; run-only and task-only
    // observations NEVER pretend to be a correlated cross-component trace.
    const level=trace?"trace":request?"request":run?"run_only":"task_only";
-   const key=task+"|"+level+"|"+(trace||request||run||e.event_ref||String(orphans.length));
+   const key=task+"|"+level+"|"+(trace||request||run||String(index));
    if(!trace&&!request)weak++;
    const ref=trace||request||run||"";
    if(!groups.has(key)){

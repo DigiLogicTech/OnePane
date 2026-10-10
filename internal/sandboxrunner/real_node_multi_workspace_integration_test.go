@@ -58,7 +58,7 @@ func TestRealRootlessWorkspaceIsolation(t *testing.T) {
   if _,err:=engine.EnsureContainer(ctx,spec);err!=nil{t.Fatalf("container %d: %v",i,err)}
   state,err:=engine.InspectContainer(ctx,id,appID)
   if err!=nil||state.Status!="running"||!state.IsolationVerified||
-   state.SpecHash!=specHash(spec)||!exactWorkspaceMount(state,roots[i]) {
+   state.SpecHash!=specHash(spec)||state.ID==""||!exactWorkspaceMount(state,roots[i]) {
    t.Fatalf("Workspace %d lacks verified dedicated OCI mount: %+v %v",i,state,err)
   }
   containerIDs[i]=state.ID
@@ -119,7 +119,7 @@ func TestRealRootlessWorkspaceIsolation(t *testing.T) {
  worldSpec.Command=[]string{"sh","-c","sleep 180"}
  rebuilt,err:=engine.EnsureContainer(ctx,worldSpec)
  if err!=nil||rebuilt.Status!="running"||!rebuilt.IsolationVerified||
-  rebuilt.ID==containerIDs[0]||!exactWorkspaceMount(rebuilt,roots[0])||
+  (rebuilt.ID==""||rebuilt.ID==containerIDs[0])||!exactWorkspaceMount(rebuilt,roots[0])||
   rebuilt.SpecHash!=specHash(worldSpec){
   t.Fatalf("World OCI rebuild did not replace exactly its owned container: %+v %v",rebuilt,err)
  }
@@ -135,6 +135,12 @@ func TestRealRootlessWorkspaceIsolation(t *testing.T) {
  storyReadback,err:=engine.ExecContainer(ctx,ids[1],appID,[]string{"sh","-c","cat /workspace/identity.txt"})
  if err!=nil||storyReadback.ExitCode!=0||strings.TrimSpace(storyReadback.Stdout)!="story-only"{
   t.Fatalf("Story file changed after World rebuild: %+v %v",storyReadback,err)
+ }
+ refreshedStoryNetwork,err:=engine.InspectNetwork(ctx,ids[1])
+ if err!=nil||refreshedStoryNetwork.Name!=b.Name||
+  (b.ID!=""&&refreshedStoryNetwork.ID!=b.ID)||
+  !refreshedStoryNetwork.Internal||refreshedStoryNetwork.RuntimeID!=ids[1]{
+  t.Fatalf("World OCI rebuild disrupted Story private network: %+v %v",refreshedStoryNetwork,err)
  }
  if _,err:=engine.StopRuntime(ctx,ids[0]);err!=nil{t.Fatal(err)}
  if _,err:=engine.StopRuntime(ctx,ids[1]);err!=nil{t.Fatal(err)}

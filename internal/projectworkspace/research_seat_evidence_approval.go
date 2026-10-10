@@ -65,31 +65,38 @@ func researchTextSelectionBounded(entries []WorkspaceEvidenceEntry)bool{
 
 func frozenResearchSeatsEligible(snapshot []byte,seats []string)bool{
  var manifest struct{
-  Members []struct {
+  ResearchMode bool `json:"research_mode"`
+  ExecutionMode string `json:"execution_mode"`
+  Research struct{ChairMode string `json:"chair_mode"`} `json:"research"`
+  Members []struct{
    ID string `json:"id"`
    MemberKind string `json:"member_kind"`
    Status string `json:"status"`
    Config json.RawMessage `json:"config"`
   } `json:"members"`
  }
- if json.Unmarshal(snapshot,&manifest)!=nil{return false}
- for _,id:=range seats{
-  found:=false
-  for _,member:=range manifest.Members{
-   if member.ID!=id{continue}
-   if member.MemberKind!="agent"||member.Status!="active"{return false}
-   var cfg struct{
-    CouncilChairOnly bool `json:"council_chair_only"`
-    ManualWeb struct{Enabled bool `json:"enabled"`} `json:"manual_web"`
-   }
-   if len(member.Config)>0&&json.Unmarshal(member.Config,&cfg)!=nil{return false}
-   if cfg.CouncilChairOnly||cfg.ManualWeb.Enabled{return false}
-   found=true
-   break
-  }
-  if !found{return false}
+ if json.Unmarshal(snapshot,&manifest)!=nil||!manifest.ResearchMode||
+  manifest.ExecutionMode!="council"||manifest.Research.ChairMode=="manual"{
+  return false
  }
- return true
+ // Council answers are visible to peer seats in later critique rounds.
+ // Sharing must therefore cover every active participant, not only the
+ // recipients of the first-pass direct evidence packet.
+ selected:=map[string]bool{}
+ for _,id:=range seats{selected[id]=true}
+ count:=0
+ for _,member:=range manifest.Members{
+  if member.Status!="active"{continue}
+  if member.MemberKind!="agent"||!selected[member.ID]{return false}
+  var cfg struct{
+   CouncilChairOnly bool `json:"council_chair_only"`
+   ManualWeb struct{Enabled bool `json:"enabled"`} `json:"manual_web"`
+  }
+  if len(member.Config)>0&&json.Unmarshal(member.Config,&cfg)!=nil{return false}
+  if cfg.CouncilChairOnly||cfg.ManualWeb.Enabled{return false}
+  count++
+ }
+ return count>0&&count==len(selected)&&len(selected)==len(seats)
 }
 
 // ApproveResearchSeatEvidence requires a second, explicit human action after

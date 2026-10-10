@@ -477,35 +477,60 @@ func deref(v *string) string {
 	return *v
 }
 
-func (s *Service) ExpireStale(ctx context.Context) (int, error) {
-	now := s.clock.UnixMilli()
-	rows, err := s.db.QueryContext(ctx, `SELECT m.peer_node_id FROM node_capability_manifests m JOIN harness_nodes n ON n.id=m.peer_node_id WHERE m.expires_at<=? AND n.trust_state='paired'`, now)
-	if err != nil {
-		return 0, err
-	}
-	var peers []string
-	for rows.Next() {
-		var p string
-		if err := rows.Scan(&p); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		peers = append(peers, p)
-	}
-	rows.Close()
-	count := 0
-	for _, p := range peers {
-		err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-			if _, err := tx.ExecContext(ctx, `UPDATE harness_nodes SET trust_state='unavailable',revision=revision+1,updated_at=? WHERE id=? AND trust_state='paired'`, now, p); err != nil {
-				return err
-			}
-			_, err := tx.ExecContext(ctx, `UPDATE model_deployments SET status='unavailable',residency_state='stopped',revision=revision+1,updated_at=? WHERE node_id=? AND json_extract(runtime_config_json,'$.federation.remote_deployment_id') IS NOT NULL`, now, p)
-			return err
-		})
-		if err != nil {
-			return count, err
-		}
-		count++
-	}
-	return count, nil
+// expireStalePeer atomically verifies the authoritative manifest expiry in
+// the same SQLite write transaction that marks a peer unavailable. A newer
+// heartbeat arriving after the outer candidate read must win rather than
+// having its live Node disabled by a delayed stale sweep.
+func (s *Service) expireStalePeer(ctx context.Context, peer string, now int64) (bool,error) {
+ changed:=false
+ err:=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+  result,err:=tx.ExecContext(ctx,`UPDATE harness_nodes
+   SET trust_state='unavailable',revision=revision+1,updated_at=?
+   WHERE id=? AND local=0 AND trust_state='paired'
+    AND EXISTS(SELECT 1 FROM node_capability_manifests m
+      WHERE m.peer_node_id=harness_nodes.id AND m.expires_at<=?)`,
+    now,peer,now)
+  if err!=nil{return err}
+  n,err:=result.RowsAffected()
+  if err!=nil{return err}
+  if n==0{return nil}
+  if n!=1{return fmt.Errorf("ambiguous peer expiry update")}
+  _,err=tx.ExecContext(ctx,`UPDATE model_deployments
+   SET status='unavailable',residency_state='stopped',
+       revision=revision+1,updated_at=?
+   WHERE node_id=? AND provider_connection_id IS NULL
+     AND json_extract(runtime_config_json,'$.federation.remote_deployment_id') IS NOT NULL`,
+    now,peer)
+  if err!=nil{return err}
+  changed=true
+  return nil
+ })
+ return changed,err
+}
+
+// ExpireStale is idempotent, never revokes a pairing or touches origin-local
+// models, and counts only peers whose availability was actually changed.
+func (s *Service) ExpireStale(ctx context.Context) (int,error) {
+ now:=s.clock.UnixMilli()
+ rows,err:=s.db.QueryContext(ctx,`SELECT m.peer_node_id
+  FROM node_capability_manifests m JOIN harness_nodes n ON n.id=m.peer_node_id
+  WHERE m.expires_at<=? AND n.local=0 AND n.trust_state='paired'`,now)
+ if err!=nil{return 0,err}
+ var peers []string
+ for rows.Next(){
+  var peer string
+  if err:=rows.Scan(&peer);err!=nil{rows.Close();return 0,err}
+  peers=append(peers,peer)
+ }
+ scanErr:=rows.Err()
+ closeErr:=rows.Close()
+ if scanErr!=nil{return 0,scanErr}
+ if closeErr!=nil{return 0,closeErr}
+ count:=0
+ for _,peer:=range peers{
+  changed,err:=s.expireStalePeer(ctx,peer,now)
+  if err!=nil{return count,err}
+  if changed{count++}
+ }
+ return count,nil
 }

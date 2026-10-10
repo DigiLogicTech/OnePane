@@ -1017,3 +1017,25 @@ Because this is a local DB-to-network preflight rather than a distributed
 transaction, an unavoidable race can still occur if the peer goes
 offline after admission; ordinary transport timeout/unknown-outcome
 semantics remain in force.
+
+## Node availability — atomic expiry-versus-heartbeat resolution
+
+The Node federation heartbeat sweep previously gathered expired Node
+IDs and then changed trust/model state in separate later transactions
+without rechecking manifest expiry. A valid newer heartbeat could arrive
+between these two stages, yet the stale sweep could still overwrite
+the just-recovered Node with `unavailable`.
+
+The per-peer transition now uses a single SQLite write transaction whose
+UPDATE is conditional on the peer *still being paired, remote, and having
+an expired manifest*. Only if exactly one Node is transitioned does the
+same transaction mark that peer's federated model deployments
+unavailable. A concurrent refreshed manifest wins without changing
+peer or deployment state. The count reports only real transitions, and
+repeated sweeps do not rewrite revisions or touch origin-local models.
+
+The regression directly simulates an expired peer candidate followed
+by a renewed manifest before the guarded transition, checks no
+erroneous disable, then checks a genuinely expired peer and
+idempotent re-sweep. The mechanism remains a local SQLite recovery
+fence, not a remote physical heartbeat acceptance result.

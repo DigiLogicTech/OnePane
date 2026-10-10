@@ -74,7 +74,7 @@ func loadQAExecutionSources(ctx context.Context,db *sql.DB,tenant,projectID,work
   SUM(CASE WHEN o.state='committed' THEN 1 ELSE 0 END),
   SUM(CASE WHEN o.state IN('denied','failed','aborted','compensation_failed') THEN 1 ELSE 0 END),
   SUM(CASE WHEN o.state IN('unknown_outcome','blocked_unknown_outcome') THEN 1 ELSE 0 END),
-  SUM(CASE WHEN o.state IN('proposed','authorized','prepared','executing','observing','verified','compensating','compensated') THEN 1 ELSE 0 END)
+  SUM(CASE WHEN o.state IN('proposed','authorized','prepared','executing','observing','verified','compensating') THEN 1 ELSE 0 END)
  FROM operations o JOIN scoped t ON t.id=o.task_id WHERE o.workspace_id=?
  GROUP BY o.task_id
  UNION ALL

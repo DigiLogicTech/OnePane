@@ -21,6 +21,14 @@ for table in Property File Component ServiceInstall ServiceControl Registry Upgr
 done
 grep -F "OnePane Linux wixl Candidate - DO NOT INSTALL" "$scratch/Property.tsv"
 grep -F "C771A020-BC81-46D6-92C3-35B80E101102" "$scratch/Property.tsv"
+# MSI Component.Attributes has the 64-bit component flag (256).
+# wixl's --arch x64 is the authority: Package.Platform is unsupported.
+awk -F '\t' '$1 == "CandidateServiceComponent" {
+  if (int($4 / 256) % 2 == 1) good = 1
+}
+END { if (!good) exit 1 }' "$scratch/Component.tsv" || {
+  echo "FAIL: service component lacks MSI 64-bit flag" >&2; exit 1;
+}
 grep -F "OnePaneWixlCandidate" "$scratch/ServiceInstall.tsv"
 grep -F "OnePaneWixlCandidate" "$scratch/ServiceControl.tsv"
 grep -F "OnePaneWixlCandidate" "$scratch/Registry.tsv"

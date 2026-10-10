@@ -511,3 +511,23 @@ without-explicit-attachment rule remain enforced. A separately reviewed
 byte-verified, sealed Research evidence attachment and seat-specific
 consumption policy are still needed. This work does not claim that step is
 complete, nor that a physical inference test has run.
+
+## Research evidence — human-only eligible session discovery
+
+The Workspace Library's evidence approval dialog now selects an existing
+Research Council Task session from the exact current Project Workspace
+instead of requiring manual copying of an opaque session ID.
+
+`GET /v1/projects/{projectID}/workspaces/{workspaceID}/research/evidence-sessions`
+requires authenticated Project and Team read authorisation, active tenant
+membership and a **human** principal. The backend lists at most 40 live
+Research-mode Council sessions with an active Team, a created Task bound to
+the requested canonical Project Workspace, zero rounds, no turn requests and
+no previously frozen evidence selection. Sibling Workspace and other
+Project sessions are never included.
+
+Selecting a session is only UI assistance. The actual freeze endpoint
+independently revalidates the human, session manifest, round and current
+Library version permissions transactionally. A stale picker result does not
+permit a late/unauthorised approval. No document data or evidence content
+is passed to a Council model through discovery.

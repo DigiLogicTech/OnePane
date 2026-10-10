@@ -46,7 +46,7 @@ func TestEvidenceTextSearchMatchesUnicodeAndKeepsRuneOffsets(t *testing.T){
   },Text:"🦊 CAFE acá Café CAFE",Trust:"untrusted_library_content",
  }}}
  results:=searchVerifiedEvidenceText(in,"café")
- if len(results.Hits)!=1||results.Hits[0].RuneOffset!=13{
+ if len(results.Hits)!=1||results.Hits[0].RuneOffset!=11{
   t.Fatalf("case-folded Unicode search offset drift: %+v",results.Hits)
  }
 }

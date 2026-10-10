@@ -5,6 +5,7 @@ package agentworker
 import (
  "context"
  "encoding/json"
+ "strings"
  "testing"
 
  "github.com/DigiLogicTech/OnePane/internal/clock"
@@ -50,6 +51,49 @@ func TestAgentWorkerSandboxToolOwnershipIsBoundToTaskWorkspace(t *testing.T) {
  execInput:=json.RawMessage(`{"runtime_id":"`+worldRun.ID+`","application_id":"`+app.ID+`","command":["sh","-c","printf world"]}`)
  imageInput:=json.RawMessage(`{"runtime_id":"`+worldRun.ID+`","application_id":"`+app.ID+`","image":"`+image+`"}`)
  runtimeInput:=json.RawMessage(`{"runtime_id":"`+worldRun.ID+`"}`)
+ // Human-approved software cannot be silently bypassed by an Agent:
+ // the Tool proposal must use the exact registered Workspace application
+ // and carry ALL operator-declared executables to live OCI preflight.
+ unchanged,err:=applyApprovedWorkspaceToolchain(ctx,db.SQL(),taskWorld,execInput)
+ if err!=nil||string(unchanged)!=string(execInput){t.Fatalf("legacy Workspace build altered: %v",err)}
+ approved,err:=svc.ApproveWorkspaceToolchainManifest(ctx,projectworkspace.ApproveToolchainManifestCommand{
+  ProjectID:project.ID,ProjectWorkspaceID:world.ID,ApplicationID:app.ID,
+  ActorPrincipalID:"operator",Requirements:[]projectworkspace.ToolchainRequirement{
+   {Executable:"python3",VersionConstraint:">=3.12"},
+   {Executable:"go",VersionConstraint:">=1.23"},
+  },
+ })
+ if err!=nil{t.Fatal(err)}
+ enriched,err:=applyApprovedWorkspaceToolchain(ctx,db.SQL(),taskWorld,execInput)
+ if err!=nil{t.Fatalf("approved Workspace task denied before live OCI check: %v",err)}
+ var execution struct{Required []string `json:"required_executables"`;Application string `json:"application_id"`}
+ if err=json.Unmarshal(enriched,&execution);err!=nil||
+  len(execution.Required)!=2||execution.Required[0]!="go"||
+  execution.Required[1]!="python3"||execution.Application!=app.ID{
+  t.Fatalf("approved requirements not injected into Agent Tool call: %+v %v",execution,err)
+ }
+ pinnedTask:=taskWorld
+ pinnedTask.Completion=json.RawMessage(`{"toolchain_manifest_sha256":"`+approved.ManifestSHA256+`"}`)
+ if _,err=applyApprovedWorkspaceToolchain(ctx,db.SQL(),pinnedTask,execInput);err!=nil{t.Fatal(err)}
+ for _,bad:=range []string{
+  `{"runtime_id":"`+worldRun.ID+`","application_id":"`+app.ID+`","command":["go","version"],"required_executables":["go"]}`,
+  `{"runtime_id":"`+worldRun.ID+`","application_id":"`+app.ID+`","command":["go","version"],"required_executables":[]}`,
+  `{"runtime_id":"`+worldRun.ID+`","application_id":"`+storyApp.ID+`","command":["go","version"]}`,
+ }{
+  if _,err=applyApprovedWorkspaceToolchain(ctx,db.SQL(),taskWorld,json.RawMessage(bad));err==nil{
+   t.Fatalf("Agent bypassed or substituted approved toolchain: %s",bad)
+  }
+ }
+ wrongDigest:=taskWorld
+ wrongDigest.Completion=json.RawMessage(`{"toolchain_manifest_sha256":"`+strings.Repeat("0",64)+`"}`)
+ if _,err=applyApprovedWorkspaceToolchain(ctx,db.SQL(),wrongDigest,execInput);err==nil{
+  t.Fatal("Orchestrator Task reused a changed toolchain approval")
+ }
+ otherWorkspace:=taskWorld
+ otherWorkspace.ProjectWorkspaceID=&story.ID
+ if _,err=applyApprovedWorkspaceToolchain(ctx,db.SQL(),otherWorkspace,execInput);err!=nil{
+  t.Fatalf("unconfigured neighbour should not inherit approval: %v",err)
+ }
  for _,tc:=range []struct{name,tool,ref string;input json.RawMessage}{
   {"exec",sandboxrunner.ToolAppExec,ref,execInput},
   {"git_mutate",sandboxrunner.ToolAppGitMutate,ref,

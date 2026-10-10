@@ -55,7 +55,7 @@ async function a49MountDevelopmentTasks(project,workspace,container){
   </details>
   <details class="a49-qa-snapshot" id="a59ScopedTraceCorrelation">
    <summary>Correlate observed Task and Worker events (authorised Workspace only)</summary>
-   <p class="list-meta">Read the latest 96 bounded, already scoped Task/Worker events. Match only observed opaque trace/request references within the same canonical Workspace and Task. Tool Gateway, model inference and external verification are explicitly unavailable in this evidence source. Browser events do not carry a shared backend trace.</p>
+   <p class="list-meta">Read the latest 96 bounded, already scoped Task/Worker events. Match only observed opaque trace/request references within the same canonical Workspace and Task. Related persisted model requests, Tool invocations, operations and verification statuses can be joined by the same authorised Task identity. These are not end-to-end trace links or proof of external success. Browser events do not carry a shared backend trace.</p>
    <div class="a49-task-actions">
     <button class="btn" id="a59Correlate" type="button">Load and correlate observed events</button>
     <label>Severity <select id="a59Severity" aria-label="Observed event severity filter">
@@ -240,7 +240,7 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    correlationStatus.textContent="Correlated "+correlationReport.groups_shown+
     " scoped groups from "+correlationReport.events_considered+" recent events"+
     (correlationReport.timeline_truncated?" (older chronology omitted)":"")+
-    ". Shared refs are observations, not proof of successful tools, model results or independent verification.";
+    ". Shared refs and persisted execution statuses are observations, not proof of external tool effects, model correctness or independent verification.";
   }catch(_){
    if(!section.isConnected||epoch!==correlationEpoch)return;
    correlationReport=null;correlationPreview.textContent="";

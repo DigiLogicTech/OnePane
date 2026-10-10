@@ -73,6 +73,15 @@ func TestProjectTaskGraphAtomicDependencyAndIdempotency(t *testing.T){
  if graph.ID==""||len(graph.Nodes)!=3||graph.ManifestSHA256==""{
   t.Fatalf("Project graph not persisted: %+v",graph)
  }
+ if graph.Status!="work_available"||graph.Progress.Admissible!=1||
+  graph.Progress.Waiting!=2||graph.Progress.NeedsAttention!=0{
+  t.Fatalf("independent branch readiness wrong: %+v",graph)
+ }
+ inventory,err:=svc.TaskGraphs(ctx,p.ID,20)
+ if err!=nil||len(inventory)!=1||inventory[0].ID!=graph.ID||
+  inventory[0].Progress.Admissible!=1{
+  t.Fatalf("Graph inventory missing initial readiness: %+v %v",inventory,err)
+ }
  lookup:=map[string]TaskGraphNode{}
  for _,n:=range graph.Nodes{lookup[n.Key]=n}
  if lookup["assets"].ProjectWorkspaceID!=source.ID||
@@ -142,6 +151,56 @@ func TestProjectTaskGraphAtomicDependencyAndIdempotency(t *testing.T){
  })
  if err!=nil||successor.State!=task.StateRunning||attempt.ID==""{
   t.Fatalf("satisfied successor did not resume: %+v %+v %v",successor,attempt,err)
+ }
+ // A broken predecessor must be visible all the way down the DAG.
+ // Use a synthetic Task state mutation, not a simulated checkpoint success.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE tasks SET state='failed'
+   WHERE id=?`,lookup["assets"].TaskID);err!=nil{t.Fatal(err)}
+ recovery,err:=svc.TaskGraph(ctx,p.ID,graph.ID)
+ if err!=nil||recovery.Status!="needs_attention"{
+  t.Fatalf("failed source was hidden: %+v %v",recovery,err)
+ }
+ statusByKey:=map[string]TaskGraphNode{}
+ for _,node:=range recovery.Nodes{statusByKey[node.Key]=node}
+ if statusByKey["story"].Readiness!="needs_attention"||
+  statusByKey["integration"].Readiness!="needs_attention"||
+  !containsNodeKey(statusByKey["integration"].FailedOrIntervenedOn,"story"){
+  t.Fatalf("transitive prerequisite failure was hidden: %+v",statusByKey)
+ }
+ // An unreviewed hard dependency added later must fail closed, without
+ // exposing its opaque Task identifier in a graph read result.
+ extra,err:=taskSvc.Create(ctx,task.CreateCommand{
+  WorkspaceID:"tenant",ProjectID:&p.ID,ProjectWorkspaceID:&source.ID,
+  Objective:"New separately approved Task",
+ })
+ if err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`INSERT INTO task_dependencies(
+  task_id,depends_on_task_id,dependency_type,dependency_mode,metadata_json)
+  VALUES(?,?,'hard','all','{}')`,lookup["integration"].TaskID,extra.ID);err!=nil{t.Fatal(err)}
+ unsafeGraph,err:=svc.TaskGraph(ctx,p.ID,graph.ID)
+ if err!=nil{t.Fatal(err)}
+ var final TaskGraphNode
+ for _,n:=range unsafeGraph.Nodes{if n.Key=="integration"{final=n}}
+ if !containsNodeKey(final.FailedOrIntervenedOn,"unscoped_dependency")||
+  unsafeGraph.Status!="needs_attention"{
+  t.Fatalf("unreviewed extra dependency was ignored: %+v",unsafeGraph)
+ }
+ report,_:=json.Marshal(unsafeGraph)
+ if strings.Contains(string(report),extra.ID){
+  t.Fatal("unknown dependency's opaque identifier leaked in operator graph report")
+ }
+ // The graph's immutable Workspace mapping remains authoritative even
+ // if a later bad operator/import path rewrites Task ownership in SQLite.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE tasks
+  SET project_workspace_id=? WHERE id=?`,source.ID,lookup["integration"].TaskID);err!=nil{t.Fatal(err)}
+ drifted,err:=svc.TaskGraph(ctx,p.ID,graph.ID)
+ if err!=nil||drifted.Status!="needs_attention"{
+  t.Fatalf("Workspace identity drift not surfaced: %+v %v",drifted,err)
+ }
+ var driftedNode TaskGraphNode
+ for _,n:=range drifted.Nodes{if n.Key=="integration"{driftedNode=n}}
+ if !driftedNode.ScopeDrift||driftedNode.Readiness!="needs_attention"{
+  t.Fatalf("Graph lost approved Task Workspace identity: %+v",driftedNode)
  }
  // A new graph is scoped to another Project only by a fresh operator action.
  if _,err=svc.TaskGraph(ctx,"other-project",graph.ID);!errors.Is(err,sql.ErrNoRows){

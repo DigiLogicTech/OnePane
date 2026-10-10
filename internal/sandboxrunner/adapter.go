@@ -89,6 +89,7 @@ func Register(reg *tool.Registry, adapter *Adapter) error {
 		{ID: ToolAppInspect, Version: "1", CapabilityID: CapabilityObserve, Mode: authority.ActionObserve, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskLow, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolImageInspect, Version: "1", CapabilityID: CapabilityObserve, Mode: authority.ActionObserve, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskLow, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppExec, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
+		{ID: ToolAppToolsDiscover, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskLow, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppGodotBuild, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppUnrealMCPProbe, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskLow, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppGitInspect, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
@@ -359,6 +360,44 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 			"action":in.Action,"succeeded":success,"result":observed,
 			"container":state,"engine":profile,
 		},summary)
+	case ToolAppToolsDiscover:
+        // Broad, read-only toolchain discovery executes a *fixed* scanner in
+        // the same verified rootless application as project.app.exec.
+        // Its response is an inventory of executable names, not permission to
+        // execute those programs or install system-level dependencies.
+        if !validToolDiscoveryEnvelope(req.Input)||!workspaceExists{
+            return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)
+        }
+        state,err:=a.engine.InspectContainer(ctx,in.RuntimeID,in.ApplicationID)
+        if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        if state.Status!="running"||!state.IsolationVerified||
+           state.RuntimeID!=in.RuntimeID||state.ApplicationID!=in.ApplicationID||
+           state.SpecHash==""||!exactWorkspaceMount(state,workspace){
+            return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Workspace discovery requires a verified rootless OCI application",ErrInvalidInput))
+        }
+        discoveryCtx,cancel:=context.WithTimeout(ctx,15*time.Second)
+        defer cancel()
+        scanned,err:=a.engine.ExecContainer(discoveryCtx,in.RuntimeID,in.ApplicationID,workspaceToolDiscoveryCommand())
+        if discoveryCtx.Err()!=nil{return tool.AdapterResult{},discoveryCtx.Err()}
+        if err!=nil{return tool.AdapterResult{},err}
+        if scanned.ExitCode!=0{
+            // A distroless image without POSIX sh, or a scanner error, must
+            // be visible as unavailable; no fallback host inventory.
+            return result(map[string]any{
+                "runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
+                "status":"unavailable","reason":"approved OCI image does not support the bounded POSIX tool scanner",
+                "tools":[]WorkspaceTool{},"count":0,
+                "note":"No host fallback; use a compatible toolchain image or authorised project.app.exec instead.",
+            },"Workspace toolchain discovery unavailable inside this image")
+        }
+        inventory,err:=decodeWorkspaceToolDiscovery(scanned.Stdout)
+        if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        return result(map[string]any{
+            "runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
+            "status":"observed","inventory":inventory,
+            "execution_enabled":false,"installation_permitted":false,
+            "sandbox_verified":true,
+        },"Observed executable names within the independently verified Workspace")
 	case ToolAppUnrealMCPProbe:
         // Editor MCP in UE 5.8 is experimental and unauthenticated. Always
         // probe from the owned rootless application network namespace, never

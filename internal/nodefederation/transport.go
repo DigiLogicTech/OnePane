@@ -47,6 +47,14 @@ func (t RemoteTransport) Dispatch(ctx context.Context, req inference.DispatchReq
 	if json.Unmarshal(req.Deployment.RuntimeConfigJSON, &cfg) != nil || cfg.Federation.RemoteDeploymentID == "" || cfg.Federation.PeerNodeID == "" {
 		return inference.DispatchResult{}, &inference.TransportError{Code: "invalid_federated_deployment", OutcomeKnown: true}
 	}
+	// Scheduling is not a durable authority: a peer can expire, revoke or
+	// withdraw the advertised model after routing but before transport.
+	// Fail before sending any prompt or starting a network request.
+	if err := t.Service.authorizeRemoteModelDispatch(ctx,cfg.Federation.PeerNodeID,
+		req.Deployment.ID,cfg.Federation.RemoteDeploymentID);err!=nil{
+		return inference.DispatchResult{},&inference.TransportError{
+			Code:"remote_node_not_admitted",OutcomeKnown:true,Err:err}
+	}
 	endpoint, fp, err := t.Service.pairedEndpoint(ctx, cfg.Federation.PeerNodeID)
 	if err != nil {
 		return inference.DispatchResult{}, &inference.TransportError{Code: "peer_endpoint_invalid", OutcomeKnown: true, Err: err}

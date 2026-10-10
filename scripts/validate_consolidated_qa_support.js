@@ -128,7 +128,7 @@ assert.deepEqual(Object.keys(entries).sort(),[
 assert.equal(entries["node.json"].local_service_observation.state,"running");
 assert.equal(entries["manifest.json"].included_sources.length,4);
 for(const [name,expected] of Object.entries(entries["manifest.json"].member_sha256)){
- const encoded=utf8.encode(JSON.stringify(entries[name],null,2)+"\\n");
+ const encoded=utf8.encode(JSON.stringify(entries[name],null,2)+"\n");
  assert.equal(createHash("sha256").update(encoded).digest("hex"),expected,
   "manifest digest must match the extracted JSON bytes for "+name);
 }

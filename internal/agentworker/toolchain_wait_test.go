@@ -2,7 +2,6 @@ package agentworker
 
 import (
  "context"
- "database/sql"
  "encoding/json"
  "path/filepath"
  "strings"
@@ -115,6 +114,17 @@ func TestApprovedWorkspaceToolchainWaitSurvivesRestartAndAvoidsDuplicateAttempt(
  if err:=db.SQL().QueryRowContext(ctx,
   `SELECT COUNT(*) FROM task_attempts WHERE task_id=?`,created.ID).Scan(&attempts);err!=nil{t.Fatal(err)}
  if attempts!=1{t.Fatalf("resource wait duplicated Task Attempt: %d",attempts)}
+ // Changing the human-approved OCI application revision invalidates the
+ // original wait identity; it can never resume on replacement software.
+ if _,err:=db.SQL().ExecContext(ctx,
+  `UPDATE project_applications SET revision=revision+1 WHERE id=?`,app.ID);err!=nil{t.Fatal(err)}
+ safe,err:=isApprovedToolchainRegisteredRunning(ctx,db.SQL(),savedWait)
+ if err!=nil||safe{
+  t.Fatalf("stale application approval silently reused: ready=%v error=%v",safe,err)
+ }
+ if _,err=applyApprovedWorkspaceToolchain(ctx,db.SQL(),ready,raw);err==nil{
+  t.Fatal("stale approved toolchain was allowed to run")
+ }
 }
 func TestApprovedToolchainWaitNeverWakesWithChangedManifestOrWrongWorkspace(t *testing.T){
  // A forged or corrupted continuation is not a grant. The helper itself
@@ -130,5 +140,4 @@ func TestApprovedToolchainWaitNeverWakesWithChangedManifestOrWrongWorkspace(t *t
  if decodeToolchainWait(json.RawMessage(`{"toolchain_wait":{"ready":true}}`))!=nil{
   t.Fatal("untrusted ready field bypassed persisted approval checks")
  }
- _=sql.ErrNoRows
 }

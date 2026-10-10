@@ -25,6 +25,7 @@ type qaExecutionSource struct {
  Failed int64 `json:"failed"`
  Uncertain int64 `json:"uncertain"`
  Pending int64 `json:"pending"`
+ Unclassified int64 `json:"unclassified"`
  Capped bool `json:"capped"`
 }
 
@@ -100,7 +101,7 @@ func loadQAExecutionSources(ctx context.Context,db *sql.DB,tenant,projectID,work
   if err:=rows.Scan(&kind,&taskID,&n,&success,&failed,&uncertain,&pending);err!=nil{return nil,err}
   if len(out)>=qaExecutionSourceCap{return nil,fmt.Errorf("execution evidence exceeded source bound")}
   if n<0||success<0||failed<0||uncertain<0||pending<0||
-   success+failed+uncertain+pending!=n{return nil,fmt.Errorf("invalid execution evidence counters")}
+   success+failed+uncertain+pending>n{return nil,fmt.Errorf("invalid execution evidence counters")}
   if kind!="model"&&kind!="tool"&&kind!="operation"&&kind!="verification"{
    return nil,fmt.Errorf("invalid execution evidence source")
   }
@@ -109,7 +110,8 @@ func loadQAExecutionSources(ctx context.Context,db *sql.DB,tenant,projectID,work
   out=append(out,qaExecutionSource{
    TaskRef:qaOpaqueRef("task",taskID),Source:kind,Total:clamp(n),
    Succeeded:clamp(success),Failed:clamp(failed),
-   Uncertain:clamp(uncertain),Pending:clamp(pending),Capped:capped,
+   Uncertain:clamp(uncertain),Pending:clamp(pending),
+   Unclassified:clamp(n-success-failed-uncertain-pending),Capped:capped,
   })
  }
  if err:=rows.Err();err!=nil{return nil,err}

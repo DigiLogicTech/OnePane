@@ -54,6 +54,46 @@ func (s *Service) researchRetryConsentTx(ctx context.Context,tx storage.Tx,sessi
  sessionID,tenant).Scan(&eligible)
  if err!=nil{return err}
  if eligible!=1{return errResearchConsentNoLongerValid}
+ // A human consent record is not a permanent Library lease. Before resuming
+ // retries, every exact frozen version must still be readable by this PWS.
+ var count,denied int
+ err=tx.QueryRowContext(ctx,`SELECT COUNT(*),
+  COALESCE(SUM(CASE WHEN EXISTS(
+   SELECT 1 FROM project_library_assets a
+   JOIN project_library_asset_versions v ON v.asset_id=a.id
+   JOIN research_session_evidence_metadata frozen
+    ON frozen.session_id=? AND frozen.project_id=a.project_id
+   WHERE a.id=json_extract(item.value,'$.asset_id')
+    AND a.archived=0 AND v.version=json_extract(item.value,'$.version')
+    AND v.content_hash=json_extract(item.value,'$.content_hash')
+    AND v.size_bytes=json_extract(item.value,'$.size_bytes')
+    AND v.mime_type=json_extract(item.value,'$.mime_type')
+    AND (
+     EXISTS(SELECT 1 FROM workspace_library_grants grant
+      WHERE grant.asset_id=a.id
+       AND grant.project_workspace_id=frozen.project_workspace_id
+       AND grant.enabled=1
+       AND json_extract(grant.permissions_json,'$.read')=1
+       AND ((grant.version_policy='latest' AND v.version=a.current_version)
+        OR (grant.version_policy='pinned' AND grant.pinned_version=v.version)))
+     OR EXISTS(SELECT 1 FROM project_workspace_publications pub
+      JOIN project_workspace_links link ON link.id=pub.link_id
+      WHERE pub.asset_id=a.id AND pub.asset_version=v.version
+       AND pub.content_hash=v.content_hash
+       AND link.project_id=a.project_id
+       AND link.target_workspace_id=frozen.project_workspace_id
+       AND link.enabled=1
+       AND (link.expires_at_ms IS NULL OR link.expires_at_ms>?)
+       AND EXISTS(SELECT 1 FROM project_workspaces source
+        WHERE source.id=link.source_workspace_id
+         AND source.project_id=a.project_id AND source.status='active'))
+    )
+  ) THEN 0 ELSE 1 END),0)
+  FROM json_each((SELECT entries_json
+   FROM research_session_evidence_metadata WHERE session_id=?)) item`,
+ sessionID,s.clock.UnixMilli(),sessionID).Scan(&count,&denied)
+ if err!=nil{return err}
+ if count<1||count>8||denied!=0{return errResearchConsentNoLongerValid}
  return nil
 }
 

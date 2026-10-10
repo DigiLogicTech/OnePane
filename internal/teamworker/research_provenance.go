@@ -32,6 +32,11 @@ type councilTurnProvenance struct {
  Round int64 `json:"round"`
  Phase string `json:"phase"`
  PinnedSeatCandidateID string `json:"pinned_seat_candidate_id,omitempty"`
+ ResearchEvidenceAttached bool `json:"research_evidence_attached,omitempty"`
+ ResearchEvidenceConsentSHA256 string `json:"research_evidence_consent_sha256,omitempty"`
+ ResearchEvidenceManifestSHA256 string `json:"research_evidence_manifest_sha256,omitempty"`
+ ResearchEvidenceDocumentCount int `json:"research_evidence_document_count,omitempty"`
+ ResearchEvidenceVerifiedBytes int64 `json:"research_evidence_verified_bytes,omitempty"`
 }
 
 func councilDigest(raw []byte)string{
@@ -57,8 +62,10 @@ func buildCouncilTurnProvenance(
  if pinnedCandidateID!=""&&pinnedCandidateID!=candidate.ID{
   return councilTurnProvenance{},fmt.Errorf("resolved Council candidate disagrees with pinned seat")
  }
+ evidence,err:=proveResearchTurnEvidence(request,candidate)
+ if err!=nil{return councilTurnProvenance{},fmt.Errorf("Research Council evidence request not proven: %w",err)}
  return councilTurnProvenance{
-  Version:"onepane.research-turn-provenance/v1",
+  Version:"onepane.research-turn-provenance/v2",
   TimestampMS:now,
   SessionManifestSHA256:sessionSHA,
   ContextSHA256:contextSHA,
@@ -73,5 +80,10 @@ func buildCouncilTurnProvenance(
   ProfileRevision:profileRevision,
   Round:round,Phase:phase,
   PinnedSeatCandidateID:pinnedCandidateID,
+  ResearchEvidenceAttached:evidence.ContextAttached,
+  ResearchEvidenceConsentSHA256:evidence.ConsentSHA256,
+  ResearchEvidenceManifestSHA256:evidence.ManifestSHA256,
+  ResearchEvidenceDocumentCount:evidence.DocumentCount,
+  ResearchEvidenceVerifiedBytes:evidence.VerifiedBytes,
  },nil
 }

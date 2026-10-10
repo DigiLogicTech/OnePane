@@ -76,6 +76,20 @@ func TestResearchSessionFrozenEvidenceApprovalAndRevocation(t *testing.T){
   Configuration:json.RawMessage(`{"research_mode":true,"research":{"critique_rounds":2}}`),
  })
  if err!=nil{t.Fatal(err)}
+ localSeat,err:=council.AddMember(ctx,team.AddMemberCommand{
+  TeamID:registered.ID,MemberKind:"agent",DisplayName:"Local analyst",
+  RoleName:"Research analyst",CapabilityID:"inference.general",
+  ProtocolLevel:"L2",CreatedBy:"human",
+  RoutePolicy:json.RawMessage(`{}`),Config:json.RawMessage(`{}`),
+ })
+ if err!=nil{t.Fatal(err)}
+ otherSeat,err:=council.AddMember(ctx,team.AddMemberCommand{
+  TeamID:registered.ID,MemberKind:"agent",DisplayName:"Independent analyst",
+  RoleName:"Research reviewer",CapabilityID:"inference.general",
+  ProtocolLevel:"L2",CreatedBy:"human",
+  RoutePolicy:json.RawMessage(`{}`),Config:json.RawMessage(`{}`),
+ })
+ if err!=nil{t.Fatal(err)}
  session,err:=council.StartSession(ctx,team.StartSessionCommand{
   TaskID:job.ID,TeamID:registered.ID,CreatedBy:"human",ExecutionMode:"council",
  })
@@ -138,6 +152,57 @@ func TestResearchSessionFrozenEvidenceApprovalAndRevocation(t *testing.T){
   []WorkspaceEvidenceSelection{{AssetID:b.ID,Version:1}});!errors.Is(err,ErrInvalidCommand){
   t.Fatalf("conflicting human approval replaced a frozen selection: %v",err)
  }
+ // A human must separately name exact runnable seats. This is an
+ // inactive local-only sharing intent, NEVER a Council context attachment.
+ if _,err=svc.ApproveResearchSeatEvidence(ctx,session.ID,"agent",
+  []string{localSeat.ID});err==nil{
+  t.Fatal("agent created Research seat evidence approval")
+ }
+ if _,err=svc.ApproveResearchSeatEvidence(ctx,session.ID,"human",
+  []string{"forged-other-workspace-member"});err==nil{
+  t.Fatal("unfrozen/foreign Research seat accepted")
+ }
+ first,err:=svc.ApproveResearchSeatEvidence(ctx,session.ID,"human",
+  []string{localSeat.ID})
+ if err!=nil{t.Fatal(err)}
+ if first.State!="approved"||first.Policy!="local_only"||
+  first.ModelVisible||first.DispatchEnabled||len(first.SeatIDs)!=1||
+  first.SeatIDs[0]!=localSeat.ID||
+  first.EvidenceManifestSHA256!=frozen.Evidence.ManifestSHA256{
+  t.Fatalf("Research seat approval widened scope or omitted provenance: %+v",first)
+ }
+ identical,err:=svc.ApproveResearchSeatEvidence(ctx,session.ID,"human",
+  []string{localSeat.ID})
+ if err!=nil||identical.ApprovedAt!=first.ApprovedAt{
+  t.Fatalf("same seat approval was not idempotent: %+v %v",identical,err)
+ }
+ if _,err=svc.ApproveResearchSeatEvidence(ctx,session.ID,"human",
+  []string{otherSeat.ID});err==nil{
+  t.Fatal("conflicting Research seat sharing plan replaced the frozen approval")
+ }
+ if _,err=svc.ResearchSeatEvidenceApproval(ctx,session.ID,"agent");err==nil{
+  t.Fatal("agent could inspect frozen seat evidence sharing intent")
+ }
+ // Revocation must remain available even if the source Workspace Library
+ // grant was withdrawn after the human sharing approval.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_library_grants
+  SET enabled=0 WHERE asset_id=? AND project_workspace_id=?`,
+  a.ID,world.ID);err!=nil{t.Fatal(err)}
+ revoked,err:=svc.RevokeResearchSeatEvidence(ctx,session.ID,"human")
+ if _,restoreErr:=db.SQL().ExecContext(ctx,`UPDATE workspace_library_grants
+  SET enabled=1 WHERE asset_id=? AND project_workspace_id=?`,
+  a.ID,world.ID);restoreErr!=nil{t.Fatal(restoreErr)}
+ if err!=nil||revoked.State!="revoked"||revoked.RevokedBy==nil||
+  *revoked.RevokedBy!="human"||revoked.DispatchEnabled{
+  t.Fatalf("seat evidence revocation missing: %+v %v",revoked,err)
+ }
+ if _,err=svc.ApproveResearchSeatEvidence(ctx,session.ID,"human",
+  []string{localSeat.ID});err==nil{
+  t.Fatal("revoked Research sharing consent was silently restored")
+ }
+ if _,err=svc.RevokeResearchSeatEvidence(ctx,session.ID,"agent");err==nil{
+  t.Fatal("agent could revoke human Research seat approval")
+ }
  if _,err=svc.FreezeResearchEvidence(ctx,session.ID,"agent",requested);err==nil{
   t.Fatal("agent could freeze its own Research evidence")
  }
@@ -146,6 +211,10 @@ func TestResearchSessionFrozenEvidenceApprovalAndRevocation(t *testing.T){
  }
  if _,err=db.SQL().ExecContext(ctx,`UPDATE team_sessions SET round_number=1
   WHERE id=?`,session.ID);err!=nil{t.Fatal(err)}
+ if _,err=svc.ApproveResearchSeatEvidence(ctx,session.ID,"human",
+  []string{otherSeat.ID});err==nil{
+  t.Fatal("late-round Research seat approval accepted")
+ }
  if _,err=svc.FreezeResearchEvidence(ctx,session.ID,"human",requested);err==nil{
   t.Fatal("Research metadata changed after first round")
  }
@@ -178,6 +247,9 @@ func TestResearchSessionFrozenEvidenceApprovalAndRevocation(t *testing.T){
   frozenCandidates,e:=svc.FrozenResearchEvidenceSessions(ctx,p.ID,world.ID,"human")
   if e!=nil||len(frozenCandidates)!=0{
    t.Fatalf("%s disclosed frozen Research session: %+v %v",reason,frozenCandidates,e)
+  }
+  if _,e=svc.ResearchSeatEvidenceApproval(ctx,session.ID,"human");e==nil{
+   t.Fatalf("%s disclosed revoked Research seat approval",reason)
   }
  }
  if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships SET status='suspended'

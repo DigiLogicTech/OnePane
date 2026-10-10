@@ -404,11 +404,92 @@ function a67BindFrozenResearchHistory(panel,prefix,workspaceID){
       receipt.hidden=false;
      }finally{verify.disabled=false;}
     });
-    wrapper.append(title,context,verify,receipt);
+    const share=document.createElement("button");
+    share.type="button";
+    share.className="btn";
+    share.textContent="Review local-only seat consent";
+    share.addEventListener("click",()=>a68ReviewResearchSeatConsent(String(item.id||"")));
+    wrapper.append(title,context,verify,share,receipt);
     output.appendChild(wrapper);
    }
   }catch(ex){
    if(panel.isConnected)output.textContent="Research approvals unavailable: "+ex.message;
   }finally{load.disabled=false;}
+ });
+}
+
+async function a68ReviewResearchSeatConsent(sessionID){
+ if(!sessionID)return;
+ const endpoint="/v1/team-sessions/"+encodeURIComponent(sessionID)+"/research/seat-evidence-approval";
+ let manifest;
+ try{
+  manifest=await apiRequest("/v1/team-sessions/"+encodeURIComponent(sessionID)+"/manifest");
+ }catch(ex){notice("Research session access denied: "+ex.message,"bad");return;}
+ const snap=manifest?.manifest?.Snapshot||manifest?.manifest?.snapshot||{};
+ const members=Array.isArray(snap.members)?snap.members:[];
+ const candidates=members.filter(m=>{
+  let cfg=m?.config||{};
+  if(typeof cfg==="string"){try{cfg=JSON.parse(cfg)}catch{return false}}
+  return m?.member_kind==="agent"&&m?.status==="active"&&
+   !cfg?.manual_web?.enabled&&!cfg?.council_chair_only;
+ });
+ let prior=null;
+ try{prior=await apiRequest(endpoint);}catch{}
+ const locked=prior?.state==="approved"||prior?.state==="revoked";
+ const rows=candidates.map(m=>{
+  const checked=prior?.seat_ids?.includes(m.id)?"checked":"";
+  return '<label class="inline-check"><input type="checkbox" data-a68-seat value="'+
+   escapeHtml(m.id)+'" '+checked+(locked?' disabled':'')+'> '+
+   escapeHtml(m.display_name||m.role_name||"Research seat")+'</label>';
+ }).join("");
+ openModal("Research evidence — local-only seat intent",
+  '<div class="qa-form" id="a68ResearchSeatConsent">'+
+  '<p class="list-meta">This is a separate, recorded human approval for selected Research seats. Only local-model candidates can qualify; manual Web seats and external providers are excluded. No text is sent to any model by this feature.</p>'+
+  '<p class="list-meta">Approval is immutable and revocable. It is NOT a capability lease or a working evidence attachment. Actual model delivery remains disabled pending independent enforcement and verification.</p>'+
+  '<div class="team-member-list">'+(rows||'<p>No eligible local-capable Research seats in this frozen session.</p>')+'</div>'+
+  '<label class="inline-check"><input type="checkbox" data-a68-confirm '+(locked?'disabled':'')+
+  '> I understand the exact seats and that this records local-only sharing intent without sending any documents.</label>'+
+  '<div class="toolbar">'+
+  '<button type="button" class="btn primary" data-a68-approve '+(locked||!candidates.length?'disabled':'')+
+  '>Approve selected seats (intent only)</button>'+
+  '<button type="button" class="btn" data-a68-revoke '+(prior?.state==="approved"?'':'disabled')+
+  '>Revoke approval</button></div>'+
+  '<pre class="a62-evidence-receipt" data-a68-receipt aria-live="polite"></pre></div>');
+ const box=document.querySelector("#a68ResearchSeatConsent");
+ if(!box)return;
+ const report=box.querySelector("[data-a68-receipt]");
+ if(prior)report.textContent=JSON.stringify(prior,null,2);
+ box.querySelector("[data-a68-approve]")?.addEventListener("click",async e=>{
+  const selected=Array.from(box.querySelectorAll("[data-a68-seat]:checked")).map(v=>v.value);
+  if(!box.querySelector("[data-a68-confirm]")?.checked||!selected.length){
+   report.textContent="Explicit confirmation and at least one selected seat are required.";
+   return;
+  }
+  e.currentTarget.disabled=true;
+  try{
+   const result=await apiRequest(endpoint,{
+    method:"POST",body:JSON.stringify({seat_ids:selected,confirm_local_only:true})
+   });
+   report.textContent=JSON.stringify(result,null,2);
+   box.querySelectorAll("[data-a68-seat], [data-a68-confirm]").forEach(v=>v.disabled=true);
+   box.querySelector("[data-a68-revoke]").disabled=false;
+   notice("Local-only Research seat intent recorded. Evidence delivery remains disabled.");
+  }catch(ex){
+   report.textContent="Approval denied: "+ex.message;
+   e.currentTarget.disabled=false;
+  }
+ });
+ box.querySelector("[data-a68-revoke]")?.addEventListener("click",async e=>{
+  if(!confirm("Revoke this Research evidence seat intent permanently?"))return;
+  e.currentTarget.disabled=true;
+  try{
+   const result=await apiRequest(endpoint+"/revoke",{method:"POST",body:"{}"});
+   report.textContent=JSON.stringify(result,null,2);
+   box.querySelector("[data-a68-approve]").disabled=true;
+   notice("Research seat evidence intent revoked.");
+  }catch(ex){
+   report.textContent="Revocation denied: "+ex.message;
+   e.currentTarget.disabled=false;
+  }
  });
 }

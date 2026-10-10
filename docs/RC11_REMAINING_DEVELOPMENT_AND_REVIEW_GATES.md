@@ -591,3 +591,43 @@ The integration tests include pre-approval invisibility, exact approved
 Workspace isolation, agent/unknown-human denial, account suspension, Team
 archive and restored eligibility. External installed UI and physical Node QA
 and the mandatory code-review/vision-review sequence remain unresolved.
+
+## Research Council — immutable local-only seat-sharing consent groundwork
+
+Research model evidence remains **not dispatched**. A separate explicit
+per-session operator consent is now available from Workspace Library's
+saved Research approvals. The operator first freezes exact metadata, then
+selects named eligible **agent** seats from the frozen Council manifest,
+reviews the strict local-only limitation and confirms the additional
+approval. Manual Web seats, Chair-only seats, unknown seats, human and
+disabled seats are ineligible. This is an intentionally dormant policy record,
+not permission to use an inference or external provider.
+
+Migration 0049 stores only exact session/Research/evidence manifest hashes,
+canonical immutable seat IDs, human approval provenance and a
+`local_only` policy. An approval can be permanently revoked. It cannot be
+replaced with a different seat set, restored after revocation, or first
+created after a Research turn has been requested. The write transaction
+rechecks active human tenant membership, exact Task/Team/Project Workspace,
+immutable session manifest, current version grants, and the bounded
+1–8 textual-version envelope (64 KiB per version; 256 KiB total).
+No raw Library content, authentication secrets or model inputs are stored.
+
+`POST /v1/team-sessions/{sessionID}/research/seat-evidence-approval`
+requires authenticated `team.write`, `project.read`, explicit
+`confirm_local_only: true` and the selected member IDs.
+`GET` on the same path requires `team.read` and `project.read`;
+`POST .../seat-evidence-approval/revoke` requires `team.write` and
+`project.read`. All service methods separately check active human
+membership. Revocation still succeeds when a former Library read grant
+is gone; it does not reinstate or dereference old evidence.
+
+**Not yet a Research evidence attachment:** the Team Worker and model
+request assembler do not read this table. Before actual consumption,
+the implementation must independently enforce exact local candidate and
+seat identity, route/provider restrictions, byte verification immediately
+before inference, untrusted-content context segregation, per-turn
+provenance, revocation/retry TOCTOU safety, provider-residency and no-fallback
+policies, and negative integration tests. Do not present these records as
+successful model delivery. Physical rootless Node acceptance, installed
+Windows/Ubuntu QA and both mandatory reviews remain blocked separately.

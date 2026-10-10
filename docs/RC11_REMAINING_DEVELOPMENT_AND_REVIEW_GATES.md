@@ -99,3 +99,25 @@ assembly is unsuitable for multi-GiB models, large videos/game builds or
 low-RAM servers; streaming directly into a bounded, permission-checked blob
 sink with durable chunk manifests, disk quota, resumability and recovery is
 future work. Do not claim unlimited artifact support or close #20 yet.
+
+## RC11-03 — expiring selective Workspace artifact links (2026-10-10)
+
+Directional artifact links from one active Project Workspace to another can now
+carry an operator-defined `expires_at_ms` deadline (Unix milliseconds).
+Existing links keep a null, perpetual expiry for backward compatibility.
+Create and toggle/update APIs may set a bounded future expiry; renewal or
+explicit clearance requires the current revision and authorised Project writer.
+An expired link remains in historical metadata as `enabled: true,
+expired: true`, never silently turning into a fresh grant.
+
+The same effective expiry check is enforced before new artifact publications,
+publication listing, Workspace Library asset enumeration, immutable version
+listing/resolution, and verified Workspace output reads. Both endpoints and
+the containing Project must still be active. Stale expiry renewals are rejected.
+The underlying immutable blob/version and provenance do not get deleted on
+expiry; re-enabling/renewing is an explicit operator act.
+
+This is **bounded artifact exchange**, not rootless runtime-to-runtime service
+connectivity, desktop preview forwarding, a transitively propagated Library
+grant, or a lease to use another Workspace's secrets/tools. RC11-03 #21 remains
+open for separately governed service connectivity and installed UI acceptance.

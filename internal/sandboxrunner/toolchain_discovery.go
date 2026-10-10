@@ -50,10 +50,10 @@ while :; do
       ""|*[!A-Za-z0-9._+-]*) continue;;
      esac
      if [ "$count" -ge 256 ]; then
-      printf '%s\\n' '__ONEPANE_TRUNCATED__'
+      printf '%s\n' '__ONEPANE_TRUNCATED__'
       exit 0
      fi
-     printf '%s\\n' "$name"
+     printf '%s\n' "$name"
      count=$((count + 1))
     done
    fi

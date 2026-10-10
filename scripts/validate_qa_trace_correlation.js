@@ -34,8 +34,8 @@ const s={
 const got=correlate(s);
 assert.equal(got.schema_version,1);
 assert.equal(got.browser_api_link,"unavailable_no_shared_trace");
-assert.equal(got.tool_gateway_link,"not_in_this_evidence_source");
-assert.equal(got.independent_verification,"not_established_by_event_chronology");
+assert.equal(got.tool_gateway_link,"task_linked_invocation_metadata_only");
+assert.equal(got.independent_verification,"persisted_verification_status_only_not_external_proof");
 assert.equal(got.attention_events_observed,2);
 assert.equal(got.omitted_events,1);
 const linked=got.groups.find(g=>g.task_ref===t&&g.correlation_ref===trace);
@@ -53,7 +53,7 @@ assert.ok(got.groups.some(g=>g.correlation_level==="run_only"));
 assert.ok(got.groups.some(g=>g.correlation_level==="task_only"));
 const text=format(got),attention=format(got,"attention"),waiting=format(got,"waiting");
 assert.ok(text.includes("Browser → backend: unavailable"));
-assert.ok(text.includes("Independent verification: not established"));
+assert.ok(text.includes("Independent verification: persisted verification statuses only"));
 assert.ok(attention.includes("task.failed"));
 assert.ok(waiting.includes("task.waiting_approval"));
 assert.ok(!waiting.includes("task.failed"));
@@ -66,6 +66,36 @@ assert.throws(()=>correlate({...s,scope:"other_workspace"}));
 assert.throws(()=>correlate({...s,schema_version:3}));
 assert.throws(()=>correlate({...s,timeline:Array(97).fill(s.timeline[0])}));
 assert.throws(()=>correlate({...s,tasks:Array(51).fill(s.tasks[0])}));
+const sourceRows=[
+ {task_ref:t,source:"model",total:3,succeeded:1,failed:0,uncertain:1,pending:0,
+  unclassified:1,capped:false,model_name:canary,request_body:canary},
+ {task_ref:t,source:"tool",total:1,succeeded:0,failed:1,uncertain:0,pending:0,
+  unclassified:0,capped:false,tool_id:canary},
+ {task_ref:t,source:"verification",total:1,succeeded:1,failed:0,uncertain:0,pending:0,
+  unclassified:0,capped:false,verification_result:canary},
+ {task_ref:other,source:"operation",total:1,succeeded:0,failed:0,uncertain:1,pending:0,
+  unclassified:0,capped:false},
+ {task_ref:canary,source:"model",total:1,succeeded:1,failed:0,uncertain:0,pending:0,
+  unclassified:0,capped:false}
+];
+const linkedExecution=correlate({...s,
+ tasks:[{task_ref:t,id:canary,objective:canary},{task_ref:other,id:canary}],
+ execution_sources:sourceRows,execution_sources_truncated:true
+});
+assert.equal(linkedExecution.execution_sources.length,4);
+assert.equal(linkedExecution.execution_sources_truncated,true);
+assert.equal(linkedExecution.execution_source_status,"read_only_scoped_task_join");
+assert.equal(linkedExecution.execution_sources.find(e=>e.source==="verification").succeeded,1);
+assert.ok(format(linkedExecution).includes("Persisted Task-linked model"));
+assert.ok(format(linkedExecution).includes("additional source groups omitted"));
+for(const value of [JSON.stringify(linkedExecution),format(linkedExecution)]){
+ assert.ok(!value.includes(canary),"private source field leaked");
+}
+assert.throws(()=>correlate({...s,execution_sources:Array(65).fill(sourceRows[0])}));
+assert.throws(()=>correlate({...s,execution_sources:"bad"}));
+const invalidCounts=correlate({...s,tasks:[{task_ref:t}],
+ execution_sources:[{...sourceRows[0],total:2}]});
+assert.equal(invalidCounts.execution_sources.length,0);
 const many=correlate({...s,timeline:Array.from({length:96},(_,i)=>event("task.started",t,i+1))});
 assert.equal(many.groups.length,48);
 assert.equal(many.omitted_events,48);

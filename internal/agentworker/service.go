@@ -191,7 +191,12 @@ func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
   }
   n++
  }
- return n,errors.Join(problems...)
+ // Historical partially persisted admissions and externally corrupted
+ // records may have no live Agent Worker row. Reconcile those separately,
+ // after known in-flight runs, without touching other Task executors.
+ orphans,orphanErr:=s.recoverOrphanedAgentAttempts(ctx)
+ if orphanErr!=nil{problems=append(problems,orphanErr)}
+ return n+orphans,errors.Join(problems...)
 }
 
 func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {

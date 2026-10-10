@@ -117,7 +117,12 @@ func TestWorkspaceEvidencePacketRequiresExactVersionGrantAndFailsClosed(t *testi
 }
 
 func TestWorkspaceEvidencePacketRejectsMaliciousSelectionsBeforeDatabase(t *testing.T){
- svc:=&Service{}
+ ctx:=context.Background()
+ db,err:=sqlitestore.Open(t.TempDir()+"/evidence-invalid.db")
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ if err=db.Migrate(ctx);err!=nil{t.Fatal(err)}
+ svc:=NewService(db.SQL(),db,clock.Real{})
  inputs:=[][]WorkspaceEvidenceSelection{
   nil,
   {{AssetID:"x",Version:0}},

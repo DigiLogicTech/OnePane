@@ -817,3 +817,22 @@ This adds a narrowly scoped legacy-database/consistency recovery seam,
 not a distributed lease or live-heartbeat expiry algorithm. Do not invoke
 startup recovery while an existing independent Worker incarnation remains
 active. Physical Node/process lifecycle acceptance remains outstanding.
+
+## Orchestrator — Attempt/Worker-backed recovery checkpoint
+
+Project Task Graphs now include an `attempt_health` classification derived
+from the **same read-only SQLite snapshot** as the approved DAG, hard edges,
+Task state and Workspace identity. A running Task with no active Attempt,
+more than one active Attempt, corrupt Attempt metadata, a missing live Agent
+Worker for an `agent_worker:v1` Attempt, or a mismatch between Task,
+Attempt and Worker statuses is marked `needs_attention`. Legitimately
+waiting Agent Workers are reported as waiting, and non-Agent-Worker
+execution protocols are not mistaken for this subsystem's ownership.
+
+Recovery checkpoint digests include the derived Attempt health, so an
+interrupted/changed Attempt invalidates a previous checkpoint even if the
+Task's revision is otherwise unchanged. No raw continuation, prompt,
+credential, tool payload or model output is returned by this read path.
+Task state remains subject to actual verified evidence; operator inspection
+is not a replay permit. No hot-process heartbeat, remote fencing or
+physical-Node acceptance is implied.

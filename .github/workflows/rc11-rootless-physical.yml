@@ -11,6 +11,44 @@ permissions:
   contents: read
 
 jobs:
+  physical-readiness-report:
+    name: Physical acceptance prerequisites (configuration only)
+    # Uses a hosted runner, never connects to an unapproved self-hosted Node.
+    # Shows only whether admin variables exist; never prints their values.
+    # A successful report job is NOT physical execution or approval.
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Record truthful physical QA blockers
+        shell: bash
+        env:
+          ROOTLESS_APPROVED: ${{ vars.ONEPANE_ROOTLESS_SMOKE_IMAGE != '' }}
+          GODOT_APPROVED: ${{ vars.ONEPANE_GODOT_SMOKE_IMAGE != '' }}
+          PYTHON_APPROVED: ${{ vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE != '' }}
+        run: |
+          {
+            echo '### RC11 physical Node acceptance — approval-only readiness'
+            echo ''
+            echo '**No physical acceptance is established by this job.**'
+            echo 'Approval variables indicate eligibility to run a self-hosted job, not image validity, OCI runtime readiness, or test success.'
+            echo ''
+            echo '| Opt-in family | Admin approval configured |'
+            echo '| --- | --- |'
+            for item in 'Rootless Workspace:ROOTLESS_APPROVED' 'Godot 4:GODOT_APPROVED' 'Python, Library and HTTP Broker:PYTHON_APPROVED'; do
+              label="${item%:*}"
+              variable="${item#*:}"
+              if [[ "${!variable}" == 'true' ]]; then
+                state='Configured — physical test must still pass'
+              else
+                state='Not configured — physical jobs skipped'
+              fi
+              printf '| %s | %s |\n' "$label" "$state"
+            done
+            echo ''
+            echo 'On the intended unprivileged Node run: `go run ./cmd/onepane-node-preflight`.'
+            echo 'Preflight reads only rootless Podman status and approved local image presence. No images are pulled or containers changed.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   physical-rootless-node:
     name: Rootless Workspace physical Node smoke (opt-in)
     # Never run self-hosted physical tests from untrusted pull requests.
@@ -181,21 +219,8 @@ jobs:
         with:
           go-version: '1.23.x'
           cache: false
-      - name: Confirm approved OCI image, local rootless Podman and unprivileged runner
+      - name: Inspect local rootless Podman and approved immutable image (read-only)
         shell: bash
-        run: |
-          set -euo pipefail
-          if [[ ! "$ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE" =~ ^[^[:space:]]+@sha256:[[:xdigit:]]{64}$ ]]; then
-            echo '::error::Physical HTTP broker image must be immutable and digest-pinned'
-            exit 1
-          fi
-          if ! command -v podman >/dev/null || [[ "$(podman info --format '{{.Host.Security.Rootless}}')" != "true" ]]; then
-            echo '::error::Trusted nonroot Podman runner required'
-            exit 1
-          fi
-          if ! podman image exists "$ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE"; then
-            echo '::error::Approved Python image must be pre-pulled, no automatic download'
-            exit 1
-          fi
+        run: go run ./cmd/onepane-node-preflight -require ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE -strict
       - name: Verify real OCI health response, sibling denial and revocation
         run: go test -tags integration ./internal/workspacebroker -run '^TestRealRootlessWorkspaceHealthBroker$' -v -count=1 -timeout 9m

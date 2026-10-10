@@ -28,6 +28,8 @@ on:
       - 'cmd/harnessd/**'
       - 'packaging/windows/service/**'
       - 'packaging/windows/setup/**'
+      - 'packaging/windows/Read-OnePaneMsiLog.ps1'
+      - 'scripts/test_offline_msi_evidence.ps1'
       - 'packaging/debian/onepane.service'
       - 'packaging/systemd/onepane.service'
       - 'scripts/install-ubuntu.sh'
@@ -103,3 +105,13 @@ jobs:
           printf 'CI compile fixture' > packaging/windows/setup/payload/qa-compile-fixture.bin
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-legacy-setup.exe ./packaging/windows/setup
           bash -n scripts/install-ubuntu.sh
+
+  offline-msi-evidence:
+    name: Validate opt-in Windows MSI log reader
+    runs-on: windows-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test allowlisted MSI analysis against synthetic secret-bearing logs
+        shell: powershell
+        run: .\\scripts\\test_offline_msi_evidence.ps1

@@ -77,6 +77,7 @@ permissions:
 jobs:
   physical-readiness-report:
     name: Physical Node approval status (informational only)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/project-workspace-development-environments'
     # Uses a hosted runner, never connects to an unapproved self-hosted Node.
     # Shows only whether admin variables exist; never prints their values.
     # A successful report job is NOT physical execution or approval.

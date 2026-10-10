@@ -65,7 +65,7 @@ func TestProjectTaskGraphAtomicDependencyAndIdempotency(t *testing.T){
    {Key:"story",ProjectWorkspaceID:story.ID,
     Objective:"Write the local script",DependsOn:[]string{"assets"}},
    {Key:"assets",ProjectWorkspaceID:source.ID,
-    Objective:"Build an isolated local asset"},
+    Objective:"Build an isolated local asset",ComputePreference:"cpu_only"},
   },
  }
  graph,err:=svc.CreateTaskGraph(ctx,plan)
@@ -84,6 +84,7 @@ func TestProjectTaskGraphAtomicDependencyAndIdempotency(t *testing.T){
  }
  lookup:=map[string]TaskGraphNode{}
  for _,n:=range graph.Nodes{lookup[n.Key]=n}
+ if lookup["assets"].ComputePreference!="cpu_only"{t.Fatalf("Task graph did not report approved CPU pin: %+v",lookup["assets"])}
  if lookup["assets"].ProjectWorkspaceID!=source.ID||
   lookup["story"].ProjectWorkspaceID!=story.ID||
   lookup["integration"].ProjectWorkspaceID!=integration.ID||
@@ -98,11 +99,13 @@ func TestProjectTaskGraphAtomicDependencyAndIdempotency(t *testing.T){
    t.Fatalf("Task scope drift: %+v %v",persisted,err)
   }
   var completion struct{Routing struct{
+   Compute string `json:"compute_preference"`
    Access struct{RemoteModels bool `json:"remote_models"`;Internet bool `json:"internet"`;Secrets string `json:"secrets"`} `json:"workspace_access"`
   } `json:"onepane_routing"`}
   if json.Unmarshal(persisted.Completion,&completion)!=nil||
    completion.Routing.Access.RemoteModels||completion.Routing.Access.Internet||
-   completion.Routing.Access.Secrets!="none"{
+   completion.Routing.Access.Secrets!="none"||
+   (key=="assets"&&completion.Routing.Compute!="cpu_only"){
    t.Fatalf("Graph unexpectedly enabled remote models, Internet or Vault: %s",persisted.Completion)
   }
  }

@@ -85,11 +85,11 @@ func TestQAExecutionEvidenceJoinsOnlyPersistedCanonicalTaskAndTenant(t *testing.
  for _,x:=range []struct{tenant,project,workspace string}{
   {"elsewhere","game","world"},{"tenant","game","missing"},{"tenant","different","world"},
  }{
-  no,_,_,err=loadQAExecutionSources(ctx,db,x.tenant,x.project,x.workspace,
+  no,_,err=loadQAExecutionSources(ctx,db,x.tenant,x.project,x.workspace,
    []task.Task{{ID:"world",WorkspaceID:x.tenant,ProjectID:&x.project,ProjectWorkspaceID:&x.workspace}})
   if err!=nil||len(no)!=0{t.Fatalf("wrong scope leaked: %+v %v",x,err)}
  }
- if no,_,_,err=loadQAExecutionSources(ctx,db,"tenant","game","",visible);err!=nil||len(no)!=0{
+ if no,_,err=loadQAExecutionSources(ctx,db,"tenant","game","",visible);err!=nil||len(no)!=0{
   t.Fatalf("empty canonical Workspace should fail closed: %+v %v",no,err)
  }
 }

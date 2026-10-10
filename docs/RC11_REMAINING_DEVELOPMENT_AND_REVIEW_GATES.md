@@ -649,3 +649,34 @@ Research request manifest records the consent fingerprint with
 **No evidence bytes are attached in this increment**. This is a necessary
 policy fence, not a claim that a future local evidence-delivery facility is
 complete or that it has passed physical runtime testing.
+
+## Research Council — bounded locally routed evidence context (initial)
+
+A named Research seat with a separate, still-active, human-approved
+`local_only` evidence plan may now receive the exact version-frozen Library
+text inside its **local-origin model** request. The worker retains isolated
+first-pass visibility and never sends this context to manual Web seats, cloud
+providers, remote nodes or agent runtimes. The request is rejected if the
+runtime model has insufficient verified context capacity; it does not
+truncate source files or replace the selected model.
+
+The worker constructs the prompt only from stored approved version IDs,
+checks active grants through the canonical Workspace evidence packet both
+before and after reads, and independently verifies active Project/tenant
+managed artifact provenance, exact SHA-256, exact byte lengths, UTF-8 and
+allowed textual MIME types. The operator preflight cap remains 8 documents,
+64 KiB each and 256 KiB total; this first local delivery implementation
+intentionally applies a **stricter 32 KiB total plaintext limit**. Larger
+approved selections pause, without silently dropping documents. Evidence
+is carried as non-authoritative `UNVERIFIED_DERIVED` `research_evidence`
+context; its text is not executable tooling instructions and is not a
+privileged agent directive. SHA-bound Research and Council context
+fingerprints accompany the resulting model request.
+
+The worker checks seat consent again immediately before inference. This
+reduces but cannot mathematically eliminate the timing interval between the
+final SQLite check and an already-issued local model call. Stronger
+revocation-while-inflight guarantees and real installed runtime acceptance
+remain separate tasks; a verified request is not proof that a model followed
+untrusted-content instructions correctly. No RC11 installer is released by
+this increment.

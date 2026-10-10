@@ -52,10 +52,10 @@ type evidenceArtifactReader interface{
 // durable read result while the individual files are being processed.
 func collectVerifiedWorkspaceEvidence(
  ctx context.Context,lib evidenceWorkspaceLibrary,artifacts evidenceArtifactReader,
- projectID,workspaceID string,selections []projectworkspace.WorkspaceEvidenceSelection,
+ projectID,workspaceID,tenantWorkspaceID string,selections []projectworkspace.WorkspaceEvidenceSelection,
  nowMS int64,
 )(verifiedWorkspaceEvidence,error){
- if lib==nil||artifacts==nil||len(selections)<1||len(selections)>verifiedEvidenceMaxEntries{
+ if tenantWorkspaceID==""||lib==nil||artifacts==nil||len(selections)<1||len(selections)>verifiedEvidenceMaxEntries{
   return verifiedWorkspaceEvidence{},errEvidenceUnsafe
  }
  manifest,err:=lib.BuildWorkspaceEvidencePacket(ctx,projectID,workspaceID,selections)
@@ -93,7 +93,8 @@ func collectVerifiedWorkspaceEvidence(
   reader,raw,e:=artifacts.Open(ctx,artifactID)
   if e!=nil{return verifiedWorkspaceEvidence{},errEvidenceUnsafe}
   if raw.Status!=artifact.StatusActive||raw.ContentHash!=selected.ContentHash||
-   raw.SizeBytes!=selected.SizeBytes||raw.ProjectID==nil||*raw.ProjectID!=projectID{
+   raw.SizeBytes!=selected.SizeBytes||raw.ProjectID==nil||*raw.ProjectID!=projectID||
+   raw.WorkspaceID!=tenantWorkspaceID{
    _=reader.Close()
    return verifiedWorkspaceEvidence{},errEvidenceUnsafe
   }
@@ -134,7 +135,7 @@ func(s *Server) readVerifiedWorkspaceEvidence(w http.ResponseWriter,r *http.Requ
   writeError(w,http.StatusBadRequest,"Select one to eight bounded evidence versions");return
  }
  result,err:=collectVerifiedWorkspaceEvidence(r.Context(),library,s.libraryArtifacts,
-  p.ID,workspaceID,input.Selections,s.clock.UnixMilli())
+  p.ID,workspaceID,p.WorkspaceID,input.Selections,s.clock.UnixMilli())
  if err!=nil{
   writeError(w,http.StatusUnprocessableEntity,
    "Evidence denied, unavailable or failed content/provenance checks");return

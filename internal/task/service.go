@@ -362,6 +362,45 @@ func (s *Service) WaitDependencyInTransaction(ctx context.Context, tx storage.Tx
  })
 }
 
+// ResumeWaitingAttemptInTransaction is the trusted autonomous Worker wake path.
+// It is deliberately narrower than operator Resume: only a dependency/resource
+// wait with the *same* active Attempt may be reactivated. Callers commit the
+// matching Worker status in the same transaction; failed journal/outbox writes
+// or stale revisions roll back the Task, Attempt and Worker together.
+func (s *Service) ResumeWaitingAttemptInTransaction(ctx context.Context, tx storage.Tx, cmd TransitionCommand, attemptID string) error {
+ if tx==nil||strings.TrimSpace(cmd.TaskID)==""||cmd.ExpectedRevision<1||
+  strings.TrimSpace(attemptID)==""{
+  return fmt.Errorf("%w: transaction, Task revision and Attempt identity required",ErrInvalidCommand)
+ }
+ t,err:=s.repo.GetForUpdate(ctx,tx,cmd.TaskID)
+ if err!=nil{return err}
+ if t.Revision!=cmd.ExpectedRevision{return ErrRevisionConflict}
+ if t.State!=StateWaitingDependency||!CanTransition(t.State,StateRunning){
+  return fmt.Errorf("%w: autonomous wake requires dependency-waiting Task, found %s",ErrInvalidTransition,t.State)
+ }
+ active,err:=s.repo.ActiveAttempt(ctx,tx,t.ID)
+ if err!=nil{return err}
+ if active==nil||active.ID!=attemptID||active.State!=AttemptWaiting{
+  return fmt.Errorf("%w: autonomous wake requires the original waiting Attempt",ErrInvalidAttempt)
+ }
+ now:=s.clock.UnixMilli()
+ if err:=s.repo.TransitionAttempt(ctx,tx,active.ID,AttemptWaiting,AttemptRunning,now);err!=nil{return err}
+ if err:=s.repo.Transition(ctx,tx,transitionRecord{
+  TaskID:t.ID,ExpectedRevision:t.Revision,From:StateWaitingDependency,To:StateRunning,UpdatedAt:now,
+ });err!=nil{return err}
+ eid,err:=s.ids.New("evt")
+ if err!=nil{return err}
+ payload,_:=json.Marshal(map[string]any{
+  "task_id":t.ID,"from":StateWaitingDependency,"to":StateRunning,
+  "attempt_id":attemptID,"reason":cmd.Reason,"revision":t.Revision+1,
+ })
+ return s.events.Append(ctx,tx,event.Event{
+  ID:eid,WorkspaceID:&t.WorkspaceID,Type:"task.resumed",
+  AggregateType:"task",AggregateID:t.ID,ActorPrincipalID:cmd.ActorPrincipalID,
+  RequestID:cmd.RequestID,TraceID:cmd.TraceID,Payload:payload,OccurredAt:now,
+ })
+}
+
 func (s *Service) WaitApproval(ctx context.Context, cmd TransitionCommand) (Task, error) {
 	return s.transitionWithAttempt(ctx, cmd, StateWaitingApproval, AttemptWaiting, "task.waiting_approval")
 }

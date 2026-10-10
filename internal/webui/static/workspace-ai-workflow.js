@@ -111,11 +111,15 @@ async function a49MountDevelopmentTasks(project,workspace,container){
   count.textContent=rows.length+" shown · "+taskRows.length+" recent Tasks in this Project Workspace (up to 15)";
   list.innerHTML=rows.length?rows.map(t=>{
    const updated=Number(t.updated_at)>0?new Date(Number(t.updated_at)).toLocaleString():"Unknown";
-   const wait=t.state==="waiting_dependency"&&t.wait?.kind==="model_resources"?t.wait:null;
-   const displayState=wait?"Waiting for local model":(t.state||"unknown");
-   const retry=wait&&Number(wait.retry_at_ms)>0?
-    '<div class="list-meta">Local-first retry: '+escapeHtml(new Date(Number(wait.retry_at_ms)).toLocaleString())+
-    ' · Attempt '+escapeHtml(String(wait.attempt||1))+
+   const kind=t.state==="waiting_dependency"?t.wait?.kind:null;
+   const wait=kind==="model_resources"||kind==="toolchain_resources"?t.wait:null;
+   const waitingToolchain=kind==="toolchain_resources";
+   const displayState=waitingToolchain?"Waiting for approved toolchain":(wait?"Waiting for local model":(t.state||"unknown"));
+   const retry=wait&&Number.isFinite(Number(wait.retry_at_ms))&&Number(wait.retry_at_ms)>0?
+    '<div class="list-meta">'+(waitingToolchain?'Next registered-runtime check: ':'Local-first retry: ')+
+    escapeHtml(new Date(Number(wait.retry_at_ms)).toLocaleString())+
+    (waitingToolchain?' · Existing Attempt preserved; OCI isolation and tools are verified before any build.':
+     ' · Attempt '+escapeHtml(String(wait.attempt||1)))+
     (wait.reason?' · '+escapeHtml(wait.reason):'')+'</div>':'';
    const dep=t.dependencies&&typeof t.dependencies==="object"?t.dependencies:null;
    const validDep=dep&&["total","completed","failed","blocked","restricted","remaining"].every(k=>

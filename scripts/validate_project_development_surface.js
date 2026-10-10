@@ -120,6 +120,14 @@ assertContains(taskModelWaitProjection,"AND t.workspace_id=? AND r.task_id IN ("
  'Task wait status must be tenant-scoped before revealing model details');
 assertContains(workspaceTaskQueue,'Waiting for local model',
  'Workspace Task queue must distinguish model waits from dependency/approval waits');
+assertContains(workspaceTaskQueue,'Waiting for approved toolchain',
+ 'Workspace Task queue must distinguish approved OCI resource waits');
+assertContains(workspaceTaskQueue,'Existing Attempt preserved',
+ 'OCI wait UI must not claim re-execution or duplicate Attempts');
+assertContains(taskModelWaitProjection,'Kind:"toolchain_resources"',
+ 'API must project persisted approved OCI waits without leaking internals');
+assertContains(taskModelWaitProjection,'t.workspace_id=r.workspace_id',
+ 'Wait metadata must be bound to the exact Worker tenant as well as the Task');
 const taskListMethod=tasksAPI.slice(tasksAPI.indexOf('func (s *Server) listTasks('),tasksAPI.indexOf('func (s *Server) createTask('));
 assertContains(taskListMethod,'reader.ListProjectWorkspace(', 'Tasks API must list scoped Tasks before applying row limit');
 assertContains(taskListMethod,'workspaceRow.ProjectID!=projectID','Tasks API must validate requested Workspace ownership');

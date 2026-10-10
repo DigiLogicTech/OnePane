@@ -287,3 +287,21 @@ registered container-status inspection and historical Project-only behavior
 remain unchanged. This does not attest installed package versions, install
 tools, prove physical Node readiness or verify build artifacts. The release
 review gates and real rootless Node acceptance remain outstanding.
+
+
+## RC11 operator-visible approved toolchain waits
+
+The canonical Workspace Task queue now distinguishes `Waiting for approved
+toolchain` from `Waiting for local model`, generic hard-dependency waits and
+capability-approval waits. The existing Task API only projects a fixed
+`toolchain_resources` kind and the next registered-runtime check timestamp
+from the persisted Worker wait; application IDs, OCI image references, approval
+digests, raw continuations and untrusted Worker logs are never returned in this
+projection. The Worker run and Task must have matching tenant ownership, and
+only already-authorised waiting-dependency Tasks are eligible. Corrupt or
+ambiguous wait records produce no status projection.
+
+This is visibility only: refreshing a Task does not start the runtime,
+approve a new image, retry an external action or attest tool availability.
+The original Task Attempt remains intact while waiting; physical rootless
+OCI inspection and executable checks happen at execution admission.

@@ -54,7 +54,8 @@ func TestRotationBoundsAndSanitisedReader(t *testing.T) {
   st,err:=os.Stat(filepath.Join(dir,"backend.jsonl"+suffix));if err!=nil{t.Fatal(err)}
   if st.Size()>MaxFileBytes{t.Fatalf("oversized evidence segment: %d",st.Size())}
  }
- f,err:=os.OpenFile(filepath.Join(dir,"backend.jsonl"),os.O_APPEND|os.O_WRONLY,0600)
+ // Keep injected-test data separate from the nearly full rotating backend file.
+ f,err:=os.OpenFile(filepath.Join(dir,"windows_service.jsonl"),os.O_CREATE|os.O_APPEND|os.O_WRONLY,0600)
  if err!=nil{t.Fatal(err)}
  _,err=f.WriteString("{\"schema\":1,\"at_utc\":\"2026-10-10T00:00:00Z\",\"component\":\"backend\",\"stage\":\"configuration\",\"outcome\":\"ok\",\"secret\":\"api-key\"}\n")
  if err!=nil{t.Fatal(err)}

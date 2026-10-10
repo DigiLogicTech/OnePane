@@ -82,7 +82,6 @@ func TestTaskWaitProjectionForApprovedOCIResourceWaitHidesIdentifiers(t *testing
  for _,secret:=range []string{"SECRET-PROJECT","SECRET-WORKSPACE","SECRET-RUNTIME","SECRET-APP",digest}{
   if strings.Contains(string(safe),secret){t.Fatalf("wait metadata leaked internal runtime identity: %s",safe)}
  }
- }
  for _,bad:=range []string{
   `{"toolchain_wait":{"retry_at_ms":1800000099999}}`,
   `{"toolchain_wait":{"project_id":"p","project_workspace_id":"w","runtime_id":"r","application_id":"a","manifest_sha256":"not-sha","retry_at_ms":5}}`,

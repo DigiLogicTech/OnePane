@@ -66,7 +66,7 @@ func TestWorkspaceExecutionManifestListsOnlyTaskOwnedOCIApplications(t *testing.
   manifest.GitInspectTool.ID!="project.app.git.inspect"||manifest.GitInspectTool.Version!="1"||len(manifest.GitInspectTool.Actions)!=4||
   manifest.FileInspectTool.ID!="project.app.files.inspect"||manifest.FileInspectTool.Version!="1"||len(manifest.FileInspectTool.Actions)!=2||
   manifest.FileEditTool.ID!="project.app.files.edit"||manifest.FileEditTool.Version!="1"||len(manifest.FileEditTool.Actions)!=3||
-  manifest.FilePublishTool.ID!="project.app.files.publish"||manifest.FilePublishTool.Version!="1"||len(manifest.FilePublishTool.Actions)!=1||
+  manifest.FilePublishTool.ID!="project.app.files.publish"||manifest.FilePublishTool.Version!="1"||(len(manifest.FilePublishTool.Actions)!=2||manifest.FilePublishTool.Actions[0]!="publish"||manifest.FilePublishTool.Actions[1]!="publish_large")||
   manifest.GitMutationTool.ID!="project.app.git.mutate"||manifest.GitMutationTool.Version!="1"||len(manifest.GitMutationTool.Actions)!=3||
   len(manifest.Applications)!=1||manifest.Applications[0].ID!=appWorld.ID {
   t.Fatalf("incorrect Task-owned Workspace execution manifest: %s",raw)

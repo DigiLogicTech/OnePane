@@ -110,9 +110,18 @@ func TestResearchSeatVerifiedTextDeliveryUsesRealLibraryAndArtifactGrants(t *tes
   input.ManifestSHA256!=frozen.Evidence.ManifestSHA256||
   input.Bytes!=int64(len(secret))||
   input.Sections[0].Trust!="UNVERIFIED_DERIVED"||
-  input.Sections[0].Authoritative||
-  !strings.Contains(string(input.Sections[0].Content),secret){
+  input.Sections[0].Authoritative{
   t.Fatalf("local seat did not receive exact untrusted frozen context: %+v",input)
+ }
+ var decoded struct{
+  Text string `json:"text"`
+  Trust string `json:"trust"`
+  SHA256 string `json:"sha256"`
+ }
+ if err=json.Unmarshal(input.Sections[0].Content,&decoded);err!=nil||
+  decoded.Text!=secret||decoded.Trust!="untrusted_library_content"||
+  decoded.SHA256!=blob.ContentHash{
+  t.Fatalf("verified local context does not preserve exact text/hash: %+v %v",decoded,err)
  }
  // The source grant governs every subsequent read, even when its original
  // metadata is approved and content-addressed.

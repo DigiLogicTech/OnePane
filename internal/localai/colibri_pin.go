@@ -2,7 +2,6 @@ package localai
 
 import (
  "context"
- "database/sql"
  "errors"
  "fmt"
  "strings"

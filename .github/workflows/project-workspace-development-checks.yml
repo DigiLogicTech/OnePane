@@ -43,6 +43,7 @@ on:
       - 'internal/projectworkspace/**'
       - 'internal/projectruntime/**'
       - 'internal/sandboxrunner/**'
+      - 'docs/GENERAL_PURPOSE_WORKSPACE_SANDBOX.md'
       - 'internal/agentworker/**'
       - 'internal/team/**'
       - 'internal/teamworker/**'

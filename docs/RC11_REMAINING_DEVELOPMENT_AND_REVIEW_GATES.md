@@ -594,13 +594,13 @@ and the mandatory code-review/vision-review sequence remain unresolved.
 
 ## Research Council — immutable local-only seat-sharing consent groundwork
 
-Research model evidence remains **not dispatched**. A separate explicit
+At the initial consent groundwork stage, Research model evidence was **not dispatched**. A separate explicit
 per-session operator consent is now available from Workspace Library's
 saved Research approvals. The operator first freezes exact metadata, then
 selects named eligible **agent** seats from the frozen Council manifest,
 reviews the strict local-only limitation and confirms the additional
 approval. Manual Web seats, Chair-only seats, unknown seats, human and
-disabled seats are ineligible. This is an intentionally dormant policy record,
+disabled seats are ineligible. This initially created a dormant policy record,
 not permission to use an inference or external provider.
 
 Migration 0049 stores only exact session/Research/evidence manifest hashes,
@@ -622,8 +622,9 @@ requires authenticated `team.write`, `project.read`, explicit
 membership. Revocation still succeeds when a former Library read grant
 is gone; it does not reinstate or dereference old evidence.
 
-**Not yet a Research evidence attachment:** the Team Worker and model
-request assembler do not read this table. Before actual consumption,
+**At the initial consent stage**, the Team Worker and model
+request assembler did not read this table; the later bounded local delivery
+increment below supersedes that implementation limitation. Before actual consumption,
 the implementation must independently enforce exact local candidate and
 seat identity, route/provider restrictions, byte verification immediately
 before inference, untrusted-content context segregation, per-turn
@@ -646,7 +647,7 @@ without substituting a cloud model. Consent is rechecked each turn, and the
 Research request manifest records the consent fingerprint with
 `research_evidence_content_delivered:false`.
 
-**No evidence bytes are attached in this increment**. This is a necessary
+**No evidence bytes were attached in this routing-fence increment**. This is a necessary
 policy fence, not a claim that a future local evidence-delivery facility is
 complete or that it has passed physical runtime testing.
 
@@ -680,3 +681,27 @@ revocation-while-inflight guarantees and real installed runtime acceptance
 remain separate tasks; a verified request is not proof that a model followed
 untrusted-content instructions correctly. No RC11 installer is released by
 this increment.
+
+## Research Council — derived-content isolation and active consent revocation
+
+Because critique rounds may include prior agent answers, direct prompt
+isolation **alone** is insufficient: a local seat could quote a private
+Library passage that reaches another model later. Human seat consent is
+therefore currently accepted only when **every active Council participant**
+is a named eligible agent seat; mixed Web/manual, human, Chair-only, partial
+seat lists and manual Chair sessions are rejected. The worker independently
+rechecks that immutable full-seat coverage before *all* Research turn
+dispatch, including before manual Web handoffs. Once protected evidence
+consent is revoked, the session cannot resume as an ordinary unrestricted
+Council; the operator must start a new session.
+
+The saved approval metadata contains no evidence bytes. The local inference
+request can contain selected, freshly verified text when active approval and
+all safety gates succeed. The stored approval API now labels the state as
+`verified_local_delivery_enabled` rather than incorrectly claiming local
+model dispatch is disabled. This does **not** authorize arbitrary agents,
+unapproved Workspaces, cloud APIs, remote nodes or unverified alternative
+Library versions. The 32 KiB delivery cap and hardware/context-capacity
+constraints still apply. Physical installed inference, crash recovery,
+inflight revocation guarantees and disclosure audit remain release-review
+items.

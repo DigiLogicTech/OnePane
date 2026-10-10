@@ -1,0 +1,40 @@
+name: OnePane Linux wixl Payload Candidate
+
+# Deliberately separate from Windows release/build/reinstall workflows.
+# Generates a real executable payload inside a NON-INSTALLABLE identity.
+on:
+  pull_request:
+    paths:
+      - 'packaging/wixl/**'
+      - '.github/workflows/wixl-onepane-candidate.yml'
+      - 'packaging/windows/assets/OnePane.ico'
+      - 'packaging/windows/desktop/**'
+      - 'packaging/windows/service/**'
+      - 'cmd/harnessd/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cross-compile-and-inspect:
+    name: Go Windows x64 + wixl tables & extracted bytes
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Cross-compile Windows x64 binaries and inspect candidate MSI
+        shell: bash
+        run: bash packaging/wixl/build-onepane-candidate.sh
+      - name: Verify only test artifacts were produced
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s build/wixl-onepane-candidate/output/OnePane-wixl-REAL-PAYLOAD-CANDIDATE-DO-NOT-INSTALL.msi
+          test -s build/wixl-onepane-candidate/output/payload.sha256
+          test ! -e dist/windows/OnePane.msi
+          echo "NON_RELEASE_CANDIDATE_VALIDATED; WINDOWS_SERVICE_LIFECYCLE_UNTESTED"

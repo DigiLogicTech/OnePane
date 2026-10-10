@@ -191,7 +191,7 @@ func TestTaskExecOptionalPreflightBlocksMissingToolsBeforeLaunch(t *testing.T){
    if len(cmd)!=6||cmd[4]!="go"||cmd[5]!="python3"{
     t.Fatalf("tool requirements were not sorted or checked: %q",cmd)
    }
-   return ExecResult{Stdout:"go\\t1\\npython3\\t1"},nil
+   return ExecResult{Stdout:"go\t1\npython3\t1"},nil
   }
   builds++
   if strings.Join(cmd," ")!="go version"{
@@ -218,7 +218,7 @@ func TestTaskExecOptionalPreflightBlocksMissingToolsBeforeLaunch(t *testing.T){
  eng.execHandler=func(_ context.Context,cmd []string)(ExecResult,error){
   if len(cmd)>4&&cmd[0]=="sh"{
    checks++
-   return ExecResult{Stdout:"go\\t1\\npython3\\t0"},nil
+   return ExecResult{Stdout:"go\t1\npython3\t0"},nil
   }
   builds++
   return ExecResult{},nil

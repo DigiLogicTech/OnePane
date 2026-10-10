@@ -1778,7 +1778,12 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		in.Completion = json.RawMessage(`{"type":"operator_review"}`)
 	}
 	actor := i.PrincipalID
-	out, err := s.tasks.Create(r.Context(), task.CreateCommand{WorkspaceID: in.WorkspaceID, ProjectID: in.ProjectID, ProjectWorkspaceID: in.ProjectWorkspaceID, Objective: in.Objective, SchedulingClass: in.SchedulingClass, Priority: in.Priority, Completion: in.Completion, ActorPrincipalID: &actor, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
+	// During an explicitly tagged, authenticated QA capture the server-minted
+	// trace overrides any caller-supplied X-Trace-ID; caller headers cannot
+	// impersonate another Task creation diagnostic trace.
+	traceID := qaTrustedTaskTrace(r)
+	if traceID == nil { traceID=headerPtr(r,"X-Trace-ID") }
+	out, err := s.tasks.Create(r.Context(), task.CreateCommand{WorkspaceID: in.WorkspaceID, ProjectID: in.ProjectID, ProjectWorkspaceID: in.ProjectWorkspaceID, Objective: in.Objective, SchedulingClass: in.SchedulingClass, Priority: in.Priority, Completion: in.Completion, ActorPrincipalID: &actor, RequestID: headerPtr(r, "X-Request-ID"), TraceID: traceID})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

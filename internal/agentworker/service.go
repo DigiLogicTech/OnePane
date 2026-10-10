@@ -312,6 +312,9 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 			// A model-resource wait is a real persisted suspension, not a
 			// dependency-free Task that should resume on every worker tick.
 			// Retain the same pinned model and local-only routing after wake.
+			if hasModelWaitField(json.RawMessage(cont))&&decodeModelWait(json.RawMessage(cont))==nil {
+                return fmt.Errorf("corrupt persisted local model wait for Worker run %s",v.run)
+            }
 			if modelWait:=decodeModelWait(json.RawMessage(cont));modelWait!=nil &&
 				s.clock.UnixMilli()<modelWait.RetryAtMS {
 				ready=false

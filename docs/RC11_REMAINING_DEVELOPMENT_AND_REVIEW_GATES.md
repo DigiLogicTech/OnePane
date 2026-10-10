@@ -977,3 +977,22 @@ software CI never exercise the actual container engine. This proves the
 specific negative case only after that opt-in physical job succeeds. It
 does not assert complete Node trust or general protection from
 unprivileged users with OCI engine access.
+
+## Remote Node scheduling — fresh, paired capability admission
+
+Federated model deployments may retain an historical `ready` status
+after a Node heartbeat expires or its pairing is revoked. The scheduler
+now reads the authoritative Node trust state, pairing status and
+capability-manifest expiry **at candidate admission**, and marks the
+remote model unschedulable unless the peer is paired and its manifest
+expiry is strictly in the future. A stale/unknown Node cannot be
+selected based only on old local database state or a previously
+qualified model profile. This does not substitute an origin-local model
+or silently route data elsewhere.
+
+The Node federation SQLite integration test explicitly seeds an active
+mTLS pairing, exercises scheduled eligibility, then expires the manifest
+without changing the model's READY deployment state. It also checks
+revoked pairing and unavailable Node trust. This is a local
+control-plane scheduling fence, not proof of remote physical health
+or the absence of all races between admission and network dispatch.

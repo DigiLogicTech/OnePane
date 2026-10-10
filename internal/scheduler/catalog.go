@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/DigiLogicTech/OnePane/internal/policy"
 )
@@ -139,10 +140,12 @@ func (c *Catalog) applyManagedAdmission(ctx context.Context, deploymentID, capab
 func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role string) ([]Candidate, error) {
 	rows, err := c.db.QueryContext(ctx, `SELECT d.id,d.status,d.node_id,d.provider_connection_id,d.context_max_reported,d.context_max_verified,d.runtime_config_json,
  m.model_ref,m.trust_state,m.static_metadata_json,p.workspace_id,p.provider,p.status,p.connection_json,
- COALESCE(n.local,0),COALESCE(n.trust_state,'')
+ COALESCE(n.local,0),COALESCE(n.trust_state,''),COALESCE(np.status,''),COALESCE(cm.expires_at,0)
  FROM model_deployments d JOIN models m ON m.id=d.model_id
  LEFT JOIN provider_connections p ON p.id=d.provider_connection_id
  LEFT JOIN harness_nodes n ON n.id=d.node_id
+ LEFT JOIN node_pairings np ON np.peer_node_id=n.id
+ LEFT JOIN node_capability_manifests cm ON cm.peer_node_id=n.id
  WHERE p.workspace_id IS NULL OR p.workspace_id=?`, ws)
 	if err != nil {
 		return nil, fmt.Errorf("list model scheduler candidates: %w", err)
@@ -154,8 +157,9 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 		var node, providerID, pws, provider, pstatus, pjson sql.NullString
 		var reported, verified sql.NullInt64
 		var local int
-		var nodeTrust string
-		if err := rows.Scan(&id, &status, &node, &providerID, &reported, &verified, &runtimeCfg, &modelRef, &trust, &metadata, &pws, &provider, &pstatus, &pjson, &local, &nodeTrust); err != nil {
+		var nodeTrust, pairingStatus string
+		var manifestExpires int64
+		if err := rows.Scan(&id, &status, &node, &providerID, &reported, &verified, &runtimeCfg, &modelRef, &trust, &metadata, &pws, &provider, &pstatus, &pjson, &local, &nodeTrust, &pairingStatus, &manifestExpires); err != nil {
 			return nil, err
 		}
 		cand := Candidate{ID: id, Kind: CandidateModel, DisplayName: modelRef, Status: status, TrustState: trust, Local: local == 1, Qualification: QualUntested, ProtocolLevel: "L0", CostClass: CostUnknown, Schedulable: (status == "ready" || status == "degraded") && (trust == "trusted" || trust == "user_trusted"), CapabilityIDs: []string{}, RoleNames: []string{}, ToolCallback: true}
@@ -290,6 +294,13 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 			return nil, err
 		}
 		if node.Valid && local == 0 && !provider.Valid {
+			// A persisted READY deployment cannot authorize a dispatch after
+			// its Node's signed/mTLS-paired capability heartbeat has expired.
+			// Do not silently route a stale model or substitute local capacity.
+			if nodeTrust != "paired" || pairingStatus != "paired" || manifestExpires <= time.Now().UnixMilli() {
+				cand.Schedulable = false
+				cand.NodeStatus = "unavailable"
+			}
 			var enabled, idleOnly int
 			err := c.db.QueryRowContext(ctx, `SELECT enabled,idle_only FROM remote_node_compute_policies WHERE node_id=?`, node.String).Scan(&enabled, &idleOnly)
 			if err == nil {

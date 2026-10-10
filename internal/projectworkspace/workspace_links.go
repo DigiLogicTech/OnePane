@@ -147,7 +147,7 @@ func (s *Service) SetWorkspaceLinkEnabled(ctx context.Context,c ToggleWorkspaceL
   enabled:=0;if c.Enabled{enabled=1}
   changed,err:=tx.ExecContext(ctx,`UPDATE project_workspace_links SET enabled=?,expires_at_ms=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?`,enabled,expiry,now,c.LinkID,c.ExpectedRevision)
   if err!=nil{return err}
-  n,_:=changed.RowsAffected();if n!=1{return ErrInvalidTransition}
+  n,err:=changed.RowsAffected();if err!=nil{return err};if n!=1{return ErrInvalidTransition}
   payload,_:=json.Marshal(map[string]any{"link_id":link.ID,"enabled":c.Enabled,"expires_at_ms":expiry})
   return s.events.Append(ctx,tx,event.Event{ID:eventID,WorkspaceID:&p.WorkspaceID,Type:"project.workspace_link_updated",AggregateType:"workspace_link",AggregateID:link.ID,ActorPrincipalID:&c.ActorPrincipalID,Payload:payload,OccurredAt:now})
  })
@@ -212,9 +212,18 @@ func (s *Service) WorkspacePublications(ctx context.Context,linkID string)([]Wor
  if live!=1{return nil,ErrInvalidTransition}
  rows,err:=s.db.QueryContext(ctx,`SELECT pub.id,pub.link_id,pub.asset_id,a.name,pub.asset_version,pub.content_hash,pub.published_by,pub.published_at
   FROM project_workspace_publications pub
-  JOIN project_library_assets a ON a.id=pub.asset_id AND a.project_id=?
-  JOIN project_library_asset_versions v ON v.asset_id=pub.asset_id AND v.version=pub.asset_version AND v.content_hash=pub.content_hash
-  WHERE pub.link_id=? AND a.archived=0 ORDER BY pub.published_at DESC,pub.id`,link.ProjectID,linkID)
+  JOIN project_workspace_links l ON l.id=pub.link_id AND l.enabled=1
+    AND (l.expires_at_ms IS NULL OR l.expires_at_ms>?)
+  JOIN projects p ON p.id=l.project_id AND p.status='active'
+  JOIN project_workspaces src ON src.id=l.source_workspace_id
+    AND src.project_id=p.id AND src.status='active'
+  JOIN project_workspaces dst ON dst.id=l.target_workspace_id
+    AND dst.project_id=p.id AND dst.status='active'
+  JOIN project_library_assets a ON a.id=pub.asset_id AND a.project_id=p.id
+  JOIN project_library_asset_versions v ON v.asset_id=pub.asset_id
+    AND v.version=pub.asset_version AND v.content_hash=pub.content_hash
+  WHERE pub.link_id=? AND p.id=? AND a.archived=0
+  ORDER BY pub.published_at DESC,pub.id`,s.clock.UnixMilli(),linkID,link.ProjectID)
  if err!=nil{return nil,err}
  defer rows.Close()
  out:=[]WorkspacePublication{}

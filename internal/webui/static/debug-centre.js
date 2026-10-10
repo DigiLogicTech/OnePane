@@ -59,6 +59,7 @@
       <p class="list-meta">The consolidated support ZIP is generated inside a selected canonical Workspace after per-source authorisation and a human review. Export rechecks current permissions.</p>
      </article>
     </div>
+    ${typeof root.a61APICapture!=="undefined"?root.a61APICapture.markup():""}
     <article class="panel-card a58-debug-tile a60-reproduction" aria-label="Operator authored QA reproduction report">
      <h3>Reproduction report</h3>
      <p class="list-meta">Type a minimal QA report below. These are YOUR notes, not automatically redacted data. Do not include credentials, tokens, personal information or private Project contents. Nothing is uploaded, stored persistently or added to a support ZIP.</p>
@@ -155,6 +156,7 @@
   }
   // Operator notes are a separate consent boundary from auto-sanitised
   // browser evidence. Nothing enters the combined QA ZIP or an API endpoint.
+  if(root.a61APICapture&&typeof root.apiRequest==="function")root.a61APICapture.bind(host,root.apiRequest);
   const note=root.a60QAReproduction;
   const reportFields={
    category:get("a60Category"),impact:get("a60Impact"),title:get("a60Title"),

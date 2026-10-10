@@ -28,6 +28,16 @@ func(s *Service) FreezeResearchEvidence(
  AND t.project_id IS NOT NULL AND t.project_workspace_id IS NOT NULL`,
  sessionID).Scan(&projectID,&workspaceID,&manifestSHA)
  if err!=nil{return ResearchEvidenceSelection{},ErrCrossWorkspace}
+ // Reject an ineligible actor *before* probing Library permissions,
+ // so an agent cannot use the approval endpoint for metadata discovery.
+ var humanCount int
+ err=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM team_sessions ss
+  JOIN principals principal ON principal.id=? AND principal.status='active'
+   AND principal.principal_type='human'
+  JOIN workspace_memberships membership ON membership.workspace_id=ss.workspace_id
+   AND membership.principal_id=principal.id AND membership.status='active'
+  WHERE ss.id=?`,actor,sessionID).Scan(&humanCount)
+ if err!=nil||humanCount!=1{return ResearchEvidenceSelection{},ErrCrossWorkspace}
  packet,err:=s.BuildWorkspaceEvidencePacket(ctx,projectID,workspaceID,selections)
  if err!=nil{return ResearchEvidenceSelection{},err}
  entriesJSON,err:=json.Marshal(packet.Entries)

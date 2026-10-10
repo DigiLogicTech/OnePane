@@ -474,7 +474,7 @@ async function a49MountDevelopmentTasks(project,workspace,container){
    supportReviewed={prepared,signature,reviewedAt:Date.now(),
     browserFingerprint:selected.browser?JSON.stringify(sources.browser):null};
    supportExport.disabled=false;
-   supportStatus.textContent="Review every included field. Export uses exactly this preview, does not re-fetch sources or upload data, and expires after two minutes. Missing source permissions fail closed.";
+   supportStatus.textContent="Review every included field. Export uses exactly this preview, rechecks current source permissions without incorporating re-fetched data, never uploads and expires after two minutes. Missing source permissions fail closed.";
   }catch(_){
    if(epoch!==supportEpoch)return;
    discardSupport();

@@ -8,6 +8,7 @@ import (
  "io"
  "net/http"
  "strings"
+ "time"
 
  "github.com/DigiLogicTech/OnePane/internal/artifact"
  "github.com/DigiLogicTech/OnePane/internal/projectworkspace"
@@ -135,7 +136,7 @@ func(s *Server) readVerifiedWorkspaceEvidence(w http.ResponseWriter,r *http.Requ
   writeError(w,http.StatusBadRequest,"Select one to eight bounded evidence versions");return
  }
  result,err:=collectVerifiedWorkspaceEvidence(r.Context(),library,s.libraryArtifacts,
-  p.ID,workspaceID,p.WorkspaceID,input.Selections,s.clock.UnixMilli())
+  p.ID,workspaceID,p.WorkspaceID,input.Selections,time.Now().UnixMilli())
  if err!=nil{
   writeError(w,http.StatusUnprocessableEntity,
    "Evidence denied, unavailable or failed content/provenance checks");return

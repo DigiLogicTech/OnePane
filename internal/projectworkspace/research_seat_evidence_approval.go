@@ -15,7 +15,8 @@ import (
 
 // ResearchSeatEvidenceApproval records separate human consent for named
 // frozen Council seats. This record is NOT a content-read capability:
-// no worker/dispatch code consumes it, and only local models are in scope.
+// the worker must independently enforce current grants, byte integrity,
+// Council isolation and origin-node routing before local-model delivery.
 type ResearchSeatEvidenceApproval struct {
  SessionID string `json:"session_id"`
  ProjectID string `json:"project_id"`
@@ -29,8 +30,8 @@ type ResearchSeatEvidenceApproval struct {
  ApprovedAt int64 `json:"approved_at"`
  RevokedBy *string `json:"revoked_by,omitempty"`
  RevokedAt *int64 `json:"revoked_at,omitempty"`
- ModelVisible bool `json:"model_visible"`
- DispatchEnabled bool `json:"dispatch_enabled"`
+ ModelVisible bool `json:"approval_record_model_visible"`
+ DispatchEnabled bool `json:"verified_local_delivery_enabled"`
 }
 
 func canonicalResearchSeats(seats []string)([]string,error){
@@ -65,37 +66,44 @@ func researchTextSelectionBounded(entries []WorkspaceEvidenceEntry)bool{
 
 func frozenResearchSeatsEligible(snapshot []byte,seats []string)bool{
  var manifest struct{
-  Members []struct {
+  ResearchMode bool `json:"research_mode"`
+  ExecutionMode string `json:"execution_mode"`
+  Research struct{ChairMode string `json:"chair_mode"`} `json:"research"`
+  Members []struct{
    ID string `json:"id"`
    MemberKind string `json:"member_kind"`
    Status string `json:"status"`
    Config json.RawMessage `json:"config"`
   } `json:"members"`
  }
- if json.Unmarshal(snapshot,&manifest)!=nil{return false}
- for _,id:=range seats{
-  found:=false
-  for _,member:=range manifest.Members{
-   if member.ID!=id{continue}
-   if member.MemberKind!="agent"||member.Status!="active"{return false}
-   var cfg struct{
-    CouncilChairOnly bool `json:"council_chair_only"`
-    ManualWeb struct{Enabled bool `json:"enabled"`} `json:"manual_web"`
-   }
-   if len(member.Config)>0&&json.Unmarshal(member.Config,&cfg)!=nil{return false}
-   if cfg.CouncilChairOnly||cfg.ManualWeb.Enabled{return false}
-   found=true
-   break
-  }
-  if !found{return false}
+ if json.Unmarshal(snapshot,&manifest)!=nil||!manifest.ResearchMode||
+  manifest.ExecutionMode!="council"||manifest.Research.ChairMode=="manual"{
+  return false
  }
- return true
+ // Council answers are visible to peer seats in later critique rounds.
+ // Sharing must therefore cover every active participant, not only the
+ // recipients of the first-pass direct evidence packet.
+ selected:=map[string]bool{}
+ for _,id:=range seats{selected[id]=true}
+ count:=0
+ for _,member:=range manifest.Members{
+  if member.Status!="active"{continue}
+  if member.MemberKind!="agent"||!selected[member.ID]{return false}
+  var cfg struct{
+   CouncilChairOnly bool `json:"council_chair_only"`
+   ManualWeb struct{Enabled bool `json:"enabled"`} `json:"manual_web"`
+  }
+  if len(member.Config)>0&&json.Unmarshal(member.Config,&cfg)!=nil{return false}
+  if cfg.CouncilChairOnly||cfg.ManualWeb.Enabled{return false}
+  count++
+ }
+ return count>0&&count==len(selected)&&len(selected)==len(seats)
 }
 
 // ApproveResearchSeatEvidence requires a second, explicit human action after
 // the metadata freeze and before the first Research turn. An immutable local-
-// only seat list is recorded with revocation support. All actual delivery
-// remains disabled pending independently reviewed policy enforcement.
+// only seat list is recorded with revocation support. Current delivery
+// still requires independent byte, route, isolation and consent checks.
 func(s *Service) ApproveResearchSeatEvidence(
  ctx context.Context,sessionID,actor string,seats []string,
 )(ResearchSeatEvidenceApproval,error){
@@ -185,7 +193,7 @@ func(s *Service) ApproveResearchSeatEvidence(
    "session_id":sessionID,"seat_count":len(ids),"policy":"local_only",
    "research_manifest_sha256":manifestSHA,
    "evidence_manifest_sha256":evidenceSHA,
-   "dispatch_enabled":false,
+   "approval_has_content":false,
   })
   return s.events.Append(ctx,tx,event.Event{ID:evtID,WorkspaceID:&tenant,
    Type:"research.seat_evidence_intent_approved",
@@ -231,6 +239,7 @@ func(s *Service) ResearchSeatEvidenceApproval(
  if err!=nil{return ResearchSeatEvidenceApproval{},err}
  if json.Unmarshal([]byte(raw),&out.SeatIDs)!=nil{return ResearchSeatEvidenceApproval{},ErrCrossWorkspace}
  out.SessionID=sessionID
+ out.DispatchEnabled=out.State=="approved"
  return out,nil
 }
 

@@ -1,5 +1,6 @@
--- Research Council explicit, seat-scoped, local-only intent. Deliberately
--- inert: no model dispatch or evidence-byte transfer reads this table yet.
+-- Research Council explicit, seat-scoped, local-only human consent.
+-- The local-origin Team Worker reads this metadata only after independently
+-- checking live Council isolation, version grants and managed artifact bytes.
 CREATE TABLE research_evidence_seat_approvals (
  session_id TEXT PRIMARY KEY REFERENCES team_sessions(id) ON DELETE RESTRICT,
  workspace_id TEXT NOT NULL REFERENCES workspaces(id),

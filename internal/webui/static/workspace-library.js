@@ -427,6 +427,8 @@ async function a68ReviewResearchSeatConsent(sessionID){
  }catch(ex){notice("Research session access denied: "+ex.message,"bad");return;}
  const snap=manifest?.manifest?.Snapshot||manifest?.manifest?.snapshot||{};
  const members=Array.isArray(snap.members)?snap.members:[];
+ const activeParticipants=members.filter(m=>m?.status==="active");
+ const hasManualChair=snap?.research?.chair_mode==="manual";
  const candidates=members.filter(m=>{
   let cfg=m?.config||{};
   if(typeof cfg==="string"){try{cfg=JSON.parse(cfg)}catch{return false}}
@@ -436,6 +438,8 @@ async function a68ReviewResearchSeatConsent(sessionID){
  let prior=null;
  try{prior=await apiRequest(endpoint);}catch{}
  const locked=prior?.state==="approved"||prior?.state==="revoked";
+ const fullLocalCouncil=!hasManualChair&&candidates.length>0&&
+  candidates.length===activeParticipants.length;
  const rows=candidates.map(m=>{
   const checked=prior?.seat_ids?.includes(m.id)?"checked":"";
   return '<label class="inline-check"><input type="checkbox" data-a68-seat value="'+
@@ -444,14 +448,14 @@ async function a68ReviewResearchSeatConsent(sessionID){
  }).join("");
  openModal("Research evidence — local-only seat intent",
   '<div class="qa-form" id="a68ResearchSeatConsent">'+
-  '<p class="list-meta">This is a separate, recorded human approval for selected Research seats. Only local-model candidates can qualify; manual Web seats and external providers are excluded. No text is sent to any model by this feature.</p>'+
-  '<p class="list-meta">Approval is immutable and revocable. It is NOT a capability lease or a working evidence attachment. Actual model delivery remains disabled pending independent enforcement and verification.</p>'+
+  '<p class="list-meta">This is separate human permission for private Workspace Library text to be attached to Research Council local-model prompts. Once approved, OnePane may supply the exact frozen versions to every approved local origin-node seat in subsequent rounds. Only UTF-8 text is eligible, with a strict 32 KiB total delivery cap; no cloud, remote or manual Web sharing.</p>'+
+  '<p class="list-meta">ALL active participants must be approved, local eligible agent seats. A mixed or manual-Chair Council cannot receive this evidence because later critique could quote private content. Approval is immutable; permanent revocation halts protected Council dispatch, including subsequent rounds, and a new session is required to restart.</p>'+
   '<div class="team-member-list">'+(rows||'<p>No eligible local-capable Research seats in this frozen session.</p>')+'</div>'+
   '<label class="inline-check"><input type="checkbox" data-a68-confirm '+(locked?'disabled':'')+
-  '> I understand the exact seats and that this records local-only sharing intent without sending any documents.</label>'+
+  '> I authorize delivery of the selected frozen text to ALL named local-model Council seats in future Research rounds, subject to live permission and hash checks.</label>'+
   '<div class="toolbar">'+
-  '<button type="button" class="btn primary" data-a68-approve '+(locked||!candidates.length?'disabled':'')+
-  '>Approve selected seats (intent only)</button>'+
+  '<button type="button" class="btn primary" data-a68-approve '+(locked||!fullLocalCouncil?'disabled':'')+
+  '>Approve local-only evidence delivery</button>'+
   '<button type="button" class="btn" data-a68-revoke '+(prior?.state==="approved"?'':'disabled')+
   '>Revoke approval</button></div>'+
   '<pre class="a62-evidence-receipt" data-a68-receipt aria-live="polite"></pre></div>');
@@ -461,6 +465,10 @@ async function a68ReviewResearchSeatConsent(sessionID){
  if(prior)report.textContent=JSON.stringify(prior,null,2);
  box.querySelector("[data-a68-approve]")?.addEventListener("click",async e=>{
   const selected=Array.from(box.querySelectorAll("[data-a68-seat]:checked")).map(v=>v.value);
+  if(!fullLocalCouncil||selected.length!==candidates.length){
+   report.textContent="Protected Research evidence requires every active Council seat to be an approved local agent. Mixed/manual Councils must use a new local-only session.";
+   return;
+  }
   if(!box.querySelector("[data-a68-confirm]")?.checked||!selected.length){
    report.textContent="Explicit confirmation and at least one selected seat are required.";
    return;
@@ -473,14 +481,14 @@ async function a68ReviewResearchSeatConsent(sessionID){
    report.textContent=JSON.stringify(result,null,2);
    box.querySelectorAll("[data-a68-seat], [data-a68-confirm]").forEach(v=>v.disabled=true);
    box.querySelector("[data-a68-revoke]").disabled=false;
-   notice("Local-only Research seat intent recorded. Evidence delivery remains disabled.");
+   notice("Local-only Research evidence approved for future seat turns; file permissions and hashes are checked again before delivery.");
   }catch(ex){
    report.textContent="Approval denied: "+ex.message;
    e.currentTarget.disabled=false;
   }
  });
  box.querySelector("[data-a68-revoke]")?.addEventListener("click",async e=>{
-  if(!confirm("Revoke this Research evidence seat intent permanently?"))return;
+  if(!confirm("Permanently revoke evidence delivery and halt further protected Council turns? A new Council session will be required."))return;
   e.currentTarget.disabled=true;
   try{
    const result=await apiRequest(endpoint+"/revoke",{method:"POST",body:"{}"});

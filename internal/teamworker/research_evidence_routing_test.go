@@ -49,3 +49,34 @@ func TestResearchEvidenceRouteFenceOverridesCloudAndPaidPolicy(t *testing.T){
   t.Fatalf("evidence sharing did not fence risky routes: %+v",route)
  }
 }
+
+func TestResearchCouncilEvidenceCannotLeakThroughPeerSeats(t *testing.T){
+ allLocal:=`{"research_mode":true,"execution_mode":"council","members":[
+  {"id":"a","member_kind":"agent","status":"active","config":{}},
+  {"id":"b","member_kind":"agent","status":"active","config":{}}
+ ]}`
+ if !researchEvidenceCouncilIsolationSafe(allLocal,[]string{"a","b"}){
+  t.Fatal("fully approved independent local Research Council rejected")
+ }
+ if researchEvidenceCouncilIsolationSafe(allLocal,[]string{"a"}){
+  t.Fatal("private evidence could escape into a non-approved peer's critique")
+ }
+ for _,snapshot:=range []string{
+  `{"research_mode":true,"execution_mode":"council","members":[
+   {"id":"a","member_kind":"agent","status":"active","config":{}},
+   {"id":"web","member_kind":"agent","status":"active","config":{"manual_web":{"enabled":true}}}
+  ]}`,
+  `{"research_mode":true,"execution_mode":"council","members":[
+   {"id":"a","member_kind":"agent","status":"active","config":{}},
+   {"id":"human","member_kind":"human","status":"active","config":{}}
+  ]}`,
+  `{"research_mode":true,"execution_mode":"council","research":{"chair_mode":"manual"},"members":[
+   {"id":"a","member_kind":"agent","status":"active","config":{}}
+  ]}`,
+ }{
+  ids:=[]string{"a","web","human"}
+  if researchEvidenceCouncilIsolationSafe(snapshot,ids){
+   t.Fatalf("mixed/manual Council accepted protected evidence: %s",snapshot)
+  }
+ }
+}

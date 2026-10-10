@@ -855,3 +855,24 @@ replay is initiated by a graph read. The external-effect classification
 also changes the deterministic recovery checkpoint digest. Automated
 tests cover tenant/Task isolation, provider-state precedence, and
 unknown-result review instead of automatic retry.
+
+## Local physical Node — fenced sandbox reconciliation
+
+Runtime reconciliation is intentionally local-only for a Workspace
+explicitly assigned to this Node. Each Tool/verification sequence now
+retains the original approved Runtime and application intent rather than
+adopting a newer database revision after a possibly long-running OCI
+operation. Immediately before applying runtime or application observations,
+and before additional image-pull/container-ensure actions, the reconciler
+rechecks immutable Node assignment, Project/Workspace ownership, runtime
+desired state, isolation backend, OCI source/image revision, relevant
+network/filesystem/resource/environment constraints and exact revision.
+Any drift returns `ErrReconciliationDrift` without falsely marking the
+new desired state fulfilled or proceeding with further stale Tool actions.
+
+This is a read-then-recheck safeguard; an already dispatched physical
+mutation cannot be unsent, and the existing optimistic revision checks
+remain the final commit fence. The Operator must reconcile the observed
+external state under the newly approved desired revision. This does not
+establish successful physical Node smoke acceptance or remote sandbox
+execution.

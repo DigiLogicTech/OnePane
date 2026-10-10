@@ -120,8 +120,8 @@ means **prerequisites only**; it is not proof that the image has all expected
 commands or that the source container passed any of the five physical
 acceptance suites.
 
-A new *hosted* job in the RC11 Trusted Rootless Node Acceptance workflow
-prints a GitHub Actions job summary for which approval-variable families
+A new *hosted* informational job in the Project Workspace Development Architecture workflow
+prints a GitHub Actions job summary on trusted integration-branch pushes for which approval-variable families
 are configured. It never invokes the self-hosted runner or sees the image
 values. That summary is not a physical pass either. Only the opt-in jobs
 with actual rootless execution are eligible for physical acceptance. The
@@ -129,3 +129,13 @@ HTTP broker job uses the same tested read-only preflight in `-strict` mode
 before running its real OCI assertions. Existing elevated privileges, unknown
 images, remote host network changes and download operations are never
 auto-approved.
+
+### Workflow status integrity
+
+The **RC11 Trusted Rootless Node Acceptance** workflow intentionally has
+*only physical Node jobs*. With no opt-in image approval configured, GitHub
+marks this entire workflow **skipped**, not successful. Its approval-only,
+hosted summary is a separate job in the Project Workspace Development
+Architecture workflow, so a successful informational report cannot turn the
+physical acceptance workflow green. Inspect each physical job's actual
+conclusion to decide whether its acceptance requirement has passed.

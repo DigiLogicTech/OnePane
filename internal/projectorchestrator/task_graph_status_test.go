@@ -49,6 +49,9 @@ func TestTaskGraphDoesNotAutoretryUnknownOutcomeOrRegressedDependencies(t *testi
   {"paused_task",TaskGraphNode{
    Key:"paused",State:task.StatePaused,
   },"needs_attention"},
+  {"workspace_identity_drift",TaskGraphNode{
+   Key:"escaped",State:task.StateReady,ScopeDrift:true,
+  },"needs_attention"},
   {"untrusted_unscoped_edge",TaskGraphNode{
    Key:"unknown",State:task.StateCreated,
    BlockedBy:[]string{"unscoped_dependency"},

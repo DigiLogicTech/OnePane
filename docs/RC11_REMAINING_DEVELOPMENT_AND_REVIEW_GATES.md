@@ -935,3 +935,27 @@ The unit tests exercise ownership, isolation, missing ID, name and
 foreign Workspace denial. Existing opt-in real rootless smoke checks
 remain necessary to validate actual Docker/Podman flags and Node process
 behaviour; a green software test does not establish physical acceptance.
+
+## Opt-in physical Node — abrupt control-plane crash acceptance
+
+The trusted rootless Node smoke workflow now includes
+`TestRealRootlessProcessCrashAndOwnedOCIRecovery`, with explicit human
+approval through the existing `ONEPANE_ROOTLESS_SMOKE_IMAGE` immutable
+digest and a pre-pulled image owned by the unprivileged runner account.
+A dedicated child test **process** creates a real isolated OCI container,
+writes one Workspace file, and exits with code 86 without cleanup.
+The parent, as a fresh control-plane incarnation, checks the original
+running OCI ID, dedicated writable mount, immutable spec hash and
+persisted file; it performs a same-spec ensure and requires **the exact
+same OCI ID** instead of replaying the command or replacing the container.
+It then stops the exact verified owned runtime and independently confirms
+the container is no longer running.
+
+Generated identifiers, Workspace directories, container names and
+networks are unique to the test; cleanup is restricted to those generated
+identifiers. No image pulls, host-wide Podman prune, user-container access
+or global temporary files are required. This tests a *process crash*
+boundary, not OS reboot, actual harnessd orchestration lease fencing or
+remote Node restart. The workflow remains SKIPPED without the explicitly
+approved image and must never be represented as a physical pass while
+skipped.

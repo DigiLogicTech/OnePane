@@ -15,6 +15,11 @@ on:
       - 'internal/webui/static/index.html'
       - 'internal/webui/static/qa-trace-correlation.js'
       - 'scripts/validate_qa_trace_correlation.js'
+      - 'internal/api/qa_api_capture.go'
+      - 'internal/api/qa_api_capture_handler.go'
+      - 'internal/api/qa_api_capture_test.go'
+      - 'internal/webui/static/qa-api-capture.js'
+      - 'scripts/validate_qa_api_capture.js'
       - 'internal/webui/static/qa-reproduction-note.js'
       - 'scripts/validate_qa_reproduction.js'
       - 'internal/webui/static/debug-centre.js'
@@ -79,6 +84,8 @@ jobs:
           node --check internal/webui/static/app-foundation.js
           node --check internal/webui/static/app.js
           node --check internal/webui/static/settings-redesign.js
+          node --check internal/webui/static/qa-api-capture.js
+          node scripts/validate_qa_api_capture.js
           node --check internal/webui/static/qa-reproduction-note.js
           node scripts/validate_qa_reproduction.js
           node --check internal/webui/static/debug-centre.js

@@ -25,6 +25,8 @@ type WorkspaceLink struct {
  CreatedBy string `json:"created_by"`
  CreatedAt int64 `json:"created_at"`
  UpdatedAt int64 `json:"updated_at"`
+ ExpiresAtMS *int64 `json:"expires_at_ms,omitempty"`
+ Expired bool `json:"expired"`
 }
 
 type WorkspacePublication struct {
@@ -41,11 +43,14 @@ type WorkspacePublication struct {
 type CreateWorkspaceLinkCommand struct {
  ProjectID, SourceWorkspaceID, TargetWorkspaceID, Name, ActorPrincipalID string
  Enable bool
+ ExpiresAtMS *int64
 }
 type ToggleWorkspaceLinkCommand struct {
  LinkID, ActorPrincipalID string
  ExpectedRevision int64
  Enabled bool
+ ExpiresAtMS *int64
+ ClearExpiry bool
 }
 type PublishWorkspaceAssetCommand struct {
  LinkID, AssetID, ActorPrincipalID string
@@ -55,24 +60,31 @@ type PublishWorkspaceAssetCommand struct {
 func scanWorkspaceLink(row scanner) (WorkspaceLink,error) {
  var x WorkspaceLink
  var enabled int
+ var expiry sql.NullInt64
  err:=row.Scan(&x.ID,&x.ProjectID,&x.SourceWorkspaceID,&x.TargetWorkspaceID,
-  &x.Name,&x.Kind,&enabled,&x.Revision,&x.CreatedBy,&x.CreatedAt,&x.UpdatedAt)
+  &x.Name,&x.Kind,&enabled,&x.Revision,&x.CreatedBy,&x.CreatedAt,&x.UpdatedAt,&expiry)
  x.Enabled=enabled!=0
+ if expiry.Valid{x.ExpiresAtMS=&expiry.Int64}
  return x,err
 }
-const workspaceLinkSelect = `SELECT id,project_id,source_workspace_id,target_workspace_id,name,kind,enabled,revision,created_by,created_at,updated_at FROM project_workspace_links WHERE id=?`
+func expireWorkspaceLink(link WorkspaceLink,now int64)WorkspaceLink{
+ link.Expired=link.ExpiresAtMS!=nil&&now>=*link.ExpiresAtMS
+ return link
+}
+const workspaceLinkSelect = `SELECT id,project_id,source_workspace_id,target_workspace_id,name,kind,enabled,revision,created_by,created_at,updated_at,expires_at_ms FROM project_workspace_links WHERE id=?`
 
 func (s *Service) WorkspaceLink(ctx context.Context,id string) (WorkspaceLink,error) {
  if s==nil||s.db==nil||strings.TrimSpace(id)=="" {return WorkspaceLink{},ErrInvalidCommand}
- return scanWorkspaceLink(s.db.QueryRowContext(ctx,workspaceLinkSelect,id))
+ link,err:=scanWorkspaceLink(s.db.QueryRowContext(ctx,workspaceLinkSelect,id))
+ return expireWorkspaceLink(link,s.clock.UnixMilli()),err
 }
 func (s *Service) WorkspaceLinks(ctx context.Context,projectID string) ([]WorkspaceLink,error) {
  if strings.TrimSpace(projectID)=="" {return nil,ErrInvalidCommand}
- rows,err:=s.db.QueryContext(ctx,`SELECT id,project_id,source_workspace_id,target_workspace_id,name,kind,enabled,revision,created_by,created_at,updated_at FROM project_workspace_links WHERE project_id=? ORDER BY created_at,id`,projectID)
+ rows,err:=s.db.QueryContext(ctx,`SELECT id,project_id,source_workspace_id,target_workspace_id,name,kind,enabled,revision,created_by,created_at,updated_at,expires_at_ms FROM project_workspace_links WHERE project_id=? ORDER BY created_at,id`,projectID)
  if err!=nil{return nil,err}
  defer rows.Close()
  out:=[]WorkspaceLink{}
- for rows.Next(){link,err:=scanWorkspaceLink(rows);if err!=nil{return nil,err};out=append(out,link)}
+ for rows.Next(){link,err:=scanWorkspaceLink(rows);if err!=nil{return nil,err};out=append(out,expireWorkspaceLink(link,s.clock.UnixMilli()))}
  return out,rows.Err()
 }
 func (s *Service) CreateWorkspaceLink(ctx context.Context,c CreateWorkspaceLinkCommand) (WorkspaceLink,error) {
@@ -83,9 +95,12 @@ func (s *Service) CreateWorkspaceLink(ctx context.Context,c CreateWorkspaceLinkC
  id,err:=s.ids.New("pwlink");if err!=nil{return WorkspaceLink{},err}
  eventID,err:=s.ids.New("evt");if err!=nil{return WorkspaceLink{},err}
  now:=s.clock.UnixMilli()
+ if c.ExpiresAtMS!=nil&&(*c.ExpiresAtMS<=now||*c.ExpiresAtMS>now+365*24*60*60*1000){
+  return WorkspaceLink{},ErrInvalidCommand
+ }
  link:=WorkspaceLink{ID:id,ProjectID:c.ProjectID,SourceWorkspaceID:c.SourceWorkspaceID,
  TargetWorkspaceID:c.TargetWorkspaceID,Name:c.Name,Kind:"artifacts",Enabled:c.Enable,
- Revision:1,CreatedBy:c.ActorPrincipalID,CreatedAt:now,UpdatedAt:now}
+ Revision:1,CreatedBy:c.ActorPrincipalID,CreatedAt:now,UpdatedAt:now,ExpiresAtMS:c.ExpiresAtMS}
  err=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx) error {
   p,err:=s.repo.ProjectTx(ctx,tx,c.ProjectID);if err!=nil{return err}
   if p.Status!="active"{return ErrProjectInactive}
@@ -96,17 +111,18 @@ func (s *Service) CreateWorkspaceLink(ctx context.Context,c CreateWorkspaceLinkC
   if err!=nil{return err}
   if count!=2{return ErrCrossWorkspace}
   enabled:=0;if c.Enable{enabled=1}
-  _,err=tx.ExecContext(ctx,`INSERT INTO project_workspace_links(id,project_id,source_workspace_id,target_workspace_id,name,kind,enabled,revision,created_by,created_at,updated_at) VALUES(?,?,?,?,?,'artifacts',?,1,?,?,?)`,
-   id,c.ProjectID,c.SourceWorkspaceID,c.TargetWorkspaceID,c.Name,enabled,c.ActorPrincipalID,now,now)
+  _,err=tx.ExecContext(ctx,`INSERT INTO project_workspace_links(id,project_id,source_workspace_id,target_workspace_id,name,kind,enabled,revision,created_by,created_at,updated_at,expires_at_ms) VALUES(?,?,?,?,?,'artifacts',?,1,?,?,?,?)`,
+   id,c.ProjectID,c.SourceWorkspaceID,c.TargetWorkspaceID,c.Name,enabled,c.ActorPrincipalID,now,now,c.ExpiresAtMS)
   if err!=nil{return err}
-  payload,_:=json.Marshal(map[string]any{"link_id":id,"source_workspace_id":c.SourceWorkspaceID,"target_workspace_id":c.TargetWorkspaceID,"enabled":c.Enable,"kind":"artifacts"})
+  payload,_:=json.Marshal(map[string]any{"link_id":id,"source_workspace_id":c.SourceWorkspaceID,"target_workspace_id":c.TargetWorkspaceID,"enabled":c.Enable,"kind":"artifacts","expires_at_ms":c.ExpiresAtMS})
   return s.events.Append(ctx,tx,event.Event{ID:eventID,WorkspaceID:&p.WorkspaceID,Type:"project.workspace_link_created",AggregateType:"workspace_link",AggregateID:id,ActorPrincipalID:&c.ActorPrincipalID,Payload:payload,OccurredAt:now})
  })
  if err!=nil{return WorkspaceLink{},err}
  return link,nil
 }
 func (s *Service) SetWorkspaceLinkEnabled(ctx context.Context,c ToggleWorkspaceLinkCommand) (WorkspaceLink,error) {
- if c.LinkID==""||c.ActorPrincipalID==""||c.ExpectedRevision<1 {return WorkspaceLink{},ErrInvalidCommand}
+ if c.LinkID==""||c.ActorPrincipalID==""||c.ExpectedRevision<1||
+  (c.ClearExpiry&&c.ExpiresAtMS!=nil){return WorkspaceLink{},ErrInvalidCommand}
  eventID,err:=s.ids.New("evt");if err!=nil{return WorkspaceLink{},err}
  now:=s.clock.UnixMilli()
  err=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
@@ -115,6 +131,13 @@ func (s *Service) SetWorkspaceLinkEnabled(ctx context.Context,c ToggleWorkspaceL
   if p.Status!="active"{return ErrProjectInactive}
   if err=s.requireActor(ctx,tx,p.WorkspaceID,c.ActorPrincipalID);err!=nil{return err}
   if link.Revision!=c.ExpectedRevision{return ErrInvalidTransition}
+  expiry:=link.ExpiresAtMS
+  if c.ClearExpiry{expiry=nil}
+  if c.ExpiresAtMS!=nil{
+   if *c.ExpiresAtMS<=now||*c.ExpiresAtMS>now+365*24*60*60*1000{return ErrInvalidCommand}
+   expiry=c.ExpiresAtMS
+  }
+  if c.Enabled&&expiry!=nil&&*expiry<=now{return ErrInvalidTransition}
   if c.Enabled{
    var active int
    err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_workspaces WHERE project_id=? AND status='active' AND id IN (?,?)`,
@@ -122,10 +145,10 @@ func (s *Service) SetWorkspaceLinkEnabled(ctx context.Context,c ToggleWorkspaceL
    if err!=nil{return err};if active!=2{return ErrCrossWorkspace}
   }
   enabled:=0;if c.Enabled{enabled=1}
-  changed,err:=tx.ExecContext(ctx,`UPDATE project_workspace_links SET enabled=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?`,enabled,now,c.LinkID,c.ExpectedRevision)
+  changed,err:=tx.ExecContext(ctx,`UPDATE project_workspace_links SET enabled=?,expires_at_ms=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?`,enabled,expiry,now,c.LinkID,c.ExpectedRevision)
   if err!=nil{return err}
-  n,_:=changed.RowsAffected();if n!=1{return ErrInvalidTransition}
-  payload,_:=json.Marshal(map[string]any{"link_id":link.ID,"enabled":c.Enabled})
+  n,err:=changed.RowsAffected();if err!=nil{return err};if n!=1{return ErrInvalidTransition}
+  payload,_:=json.Marshal(map[string]any{"link_id":link.ID,"enabled":c.Enabled,"expires_at_ms":expiry})
   return s.events.Append(ctx,tx,event.Event{ID:eventID,WorkspaceID:&p.WorkspaceID,Type:"project.workspace_link_updated",AggregateType:"workspace_link",AggregateID:link.ID,ActorPrincipalID:&c.ActorPrincipalID,Payload:payload,OccurredAt:now})
  })
  if err!=nil{return WorkspaceLink{},err}
@@ -139,7 +162,7 @@ func (s *Service) PublishWorkspaceAsset(ctx context.Context,c PublishWorkspaceAs
  var published WorkspacePublication
  err=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
   link,err:=scanWorkspaceLink(tx.QueryRowContext(ctx,workspaceLinkSelect,c.LinkID));if err!=nil{return err}
-  if !link.Enabled{return ErrInvalidTransition}
+  if !link.Enabled||(link.ExpiresAtMS!=nil&&now>=*link.ExpiresAtMS){return ErrInvalidTransition}
   p,err:=s.repo.ProjectTx(ctx,tx,link.ProjectID);if err!=nil{return err}
   if p.Status!="active"{return ErrProjectInactive}
   if err=s.requireActor(ctx,tx,p.WorkspaceID,c.ActorPrincipalID);err!=nil{return err}
@@ -175,12 +198,32 @@ func (s *Service) PublishWorkspaceAsset(ctx context.Context,c PublishWorkspaceAs
 func (s *Service) WorkspacePublications(ctx context.Context,linkID string)([]WorkspacePublication,error){
  if linkID==""{return nil,ErrInvalidCommand}
  link,err:=s.WorkspaceLink(ctx,linkID);if err!=nil{return nil,err}
- if !link.Enabled{return nil,ErrInvalidTransition}
+ if !link.Enabled||link.Expired{return nil,ErrInvalidTransition}
+ var live int
+ err=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_workspace_links l
+  JOIN projects p ON p.id=l.project_id AND p.status='active'
+  JOIN project_workspaces src ON src.id=l.source_workspace_id
+    AND src.project_id=p.id AND src.status='active'
+  JOIN project_workspaces dst ON dst.id=l.target_workspace_id
+    AND dst.project_id=p.id AND dst.status='active'
+  WHERE l.id=? AND l.enabled=1 AND (l.expires_at_ms IS NULL OR l.expires_at_ms>?)`,
+  linkID,s.clock.UnixMilli()).Scan(&live)
+ if err!=nil{return nil,err}
+ if live!=1{return nil,ErrInvalidTransition}
  rows,err:=s.db.QueryContext(ctx,`SELECT pub.id,pub.link_id,pub.asset_id,a.name,pub.asset_version,pub.content_hash,pub.published_by,pub.published_at
   FROM project_workspace_publications pub
-  JOIN project_library_assets a ON a.id=pub.asset_id AND a.project_id=?
-  JOIN project_library_asset_versions v ON v.asset_id=pub.asset_id AND v.version=pub.asset_version AND v.content_hash=pub.content_hash
-  WHERE pub.link_id=? AND a.archived=0 ORDER BY pub.published_at DESC,pub.id`,link.ProjectID,linkID)
+  JOIN project_workspace_links l ON l.id=pub.link_id AND l.enabled=1
+    AND (l.expires_at_ms IS NULL OR l.expires_at_ms>?)
+  JOIN projects p ON p.id=l.project_id AND p.status='active'
+  JOIN project_workspaces src ON src.id=l.source_workspace_id
+    AND src.project_id=p.id AND src.status='active'
+  JOIN project_workspaces dst ON dst.id=l.target_workspace_id
+    AND dst.project_id=p.id AND dst.status='active'
+  JOIN project_library_assets a ON a.id=pub.asset_id AND a.project_id=p.id
+  JOIN project_library_asset_versions v ON v.asset_id=pub.asset_id
+    AND v.version=pub.asset_version AND v.content_hash=pub.content_hash
+  WHERE pub.link_id=? AND p.id=? AND a.archived=0
+  ORDER BY pub.published_at DESC,pub.id`,s.clock.UnixMilli(),linkID,link.ProjectID)
  if err!=nil{return nil,err}
  defer rows.Close()
  out:=[]WorkspacePublication{}

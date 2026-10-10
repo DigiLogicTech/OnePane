@@ -83,11 +83,12 @@ func (s *Server) projectWorkspaceLinks(w http.ResponseWriter,r *http.Request) {
   TargetWorkspaceID string `json:"target_workspace_id"`
   Name string `json:"name"`
   Enable bool `json:"enable"`
+  ExpiresAtMS *int64 `json:"expires_at_ms,omitempty"`
  }
  if !decodeJSON(w,r,&input){return}
  out,err:=svc.CreateWorkspaceLink(r.Context(),projectworkspace.CreateWorkspaceLinkCommand{
   ProjectID:projectID,SourceWorkspaceID:input.SourceWorkspaceID,TargetWorkspaceID:input.TargetWorkspaceID,
-  Name:input.Name,Enable:input.Enable,ActorPrincipalID:i.PrincipalID})
+  Name:input.Name,Enable:input.Enable,ExpiresAtMS:input.ExpiresAtMS,ActorPrincipalID:i.PrincipalID})
  respondDomain(w,out,err,http.StatusCreated)
 }
 func (s *Server) workspaceLinkAccess(w http.ResponseWriter,r *http.Request)(workspaceLinkReader,projectworkspace.WorkspaceLink,bool){
@@ -107,10 +108,13 @@ func (s *Server) toggleWorkspaceLink(w http.ResponseWriter,r *http.Request){
  var input struct {
   ExpectedRevision int64 `json:"expected_revision"`
   Enabled bool `json:"enabled"`
+  ExpiresAtMS *int64 `json:"expires_at_ms,omitempty"`
+  ClearExpiry bool `json:"clear_expiry,omitempty"`
  }
  if !decodeJSON(w,r,&input){return}
  out,err:=svc.SetWorkspaceLinkEnabled(r.Context(),projectworkspace.ToggleWorkspaceLinkCommand{
-  LinkID:link.ID,ActorPrincipalID:i.PrincipalID,ExpectedRevision:input.ExpectedRevision,Enabled:input.Enabled})
+  LinkID:link.ID,ActorPrincipalID:i.PrincipalID,ExpectedRevision:input.ExpectedRevision,
+  Enabled:input.Enabled,ExpiresAtMS:input.ExpiresAtMS,ClearExpiry:input.ClearExpiry})
  respondDomain(w,out,err,http.StatusOK)
 }
 func (s *Server) publishWorkspaceAsset(w http.ResponseWriter,r *http.Request){

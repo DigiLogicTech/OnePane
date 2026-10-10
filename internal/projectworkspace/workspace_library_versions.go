@@ -34,9 +34,13 @@ func (s *Service) WorkspaceLibraryVersions(ctx context.Context,projectID,workspa
     JOIN project_workspace_links l ON l.id=pub.link_id
     WHERE pub.asset_id=a.id AND pub.asset_version=v.version
      AND pub.content_hash=v.content_hash AND l.project_id=a.project_id
-     AND l.target_workspace_id=? AND l.enabled=1)
+     AND l.target_workspace_id=? AND l.enabled=1
+     AND (l.expires_at_ms IS NULL OR l.expires_at_ms>?)
+     AND EXISTS(SELECT 1 FROM projects link_project WHERE link_project.id=l.project_id AND link_project.status='active')
+     AND EXISTS(SELECT 1 FROM project_workspaces link_source WHERE link_source.id=l.source_workspace_id AND link_source.project_id=l.project_id AND link_source.status='active')
+     AND EXISTS(SELECT 1 FROM project_workspaces link_target WHERE link_target.id=l.target_workspace_id AND link_target.project_id=l.project_id AND link_target.status='active'))
   )
-  ORDER BY v.version DESC LIMIT 100`,assetID,projectID,workspaceID,workspaceID)
+  ORDER BY v.version DESC LIMIT 100`,assetID,projectID,workspaceID,workspaceID,s.clock.UnixMilli())
  if err!=nil{return nil,err}
  defer rows.Close()
  versions:=[]LibraryVersion{}

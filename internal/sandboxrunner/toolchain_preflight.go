@@ -79,15 +79,29 @@ func decodeToolchainRequirements(raw json.RawMessage)(ToolchainRequirements,erro
   len(r.Required)==0||len(r.Required)>maxToolchainRequirements{
   return ToolchainRequirements{},fmt.Errorf("%w: invalid declared toolchain prerequisites",ErrInvalidInput)
  }
- unique:=make(map[string]bool,len(r.Required))
- for _,n:=range r.Required{
+ required,err:=normalizeToolchainPrerequisites(r.Required)
+ if err!=nil{return ToolchainRequirements{},err}
+ r.Required=required
+ return r,nil
+}
+
+// The same normalisation applies to standalone preflight requests and the
+// optional pre-execution admission check on project.app.exec. This is
+// readiness checking, not a security policy that can replace Tool leases.
+func normalizeToolchainPrerequisites(names []string)([]string,error){
+ if len(names)==0||len(names)>maxToolchainRequirements{
+  return nil,fmt.Errorf("%w: requires 1..32 executable names",ErrInvalidInput)
+ }
+ unique:=make(map[string]bool,len(names))
+ copyNames:=append([]string(nil),names...)
+ for _,n:=range copyNames{
   if !allowedToolName(n)||n=="."||n==".."||unique[n]{
-   return ToolchainRequirements{},fmt.Errorf("%w: invalid or duplicate toolchain executable",ErrInvalidInput)
+   return nil,fmt.Errorf("%w: invalid or duplicate toolchain executable",ErrInvalidInput)
   }
   unique[n]=true
  }
- sort.Strings(r.Required)
- return r,nil
+ sort.Strings(copyNames)
+ return copyNames,nil
 }
 
 func workspaceToolchainPreflightCommand(r ToolchainRequirements)[]string{

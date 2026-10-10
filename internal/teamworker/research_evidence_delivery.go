@@ -37,6 +37,22 @@ func researchSeatTextAllowed(mediaType string,size int64)bool{
  return false
 }
 
+func verifiedResearchEvidenceBytes(reader io.Reader,size int64,digest string)([]byte,error){
+ if reader==nil||size<0||size>researchSeatDeliveryMaxFileBytes||
+  !strings.HasPrefix(digest,"sha256:")||len(digest)!=71{
+  return nil,errors.New("invalid Research evidence byte bounds")
+ }
+ data,err:=io.ReadAll(io.LimitReader(reader,size+1))
+ if err!=nil||int64(len(data))!=size||!utf8.Valid(data){
+  return nil,errors.New("Research evidence read failed exact UTF-8 length check")
+ }
+ hashed:=sha256.Sum256(data)
+ if "sha256:"+hex.EncodeToString(hashed[:])!=digest{
+  return nil,errors.New("Research evidence SHA-256 mismatch")
+ }
+ return data,nil
+}
+
 type researchSeatEvidenceInput struct{
  Sections []agentprotocol.ContextSection
  Bytes int64
@@ -122,14 +138,10 @@ func(s *Service) loadResearchSeatEvidence(
    _=reader.Close()
    return empty,errors.New("Research evidence blob does not belong to session tenant and Project")
   }
-  b,readErr:=io.ReadAll(io.LimitReader(reader,entry.SizeBytes+1))
+  b,readErr:=verifiedResearchEvidenceBytes(reader,entry.SizeBytes,entry.ContentHash)
   closeErr:=reader.Close()
-  if readErr!=nil||closeErr!=nil||int64(len(b))!=entry.SizeBytes||!utf8.Valid(b){
-   return empty,errors.New("Research evidence failed bounded exact UTF-8 read")
-  }
-  digest:=sha256.Sum256(b)
-  if "sha256:"+hex.EncodeToString(digest[:])!=entry.ContentHash{
-   return empty,errors.New("Research evidence bytes differ from frozen hash")
+  if readErr!=nil||closeErr!=nil{
+   return empty,errors.New("Research evidence failed bounded exact UTF-8 and hash verification")
   }
   // Text is untrusted data, NEVER user/system instructions or a tool grant.
   rawContext,e:=json.Marshal(map[string]any{

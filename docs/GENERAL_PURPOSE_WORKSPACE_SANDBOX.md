@@ -141,3 +141,45 @@ Node/GPU compatibility must be implemented before claiming full managed
 provisioning. The same physical, opt-in rootless Python OCI smoke now checks
 a real `ready` preflight, a guarded Python command and a denied missing
 dependency; it is **not passed** while runner/image prerequisites are skipped.
+
+
+## RC11 immutable operator-approved Workspace toolchain manifests
+
+Workspaces now support a separate, durable **human-approved desired toolchain
+profile**, in addition to the existing inventory and per-Task executable checks.
+
+- The approval references one **canonical active Project Workspace** and a
+  registered OCI application already tied to that Workspace's runtime.
+  OnePane records the actual registered **sha256-pinned OCI image** and the
+  application's revision, never a model-invented image or a floating tag.
+- A human operator with the existing `project.write` and `project.run`
+  permissions explicitly approves **1–32 unique executable requirements**,
+  including optional *declared* version constraints such as `go:>=1.23`.
+  Agent/service identities cannot approve on their own. Version constraints
+  are for planning only; they are **not currently checked against installed
+  package versions** by the presence-only preflight.
+- Each approval creates an **append-only SQL revision** with a deterministic
+  SHA-256 of Project/Workspace, application ID/revision, image and sorted
+  requirement declarations. Database triggers reject changes or deletion
+  of historical revisions. Reapproval requires an exact expected revision;
+  concurrent/stale updates fail closed. Approval events preserve actor and
+  digest provenance, without secret or package output.
+- API: `GET/PUT /v1/projects/{projectID}/workspaces/{workspaceID}/toolchain-manifest`
+  with canonical Workspace membership and Project permissions.
+  **Workspace sandbox** displays the selected approved image, revision,
+  current status and required software, and exposes a human approval form.
+- Agent execution manifests include the Task's own approved Workspace profile
+  as **approved_unverified**; changed application image/revision makes it
+  `stale_application_changed`. Cross-Workspace profiles never appear.
+  The Agent should use `project.app.toolchain.preflight` or
+  `project.app.exec.required_executables` to observe presence before building,
+  and use independently verified publication for actual outputs.
+
+**Not yet implemented:** mandatory scheduler enforcement of a saved profile,
+version/package/SBOM attestation, operator-authorized offline image builds,
+signed runtime provenance, physical rootless Node acceptance and approvals
+for shared Workspace artifact transfer. Merely approving software does not
+install it, grant a Tool lease, prove GPU compatibility or authorize a
+remote MCP endpoint. A Task may still explicitly execute without attaching
+`required_executables`; persistence improves orchestration context but
+is not presently a security admission policy for all Tasks.

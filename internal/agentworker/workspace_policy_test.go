@@ -172,6 +172,10 @@ func TestFilesystemNoneDeniesImplicitOCIWorkspaceMount(t *testing.T){
   {"files_edit","project.app.files.edit",authority.ActionExecuteSandboxed},
   {"files_publish","project.app.files.publish",authority.ActionExecuteSandboxed},
   {"start_app","project.app.ensure",authority.ActionMutate},
+  {"godot_build","project.app.godot.build",authority.ActionExecuteSandboxed},
+  {"tool_discovery","project.app.tools.discover",authority.ActionExecuteSandboxed},
+  {"dependency_preflight","project.app.toolchain.preflight",authority.ActionExecuteSandboxed},
+  {"unreal_probe","project.app.unreal.mcp.probe",authority.ActionExecuteSandboxed},
   {"create_runtime","project.runtime.ensure",authority.ActionMutate},
  }{
   t.Run(tc.name,func(t *testing.T){

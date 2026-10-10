@@ -1,6 +1,9 @@
 package sandboxrunner
 
 import (
+ "context"
+
+ "github.com/DigiLogicTech/OnePane/internal/tool"
  "crypto/sha256"
  "encoding/hex"
  "encoding/json"
@@ -156,4 +159,34 @@ func toolchainPreflightUnavailable(r ToolchainRequirements,specHash string)Toolc
   ExecutionGranted:false,InstallationGranted:false,
   Note:"The approved OCI image could not execute OnePane's fixed POSIX preflight. Required tools are unknown, not proven absent. No host fallback or package installation attempted.",
  }
+}
+
+
+// checkExecutablePrerequisites runs only a fixed presence scanner inside an
+// already verified rootless OCI application. No installed executable is run,
+// no package is installed and no host executable search is permitted.
+func (a *Adapter) checkExecutablePrerequisites(
+ ctx context.Context, runtimeID, applicationID, specHash string, raw json.RawMessage,
+) (string, string, error) {
+ if len(raw)==0{return "not_requested","",nil}
+ var names []string
+ if err:=json.Unmarshal(raw,&names);err!=nil {
+  return "","",tool.KnownFailure(fmt.Errorf("%w: invalid required_executables",ErrInvalidInput))
+ }
+ required,err:=normalizeToolchainPrerequisites(names)
+ if err!=nil{return "","",tool.KnownFailure(err)}
+ check:=ToolchainRequirements{RuntimeID:runtimeID,ApplicationID:applicationID,Required:required}
+ fingerprint:=fingerprintToolchainRequirements(required)
+ observed,err:=a.engine.ExecContainer(ctx,runtimeID,applicationID,workspaceToolchainPreflightCommand(check))
+ if ctx.Err()!=nil{return "","",ctx.Err()}
+ if err!=nil{return "","",err}
+ if observed.ExitCode!=0{
+  return "","",tool.KnownFailure(fmt.Errorf("%w: prerequisites uncheckable in approved OCI application; build not executed",ErrInvalidInput))
+ }
+ result,err:=parseToolchainPreflight(observed.Stdout,check,specHash)
+ if err!=nil{return "","",tool.KnownFailure(err)}
+ if len(result.Missing)>0{
+  return "","",tool.KnownFailure(fmt.Errorf("%w: missing Workspace executables: %s; build not executed",ErrInvalidInput,strings.Join(result.Missing,", ")))
+ }
+ return "ready",fingerprint,nil
 }

@@ -538,6 +538,10 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
         if timeout==0{timeout=600}
         execCtx,cancel:=context.WithTimeout(ctx,time.Duration(timeout)*time.Second)
         defer cancel()
+        // A failed, missing or spoofed prerequisite check cannot launch Godot.
+        preflightStatus,preflightFingerprint,err:=a.checkExecutablePrerequisites(
+            execCtx,in.RuntimeID,in.ApplicationID,state.SpecHash,in.RequiredExecutables)
+        if err!=nil{return tool.AdapterResult{},err}
         observed,err:=a.engine.ExecContainer(execCtx,in.RuntimeID,in.ApplicationID,command)
         if execCtx.Err()!=nil{return tool.AdapterResult{},execCtx.Err()}
         if err!=nil{return tool.AdapterResult{},err}
@@ -550,6 +554,7 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
             "runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
             "action":in.Action,"succeeded":succeeded,"result":observed,
             "container":state,"engine":profile,
+            "toolchain_preflight":preflightStatus,"toolchain_requirements_sha256":preflightFingerprint,
             "artifact_verified":false,
             "note":"Use Task-owned project.app.files.publish for immutable hash-verified output; build exit code is not artifact proof",
         },summary)
@@ -579,34 +584,9 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 		}
 		execCtx, cancel := context.WithTimeout(ctx, time.Duration(in.TimeoutSeconds)*time.Second)
 		defer cancel()
-        preflightStatus:="not_requested"
-        preflightFingerprint:=""
-        if len(in.RequiredExecutables)>0{
-            var names []string
-            if err:=json.Unmarshal(in.RequiredExecutables,&names);err!=nil{
-                return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: invalid required_executables",ErrInvalidInput))
-            }
-            required,err:=normalizeToolchainPrerequisites(names)
-            if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
-            checkRequest:=ToolchainRequirements{
-                RuntimeID:in.RuntimeID,ApplicationID:in.ApplicationID,Required:required,
-            }
-            preflightFingerprint=fingerprintToolchainRequirements(required)
-            observed,err:=a.engine.ExecContainer(execCtx,in.RuntimeID,in.ApplicationID,
-                workspaceToolchainPreflightCommand(checkRequest))
-            if execCtx.Err()!=nil{return tool.AdapterResult{},execCtx.Err()}
-            if err!=nil{return tool.AdapterResult{},err}
-            if observed.ExitCode!=0{
-                return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: toolchain prerequisites could not be inspected inside the approved OCI image; no command executed",ErrInvalidInput))
-            }
-            preflight,err:=parseToolchainPreflight(observed.Stdout,checkRequest,state.SpecHash)
-            if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
-            if len(preflight.Missing)>0{
-                return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: missing Workspace toolchain executables: %s; no build command executed",
-                    ErrInvalidInput,strings.Join(preflight.Missing,", ")))
-            }
-            preflightStatus="ready"
-        }
+        preflightStatus,preflightFingerprint,err:=a.checkExecutablePrerequisites(
+            execCtx,in.RuntimeID,in.ApplicationID,state.SpecHash,in.RequiredExecutables)
+        if err!=nil{return tool.AdapterResult{},err}
 		execResult, err := a.engine.ExecContainer(execCtx, in.RuntimeID, in.ApplicationID, in.Command)
 		// Return the cancellation cause (rather than an engine-specific
 		// "signal: killed") so the Gateway records timed_out/cancelled.

@@ -11,10 +11,10 @@ import (
 // environment, image, mount or shell command was actually honoured.
 func validGodotEnvelope(raw json.RawMessage)bool{
  var m map[string]json.RawMessage
- if err:=json.Unmarshal(raw,&m);err!=nil||len(m)<3||len(m)>4{return false}
+ if err:=json.Unmarshal(raw,&m);err!=nil||len(m)<3||len(m)>5{return false}
  for k:=range m{
   switch k {
-  case "runtime_id","application_id","action","timeout_seconds":
+  case "runtime_id","application_id","action","timeout_seconds","required_executables":
   default:return false
   }
  }

@@ -62,3 +62,40 @@ Godot must already exist **inside the explicitly registered immutable OCI image*
 Unit tests cover the exact arguments, forbidden injection parameters/paths, unsupported actions, rootful/extra-bind denial, failed Godot run and deadlines. The opt-in, trusted self-hosted Godot physical acceptance now exercises the **same adapter action path** instead of bypassing it with raw `ExecContainer`, followed by independent host SHA-256 readback of the generated file. Physical CI remains explicitly skipped until a repo administrator pre-pulls and authorises a compatible digest-pinned Godot OCI image and rootless runner; these green source tests cannot claim installed Godot acceptance.
 
 **Still open:** real physical Godot run, package/image preflight, Task Gateway/capability lease live acceptance, publication to immutable Project Library through the real publisher, two-Workspace controlled grants, error/retry/rollback and high-confidence postcondition probe. Do not close #20 or build RC11 yet; user-mandated #86 reviews remain release blockers.
+
+## General-purpose, multi-MiB Task outputs — source and QA scope
+
+The `project.app.files.publish` Tool now supports **opt-in** `publish_large`
+for arbitrary generated files from a verified, owned, running rootless OCI
+Workspace. This fixes the previous 256 KiB *per-file* limitation without
+raising the command-output limit or trusting CLI output truncation. The
+**existing `publish` action is unchanged**.
+
+- A fixed OnePane-owned in-container Python reader uses O_NOFOLLOW on every
+  directory and the file. It returns a full-file SHA-256 and stable file
+  fingerprint, followed by 512 KiB chunks encoded as bounded receipts, then a
+  second full-file hash/fingerprint. The host independently verifies every
+  chunk and final SHA-256 before publication.
+- Maximum file size is **32 MiB** for now, with a **600-second default**
+  transfer timeout and a configurable maximum of 1200 seconds, still subject
+  to the shorter Task cancellation deadline. Larger
+  files, changed sources, malformed/chopped OCI replies, wrong digests,
+  unsafe paths, symlinks and extra host mounts fail closed.
+- A second authority boundary rechecks the active Task and Attempt, Project,
+  canonical Workspace, running on-Node runtime/application and worker before
+  the artifact store writes any new bytes. The existing content-addressed
+  blob store, immutable Library versions, duplicate suppression, unknown-
+  outcome recovery and revoked/cross-Workspace access restrictions remain
+  authoritative. No host temp staging or additional network listener is
+  introduced.
+- Regression suite includes real Python no-follow chunk reads, multi-MiB
+  source mutation during transfer, corrupt chunk/hash, same Task ownership,
+  missing Attempt, foreign OCI mounts, immutable blob readback, same-hash
+  retries, new-version handling and cross-Workspace access denial.
+
+**Still open:** external physical Ubuntu rootless Node smoke must run on an
+explicitly trusted host and digest-pinned Python-capable image. 32 MiB memory
+assembly is unsuitable for multi-GiB models, large videos/game builds or
+low-RAM servers; streaming directly into a bounded, permission-checked blob
+sink with durable chunk manifests, disk quota, resumability and recovery is
+future work. Do not claim unlimited artifact support or close #20 yet.

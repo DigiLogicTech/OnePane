@@ -21,6 +21,7 @@ type fakeEngine struct {
 	execExitCode int
 	execStderr string
 	execStdout string
+	execHandler func(context.Context,[]string)(ExecResult,error)
 	inspectMount string
 	extraBind bool
 }
@@ -78,6 +79,7 @@ func (f *fakeEngine) StopContainer(context.Context, string, string) (ContainerSt
 }
 func (f *fakeEngine) ExecContainer(ctx context.Context, _, _ string, command []string) (ExecResult, error) {
  f.execs++
+ if f.execHandler!=nil{return f.execHandler(ctx,command)}
  if f.blockExec {
   <-ctx.Done()
   return ExecResult{},ctx.Err()

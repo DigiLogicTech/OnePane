@@ -1,6 +1,7 @@
 package sandboxrunner
 
 import (
+	"errors"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -197,14 +198,30 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 			"container":state,"engine":profile,
 		},summary)
 	case ToolAppFilePublish:
+        large:=in.Action=="publish_large"
+        limitSeconds:=120
+        if large{limitSeconds=1200}
 		if req.TaskID==nil||req.AttemptID==nil||a.publisher==nil||
-			!safeID.MatchString(in.ApplicationID)||in.Action!="publish"||
+			!safeID.MatchString(in.ApplicationID)||
+            (in.Action!="publish"&&!large)||
 			len(in.Command)!=0||in.Image!=""||in.Message!=""||
 			in.ContentBase64!=""||in.ExpectedSHA256!=""||
-			in.TimeoutSeconds<0||in.TimeoutSeconds>120{
+            (large&&(len(in.RuntimeSpec)!=0||len(in.ResourceLimits)!=0||
+             len(in.EnvironmentBindings)!=0||len(in.NetworkPolicy)!=0||
+             len(in.Endpoints)!=0))||
+			in.TimeoutSeconds<0||in.TimeoutSeconds>limitSeconds{
 			return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)
 		}
-		command,err:=publicationReadCommand(in.Path)
+        // Both publishing modes use the same registered, Task-owned,
+        // independently inspected rootless OCI Workspace; substantial output
+        // is transferred only through fixed-size, source-revalidated chunks.
+        var command []string
+        var err error
+        if !large{
+            command,err=publicationReadCommand(in.Path)
+        }else{
+            command,err=publicationLargeReadCommand(in.Path,"manifest",0)
+        }
 		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
 		if !workspaceExists{return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)}
 		state,err:=a.engine.InspectContainer(ctx,in.RuntimeID,in.ApplicationID)
@@ -215,17 +232,35 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: publication requires verified Workspace OCI application",ErrInvalidInput))
 		}
 		timeout:=in.TimeoutSeconds
-		if timeout==0{timeout=30}
+        if timeout==0{
+           timeout=30
+           if large{timeout=600}
+        }
 		execCtx,cancel:=context.WithTimeout(ctx,time.Duration(timeout)*time.Second)
 		defer cancel()
-		observed,err:=a.engine.ExecContainer(execCtx,in.RuntimeID,in.ApplicationID,command)
-		if execCtx.Err()!=nil{return tool.AdapterResult{},execCtx.Err()}
-		if err!=nil{return tool.AdapterResult{},err}
-		if observed.ExitCode!=0{
-			return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: OCI publication source unavailable or not a regular bounded file",ErrInvalidInput))
-		}
-		bytes,sha,err:=decodePublicationRead(observed.Stdout)
-		if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        var bytes []byte
+        var sha string
+        if large{
+            // The Agent cannot supply host paths, transfer offsets, commands
+            // or a target hash. The adapter alone owns the read plan.
+            bytes,sha,err=readWorkspaceLargePublication(execCtx,in.Path,
+                func(stageCtx context.Context,stageCommand []string)(ExecResult,error){
+                    return a.engine.ExecContainer(stageCtx,in.RuntimeID,in.ApplicationID,stageCommand)
+                })
+            if err!=nil{
+                if errors.Is(err,ErrInvalidInput){return tool.AdapterResult{},tool.KnownFailure(err)}
+                return tool.AdapterResult{},err
+            }
+        }else{
+		    observed,execErr:=a.engine.ExecContainer(execCtx,in.RuntimeID,in.ApplicationID,command)
+		    if execCtx.Err()!=nil{return tool.AdapterResult{},execCtx.Err()}
+		    if execErr!=nil{return tool.AdapterResult{},execErr}
+		    if observed.ExitCode!=0{
+			    return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: OCI publication source unavailable or not a regular bounded file",ErrInvalidInput))
+		    }
+		    bytes,sha,err=decodePublicationRead(observed.Stdout)
+		    if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        }
 		publication,err:=a.publisher.PublishWorkspaceFile(ctx,WorkspacePublicationRequest{
 			WorkspaceID:req.WorkspaceID,TaskID:*req.TaskID,AttemptID:*req.AttemptID,
 			RuntimeID:in.RuntimeID,ApplicationID:in.ApplicationID,

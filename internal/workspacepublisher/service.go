@@ -39,7 +39,7 @@ func (s *Service) PublishWorkspaceFile(ctx context.Context,c sandboxrunner.Works
  if s==nil||s.db==nil||s.artifacts==nil||s.projects==nil||
   strings.TrimSpace(s.localNodeID)==""||c.TaskID==""||c.AttemptID==""||
   c.WorkspaceID==""||c.RuntimeID==""||c.ApplicationID==""||
-  c.Path==""||len(c.Content)>sandboxrunner.WorkspacePublicationLimit{
+  c.Path==""||len(c.Content)>sandboxrunner.WorkspaceLargePublicationLimit{
   return sandboxrunner.WorkspacePublication{},ErrPublishDenied
  }
  if strings.HasPrefix(c.Path,"/")||strings.ContainsAny(c.Path,"\\\x00")||
@@ -110,7 +110,7 @@ func (s *Service) PublishWorkspaceFile(ctx context.Context,c sandboxrunner.Works
   priorID:=strings.TrimPrefix(previous.StorageURI,"artifact:")
   stored,e=s.artifacts.Get(ctx,priorID)
   if e!=nil||stored.ProjectID==nil||*stored.ProjectID!=projectID||
-   stored.WorkspaceID!=tenant||stored.ContentHash!=c.ContentHash||
+   stored.WorkspaceID!=tenant||stored.ContentHash!="sha256:"+c.ContentHash||
    stored.SizeBytes!=int64(len(c.Content))||
    s.artifacts.VerifyContent(ctx,priorID)!=nil{
    return sandboxrunner.WorkspacePublication{},ErrPublishDenied
@@ -122,14 +122,18 @@ func (s *Service) PublishWorkspaceFile(ctx context.Context,c sandboxrunner.Works
    "runtime_id":c.RuntimeID,"application_id":c.ApplicationID,"project_workspace_id":projectWorkspaceID,
    "relative_path":c.Path,"content_hash":c.ContentHash,
   })
+  // Origin-scoped artifacts must identify their actual approved local Node.
+  // Without this field policy.ValidateDataLabel rejects every genuine
+  // Workspace publication before the immutable artifact can be recorded.
   label:=policy.DataLabel{WorkspaceID:tenant,Confidentiality:policy.ConfidentialityInternal,
-   Residency:policy.ResidencyOriginNode,Trust:policy.TrustUntrustedContent}
+   Residency:policy.ResidencyOriginNode,OriginNodeID:s.localNodeID,
+   Trust:policy.TrustUntrustedContent}
   stored,e=s.artifacts.Create(ctx,artifact.CreateCommand{
    WorkspaceID:tenant,ProjectID:&projectID,MediaType:mime,Label:label,
    CreatedBy:&actor,ActorPrincipalID:&actor,Metadata:meta,
   },bytes.NewReader(c.Content))
   if e!=nil{return sandboxrunner.WorkspacePublication{},e}
-  if stored.ContentHash!=c.ContentHash||stored.SizeBytes!=int64(len(c.Content))||
+  if stored.ContentHash!="sha256:"+c.ContentHash||stored.SizeBytes!=int64(len(c.Content))||
    s.artifacts.VerifyContent(ctx,stored.ID)!=nil{
    return sandboxrunner.WorkspacePublication{},fmt.Errorf("%w: managed artifact integrity not verified",ErrPublishDenied)
   }
@@ -141,7 +145,7 @@ func (s *Service) PublishWorkspaceFile(ctx context.Context,c sandboxrunner.Works
  }
  item,err:=s.projects.PublishWorkspaceFileVersion(ctx,projectworkspace.PublishWorkspaceFileVersionCommand{
   ProjectID:projectID,SourceWorkspaceID:projectWorkspaceID,RelativePath:c.Path,
-  Name:name,MIMEType:mime,ArtifactID:stored.ID,ContentHash:stored.ContentHash,
+  Name:name,MIMEType:mime,ArtifactID:stored.ID,ContentHash:c.ContentHash,
   SizeBytes:stored.SizeBytes,ActorPrincipalID:actor,TaskID:c.TaskID,AttemptID:c.AttemptID,
  })
  if err!=nil{return sandboxrunner.WorkspacePublication{},err}
@@ -214,7 +218,7 @@ func (s *Service) reservePublication(ctx context.Context,c sandboxrunner.Workspa
  // source Workspace grant. Verify both before reusing a prior receipt.
  stored,err:=s.artifacts.Get(ctx,artifactID.String)
  if err!=nil||stored.ProjectID==nil||*stored.ProjectID!=projectID||
-  stored.WorkspaceID!=c.WorkspaceID||stored.ContentHash!=c.ContentHash||
+  stored.WorkspaceID!=c.WorkspaceID||stored.ContentHash!="sha256:"+c.ContentHash||
   stored.SizeBytes!=int64(len(c.Content))||
   s.artifacts.VerifyContent(ctx,artifactID.String)!=nil{
   return sandboxrunner.WorkspacePublication{},false,ErrPublishDenied

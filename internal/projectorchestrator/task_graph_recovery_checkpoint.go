@@ -28,6 +28,7 @@ type RecoveryCheckpointNode struct {
  ProjectWorkspaceID string `json:"project_workspace_id"`
  State task.State `json:"state"`
  Readiness string `json:"readiness"`
+ AttemptHealth string `json:"attempt_health,omitempty"`
  RecoveryClass string `json:"recovery_class"`
  Dependencies []string `json:"dependencies"`
  Blockers []string `json:"blockers"`
@@ -45,7 +46,7 @@ func recoveryCheckpointForGraph(graph TaskGraph) RecoveryCheckpoint {
  for _,n:=range graph.Nodes{
   current:=RecoveryCheckpointNode{
    Key:n.Key,TaskID:n.TaskID,ProjectWorkspaceID:n.ProjectWorkspaceID,
-   State:n.State,Readiness:n.Readiness,
+   State:n.State,Readiness:n.Readiness,AttemptHealth:n.AttemptHealth,
    Dependencies:append([]string{},n.DependsOn...),
    Blockers:append([]string{},n.BlockedBy...),
    OperatorAction:n.NextAction,

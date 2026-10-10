@@ -103,6 +103,13 @@ func TestWorkspaceEvidencePacketRequiresExactVersionGrantAndFailsClosed(t *testi
   t.Fatalf("publication implicitly included ungranted second asset: %v",err)
  }
  if _,err=db.SQL().ExecContext(ctx,`UPDATE project_workspace_links
+  SET expires_at_ms=? WHERE id=?`,now-1,link.ID);err!=nil{t.Fatal(err)}
+ if _,err:=svc.BuildWorkspaceEvidencePacket(ctx,project.ID,research.ID,
+  []WorkspaceEvidenceSelection{{AssetID:first.ID,Version:1}});
+  !errors.Is(err,ErrCrossWorkspace){t.Fatalf("expired publication remained selectable: %v",err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_workspace_links
+  SET expires_at_ms=NULL WHERE id=?`,link.ID);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_workspace_links
   SET enabled=0 WHERE id=?`,link.ID);err!=nil{t.Fatal(err)}
  if _,err:=svc.BuildWorkspaceEvidencePacket(ctx,project.ID,research.ID,
   []WorkspaceEvidenceSelection{{AssetID:first.ID,Version:1}});

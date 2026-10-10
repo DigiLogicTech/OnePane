@@ -99,7 +99,11 @@ func(s *Service) consentForSeat(ctx context.Context,tenant,sessionID,seatID,mani
   return out,nil
  }
  if err!=nil{return out,err}
- if state=="revoked"{return out,nil}
+ if state=="revoked"{
+  // Previously generated replies may quote protected evidence. Stop the
+  // whole Research Council; do not resume into an unfenced cloud seat.
+  return out,fmt.Errorf("Research evidence consent was revoked; create a new Council session")
+ }
  if state!="approved"||policyName!="local_only"||
    researchSHA!=manifestSHA||evidenceSHA==""{
   return out,fmt.Errorf("invalid or stale Research evidence seat consent")
@@ -114,10 +118,13 @@ func(s *Service) consentForSeat(ctx context.Context,tenant,sessionID,seatID,mani
   }
   if id==seatID{out.Active=true}
  }
+ if !researchEvidenceCouncilIsolationSafe(snapshotJSON,ids){
+  return researchSeatConsent{},fmt.Errorf("protected Research evidence requires all Council seats to be approved local agents")
+ }
+ if !out.Active{
+  return researchSeatConsent{},fmt.Errorf("Research seat was not approved for protected Council evidence")
+ }
  if out.Active{
-  if !researchEvidenceCouncilIsolationSafe(snapshotJSON,ids){
-   return researchSeatConsent{},fmt.Errorf("protected Research evidence requires all Council seats to be approved local agents")
-  }
   out.ResearchSHA256=researchSHA
   out.EvidenceSHA256=evidenceSHA
  }

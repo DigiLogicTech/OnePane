@@ -238,7 +238,7 @@ func (s *Service) admitCreated(ctx context.Context, limit int) (int, error) {
 WHERE t.state='created'
 AND NOT EXISTS (SELECT 1 FROM task_execution_profiles ep LEFT JOIN team_sessions ts ON ts.id=ep.team_session_id WHERE ep.task_id=t.id AND ep.execution_mode='team' AND (ts.accepted_plan_id IS NULL OR ts.status NOT IN ('plan_accepted','executing')))
 AND NOT EXISTS (SELECT 1 FROM routine_occurrences ro JOIN project_routine_bindings b ON b.routine_id=ro.routine_id AND b.status='active' AND b.action_kind='app_command' WHERE ro.task_id=t.id)
-AND NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks dep ON dep.id=d.depends_on_task_id WHERE d.task_id=t.id AND d.dependency_type='hard' AND dep.state<>'complete')
+AND NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks dep ON dep.id=d.depends_on_task_id WHERE d.task_id=t.id AND d.dependency_type='hard' AND (dep.state<>'complete' OR dep.archived_at IS NOT NULL))
 ORDER BY t.priority DESC,t.created_at,t.id LIMIT ?`, limit)
 	if err != nil {
 		return 0, err
@@ -292,7 +292,7 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 	for _, v := range xs {
 		if v.state == string(task.StateWaitingDependency) {
 			var blocked int
-			if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_dependencies d JOIN tasks dep ON dep.id=d.depends_on_task_id WHERE d.task_id=? AND d.dependency_type='hard' AND dep.state<>'complete'`, v.task).Scan(&blocked); err != nil {
+			if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_dependencies d JOIN tasks dep ON dep.id=d.depends_on_task_id WHERE d.task_id=? AND d.dependency_type='hard' AND (dep.state<>'complete' OR dep.archived_at IS NOT NULL)`, v.task).Scan(&blocked); err != nil {
 				return err
 			}
 			ready := blocked == 0

@@ -80,8 +80,7 @@ jobs:
           # offline-only reader without a running OnePane API or database.
           go build -o /tmp/onepane-qa-bootstrap ./cmd/harnessd
           evidence_root="$(mktemp -d)"
-          if ONEPANE_STARTUP_EVIDENCE_ROOT="$evidence_root" /tmp/onepane-qa-bootstrap \\
-             -config "$evidence_root/nonexistent.yaml" >/dev/null 2>&1; then
+          if ONEPANE_STARTUP_EVIDENCE_ROOT="$evidence_root" /tmp/onepane-qa-bootstrap -config "$evidence_root/nonexistent.yaml" >/dev/null 2>&1; then
             echo "Deliberately invalid configuration unexpectedly passed"
             exit 1
           fi

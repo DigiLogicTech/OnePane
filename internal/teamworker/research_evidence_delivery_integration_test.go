@@ -183,6 +183,26 @@ func TestResearchSeatVerifiedTextDeliveryUsesRealLibraryAndArtifactGrants(t *tes
  assertMessages(1)
  if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_library_grants
   SET enabled=1 WHERE project_workspace_id=? AND asset_id=?`,workspaceID,asset.ID);err!=nil{t.Fatal(err)}
+ // Timed rate-limit retries are bounded: two automatic attempts,
+ // then explicit operator intervention. Success preserves existing seats.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_sessions SET
+  status='paused_for_deliberation' WHERE id=?`,session.ID);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_turn_requests
+  SET status='blocked',attempt_count=3,retry_after=?
+  WHERE id=?`,clock.Real{}.UnixMilli()-1,secondTurn.ID);err!=nil{t.Fatal(err)}
+ automatic:=team.RetryResearchRoundCommand{
+  SessionID:session.ID,RequestedByPrincipalID:"human",Automatic:true,
+ }
+ if _,err=council.RetryResearchRound(ctx,automatic);err==nil{
+  t.Fatal("third unattended provider retry was accepted")
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_turn_requests
+  SET attempt_count=2 WHERE id=?`,secondTurn.ID);err!=nil{t.Fatal(err)}
+ if _,err=council.RetryResearchRound(ctx,automatic);err!=nil{
+  t.Fatalf("bounded same-Council timed retry denied: %v",err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE team_turn_requests
+  SET status='running' WHERE id=? AND status='pending'`,secondTurn.ID);err!=nil{t.Fatal(err)}
  if _,err=projectService.RevokeResearchSeatEvidence(ctx,session.ID,"human");err!=nil{t.Fatal(err)}
  if _,e:=worker.completeProtectedResearchTurn(ctx,"tenant",session.ID,secondTurn.ID,
   second.ID,manifest.SnapshotSHA256,frozen.Evidence.ManifestSHA256,

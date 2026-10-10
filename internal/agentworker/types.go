@@ -89,6 +89,7 @@ type routePolicy struct {
 	ExcludedCandidateIDs        []string `json:"excluded_candidate_ids,omitempty"`
 	BudgetAccountID             string   `json:"budget_account_id,omitempty"`
 	BudgetReserveAmount         int64    `json:"budget_reserve_amount,omitempty"`
+	ComputePreference string `json:"compute_preference,omitempty"`
 }
 
 func defaultRoutePolicy() routePolicy {
@@ -96,7 +97,7 @@ func defaultRoutePolicy() routePolicy {
 	// qualified limited model. The scheduler still enforces exact capability,
 	// protocol, context, admission, data handling and explicit cost policy.
 	// Research mode uses separately pinned seats and must not substitute models.
-	return routePolicy{RoutingEnabled: true, AllowDelegation: true, AllowRemote: true, PreferZeroIncrementalCost: true, AllowLimited: true, AllowMediated: true, AllowDegraded: true}
+	return routePolicy{RoutingEnabled: true, AllowDelegation: true, AllowRemote: true, PreferZeroIncrementalCost: true, AllowLimited: true, AllowMediated: true, AllowDegraded: true, ComputePreference:"auto"}
 }
 
 type toolProposal struct {

@@ -478,3 +478,36 @@ directional publications remain authoritative. Stream errors after the
 HTTP response begins are still observable client transfer failures rather
 than a transactional rollback; stronger descriptor-pinned snapshot reads
 and end-to-end installed download tests remain useful future work.
+
+## Research Council — explicit pre-round evidence metadata freeze
+
+An authenticated **human** may select 1–16 exact Workspace-readable
+Project Library versions for a Research Council Task that has a canonical
+Project Workspace. `POST /v1/team-sessions/{sessionID}/research/evidence-selection`
+requires `team.write` and freezes the version/hash metadata selection for
+the specific Research session. `GET` on the same path requires `team.read`
+and a currently active human principal. Neither action accepts a caller-
+supplied Project ID, Workspace ID, model ID or raw file path.
+
+The freeze requires a saved **Research-mode Council session**, its immutable
+session-manifest SHA, a created Task with a named Project Workspace,
+and **no Council turn initiated** (round zero with no turn requests).
+Approval, current exact Library read grants, artifact versions and
+Project/Workspace ownership are rechecked inside the write transaction.
+Concurrent revocation, archive, foreign selection or a different
+human-approval plan fails closed. Identical pre-round retries are idempotent;
+the first immutable approval cannot be edited after the Council begins.
+
+Migration 0048 stores the human approver, frozen Council-manifest fingerprint,
+source Project Workspace and *metadata-only* Library entry manifest hash.
+The event journal captures the approval, not document content. Later reads
+recheck the current Library grants; revocation or expiry makes the receipt
+unavailable without erasing the historical provenance record.
+
+**Crucial boundary:** freezing metadata does **not** inject content into any
+Council seat, inference prompt, WebChat conversation, Task, evidence packet
+tool or external provider. First-pass seat isolation and the no-Library-
+without-explicit-attachment rule remain enforced. A separately reviewed
+byte-verified, sealed Research evidence attachment and seat-specific
+consumption policy are still needed. This work does not claim that step is
+complete, nor that a physical inference test has run.

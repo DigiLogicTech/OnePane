@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"github.com/DigiLogicTech/OnePane/internal/projectworkspace"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -144,6 +146,34 @@ func (s *Server) getTeamSession(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		writeJSON(w, 200, ss)
 	}
+}
+// Frozen Research evidence is metadata-only. Neither handler injects data
+// into a Council seat or grants an agent permission to read Library files.
+type researchEvidenceService interface{
+ FreezeResearchEvidence(context.Context,string,string,
+  []projectworkspace.WorkspaceEvidenceSelection)(projectworkspace.ResearchEvidenceSelection,error)
+ ResearchEvidence(context.Context,string,string)(projectworkspace.ResearchEvidenceSelection,error)
+}
+func(s *Server) freezeResearchEvidence(w http.ResponseWriter,r *http.Request){
+ identity,_,ok:=s.sessionFor(w,r,"team.write")
+ if !ok{return}
+ svc,ok:=s.projects.(researchEvidenceService)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Research evidence selection unavailable");return}
+ var request struct{
+  Selections []projectworkspace.WorkspaceEvidenceSelection `json:"selections"`
+ }
+ if !decodeJSON(w,r,&request){return}
+ out,err:=svc.FreezeResearchEvidence(r.Context(),r.PathValue("sessionID"),
+  identity.PrincipalID,request.Selections)
+ respondDomain(w,out,err,http.StatusCreated)
+}
+func(s *Server) readResearchEvidence(w http.ResponseWriter,r *http.Request){
+ identity,_,ok:=s.sessionFor(w,r,"team.read")
+ if !ok{return}
+ svc,ok:=s.projects.(researchEvidenceService)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Research evidence selection unavailable");return}
+ out,err:=svc.ResearchEvidence(r.Context(),r.PathValue("sessionID"),identity.PrincipalID)
+ respondDomain(w,out,err,http.StatusOK)
 }
 func (s *Server) getTeamSessionManifest(w http.ResponseWriter, r *http.Request) {
 	_, ss, ok := s.sessionFor(w, r, "team.read")

@@ -58,7 +58,7 @@ async function a46RenderLibrary(project,workspace,root){
    <button class="btn" type="button" id="a46ClearSearch" ${query?"":"disabled"}>Clear</button>
  </form>
  <div class="a46-library-items">${cards||'<div class="empty-state compact">No Project Library assets. Upload a document, source artifact or asset to begin.</div>'}</div>
- ${source?.id?'<div class="a62-evidence-panel"><div class="toolbar"><button type="button" class="btn" data-a62-build disabled>Build scoped evidence manifest</button><button type="button" class="btn" data-a63-read disabled>Read verified text (up to 8)</button></div><p class="list-meta">Metadata: choose up to 16 exact versions. Text retrieval: choose up to 8 UTF-8 documents, 64 KiB each, 256 KiB total. Every read is hash checked and permissions are rechecked. Untrusted text is for operator review only: it is not sent to the Orchestrator or Council.</p><pre class="a62-evidence-receipt" data-a62-result hidden aria-label="Scoped Workspace evidence metadata manifest"></pre><pre class="a62-evidence-receipt" data-a63-result hidden aria-label="Verified untrusted Workspace Library text"></pre><label class="a64-search-label">Search selected verified text (2–64 characters)<input type="search" data-a64-query maxlength="64" placeholder="Phrase to find in approved versions"></label><div class="toolbar"><button type="button" class="btn" data-a64-search disabled>Search selected text</button></div><pre class="a62-evidence-receipt" data-a64-results hidden aria-label="Permission-checked evidence search snippets"></pre></div>':""}`;
+ ${source?.id?'<div class="a62-evidence-panel"><div class="toolbar"><button type="button" class="btn" data-a62-build disabled>Build scoped evidence manifest</button><button type="button" class="btn" data-a63-read disabled>Read verified text (up to 8)</button><button type="button" class="btn" data-a65-freeze disabled>Approve Research evidence metadata</button></div><p class="list-meta">Metadata: choose up to 16 exact versions. Text retrieval: choose up to 8 UTF-8 documents, 64 KiB each, 256 KiB total. Every read is hash checked and permissions are rechecked. Untrusted text is for operator review only: it is not sent to the Orchestrator or Council.</p><pre class="a62-evidence-receipt" data-a62-result hidden aria-label="Scoped Workspace evidence metadata manifest"></pre><pre class="a62-evidence-receipt" data-a63-result hidden aria-label="Verified untrusted Workspace Library text"></pre><label class="a64-search-label">Search selected verified text (2–64 characters)<input type="search" data-a64-query maxlength="64" placeholder="Phrase to find in approved versions"></label><div class="toolbar"><button type="button" class="btn" data-a64-search disabled>Search selected text</button></div><pre class="a62-evidence-receipt" data-a64-results hidden aria-label="Permission-checked evidence search snippets"></pre></div>':""}`;
  // Evidence selection is deliberate and read-only. Server revalidates each
  // selected immutable version against the current direct grant/publication.
  const build=root.querySelector("[data-a62-build]");
@@ -70,14 +70,50 @@ async function a46RenderLibrary(project,workspace,root){
   const read=root.querySelector("[data-a63-read]");
   const search=root.querySelector("[data-a64-search]");
   const searchInput=root.querySelector("[data-a64-query]");
+  const freeze=root.querySelector("[data-a65-freeze]");
   const update=()=>{
    const count=selected().length;
    build.disabled=count===0;
    if(read)read.disabled=count===0||count>8;
+   if(freeze)freeze.disabled=count===0||count>16;
    if(search)search.disabled=count===0||count>8||String(searchInput?.value||"").trim().length<2;
   };
   root.querySelectorAll("[data-a62-asset]").forEach(input=>input.addEventListener("change",update));
   searchInput?.addEventListener("input",update);
+  freeze?.addEventListener("click",()=>{
+   const selections=selected();
+   if(!selections.length||selections.length>16){
+    notice("Select between one and sixteen permitted evidence versions.","bad");return;
+   }
+   openModal("Approve Research evidence selection",
+    '<form id="a65FreezeEvidenceForm" class="qa-form">'+
+    '<p class="list-meta">Freeze these exact Library versions for a Research Council session before its first round. This records hash-pinned metadata only. No raw documents, snippets or Library permissions are delivered to model seats.</p>'+
+    '<label>Research Council session ID<input name="session_id" required maxlength="128" autocomplete="off" placeholder="Session created for a Project Workspace Task"></label>'+
+    '<label class="inline-check"><input type="checkbox" name="reviewed" required> I reviewed all '+selections.length+' selected versions and approve this immutable metadata selection.</label>'+
+    '<div class="error" id="a65FreezeError" role="alert"></div>'+
+    '<button type="submit" class="btn primary">Freeze approved metadata</button></form>');
+   const form=document.querySelector("#a65FreezeEvidenceForm");
+   if(!form)return;
+   form.onsubmit=async e=>{
+    e.preventDefault();
+    if(!form.elements.reviewed?.checked)return;
+    const sid=String(form.elements.session_id?.value||"").trim();
+    if(!sid)return;
+    const button=form.querySelector('[type="submit"]');
+    button.disabled=true;
+    try{
+     await apiRequest("/v1/team-sessions/"+encodeURIComponent(sid)+"/research/evidence-selection",{
+      method:"POST",body:JSON.stringify({selections})
+     });
+     closeModal();
+     notice("Research evidence metadata frozen for this Council session. No content was sent to any model.");
+    }catch(ex){
+     button.disabled=false;
+     form.querySelector("#a65FreezeError").textContent=ex.message;
+    }
+   };
+  });
+
   search?.addEventListener("click",async()=>{
    const selections=selected(),query=String(searchInput?.value||"").trim();
    if(!selections.length||selections.length>8||query.length<2||query.length>64){

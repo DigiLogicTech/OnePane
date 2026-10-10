@@ -58,7 +58,7 @@ async function a46RenderLibrary(project,workspace,root){
    <button class="btn" type="button" id="a46ClearSearch" ${query?"":"disabled"}>Clear</button>
  </form>
  <div class="a46-library-items">${cards||'<div class="empty-state compact">No Project Library assets. Upload a document, source artifact or asset to begin.</div>'}</div>
- ${source?.id?'<div class="a62-evidence-panel"><div class="toolbar"><button type="button" class="btn" data-a62-build disabled>Build scoped evidence manifest</button><button type="button" class="btn" data-a63-read disabled>Read verified text (up to 8)</button></div><p class="list-meta">Metadata: choose up to 16 exact versions. Text retrieval: choose up to 8 UTF-8 documents, 64 KiB each, 256 KiB total. Every read is hash checked and permissions are rechecked. Untrusted text is for operator review only: it is not sent to the Orchestrator or Council.</p><pre class="a62-evidence-receipt" data-a62-result hidden aria-label="Scoped Workspace evidence metadata manifest"></pre><pre class="a62-evidence-receipt" data-a63-result hidden aria-label="Verified untrusted Workspace Library text"></pre></div>':""}`;
+ ${source?.id?'<div class="a62-evidence-panel"><div class="toolbar"><button type="button" class="btn" data-a62-build disabled>Build scoped evidence manifest</button><button type="button" class="btn" data-a63-read disabled>Read verified text (up to 8)</button></div><p class="list-meta">Metadata: choose up to 16 exact versions. Text retrieval: choose up to 8 UTF-8 documents, 64 KiB each, 256 KiB total. Every read is hash checked and permissions are rechecked. Untrusted text is for operator review only: it is not sent to the Orchestrator or Council.</p><pre class="a62-evidence-receipt" data-a62-result hidden aria-label="Scoped Workspace evidence metadata manifest"></pre><pre class="a62-evidence-receipt" data-a63-result hidden aria-label="Verified untrusted Workspace Library text"></pre><label class="a64-search-label">Search selected verified text (2–64 characters)<input type="search" data-a64-query maxlength="64" placeholder="Phrase to find in approved versions"></label><div class="toolbar"><button type="button" class="btn" data-a64-search disabled>Search selected text</button></div><pre class="a62-evidence-receipt" data-a64-results hidden aria-label="Permission-checked evidence search snippets"></pre></div>':""}`;
  // Evidence selection is deliberate and read-only. Server revalidates each
  // selected immutable version against the current direct grant/publication.
  const build=root.querySelector("[data-a62-build]");
@@ -68,12 +68,35 @@ async function a46RenderLibrary(project,workspace,root){
    version:Number(el.dataset.a62Version||0)
   }));
   const read=root.querySelector("[data-a63-read]");
+  const search=root.querySelector("[data-a64-search]");
+  const searchInput=root.querySelector("[data-a64-query]");
   const update=()=>{
    const count=selected().length;
    build.disabled=count===0;
    if(read)read.disabled=count===0||count>8;
+   if(search)search.disabled=count===0||count>8||String(searchInput?.value||"").trim().length<2;
   };
   root.querySelectorAll("[data-a62-asset]").forEach(input=>input.addEventListener("change",update));
+  searchInput?.addEventListener("input",update);
+  search?.addEventListener("click",async()=>{
+   const selections=selected(),query=String(searchInput?.value||"").trim();
+   if(!selections.length||selections.length>8||query.length<2||query.length>64){
+    notice("Select up to eight authorised text versions and a 2–64 character query.","bad");return;
+   }
+   search.disabled=true;
+   const output=root.querySelector("[data-a64-results]");
+   if(output){output.textContent="";output.hidden=true;}
+   try{
+    const result=await apiRequest(prefix+"/workspaces/"+encodeURIComponent(source.id)+
+     "/evidence-packets/search-text",{
+     method:"POST",body:JSON.stringify({selections,query})
+    });
+    if(!root.isConnected)return;
+    if(output){output.textContent=JSON.stringify(result,null,2);output.hidden=false;}
+    notice("Permission-checked content search complete; no index or model prompt created.");
+   }catch(err){notice("Evidence search denied: "+err.message,"bad")}
+   finally{update()}
+  });
   read?.addEventListener("click",async()=>{
    const selections=selected();
    if(!selections.length||selections.length>8){

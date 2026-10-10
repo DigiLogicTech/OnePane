@@ -223,7 +223,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			if e := r.requireApplicationRevision(ctx, app); e != nil {
 				return result, e
 			}
-			cur, e := r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: cur.ID, ExpectedRevision: app.Revision, Status: projectworkspace.AppStopped, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+			cur, e := r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: app.ID, ExpectedRevision: app.Revision, Status: projectworkspace.AppStopped, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 			if e != nil {
 				return result, e
 			}
@@ -264,7 +264,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			if e := r.requireApplicationRevision(ctx, app); e != nil {
 				return result, e
 			}
-			cur, e := r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: cur.ID, ExpectedRevision: app.Revision, Status: projectworkspace.AppRunning, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+			cur, e := r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: app.ID, ExpectedRevision: app.Revision, Status: projectworkspace.AppRunning, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 			if e != nil {
 				return result, e
 			}
@@ -289,7 +289,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			if e := r.requireApplicationRevision(ctx, app); e != nil {
 				return result, e
 			}
-			cur, e := r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: cur.ID, ExpectedRevision: app.Revision, Status: projectworkspace.AppInstalled, ObservationID: pev.observation.ID, VerificationID: pev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+			cur, e := r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: app.ID, ExpectedRevision: app.Revision, Status: projectworkspace.AppInstalled, ObservationID: pev.observation.ID, VerificationID: pev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 			if e != nil {
 				return result, e
 			}
@@ -309,7 +309,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			if e := r.requireApplicationRevision(ctx, app); e != nil {
 				return result, e
 			}
-			cur, e := r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: cur.ID, ExpectedRevision: app.Revision, Status: projectworkspace.AppStopped, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+			cur, e := r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: app.ID, ExpectedRevision: app.Revision, Status: projectworkspace.AppStopped, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 			if e != nil {
 				return result, e
 			}

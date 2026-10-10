@@ -294,6 +294,15 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		if err!=nil{return s.fail(ctx,res,err)}
 		sections=append(sections,chairEvidence...)
 	}
+	// Every Research turn (including manual Web and Chair seats) is checked
+	// before any prompt handoff. A prior protected approval makes the whole
+	// Council a local-only information-flow domain, including quoted replies.
+	// A revoked or partially approved Council pauses, never downgrades to web.
+	var evidenceConsent researchSeatConsent
+	if researchMode {
+		evidenceConsent, err = s.consentForSeat(ctx,ws,ss.ID,member.ID,manifestRecord.SnapshotSHA256)
+		if err != nil { return s.pauseResearch(ctx,res,ss,turnID,err) }
+	}
 	// Web Chat seats are human-mediated. They never call an inference API,
 	// consume a scheduled provider candidate or acquire tool permissions.
 	// Snapshot config and evidence filtering above still govern their prompt.
@@ -311,13 +320,6 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		if err != nil { return s.fail(ctx, res, fmt.Errorf("queue manual Web Chat Council turn: %w", err)) }
 		res.Status = "awaiting_manual_input"
 		return res
-	}
-	// The persisted human consent is resolved independently for every turn.
-	// It does NOT inject Library bytes; it only fences eligible destinations.
-	var evidenceConsent researchSeatConsent
-	if researchMode {
-		evidenceConsent, err = s.consentForSeat(ctx,ws,ss.ID,member.ID,manifestRecord.SnapshotSHA256)
-		if err != nil { return s.pauseResearch(ctx,res,ss,turnID,err) }
 	}
 	rp := routePolicy{PreferZeroIncrementalCost: true, AllowMediated: true, AllowDegraded: true}
 	_ = json.Unmarshal(member.RoutePolicy, &rp)

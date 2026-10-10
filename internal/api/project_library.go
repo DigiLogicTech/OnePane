@@ -239,5 +239,8 @@ func (s *Server) downloadWorkspaceLibraryVersion(w http.ResponseWriter,r *http.R
  w.Header().Set("X-OnePane-Content-Hash",selected.ContentHash)
  w.Header().Set("Content-Length",strconv.FormatInt(selected.SizeBytes,10))
  w.WriteHeader(http.StatusOK)
- _,_=io.Copy(w,reader)
+ // The artifact was verified before opening, and the streamed response
+ // must never exceed the exact immutable version's advertised byte count.
+ // A mid-stream disk fault cannot be converted to success after headers.
+ _,_=io.CopyN(w,reader,selected.SizeBytes)
 }

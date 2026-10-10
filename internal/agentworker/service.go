@@ -443,6 +443,9 @@ func (s *Service) readyTasks(ctx context.Context, limit int) ([]task.Task, error
 	rows, err := s.db.QueryContext(ctx, `SELECT id FROM tasks t WHERE state='ready'
 AND NOT EXISTS (SELECT 1 FROM task_attempts a WHERE a.task_id=t.id AND a.status IN ('created','queued','running','waiting'))
 AND NOT EXISTS (SELECT 1 FROM routine_occurrences ro JOIN project_routine_bindings b ON b.routine_id=ro.routine_id AND b.status='active' AND b.action_kind='app_command' WHERE ro.task_id=t.id)
+AND NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks dep ON dep.id=d.depends_on_task_id
+ WHERE d.task_id=t.id AND d.dependency_type='hard'
+ AND (dep.state<>'complete' OR dep.archived_at IS NOT NULL))
 ORDER BY priority DESC,COALESCE(ready_at,created_at),id LIMIT ?`, limit)
 	if err != nil {
 		return nil, err

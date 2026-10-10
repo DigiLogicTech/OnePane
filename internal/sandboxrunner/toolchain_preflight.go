@@ -58,7 +58,7 @@ for tool do
   esac
   [ -n "$remaining" ] || break
  done
- printf '%s\\t%s\\n' "$tool" "$present"
+ printf '%s\t%s\n' "$tool" "$present"
 done`
 
 func decodeToolchainRequirements(raw json.RawMessage)(ToolchainRequirements,error){

@@ -399,3 +399,35 @@ Research Council/Project Orchestrator contexts, byte verification at
 attachment time, immutable provenance records and user-approved use of
 selected evidence. Source/unit CI alone is not a substitute for installed
 Workspace and physical Node acceptance.
+
+## RC11-04 — bounded verified text retrieval (operator review only)
+
+The existing version-selected Workspace evidence packet now supports a separate
+`POST /v1/projects/{projectID}/workspaces/{workspaceID}/evidence-packets/verified-text`
+request. It is scoped through the same authenticated canonical Workspace
+context, **not** a Project-wide or model-initiated file read. An operator
+selects 1–8 exact authorised versions (maximum 64 KiB per item, 256 KiB
+combined). Only valid UTF-8 files with supported text-like MIME are eligible.
+Binary, oversized, malformed, unknown or unavailable items fail closed.
+
+Retrieval obtains the metadata manifest, resolves and reauthorises every
+specific version, calls the managed blob store's SHA-256/size verifier,
+checks active immutable artifact provenance, reads into a bounded buffer,
+and independently hashes the returned bytes. Finally the entire metadata
+selection is reauthorised and its canonical digest compared before the
+response is emitted. Any denial returns **no partial document content**.
+Revocation can still occur after the final read check; the response is never
+a persistent lease or a right to retrieve the same content later.
+
+The Workspace Library uses a distinct explicit "Read verified text"
+button, and renders every returned untrusted document **only as plain
+text**. No text is passed into an Agent, Task, model, prompt template,
+Research Council seat or external provider. The response is marked
+`untrusted_library_content`; the user must explicitly opt in to a
+future governed Research/Orchestrator attachment workflow.
+
+This is real bounded, hash-verified retrieval, not full-text indexing,
+OCR, PDF parsing, persistent embeddings or a claim that the attached
+data is a trusted instruction. Further work remains for permission-aware
+content indexing, artifact-scale streaming and explicitly approved
+Research attachments.

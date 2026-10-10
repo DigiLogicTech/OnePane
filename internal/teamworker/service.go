@@ -454,6 +454,11 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 				fmt.Errorf("Research seat evidence consent revoked before local dispatch"))
 		}
 	}
+	if _,proofErr:=proveResearchTurnEvidence(areq,cand);proofErr!=nil{
+		s.release(ctx,reservationID)
+		if researchMode{return s.pauseResearch(ctx,res,ss,turnID,proofErr)}
+		return s.fail(ctx,res,proofErr)
+	}
 	response, err := s.dispatch(ctx, areq, cand, label, reservationID)
 	if err != nil {
 		s.release(ctx, reservationID)

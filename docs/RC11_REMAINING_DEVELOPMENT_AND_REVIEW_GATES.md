@@ -705,3 +705,30 @@ Library versions. The 32 KiB delivery cap and hardware/context-capacity
 constraints still apply. Physical installed inference, crash recovery,
 inflight revocation guarantees and disclosure audit remain release-review
 items.
+
+## Research Council — per-turn evidence attestation and redacted QA state
+
+A new Research turn-provenance v2 record binds the successful seat response
+to an immutable agent-request SHA, resolved local candidate, frozen Council
+manifest, selected evidence manifest, consent fingerprint, and exact
+verified document count/byte total. The proof independently checks that
+each `research_evidence` section is non-authoritative
+`UNVERIFIED_DERIVED`, carries `untrusted_library_content`, and its text
+still matches its embedded SHA-256. The request metadata cannot falsely
+claim evidence attachment with no sections or embed an evidence section
+while omitting the approval marker. Invalid metadata and nonlocal candidate
+types are rejected **before** model inference.
+
+Only successful Research responses receive per-turn durable provenance.
+This is evidence of a completed locally routed response with a bound
+request, not proof the model correctly used the evidence nor a hard
+guarantee of atomic revocation while an already-sent inference runs.
+
+The restricted QA snapshot surfaces only `seat_consent_state`
+(`none`, `local_only_approved` or `revoked`) and
+`verified_local_response_recorded`, based on a Worker-authored agent
+response whose v2 evidence manifest matches the stored Research approval.
+QA does not export documents, model replies, filenames, asset IDs,
+selected seat identities, Library contents, provenance hashes or raw
+inference prompts. Historic replies may still be recorded after revocation,
+while current permission checks stop new protected dispatch.

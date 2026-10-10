@@ -8,7 +8,6 @@ import (
  "crypto/sha256"
  "encoding/hex"
  "encoding/json"
- "fmt"
  "io"
  "os"
  "os/exec"
@@ -280,6 +279,19 @@ print("ONEPANE_PHYSICAL_BUILD_OK")`
  if err=artifacts.VerifyContent(ctx,first.ArtifactID);err!=nil{
   t.Fatalf("revocation incorrectly deleted immutable physical blob: %v",err)
  }
+ // A fresh attempt to replay a revoked receipt must not silently restore
+ // access merely because the OCI bytes and immutable artifact still exist.
+ if _,err=adapter.Invoke(ctx,tool.AdapterRequest{
+  ToolID:sandboxrunner.ToolAppFilePublish,WorkspaceID:tenant,
+  TaskID:&created.ID,AttemptID:&attempt.ID,Input:publishInput,
+ });err==nil{
+  t.Fatal("revoked Workspace grant was reissued by a repeated publish")
+ }
+ stillRevoked,err:=projects.WorkspacePublishedOutputs(ctx,p.ID,build.ID)
+ if err!=nil||len(stillRevoked)!=0{
+  t.Fatalf("revoked Workspace regained read grant: %+v %v",stillRevoked,err)
+ }
+
  if _,err=engine.StopRuntime(ctx,runtime.ID);err!=nil{t.Fatal(err)}
  stopped,err:=engine.InspectContainer(ctx,runtime.ID,app.ID)
  if err!=nil||stopped.Status=="running"||stopped.Status=="restarting"{
@@ -289,8 +301,3 @@ print("ONEPANE_PHYSICAL_BUILD_OK")`
 }
 
 func ptrPhysical(v string)*string {return &v}
-
-// Keep the helper used by this file compiled in the same package on Linux
-// and Windows hosted Go integration builds without needing Podman at compile
-// time. Physical execution is guarded by an explicit opt-in environment var.
-var _=fmt.Sprintf

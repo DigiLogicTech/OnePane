@@ -80,9 +80,29 @@ func TestResearchSessionFrozenEvidenceApprovalAndRevocation(t *testing.T){
   TaskID:job.ID,TeamID:registered.ID,CreatedBy:"human",ExecutionMode:"council",
  })
  if err!=nil{t.Fatal(err)}
+ // The picker is strictly tenant-, role-, Project- and Workspace-scoped.
+ eligible,err:=svc.EligibleResearchEvidenceSessions(ctx,p.ID,world.ID,"human")
+ if err!=nil||len(eligible)!=1||eligible[0].ID!=session.ID||
+  eligible[0].TaskID!=job.ID||eligible[0].TeamID!=registered.ID{
+  t.Fatalf("expected exact pre-round Research session, got %+v: %v",eligible,err)
+ }
+ for _,tc:=range []struct{ project,workspace,actor string }{
+  {p.ID,research.ID,"human"},
+  {p.ID,world.ID,"agent"},
+  {p.ID,world.ID,"unknown-human"},
+ }{
+  candidates,e:=svc.EligibleResearchEvidenceSessions(ctx,tc.project,tc.workspace,tc.actor)
+  if e!=nil||len(candidates)!=0{
+   t.Fatalf("unauthorised picker disclosure for %+v: %+v %v",tc,candidates,e)
+  }
+ }
  requested:=[]WorkspaceEvidenceSelection{{AssetID:a.ID,Version:1}}
  frozen,err:=svc.FreezeResearchEvidence(ctx,session.ID,"human",requested)
  if err!=nil{t.Fatal(err)}
+ eligible,err=svc.EligibleResearchEvidenceSessions(ctx,p.ID,world.ID,"human")
+ if err!=nil||len(eligible)!=0{
+  t.Fatalf("frozen Research session still listed: %+v %v",eligible,err)
+ }
  if frozen.ProjectID!=p.ID||frozen.ProjectWorkspaceID!=world.ID||
   frozen.ResearchManifestSHA256==""||frozen.Evidence.ManifestSHA256==""||
   len(frozen.Evidence.Entries)!=1||frozen.ApprovedBy!="human"{
@@ -126,6 +146,17 @@ func TestResearchSessionFrozenEvidenceApprovalAndRevocation(t *testing.T){
   TaskID:other.ID,TeamID:registered.ID,CreatedBy:"human",ExecutionMode:"council",
  })
  if err!=nil{t.Fatal(err)}
+ eligible,err=svc.EligibleResearchEvidenceSessions(ctx,p.ID,research.ID,"human")
+ if err!=nil||len(eligible)!=1||eligible[0].ID!=otherSession.ID{
+  t.Fatalf("sibling Workspace picker mixed scoped Council sessions: %+v %v",eligible,err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,"UPDATE team_sessions SET round_number=1 WHERE id=?",otherSession.ID);err!=nil{
+  t.Fatal(err)
+ }
+ eligible,err=svc.EligibleResearchEvidenceSessions(ctx,p.ID,research.ID,"human")
+ if err!=nil||len(eligible)!=0{
+  t.Fatalf("post-round Research session remained selectable: %+v %v",eligible,err)
+ }
  if _,err=svc.FreezeResearchEvidence(ctx,otherSession.ID,"human",requested);
   !errors.Is(err,ErrCrossWorkspace){
   t.Fatalf("Research Workspace inherited World evidence: %v",err)

@@ -182,6 +182,26 @@ func TestBrokerToolGatewayTaskAttemptLeaseAndRevocation(t *testing.T){
   t.Fatal("forged direct call was authorized")
  }
  if probe.calls!=1{t.Fatal("forged direct call dialled a service")}
+ // A valid per-call lease cannot let an Agent move its persisted Task
+ // into the source Workspace to read what the original target could access.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE tasks SET project_workspace_id=?
+  WHERE id=?`,source.ID,created.ID);err!=nil{t.Fatal(err)}
+ moved,err:=invoke(ref,issue(ref),&attempt.ID,input)
+ if err==nil||moved.Status!=tool.StatusFailed||probe.calls!=1{
+  t.Fatalf("source Workspace Task incorrectly admitted: %+v %v",moved,err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE tasks SET project_workspace_id=?
+  WHERE id=?`,target.ID,created.ID);err!=nil{t.Fatal(err)}
+ // Agent Worker state is not equivalent to a running Task Attempt. A
+ // suspended Worker cannot initiate the same resource even with a fresh lease.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE agent_worker_runs SET status='waiting'
+  WHERE id='run'`);err!=nil{t.Fatal(err)}
+ waiting,err:=invoke(ref,issue(ref),&attempt.ID,input)
+ if err==nil||waiting.Status!=tool.StatusFailed||probe.calls!=1{
+  t.Fatalf("waiting Worker incorrectly admitted: %+v %v",waiting,err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE agent_worker_runs SET status='running'
+  WHERE id='run'`);err!=nil{t.Fatal(err)}
  // Revoke during an otherwise successful broker read. Adapter checks
  // the persisted grant again before releasing even the sanitized result.
  probe.onProbe=func(_ Request){

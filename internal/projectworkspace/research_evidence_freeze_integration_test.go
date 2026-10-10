@@ -162,17 +162,20 @@ func TestResearchSessionFrozenEvidenceApprovalAndRevocation(t *testing.T){
   []string{"forged-other-workspace-member"});err==nil{
   t.Fatal("unfrozen/foreign Research seat accepted")
  }
+ if _,err=svc.ApproveResearchSeatEvidence(ctx,session.ID,"human",
+  []string{localSeat.ID});err==nil{
+  t.Fatal("partial Council approval could expose evidence through unapproved critique seats")
+ }
  first,err:=svc.ApproveResearchSeatEvidence(ctx,session.ID,"human",
-  []string{localSeat.ID})
+  []string{localSeat.ID,otherSeat.ID})
  if err!=nil{t.Fatal(err)}
  if first.State!="approved"||first.Policy!="local_only"||
-  first.ModelVisible||first.DispatchEnabled||len(first.SeatIDs)!=1||
-  first.SeatIDs[0]!=localSeat.ID||
+  first.ModelVisible||first.DispatchEnabled||len(first.SeatIDs)!=2||
   first.EvidenceManifestSHA256!=frozen.Evidence.ManifestSHA256{
   t.Fatalf("Research seat approval widened scope or omitted provenance: %+v",first)
  }
  identical,err:=svc.ApproveResearchSeatEvidence(ctx,session.ID,"human",
-  []string{localSeat.ID})
+  []string{localSeat.ID,otherSeat.ID})
  if err!=nil||identical.ApprovedAt!=first.ApprovedAt{
   t.Fatalf("same seat approval was not idempotent: %+v %v",identical,err)
  }

@@ -317,6 +317,9 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 				s.clock.UnixMilli()<modelWait.RetryAtMS {
 				ready=false
 			}
+			if hasToolchainWaitField(json.RawMessage(cont))&&decodeToolchainWait(json.RawMessage(cont))==nil{
+				return fmt.Errorf("corrupt persisted Workspace toolchain wait for Worker run %s",v.run)
+			}
 			if toolchainWait:=decodeToolchainWait(json.RawMessage(cont));toolchainWait!=nil{
 				ready=false
 				if s.clock.UnixMilli()>=toolchainWait.RetryAtMS{

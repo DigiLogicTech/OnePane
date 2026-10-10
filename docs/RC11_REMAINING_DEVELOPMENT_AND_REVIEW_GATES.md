@@ -531,3 +531,36 @@ independently revalidates the human, session manifest, round and current
 Library version permissions transactionally. A stale picker result does not
 permit a late/unauthorised approval. No document data or evidence content
 is passed to a Council model through discovery.
+
+## Research Council — explicit frozen-text integrity preflight (operator only)
+
+A newly frozen Research evidence metadata selection can be separately checked
+from the Workspace Library approval dialog by choosing **Verify frozen text
+locally**. The approval dialog does not automatically read document bytes.
+This additional operator-initiated `POST
+/v1/team-sessions/{sessionID}/research/evidence-preflight` requires existing
+`team.read` and `project.read`, a currently active human principal with
+active tenant membership, and the exact immutable Research evidence selection.
+It accepts **no caller-supplied asset list** and does not grant new read access.
+
+The API reuses the established byte-verified Workspace text reader, enforcing
+at most eight UTF-8 text versions, <=64 KiB each and <=256 KiB total. Each
+read requires the current canonical Workspace grants/publications, matching
+Project and tenant-owned active managed artifact, exact selected version hash
+and byte length. It fails closed on revoked/expired rights, binary/oversized
+files, corruption and changed manifests; it checks the frozen Research
+approval again after all reads. A previously frozen metadata selection of
+nine to sixteen versions remains valid as **metadata**, but is not eligible
+for this bounded text preflight.
+
+The response is **only** a no-store, schema-versioned receipt of the Research
+session, manifest hashes, document count, byte total and verification time.
+No raw document text, snippets, filenames, blob IDs, storage URLs, capability
+leases, prompt content or plaintext caches are returned or persisted by this
+preflight. Nothing is attached to a Research seat; no inference, routing,
+untrusted document execution or new Council authority is introduced.
+Permissions must be checked again at any eventual explicitly consented model
+consumption; this receipt is neither an attachment nor proof of perpetual
+access. Automated evidence integrity/isolated-scope checks do not substitute
+for external physical Node and installed-product QA. The user review
+sequence and protected RC10 baseline remain unchanged.

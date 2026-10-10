@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"crypto/subtle"
 	"errors"
 	"flag"
@@ -26,28 +27,59 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/ingress"
 	"github.com/DigiLogicTech/OnePane/internal/nodefederation"
 	"github.com/DigiLogicTech/OnePane/internal/sandboxrunner"
+	"github.com/DigiLogicTech/OnePane/internal/startupevidence"
 	"github.com/DigiLogicTech/OnePane/internal/webui"
 )
 
 func main() {
-	var configPath string
+	var configPath, offlineRoot string
 	flag.StringVar(&configPath, "config", "", "path to bootstrap YAML configuration")
+	flag.StringVar(&offlineRoot, "startup-evidence-root", "", "read only: print sanitized offline startup evidence for an explicit data root")
 	flag.Parse()
 
+	// This mode does not open config, SQLite, start listeners or use a network.
+	// Local filesystem access is governed by OS permissions on the data root.
+	if offlineRoot != "" {
+		rows, err := startupevidence.Read(offlineRoot)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Offline startup evidence unavailable or access denied")
+			os.Exit(1)
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(rows)
+		return
+	}
+	// A service manager may supply this path for evidence of config failures
+	// that happen before the YAML data root can be loaded.
+	evidenceRoot := strings.TrimSpace(os.Getenv("ONEPANE_STARTUP_EVIDENCE_ROOT"))
+	record := func(stage startupevidence.Stage, outcome startupevidence.Outcome) {
+		if evidenceRoot != "" {
+			_ = startupevidence.Record(evidenceRoot, startupevidence.Backend, stage, outcome)
+		}
+	}
+	record(startupevidence.Config, startupevidence.Begin)
 	log.Printf("harnessd startup: loading configuration")
 	cfg, err := config.Load(configPath)
 	if err != nil {
+		record(startupevidence.Config, startupevidence.Failed)
 		log.Fatalf("configuration: %v", err)
 	}
+	if evidenceRoot == "" {
+		evidenceRoot = cfg.Storage.DataDir
+	}
+	record(startupevidence.Config, startupevidence.OK)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	log.Printf("harnessd startup: entering bootstrap")
+	record(startupevidence.Bootstrap, startupevidence.Begin)
 	runtime, err := bootstrap.Open(ctx, cfg)
 	if err != nil {
+		record(startupevidence.Bootstrap, startupevidence.Failed)
 		log.Fatalf("bootstrap: %v", err)
 	}
+	record(startupevidence.Bootstrap, startupevidence.OK)
+	record(startupevidence.State, startupevidence.Begin)
 	log.Printf("harnessd startup: bootstrap ready; preparing API routes")
 	defer runtime.DB.Close()
 	// A previous service crash may have stranded private OCI credential files
@@ -59,12 +91,15 @@ func main() {
 
 	state, err := runtime.System.Get(ctx)
 	if err != nil {
+		record(startupevidence.State, startupevidence.Failed)
 		log.Fatalf("system state: %v", err)
 	}
 	n, err := runtime.Nodes.Local(ctx)
 	if err != nil {
+		record(startupevidence.State, startupevidence.Failed)
 		log.Fatalf("local node: %v", err)
 	}
+	record(startupevidence.State, startupevidence.OK)
 
 	bearerAuth := api.NewBearerAuthorizer(runtime.DB.SQL(), clock.Real{})
 	auth := api.NewHybridAuthorizer(bearerAuth, runtime.WebAuth)
@@ -471,6 +506,7 @@ func main() {
 	if federationHTTPServer != nil {
 		serverCount++
 	}
+	record(startupevidence.API, startupevidence.Begin)
 	serverErr := make(chan serverResult, serverCount)
 	go func() {
 		err := httpServer.ListenAndServe()
@@ -503,6 +539,7 @@ func main() {
 
 	select {
 	case <-ctx.Done():
+		record(startupevidence.API, startupevidence.Stopped)
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 48*time.Second)
 		defer shutdownCancel()
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
@@ -536,6 +573,7 @@ func main() {
 			}
 			_ = runtime.LocalAI.ShutdownManagedRuntimes(shutdownCtx)
 			_ = runtime.LocalAI.StopManagedLLMFit(shutdownCtx)
+			record(startupevidence.API, startupevidence.Failed)
 			log.Fatalf("%s http server: %v", result.name, result.err)
 		}
 	}

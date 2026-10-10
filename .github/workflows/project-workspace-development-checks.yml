@@ -24,6 +24,13 @@ on:
       - 'internal/storage/sqlite/**'
       - 'migrations/**'
       - 'internal/api/**'
+      - 'internal/startupevidence/**'
+      - 'cmd/harnessd/**'
+      - 'packaging/windows/service/**'
+      - 'packaging/windows/setup/**'
+      - 'packaging/debian/onepane.service'
+      - 'packaging/systemd/onepane.service'
+      - 'scripts/install-ubuntu.sh'
       - 'internal/scheduler/**'
       - 'internal/localai/**'
       - 'docs/PROJECT_WORKSPACE_DEVELOPMENT_ENVIRONMENTS_RFC.md'
@@ -69,4 +76,30 @@ jobs:
       - name: Full Go regression and cross-platform compilation
         run: |
           go test ./...
+          # Exercise a real pre-config, pre-HTTP backend failure and the
+          # offline-only reader without a running OnePane API or database.
+          go build -o /tmp/onepane-qa-bootstrap ./cmd/harnessd
+          evidence_root="$(mktemp -d)"
+          if ONEPANE_STARTUP_EVIDENCE_ROOT="$evidence_root" /tmp/onepane-qa-bootstrap -config "$evidence_root/nonexistent.yaml" >/dev/null 2>&1; then
+            echo "Deliberately invalid configuration unexpectedly passed"
+            exit 1
+          fi
+          /tmp/onepane-qa-bootstrap -startup-evidence-root "$evidence_root" |
+            node -e 'let data="";process.stdin.on("data",x=>data+=x).on("end",()=>{
+              const events=JSON.parse(data);
+              if(!events.some(e=>e.schema===1 && e.component==="backend" &&
+                 e.stage==="configuration" && e.outcome==="failed"))process.exit(1);
+              for(const e of events){
+                if(Object.keys(e).some(k=>!["schema","at_utc","component","stage","outcome"].includes(k)))
+                  process.exit(2);
+              }
+            })'
+          rm -rf -- "$evidence_root"
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-harnessd.exe ./cmd/harnessd
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-service.exe ./packaging/windows/service
+          # Compile the legacy setup source without a real distributable payload.
+          # No installer is packaged or released by this compilation check.
+          mkdir -p packaging/windows/setup/payload
+          printf 'CI compile fixture' > packaging/windows/setup/payload/qa-compile-fixture.bin
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-legacy-setup.exe ./packaging/windows/setup
+          bash -n scripts/install-ubuntu.sh

@@ -89,6 +89,7 @@ func Register(reg *tool.Registry, adapter *Adapter) error {
 		{ID: ToolAppInspect, Version: "1", CapabilityID: CapabilityObserve, Mode: authority.ActionObserve, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskLow, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolImageInspect, Version: "1", CapabilityID: CapabilityObserve, Mode: authority.ActionObserve, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskLow, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppExec, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
+		{ID: ToolAppGodotBuild, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppGitInspect, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppFileInspect, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppFileEdit, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
@@ -357,7 +358,51 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 			"action":in.Action,"succeeded":success,"result":observed,
 			"container":state,"engine":profile,
 		},summary)
-	case ToolAppExec:
+	case ToolAppGodotBuild:
+        // Godot must be part of the operator-approved immutable image.
+        // No on-demand downloads, host shell, arbitrary flags or model-supplied
+        // file paths are permitted by this specialised Tool Gateway entry.
+        if !safeID.MatchString(in.ApplicationID) ||
+           in.Image!=""||in.Path!=""||in.Name!=""||in.MediaType!=""||
+           in.ContentBase64!=""||in.ExpectedSHA256!=""||in.Message!=""||
+           len(in.Command)!=0||len(in.Endpoints)!=0||
+           len(in.RuntimeSpec)!=0||len(in.ResourceLimits)!=0||
+           len(in.EnvironmentBindings)!=0||len(in.NetworkPolicy)!=0||
+           in.TimeoutSeconds<0||in.TimeoutSeconds>3600 {
+            return tool.AdapterResult{},tool.KnownFailure(ErrInvalidInput)
+        }
+        command,err:=godotBuildCommand(in.Action)
+        if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        if !workspaceExists{
+            return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Workspace not provisioned",ErrInvalidInput))
+        }
+        state,err:=a.engine.InspectContainer(ctx,in.RuntimeID,in.ApplicationID)
+        if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        if state.Status!="running"||!state.IsolationVerified||
+           state.RuntimeID!=in.RuntimeID||state.ApplicationID!=in.ApplicationID||
+           state.SpecHash==""||!exactWorkspaceMount(state,workspace){
+            return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Godot build requires an independently verified running Workspace sandbox",ErrInvalidInput))
+        }
+        timeout:=in.TimeoutSeconds
+        if timeout==0{timeout=600}
+        execCtx,cancel:=context.WithTimeout(ctx,time.Duration(timeout)*time.Second)
+        defer cancel()
+        observed,err:=a.engine.ExecContainer(execCtx,in.RuntimeID,in.ApplicationID,command)
+        if execCtx.Err()!=nil{return tool.AdapterResult{},execCtx.Err()}
+        if err!=nil{return tool.AdapterResult{},err}
+        succeeded:=observed.ExitCode==0
+        summary:="Godot "+in.Action+" completed inside verified Workspace; artifact verification/publication remains separate"
+        if !succeeded{
+            summary=fmt.Sprintf("Godot %s exited with code %d; no build success is claimed",in.Action,observed.ExitCode)
+        }
+        return result(map[string]any{
+            "runtime_id":in.RuntimeID,"application_id":in.ApplicationID,
+            "action":in.Action,"succeeded":succeeded,"result":observed,
+            "container":state,"engine":profile,
+            "artifact_verified":false,
+            "note":"Use Task-owned project.app.files.publish for immutable hash-verified output; build exit code is not artifact proof",
+        },summary)
+    case ToolAppExec:
 		// A Task may take longer on local CPU, but cannot hold a sandbox exec
 		// indefinitely. The caller's shorter cancellation deadline still wins.
 		if in.TimeoutSeconds < 0 || in.TimeoutSeconds > 7200 {

@@ -502,60 +502,84 @@ func scanRun(row rowScanner) (Run, error) {
 }
 
 func (s *Service) startRun(ctx context.Context, t task.Task) (Run, TickResult) {
-	res := TickResult{TaskID: t.ID, Status: "failed"}
-	if err := s.ensureWorkspaceAccess(ctx, t.WorkspaceID); err != nil {
-		res.Error = err.Error()
-		return Run{}, res
-	}
-	worker := WorkerPrincipal
-	actor := AuthorityPrincipal
-	started, attempt, err := s.tasks.Start(ctx, task.StartCommand{TaskID: t.ID, ExpectedRevision: t.Revision, WorkerPrincipalID: &worker, ActorPrincipalID: &actor, Metadata: json.RawMessage(`{"agent_worker":"v1"}`)})
-	if err != nil {
-		res.Error = err.Error()
-		return Run{}, res
-	}
-	rid, _ := s.ids.New("awrun")
-	now := s.clock.UnixMilli()
-	route := defaultRoutePolicy()
-	workspaceRouting := routingPolicyFromCompletion(started.Completion)
-	if workspaceRouting.Enabled != nil {
-		route.RoutingEnabled = *workspaceRouting.Enabled
-		route.AllowDelegation = *workspaceRouting.Enabled
-	}
-	route.AllowRemote = effectiveRemoteModelAllowance(t, workspaceRouting, route.AllowRemote)
-	ids := make([]string, 0, 1+len(workspaceRouting.FallbackCandidateIDs))
-	if v := strings.TrimSpace(workspaceRouting.CandidateID); v != "" {
-		ids = append(ids, v)
-	}
-	if route.RoutingEnabled {
-		for _, id := range workspaceRouting.FallbackCandidateIDs {
-			if id = strings.TrimSpace(id); id != "" && !contains(ids, id) {
-				ids = append(ids, id)
-			}
-		}
-	}
-	route.IncludeCandidateIDs = ids
-	maxEscalations := s.cfg.MaxEscalations
-	if !route.RoutingEnabled {
-		maxEscalations = 0
-	}
-	rp, _ := json.Marshal(route)
-	r := Run{ID: rid, WorkspaceID: started.WorkspaceID, TaskID: started.ID, AttemptID: attempt.ID, WorkerPrincipalID: worker, Status: RunRunning, RoleName: s.cfg.RoleName, CapabilityID: s.cfg.CapabilityID, ProtocolLevel: strings.ToUpper(s.cfg.ProtocolLevel), MaxSteps: s.cfg.MaxSteps, MaxReplans: s.cfg.MaxReplans, MaxEscalations: maxEscalations, RoutePolicy: rp, Continuation: json.RawMessage(`{}`), Revision: 1, StartedAt: now, UpdatedAt: now}
-	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_worker_runs(id,workspace_id,task_id,attempt_id,worker_principal_id,status,role_name,capability_id,protocol_level,max_steps,step_count,max_replans,replan_count,max_escalations,escalation_count,route_policy_json,continuation_json,revision,started_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, r.ID, r.WorkspaceID, r.TaskID, r.AttemptID, r.WorkerPrincipalID, r.Status, r.RoleName, r.CapabilityID, r.ProtocolLevel, r.MaxSteps, 0, r.MaxReplans, 0, r.MaxEscalations, 0, string(r.RoutePolicy), string(r.Continuation), 1, now, now); err != nil {
-			return err
-		}
-		eid, _ := s.ids.New("evt")
-		p, _ := json.Marshal(map[string]any{"run_id": r.ID, "task_id": r.TaskID, "attempt_id": r.AttemptID, "max_steps": r.MaxSteps})
-		return s.events.Append(ctx, tx, event.Event{ID: eid, WorkspaceID: &r.WorkspaceID, Type: "agent_worker.started", AggregateType: "agent_worker_run", AggregateID: r.ID, ActorPrincipalID: &actor, Payload: p, OccurredAt: now})
-	})
-	if err != nil {
-		res.Error = err.Error()
-		return Run{}, res
-	}
-	res.RunID = r.ID
-	res.Status = "running"
-	return r, res
+ res:=TickResult{TaskID:t.ID,Status:"failed"}
+ if err:=s.ensureWorkspaceAccess(ctx,t.WorkspaceID);err!=nil{
+  res.Error=err.Error();return Run{},res
+ }
+ worker:=WorkerPrincipal
+ actor:=AuthorityPrincipal
+ cmd:=task.StartCommand{
+  TaskID:t.ID,ExpectedRevision:t.Revision,WorkerPrincipalID:&worker,
+  ActorPrincipalID:&actor,Metadata:json.RawMessage(`{"agent_worker":"v1"}`),
+ }
+ // Preserve the ordinary admission policy before entering the write
+ // transaction. StartInTransaction enforces the same Task CAS again.
+ if err:=s.tasks.CheckStartAdmission(ctx,cmd);err!=nil{
+  res.Error=err.Error();return Run{},res
+ }
+ rid,err:=s.ids.New("awrun")
+ if err!=nil{res.Error=err.Error();return Run{},res}
+ eventID,err:=s.ids.New("evt")
+ if err!=nil{res.Error=err.Error();return Run{},res}
+ now:=s.clock.UnixMilli()
+ route:=defaultRoutePolicy()
+ workspaceRouting:=routingPolicyFromCompletion(t.Completion)
+ if workspaceRouting.Enabled!=nil{
+  route.RoutingEnabled=*workspaceRouting.Enabled
+  route.AllowDelegation=*workspaceRouting.Enabled
+ }
+ route.AllowRemote=effectiveRemoteModelAllowance(t,workspaceRouting,route.AllowRemote)
+ ids:=make([]string,0,1+len(workspaceRouting.FallbackCandidateIDs))
+ if v:=strings.TrimSpace(workspaceRouting.CandidateID);v!=""{
+  ids=append(ids,v)
+ }
+ if route.RoutingEnabled{
+  for _,id:=range workspaceRouting.FallbackCandidateIDs{
+   if id=strings.TrimSpace(id);id!=""&&!contains(ids,id){ids=append(ids,id)}
+  }
+ }
+ route.IncludeCandidateIDs=ids
+ maxEscalations:=s.cfg.MaxEscalations
+ if !route.RoutingEnabled{maxEscalations=0}
+ rp,err:=json.Marshal(route)
+ if err!=nil{res.Error=err.Error();return Run{},res}
+ var r Run
+ // Previously Task.Start committed before Worker creation. Any DB failure
+ // between those writes stranded a RUNNING Task and Attempt without a Worker
+ // row; RecoverLostRuns could not discover the orphan. All admission writes
+ // and both audit/outbox events must now commit together or not at all.
+ err=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+  started,attempt,startErr:=s.tasks.StartInTransaction(ctx,tx,cmd)
+  if startErr!=nil{return startErr}
+  r=Run{
+   ID:rid,WorkspaceID:started.WorkspaceID,TaskID:started.ID,
+   AttemptID:attempt.ID,WorkerPrincipalID:worker,Status:RunRunning,
+   RoleName:s.cfg.RoleName,CapabilityID:s.cfg.CapabilityID,
+   ProtocolLevel:strings.ToUpper(s.cfg.ProtocolLevel),
+   MaxSteps:s.cfg.MaxSteps,MaxReplans:s.cfg.MaxReplans,
+   MaxEscalations:maxEscalations,RoutePolicy:rp,
+   Continuation:json.RawMessage(`{}`),Revision:1,StartedAt:now,UpdatedAt:now,
+  }
+  if _,err:=tx.ExecContext(ctx,`INSERT INTO agent_worker_runs(id,workspace_id,task_id,attempt_id,worker_principal_id,status,role_name,capability_id,protocol_level,max_steps,step_count,max_replans,replan_count,max_escalations,escalation_count,route_policy_json,continuation_json,revision,started_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+   r.ID,r.WorkspaceID,r.TaskID,r.AttemptID,r.WorkerPrincipalID,
+   r.Status,r.RoleName,r.CapabilityID,r.ProtocolLevel,r.MaxSteps,
+   0,r.MaxReplans,0,r.MaxEscalations,0,string(r.RoutePolicy),
+   string(r.Continuation),1,now,now);err!=nil{return err}
+  p,err:=json.Marshal(map[string]any{
+   "run_id":r.ID,"task_id":r.TaskID,"attempt_id":r.AttemptID,
+   "max_steps":r.MaxSteps,
+  })
+  if err!=nil{return err}
+  return s.events.Append(ctx,tx,event.Event{
+   ID:eventID,WorkspaceID:&r.WorkspaceID,Type:"agent_worker.started",
+   AggregateType:"agent_worker_run",AggregateID:r.ID,
+   ActorPrincipalID:&actor,Payload:p,OccurredAt:now,
+  })
+ })
+ if err!=nil{res.Error=err.Error();return Run{},res}
+ res.RunID=r.ID
+ res.Status="running"
+ return r,res
 }
 
 func (s *Service) getRun(ctx context.Context, id string) (Run, error) {

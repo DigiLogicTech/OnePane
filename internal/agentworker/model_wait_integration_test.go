@@ -263,3 +263,96 @@ func TestWorkerWakeIsAtomicAcrossAttemptTaskAndRun(t *testing.T) {
   t.Fatalf("operator-resumed original Attempt did not reconcile: %+v %v",resumedRun,err)
  }
 }
+
+
+func TestWorkerAdmissionRollsBackTaskAttemptAndBothEventsOnFailure(t *testing.T) {
+ ctx:=context.Background()
+ db,err:=sqlitestore.Open(filepath.Join(t.TempDir(),"atomic_admission.db"))
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ if err:=db.Migrate(ctx);err!=nil{t.Fatal(err)}
+ now:=clock.Real{}.UnixMilli()
+ if _,err:=db.SQL().ExecContext(ctx,`INSERT INTO workspaces
+ (id,name,status,revision,created_at,updated_at)
+ VALUES('tenant','Tenant','active',1,?,?)`,now,now);err!=nil{t.Fatal(err)}
+ ts:=task.NewService(db.SQL(),db,clock.Real{})
+ worker:=New(db.SQL(),db,clock.Real{},"local",ts,nil,nil,nil,nil,nil,nil,nil,nil,nil,nil)
+ created,err:=ts.Create(ctx,task.CreateCommand{
+  WorkspaceID:"tenant",Objective:"Do not strand Task before Worker starts",
+ })
+ if err!=nil{t.Fatal(err)}
+ ready,err:=ts.MarkReady(ctx,task.TransitionCommand{
+  TaskID:created.ID,ExpectedRevision:created.Revision,
+ })
+ if err!=nil{t.Fatal(err)}
+
+ assertRolledBack:=func(phase string){
+  t.Helper()
+  held,err:=ts.Get(ctx,created.ID)
+  if err!=nil||held.State!=task.StateReady||held.Revision!=ready.Revision{
+   t.Fatalf("%s: orphan Task or revision advanced: %+v %v",phase,held,err)
+  }
+  var attempts,runs,events int
+  for _,check:=range []struct{q string;target *int}{
+   {`SELECT COUNT(*) FROM task_attempts WHERE task_id=?`,&attempts},
+   {`SELECT COUNT(*) FROM agent_worker_runs WHERE task_id=?`,&runs},
+   {`SELECT COUNT(*) FROM events WHERE aggregate_id=? AND
+    event_type IN ('task.started','agent_worker.started')`,&events},
+  }{
+   if err:=db.SQL().QueryRowContext(ctx,check.q,created.ID).
+     Scan(check.target);err!=nil{t.Fatal(err)}
+  }
+  if attempts!=0||runs!=0||events!=0{
+   t.Fatalf("%s: partial admission attempts=%d runs=%d events=%d",
+    phase,attempts,runs,events)
+  }
+ }
+ // Simulate the precise former failure window, after Task and Attempt were
+ // already committed, when Worker insertion could fail.
+ if _,err:=db.SQL().ExecContext(ctx,`CREATE TRIGGER fail_worker_insert
+ BEFORE INSERT ON agent_worker_runs
+ BEGIN SELECT RAISE(ABORT,'injected Worker insert failure'); END`);err!=nil{t.Fatal(err)}
+ if _,result:=worker.startRun(ctx,ready);result.Error==""||result.Status!="failed"{
+  t.Fatalf("Worker insertion fault was accepted: %+v",result)
+ }
+ assertRolledBack("Worker insertion")
+ if _,err:=db.SQL().ExecContext(ctx,`DROP TRIGGER fail_worker_insert`);err!=nil{t.Fatal(err)}
+
+ // A fault appending the Worker started event must also undo the Task start
+ // event and Worker row, not just the Worker event.
+ if _,err:=db.SQL().ExecContext(ctx,`CREATE TRIGGER fail_worker_event
+ BEFORE INSERT ON events WHEN NEW.event_type='agent_worker.started'
+ BEGIN SELECT RAISE(ABORT,'injected Worker event failure'); END`);err!=nil{t.Fatal(err)}
+ if _,result:=worker.startRun(ctx,ready);result.Error==""||result.Status!="failed"{
+  t.Fatalf("Worker event fault was accepted: %+v",result)
+ }
+ assertRolledBack("Worker event")
+ if _,err:=db.SQL().ExecContext(ctx,`DROP TRIGGER fail_worker_event`);err!=nil{t.Fatal(err)}
+
+ started,result:=worker.startRun(ctx,ready)
+ if result.Error!=""||started.ID==""||started.AttemptID==""{
+  t.Fatalf("legitimate admission failed after rollback: %+v %+v",started,result)
+ }
+ active,err:=ts.Get(ctx,created.ID)
+ if err!=nil||active.State!=task.StateRunning||active.Revision!=ready.Revision+1{
+  t.Fatalf("Task not running after successful atomic admission: %+v %v",active,err)
+ }
+ var attempts,runs,events int
+ for _,check:=range []struct{q string;target *int}{
+  {`SELECT COUNT(*) FROM task_attempts WHERE task_id=?`,&attempts},
+  {`SELECT COUNT(*) FROM agent_worker_runs WHERE task_id=?`,&runs},
+  {`SELECT COUNT(*) FROM events WHERE aggregate_id=? AND
+   event_type IN ('task.started','agent_worker.started')`,&events},
+ }{
+  if err:=db.SQL().QueryRowContext(ctx,check.q,created.ID).
+   Scan(check.target);err!=nil{t.Fatal(err)}
+ }
+ // The Worker event is aggregated under the Run ID; only the Task event
+ // should be counted on the Task's own aggregate.
+ if attempts!=1||runs!=1||events!=1{
+  t.Fatalf("successful admission counts: attempts=%d runs=%d task events=%d",attempts,runs,events)
+ }
+ if _,result:=worker.startRun(ctx,ready);result.Error==""{
+  t.Fatal("stale READY revision admitted a duplicate Worker")
+ }
+}

@@ -5,28 +5,42 @@ import (
  "testing"
 )
 
-func TestResearchSeatIntentNeverAuthorizesUnfrozenOrManualSeats(t *testing.T){
- snapshot:=[]byte(`{"members":[
-  {"id":"local","member_kind":"agent","status":"active","config":{}},
-  {"id":"web","member_kind":"agent","status":"active","config":{"manual_web":{"enabled":true,"provider_id":"chatgpt"}}},
-  {"id":"chair","member_kind":"agent","status":"active","config":{"council_chair_only":true}},
-  {"id":"human","member_kind":"human","status":"active","config":{}},
-  {"id":"suspended","member_kind":"agent","status":"disabled","config":{}},
-  {"id":"supervisor","member_kind":"supervisor","status":"active","config":{}}
+func TestResearchSeatIntentRejectsMixedOrPartiallyApprovedCouncils(t *testing.T){
+ safe:=[]byte(`{"research_mode":true,"execution_mode":"council","members":[
+  {"id":"localA","member_kind":"agent","status":"active","config":{}},
+  {"id":"localB","member_kind":"agent","status":"active","config":{}},
+  {"id":"disabled","member_kind":"agent","status":"disabled","config":{}}
  ]}`)
- if !frozenResearchSeatsEligible(snapshot,[]string{"local"}){
-  t.Fatal("active frozen local agent was rejected")
+ if !frozenResearchSeatsEligible(safe,[]string{"localA","localB"}){
+  t.Fatal("fully covered Research Council denied")
  }
- for _,seat:=range []string{"web","chair","human","suspended","supervisor","unknown"}{
-  if frozenResearchSeatsEligible(snapshot,[]string{seat}){
-   t.Fatalf("inadmissible frozen Research seat %q was approved",seat)
-  }
-  if frozenResearchSeatsEligible(snapshot,[]string{"local",seat}){
-   t.Fatalf("mixed Research seat selection admitted %q",seat)
+ for _,ids:=range [][]string{{"localA"},{"localB"},{"localA","disabled"},
+  {"localA","localB","unknown"}}{
+  if frozenResearchSeatsEligible(safe,ids){
+   t.Fatalf("partial or foreign Research seat approval accepted: %q",ids)
   }
  }
- if frozenResearchSeatsEligible([]byte("not JSON"),[]string{"local"}){
-  t.Fatal("corrupt snapshot permitted sharing")
+ for _,tc:=range []struct{name,cfg string}{
+  {"manual_web",`{"manual_web":{"enabled":true}}`},
+  {"chair",`{"council_chair_only":true}`},
+ }{
+  sample:=[]byte(`{"research_mode":true,"execution_mode":"council","members":[
+   {"id":"localA","member_kind":"agent","status":"active","config":{}},
+   {"id":"localB","member_kind":"agent","status":"active","config":`+tc.cfg+`}
+  ]}`)
+  if frozenResearchSeatsEligible(sample,[]string{"localA","localB"}){
+   t.Fatalf("%s could receive private Research critique outputs",tc.name)
+  }
+ }
+ for _,invalid:=range []string{
+  `{"research_mode":false,"execution_mode":"council","members":[]}`,
+  `{"research_mode":true,"execution_mode":"team","members":[]}`,
+  `{"research_mode":true,"execution_mode":"council","research":{"chair_mode":"manual"},"members":[{"id":"a","member_kind":"agent","status":"active","config":{}}]}`,
+  `not JSON`,
+ }{
+  if frozenResearchSeatsEligible([]byte(invalid),[]string{"a"}){
+   t.Fatalf("invalid Research snapshot accepted: %s",invalid)
+  }
  }
 }
 

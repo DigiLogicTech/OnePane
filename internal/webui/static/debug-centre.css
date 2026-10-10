@@ -28,3 +28,12 @@
 .a60-consent{display:flex;gap:8px;align-items:flex-start}
 .a60-consent label{display:flex;align-items:flex-start;gap:9px}
 @media(max-width:680px){.a60-reproduction-fields{grid-template-columns:minmax(0,1fr)}}
+
+/* RC11 owned backend diagnostics: themed and responsive without using global logs. */
+.a61-api-panel{width:100%}
+.a61-api-controls{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap}
+.a61-api-controls label{display:grid;gap:5px;min-width:min(100%,150px)}
+.a61-api-controls select{background:var(--panel-2);border:1px solid var(--border);padding:7px;border-radius:7px;min-width:0}
+.a61-api-controls button{min-height:34px}
+.a61-api-panel .a58-debug-preview{white-space:pre-wrap;max-height:340px}
+@media(max-width:620px){.a61-api-controls{align-items:stretch}.a61-api-controls label{width:100%}.a61-api-controls button{width:100%}}

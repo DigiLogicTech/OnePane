@@ -120,39 +120,49 @@ func loadQAProbeWitnesses(ctx context.Context,db *sql.DB,tenant,projectID,worksp
  bounded,cancel:=context.WithTimeout(ctx,3*time.Second);defer cancel()
  rows,err:=db.QueryContext(bounded,query,args...)
  if err!=nil{return nil,false,fmt.Errorf("scoped assurance observation links unavailable: %w",err)}
- defer rows.Close()
- verifier:=observation.NewService(db,nil,nil)
+ type observationRow struct{
+  taskID,verificationID,observationID,role,trust,verificationStatus,assuranceStatus,required string
+  observedAt,minAttempt,minOperation int64
+  source,worker,achieved,assuranceAchieved,digest sql.NullString
+ }
+ collected:=make([]observationRow,0,qaDeepEvidenceCap)
+ truncated:=false
  for rows.Next(){
-  var taskID,verificationID,observationID,role,trust,verificationStatus,assuranceStatus,required string
-  var observedAt,minAttempt,minOperation int64
-  var source,worker,achieved,assuranceAchieved,digest sql.NullString
-  if err:=rows.Scan(&taskID,&verificationID,&observationID,&role,&trust,&observedAt,
-   &source,&worker,&verificationStatus,&assuranceStatus,&required,&achieved,&assuranceAchieved,&digest,
-   &minAttempt,&minOperation);err!=nil{return nil,false,err}
-  if len(out)>=qaDeepEvidenceCap{return out,true,nil}
-  // The original evaluator checks integrity at evaluation time. The new QA
-  // report re-hashes the persisted full observation now; a changed row fails.
-  intact:=verifier.VerifyIntegrity(bounded,observationID)==nil
-  afterAttempt:=minAttempt>0&&observedAt>=minAttempt
-  afterOperation:=minOperation==0||observedAt>=minOperation
-  independent:=worker.Valid&&worker.String!=""&&source.Valid&&source.String!=""&&source.String!=worker.String
-  achievedLevel:="";if achieved.Valid{achievedLevel=achieved.String}
-  assuranceLevel:="";if assuranceAchieved.Valid{assuranceLevel=assuranceAchieved.String}
-  recordedPass:=verificationStatus=="pass"&&assuranceStatus=="passed"&&qaDigestRecorded(digest)&&
-   qaLevelRank(required)>=1&&qaLevelRank(achievedLevel)>=qaLevelRank(required)&&
-   qaLevelRank(assuranceLevel)>=qaLevelRank(required)
-  corroborates:=role=="integration"&&recordedPass&&intact&&afterAttempt&&afterOperation&&independent
+  var x observationRow
+  if err:=rows.Scan(&x.taskID,&x.verificationID,&x.observationID,&x.role,&x.trust,&x.observedAt,
+   &x.source,&x.worker,&x.verificationStatus,&x.assuranceStatus,&x.required,&x.achieved,
+   &x.assuranceAchieved,&x.digest,&x.minAttempt,&x.minOperation);err!=nil{
+   rows.Close();return nil,false,err
+  }
+  if len(collected)>=qaDeepEvidenceCap{truncated=true;break}
+  collected=append(collected,x)
+ }
+ if err:=rows.Err();err!=nil{rows.Close();return nil,false,err}
+ if err:=rows.Close();err!=nil{return nil,false,err}
+ // Close the result set before querying individual observation integrity.
+ // This works with SQLite connection pools capped to a single connection.
+ verifier:=observation.NewService(db,nil,nil)
+ for _,x:=range collected{
+  intact:=verifier.VerifyIntegrity(bounded,x.observationID)==nil
+  afterAttempt:=x.minAttempt>0&&x.observedAt>=x.minAttempt
+  afterOperation:=x.minOperation==0||x.observedAt>=x.minOperation
+  independent:=x.worker.Valid&&x.worker.String!=""&&x.source.Valid&&x.source.String!=""&&x.source.String!=x.worker.String
+  achievedLevel:="";if x.achieved.Valid{achievedLevel=x.achieved.String}
+  assuranceLevel:="";if x.assuranceAchieved.Valid{assuranceLevel=x.assuranceAchieved.String}
+  recordedPass:=x.verificationStatus=="pass"&&x.assuranceStatus=="passed"&&qaDigestRecorded(x.digest)&&
+   qaLevelRank(x.required)>=1&&qaLevelRank(achievedLevel)>=qaLevelRank(x.required)&&
+   qaLevelRank(assuranceLevel)>=qaLevelRank(x.required)
+  corroborates:=x.role=="integration"&&recordedPass&&intact&&afterAttempt&&afterOperation&&independent
   out=append(out,qaProbeWitness{
-   TaskRef:qaOpaqueRef("task",taskID),
-   VerificationRef:qaOpaqueRef("verification",verificationID),
-   ObservationRef:qaOpaqueRef("observation",observationID),
-   Role:role,SourceTrust:qaWitnessTrust(trust),
+   TaskRef:qaOpaqueRef("task",x.taskID),
+   VerificationRef:qaOpaqueRef("verification",x.verificationID),
+   ObservationRef:qaOpaqueRef("observation",x.observationID),
+   Role:x.role,SourceTrust:qaWitnessTrust(x.trust),
    ObservedAfterAttempt:afterAttempt,ObservedAfterOperationStart:afterOperation,
    IntegrityRechecked:intact,IndependentSource:independent,
    RecordedAssurancePass:recordedPass,CorroboratingIntegrationProbe:corroborates,
    EvidenceClass:"recorded_probe_observation_not_external_effect_attestation",
   })
  }
- if err:=rows.Err();err!=nil{return nil,false,err}
- return out,false,nil
+ return out,truncated,nil
 }

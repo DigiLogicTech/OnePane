@@ -97,6 +97,11 @@ func scopeWorkspaceCompletion(raw json.RawMessage, workspaceID string) (json.Raw
  // never authorises remote providers, extra spend or a Workspace escape.
  compute:="auto"
  if value,ok:=routing["compute_preference"];ok{
+  // JSON null is not an omitted placement and must not be silently
+  // promoted into automatic model selection.
+  if string(value)=="null"{
+   return nil,fmt.Errorf("%w: null compute preference is not allowed",ErrInvalidCommand)
+  }
   if err:=json.Unmarshal(value,&compute);err!=nil{
    return nil,fmt.Errorf("%w: compute preference must be a string",ErrInvalidCommand)
   }

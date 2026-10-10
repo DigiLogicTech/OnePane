@@ -99,6 +99,10 @@ type qaSnapshot struct {
  WorkerToolLinksTruncated bool `json:"worker_tool_links_truncated"`
  AssuranceEvidence []qaAssuranceEvidence `json:"assurance_evidence"`
  AssuranceEvidenceTruncated bool `json:"assurance_evidence_truncated"`
+ AsyncLineage []qaAsyncLineage `json:"async_lineage"`
+ AsyncLineageTruncated bool `json:"async_lineage_truncated"`
+ ProbeWitnesses []qaProbeWitness `json:"probe_witnesses"`
+ ProbeWitnessesTruncated bool `json:"probe_witnesses_truncated"`
 }
 var qaExcluded=[]string{
  "credentials, cookies, OAuth and Vault material",
@@ -122,6 +126,7 @@ func makeQASnapshot(now time.Time,rows []task.Task,progress map[string]taskExecu
   ExecutionSources:make([]qaExecutionSource,0),
   WorkerToolLinks:make([]qaWorkerToolEvidence,0),
   AssuranceEvidence:make([]qaAssuranceEvidence,0),
+  AsyncLineage:make([]qaAsyncLineage,0),ProbeWitnesses:make([]qaProbeWitness,0),
   ExcludedCategories:append([]string(nil),qaExcluded...),Tasks:make([]qaTaskEntry,0),
  }
  if len(rows)>qaSnapshotTaskCap{snap.Truncated=true;rows=rows[:qaSnapshotTaskCap]}

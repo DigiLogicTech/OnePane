@@ -535,6 +535,9 @@ func (s *Service) startRun(ctx context.Context, t task.Task) (Run, TickResult) {
   route.AllowDelegation=*workspaceRouting.Enabled
  }
  route.AllowRemote=effectiveRemoteModelAllowance(t,workspaceRouting,route.AllowRemote)
+ placement,placementErr:=computePlacementForTask(t)
+ if placementErr!=nil{res.Error=placementErr.Error();return Run{},res}
+ route.ComputePreference=placement
  ids:=make([]string,0,1+len(workspaceRouting.FallbackCandidateIDs))
  if v:=strings.TrimSpace(workspaceRouting.CandidateID);v!=""{
   ids=append(ids,v)

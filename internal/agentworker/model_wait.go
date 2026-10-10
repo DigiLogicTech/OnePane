@@ -58,7 +58,8 @@ func shouldWaitForLocalModel(t task.Task, routeErr error, rejected []scheduler.R
   switch strings.TrimSpace(c.Reason) {
   case "candidate is not schedulable","candidate is degraded","candidate is untested",
    "not_selected_by_request", // A pinned candidate may not be registered yet.
-   "remote candidate disallowed by workspace policy":
+   "remote candidate disallowed by workspace policy",
+   "workspace requires CPU placement","workspace requires GPU placement":
    return true
   }
  }

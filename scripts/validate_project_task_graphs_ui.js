@@ -19,11 +19,12 @@ const scope=vm.runInNewContext(src+"\n({a61NodesFromDraft,a61GraphCard,a61GraphB
  {Map,Date,escapeHtml,apiRequest:()=>{throw Error("no network expected");}});
 const example={nodes:[
  {project_workspace_id:"canonical-world",objective:"Build assets",depends:"",priority:0},
- {project_workspace_id:"canonical-story",objective:"Compose narrative",depends:"step1",priority:20}
+ {project_workspace_id:"canonical-story",objective:"Compose narrative",depends:"step1",priority:20,compute_preference:"cpu_only"}
 ]};
 const canonical=scope.a61NodesFromDraft(example);
 assert.deepEqual(JSON.parse(JSON.stringify(canonical)).map(n=>n.depends_on),[[],["step1"]]);
 assert.equal(canonical[1].project_workspace_id,"canonical-story");
+assert.equal(canonical[1].compute_preference,"cpu_only");
 for(const [name,nodes] of Object.entries({
  "self_cycle":[{...example.nodes[0],depends:"step1"}],
  "unknown_dep":[{...example.nodes[0],depends:"step9"}],
@@ -31,6 +32,7 @@ for(const [name,nodes] of Object.entries({
  "no_scope":[{...example.nodes[0],project_workspace_id:""}],
  "empty_task":[{...example.nodes[0],objective:"  "}],
  "unsafe_priority":[{...example.nodes[0],priority:999}],
+ "unknown_compute":[{...example.nodes[0],compute_preference:"cloud_only"}],
 })){
  assert.throws(()=>scope.a61NodesFromDraft({nodes}),undefined,name);
 }
@@ -47,4 +49,6 @@ const builder=scope.a61GraphBuilderMarkup({
 assert(!builder.includes("<img"));
 assert(builder.includes("Approve and create Task graph"));
 assert(builder.includes("eligible Tasks"));
+assert(builder.includes("Compute placement"));
+assert(builder.includes("CPU only"));
 process.stdout.write("PASS: canonical Workspace Task DAG builder, approval, validation, escaping and read-only status\n");

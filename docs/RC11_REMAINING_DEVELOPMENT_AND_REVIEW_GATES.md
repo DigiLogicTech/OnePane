@@ -331,3 +331,34 @@ The Workspace Development surface now includes Project Task graphs, a Project-sc
 A human operator can compose up to 32 explicitly named steps across registered, active canonical Project Workspaces, express hard predecessor keys, and supply a Project-scoped idempotency key. The UI requires an explicit approval checkbox and warns that submitting a graph can enqueue runnable Tasks immediately. The backend revalidates the authenticated human, DAG topology and Workspace isolation. Graph submission is not an arbitrary model tool and does not grant remote inference, host files, Vault or network access.
 
 The panel handles list refresh failures without wrongly telling the operator that a successfully committed graph was rejected. Node regression checks verify dependency input, approval messaging, mounting, canonical Workspace IDs and HTML escaping. Future iteration should add direct Task/open-in-Inspector links, richer visual DAG editing, controlled recovery actions and Project-level navigation.
+
+## RC11-04 — CPU-only / CPU-preferred autonomous Task placement
+
+Named Workspace Tasks can now persist a reviewed `onepane_routing.compute_preference`
+with one of `auto`, `prefer_cpu`, `cpu_only`, `prefer_gpu` and
+`gpu_only`. Invalid or type-confused values are rejected before any Task
+is queued. Older named Workspace Tasks with no compute preference default
+to `auto`, without enabling remote/cloud inference.
+
+On admission the Agent Worker snapshots the exact Task compute preference
+into its durable Worker route policy. Scheduler routing consumes that exact
+setting at each step; `cpu_only` excludes candidates not actually declared
+CPU and `prefer_cpu` scores eligible CPU candidates more favourably.
+An incompatible model pin is **not** replaced to satisfy CPU routing.
+No new model, cloud destination or budget authority can arise from a compute
+preference. Child delegations inherit the parent's complete canonical
+`onepane_routing` policy, including CPU and remote-model constraints.
+
+A missing qualified local CPU model is treated as a persisted, bounded
+resource wait on the *same* Task/Attempt, with an explicit reason and retry
+deadline. A permanently incompatible or inadequate candidate remains
+blocked for operator intervention, not silently substituted. Existing
+Research Council pinned-seat/fallback guarantees are unchanged.
+
+Per-step placement is now available in the operator-approved Project Task
+graph editor. Omitted values canonicalize to `auto` before graph hashing
+and atomic Task creation; changing placement under an existing idempotency
+key conflicts instead of rewriting an existing Task. Graph readback
+displays the persisted placement without reporting CPU/GPU hardware
+as actually running. Physical end-to-end CPU-only inference, performance,
+residency and recovery acceptance remain required separately.

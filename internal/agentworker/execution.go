@@ -52,12 +52,15 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	}
 	rp := defaultRoutePolicy()
 	_ = json.Unmarshal(run.RoutePolicy, &rp)
+ if !validComputePlacement(rp.ComputePreference){
+  return s.blockRun(ctx,run,res,"persisted Worker compute placement is invalid")
+ }
 	label := policy.DataLabel{WorkspaceID: run.WorkspaceID, Confidentiality: policy.ConfidentialityInternal, Residency: policy.ResidencyAny, Trust: policy.TrustUserInstruction}
 	tokens := int64((compiled.Manifest.UsedBytes + 3) / 4)
 	if tokens < 1 {
 		tokens = 1
 	}
-	decision, err := s.scheduler.Route(ctx, scheduler.RouteRequest{WorkspaceID: run.WorkspaceID, CapabilityID: run.CapabilityID, RoleName: run.RoleName, ProtocolLevel: run.ProtocolLevel, ContextTokens: tokens, DataLabel: label, AllowUntested: rp.AllowUntested, AllowLimited: rp.AllowLimited, AllowMediated: rp.AllowMediated, AllowDegraded: rp.AllowDegraded, RequireZeroIncrementalCost: rp.RequireZeroIncrementalCost, PreferZeroIncrementalCost: rp.PreferZeroIncrementalCost, AllowSubscriptionUsage: rp.AllowSubscriptionUsage, AllowPotentialMonetarySpend: rp.AllowPotentialMonetarySpend, LocalOnly: !rp.AllowRemote, IncludeCandidateIDs: rp.IncludeCandidateIDs, ExcludeCandidateIDs: rp.ExcludedCandidateIDs})
+	decision, err := s.scheduler.Route(ctx, scheduler.RouteRequest{WorkspaceID: run.WorkspaceID, CapabilityID: run.CapabilityID, RoleName: run.RoleName, ProtocolLevel: run.ProtocolLevel, ContextTokens: tokens, DataLabel: label, AllowUntested: rp.AllowUntested, AllowLimited: rp.AllowLimited, AllowMediated: rp.AllowMediated, AllowDegraded: rp.AllowDegraded, RequireZeroIncrementalCost: rp.RequireZeroIncrementalCost, PreferZeroIncrementalCost: rp.PreferZeroIncrementalCost, AllowSubscriptionUsage: rp.AllowSubscriptionUsage, AllowPotentialMonetarySpend: rp.AllowPotentialMonetarySpend, LocalOnly: !rp.AllowRemote, ComputePreference:rp.ComputePreference, IncludeCandidateIDs: rp.IncludeCandidateIDs, ExcludeCandidateIDs: rp.ExcludedCandidateIDs})
 	if err != nil || decision.Selected == nil {
 		if err == nil {
 			err = scheduler.ErrNoEligibleCandidate

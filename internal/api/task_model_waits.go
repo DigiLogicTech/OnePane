@@ -4,6 +4,7 @@ import (
  "context"
  "database/sql"
  "encoding/json"
+ "encoding/hex"
  "fmt"
  "strings"
 
@@ -19,6 +20,9 @@ type taskModelWait struct {
  Reason string `json:"reason,omitempty"`
 }
 
+// parseTaskModelWait intentionally projects only non-sensitive dependency status.
+// A model-supplied completion cannot authorise resource provisioning or wake
+// a Worker; those decisions are rechecked against canonical persisted scope.
 func parseTaskModelWait(raw string)(taskModelWait,bool){
  var c struct{
   ModelWait *struct{
@@ -26,15 +30,36 @@ func parseTaskModelWait(raw string)(taskModelWait,bool){
    RetryAtMS int64 `json:"retry_at_ms"`
    Reason string `json:"reason"`
   } `json:"model_wait"`
+  ToolchainWait *struct{
+   ProjectID string `json:"project_id"`
+   ProjectWorkspaceID string `json:"project_workspace_id"`
+   RuntimeID string `json:"runtime_id"`
+   ApplicationID string `json:"application_id"`
+   ManifestSHA256 string `json:"manifest_sha256"`
+   RetryAtMS int64 `json:"retry_at_ms"`
+  } `json:"toolchain_wait"`
  }
- if json.Unmarshal([]byte(raw),&c)!=nil||c.ModelWait==nil||
-  c.ModelWait.Attempt<1||c.ModelWait.RetryAtMS<1{return taskModelWait{},false}
- reason:=c.ModelWait.Reason
- if len(reason)>180{reason=reason[:180]}
- return taskModelWait{
-  Kind:"model_resources",RetryAtMS:c.ModelWait.RetryAtMS,
-  Attempt:c.ModelWait.Attempt,Reason:reason,
- },true
+ if json.Unmarshal([]byte(raw),&c)!=nil{return taskModelWait{},false}
+ if c.ModelWait!=nil&&c.ToolchainWait!=nil{return taskModelWait{},false}
+ if c.ModelWait!=nil{
+  if c.ModelWait.Attempt<1||c.ModelWait.RetryAtMS<1{return taskModelWait{},false}
+  reason:=c.ModelWait.Reason
+  if len(reason)>180{reason=reason[:180]}
+  return taskModelWait{Kind:"model_resources",RetryAtMS:c.ModelWait.RetryAtMS,
+   Attempt:c.ModelWait.Attempt,Reason:reason},true
+ }
+ if c.ToolchainWait!=nil{
+  w:=c.ToolchainWait
+  if w.ProjectID==""||w.ProjectWorkspaceID==""||w.RuntimeID==""||
+   w.ApplicationID==""||w.RetryAtMS<1||len(w.ManifestSHA256)!=64||
+   strings.ToLower(w.ManifestSHA256)!=w.ManifestSHA256{return taskModelWait{},false}
+  if _,err:=hex.DecodeString(w.ManifestSHA256);err!=nil{return taskModelWait{},false}
+  // Never send image, application, project IDs, digest or raw continuation
+  // to the client. The UI receives only a fixed operator-friendly wait note.
+  return taskModelWait{Kind:"toolchain_resources",RetryAtMS:w.RetryAtMS,
+   Reason:"Approved OCI application not yet registered running; no image substitution or automatic build replay."},true
+ }
+ return taskModelWait{},false
 }
 
 // Load visible Task IDs first through the already tenancy/project-scoped Task
@@ -56,7 +81,7 @@ func loadTaskModelWaits(ctx context.Context,db *sql.DB,tenant string,rows []task
  marks:=strings.TrimSuffix(strings.Repeat("?,",len(ids)),",")
  q:=`SELECT r.task_id,r.continuation_json
  FROM agent_worker_runs r
- JOIN tasks t ON t.id=r.task_id
+ JOIN tasks t ON t.id=r.task_id AND t.workspace_id=r.workspace_id
  WHERE r.status='waiting' AND t.state='waiting_dependency'
  AND t.workspace_id=? AND r.task_id IN (`+marks+`)
  ORDER BY r.updated_at DESC,r.id DESC`

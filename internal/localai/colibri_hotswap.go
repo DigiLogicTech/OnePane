@@ -20,6 +20,7 @@ type colibriSwapCandidate struct {
     ID string
     Status RuntimeInstanceStatus
     LastUsed int64
+    Pinned bool
 }
 
 // The caller must enforce the supervisor residency lock. Refuse a competing
@@ -27,6 +28,7 @@ type colibriSwapCandidate struct {
 func selectColibriEvictions(candidates []colibriSwapCandidate, active map[string]int) ([]string,error) {
     out:=[]string{}
     for _,c:=range candidates {
+        if c.Pinned {return nil,fmt.Errorf("Colibri model %s is pinned; unpin it before selecting another Colibri model",c.ID)}
         switch c.Status {
         case RuntimeHealthy:
             if active[c.ID]>0 {
@@ -43,7 +45,7 @@ func selectColibriEvictions(candidates []colibriSwapCandidate, active map[string
 }
 
 func (s *RuntimeSupervisor) colibriResidents(ctx context.Context,nodeID,except string) ([]colibriSwapCandidate,error) {
-    rows,err:=s.db.QueryContext(ctx, `SELECT i.deployment_id,i.status,COALESCE(i.last_seen_at,i.started_at,i.updated_at)
+    rows,err:=s.db.QueryContext(ctx, `SELECT i.deployment_id,i.status,COALESCE(i.last_seen_at,i.started_at,i.updated_at),CASE WHEN json_extract(d.runtime_config_json,'$.colibri_pinned')=1 THEN 1 ELSE 0 END
         FROM local_runtime_instances i
         JOIN model_deployments d ON d.id=i.deployment_id
         WHERE i.node_id=? AND i.deployment_id<>?
@@ -55,7 +57,7 @@ func (s *RuntimeSupervisor) colibriResidents(ctx context.Context,nodeID,except s
     result:=[]colibriSwapCandidate{}
     for rows.Next(){
         var v colibriSwapCandidate
-        if err:=rows.Scan(&v.ID,&v.Status,&v.LastUsed);err!=nil{return nil,err}
+        if err:=rows.Scan(&v.ID,&v.Status,&v.LastUsed,&v.Pinned);err!=nil{return nil,err}
         result=append(result,v)
     }
     return result,rows.Err()

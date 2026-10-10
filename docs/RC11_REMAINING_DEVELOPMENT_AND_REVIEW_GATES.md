@@ -156,3 +156,37 @@ and prove it on the physical Ubuntu Node with two isolated Workspaces.
 Do not connect OCI networks, expose an unauthenticated endpoint, or describe
 these metadata-only grants as functional service forwarding. The absence of
 physical acceptance remains a release blocker under #19 and #21.
+
+## RC11-03 — bounded Node-local health probe (2026-10-10)
+
+`internal/workspacebroker` implements a real, **internal-only** HTTP
+readiness probe against an approved directional Workspace service grant. It
+uses the existing pinned grant and independently verified loopback route, then
+freshly inspects the source's rootless OCI container on the exact designated
+local Node. The container must be running, privately networked, mounted to
+the single canonical Workspace root, in the expected security profile, with
+matching application/spec and matching loopback port. Any mismatch denies
+access before opening a socket.
+
+The probe permits only a hardcoded small set of `/health`, `/healthz`,
+`/ready`, `/readyz` and `/status` paths, even if the operator-approved
+record names something else. It sends only GET, with no caller-controlled
+headers/body/URL, no proxy or DNS, no redirects, a six-second deadline,
+two-probe maximum concurrency and a 64 KiB maximum JSON response.
+The body is reduced to a known ready/unready value; unrelated fields,
+untrusted upstream error text, cookies, Authorization headers, raw content,
+Node/host addresses and OCI identifiers are never surfaced.
+
+Before returning the normalized result, the broker checks that the exact
+source container still exists and has the same observed identity, plus that
+the Workspace grant revision, current route and pinned verification have not
+changed. Unit fixtures cover live local HTTP, wrong target/Node, extra mount,
+public listener, stale verification, changes during the request, redirects,
+oversized content and attempted credential exposure.
+
+**Important scope limitation:** The broker is not exposed via public API,
+WebUI, Agent Tool or automated Task execution. Its caller still needs a
+Gateway-verified target Workspace/Task identity and per-call tool lease.
+Rootless physical verification of actual Podman runtime/process ownership and
+the route-to-socket binding remains outstanding. This is **not** general
+Workspace-to-Workspace HTTP/TCP communication and is not a pass for #21.

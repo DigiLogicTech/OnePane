@@ -190,3 +190,30 @@ Gateway-verified target Workspace/Task identity and per-call tool lease.
 Rootless physical verification of actual Podman runtime/process ownership and
 the route-to-socket binding remains outstanding. This is **not** general
 Workspace-to-Workspace HTTP/TCP communication and is not a pass for #21.
+
+## RC11-03 — opt-in physical Workspace health mediation acceptance
+
+A dedicated `TestRealRootlessWorkspaceHealthBroker` now combines real
+rootless Podman with the *actual* Workspace service grant resolver and
+Node-local health broker. The disposable QA scenario creates two explicitly
+named Workspaces (World source and Story client) and an ungranted Research
+Workspace; starts a pinned Python HTTP daemon inside an independently
+verified, read-only-root OCI container with a single managed Workspace bind;
+confirms private networking and a random loopback-only published port;
+persists a V2-verified route from the real OCI observation; then grants only
+Story access to the fixed `/health` service resource.
+
+When actually run, acceptance requires a normalized `healthy` receipt with
+no raw server secrets or cookies, a denial to ungranted Research, and
+immediate denial following operator revocation. The approved service is
+stopped and only its precisely owned disposable container/network are
+removed, without pruning the image or touching existing User Workspaces.
+
+The physical workflow job is gated behind the existing administrator-defined
+`ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE` immutable digest and trusted
+unprivileged self-hosted Podman user, and is **skipped by default**.
+It runs only on a push to the RC11 integration branch, not an untrusted pull
+request. CI compilation and synthetic success remain distinct from actual
+physical execution. Even physical success does not authorise a general
+network proxy or Agent Tool; Task Gateway binding/lease, continuous
+revalidation and rigorous UI/installer acceptance are still required.

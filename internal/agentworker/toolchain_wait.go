@@ -26,6 +26,13 @@ type toolchainWaitRecord struct{
 type toolchainWaitEnvelope struct {
  ToolchainWait *toolchainWaitRecord `json:"toolchain_wait,omitempty"`
 }
+// Corrupt persisted wait data cannot silently become a dependency-free wait.
+func hasToolchainWaitField(raw json.RawMessage)bool{
+ var fields map[string]json.RawMessage
+ if json.Unmarshal(raw,&fields)!=nil{return true} // Fail closed on malformed persisted JSON.
+ _,ok:=fields["toolchain_wait"]
+ return ok
+}
 func decodeToolchainWait(raw json.RawMessage)*toolchainWaitRecord{
  var env toolchainWaitEnvelope
  if json.Unmarshal(raw,&env)!=nil||env.ToolchainWait==nil{return nil}

@@ -39,7 +39,7 @@ func (s *Service) PublishWorkspaceFile(ctx context.Context,c sandboxrunner.Works
  if s==nil||s.db==nil||s.artifacts==nil||s.projects==nil||
   strings.TrimSpace(s.localNodeID)==""||c.TaskID==""||c.AttemptID==""||
   c.WorkspaceID==""||c.RuntimeID==""||c.ApplicationID==""||
-  c.Path==""||len(c.Content)>sandboxrunner.WorkspacePublicationLimit{
+  c.Path==""||len(c.Content)>sandboxrunner.WorkspaceLargePublicationLimit{
   return sandboxrunner.WorkspacePublication{},ErrPublishDenied
  }
  if strings.HasPrefix(c.Path,"/")||strings.ContainsAny(c.Path,"\\\x00")||

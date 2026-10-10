@@ -438,11 +438,11 @@ assertContains(qaUI,'a56SupportBundle.prepare(sources)',
  'all sources must be freshly sanitized before preview');
 assertContains(qaUI,'supportPreview.textContent=prepared.json',
  'combined preview must not interpret source JSON as HTML');
-assertContains(qaUI,'supportPreview.textContent!==reviewed.prepared.json',
+assertContains(qaUI,'supportPreview.textContent===reviewed.prepared.json',
  'final export must be identical to the human-reviewed preview');
-assertContains(qaUI,'Date.now()-reviewed.reviewedAt>120000',
+assertContains(qaUI,'Date.now()-reviewed.reviewedAt<=120000',
  'review must expire within two minutes');
-assertContains(qaUI,'JSON.stringify(incident.snapshot())!==reviewed.browserFingerprint',
+assertContains(qaUI,'JSON.stringify(incident.snapshot())===reviewed.browserFingerprint',
  'updated browser incident captures must require new review');
 assertContains(qaUI,'a56SupportBundle.zip(reviewed.prepared)',
  'only the reviewed locally sanitized sources may enter ZIP');

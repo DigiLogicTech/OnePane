@@ -732,3 +732,24 @@ QA does not export documents, model replies, filenames, asset IDs,
 selected seat identities, Library contents, provenance hashes or raw
 inference prompts. Historic replies may still be recorded after revocation,
 while current permission checks stop new protected dispatch.
+
+## Protected Research completion and revocation transaction
+
+For a Research Council turn containing locally delivered frozen Library
+evidence, the worker no longer writes the model response and successful
+turn in separate transactions. Instead, the final completion transaction
+atomically rechecks the active human consent, exact Research and evidence
+manifest hashes, selected member and round, active tenant/Team/Project,
+the original approving human's active membership, and **all version grants**
+including pinned/latest rules and live directional publications. A concurrent
+revocation/grant update cannot interleave between this final authorization
+check and the durable response. If any predicate fails, the transaction
+rolls back without a message or successful turn. The worker discards its
+model response and pauses the Council for operator intervention.
+
+This prevents a *post-inference* revocation race in the persistence layer;
+it cannot retract plaintext from a model invocation that had already
+started before revocation. It does not imply that the local runtime cancels
+in-flight generation instantly. Existing non-protected Council/Team paths
+retain their own behavior. SQLite regression tests cover success,
+idempotency/replay, Library permission withdrawal, and revoked human consent.

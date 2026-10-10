@@ -123,6 +123,50 @@ func TestResearchSeatVerifiedTextDeliveryUsesRealLibraryAndArtifactGrants(t *tes
   decoded.SHA256!=blob.ContentHash{
   t.Fatalf("verified local context does not preserve exact text/hash: %+v %v",decoded,err)
  }
+ // A protected response and its turn state are committed only together.
+ // Exercise actual Research turn requests and a managed system principal.
+ if err=worker.EnsureSystemPrincipal(ctx);err!=nil{t.Fatal(err)}
+ turns,err:=council.RequestRound(ctx,team.RequestRoundCommand{
+  SessionID:session.ID,RequestedByPrincipalID:"human",
+  ResearchPhase:team.ResearchPhaseIndependent,
+ })
+ if err!=nil||len(turns)!=2{t.Fatalf("Research round creation: %d %v",len(turns),err)}
+ bySeat:=map[string]team.TurnRequest{}
+ for _,turn:=range turns{
+  bySeat[turn.MemberID]=turn
+  if _,err=db.SQL().ExecContext(ctx,`UPDATE team_turn_requests
+   SET status='running' WHERE id=?`,turn.ID);err!=nil{t.Fatal(err)}
+ }
+ makeResponse:=func(label string)json.RawMessage{
+  raw,e:=json.Marshal(map[string]any{
+   "text":label,"research_provenance":map[string]any{
+    "research_evidence_attached":true,
+    "session_manifest_sha256":manifest.SnapshotSHA256,
+    "research_evidence_manifest_sha256":frozen.Evidence.ManifestSHA256,
+   },
+  })
+  if e!=nil{t.Fatal(e)}
+  return raw
+ }
+ firstTurn:=bySeat[first.ID]
+ secondTurn:=bySeat[second.ID]
+ if _,err=worker.completeProtectedResearchTurn(ctx,"tenant",session.ID,firstTurn.ID,
+  first.ID,manifest.SnapshotSHA256,frozen.Evidence.ManifestSHA256,
+  1,makeResponse("first protected local answer"));err!=nil{t.Fatal(err)}
+ if _,err=worker.completeProtectedResearchTurn(ctx,"tenant",session.ID,firstTurn.ID,
+  first.ID,manifest.SnapshotSHA256,frozen.Evidence.ManifestSHA256,
+  1,makeResponse("replay"));err==nil{
+  t.Fatal("completed protected turn was replayed")
+ }
+ assertMessages:=func(expected int){
+  t.Helper()
+  var count int
+  if e:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM team_messages
+   WHERE session_id=?`,session.ID).Scan(&count);e!=nil||count!=expected{
+   t.Fatalf("unexpected protected messages %d wanted %d: %v",count,expected,e)
+  }
+ }
+ assertMessages(1)
  // The source grant governs every subsequent read, even when its original
  // metadata is approved and content-addressed.
  if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_library_grants
@@ -131,9 +175,21 @@ func TestResearchSeatVerifiedTextDeliveryUsesRealLibraryAndArtifactGrants(t *tes
   manifest.SnapshotSHA256,consent);e==nil||len(leaked.Sections)>0{
   t.Fatal("revoked Workspace Library grant still released private evidence")
  }
+ if _,e:=worker.completeProtectedResearchTurn(ctx,"tenant",session.ID,secondTurn.ID,
+  second.ID,manifest.SnapshotSHA256,frozen.Evidence.ManifestSHA256,
+  1,makeResponse("must not persist after grant withdrawal"));e==nil{
+  t.Fatal("withdrawn Library grant permitted protected reply persistence")
+ }
+ assertMessages(1)
  if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_library_grants
   SET enabled=1 WHERE project_workspace_id=? AND asset_id=?`,workspaceID,asset.ID);err!=nil{t.Fatal(err)}
  if _,err=projectService.RevokeResearchSeatEvidence(ctx,session.ID,"human");err!=nil{t.Fatal(err)}
+ if _,e:=worker.completeProtectedResearchTurn(ctx,"tenant",session.ID,secondTurn.ID,
+  second.ID,manifest.SnapshotSHA256,frozen.Evidence.ManifestSHA256,
+  1,makeResponse("must not persist after human consent revocation"));e==nil{
+  t.Fatal("revoked human consent permitted protected reply persistence")
+ }
+ assertMessages(1)
  if _,err=worker.consentForSeat(ctx,"tenant",session.ID,second.ID,manifest.SnapshotSHA256);err==nil{
   t.Fatal("revoked Council silently restarted without local evidence protection")
  }

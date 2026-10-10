@@ -88,7 +88,7 @@ func TestPairedHeartbeatSequenceCannotReanimateWithdrawnRemoteCapabilities(t *te
  if afterRev!=rev||status(oldID)!="unavailable"{
   t.Fatal("duplicate manifest re-imported stale model capability")
  }
- if err=db.SQL().ExecContext(ctx,`UPDATE harness_nodes
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE harness_nodes
   SET trust_state='unavailable' WHERE id='peer'`);err!=nil{t.Fatal(err)}
  renewed:=mk(300,"current-dep","example/current")
  if err=svc.ReceiveHeartbeat(ctx,"peer",renewed);err!=nil{

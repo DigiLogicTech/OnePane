@@ -4,7 +4,7 @@
 (function(root){
  "use strict";
  const valid={
-  task:/^task-[a-f0-9]{24}$/,run:/^run-[a-f0-9]{24}$/,
+  task:/^task-[a-f0-9]{24}$/,run:/^run-[a-f0-9]{24}$/,attempt:/^attempt-[a-f0-9]{24}$/,
   tool:/^tool-[a-f0-9]{24}$/,operation:/^operation-[a-f0-9]{24}$/,
   observation:/^observation-[a-f0-9]{24}$/,
   verification:/^verification-[a-f0-9]{24}$/,trace:/^trace-[a-f0-9]{24}$/
@@ -29,6 +29,42 @@
   const assuranceRows=snapshot.assurance_evidence;
   if(rows!==undefined&&(!Array.isArray(rows)||rows.length>24))throw Error("Invalid Worker provenance");
   if(assuranceRows!==undefined&&(!Array.isArray(assuranceRows)||assuranceRows.length>24))throw Error("Invalid assurance provenance");
+  const rawLineage=snapshot.async_lineage,rawProbes=snapshot.probe_witnesses;
+  if(rawLineage!==undefined&&(!Array.isArray(rawLineage)||rawLineage.length>24))
+   throw Error("Oversized asynchronous lineage");
+  if(rawProbes!==undefined&&(!Array.isArray(rawProbes)||rawProbes.length>24))
+   throw Error("Oversized probe witnesses");
+  const lineage=[];
+  for(const e of rawLineage||[]){
+   if(!e||!permittedTasks.has(e.task_ref)||!valid.attempt.test(e.attempt_ref||"")||
+    !valid.run.test(e.worker_run_ref||"")||
+    e.link_kind!=="persisted_task_attempt_worker_foreign_keys"||
+    !Number.isSafeInteger(e.steps_recorded)||e.steps_recorded<0||e.steps_recorded>256)continue;
+   lineage.push({task_ref:e.task_ref,attempt_ref:e.attempt_ref,worker_run_ref:e.worker_run_ref,
+    attempt_state:en(e.attempt_state,["created","queued","running","waiting","succeeded",
+     "failed","cancelled","interrupted"]),
+    worker_state:en(e.worker_state,["running","waiting","blocked","succeeded","failed","interrupted"]),
+    steps_recorded:e.steps_recorded});
+  }
+  const probes=[];
+  for(const e of rawProbes||[]){
+   if(!e||!permittedTasks.has(e.task_ref)||
+    !valid.verification.test(e.verification_ref||"")||
+    !valid.observation.test(e.observation_ref||"")||
+    !["direct","integration"].includes(e.role)||
+    e.evidence_class!=="recorded_probe_observation_not_external_effect_attestation")continue;
+   const intact=e.integrity_rechecked===true,independent=e.independent_source===true;
+   const fresh=e.observed_after_attempt===true&&e.observed_after_operation_start===true;
+   const qualified=e.corroborating_integration_probe===true&&e.recorded_assurance_pass===true&&
+    e.role==="integration"&&intact&&independent&&fresh;
+   probes.push({task_ref:e.task_ref,verification_ref:e.verification_ref,
+    observation_ref:e.observation_ref,role:e.role,
+    source_trust:en(e.source_trust,["trusted_control","trusted_procedure","authoritative_data",
+     "user_instruction","untrusted_content","unverified_derived","verified_derived"]),
+    integrity_rechecked:intact,independent_source:independent,fresh,
+    recorded_assurance_pass:e.recorded_assurance_pass===true,
+    corroborating_integration_probe:qualified});
+  }
   const worker=[];
   for(const e of rows||[]){
    if(!e||!permittedTasks.has(e.task_ref)||!valid.run.test(e.run_ref||"")||
@@ -80,7 +116,10 @@
   }
   return {scope:"canonical_project_workspace",schema_version:1,
    tagged_capture_reviewed:capture!==undefined,created,
-   worker,assurance,worker_truncated:snapshot.worker_tool_links_truncated===true,
+   worker,assurance,lineage,probes,
+   lineage_truncated:snapshot.async_lineage_truncated===true,
+   probes_truncated:snapshot.probe_witnesses_truncated===true,
+   worker_truncated:snapshot.worker_tool_links_truncated===true,
    assurance_truncated:snapshot.assurance_evidence_truncated===true,
    limitations:"Persistent same-Task associations only; no timing-based inference or external side-effect attestation"};
  }
@@ -95,6 +134,20 @@
    ...p.worker.map(e=>"  Task "+e.task_ref+" Worker "+e.run_ref+" → "+e.source+" "+e.target_ref+
      "; journal="+e.journal_status+" persisted="+e.target_status+
      (e.observation_ref?" observation="+e.observation_ref:"")),
+   "Asynchronous persisted Task → Attempt → Worker links: "+(p.lineage?.length||0)+
+    (p.lineage_truncated?" (older runs omitted)":""),
+   ...(p.lineage||[]).map(e=>"  Task "+e.task_ref+" → Attempt "+e.attempt_ref+" ("+e.attempt_state+
+    ") → Worker "+e.worker_run_ref+" ("+e.worker_state+") steps="+e.steps_recorded+
+    " [FK-linked, not propagated HTTP trace]"),
+   "Rechecked assurance probe observations: "+(p.probes?.length||0)+
+    (p.probes_truncated?" (older evidence omitted)":""),
+   ...(p.probes||[]).map(e=>"  Task "+e.task_ref+" verification="+e.verification_ref+
+    " observation="+e.observation_ref+" role="+e.role+" trust="+e.source_trust+
+    " integrity-rechecked="+e.integrity_rechecked+" fresh="+e.fresh+
+    " independent-source="+e.independent_source+
+    " recorded-assurance-pass="+e.recorded_assurance_pass+
+    " corroborating-integration-record="+e.corroborating_integration_probe+
+    " [revalidated stored evidence, not a new external probe]"),
    "Independent-assurance records: "+p.assurance.length+(p.assurance_truncated?" (older records omitted)":""),
    ...p.assurance.map(e=>"  Task "+e.task_ref+" verification="+e.verification_ref+
     " state="+e.verification_status+" assurance="+e.assurance_status+

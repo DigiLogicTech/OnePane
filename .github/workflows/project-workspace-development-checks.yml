@@ -20,6 +20,8 @@ on:
       - 'internal/webui/static/workspace-ai-workflow.js'
       - 'internal/webui/static/qa-trace-correlation.js'
       - 'scripts/validate_qa_trace_correlation.js'
+      - 'internal/api/qa_async_probe_evidence.go'
+      - 'internal/api/qa_async_probe_evidence_test.go'
       - 'internal/api/qa_deep_provenance.go'
       - 'internal/api/qa_deep_provenance_test.go'
       - 'internal/api/qa_trusted_trace_test.go'

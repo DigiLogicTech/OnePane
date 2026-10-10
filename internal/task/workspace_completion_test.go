@@ -115,3 +115,37 @@ func TestLegacyProjectTasksKeepExistingCompletionSemantics(t *testing.T) {
   t.Fatalf("legacy Task was rewritten: got %s",got.Completion)
  }
 }
+
+func TestWorkspaceTaskComputePlacementIsPinnedAndValidated(t *testing.T){
+ pid,wid:="project","cpu-workspace"
+ for _,place:=range []string{"auto","prefer_cpu","cpu_only","prefer_gpu","gpu_only"}{
+  svc,_,_,_:=newTestService(1700000000000)
+  input,_:=json.Marshal(map[string]any{
+   "onepane_routing":map[string]any{"compute_preference":place},
+  })
+  created,err:=svc.Create(context.Background(),CreateCommand{
+   WorkspaceID:"tenant",ProjectID:&pid,ProjectWorkspaceID:&wid,
+   Objective:"Run on approved placement",Completion:input,
+  })
+  if err!=nil{t.Fatalf("valid placement %s rejected: %v",place,err)}
+  var body struct{Routing struct{
+   Compute string `json:"compute_preference"`
+   Access struct{ Remote bool `json:"remote_models"` } `json:"workspace_access"`
+  } `json:"onepane_routing"`}
+  if err=json.Unmarshal(created.Completion,&body);err!=nil||
+   body.Routing.Compute!=place||body.Routing.Access.Remote{
+   t.Fatalf("placement changed remote authority: %s %v",created.Completion,err)
+  }
+ }
+ for _,raw:=range []string{
+  `{"onepane_routing":{"compute_preference":"cloud_only"}}`,
+  `{"onepane_routing":{"compute_preference":123}}`,
+  `{"onepane_routing":{"compute_preference":null}}`,
+ }{
+  svc,_,_,_:=newTestService(1700000000000)
+  if _,err:=svc.Create(context.Background(),CreateCommand{
+   WorkspaceID:"tenant",ProjectID:&pid,ProjectWorkspaceID:&wid,
+   Objective:"Fail closed",Completion:json.RawMessage(raw),
+  });err==nil{t.Fatalf("invalid compute authority persisted: %s",raw)}
+ }
+}

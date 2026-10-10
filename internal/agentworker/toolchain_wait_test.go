@@ -97,10 +97,34 @@ func TestApprovedWorkspaceToolchainWaitSurvivesRestartAndAvoidsDuplicateAttempt(
  if err!=nil||notYet.State!=task.StateWaitingDependency{
   t.Fatalf("stopped OCI resumed work despite observed resources not running: %+v %v",notYet,err)
  }
+ deferred,err:=restarted.getRun(ctx,run.ID)
+ if err!=nil{t.Fatal(err)}
+ next:=decodeToolchainWait(deferred.Continuation)
+ if next==nil||next.RetryAtMS<=(clock.Real{}).UnixMilli(){
+  t.Fatalf("expired wait was not deferred after unavailable resource check: %+v",next)
+ }
+ if err:=restarted.syncResumedRuns(ctx);err!=nil{t.Fatal(err)}
+ stillDeferred,err:=restarted.getRun(ctx,run.ID)
+ if err!=nil{t.Fatal(err)}
+ if again:=decodeToolchainWait(stillDeferred.Continuation);again==nil||again.RetryAtMS!=next.RetryAtMS{
+  t.Fatalf("resource wait got repeatedly polled before deadline: %+v",again)
+ }
  if _,err:=db.SQL().ExecContext(ctx,
   `UPDATE project_runtimes SET desired_state='running',status='running' WHERE id=?`,runtime.ID);err!=nil{t.Fatal(err)}
  if _,err:=db.SQL().ExecContext(ctx,
   `UPDATE project_applications SET status='running' WHERE id=?`,app.ID);err!=nil{t.Fatal(err)}
+ // The recently re-armed deadline must still hold even after the app
+ // becomes ready. Force the exact durable deadline due without sleeping.
+ if err:=restarted.syncResumedRuns(ctx);err!=nil{t.Fatal(err)}
+ beforeDeadline,err:=tasks.Get(ctx,created.ID)
+ if err!=nil||beforeDeadline.State!=task.StateWaitingDependency{
+  t.Fatalf("toolchain wait resumed early: %+v %v",beforeDeadline,err)
+ }
+ nowDue:=*next
+ nowDue.RetryAtMS=clock.Real{}.UnixMilli()-1000
+ dueAgain,_:=json.Marshal(toolchainWaitEnvelope{ToolchainWait:&nowDue})
+ if _,err:=db.SQL().ExecContext(ctx,
+  `UPDATE agent_worker_runs SET continuation_json=? WHERE id=?`,string(dueAgain),run.ID);err!=nil{t.Fatal(err)}
  if err:=restarted.syncResumedRuns(ctx);err!=nil{t.Fatal(err)}
  resumed,err:=tasks.Get(ctx,created.ID)
  if err!=nil||resumed.State!=task.StateRunning{

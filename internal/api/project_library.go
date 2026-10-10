@@ -229,13 +229,18 @@ func (s *Server) downloadWorkspaceLibraryVersion(w http.ResponseWriter,r *http.R
  reader,raw,err:=s.libraryArtifacts.Open(r.Context(),artifactID)
  if err!=nil{writeError(w,http.StatusServiceUnavailable,"Library blob unavailable");return}
  defer reader.Close()
- if raw.ContentHash!=selected.ContentHash||raw.SizeBytes!=selected.SizeBytes||raw.ProjectID==nil||*raw.ProjectID!=p.ID{
+ if !libraryArtifactMatchesProject(selected,raw,p.ID,p.WorkspaceID){
   writeError(w,http.StatusForbidden,"Library provenance mismatch");return
  }
+ w.Header().Set("X-Content-Type-Options","nosniff")
+ w.Header().Set("Cache-Control","no-store, private")
  w.Header().Set("Content-Type","application/octet-stream")
  w.Header().Set("Content-Disposition",fmt.Sprintf("attachment; filename=\"onepane-%s-v%d\"",r.PathValue("assetID"),version))
  w.Header().Set("X-OnePane-Content-Hash",selected.ContentHash)
  w.Header().Set("Content-Length",strconv.FormatInt(selected.SizeBytes,10))
  w.WriteHeader(http.StatusOK)
- _,_=io.Copy(w,reader)
+ // The artifact was verified before opening, and the streamed response
+ // must never exceed the exact immutable version's advertised byte count.
+ // A mid-stream disk fault cannot be converted to success after headers.
+ _,_=io.CopyN(w,reader,selected.SizeBytes)
 }

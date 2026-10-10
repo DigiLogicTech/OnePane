@@ -9,7 +9,6 @@ import (
  "strings"
  "unicode/utf8"
 
- "github.com/DigiLogicTech/OnePane/internal/artifact"
 )
 
 const workspaceLibraryTextPreviewLimit int64=256<<10
@@ -78,9 +77,7 @@ func (s *Server) previewWorkspaceLibraryVersion(w http.ResponseWriter,r *http.Re
  reader,raw,err:=s.libraryArtifacts.Open(r.Context(),artifactID)
  if err!=nil{writeError(w,http.StatusServiceUnavailable,"Library content unavailable");return}
  defer reader.Close()
- if raw.Status!=artifact.StatusActive||raw.ContentHash!=selected.ContentHash||
-  raw.SizeBytes!=selected.SizeBytes||raw.ProjectID==nil||*raw.ProjectID!=p.ID||
-  raw.WorkspaceID!=p.WorkspaceID{
+ if !libraryArtifactMatchesProject(selected,raw,p.ID,p.WorkspaceID){
   writeError(w,http.StatusForbidden,"Library provenance mismatch");return
  }
  bytes,err:=readWorkspaceLibraryPreview(reader,selected.SizeBytes)

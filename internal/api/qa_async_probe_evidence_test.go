@@ -88,6 +88,8 @@ func qaAsyncFixture(t *testing.T)(*sql.DB,[]task.Task){
 
 func TestQAAsyncLineageAndRehashedIndependentWitnesses(t *testing.T){
  db,visible:=qaAsyncFixture(t);defer db.Close()
+ // Regression: probe integrity rechecks cannot deadlock a single-connection SQLite pool.
+ db.SetMaxOpenConns(1)
  ctx:=context.Background()
  chains,truncated,err:=loadQAAsyncLineage(ctx,db,"tenant","game","world",visible)
  if err!=nil||truncated||len(chains)!=1{t.Fatalf("lineage: %+v truncated=%v err=%v",chains,truncated,err)}

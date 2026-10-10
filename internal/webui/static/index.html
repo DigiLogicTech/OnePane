@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="/style.css" />
   <link rel="stylesheet" href="/ui-consistency.css" />
   <link rel="stylesheet" href="/attention-drawer.css" />
+  <link rel="stylesheet" href="/debug-centre.css" />
 </head>
 <body>
   <section id="authGate" class="auth-gate" aria-live="polite">
@@ -102,6 +103,7 @@
         <div class="drawer-resizer" id="drawerResizer" role="separator" aria-orientation="horizontal"></div>
         <div class="drawer-tabs" id="drawerTabs"></div>
         <div class="drawer-actions">
+          <button class="btn a58-drawer-debug" type="button" id="a58OpenDebugCentre" title="Open Debug & Diagnostics" aria-label="Open Debug and Diagnostics Centre">Debug</button>
           <button class="shell-panel-toggle drawer-edge-toggle" id="drawerToggle" aria-label="Collapse Logs drawer" title="Collapse Logs drawer" aria-controls="bottomDrawer" aria-expanded="true"><svg class="panel-toggle-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6"/></svg></button>
         </div>
         <div id="drawerContent" class="drawer-content"></div>
@@ -180,6 +182,7 @@
   <script src="/qa-report-summary.js"></script>
   <script src="/qa-incident-capture.js"></script>
   <script src="/qa-consolidated-support.js"></script>
+  <script src="/debug-centre.js"></script>
   <script src="/workspace-ai-workflow.js"></script>
   <script src="/project-library-route.js"></script>
   <script src="/evidence-audit-page.js"></script>

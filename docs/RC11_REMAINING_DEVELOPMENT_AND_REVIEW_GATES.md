@@ -836,3 +836,22 @@ credential, tool payload or model output is returned by this read path.
 Task state remains subject to actual verified evidence; operator inspection
 is not a replay permit. No hot-process heartbeat, remote fencing or
 physical-Node acceptance is implied.
+
+## Orchestrator — unknown external Tool mutation recovery state
+
+The Project Task graph and recovery checkpoint now inspect only the bounded,
+Task/tenant-scoped **Operation state** within the same consistent SQLite
+snapshot as Task/Attempt and dependency state. The operator sees
+`external_effect_health`, not secret-bearing tool input, receipts, endpoint
+URLs or capability leases.
+
+Unknown or blocked-unknown external outcomes, failed compensation, and
+inflight mutations that outlived the Task's running state are classified as
+`needs_attention`. A legitimately running external Operation remains a
+live observation, not an automatic crash verdict. Resolution requires
+independent observation, verification or authorised compensation through
+the existing OperationCoordinator. No fallback Tool invocation or Task
+replay is initiated by a graph read. The external-effect classification
+also changes the deterministic recovery checkpoint digest. Automated
+tests cover tenant/Task isolation, provider-state precedence, and
+unknown-result review instead of automatic retry.

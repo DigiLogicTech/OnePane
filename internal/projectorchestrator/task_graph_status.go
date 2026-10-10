@@ -46,6 +46,9 @@ func evaluateTaskGraph(graph *TaskGraph)(TaskGraphProgress,string){
    }
   }
   switch{
+  case needsExternalEffectReview(n.ExternalEffectHealth):
+   n.Readiness="needs_attention"
+   n.NextAction="External Tool mutation has an unknown outcome or unfinished compensation; use independent observation/verification before any replay."
   case needsAttemptRecoveryReview(n.AttemptHealth):
    n.Readiness="needs_attention"
    n.NextAction="Attempt/Worker ownership is inconsistent or orphaned; inspect recovery records and reconcile unknown side effects before resuming."

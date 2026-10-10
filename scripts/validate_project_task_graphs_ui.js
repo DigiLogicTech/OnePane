@@ -58,6 +58,11 @@ const healthCard=scope.a61GraphCard({id:"graph",name:"Recovery",nodes:[{
  key:"orphan",readiness:"needs_attention",attempt_health:attack
 }]});
 assert(healthCard.includes("Execution record: &lt;img"));
+const externalHealthCard=scope.a61GraphCard({id:"graph",name:"Recovery",nodes:[{
+ key:"mutating",readiness:"needs_attention",external_effect_health:attack
+}]});
+assert(externalHealthCard.includes("External operation: &lt;img"));
+assert(!externalHealthCard.includes("<img"));
 assert(!healthCard.includes("<img"));
 const builder=scope.a61GraphBuilderMarkup({
  name:attack,idempotency_key:"safe-key",approved:false,

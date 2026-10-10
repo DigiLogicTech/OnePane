@@ -45,6 +45,23 @@ func (s *Server) listWorkspaceLibrary(w http.ResponseWriter,r *http.Request){
  items,err:=lib.WorkspaceLibraryAssets(r.Context(),p.ID,workspaceID,r.URL.Query().Get("q"))
  respondDomain(w,items,err,http.StatusOK)
 }
+// Packet creation is a read-only permission-filtered selection. It does
+// not attach evidence to a Council/Task or provide a transferable read token.
+func(s *Server) buildWorkspaceEvidencePacket(w http.ResponseWriter,r *http.Request){
+ p,workspaceID,_,ok:=s.workspaceRuntimeContext(w,r,false)
+ if !ok{return}
+ builder,ok:=s.projects.(interface{
+  BuildWorkspaceEvidencePacket(context.Context,string,string,[]projectworkspace.WorkspaceEvidenceSelection)(projectworkspace.WorkspaceEvidencePacket,error)
+ })
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Workspace evidence selection unavailable");return}
+ var input struct{
+  Selections []projectworkspace.WorkspaceEvidenceSelection `json:"selections"`
+ }
+ if !decodeJSON(w,r,&input){return}
+ receipt,err:=builder.BuildWorkspaceEvidencePacket(r.Context(),p.ID,workspaceID,input.Selections)
+ respondDomain(w,receipt,err,http.StatusOK)
+}
+
 // A Workspace never receives the unrestricted Project-wide asset history.
 // Each version is independently filtered by the currently effective read grant
 // or enabled directional publication, including pinned-versus-latest policy.

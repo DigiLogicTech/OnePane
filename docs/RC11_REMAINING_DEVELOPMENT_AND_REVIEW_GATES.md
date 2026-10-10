@@ -795,3 +795,25 @@ scheduler observations. The original Research seat model pin remains in
 force, and the system never silently substitutes another model on retry.
 These constraints prevent a rate-limit loop from regenerating a round
 indefinitely without the operator.
+
+## Startup — orphan Agent Worker Attempt recovery
+
+The existing atomic admission and `RecoverLostRuns` path already blocks
+in-flight worker executions after restart. Legacy or inconsistent records
+may nevertheless contain a live Agent Worker-owned Attempt with **no live
+Worker row**. Startup recovery now separately detects the exact Agent Worker
+protocol marker and principal, and refuses to adopt any other Task executor's
+Attempt. The orphan finder includes only created/queued/running/waiting
+Attempts and excludes every Attempt with a running or legitimately waiting
+Worker. Each candidate is rechecked within a SQLite write transaction
+before the canonical Task recovery method atomically interrupts its Attempt,
+blocks the Task, records a recovery event and enqueues an operator recovery
+outbox job. No model request or Tool mutation is replayed. One inconsistent
+Task does not prevent independent orphan inspection. Repeated startup calls
+are idempotent; a successful Task still requires independent reconciliation
+and explicit admission before future execution.
+
+This adds a narrowly scoped legacy-database/consistency recovery seam,
+not a distributed lease or live-heartbeat expiry algorithm. Do not invoke
+startup recovery while an existing independent Worker incarnation remains
+active. Physical Node/process lifecycle acceptance remains outstanding.

@@ -7,7 +7,6 @@ import (
  "encoding/hex"
  "encoding/json"
  "errors"
- "fmt"
  "regexp"
  "strings"
 
@@ -125,8 +124,9 @@ func(s *Service) CreateTaskGraph(ctx context.Context,c CreateTaskGraphCommand)(T
  for i:=range c.Nodes{c.Nodes[i].Objective=strings.TrimSpace(c.Nodes[i].Objective)}
  order,hash,err:=graphCreationPlan(c)
  if err!=nil{return TaskGraph{},err}
+ if s==nil||s.db==nil||s.tx==nil{return TaskGraph{},ErrInvalid}
  creator,ok:=s.tasks.(graphTaskCreator)
- if s==nil||s.db==nil||s.tx==nil||!ok{return TaskGraph{},ErrInvalid}
+ if !ok{return TaskGraph{},ErrInvalid}
  graphID,err:=s.ids.New("ptgraph")
  if err!=nil{return TaskGraph{},err}
  eventID,err:=s.ids.New("evt")

@@ -441,6 +441,15 @@ func classifyContainerExecResult(stdout, stderr string, err error) (ExecResult, 
  return result,nil
 }
 
+// verifiedCommandTarget requires evidence of exact OCI ownership immediately
+// before a command. The caller must address the immutable inspected container
+// ID, not a predictable mutable name that could be replaced after inspection.
+func verifiedCommandTarget(runtimeID,applicationID string,st ContainerState)bool{
+ return st.ID!=""&&st.Status=="running"&&st.IsolationVerified&&
+  st.RuntimeID==runtimeID&&st.ApplicationID==applicationID&&
+  st.Name==containerName(runtimeID,applicationID)&&st.SpecHash!=""
+}
+
 func (e *CLIEngine) ExecContainer(ctx context.Context, runtimeID, applicationID string, command []string) (ExecResult, error) {
  if len(command)==0||len(command)>128{return ExecResult{},ErrInvalidInput}
  for _,arg:=range command{
@@ -448,42 +457,44 @@ func (e *CLIEngine) ExecContainer(ctx context.Context, runtimeID, applicationID 
  }
  p,err:=e.Probe(ctx)
  if err!=nil{return ExecResult{},err}
- name:=containerName(runtimeID,applicationID)
- args:=append([]string{"exec",name},command...)
+ if !p.Rootless{return ExecResult{},ErrRootlessRequired}
+ st,err:=e.InspectContainer(ctx,runtimeID,applicationID)
+ if err!=nil{return ExecResult{},err}
+ if !verifiedCommandTarget(runtimeID,applicationID,st){
+  return ExecResult{},fmt.Errorf("%w: refused command on unverified Workspace OCI container",ErrInvalidInput)
+ }
+ args:=append([]string{"exec",st.ID},command...)
  stdout,stderr,err:=runCLI(ctx,p.Executable,args...)
  if ctx.Err()!=nil{return ExecResult{},ctx.Err()}
  return classifyContainerExecResult(stdout,stderr,err)
 }
 
 func (e *CLIEngine) StopContainer(ctx context.Context, runtimeID, applicationID string) (ContainerState, error) {
-	p, err := e.Probe(ctx)
-	if err != nil {
-		return ContainerState{}, err
-	}
-	name := containerName(runtimeID, applicationID)
-	out, stderr, err := runCLI(ctx, p.Executable, "container", "inspect", name, "--format", `{{.State.Status}}|{{.Id}}`)
-	if err != nil {
-		if containerNotFound(stderr) {
-			return ContainerState{Name: name, Status: "absent"}, nil
-		}
-		return ContainerState{}, fmt.Errorf("inspect container: %v: %s", err, stderr)
-	}
-	parts := strings.SplitN(out, "|", 2)
-	id := ""
-	status := ""
-	if len(parts) > 0 {
-		status = parts[0]
-	}
-	if len(parts) > 1 {
-		id = parts[1]
-	}
-	if status == "running" {
-		if _, stderr, err := runCLI(ctx, p.Executable, "stop", "--time", "10", name); err != nil {
-			return ContainerState{}, fmt.Errorf("stop container: %v: %s", err, stderr)
-		}
-		status = "stopped"
-	}
-	return ContainerState{Name: name, ID: id, Status: status}, nil
+ p,err:=e.Probe(ctx)
+ if err!=nil{return ContainerState{},err}
+ if !p.Rootless{return ContainerState{},ErrRootlessRequired}
+ st,err:=e.InspectContainer(ctx,runtimeID,applicationID)
+ if err!=nil{return ContainerState{},err}
+ if st.Status=="absent"{return st,nil}
+ if st.ID==""||!st.IsolationVerified||st.RuntimeID!=runtimeID||
+  st.ApplicationID!=applicationID||st.Name!=containerName(runtimeID,applicationID)||
+  st.SpecHash==""{
+  return ContainerState{},fmt.Errorf("%w: refused stop of unverified Workspace OCI container",ErrInvalidInput)
+ }
+ if st.Status=="running"{
+  if _,stderr,err:=runCLI(ctx,p.Executable,"stop","--time","10",st.ID);err!=nil{
+   return ContainerState{},fmt.Errorf("stop container: %v: %s",err,stderr)
+  }
+ }
+ // An engine command returning zero is not evidence that the exact
+ // container actually stopped. Check the pinned ID and terminal state.
+ verified,err:=e.InspectContainer(ctx,runtimeID,applicationID)
+ if err!=nil{return ContainerState{},err}
+ if verified.ID!=st.ID||!verified.IsolationVerified||
+  verified.Status=="running"||verified.Status=="restarting"{
+  return ContainerState{},fmt.Errorf("%w: managed container stop not independently verified",ErrInvalidInput)
+ }
+ return verified,nil
 }
 func (e *CLIEngine) StopRuntime(ctx context.Context, runtimeID string) ([]ContainerState, error) {
 	p, err := e.Probe(ctx)

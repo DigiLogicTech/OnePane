@@ -58,7 +58,7 @@ async function a46RenderLibrary(project,workspace,root){
    <button class="btn" type="button" id="a46ClearSearch" ${query?"":"disabled"}>Clear</button>
  </form>
  <div class="a46-library-items">${cards||'<div class="empty-state compact">No Project Library assets. Upload a document, source artifact or asset to begin.</div>'}</div>
- ${source?.id?'<div class="a62-evidence-panel"><div class="toolbar"><button type="button" class="btn" data-a62-build disabled>Build scoped evidence manifest</button></div><p class="list-meta">Select up to 16 exact authorised versions. Generates only a permission-checked hash and metadata receipt, not document bytes or a transferable read grant.</p><pre class="a62-evidence-receipt" data-a62-result hidden aria-label="Scoped Workspace evidence metadata manifest"></pre></div>':""}`;
+ ${source?.id?'<div class="a62-evidence-panel"><div class="toolbar"><button type="button" class="btn" data-a62-build disabled>Build scoped evidence manifest</button><button type="button" class="btn" data-a63-read disabled>Read verified text (up to 8)</button></div><p class="list-meta">Metadata: choose up to 16 exact versions. Text retrieval: choose up to 8 UTF-8 documents, 64 KiB each, 256 KiB total. Every read is hash checked and permissions are rechecked. Untrusted text is for operator review only: it is not sent to the Orchestrator or Council.</p><pre class="a62-evidence-receipt" data-a62-result hidden aria-label="Scoped Workspace evidence metadata manifest"></pre><pre class="a62-evidence-receipt" data-a63-result hidden aria-label="Verified untrusted Workspace Library text"></pre></div>':""}`;
  // Evidence selection is deliberate and read-only. Server revalidates each
  // selected immutable version against the current direct grant/publication.
  const build=root.querySelector("[data-a62-build]");
@@ -67,8 +67,36 @@ async function a46RenderLibrary(project,workspace,root){
    asset_id:String(el.dataset.a62Asset||""),
    version:Number(el.dataset.a62Version||0)
   }));
-  const update=()=>{build.disabled=selected().length===0};
+  const read=root.querySelector("[data-a63-read]");
+  const update=()=>{
+   const count=selected().length;
+   build.disabled=count===0;
+   if(read)read.disabled=count===0||count>8;
+  };
   root.querySelectorAll("[data-a62-asset]").forEach(input=>input.addEventListener("change",update));
+  read?.addEventListener("click",async()=>{
+   const selections=selected();
+   if(!selections.length||selections.length>8){
+    notice("Select one to eight small text Library versions.","bad");return;
+   }
+   read.disabled=true;
+   const output=root.querySelector("[data-a63-result]");
+   if(output){output.hidden=true;output.textContent="";}
+   try{
+    const evidence=await apiRequest(prefix+"/workspaces/"+encodeURIComponent(source.id)+
+     "/evidence-packets/verified-text",{
+     method:"POST",body:JSON.stringify({selections})
+    });
+    if(!root.isConnected)return;
+    if(output){
+     output.hidden=false;
+     // Never parse untrusted Library text into DOM markup or execute it.
+     output.textContent=JSON.stringify(evidence,null,2);
+    }
+    notice("Evidence text verified for local operator inspection only.");
+   }catch(err){notice("Verified evidence read denied: "+err.message,"bad")}
+   finally{update()}
+  });
   build.addEventListener("click",async()=>{
    const selections=selected();
    if(selections.length<1||selections.length>16){

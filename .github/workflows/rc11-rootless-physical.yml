@@ -128,3 +128,41 @@ jobs:
           fi
       - name: Produce and independently verify real 2.5 MiB Workspace output
         run: go test -tags integration ./internal/sandboxrunner -run '^TestRealRootlessLargeArtifactPublication$' -v -count=1 -timeout 9m
+
+  physical-rootless-library-e2e:
+    name: Real rootless build to immutable Project Library (opt-in)
+    # The existing large-transfer smoke uses a mock publisher. This one
+    # checks real SQLite, blob persistence, source-only grants and revocation.
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feature/project-workspace-development-environments' && vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE != '' }}
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 12
+    env:
+      ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE: ${{ vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Confirm approved rootless Podman and immutable pre-pulled Python image
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE" =~ ^[^[:space:]]+@sha256:[[:xdigit:]]{64}$ ]]; then
+            echo '::error::Full immutable OCI sha256 reference required for physical Library QA'
+            exit 1
+          fi
+          if ! command -v podman >/dev/null; then
+            echo '::error::Trusted unprivileged Podman runner is required'
+            exit 1
+          fi
+          if [[ "$(podman info --format '{{.Host.Security.Rootless}}')" != "true" ]]; then
+            echo '::error::Refusing physical publication as privileged/rootful OCI'
+            exit 1
+          fi
+          if ! podman image exists "$ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE"; then
+            echo '::error::Approved digest-pinned Python image must be pre-pulled under this user'
+            exit 1
+          fi
+      - name: Execute real OCI Python build and verify immutable Library publication
+        run: go test -tags integration ./internal/workspacepublisher -run '^TestRealRootlessEndToEndLibraryPublication$' -v -count=1 -timeout 9m

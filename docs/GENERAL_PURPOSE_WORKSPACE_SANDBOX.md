@@ -324,3 +324,43 @@ stale Worker revisions and preserve the original Task Attempt across restart.
 This is database crash consistency, **not** proof that a physical OCI Node is
 running, that installed tool versions match a desired manifest, or that
 artifact publication succeeded.
+
+
+## RC11 trusted physical OCI → immutable Library acceptance (opt-in)
+
+The additional `TestRealRootlessEndToEndLibraryPublication` covers the
+gap between real OCI adapter execution and the real Task-owned persistent
+publisher. It runs under the existing administrator-configured
+`ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE` opt-in gate on a trusted, unprivileged
+self-hosted Linux Podman runner, using an already locally cached image
+referenced by an immutable OCI SHA-256 digest. It does not pull or install
+software, modify another Workspace, touch existing installations or publish
+any release artifact.
+
+On actual execution, this test must demonstrate the entire chain:
+1. Register a real Project, two independent named Workspaces, an approved
+   local Node, the build runtime/application and an active Task/Attempt in a
+   disposable local SQLite store.
+2. Start an independently inspected rootless, read-only-root OCI application
+   with exactly the provisioned Workspace mount and private internal network.
+3. Invoke the normal `project.app.exec` adapter with the required `sh` and
+   `python3` preflight, producing a deterministic 2.5 MiB binary inside the
+   OCI Workspace; independently hash the real host-visible output.
+4. Run `project.app.files.publish` in `publish_large` mode through the same
+   adapter, but backed by the **actual** Workspace publisher, content-addressed
+   artifact store and append-only Project Library—not a fake success receipt.
+   Compare source bytes, published blob, immutable Library version, SHA-256 and
+   origin Workspace attribution.
+5. Re-run the same publication and demand the same artifact/Library version
+   (no duplicate), prove a sibling Workspace has no implicit read permission,
+   revoke the source grant and prove the artifact stays immutable while the
+   revoked Workspace loses its scoped listing.
+6. Stop the exact verified rootless runtime; only generated QA container/network
+   identities are eligible for teardown, without image pruning.
+
+**Execution status:** test source and CI wiring alone prove only that the test
+compiles and its regular Go regressions pass. When the administrator has not
+approved the image/repository variable, this job is skipped and the physical
+end-to-end gate remains **unverified**. It does not by itself constitute an
+end-to-end Tool Gateway lease, real production user session, Godot, unlimited
+streaming, cross-Workspace grant or Windows native runtime acceptance.

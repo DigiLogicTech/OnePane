@@ -23,7 +23,9 @@ func enforceSandboxToolOwnership(ctx context.Context, db *sql.DB, t task.Task, t
  case sandboxrunner.ToolAppPull, sandboxrunner.ToolAppEnsure, sandboxrunner.ToolImageInspect:
   isApp = true
   requiresImage = true
- case sandboxrunner.ToolAppStop, sandboxrunner.ToolAppInspect, sandboxrunner.ToolAppExec, sandboxrunner.ToolAppGitInspect, sandboxrunner.ToolAppGitMutate, sandboxrunner.ToolAppFileInspect, sandboxrunner.ToolAppFileEdit, sandboxrunner.ToolAppFilePublish:
+ case sandboxrunner.ToolAppStop, sandboxrunner.ToolAppInspect, sandboxrunner.ToolAppExec, sandboxrunner.ToolAppGitInspect, sandboxrunner.ToolAppGitMutate, sandboxrunner.ToolAppFileInspect, sandboxrunner.ToolAppFileEdit, sandboxrunner.ToolAppFilePublish,
+  sandboxrunner.ToolAppToolsDiscover, sandboxrunner.ToolAppToolchainPreflight,
+  sandboxrunner.ToolAppGodotBuild, sandboxrunner.ToolAppUnrealMCPProbe:
   isApp = true
  default:
   return nil // Non-sandbox tools use their own resource and lease scopes.

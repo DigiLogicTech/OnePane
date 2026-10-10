@@ -183,3 +183,56 @@ install it, grant a Tool lease, prove GPU compatibility or authorize a
 remote MCP endpoint. A Task may still explicitly execute without attaching
 `required_executables`; persistence improves orchestration context but
 is not presently a security admission policy for all Tasks.
+
+
+## RC11 Project Orchestrator toolchain admission (2026-10-10)
+
+A named Project Workspace's approved manifest now informs **planning and
+Agent-initiated general-purpose sandbox execution**. This connects the
+previously separate persisted approval and per-Task preflight features.
+
+- The Project Orchestrator's bounded selected-Workspace snapshot includes a
+  scoped `toolchain_readiness` observation with a distinct state:
+  `not_approved` (no operator approval),
+  `waiting_approval` (approved application image/revision changed),
+  `waiting_resources` (application/runtime not persistently observed
+  running), or `ready_for_preflight` (the selected application and runtime
+  report running, **not** live software/version qualified). It records only
+  the approved application, manifest digest, required software and bounded
+  status; it does not inspect another Workspace, start a runtime, download
+  software or substitute an image.
+- Newly created Project Orchestrator Tasks now set the **canonical relational
+  `ProjectWorkspaceID`** rather than only a JSON copy of the Workspace ID.
+  If there is an approved manifest, the Task's completion context pins the
+  exact SHA-256 of that approval. A different approval later requires review
+  before the Task's general-purpose OCI execution can proceed.
+- The Agent Worker, after checking the Task's canonical Project/Workspace/OCI
+  ownership but **before consulting its capability lease**, validates each
+  `project.app.exec` proposal against the latest approved manifest.
+  If one exists, a stale approval, pinned Task digest mismatch, different OCI
+  application or agent-supplied weaker prerequisite set is denied. Otherwise
+  the Worker injects **all** approved executable names as
+  `required_executables`, activating the existing in-container presence
+  preflight before a command can launch. An Agent may not omit the field to
+  skip a reviewed Workspace's declared software prerequisites.
+- Legacy/no-manifest Project execution retains its existing behaviour.
+  Agents can continue to plan or request governed provisioning even when
+  the runtime is not yet running. There is **no automatic image pull,
+  privileged installation, silent fallback, or claim that presence validates
+  exact package versions**. The Task must still obtain the normal lease,
+  run within its independently inspected OCI runtime, and independently
+  verify and publish any real artifact.
+- Newly registered `project.app.tools.discover`,
+  `project.app.toolchain.preflight`, `project.app.godot.build` and
+  `project.app.unreal.mcp.probe` now share the existing
+  Task-bound canonical sandbox ownership checks; a broad execution lease
+  cannot choose another Project Workspace's application through these IDs.
+
+**Still pending:** scheduler-level resource reservations and persisted
+backoff/wake, full-version constraint attestation (currently presence-only),
+mandatory approved manifest policy for *all* new Workspaces, comprehensive
+specialized-adapter execution admission, operator-governed image provisioning,
+physical Node acceptance and complete automated recovery. Orchestrator status
+and model inference are distinct from OS scheduler readiness; a persisted
+`running` claim is not an externally refreshed Node health or execution
+postcondition. RC11 review gates #86 remain blockers to packaging.

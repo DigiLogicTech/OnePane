@@ -190,6 +190,11 @@ func (s *Service) contextSnapshot(ctx context.Context, projectID, requestedPWS s
 	}
 	pwss:=[]map[string]any{};for _,x:=range pwsRows{pwss=append(pwss,map[string]any{"id":x.ID,"name":x.Name,"ai_settings":json.RawMessage(x.Settings)})}
 	snapshot:=map[string]any{"project":map[string]any{"id":projectID,"name":projectName,"policy":json.RawMessage(projectPolicy)},"project_workspaces":pwss,"selected_project_workspace_id":selected.ID,"execution_mode":mode,"tasks":tasks,"recent_events":events,"runtime":runtime}
+	if selected.ID!=""{
+		readiness,err:=inspectWorkspaceToolchain(ctx,s.db,projectID,selected.ID)
+		if err!=nil{return nil,"","","",fmt.Errorf("Project Workspace toolchain readiness: %w",err)}
+		snapshot["toolchain_readiness"]=readiness
+	}
 	raw,_:=json.Marshal(snapshot)
 	return raw,selected.ID,mode,teamID,nil
 }
@@ -252,8 +257,24 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 	var taskID,sessionID *string
 	disposition:="answered"
 	if action=="task" {
-		completion,_:=json.Marshal(map[string]any{"source":"project-orchestrator","project_workspace_id":pwsID,"requested_mode":mode})
-		t,terr:=s.tasks.Create(ctx,task.CreateCommand{WorkspaceID:o.WorkspaceID,ProjectID:&c.ProjectID,Objective:objective,SchedulingClass:task.ClassUserInteractive,Priority:10,Completion:completion,ActorPrincipalID:&c.ActorPrincipalID})
+		// Use canonical relational ownership, not only model-supplied JSON.
+		// When an approved toolchain exists, pin its exact digest to this Task,
+		// so later approval changes cannot silently substitute a build image.
+		completionState:=map[string]any{"source":"project-orchestrator","project_workspace_id":pwsID,"requested_mode":mode}
+		var canonicalPWS *string
+		if pwsID!=""{
+			canonicalPWS=&pwsID
+			readiness,checkErr:=inspectWorkspaceToolchain(ctx,s.db,c.ProjectID,pwsID)
+			if checkErr!=nil{return TurnResult{},checkErr}
+			if readiness.ManifestSHA256!=""{
+				completionState["toolchain_manifest_sha256"]=readiness.ManifestSHA256
+			}
+			if readiness.Status!="ready_for_preflight"{
+				answer=answer+"\\n\\nWorkspace toolchain: "+readiness.Status+". "+readiness.NextAction
+			}
+		}
+		completion,_:=json.Marshal(completionState)
+		t,terr:=s.tasks.Create(ctx,task.CreateCommand{WorkspaceID:o.WorkspaceID,ProjectID:&c.ProjectID,ProjectWorkspaceID:canonicalPWS,Objective:objective,SchedulingClass:task.ClassUserInteractive,Priority:10,Completion:completion,ActorPrincipalID:&c.ActorPrincipalID})
 		if terr!=nil { disposition="blocked"; answer=answer+"\n\nTask creation was blocked: "+terr.Error() } else {
 			taskID=&t.ID;disposition="task_created"
 			if (mode=="team"||mode=="council")&&teamID!=""&&s.teams!=nil {

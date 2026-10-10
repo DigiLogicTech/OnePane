@@ -201,3 +201,18 @@ func TestFilesystemNoneDeniesImplicitOCIWorkspaceMount(t *testing.T){
   t.Fatal("persisted Task filesystem:none policy did not survive historical Task boundary")
  }
 }
+
+func TestDelegatedTaskRetainsPinnedHumanApprovedToolchainWithoutRoutingEnvelope(t *testing.T){
+ parent:=json.RawMessage(`{"toolchain_manifest_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`)
+ child:=json.RawMessage(`{"toolchain_manifest_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","type":"model_specified"}`)
+ got:=inheritOnePaneRouting(parent,child)
+ var scope struct {
+  Digest string `json:"toolchain_manifest_sha256"`
+  Type string `json:"type"`
+ }
+ if err:=json.Unmarshal(got,&scope);err!=nil{t.Fatal(err)}
+ if scope.Digest!="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"||
+  scope.Type!="model_specified"{
+  t.Fatalf("delegated Task dropped or substituted parent approval: %s",got)
+ }
+}

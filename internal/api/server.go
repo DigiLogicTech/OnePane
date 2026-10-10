@@ -467,6 +467,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/manifest", s.getTeamSessionManifest)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/research/evidence-selection", s.freezeResearchEvidence)
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/research/evidence-selection", s.readResearchEvidence)
+	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/research/evidence-preflight", s.preflightResearchEvidenceText)
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/messages", s.listTeamMessages)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/messages", s.postTeamMessage)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/rounds", s.requestTeamRound)

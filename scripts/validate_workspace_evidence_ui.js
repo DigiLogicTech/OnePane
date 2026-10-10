@@ -82,3 +82,20 @@ assert(sessionPicker.includes("NOT EXISTS(SELECT 1 FROM research_session_evidenc
 assert(sessionHandler.includes('team.read'));
 console.log("PASS: scoped human-only pre-round Research Council session picker");
 
+
+const textPreflight=fs.readFileSync("internal/api/research_evidence_preflight.go","utf8");
+assert(routes.includes('POST /v1/team-sessions/{sessionID}/research/evidence-preflight'));
+assert(ui.includes('data-a66-preflight'));
+assert(ui.includes('/research/evidence-preflight'));
+assert(ui.includes('form.querySelector("[data-a66-preflight]")?.addEventListener("click"'));
+assert(ui.includes('output.textContent=JSON.stringify(receipt,null,2)'));
+assert(textPreflight.includes('s.sessionFor(w,r,"team.read")'));
+assert(textPreflight.includes('"project.read"'));
+assert(textPreflight.includes('svc.ResearchEvidence(r.Context(),session.ID,identity.PrincipalID)'));
+assert(textPreflight.includes('collectVerifiedWorkspaceEvidence(ctx,lib,blobs,'));
+assert(textPreflight.includes('len(packet.Entries)>verifiedEvidenceMaxEntries'));
+assert(textPreflight.includes('fresh.Evidence.ManifestSHA256!=frozen.Evidence.ManifestSHA256'));
+assert(textPreflight.includes('ModelVisible:false,Persisted:false'));
+assert(!textPreflight.includes('agentprotocol.Request'));
+assert(!textPreflight.includes('s.dispatch('));
+console.log("PASS: operator-only frozen Research text preflight with no implicit Council attachment");

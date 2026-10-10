@@ -124,8 +124,30 @@ async function a46RenderLibrary(project,workspace,root){
       "/research/evidence-selection",{
       method:"POST",body:JSON.stringify({selections})
      });
-     closeModal();
-     notice("Research evidence metadata frozen for this Council session. No document content was sent to any model.");
+     // Approval does not imply permission to read or forward document text.
+     // Offer a distinct, opt-in server-side integrity preflight. The receipt
+     // contains hashes, counts and sizes only, never the selected plaintext.
+     form.innerHTML='<p class="list-meta">Research evidence metadata is frozen for this session. No document content was sent to a model.</p>'+
+      '<p class="list-meta">Optional: verify up to 8 small UTF-8 documents (64 KiB each; 256 KiB total) against the exact frozen selection. Verification reads text only on this OnePane server; it does not save or forward text to any Council seat.</p>'+
+      '<button type="button" class="btn" data-a66-preflight>Verify frozen text locally</button> '+
+      '<button type="button" class="btn" data-a66-close>Close</button>'+
+      '<pre data-a66-result class="a62-evidence-receipt" hidden aria-label="Frozen Research text verification receipt"></pre>';
+     form.querySelector("[data-a66-close]")?.addEventListener("click",closeModal);
+     form.querySelector("[data-a66-preflight]")?.addEventListener("click",async e=>{
+      const verify=e.currentTarget,output=form.querySelector("[data-a66-result]");
+      verify.disabled=true;
+      if(output){output.hidden=true;output.textContent="";}
+      try{
+       const receipt=await apiRequest("/v1/team-sessions/"+encodeURIComponent(sid)+
+        "/research/evidence-preflight",{method:"POST"});
+       if(!form.isConnected)return;
+       if(output){output.hidden=false;output.textContent=JSON.stringify(receipt,null,2);}
+       notice("Frozen Research text verified for this operator only. No Council attachment or model access was created.");
+      }catch(ex){
+       if(output){output.hidden=false;output.textContent="Text preflight denied: "+ex.message;}
+      }finally{verify.disabled=false;}
+     });
+     notice("Research metadata frozen. Text verification is optional and requires a separate click.");
     }catch(ex){
      button.disabled=false;
      form.querySelector("#a65FreezeError").textContent=ex.message;

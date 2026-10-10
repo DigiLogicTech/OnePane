@@ -58,22 +58,31 @@ async function a45RenderCollaboration(project,workspace,root){
    <label>Share from <input disabled value="${a45HTML(workspace.name||current.name)}"></label>
    <label>To Workspace <select name="target_workspace_id" required ${hasTargets?"":"disabled"}>${options||'<option>No other canonical Workspaces yet</option>'}</select></label>
    <label>Connection name<input name="name" maxlength="120" required value="${a45HTML(workspace.name||"Workspace")} artifacts"></label>
+   <label>Grant duration<select name="duration"><option value="none">Until revoked</option><option value="day">24 hours</option><option value="week">7 days</option><option value="month">30 days</option></select></label>
    <button type="submit" class="btn primary" ${hasTargets?"":"disabled"}>Enable connection</button>
  </form>`;
  const rows=currentLinks.length?currentLinks.map(l=>{
+  const expired=Boolean(l.expired);
+  const usable=Boolean(l.enabled)&&!expired;
+  const expires=Number(l.expires_at_ms);
+  const expiryText=l.expires_at_ms&&Number.isFinite(expires)&&expires>0
+   ?`Expires ${new Date(expires).toLocaleString()}`:"No expiry";
   const from=nameByID.get(l.source_workspace_id)||l.source_workspace_id;
   const to=nameByID.get(l.target_workspace_id)||l.target_workspace_id;
   const sending=l.source_workspace_id===current.id;
   return `<article class="a45-link-card" data-a45-link-id="${a45HTML(l.id)}">
    <div class="a45-link-header"><div><strong>${a45HTML(l.name)}</strong>
-    <div class="list-meta">${a45HTML(from)} → ${a45HTML(to)} · ${sending?"Outgoing":"Incoming"} · Artifact versions</div></div>
-    <span class="pill ${l.enabled?"good":""}">${l.enabled?"Enabled":"Disabled"}</span></div>
+    <div class="list-meta">${a45HTML(from)} → ${a45HTML(to)} · ${sending?"Outgoing":"Incoming"} · Artifact versions</div>
+    <div class="list-meta">${a45HTML(expiryText)}</div></div>
+    <span class="pill ${usable?"good":""}">${expired?"Expired":l.enabled?"Enabled":"Disabled"}</span></div>
    <div class="toolbar a45-link-actions">
     <button type="button" class="btn" data-a45-toggle="${a45HTML(l.id)}" data-a45-revision="${Number(l.revision)}" data-a45-enabled="${l.enabled?"1":"0"}">${l.enabled?"Disable":"Enable"} link</button>
-    ${sending&&l.enabled?`<button type="button" class="btn" data-a45-publish="${a45HTML(l.id)}">Publish Library asset</button>`:""}
+    ${l.expires_at_ms?`<button type="button" class="btn" data-a45-renew="${a45HTML(l.id)}" data-a45-revision="${Number(l.revision)}">Renew 7 days</button>
+    <button type="button" class="btn" data-a45-clear-expiry="${a45HTML(l.id)}" data-a45-revision="${Number(l.revision)}">Remove expiry</button>`:""}
+    ${sending&&usable?`<button type="button" class="btn" data-a45-publish="${a45HTML(l.id)}">Publish Library asset</button>`:""}
    </div>
    <div class="a45-publications" data-a45-pubs="${a45HTML(l.id)}">
-    <span class="list-meta">${l.enabled?"Loading published versions…":"Revoked links cannot expose publications."}</span>
+    <span class="list-meta">${usable?"Loading published versions…":expired?"Expired links cannot expose publications.":"Disabled links cannot expose publications."}</span>
    </div>
   </article>`;
  }).join(""):'<div class="empty-state compact">No connections involving this Workspace. Other sandboxes remain isolated.</div>';
@@ -82,9 +91,12 @@ async function a45RenderCollaboration(project,workspace,root){
  root.querySelector("#a45ConnectionForm")?.addEventListener("submit",async e=>{
   e.preventDefault();const button=e.currentTarget.querySelector('[type="submit"]');button.disabled=true;
   const data=Object.fromEntries(new FormData(e.currentTarget));
+  const durationMs={day:86400000,week:7*86400000,month:30*86400000}[data.duration];
   try{
    await apiRequest(endpoint+"/workspace-links",{method:"POST",body:JSON.stringify({
-    source_workspace_id:current.id,target_workspace_id:data.target_workspace_id,name:data.name,enable:true
+    source_workspace_id:current.id,target_workspace_id:data.target_workspace_id,
+    name:data.name,enable:true,
+    ...(durationMs?{expires_at_ms:Date.now()+durationMs}:{})
    })});await refresh();
   }catch(err){button.disabled=false;notice("Connection failed: "+err.message,"bad")}
  });
@@ -93,6 +105,29 @@ async function a45RenderCollaboration(project,workspace,root){
   try{await apiRequest(`/v1/workspace-links/${encodeURIComponent(b.dataset.a45Toggle)}`,{
    method:"PATCH",body:JSON.stringify({expected_revision:Number(b.dataset.a45Revision),enabled:b.dataset.a45Enabled!=="1"})
   });await refresh()}catch(err){b.disabled=false;notice("Link update failed: "+err.message,"bad")}
+ }));
+ root.querySelectorAll("[data-a45-renew]").forEach(b=>b.addEventListener("click",async()=>{
+  b.disabled=true;
+  try{
+   await apiRequest(`/v1/workspace-links/${encodeURIComponent(b.dataset.a45Renew)}`,{
+    method:"PATCH",body:JSON.stringify({
+     expected_revision:Number(b.dataset.a45Revision),enabled:true,
+     expires_at_ms:Date.now()+7*86400000
+    })
+   });
+   notice("Workspace link renewed for seven days.");await refresh();
+  }catch(err){b.disabled=false;notice("Link renewal failed: "+err.message,"bad")}
+ }));
+ root.querySelectorAll("[data-a45-clear-expiry]").forEach(b=>b.addEventListener("click",async()=>{
+  b.disabled=true;
+  try{
+   await apiRequest(`/v1/workspace-links/${encodeURIComponent(b.dataset.a45ClearExpiry)}`,{
+    method:"PATCH",body:JSON.stringify({
+     expected_revision:Number(b.dataset.a45Revision),enabled:true,clear_expiry:true
+    })
+   });
+   notice("Workspace link expiry removed.");await refresh();
+  }catch(err){b.disabled=false;notice("Expiry update failed: "+err.message,"bad")}
  }));
  root.querySelectorAll("[data-a45-publish]").forEach(b=>b.addEventListener("click",async()=>{
   const id=b.dataset.a45Publish;
@@ -123,7 +158,7 @@ async function a45RenderCollaboration(project,workspace,root){
    }catch(err){submit.disabled=false;form.querySelector("#a45PublishError").textContent=err.message}
   };
  }));
- const enabled=currentLinks.filter(l=>l.enabled);
+ const enabled=currentLinks.filter(l=>l.enabled&&!l.expired);
  await Promise.all(enabled.map(async link=>{
   const cell=root.querySelector(`[data-a45-pubs="${CSS.escape(link.id)}"]`);
   if(!cell)return;

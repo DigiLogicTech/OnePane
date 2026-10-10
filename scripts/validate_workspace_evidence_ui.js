@@ -1,0 +1,28 @@
+// This is a UI/source contract test, not proof of stored content integrity.
+const fs=require("node:fs");
+const assert=require("node:assert/strict");
+const ui=fs.readFileSync("internal/webui/static/workspace-library.js","utf8");
+const api=fs.readFileSync("internal/api/project_library.go","utf8");
+const routes=fs.readFileSync("internal/api/server.go","utf8");
+const service=fs.readFileSync("internal/projectworkspace/workspace_evidence_packet.go","utf8");
+assert(ui.includes("data-a62-asset"));
+assert(ui.includes("data-a62-version"));
+assert(ui.includes("data-a62-build"));
+assert(ui.includes("selections.length>16"));
+assert(ui.includes("output.textContent=JSON.stringify(packet,null,2)"));
+assert(ui.includes("does not grant")||ui.includes("no document content"));
+assert(ui.includes('"/evidence-packets"'));
+assert(ui.includes('method:"POST",body:JSON.stringify({selections})'));
+assert(routes.includes('POST /v1/projects/{projectID}/workspaces/{workspaceID}/evidence-packets'));
+assert(api.includes('s.workspaceRuntimeContext(w,r,false)'));
+assert(service.includes('len(selections)>16'));
+assert(service.includes('sql.TxOptions{ReadOnly:true}'));
+assert(service.includes("g.project_workspace_id=w.id"));
+assert(service.includes("link.target_workspace_id=w.id"));
+assert(service.includes("link.enabled=1"));
+assert(service.includes("link.expires_at_ms"));
+assert(service.includes('ErrCrossWorkspace'));
+assert(!service.includes("StorageURI string"));
+assert(!service.includes('json:"storage_uri"'));
+assert(!service.includes('CapabilityLease'));
+console.log("PASS: metadata-only scoped evidence UI and guarded read-only Workspace API contract");

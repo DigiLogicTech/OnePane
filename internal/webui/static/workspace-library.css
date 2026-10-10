@@ -28,3 +28,12 @@
  white-space:pre-wrap;overflow-wrap:anywhere;box-sizing:border-box;margin:8px 0 0;
  padding:12px;border:1px solid var(--border);border-radius:8px;
  background:var(--panel);color:var(--text);font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}
+
+/* Explicit, nontransferable evidence metadata selection */
+.a62-evidence-pick{display:flex;align-items:center;gap:9px;margin:8px 0;overflow-wrap:anywhere;font-size:12px}
+.a62-evidence-pick input{flex:0 0 auto}
+.a62-evidence-panel{border-top:1px solid var(--border);margin-top:12px;padding-top:12px;min-width:0}
+.a62-evidence-panel>.toolbar{display:flex;justify-content:flex-end;flex-wrap:wrap}
+.a62-evidence-panel>p{margin:8px 0}
+.a62-evidence-receipt{max-width:100%;max-height:260px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:12px}
+.a62-evidence-receipt[hidden]{display:none!important}

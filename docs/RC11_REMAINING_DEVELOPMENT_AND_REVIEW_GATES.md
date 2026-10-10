@@ -362,3 +362,40 @@ key conflicts instead of rewriting an existing Task. Graph readback
 displays the persisted placement without reporting CPU/GPU hardware
 as actually running. Physical end-to-end CPU-only inference, performance,
 residency and recovery acceptance remain required separately.
+
+## RC11-04 — bounded, version-selected Workspace evidence metadata
+
+The Project Library can now build a **nontransferable metadata manifest** from
+1–16 explicitly selected immutable Library versions using
+`POST /v1/projects/{projectID}/workspaces/{workspaceID}/evidence-packets`.
+This endpoint authenticates the current Project reader and the canonical
+Workspace context. Every exact `asset_id + version` is reauthorized in one
+consistent SQLite read transaction against the *current* direct read grant
+(latest/pinned) or a hash-matching, enabled and unexpired directional
+publication with active Project/source/target Workspaces.
+
+The receipt includes only canonical Project/Workspace identity, immutable
+version metadata (name, MIME type, recorded content hash and size), a snapshot
+timestamp and a deterministic SHA-256 of the canonical selected metadata.
+It excludes storage URIs, artifact IDs, raw document bytes, host paths,
+download links and credentials; it does not create a read capability. Future
+reads still require separate permission and content-integrity verification,
+and revocation affects new selections immediately. The packet itself is not
+yet a persisted Research Council evidence attachment.
+
+The Workspace Library UI offers checkboxes only for currently accessible
+assets and selects each displayed exact version. A bounded "Build scoped
+evidence manifest" button renders the returned metadata as plain text,
+never HTML. It cannot silently share the packet with another Workspace,
+send data to a model, run a background indexer or widen permissions.
+Integrations test cross-Project and cross-Workspace denial, link-only
+non-access, exact publication, second-asset denial, expiry/revocation,
+archive denial, canonical digest ordering, duplicate and oversized
+selection denial and absence of raw storage references.
+
+**Still outstanding:** bytes-level content ingestion/indexing and
+permission-rechecked evidence retrieval into isolated, explicitly approved
+Research Council/Project Orchestrator contexts, byte verification at
+attachment time, immutable provenance records and user-approved use of
+selected evidence. Source/unit CI alone is not a substitute for installed
+Workspace and physical Node acceptance.

@@ -350,6 +350,18 @@ func (s *Service) handleTool(ctx context.Context, run Run, t task.Task, resp age
 			map[string]any{"tool_id": p.ToolID, "resource_ref": p.ResourceRef, "reason": err.Error(), "policy": "sandbox_ownership"})
 		return s.blockRun(ctx, run, res, "sandbox scope denied tool: "+err.Error())
 	}
+	// A human-approved Workspace toolchain cannot be bypassed by leaving
+	// required_executables empty or naming another registered OCI application.
+	// Validate before consulting any authority lease or invoking a tool.
+	if p.ToolID=="project.app.exec"{
+		p.Input,err=applyApprovedWorkspaceToolchain(ctx,s.db,t,p.Input)
+		if err!=nil{
+			_ = s.journal(ctx,run.ID,"tool","denied",nil,nil,strPtr("tool"),nil,
+				map[string]any{"tool_id":p.ToolID,"resource_ref":p.ResourceRef,
+				"reason":err.Error(),"policy":"approved_workspace_toolchain"})
+			return s.blockRun(ctx,run,res,"Workspace toolchain admission denied: "+err.Error())
+		}
+	}
 	leaseID, err := s.findLease(ctx, run.WorkspaceID, run.TaskID, def.CapabilityID, def.Mode, p.ResourceRef)
 	if err != nil {
 		cont, _ := json.Marshal(map[string]any{"authority_required": map[string]any{"capability_id": def.CapabilityID, "action": def.Mode, "resource_ref": p.ResourceRef, "tool_id": p.ToolID, "tool_version": p.ToolVersion}})

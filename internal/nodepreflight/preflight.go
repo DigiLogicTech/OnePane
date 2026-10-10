@@ -43,6 +43,10 @@ type Report struct {
 }
 
 var ErrInvalidVariable=errors.New("unapproved image environment variable")
+func validReference(ref string)bool{
+ return immutableImage.MatchString(ref)&&!strings.Contains(ref,"://")&&
+  !strings.HasPrefix(ref,"/")&&!strings.Contains(ref,"//")
+}
 func allowedVariable(v string)bool{
  for _,allowed:=range ApprovedVariables{if v==allowed{return true}}
  return false
@@ -84,7 +88,7 @@ func Check(ctx context.Context,inspector Inspector,getenv func(string)string,osN
   check:=ImageCheck{Variable:variable,State:"approval_missing"}
   switch{
   case ref=="":
-  case strings.TrimSpace(ref)!=ref||!immutableImage.MatchString(ref):
+  case strings.TrimSpace(ref)!=ref||!validReference(ref):
    check.State="invalid_immutable_reference"
   case report.Podman!="rootless":
    check.State="node_unavailable"
@@ -116,7 +120,7 @@ func(LocalPodman) RootlessPodman(ctx context.Context)(bool,error){
  return strings.TrimSpace(string(out))=="true",nil
 }
 func(LocalPodman) ImagePresent(ctx context.Context,ref string)(bool,error){
- if !immutableImage.MatchString(ref){return false,errors.New("immutable digest required")}
+ if !validReference(ref){return false,errors.New("immutable digest required")}
  executable,err:=exec.LookPath("podman")
  if err!=nil{return false,err}
  err=exec.CommandContext(ctx,executable,"image","exists",ref).Run()

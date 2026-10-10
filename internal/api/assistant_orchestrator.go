@@ -131,6 +131,7 @@ func (s *Server) submitProjectOrchestratorTurn(w http.ResponseWriter,r *http.Req
 type projectTaskGraphService interface {
  CreateTaskGraph(context.Context,projectorchestrator.CreateTaskGraphCommand)(projectorchestrator.TaskGraph,error)
  TaskGraph(context.Context,string,string)(projectorchestrator.TaskGraph,error)
+ TaskGraphs(context.Context,string,int)([]projectorchestrator.TaskGraph,error)
 }
 func(s *Server) projectTaskGraphService(w http.ResponseWriter)(projectTaskGraphService,bool){
  graph,ok:=s.projectOrchestrator.(projectTaskGraphService)
@@ -149,6 +150,17 @@ func(s *Server) createProjectTaskGraph(w http.ResponseWriter,r *http.Request){
  input.ActorPrincipalID=i.PrincipalID
  created,err:=graph.CreateTaskGraph(r.Context(),input)
  respondDomain(w,created,err,http.StatusCreated)
+}
+func(s *Server) listProjectTaskGraphs(w http.ResponseWriter,r *http.Request){
+ i,ok:=s.authenticate(w,r);if !ok{return}
+ p,err:=s.projects.Project(r.Context(),r.PathValue("projectID"))
+ if err!=nil{respondDomain(w,nil,err,0);return}
+ if !s.authorize(w,r,i,p.WorkspaceID,"project.read"){return}
+ graph,ok:=s.projectTaskGraphService(w);if !ok{return}
+ limit:=parseLimit(r,20)
+ if limit>50{limit=50}
+ out,err:=graph.TaskGraphs(r.Context(),p.ID,limit)
+ respondDomain(w,out,err,http.StatusOK)
 }
 func(s *Server) getProjectTaskGraph(w http.ResponseWriter,r *http.Request){
  i,ok:=s.authenticate(w,r);if !ok{return}

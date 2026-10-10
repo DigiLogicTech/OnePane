@@ -59,8 +59,9 @@ func TestQAExecutionEvidenceJoinsOnlyPersistedCanonicalTaskAndTenant(t *testing.
   {ID:"foreign-tenant",WorkspaceID:"elsewhere",ProjectID:&project,ProjectWorkspaceID:&world},
   {ID:"other-project",WorkspaceID:"tenant",ProjectID:&project,ProjectWorkspaceID:&world},
  }
- got,err:=loadQAExecutionSources(ctx,db,"tenant",project,world,visible)
+ got,truncated,err:=loadQAExecutionSources(ctx,db,"tenant",project,world,visible)
  if err!=nil{t.Fatal(err)}
+ if truncated{t.Fatal("unexpected truncation")}
  if len(got)!=4{t.Fatalf("expected only 4 source aggregates for one authorised Task: %+v",got)}
  expected:=map[string][6]int64{
   "model":{3,1,0,1,0,1},
@@ -79,16 +80,16 @@ func TestQAExecutionEvidenceJoinsOnlyPersistedCanonicalTaskAndTenant(t *testing.
   if strings.Contains(string(raw),secret){t.Fatalf("source text leaked %q: %s",secret,raw)}
  }
  forged:=[]task.Task{{ID:"story",WorkspaceID:"tenant",ProjectID:&project,ProjectWorkspaceID:&world}}
- no,err:=loadQAExecutionSources(ctx,db,"tenant",project,world,forged)
+ no,_,err:=loadQAExecutionSources(ctx,db,"tenant",project,world,forged)
  if err!=nil||len(no)!=0{t.Fatalf("forged canonical membership accepted: %+v %v",no,err)}
  for _,x:=range []struct{tenant,project,workspace string}{
   {"elsewhere","game","world"},{"tenant","game","missing"},{"tenant","different","world"},
  }{
-  no,err=loadQAExecutionSources(ctx,db,x.tenant,x.project,x.workspace,
+  no,_,_,err=loadQAExecutionSources(ctx,db,x.tenant,x.project,x.workspace,
    []task.Task{{ID:"world",WorkspaceID:x.tenant,ProjectID:&x.project,ProjectWorkspaceID:&x.workspace}})
   if err!=nil||len(no)!=0{t.Fatalf("wrong scope leaked: %+v %v",x,err)}
  }
- if no,err=loadQAExecutionSources(ctx,db,"tenant","game","",visible);err!=nil||len(no)!=0{
+ if no,_,_,err=loadQAExecutionSources(ctx,db,"tenant","game","",visible);err!=nil||len(no)!=0{
   t.Fatalf("empty canonical Workspace should fail closed: %+v %v",no,err)
  }
 }
@@ -102,7 +103,7 @@ func TestQAExecutionEvidenceFailsClosedIfSourceUnavailable(t *testing.T){
   `INSERT INTO tasks VALUES('world','tenant','game','world')`,
  }{if _,err=db.Exec(q);err!=nil{t.Fatal(err)}}
  project,world:="game","world"
- _,err=loadQAExecutionSources(context.Background(),db,"tenant",project,world,
+ _,_,err=loadQAExecutionSources(context.Background(),db,"tenant",project,world,
   []task.Task{{ID:"world",WorkspaceID:"tenant",ProjectID:&project,ProjectWorkspaceID:&world}})
  if err==nil{t.Fatal("partial evidence falsely returned when model/tool/verification sources are missing")}
 }

@@ -20,6 +20,11 @@ on:
       - 'internal/webui/static/workspace-ai-workflow.js'
       - 'internal/webui/static/qa-trace-correlation.js'
       - 'scripts/validate_qa_trace_correlation.js'
+      - 'internal/api/qa_deep_provenance.go'
+      - 'internal/api/qa_deep_provenance_test.go'
+      - 'internal/api/qa_trusted_trace_test.go'
+      - 'internal/webui/static/qa-execution-provenance.js'
+      - 'scripts/validate_qa_execution_provenance.js'
       - 'internal/api/qa_api_capture.go'
       - 'internal/api/qa_api_capture_handler.go'
       - 'internal/api/qa_api_capture_test.go'
@@ -89,6 +94,8 @@ jobs:
           node --check internal/webui/static/app-foundation.js
           node --check internal/webui/static/app.js
           node --check internal/webui/static/settings-redesign.js
+          node --check internal/webui/static/qa-execution-provenance.js
+          node scripts/validate_qa_execution_provenance.js
           node --check internal/webui/static/qa-api-capture.js
           node scripts/validate_qa_api_capture.js
           node --check internal/webui/static/qa-reproduction-note.js

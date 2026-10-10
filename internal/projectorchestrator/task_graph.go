@@ -298,3 +298,33 @@ func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGra
  if err:=tx.Commit();err!=nil{return TaskGraph{},err}
  return x,nil
 }
+
+ 
+// TaskGraphs lists a bounded, Project-scoped inventory. Each graph is read
+// using its own consistent SQLite snapshot. Cross-Project identifiers are
+// never returned and results are advisory until the Task Gateway admits work.
+func(s *Service) TaskGraphs(ctx context.Context,projectID string,limit int)([]TaskGraph,error){
+ if s==nil||s.db==nil||projectID==""{return nil,ErrInvalid}
+ if limit<=0||limit>50{limit=20}
+ rows,err:=s.db.QueryContext(ctx,`SELECT g.id
+ FROM project_orchestrator_task_graphs g
+ JOIN projects p ON p.id=g.project_id AND p.status='active'
+ WHERE g.project_id=? ORDER BY g.created_at DESC,g.id DESC LIMIT ?`,projectID,limit)
+ if err!=nil{return nil,err}
+ ids:=[]string{}
+ for rows.Next(){
+  var id string
+  if err=rows.Scan(&id);err!=nil{break}
+  ids=append(ids,id)
+ }
+ if err==nil{err=rows.Err()}
+ _=rows.Close()
+ if err!=nil{return nil,err}
+ out:=make([]TaskGraph,0,len(ids))
+ for _,id:=range ids{
+  graph,e:=s.TaskGraph(ctx,projectID,id)
+  if e!=nil{return nil,e}
+  out=append(out,graph)
+ }
+ return out,nil
+}

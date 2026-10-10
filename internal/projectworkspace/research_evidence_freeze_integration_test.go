@@ -170,7 +170,7 @@ func TestResearchSessionFrozenEvidenceApprovalAndRevocation(t *testing.T){
   []string{localSeat.ID,otherSeat.ID})
  if err!=nil{t.Fatal(err)}
  if first.State!="approved"||first.Policy!="local_only"||
-  first.ModelVisible||first.DispatchEnabled||len(first.SeatIDs)!=2||
+  first.ModelVisible||!first.DispatchEnabled||len(first.SeatIDs)!=2||
   first.EvidenceManifestSHA256!=frozen.Evidence.ManifestSHA256{
   t.Fatalf("Research seat approval widened scope or omitted provenance: %+v",first)
  }

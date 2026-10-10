@@ -896,3 +896,20 @@ immutable duplicate behavior and a new monotonic heartbeat recovering an
 unavailable-but-still-paired Node. This proves control-plane replay
 invariants; it does **not** establish physical Node or external network
 acceptance, remote sandbox scheduling or process lease fencing.
+
+## Orchestrator — honest local-Node toolchain readiness
+
+A human-approved OCI image and two persisted "running" statuses do not
+authorize using another Node's Project Workspace. The Project Orchestrator
+readiness snapshot now examines the sandbox runtime's explicit Node
+assignment: origin Node (local, trusted identity) permits only
+`ready_for_preflight`; an explicitly paired/untrusted remote Node produces
+`unsupported_node_placement`; an unknown Node produces `waiting_node`.
+Legacy unassigned runtime behavior stays origin-local and still requires
+a physical version/health preflight before any build.
+
+The read path exposes only coarse `node_placement` state, not a cross-Node
+identifier or a remote execution route. Integration tests assert that an
+approved remote-assigned runtime cannot claim readiness even if its status
+and application status were persisted as running, and that moving back to
+the origin restores only the bounded preflight eligibility claim.

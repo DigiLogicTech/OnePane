@@ -70,6 +70,87 @@ func TestWorkspaceArtifactChannelsEnforceProjectAndVersionBoundaries(t *testing.
  if _,err=svc.ResolveWorkspaceLibraryVersion(ctx,p.ID,story.ID,worldAsset,1);err!=nil{t.Fatalf("Storyline should receive explicitly published World artifact: %v",err)}
  if _,err=svc.ResolveWorkspaceLibraryVersion(ctx,p.ID,story.ID,assetID,2);err==nil{t.Fatal("upstream research asset leaked transitively into Storyline")}
 
+
+ // A single explicit World -> Story artifact grant may have an expiry. A
+ // link that has expired must not be usable through *any* Library read path,
+ // regardless of immutable publication history or desired enabled state.
+ expires:=clock.Real{}.UnixMilli()+60000
+ timed,err:=svc.SetWorkspaceLinkEnabled(ctx,ToggleWorkspaceLinkCommand{
+  LinkID:worldLink.ID,ActorPrincipalID:"owner",ExpectedRevision:worldLink.Revision,
+  Enabled:true,ExpiresAtMS:&expires,
+ })
+ if err!=nil||timed.ExpiresAtMS==nil||*timed.ExpiresAtMS!=expires||timed.Expired{
+  t.Fatalf("operator expiry not persisted: %+v %v",timed,err)
+ }
+ versions,err:=svc.WorkspaceLibraryVersions(ctx,p.ID,story.ID,worldAsset)
+ if err!=nil||len(versions)!=1||versions[0].Version!=1{
+  t.Fatalf("valid expiring link did not expose exact approved version: %+v %v",versions,err)
+ }
+ // The database does not delete rows or mutate any Library blob on expiry.
+ expiredAt:=clock.Real{}.UnixMilli()-1000
+ if _,err=db.SQL().ExecContext(ctx,
+  `UPDATE project_workspace_links SET expires_at_ms=? WHERE id=?`,
+  expiredAt,worldLink.ID);err!=nil{t.Fatal(err)}
+ expired,err:=svc.WorkspaceLink(ctx,worldLink.ID)
+ if err!=nil||!expired.Expired||!expired.Enabled{
+  t.Fatalf("expired link was not exposed as an expired policy: %+v %v",expired,err)
+ }
+ if _,err=svc.WorkspacePublications(ctx,worldLink.ID);err==nil{
+  t.Fatal("expired channel still exposed metadata")
+ }
+ if _,err=svc.PublishWorkspaceAsset(ctx,PublishWorkspaceAssetCommand{
+  LinkID:worldLink.ID,AssetID:worldAsset,Version:1,ActorPrincipalID:"owner",
+ });err==nil{t.Fatal("expired channel allowed a new publication")}
+ if _,err=svc.ResolveWorkspaceLibraryVersion(ctx,p.ID,story.ID,worldAsset,1);err==nil{
+  t.Fatal("expired channel still allowed version read")
+ }
+ if _,err=svc.WorkspaceLibraryVersions(ctx,p.ID,story.ID,worldAsset);err==nil{
+  t.Fatal("expired channel exposed version enumeration")
+ }
+ assets,err:=svc.WorkspaceLibraryAssets(ctx,p.ID,story.ID,"")
+ if err!=nil||len(assets)!=0{
+  t.Fatalf("expired grant appeared in scoped Library inventory: %+v %v",assets,err)
+ }
+ if _,err=svc.SetWorkspaceLinkEnabled(ctx,ToggleWorkspaceLinkCommand{
+  LinkID:worldLink.ID,ActorPrincipalID:"owner",ExpectedRevision:timed.Revision,
+  Enabled:true,
+ });err==nil{t.Fatal("expired link reactivated without explicit renewal")}
+ renewal:=clock.Real{}.UnixMilli()+120000
+ restored,err:=svc.SetWorkspaceLinkEnabled(ctx,ToggleWorkspaceLinkCommand{
+  LinkID:worldLink.ID,ActorPrincipalID:"owner",ExpectedRevision:timed.Revision,
+  Enabled:true,ExpiresAtMS:&renewal,
+ })
+ if err!=nil||restored.Expired||restored.ExpiresAtMS==nil||
+  *restored.ExpiresAtMS!=renewal{
+  t.Fatalf("CAS renewal failed: %+v %v",restored,err)
+ }
+ if _,err=svc.SetWorkspaceLinkEnabled(ctx,ToggleWorkspaceLinkCommand{
+  LinkID:worldLink.ID,ActorPrincipalID:"owner",ExpectedRevision:timed.Revision,
+  Enabled:true,ClearExpiry:true,
+ });err==nil{t.Fatal("stale expiry clearance succeeded")}
+ if _,err=svc.ResolveWorkspaceLibraryVersion(ctx,p.ID,story.ID,worldAsset,1);err!=nil{
+  t.Fatalf("renewed channel did not restore the exact original version: %v",err)
+ }
+ // A live historical link cannot keep serving a source that has been
+ // archived. The same boundary also applies if the target is archived.
+ for _,archivedWorkspace:=range []string{world.ID,story.ID}{
+  if _,err=db.SQL().ExecContext(ctx,
+   `UPDATE project_workspaces SET status='archived' WHERE id=?`,
+   archivedWorkspace);err!=nil{t.Fatal(err)}
+  if _,err=svc.WorkspacePublications(ctx,worldLink.ID);err==nil{
+   t.Fatalf("archived link endpoint %s exposed metadata",archivedWorkspace)
+  }
+  if _,err=svc.ResolveWorkspaceLibraryVersion(ctx,p.ID,story.ID,worldAsset,1);err==nil{
+   t.Fatalf("archived link endpoint %s still authorised version",archivedWorkspace)
+  }
+  if _,err=db.SQL().ExecContext(ctx,
+   `UPDATE project_workspaces SET status='active' WHERE id=?`,
+   archivedWorkspace);err!=nil{t.Fatal(err)}
+ }
+ if _,err=svc.ResolveWorkspaceLibraryVersion(ctx,p.ID,story.ID,worldAsset,1);err!=nil{
+  t.Fatalf("active endpoints did not restore approved grant: %v",err)
+ }
+
  disabled,err:=svc.SetWorkspaceLinkEnabled(ctx,ToggleWorkspaceLinkCommand{LinkID:link.ID,ActorPrincipalID:"owner",ExpectedRevision:link.Revision,Enabled:false})
  if err!=nil||disabled.Enabled{t.Fatalf("revoke: %v %+v",err,disabled)}
  if _,err=svc.WorkspacePublications(ctx,link.ID);err==nil{t.Fatal("revoked link exposed publications")}

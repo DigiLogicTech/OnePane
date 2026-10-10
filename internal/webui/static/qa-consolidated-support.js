@@ -162,6 +162,50 @@
    backend_readiness:safeReadiness,
    evidence_limit:"service manager state only for actual local Node; remote services and end-to-end health unverified"};
  }
+ const qaSHA256K=[
+  0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+  0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+  0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+  0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+  0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+  0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+  0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+  0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+ ];
+ const qaRotate=(v,n)=>(v>>>n)|(v<<(32-n));
+ // In-memory SHA-256 also works on offline/local HTTP OnePane WebUI,
+ // where browser SubtleCrypto can be absent. Inputs are bounded.
+ function sha256Bytes(bytes){
+  if(!(bytes instanceof Uint8Array)||bytes.length>192*1024)throw Error("Invalid QA digest input");
+  const n=bytes.length, padded=new Uint8Array(Math.ceil((n+9)/64)*64);
+  padded.set(bytes);padded[n]=0x80;
+  const bits=n*8,view=new DataView(padded.buffer),tail=padded.length-8;
+  view.setUint32(tail,Math.floor(bits/4294967296),false);
+  view.setUint32(tail+4,bits>>>0,false);
+  const H=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+   0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  const w=new Uint32Array(64);
+  for(let offset=0;offset<padded.length;offset+=64){
+   for(let i=0;i<16;i++)w[i]=view.getUint32(offset+4*i,false);
+   for(let i=16;i<64;i++){
+    const x=w[i-15],y=w[i-2];
+    w[i]=(w[i-16]+(qaRotate(x,7)^qaRotate(x,18)^(x>>>3))+
+     w[i-7]+(qaRotate(y,17)^qaRotate(y,19)^(y>>>10)))>>>0;
+   }
+   let [a,b,c,d,e,f,g,h]=H;
+   for(let i=0;i<64;i++){
+    const S1=qaRotate(e,6)^qaRotate(e,11)^qaRotate(e,25);
+    const t1=(h+S1+((e&f)^(~e&g))+qaSHA256K[i]+w[i])>>>0;
+    const S0=qaRotate(a,2)^qaRotate(a,13)^qaRotate(a,22);
+    const t2=(S0+((a&b)^(a&c)^(b&c)))>>>0;
+    h=g;g=f;f=e;e=(d+t1)>>>0;d=c;c=b;b=a;a=(t1+t2)>>>0;
+   }
+   const state=[a,b,c,d,e,f,g,h];
+   for(let i=0;i<8;i++)H[i]=(H[i]+state[i])>>>0;
+  }
+  return H.map(v=>v.toString(16).padStart(8,"0")).join("");
+ }
+ const qaJSONBytes=(value)=>new TextEncoder().encode(JSON.stringify(value,null,2)+"\\n");
  function prepare(sources){
   if(!sources||!sources.workspace)throw Error("Workspace scope and preview required");
   const files={"workspace.json":workspace(sources.workspace)};
@@ -175,6 +219,16 @@
     "raw logs, process details and network endpoints","model weights and private Project files",
     "unverified health claims, full installer logs and screenshots"],
    notes:"All content separately projected through fixed allowlists. No upload or remote collection."};
+  // Compute SHA-256 of exactly the projected ZIP member bytes, excluding
+  // manifest.json itself to avoid recursive self-hashing.
+  manifest.integrity_algorithm="SHA-256";
+  manifest.integrity_scope="extracted_utf8_member_bytes";
+  manifest.member_sha256={};
+  for(const name of names){
+   const bytes=qaJSONBytes(files[name]);
+   if(bytes.length>128*1024)throw Error("QA member exceeds per-file limit");
+   manifest.member_sha256[name]=sha256Bytes(bytes);
+  }
   files["manifest.json"]=manifest;
   const json=JSON.stringify({manifest,sources:files},null,2);
   if(new TextEncoder().encode(json).length>MAX_PREVIEW)throw Error("Combined reviewed preview exceeds size limit");
@@ -193,8 +247,10 @@
   for(const name of Object.keys(reviewed.files).sort()){
    if(!["workspace.json","browser.json","agent-check.json","node.json","manifest.json"].includes(name))
     throw Error("Unsupported QA bundle entry");
-   const filename=encoder.encode(name),content=encoder.encode(JSON.stringify(reviewed.files[name],null,2)+"\n");
+   const filename=encoder.encode(name),content=qaJSONBytes(reviewed.files[name]);
    if(content.length>128*1024)throw Error("Source exceeds per-file limit");
+   if(name!=="manifest.json"&&reviewed.files["manifest.json"]?.member_sha256?.[name]!==sha256Bytes(content))
+    throw Error("Source integrity digest changed");
    entries.push({filename,content,checksum:crc32(content)});
   }
   let localLength=0,centralLength=0;
@@ -228,7 +284,7 @@
   if(offset+22!==size)throw Error("ZIP layout mismatch");
   return data;
  }
- const api={prepare,zip,workspace,browser,model,node};
+ const api={prepare,zip,workspace,browser,model,node,sha256Bytes};
  root.a56SupportBundle=api;
  if(typeof module==="object"&&module&&module.exports)module.exports=api;
 })(typeof globalThis!=="undefined"?globalThis:this);

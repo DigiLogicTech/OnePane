@@ -631,3 +631,21 @@ provenance, revocation/retry TOCTOU safety, provider-residency and no-fallback
 policies, and negative integration tests. Do not present these records as
 successful model delivery. Physical rootless Node acceptance, installed
 Windows/Ubuntu QA and both mandatory reviews remain blocked separately.
+
+## Research Council — origin-node evidence destination fence
+
+When a Research seat has an active human-approved local-only evidence intent,
+Team Worker now rereads and binds that approval to the immutable Research
+session manifest and exact seat before selecting a candidate. It constrains
+routing to local origin-node model deployments with no potential monetary
+spend and additionally checks the resolved candidate before seat binding,
+after any pinned-seat re-resolution, and before budget reservation/inference.
+Remote nodes, provider connections, agent runtimes, free cloud offerings and
+untrusted destinations fail closed. Provider failure parks the Research round
+without substituting a cloud model. Consent is rechecked each turn, and the
+Research request manifest records the consent fingerprint with
+`research_evidence_content_delivered:false`.
+
+**No evidence bytes are attached in this increment**. This is a necessary
+policy fence, not a claim that a future local evidence-delivery facility is
+complete or that it has passed physical runtime testing.

@@ -312,10 +312,18 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		res.Status = "awaiting_manual_input"
 		return res
 	}
+	// The persisted human consent is resolved independently for every turn.
+	// It does NOT inject Library bytes; it only fences eligible destinations.
+	var evidenceConsent researchSeatConsent
+	if researchMode {
+		evidenceConsent, err = s.consentForSeat(ctx,ws,ss.ID,member.ID,manifestRecord.SnapshotSHA256)
+		if err != nil { return s.pauseResearch(ctx,res,ss,turnID,err) }
+	}
 	rp := routePolicy{PreferZeroIncrementalCost: true, AllowMediated: true, AllowDegraded: true}
 	_ = json.Unmarshal(member.RoutePolicy, &rp)
 	label := policy.DataLabel{WorkspaceID: ws, Confidentiality: policy.ConfidentialityInternal, Residency: policy.ResidencyAny, Trust: policy.TrustUserInstruction}
 	request := scheduler.RouteRequest{WorkspaceID: ws, CapabilityID: member.CapabilityID, RoleName: member.RoleName, ProtocolLevel: member.ProtocolLevel, ContextTokens: int64((used + 3) / 4), DataLabel: label, AllowUntested: rp.AllowUntested, AllowLimited: rp.AllowLimited, AllowMediated: rp.AllowMediated, AllowDegraded: rp.AllowDegraded, RequireZeroIncrementalCost: rp.RequireZeroIncrementalCost, PreferZeroIncrementalCost: rp.PreferZeroIncrementalCost, AllowSubscriptionUsage: rp.AllowSubscriptionUsage, AllowPotentialMonetarySpend: rp.AllowPotentialMonetarySpend}
+	if evidenceConsent.Active{applyResearchEvidenceRouteFence(&request)}
 	pinSeat := researchMode && (research.PinModels || research.DisableModelSubstitution || research.SameModelRetries)
 	var seatBinding team.SeatBinding
 	if pinSeat {
@@ -337,6 +345,9 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		return s.block(ctx, res, err)
 	}
 	cand := decision.Selected.Candidate
+	if evidenceConsent.Active&&!researchEvidenceCandidateAllowed(cand){
+		return s.pauseResearch(ctx,res,ss,turnID,fmt.Errorf("approved Research evidence seat requires a strictly local origin-node model"))
+	}
 	if pinSeat && seatBinding.CandidateID == "" {
 		raw,_:=json.Marshal(map[string]any{"id":cand.ID,"kind":cand.Kind,"display_name":cand.DisplayName,"provider":cand.Provider,"node_id":cand.NodeID,"compute_mode":cand.ComputeMode,"runtime_backend":cand.RuntimeBackend,"local":cand.Local,"cost_class":cand.CostClass,"qualification":cand.Qualification,"protocol_level":cand.ProtocolLevel,"context_max":cand.ContextMax,"metadata":cand.Metadata})
 		bound, bindErr := s.teams.BindSeat(ctx, ss.ID, member.ID, string(cand.Kind), cand.ID, raw)
@@ -356,6 +367,9 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 			}
 			cand = decision.Selected.Candidate
 		}
+	}
+	if evidenceConsent.Active&&!researchEvidenceCandidateAllowed(cand){
+		return s.pauseResearch(ctx,res,ss,turnID,fmt.Errorf("pinned Research seat resolved to nonlocal model"))
 	}
 	kind, cid := string(cand.Kind), cand.ID
 	_, _ = s.db.ExecContext(ctx, `UPDATE team_turn_requests SET selected_candidate_kind=?,selected_candidate_id=?,updated_at=? WHERE id=?`, kind, cid, s.clock.UnixMilli(), turnID)
@@ -384,6 +398,10 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 	contextHash:=hex.EncodeToString(contextSum[:])
 	manifestPayload:=map[string]any{"session_id":ss.ID,"message_count":len(sections)-1,"bytes":used,"round":turnRound,"research_phase":researchPhase,"research_total_rounds":team.ResearchTotalRounds(research),"critique_rounds":research.CritiqueRounds,"context_sha256":contextHash,"research_mode":researchMode,"candidate_id":cand.ID,"candidate_kind":cand.Kind,"profile_id":profileID,"profile_revision":profileRevision}
 	if hasManifest { manifestPayload["session_manifest_sha256"]=manifestRecord.SnapshotSHA256 }
+	if evidenceConsent.Active {
+		manifestPayload["research_evidence_consent_sha256"]=evidenceConsent.EvidenceSHA256
+		manifestPayload["research_evidence_content_delivered"]=false
+	}
 	if seatBinding.CandidateID!="" { manifestPayload["seat_binding_candidate_id"]=seatBinding.CandidateID }
 	manifest,_:=json.Marshal(manifestPayload)
 	areq := agentprotocol.Request{ProtocolVersion: agentprotocol.Version, RequestID: "", WorkspaceID: ws, TaskID: ss.TaskID, PrincipalID: WorkerPrincipal, Role: member.RoleName, Objective: objective, Constraints: json.RawMessage(`{"deliberation_only":true,"no_side_effects":true}`), Context: sections, ContextManifest: manifest, PermittedProposalTypes: []agentprotocol.ProposalType{agentprotocol.ProposalReplan, agentprotocol.ProposalHuman, agentprotocol.ProposalComplete, agentprotocol.ProposalWait, agentprotocol.ProposalFail}, ToolCallback: false}

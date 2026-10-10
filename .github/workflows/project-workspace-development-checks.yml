@@ -75,6 +75,44 @@ permissions:
   contents: read
 
 jobs:
+  physical-readiness-report:
+    name: Physical Node approval status (informational only)
+    # Uses a hosted runner, never connects to an unapproved self-hosted Node.
+    # Shows only whether admin variables exist; never prints their values.
+    # A successful report job is NOT physical execution or approval.
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Record truthful physical QA blockers
+        shell: bash
+        env:
+          ROOTLESS_APPROVED: ${{ vars.ONEPANE_ROOTLESS_SMOKE_IMAGE != '' }}
+          GODOT_APPROVED: ${{ vars.ONEPANE_GODOT_SMOKE_IMAGE != '' }}
+          PYTHON_APPROVED: ${{ vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE != '' }}
+        run: |
+          {
+            echo '### RC11 physical Node acceptance — approval-only readiness'
+            echo ''
+            echo '**No physical acceptance is established by this job.**'
+            echo 'Approval variables indicate eligibility to run a self-hosted job, not image validity, OCI runtime readiness, or test success.'
+            echo ''
+            echo '| Opt-in family | Admin approval configured |'
+            echo '| --- | --- |'
+            for item in 'Rootless Workspace:ROOTLESS_APPROVED' 'Godot 4:GODOT_APPROVED' 'Python, Library and HTTP Broker:PYTHON_APPROVED'; do
+              label="${item%:*}"
+              variable="${item#*:}"
+              if [[ "${!variable}" == 'true' ]]; then
+                state='Configured — physical test must still pass'
+              else
+                state='Not configured — physical jobs skipped'
+              fi
+              printf '| %s | %s |\n' "$label" "$state"
+            done
+            echo ''
+            echo 'On the intended unprivileged Node run: `go run ./cmd/onepane-node-preflight`.'
+            echo 'Preflight reads only rootless Podman status and approved local image presence. No images are pulled or containers changed.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   development-contract:
     name: Validate honest Workspace runtime boundaries
     runs-on: ubuntu-latest

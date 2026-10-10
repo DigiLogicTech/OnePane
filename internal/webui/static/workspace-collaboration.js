@@ -168,4 +168,117 @@ async function a45RenderCollaboration(project,workspace,root){
    cell.innerHTML=Array.isArray(pubs)&&pubs.length?pubs.map(p=>`<div class="a45-publication"><strong>${a45HTML(p.asset_name)}</strong><span class="list-meta">v${Number(p.asset_version)} · ${a45HTML(p.content_hash)} · ${a45HTML(p.asset_id)}</span></div>`).join(""):'<span class="list-meta">No versions published.</span>';
   }catch(err){if(cell.isConnected)cell.textContent="Publication list unavailable: "+err.message}
  }));
+ if(root.isConnected&&root.dataset.workspaceId===String(workspace.id)){
+  const serviceArea=document.createElement("section");
+  serviceArea.className="a46-service-grants";
+  root.append(serviceArea);
+  await a46RenderServiceGrants(project,current,canonical,serviceArea);
+ }
+}
+
+/* Operator service approvals, deliberately NOT service forwarding. A grant
+ * pins a live verified OCI endpoint, but no browser or sandbox network
+ * request is sent to the approved path until Node-local mediation is passed.
+ */
+async function a46RenderServiceGrants(project,current,canonical,section){
+ if(!section?.isConnected)return;
+ const prefix="/v1/projects/"+encodeURIComponent(project.id);
+ let services=[];
+ try{
+  const result=await apiRequest(prefix+"/workspace-service-links");
+  services=Array.isArray(result)?result:[];
+ }catch(err){
+  if(section.isConnected)section.innerHTML='<h4>Service approvals</h4><div class="error">'+a45HTML(err.message)+'</div>';
+  return;
+ }
+ let endpoints=[];
+ try{
+  const runtime=await apiRequest(prefix+"/workspaces/"+encodeURIComponent(current.id)+"/runtime");
+  if(runtime?.id){
+   const result=await apiRequest("/v1/project-runtimes/"+encodeURIComponent(runtime.id)+"/endpoints");
+   endpoints=(Array.isArray(result)?result:[]).filter(e=>
+    e.protocol==="http"&&e.status==="ready"&&e.application_id);
+  }
+ }catch(_err){
+  // A Workspace without a verified runtime cannot approve a service grant.
+  // Existing grants remain visible for expiry/revocation operations.
+ }
+ if(!section.isConnected)return;
+ const names=new Map(canonical.map(w=>[String(w.id),String(w.name||w.id)]));
+ const targets=canonical.filter(w=>w.id!==current.id&&w.status==="active");
+ const targetOptions=targets.map(w=>'<option value="'+a45HTML(w.id)+'">'+a45HTML(w.name)+'</option>').join("");
+ const endpointOptions=endpoints.map(e=>'<option value="'+a45HTML(e.id)+'">'+
+  a45HTML(e.name||"HTTP endpoint")+' · '+Number(e.internal_port)+'</option>').join("");
+ const relevant=services.filter(l=>l.source_workspace_id===current.id||l.target_workspace_id===current.id);
+ const rows=relevant.length?relevant.map(l=>{
+  const expired=Boolean(l.expired)||Number(l.expires_at_ms)<=Date.now();
+  const name=names.get(l.source_workspace_id)||l.source_workspace_id;
+  const dest=names.get(l.target_workspace_id)||l.target_workspace_id;
+  const outgoing=l.source_workspace_id===current.id;
+  const status=expired?"Expired":l.enabled?"Approved":"Revoked";
+  return '<article class="a45-link-card"><div class="a45-link-header"><div>'+
+   '<strong>'+a45HTML(l.name)+'</strong>'+
+   '<div class="list-meta">'+a45HTML(name)+' → '+a45HTML(dest)+
+   ' · '+(outgoing?"Outgoing":"Incoming")+' · '+a45HTML(l.approved_path)+'</div>'+
+   '<div class="list-meta">Expires '+a45HTML(new Date(Number(l.expires_at_ms)).toLocaleString())+
+   ' · Transport inactive until Node verification</div></div>'+
+   '<span class="pill">'+status+'</span></div>'+
+   '<div class="toolbar a45-link-actions">'+
+   (l.enabled?'<button class="btn" type="button" data-a46-revoke="'+a45HTML(l.id)+
+    '" data-a46-revision="'+Number(l.revision)+'">Revoke</button>':'')+
+   '<button class="btn" type="button" data-a46-renew="'+a45HTML(l.id)+
+   '" data-a46-revision="'+Number(l.revision)+'">Approve another 7 days</button>'+
+   '</div></article>';
+ }).join(""):'<div class="empty-state compact">No service approvals. Workspace networks remain isolated.</div>';
+ const canCreate=endpoints.length>0&&targets.length>0;
+ section.innerHTML='<h4>Scoped HTTP service approvals</h4>'+
+  '<p class="list-meta">Operator policy only: no connection, HTTP forwarding, automatic credentials or cross-Workspace network access is enabled. Physical Node broker validation is still required.</p>'+
+  '<form class="a45-connection-form" data-a46-form>'+
+   '<label>Verified source HTTP endpoint<select name="endpoint_id" required '+(endpoints.length?"":"disabled")+'>'+
+    (endpointOptions||'<option>No verified HTTP endpoints</option>')+'</select></label>'+
+   '<label>Destination Workspace<select name="target_workspace_id" required '+(targets.length?"":"disabled")+'>'+
+    (targetOptions||'<option>No other active Workspaces</option>')+'</select></label>'+
+   '<label>Approval name<input name="name" maxlength="120" required value="Approved service status"></label>'+
+   '<label>Exact read-only path<input name="approved_path" maxlength="128" value="/health" required></label>'+
+   '<label>Expiry<select name="duration"><option value="1">24 hours</option>'+
+    '<option value="7" selected>7 days</option><option value="30">30 days</option></select></label>'+
+   '<button type="submit" class="btn" '+(canCreate?"":"disabled")+
+    '>Record service approval</button></form>'+
+  '<div class="a45-links">'+rows+'</div>';
+ const refresh=()=>a46RenderServiceGrants(project,current,canonical,section);
+ section.querySelector("[data-a46-form]")?.addEventListener("submit",async event=>{
+  event.preventDefault();
+  const button=event.currentTarget.querySelector('[type="submit"]');
+  button.disabled=true;
+  const values=Object.fromEntries(new FormData(event.currentTarget));
+  try{
+   await apiRequest(prefix+"/workspace-service-links",{
+    method:"POST",body:JSON.stringify({
+     source_workspace_id:current.id,target_workspace_id:values.target_workspace_id,
+     endpoint_id:values.endpoint_id,name:values.name,
+     approved_path:values.approved_path,
+     expires_at_ms:Date.now()+Number(values.duration)*86400000
+    })
+   });
+   notice("Service approval recorded; forwarding remains disabled.");
+   await refresh();
+  }catch(err){button.disabled=false;notice("Service approval failed: "+err.message,"bad")}
+ });
+ for(const action of ["revoke","renew"]){
+  section.querySelectorAll("[data-a46-"+action+"]").forEach(button=>button.addEventListener("click",async()=>{
+   button.disabled=true;
+   const id=button.dataset["a46"+action[0].toUpperCase()+action.slice(1)];
+   const revision=Number(button.dataset.a46Revision);
+   try{
+    await apiRequest("/v1/workspace-service-links/"+encodeURIComponent(id),{
+     method:"PATCH",body:JSON.stringify({
+      expected_revision:revision,enabled:action==="renew",
+      ...(action==="renew"?{expires_at_ms:Date.now()+7*86400000}:{})
+     })
+    });
+    notice(action==="renew"?"Service approval renewed; forwarding remains disabled.":"Service approval revoked.");
+    await refresh();
+   }catch(err){button.disabled=false;notice("Service approval change failed: "+err.message,"bad")}
+  }));
+ }
 }

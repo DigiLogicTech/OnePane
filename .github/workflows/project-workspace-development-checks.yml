@@ -78,4 +78,9 @@ jobs:
           go test ./...
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-harnessd.exe ./cmd/harnessd
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-service.exe ./packaging/windows/service
+          # Compile the legacy setup source without a real distributable payload.
+          # No installer is packaged or released by this compilation check.
+          mkdir -p packaging/windows/setup/payload
+          printf 'CI compile fixture' > packaging/windows/setup/payload/qa-compile-fixture.bin
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-legacy-setup.exe ./packaging/windows/setup
           bash -n scripts/install-ubuntu.sh

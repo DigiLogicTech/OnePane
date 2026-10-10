@@ -237,86 +237,88 @@ func (s *Service) MarkReady(ctx context.Context, cmd TransitionCommand) (Task, e
 	return s.transition(ctx, cmd, StateReady, "task.ready", func(tr *transitionRecord, now int64) { tr.ReadyAt = &now })
 }
 
+// CheckStartAdmission preserves the ordinary admission guard before a trusted
+// caller opens a multi-subsystem transaction. A guard can query other services
+// through the database and must not be called from inside an SQLite write
+// transaction (which could deadlock on the pooled connection).
+func (s *Service) CheckStartAdmission(ctx context.Context, cmd StartCommand) error {
+ if strings.TrimSpace(cmd.TaskID)==""||cmd.ExpectedRevision<1{
+  return fmt.Errorf("%w: task id and expected revision are required",ErrInvalidCommand)
+ }
+ if s.guard!=nil{
+  current,err:=s.repo.Get(ctx,cmd.TaskID)
+  if err!=nil{return err}
+  if err:=s.guard.AllowStart(ctx,current);err!=nil{return err}
+ }
+ return nil
+}
+
+// Start retains the public Task lifecycle: callers observe an already
+// committed Task and Attempt, with the same guard and event semantics.
 func (s *Service) Start(ctx context.Context, cmd StartCommand) (Task, Attempt, error) {
-	if strings.TrimSpace(cmd.TaskID) == "" || cmd.ExpectedRevision < 1 {
-		return Task{}, Attempt{}, fmt.Errorf("%w: task id and expected revision are required", ErrInvalidCommand)
-	}
-	if s.guard != nil {
-		t, err := s.repo.Get(ctx, cmd.TaskID)
-		if err != nil {
-			return Task{}, Attempt{}, err
-		}
-		if err := s.guard.AllowStart(ctx, t); err != nil {
-			return Task{}, Attempt{}, err
-		}
-	}
-	if len(cmd.Metadata) == 0 {
-		cmd.Metadata = json.RawMessage(`{}`)
-	}
-	if !json.Valid(cmd.Metadata) {
-		return Task{}, Attempt{}, fmt.Errorf("%w: attempt metadata must be valid JSON", ErrInvalidCommand)
-	}
+ if err:=s.CheckStartAdmission(ctx,cmd);err!=nil{return Task{},Attempt{},err}
+ var started Task
+ var created Attempt
+ err:=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+  var startErr error
+  started,created,startErr=s.StartInTransaction(ctx,tx,cmd)
+  return startErr
+ })
+ if err!=nil{return Task{},Attempt{},err}
+ return started,created,nil
+}
 
-	attemptID, err := s.ids.New("attempt")
-	if err != nil {
-		return Task{}, Attempt{}, err
-	}
-	eventID, err := s.ids.New("evt")
-	if err != nil {
-		return Task{}, Attempt{}, err
-	}
-	now := s.clock.UnixMilli()
-	var created Attempt
-
-	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		t, err := s.repo.GetForUpdate(ctx, tx, cmd.TaskID)
-		if err != nil {
-			return err
-		}
-		if t.Revision != cmd.ExpectedRevision {
-			return ErrRevisionConflict
-		}
-		if !CanTransition(t.State, StateRunning) {
-			return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, t.State, StateRunning)
-		}
-		active, err := s.repo.ActiveAttempt(ctx, tx, t.ID)
-		if err != nil {
-			return err
-		}
-		if active != nil {
-			return ErrActiveAttempt
-		}
-		n, err := s.repo.NextAttemptNumber(ctx, tx, t.ID)
-		if err != nil {
-			return err
-		}
-		created = Attempt{
-			ID: attemptID, TaskID: t.ID, AttemptNumber: n, WorkerPrincipalID: cmd.WorkerPrincipalID,
-			State: AttemptRunning, StartedAt: &now, Metadata: cloneJSON(cmd.Metadata),
-		}
-		if err := s.repo.InsertAttempt(ctx, tx, created); err != nil {
-			return err
-		}
-		if err := s.repo.Transition(ctx, tx, transitionRecord{
-			TaskID: t.ID, ExpectedRevision: t.Revision, From: t.State, To: StateRunning, UpdatedAt: now,
-		}); err != nil {
-			return err
-		}
-		payload, _ := json.Marshal(map[string]any{
-			"task_id": t.ID, "attempt_id": attemptID, "attempt_number": n,
-			"from": t.State, "to": StateRunning, "revision": t.Revision + 1,
-		})
-		return s.events.Append(ctx, tx, event.Event{
-			ID: eventID, WorkspaceID: &t.WorkspaceID, Type: "task.started",
-			AggregateType: "task", AggregateID: t.ID, ActorPrincipalID: cmd.ActorPrincipalID,
-			RequestID: cmd.RequestID, TraceID: cmd.TraceID, Payload: payload, OccurredAt: now,
-		})
-	})
-	if err != nil {
-		return Task{}, Attempt{}, err
-	}
-	t, err := s.repo.Get(ctx, cmd.TaskID)
-	return t, created, err
+// StartInTransaction permits trusted control-plane Worker admission to commit
+// Task start, the *original* Attempt, Worker run and both events in one atomic
+// transaction. Its caller MUST first call CheckStartAdmission before opening
+// the transaction. This method cannot grant admission on its own; Task
+// revision/state and active Attempt checks are repeated inside the write
+// transaction to reject races.
+func (s *Service) StartInTransaction(ctx context.Context, tx storage.Tx, cmd StartCommand) (Task, Attempt, error) {
+ if tx==nil||strings.TrimSpace(cmd.TaskID)==""||cmd.ExpectedRevision<1{
+  return Task{},Attempt{},fmt.Errorf("%w: transaction, task id and expected revision are required",ErrInvalidCommand)
+ }
+ if len(cmd.Metadata)==0{cmd.Metadata=json.RawMessage(`{}`)}
+ if !json.Valid(cmd.Metadata){
+  return Task{},Attempt{},fmt.Errorf("%w: attempt metadata must be valid JSON",ErrInvalidCommand)
+ }
+ attemptID,err:=s.ids.New("attempt")
+ if err!=nil{return Task{},Attempt{},err}
+ eventID,err:=s.ids.New("evt")
+ if err!=nil{return Task{},Attempt{},err}
+ now:=s.clock.UnixMilli()
+ t,err:=s.repo.GetForUpdate(ctx,tx,cmd.TaskID)
+ if err!=nil{return Task{},Attempt{},err}
+ if t.Revision!=cmd.ExpectedRevision{return Task{},Attempt{},ErrRevisionConflict}
+ if !CanTransition(t.State,StateRunning){
+  return Task{},Attempt{},fmt.Errorf("%w: %s -> %s",ErrInvalidTransition,t.State,StateRunning)
+ }
+ active,err:=s.repo.ActiveAttempt(ctx,tx,t.ID)
+ if err!=nil{return Task{},Attempt{},err}
+ if active!=nil{return Task{},Attempt{},ErrActiveAttempt}
+ n,err:=s.repo.NextAttemptNumber(ctx,tx,t.ID)
+ if err!=nil{return Task{},Attempt{},err}
+ created:=Attempt{
+  ID:attemptID,TaskID:t.ID,AttemptNumber:n,WorkerPrincipalID:cmd.WorkerPrincipalID,
+  State:AttemptRunning,StartedAt:&now,Metadata:cloneJSON(cmd.Metadata),
+ }
+ if err:=s.repo.InsertAttempt(ctx,tx,created);err!=nil{return Task{},Attempt{},err}
+ if err:=s.repo.Transition(ctx,tx,transitionRecord{
+  TaskID:t.ID,ExpectedRevision:t.Revision,From:t.State,To:StateRunning,UpdatedAt:now,
+ });err!=nil{return Task{},Attempt{},err}
+ payload,_:=json.Marshal(map[string]any{
+  "task_id":t.ID,"attempt_id":attemptID,"attempt_number":n,
+  "from":t.State,"to":StateRunning,"revision":t.Revision+1,
+ })
+ if err:=s.events.Append(ctx,tx,event.Event{
+  ID:eventID,WorkspaceID:&t.WorkspaceID,Type:"task.started",
+  AggregateType:"task",AggregateID:t.ID,ActorPrincipalID:cmd.ActorPrincipalID,
+  RequestID:cmd.RequestID,TraceID:cmd.TraceID,Payload:payload,OccurredAt:now,
+ });err!=nil{return Task{},Attempt{},err}
+ t.State=StateRunning
+ t.Revision++
+ t.UpdatedAt=now
+ return t,created,nil
 }
 
 func (s *Service) WaitDependency(ctx context.Context, cmd TransitionCommand) (Task, error) {

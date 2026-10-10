@@ -28,6 +28,7 @@ type onePaneRoutingPolicy struct {
 	AgentProfile          string                `json:"agent_profile,omitempty"`
 	FallbackAgentProfiles []string              `json:"fallback_agent_profiles,omitempty"`
 	ProjectWorkspaceID    string                `json:"project_workspace_id,omitempty"`
+	ComputePreference string `json:"compute_preference,omitempty"`
 	WorkspaceAccess       workspaceAccessPolicy `json:"workspace_access,omitempty"`
 }
 
@@ -164,4 +165,19 @@ func workspaceToolAllowedWithPolicy(p workspaceAccessPolicy, capabilityID string
 	// workspace-only filesystem boundaries are additionally enforced by the
 	// CapabilityLease/resource scope. This policy can narrow access, never widen it.
 	return nil
+}
+
+func validComputePlacement(v string)bool{
+ switch v{
+ case "","auto","prefer_cpu","cpu_only","prefer_gpu","gpu_only":return true
+ default:return false
+ }
+}
+// No Task or delegated Agent can widen its original Project scope by
+// choosing an otherwise valid compute preference.
+func computePlacementForTask(t task.Task)(string,error){
+ value:=routingPolicyFromCompletion(t.Completion).ComputePreference
+ if !validComputePlacement(value){return "",fmt.Errorf("persisted Task has unsupported compute placement")}
+ if value==""{return "auto",nil}
+ return value,nil
 }

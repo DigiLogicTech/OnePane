@@ -48,3 +48,17 @@ The separately approved, digest-pinned **rootless Node** integration test `TestR
 - Both Workspaces must stop cleanly without image pruning, uncontrolled host-shell commands, or deletion of existing user roots. The explicit trusted test uses only fresh generated OCI names and disposable temporary directories.
 
 This added acceptance is source-compiled by integration CI, but physical results remain **unverified** while the trusted self-hosted rootless job is **skipped**. The physical workflow still requires a deliberate repository administrator-provided digest-pinned pre-pulled image and verified unprivileged Podman identity. Do not substitute a hosted/unit simulation or a green source-compilation run for the actual rootless acceptance check. After the approved Node/image become available, run the existing opt-in workflow and record the actual result before closing #19/#20 or packaging RC11.
+
+## RC11-02 — governed Godot 4 toolchain execution (2026-10-10)
+
+A dedicated `project.app.godot.build` sandbox tool is now registered with the existing `project.app.execute` capability and `ActionExecuteSandboxed` authority/lease path. It is **not** an uncontrolled package installer, a host command or a model-controlled Godot CLI. It accepts only `runtime_id`, `application_id`, `action` (`import` or `run`) and optional bounded `timeout_seconds`; unknown JSON keys and all executable/image/path/environment/mount/network overrides are rejected.
+
+Commands are immutable argument vectors, never a shell:
+- `import` → `godot --headless --path /workspace --editor --import`
+- `run` → `godot --headless --path /workspace --quit-after 60`
+
+Godot must already exist **inside the explicitly registered immutable OCI image**. The adapter probes rootless OCI, checks the owned runtime + application, requires running/observed `IsolationVerified` with exact single allowed writable Workspace mount and valid spec hash, and bounds execution by caller cancellation or 600 s default / 3600 s maximum. Nonzero scene/import exit status is preserved as an observed **build failure** (not labelled build success), and OCI timeouts/errors fail the Tool invocation. A successful command explicitly reports `artifact_verified=false`: it does **not** publish or externally attest to an artifact. A distinct Task-owned `project.app.files.publish` invocation remains responsible for independently hashed, immutable Library publication and grant controls.
+
+Unit tests cover the exact arguments, forbidden injection parameters/paths, unsupported actions, rootful/extra-bind denial, failed Godot run and deadlines. The opt-in, trusted self-hosted Godot physical acceptance now exercises the **same adapter action path** instead of bypassing it with raw `ExecContainer`, followed by independent host SHA-256 readback of the generated file. Physical CI remains explicitly skipped until a repo administrator pre-pulls and authorises a compatible digest-pinned Godot OCI image and rootless runner; these green source tests cannot claim installed Godot acceptance.
+
+**Still open:** real physical Godot run, package/image preflight, Task Gateway/capability lease live acceptance, publication to immutable Project Library through the real publisher, two-Workspace controlled grants, error/retry/rollback and high-confidence postcondition probe. Do not close #20 or build RC11 yet; user-mandated #86 reviews remain release blockers.

@@ -248,3 +248,44 @@ verification.
 adapter in bootstrap, granting agent profiles permission to use it, trusted
 Node identity and remote broker routing, and physical Podman multi-Workspace
 acceptance. Keep all of these disabled until approval and #19/#21/#86 gates.
+
+## RC11-04 — atomic, human-reviewed Project Task dependency graphs
+
+The Project Orchestrator now supports an explicit operator-approved plan
+consisting of 1..32 named Tasks in active, canonical Workspaces of **one**
+Project, with up to 8 *hard/all* prerequisite links per Task. Graph validation
+rejects unknown nodes, duplicate/self edges, cyclic plans, inactive/foreign
+Workspaces, oversized objectives and nonhuman actors.
+
+`POST /v1/projects/{projectID}/orchestrator/task-graphs` requires the
+authenticated operator's `task.write` authority, and
+`GET /v1/projects/{projectID}/orchestrator/task-graphs/{graphID}`
+requires `project.read`. The Project Task graph is neither invented by a
+reasoning model nor committed by a read-only Assistant turn. The Project ID
+and principal are obtained from the authenticated API session, not copied
+from the submitted graph.
+
+Migration 0047 records a Project-scoped idempotency key, canonical SHA-256
+plan digest, graph-node mapping and provenance. A **single write
+transaction** stores the graph, each Task/Event/Outbox admission message,
+and all dependency edges. Repeating the same key+plan returns the original
+Task graph; changed content under the same key rejects without creating
+more Tasks. Different Workspaces stay filesystem-, secret- and network-
+isolated: completion state is the only shared ordering signal.
+
+Existing autonomous Agent Worker admission for newly created Tasks already
+waited on hard predecessors. RC11 now also rejects ready-to-start work
+when any hard predecessor is not complete or has been archived. That
+condition is rechecked inside the Task+Attempt **write transaction**,
+regardless of what set the Task to ready. A blocked successor must not
+consume a model lease, start an Attempt, or misreport parallel work as
+success. Independent DAG branches can continue; failed predecessors
+remain visibly blocking instead of silent fallback.
+
+Graph submission itself requires no inference or cloud provider, and
+canonical named Workspace Tasks default to disallowing remote model
+use unless separately, explicitly approved under existing Workspace
+policy. **Not yet delivered:** automatic DAG planning/synthesis from AI,
+graph-specific UI, terminal-failure policy/recovery actions and physical
+CPU-only completion acceptance. These remain separate governed work, not
+inferred from passing source tests.

@@ -82,3 +82,50 @@ A green hosted workflow with a **skipped** physical job is never sufficient
 to approve RC11. The smoke is one acceptance gate; real installed OnePane
 API→Task/lease→operation→verification, multi-Workspace isolation and
 Windows/Ubuntu upgrade preservation must also pass.
+
+## RC11 Node readiness preflight (read-only, available before image approval)
+
+To see the **reason the physical gates are not running**, use this safe
+inspection command on the intended unprivileged Linux runner (or from the
+checked-out RC11 tree under the OnePane runtime's service account):
+
+```bash
+go run ./cmd/onepane-node-preflight
+# To check only the Python, Library and HTTP broker acceptance family:
+go run ./cmd/onepane-node-preflight -require ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE -strict
+```
+
+The command does **not** modify Node state. It only checks whether this is
+Linux, whether the current process is nonroot with functional rootless Podman,
+and whether immutable OCI digest references supplied through an explicit
+allowlist of repository/local environment variable names already exist in
+the current user's local image pool. It never runs `podman pull`, `run`,
+`exec`, `rm`, `network` or privileged host commands. It does not print
+the actual image repository/ref, username, environment contents, local paths
+or diagnostic output. Image identities in reports are abbreviated one-way
+fingerprints.
+
+The three independent opt-in image variables are:
+- `ONEPANE_ROOTLESS_SMOKE_IMAGE`: POSIX `sh` + `sleep` image for general
+  rootless Workspace isolation/restart.
+- `ONEPANE_GODOT_SMOKE_IMAGE`: digest-pinned Godot 4 image for asset builds.
+- `ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE`: digest-pinned Python 3 image
+  containing `sh` for large publication, immutable Library and HTTP broker.
+
+The report distinguishes `approval_missing`, `invalid_immutable_reference`,
+`not_rootless`, `unavailable`, `image_not_present`,
+`image_check_failed` and `locally_present` and always sets
+`physical_acceptance_verified: false`. `ready_for_physical_test: true`
+means **prerequisites only**; it is not proof that the image has all expected
+commands or that the source container passed any of the five physical
+acceptance suites.
+
+A new *hosted* job in the RC11 Trusted Rootless Node Acceptance workflow
+prints a GitHub Actions job summary for which approval-variable families
+are configured. It never invokes the self-hosted runner or sees the image
+values. That summary is not a physical pass either. Only the opt-in jobs
+with actual rootless execution are eligible for physical acceptance. The
+HTTP broker job uses the same tested read-only preflight in `-strict` mode
+before running its real OCI assertions. Existing elevated privileges, unknown
+images, remote host network changes and download operations are never
+auto-approved.

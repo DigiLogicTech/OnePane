@@ -280,10 +280,11 @@ type Server struct {
 	providerOAuth   providerOAuthService
 	configPath      string
 	modelPoolPath   string
+	apiCapture      *qaAPICapture
 }
 
 func NewServer(projects projectService, events eventReader, auth Authorizer) *Server {
-	s := &Server{mux: http.NewServeMux(), projects: projects, events: events, auth: auth}
+	s := &Server{mux: http.NewServeMux(), projects: projects, events: events, auth: auth, apiCapture: &qaAPICapture{}}
 	if routes, ok := any(projects).(ingressRouteResolver); ok {
 		s.ingressRoutes = routes
 	}
@@ -323,7 +324,7 @@ func (s *Server) SetRuntimeConfig(path, modelPoolPath string) {
 	s.configPath = strings.TrimSpace(path)
 	s.modelPoolPath = strings.TrimSpace(modelPoolPath)
 }
-func (s *Server) Handler() http.Handler { return s.securityHeaders(s.mux) }
+func (s *Server) Handler() http.Handler { return s.securityHeaders(s.qaCaptureMiddleware(s.mux)) }
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/system/metrics", s.hostMetricsRequest)
@@ -356,6 +357,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/qa/nodes/{nodeID}/evidence", s.qaNodeEvidenceHandler)
 	s.mux.HandleFunc("GET /v1/qa/workspace-snapshot", s.qaWorkspaceSnapshot)
 	s.mux.HandleFunc("POST /v1/qa/workspace-bundle", s.qaWorkspaceBundle)
+	// RC11: administrator-owned, off-by-default, explicitly tagged HTTP diagnostics.
+	s.mux.HandleFunc("POST /v1/qa/api-capture/start", s.qaAPICaptureStart)
+	s.mux.HandleFunc("GET /v1/qa/api-capture", s.qaAPICaptureStatus)
+	s.mux.HandleFunc("POST /v1/qa/api-capture/stop", s.qaAPICaptureStop)
 	s.mux.HandleFunc("GET /v1/tasks", s.listTasks)
 	s.mux.HandleFunc("POST /v1/tasks", s.createTask)
 	s.mux.HandleFunc("POST /v1/tasks/{taskID}/archive", s.archiveTask)

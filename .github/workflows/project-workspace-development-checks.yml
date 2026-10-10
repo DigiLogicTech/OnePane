@@ -44,6 +44,9 @@ on:
       - 'internal/projectruntime/**'
       - 'internal/sandboxrunner/**'
       - 'internal/workspacebroker/**'
+      - 'internal/nodepreflight/**'
+      - 'cmd/onepane-node-preflight/**'
+      - '.github/workflows/rc11-rootless-physical.yml'
       - 'docs/GENERAL_PURPOSE_WORKSPACE_SANDBOX.md'
       - 'internal/agentworker/**'
       - 'internal/team/**'
@@ -139,6 +142,7 @@ jobs:
               }
             })'
           rm -rf -- "$evidence_root"
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-node-preflight.exe ./cmd/onepane-node-preflight
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-harnessd.exe ./cmd/harnessd
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-service.exe ./packaging/windows/service
           # Compile the legacy setup source without a real distributable payload.

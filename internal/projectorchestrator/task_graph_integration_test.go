@@ -189,6 +189,19 @@ func TestProjectTaskGraphAtomicDependencyAndIdempotency(t *testing.T){
  if strings.Contains(string(report),extra.ID){
   t.Fatal("unknown dependency's opaque identifier leaked in operator graph report")
  }
+ // The graph's immutable Workspace mapping remains authoritative even
+ // if a later bad operator/import path rewrites Task ownership in SQLite.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE tasks
+  SET project_workspace_id=? WHERE id=?`,source.ID,lookup["integration"].TaskID);err!=nil{t.Fatal(err)}
+ drifted,err:=svc.TaskGraph(ctx,p.ID,graph.ID)
+ if err!=nil||drifted.Status!="needs_attention"{
+  t.Fatalf("Workspace identity drift not surfaced: %+v %v",drifted,err)
+ }
+ var driftedNode TaskGraphNode
+ for _,n:=range drifted.Nodes{if n.Key=="integration"{driftedNode=n}}
+ if !driftedNode.ScopeDrift||driftedNode.Readiness!="needs_attention"{
+  t.Fatalf("Graph lost approved Task Workspace identity: %+v",driftedNode)
+ }
  // A new graph is scoped to another Project only by a fresh operator action.
  if _,err=svc.TaskGraph(ctx,"other-project",graph.ID);!errors.Is(err,sql.ErrNoRows){
   t.Fatalf("graph exposed across Project boundaries: %v",err)

@@ -326,6 +326,14 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 					registered,checkErr:=isApprovedToolchainRegisteredRunning(ctx,s.db,toolchainWait)
 					if checkErr!=nil{return fmt.Errorf("recheck persisted Workspace toolchain wait: %w",checkErr)}
 					ready=blocked==0&&registered
+                    if !ready {
+                        // Advance the persisted deadline atomically: an
+                        // unavailable approved runtime must not be rechecked
+                        // on every Worker tick after the first expiry.
+                        if err:=s.deferWorkspaceToolchainWait(ctx,v.run,cont,toolchainWait);err!=nil{
+                            return fmt.Errorf("defer approved Workspace runtime recheck: %w",err)
+                        }
+                    }
 				}
 			}
 			if strings.TrimSpace(c.OperationID) != "" {

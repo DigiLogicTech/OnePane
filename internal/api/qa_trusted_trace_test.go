@@ -3,7 +3,6 @@ package api
 import (
  "context"
  "encoding/json"
- "net/http"
  "net/http/httptest"
  "strings"
  "testing"

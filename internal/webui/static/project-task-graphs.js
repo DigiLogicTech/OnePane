@@ -107,7 +107,10 @@ function a61GraphCard(graph){
  return '<details class="a61-graph-card"><summary><strong>'+a61Safe(graph.name||"Task graph")+
   '</strong><span class="pill">'+a61Safe(graph.status||"unknown")+'</span>'+
   '<span class="list-meta">'+a61Safe(summary)+'</span></summary>'+
-  '<div class="a61-graph-nodes">'+rows+'</div></details>';
+  '<div class="a61-graph-nodes">'+rows+'</div>'+
+  '<div class="toolbar"><button type="button" class="btn" data-a69-recovery="'+
+   a61Safe(graph.id)+'">Inspect recovery checkpoint</button></div>'+
+  '<pre class="a62-evidence-receipt" data-a69-output hidden></pre></details>';
 }
 async function a61MountProjectTaskGraphs(project,workspace,container){
  if(!container?.isConnected)return;
@@ -188,6 +191,24 @@ async function a61MountProjectTaskGraphs(project,workspace,container){
   if(!inventory)return;
   inventory.innerHTML=graphs.length?graphs.map(a61GraphCard).join(""):
    '<div class="empty-state compact">No operator-approved Task graphs in this Project.</div>';
+  inventory.querySelectorAll("[data-a69-recovery]").forEach(button=>{
+   button.addEventListener("click",async()=>{
+    const graphID=button.getAttribute("data-a69-recovery");
+    const output=button.closest("details")?.querySelector("[data-a69-output]");
+    if(!graphID||!output)return;
+    button.disabled=true;
+    output.hidden=false;
+    output.textContent="Checking current persisted graph and Task states…";
+    try{
+     const checkpoint=await apiRequest(base+"/orchestrator/task-graphs/"+
+      encodeURIComponent(graphID)+"/recovery-checkpoint");
+     if(!section.isConnected||!button.isConnected)return;
+     output.textContent=JSON.stringify(checkpoint,null,2);
+    }catch(ex){
+     if(button.isConnected)output.textContent="Recovery inspection unavailable: "+ex.message;
+    }finally{if(button.isConnected)button.disabled=false;}
+   });
+  });
  };
  section.innerHTML=intro+'<div class="toolbar a61-graph-actions">'+
   '<button type="button" class="btn" data-a61-refresh>Refresh statuses</button>'+

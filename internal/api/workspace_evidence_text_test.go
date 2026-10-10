@@ -77,7 +77,7 @@ func verifiedEvidenceFixture(contents string)(*evidenceFixtureLibrary,*evidenceF
  return lib,artifacts
 }
 func readFixture(lib *evidenceFixtureLibrary,blob *evidenceFixtureArtifacts)(verifiedWorkspaceEvidence,error){
- return collectVerifiedWorkspaceEvidence(context.Background(),lib,blob,"project","world",
+ return collectVerifiedWorkspaceEvidence(context.Background(),lib,blob,"project","world","tenant",
   []projectworkspace.WorkspaceEvidenceSelection{{AssetID:"a",Version:1}},12345)
 }
 func TestVerifiedWorkspaceEvidenceReadsHashBoundedUntrustedText(t *testing.T){
@@ -104,6 +104,7 @@ func TestVerifiedWorkspaceEvidenceFailsClosedOnAllUnsafeSources(t *testing.T){
   {"blob_open_failed",func(_ *evidenceFixtureLibrary,a *evidenceFixtureArtifacts){a.failOpen=true}},
   {"blob_quarantined",func(_ *evidenceFixtureLibrary,a *evidenceFixtureArtifacts){a.raw.Status=artifact.StatusQuarantined}},
   {"wrong_tenant_project",func(_ *evidenceFixtureLibrary,a *evidenceFixtureArtifacts){v:="other";a.raw.ProjectID=&v}},
+  {"wrong_tenant_workspace",func(_ *evidenceFixtureLibrary,a *evidenceFixtureArtifacts){a.raw.WorkspaceID="other-tenant"}},
   {"wrong_content_hash",func(l *evidenceFixtureLibrary,_ *evidenceFixtureArtifacts){l.version.ContentHash="sha256:wrong"}},
   {"wrong_mime",func(l *evidenceFixtureLibrary,_ *evidenceFixtureArtifacts){l.version.MIMEType="application/octet-stream"}},
   {"not_managed_blob",func(l *evidenceFixtureLibrary,_ *evidenceFixtureArtifacts){l.version.StorageURI="file:/host/secrets"}},
@@ -130,7 +131,7 @@ func TestVerifiedWorkspaceEvidenceRejectsUnboundedRequest(t *testing.T){
  for _,n:=range []int{0,9,16}{
   req:=make([]projectworkspace.WorkspaceEvidenceSelection,n)
   if _,err:=collectVerifiedWorkspaceEvidence(context.Background(),lib,blob,
-   "project","world",req,0);!errors.Is(err,errEvidenceUnsafe){
+   "project","world","tenant",req,0);!errors.Is(err,errEvidenceUnsafe){
    t.Fatalf("unbounded size %d accepted: %v",n,err)
   }
  }

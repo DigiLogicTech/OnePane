@@ -4,6 +4,7 @@
 // No server or network is needed; all service evidence is synthetic.
 const assert=require("node:assert/strict");
 const support=require("../internal/webui/static/qa-consolidated-support.js");
+const {createHash}=require("node:crypto");
 const decoder=new TextDecoder();
 const secret="USER_SUPPLIED_BEARER_COOKIE_PROMPT_PRIVATE_QA";
 const hash=(kind)=>kind+"-"+"a".repeat(24);
@@ -90,6 +91,17 @@ function readZip(b){
   "central directory counts match");
  return entries;
 }
+// Verify local SHA-256 against standard published vectors and Node crypto,
+// including a multi-block payload and non-ASCII UTF-8.
+const utf8=new TextEncoder();
+assert.equal(support.sha256Bytes(utf8.encode("")),
+ "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+assert.equal(support.sha256Bytes(utf8.encode("abc")),
+ "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+for(const value of ["OnePane — SANDBOX ✓","x".repeat(150000)]){
+ const raw=utf8.encode(value);
+ assert.equal(support.sha256Bytes(raw),createHash("sha256").update(raw).digest("hex"));
+}
 const prepared=support.prepare(good);
 assert.ok(prepared.json.length>100);
 assert.equal(prepared.files["workspace.json"].captured_tasks,2);
@@ -106,11 +118,21 @@ assert.ok(!prepared.json.includes(secret),"raw user information must not appear 
 const bytes=support.zip(prepared);
 assert.ok(bytes.byteLength<262144);
 assert.ok(!decoder.decode(bytes).includes(secret),"raw secrets must not appear in archive");
+assert.equal(prepared.files["manifest.json"].integrity_algorithm,"SHA-256");
+assert.equal(prepared.files["manifest.json"].integrity_scope,"extracted_utf8_member_bytes");
+assert.deepEqual(Object.keys(prepared.files["manifest.json"].member_sha256).sort(),
+ ["agent-check.json","browser.json","node.json","workspace.json"]);
 const entries=readZip(bytes);
 assert.deepEqual(Object.keys(entries).sort(),[
  "agent-check.json","browser.json","manifest.json","node.json","workspace.json"].sort());
 assert.equal(entries["node.json"].local_service_observation.state,"running");
 assert.equal(entries["manifest.json"].included_sources.length,4);
+for(const [name,expected] of Object.entries(entries["manifest.json"].member_sha256)){
+ const encoded=utf8.encode(JSON.stringify(entries[name],null,2)+"\\n");
+ assert.equal(createHash("sha256").update(encoded).digest("hex"),expected,
+  "manifest digest must match the extracted JSON bytes for "+name);
+}
+
 assert.equal(entries["agent-check.json"].sessions[0].last_failure_category,"deadline_exceeded");
 // Unsupported source data must never be echoed. Every route is fixed.
 for(const [key,expected] of [
@@ -149,6 +171,16 @@ assert.equal(attacker.files["browser.json"].events[0].duration_ms,0);
 const tamper=support.prepare(good);
 tamper.files["node.json"].extra_private=secret;
 assert.throws(()=>support.zip(tamper),/changed/);
+// A caller cannot update a projected member and re-create the preview while
+// leaving stale digests: ZIP generation checks every allowlisted member hash.
+const changed=support.prepare(good);
+changed.files["workspace.json"].captured_tasks=49;
+changed.json=JSON.stringify({manifest:changed.files["manifest.json"],sources:changed.files},null,2);
+assert.throws(()=>support.zip(changed),/integrity digest changed/);
+const polluted=support.prepare(good);
+polluted.files["manifest.json"].member_sha256["workspace.json"]="0".repeat(64);
+polluted.json=JSON.stringify({manifest:polluted.files["manifest.json"],sources:polluted.files},null,2);
+assert.throws(()=>support.zip(polluted),/integrity digest changed/);
 const required=support.prepare({workspace:good.workspace});
 assert.deepEqual(Object.keys(readZip(support.zip(required))).sort(),["manifest.json","workspace.json"]);
-console.log("PASS: bounded reviewed QA ZIP, CRC32, four-source selection, hostile-data redaction and tamper prevention");
+console.log("PASS: bounded reviewed QA ZIP, SHA-256 member integrity, CRC32, redaction and tamper prevention");

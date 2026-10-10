@@ -458,3 +458,23 @@ Library data. A future persistent search service requires an approved
 retention policy, quotas, encryption, revocation-aware query filtering,
 index invalidation, ingest format selection and explicit Research evidence
 attachment; none is inferred from the availability of this endpoint.
+
+## RC11-04 — uniform managed Library artifact provenance
+
+The existing Workspace version **download** had a weaker post-open check
+than its preview and verified evidence APIs: it compared immutable hash,
+size and Project, but not the blob's active/quarantined state or owning
+tenant Workspace. The download, bounded UTF-8 preview and selected evidence
+reader now use one shared, fail-closed predicate: active managed artifact,
+exact content hash/size, same Project and same Project tenant Workspace.
+Downloads also set `Cache-Control: no-store, private` and `nosniff`, and
+bound streaming to the exact authorised immutable version length. Unit
+tests deny archived, quarantined, corrupted, foreign-Project, foreign-tenant,
+wrong hash/size and missing-scope artifacts.
+
+This is an important consistency hardening, **not** permission to access
+another Workspace's Library. The existing effective read grants and
+directional publications remain authoritative. Stream errors after the
+HTTP response begins are still observable client transfer failures rather
+than a transactional rollback; stronger descriptor-pinned snapshot reads
+and end-to-end installed download tests remain useful future work.

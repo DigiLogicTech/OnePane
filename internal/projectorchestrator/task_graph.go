@@ -23,6 +23,7 @@ type TaskGraphNodeSpec struct {
  Objective string `json:"objective"`
  DependsOn []string `json:"depends_on,omitempty"`
  Priority int `json:"priority,omitempty"`
+ ComputePreference string `json:"compute_preference,omitempty"`
 }
 type CreateTaskGraphCommand struct {
  ProjectID string `json:"project_id"`
@@ -37,6 +38,7 @@ type TaskGraphNode struct {
  ProjectWorkspaceID string `json:"project_workspace_id"`
  DependsOn []string `json:"depends_on"`
  State task.State `json:"state"`
+ ComputePreference string `json:"compute_preference"`
  Archived bool `json:"archived"`
  ScopeDrift bool `json:"scope_drift,omitempty"`
  BlockedBy []string `json:"blocked_by"`
@@ -73,6 +75,10 @@ func graphCreationPlan(c CreateTaskGraphCommand)([]int,string,error){
   if !graphKeyRE.MatchString(n.Key)||n.ProjectWorkspaceID==""||
    n.Objective==""||len(n.Objective)>4096||n.Priority<0||n.Priority>100||
    len(n.DependsOn)>8{return nil,"",ErrInvalid}
+  switch n.ComputePreference{
+  case "","auto","prefer_cpu","cpu_only","prefer_gpu","gpu_only":
+  default:return nil,"",ErrInvalid
+  }
   if _,exists:=indexes[n.Key];exists{return nil,"",ErrInvalid}
   indexes[n.Key]=i
  }
@@ -185,6 +191,7 @@ func(s *Service) CreateTaskGraph(ctx context.Context,c CreateTaskGraphCommand)(T
     "dependency_policy":"hard_all",
     "operator_approved":true,
     "routing_intent":"local_first",
+    "onepane_routing":map[string]any{"compute_preference":n.ComputePreference},
    })
    created,createErr:=creator.CreateInTransaction(ctx,tx,task.CreateCommand{
     WorkspaceID:tenant,ProjectID:&c.ProjectID,
@@ -243,7 +250,7 @@ func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGra
    &x.ManifestSHA256,&x.CreatedBy,&x.CreatedAt,&expectedNodeCount)
  if err!=nil{return TaskGraph{},err}
  rows,err:=tx.QueryContext(ctx,`SELECT n.node_key,n.task_id,
-  n.project_workspace_id,t.project_workspace_id,t.state,t.archived_at
+  n.project_workspace_id,t.project_workspace_id,t.state,t.archived_at,t.completion_json
   FROM project_orchestrator_task_graph_nodes n
   JOIN tasks t ON t.id=n.task_id AND t.project_id=?
   WHERE n.graph_id=? ORDER BY n.position`,projectID,graphID)
@@ -253,7 +260,12 @@ func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGra
   var n TaskGraphNode
   var archived sql.NullInt64
   var actualWorkspace sql.NullString
-  if err=rows.Scan(&n.Key,&n.TaskID,&n.ProjectWorkspaceID,&actualWorkspace,&n.State,&archived);err!=nil{break}
+  var completion string
+  if err=rows.Scan(&n.Key,&n.TaskID,&n.ProjectWorkspaceID,&actualWorkspace,&n.State,&archived,&completion);err!=nil{break}
+  var metadata struct{ OnePaneRouting struct{ ComputePreference string `json:"compute_preference"` } `json:"onepane_routing"` }
+  if err=json.Unmarshal([]byte(completion),&metadata);err!=nil{return TaskGraph{},err}
+  n.ComputePreference=metadata.OnePaneRouting.ComputePreference
+  if n.ComputePreference==""{n.ComputePreference="auto"}
   n.Archived=archived.Valid
   n.ScopeDrift=!actualWorkspace.Valid||actualWorkspace.String!=n.ProjectWorkspaceID
   n.DependsOn=[]string{}

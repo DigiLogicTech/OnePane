@@ -128,6 +128,20 @@ func (s *Server) loadQASnapshot(w http.ResponseWriter,r *http.Request,in qaWorks
   writeError(w,http.StatusServiceUnavailable,"scoped assurance evidence unavailable")
   return qaSnapshot{},false
  }
+ lineage,lineageTruncated,err:=loadQAAsyncLineage(r.Context(),s.attentionDB,tenant,projectID,workspaceID,timelineRows)
+ if err!=nil{
+  writeError(w,http.StatusServiceUnavailable,"scoped asynchronous lineage unavailable")
+  return qaSnapshot{},false
+ }
+ probes,probesTruncated,err:=loadQAProbeWitnesses(r.Context(),s.attentionDB,tenant,projectID,workspaceID,timelineRows)
+ if err!=nil{
+  writeError(w,http.StatusServiceUnavailable,"scoped assurance probe evidence unavailable")
+  return qaSnapshot{},false
+ }
+ snapshot.AsyncLineage=lineage
+ snapshot.AsyncLineageTruncated=lineageTruncated
+ snapshot.ProbeWitnesses=probes
+ snapshot.ProbeWitnessesTruncated=probesTruncated
  snapshot.WorkerToolLinks=workerLinks
  snapshot.WorkerToolLinksTruncated=workerLinksTruncated
  snapshot.AssuranceEvidence=assurance

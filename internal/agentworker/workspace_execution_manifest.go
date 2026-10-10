@@ -8,6 +8,8 @@ import (
  "fmt"
 
  "github.com/DigiLogicTech/OnePane/internal/task"
+ "github.com/DigiLogicTech/OnePane/internal/projectworkspace"
+ "github.com/DigiLogicTech/OnePane/internal/clock"
 )
 
 // workspaceExecutionManifest returns only resources owned by the Task's
@@ -55,7 +57,29 @@ func workspaceExecutionManifest(ctx context.Context, db *sql.DB, t task.Task) (j
  if rowsErr:=rows.Err();err==nil {err=rowsErr}
  if closeErr:=rows.Close();err==nil {err=closeErr}
  if err!=nil{return nil,fmt.Errorf("scan Workspace OCI tool inventory: %w",err)}
+ // Approval is a persistent human-reviewed desired state, never inferred
+ // from a model's prior outputs. The Service checks canonical tenant-owned
+ // Project/Workspace membership, the manifest digest, and whether the
+ // registered OCI application revision still matches its approval.
+ approvedManifest:=map[string]any{
+  "status":"not_approved",
+  "note":"No human-approved Workspace toolchain profile; request an operator approval before asserting locked dependencies.",
+ }
+ approved,approvalErr:=projectworkspace.NewService(db,nil,clock.Real{}).
+  WorkspaceToolchainManifest(ctx,*t.ProjectID,*t.ProjectWorkspaceID)
+ if approvalErr==nil{
+  approvedManifest=map[string]any{
+   "status":approved.Status,"manifest_sha256":approved.ManifestSHA256,
+   "revision":approved.Revision,"application_id":approved.ApplicationID,
+   "image_ref":approved.ImageRef,"requirements":approved.Requirements,
+   "current_application_matches":approved.CurrentApplicationMatches,
+   "note":"Human-approved declared requirements, NOT installed/version verified. For builds, use required_executables and project.app.toolchain.preflight on the exact running OCI application. Never silently install/substitute a toolchain.",
+  }
+ }else if !errors.Is(approvalErr,sql.ErrNoRows){
+  return nil,fmt.Errorf("read approved Workspace toolchain manifest: %w",approvalErr)
+ }
  return json.Marshal(map[string]any{
+  "approved_toolchain_manifest":approvedManifest,
   "project_workspace_id":*t.ProjectWorkspaceID,
   "runtime_id":runtimeID,
   "resource_ref":"project_runtime:"+runtimeID,
@@ -80,12 +104,12 @@ func workspaceExecutionManifest(ctx context.Context, db *sql.DB, t task.Task) (j
    "tool_id":"project.app.files.publish",
    "tool_version":"1",
    "capability_id":"project.app.execute",
-   "actions":[]string{"publish"},
+   "actions":[]string{"publish","publish_large"},
    "input_schema":map[string]any{
     "runtime_id":"registered runtime_id above",
     "application_id":"one of the application_id values above",
     "action":"publish",
-    "path":"Workspace-relative regular file path, no symlinks or .git internals; max 256KiB",
+    "path":"Workspace-relative regular file path, no symlinks or .git internals; publish=256KiB, publish_large=32MiB",
     "name":"optional published Library display name, max 240 characters",
     "media_type":"optional MIME type; defaults to application/octet-stream",
     "timeout_seconds":"optional 1..120, default 30",
@@ -134,6 +158,16 @@ func workspaceExecutionManifest(ctx context.Context, db *sql.DB, t task.Task) (j
     "timeout_seconds":"optional integer 1..120; default 30",
    },
   },
+  "toolchain_preflight_tool":map[string]any{
+   "tool_id":"project.app.toolchain.preflight",
+   "tool_version":"1","capability_id":"project.app.execute",
+   "input_schema":map[string]any{
+    "runtime_id":"registered runtime_id above",
+    "application_id":"approved application_id above",
+    "required":"array of 1..32 arbitrary unique pathless executable names",
+   },
+   "note":"Checks presence only, not package versions, execution permission or immutable image qualification; missing prerequisites must be surfaced rather than auto-installed.",
+  },
   "command_tool":map[string]any{
    "tool_id":"project.app.exec",
    "tool_version":"1",
@@ -143,6 +177,7 @@ func workspaceExecutionManifest(ctx context.Context, db *sql.DB, t task.Task) (j
     "application_id":"one of the application_id values above",
     "command":[]string{"executable","arg1"},
     "timeout_seconds":"optional integer 1..7200; default 900",
+    "required_executables":"optional 1..32 pathless executable names; blocks execution if prerequisites missing or cannot be checked",
    },
   },
   "note":"Read-only resource inventory, not authority. Only use registered OCI applications; executions require a capability lease, an independently verified running rootless sandbox, and a Workspace-only bind. Never invent IDs, access host files, or treat a requested state as verified.",

@@ -26,3 +26,16 @@ assert(!service.includes("StorageURI string"));
 assert(!service.includes('json:"storage_uri"'));
 assert(!service.includes('CapabilityLease'));
 console.log("PASS: metadata-only scoped evidence UI and guarded read-only Workspace API contract");
+
+const retrieval=fs.readFileSync("internal/api/workspace_evidence_text.go","utf8");
+assert(routes.includes('POST /v1/projects/{projectID}/workspaces/{workspaceID}/evidence-packets/verified-text'));
+assert(ui.includes('data-a63-read'));
+assert(ui.includes('/evidence-packets/verified-text'));
+assert(ui.includes('output.textContent=JSON.stringify(evidence,null,2)'));
+assert(retrieval.includes('verifiedEvidenceMaxFileBytes int64=64<<10'));
+assert(retrieval.includes('verifiedEvidenceMaxTotalBytes int64=256<<10'));
+assert(retrieval.includes('artifacts.VerifyContent(ctx,artifactID)'));
+assert(retrieval.includes('lib.ResolveWorkspaceLibraryVersion(ctx,projectID,workspaceID'));
+assert(retrieval.includes('latest,err:=lib.BuildWorkspaceEvidencePacket('));
+assert(retrieval.includes('untrusted_library_content'));
+console.log("PASS: bounded verified-text retrieval rechecks permissions, hashes and textContent rendering");

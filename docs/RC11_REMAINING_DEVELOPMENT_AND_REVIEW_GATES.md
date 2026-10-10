@@ -431,3 +431,30 @@ OCR, PDF parsing, persistent embeddings or a claim that the attached
 data is a trusted instruction. Further work remains for permission-aware
 content indexing, artifact-scale streaming and explicitly approved
 Research attachments.
+
+## RC11-04 — scoped, on-demand full-text matching of selected evidence
+
+A separate, read-only Workspace API permits case-insensitive text matching
+against **up to eight explicitly selected Library versions**:
+`POST /v1/projects/{projectID}/workspaces/{workspaceID}/evidence-packets/search-text`.
+It takes a 2–64 character query, authorises and verifies the same bounded
+source bytes as the separately implemented verified-text retrieval, then
+searches them **in memory**. Every request rechecks source Project,
+Workspace, version grants and immutable blob integrity; it cannot discover
+unselected assets, search other Workspaces, or auto-attach evidence to an
+Agent or Council.
+
+Results contain only maximum 12 bounded snippets, at most three per
+version, plus an asset/version/hash citation, Unicode-rune offset and
+`untrusted_library_content` provenance marker. The operator UI requires
+manual selection and search submission, rendering results with
+`textContent`; it neither sends bytes to cloud inference nor executes
+document instructions. Tests cover Unicode case matching, query control
+characters, result attribution, snippet sizes and truncation.
+
+**This is an on-demand memory scan, NOT a persistent FTS or vector index.**
+It deliberately avoids an uncontrolled second plaintext copy of private
+Library data. A future persistent search service requires an approved
+retention policy, quotas, encryption, revocation-aware query filtering,
+index invalidation, ingest format selection and explicit Research evidence
+attachment; none is inferred from the availability of this endpoint.

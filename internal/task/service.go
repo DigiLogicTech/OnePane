@@ -296,6 +296,17 @@ func (s *Service) StartInTransaction(ctx context.Context, tx storage.Tx, cmd Sta
  active,err:=s.repo.ActiveAttempt(ctx,tx,t.ID)
  if err!=nil{return Task{},Attempt{},err}
  if active!=nil{return Task{},Attempt{},ErrActiveAttempt}
+ // Revalidate hard predecessors inside the same write transaction as Task
+ // and Attempt start. Ready is not a substitute for dependency completion:
+ // external transitions, restarts or competing workers must not bypass DAG.
+ var blocked int
+ if err:=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM task_dependencies d
+   JOIN tasks dep ON dep.id=d.depends_on_task_id
+   WHERE d.task_id=? AND d.dependency_type='hard'
+   AND (dep.state<>'complete' OR dep.archived_at IS NOT NULL)`,t.ID).Scan(&blocked);err!=nil{
+  return Task{},Attempt{},err
+ }
+ if blocked!=0{return Task{},Attempt{},ErrHardDependencyUnsatisfied}
  n,err:=s.repo.NextAttemptNumber(ctx,tx,t.ID)
  if err!=nil{return Task{},Attempt{},err}
  created:=Attempt{

@@ -118,6 +118,20 @@ func (s *Server) loadQASnapshot(w http.ResponseWriter,r *http.Request,in qaWorks
   writeError(w,http.StatusServiceUnavailable,"scoped execution evidence unavailable")
   return qaSnapshot{},false
  }
+ workerLinks,workerLinksTruncated,err:=loadQAWorkerToolEvidence(r.Context(),s.attentionDB,tenant,projectID,workspaceID,timelineRows)
+ if err!=nil{
+  writeError(w,http.StatusServiceUnavailable,"scoped Worker Tool provenance unavailable")
+  return qaSnapshot{},false
+ }
+ assurance,assuranceTruncated,err:=loadQAAssuranceEvidence(r.Context(),s.attentionDB,tenant,projectID,workspaceID,timelineRows)
+ if err!=nil{
+  writeError(w,http.StatusServiceUnavailable,"scoped assurance evidence unavailable")
+  return qaSnapshot{},false
+ }
+ snapshot.WorkerToolLinks=workerLinks
+ snapshot.WorkerToolLinksTruncated=workerLinksTruncated
+ snapshot.AssuranceEvidence=assurance
+ snapshot.AssuranceEvidenceTruncated=assuranceTruncated
  snapshot.ExecutionSources=executionSources
  snapshot.ExecutionSourcesTruncated=sourcesTruncated
  snapshot.Timeline=timeline

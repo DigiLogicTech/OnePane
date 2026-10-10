@@ -94,6 +94,7 @@ func searchVerifiedEvidenceText(verified verifiedWorkspaceEvidence,query string)
    })
    cursor=at+len(needle)
   }
+  if matchEvidenceRunes(lower,needle,cursor)>=0{output.Truncated=true}
  }
  return output
 }

@@ -140,6 +140,14 @@ func (s *Server) loadQASnapshot(w http.ResponseWriter,r *http.Request,in qaWorks
  }
  snapshot.AsyncLineage=lineage
  snapshot.AsyncLineageTruncated=lineageTruncated
+ researchEvidence,researchTruncated,err:=loadQAResearchEvidence(r.Context(),
+  s.attentionDB,tenant,projectID,workspaceID,timelineRows)
+ if err!=nil{
+  writeError(w,http.StatusServiceUnavailable,"scoped Research evidence provenance unavailable")
+  return qaSnapshot{},false
+ }
+ snapshot.ResearchEvidence=researchEvidence
+ snapshot.ResearchEvidenceTruncated=researchTruncated
  snapshot.ProbeWitnesses=probes
  snapshot.ProbeWitnessesTruncated=probesTruncated
  snapshot.WorkerToolLinks=workerLinks

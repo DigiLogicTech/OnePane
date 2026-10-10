@@ -103,6 +103,8 @@ type qaSnapshot struct {
  AsyncLineageTruncated bool `json:"async_lineage_truncated"`
  ProbeWitnesses []qaProbeWitness `json:"probe_witnesses"`
  ProbeWitnessesTruncated bool `json:"probe_witnesses_truncated"`
+ ResearchEvidence []qaResearchEvidenceState `json:"research_evidence"`
+ ResearchEvidenceTruncated bool `json:"research_evidence_truncated"`
 }
 var qaExcluded=[]string{
  "credentials, cookies, OAuth and Vault material",

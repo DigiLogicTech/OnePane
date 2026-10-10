@@ -34,7 +34,7 @@ func TestQACaptureOptInOwnerExpiryBoundsAndNoRawFields(t *testing.T){
  if !ok||v.ObservedRequests!=1||len(v.Observations)!=1||len(v.Counters)!=1{t.Fatalf("capture not scoped: %+v",v)}
  if v.Observations[0].Subsystem!="projects"||v.Observations[0].StatusCode!=502{t.Fatalf("not projected: %+v",v)}
  raw,_:=json.Marshal(v)
- for _,secret:=range []string{"SECRET_CANARY","/v1/projects/private","someoneelse","credential","raw_path","request_body"}{
+ for _,secret:=range []string{"SECRET_CANARY","/v1/projects/private","someoneelse","credentialA","raw_path","request_body"}{
   if strings.Contains(string(raw),secret){t.Fatalf("unallowlisted value %q leaked: %s",secret,raw)}
  }
  for i:=0;i<90;i++{

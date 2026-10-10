@@ -450,6 +450,8 @@ assertContains(qaUI,'let supportEpoch=0;',
  'pending QA reviews and exports must have a revocation generation');
 assertContains(qaUI,'const reauthorizeSupportSources=async selected=>',
  'export must use a fresh live backend permission check');
+assertContains(qaUI,'const liveOnly={cache:"no-store"};',
+ 'reauthorization must not reuse cached GET permissions');
 assertContains(qaUI,'await reauthorizeSupportSources(supportOptions());',
  'the final download path must recheck all selected scoped sources');
 assertContains(qaUI,'if(selected.model)await apiRequest("/v1/qa/model-deployments/"',

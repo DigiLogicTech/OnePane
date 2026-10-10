@@ -93,6 +93,19 @@ func TestQAResearchEvidenceOnlyExposesBoundedScopedApprovalState(t *testing.T){
   strings.Contains(string(raw),"message-world"){
   t.Fatalf("QA snapshot leaked private evidence provenance: %s",raw)
  }
+ // Untrusted user messages cannot forge evidence delivery provenance.
+ if _,err=db.ExecContext(ctx,`UPDATE team_messages SET author_principal_id='human'
+  WHERE id='message-world'`);err!=nil{t.Fatal(err)}
+ forged,_,err:=loadQAResearchEvidence(ctx,db,"tenant","project","world",visible)
+ if err!=nil||len(forged)!=1||forged[0].VerifiedLocalResponseRecorded{
+  t.Fatalf("QA accepted a human-authored fake agent delivery: %+v %v",forged,err)
+ }
+ if _,err=db.ExecContext(ctx,`UPDATE team_messages SET author_principal_id='system:team-worker',
+  content_json='this is malformed JSON' WHERE id='message-world'`);err!=nil{t.Fatal(err)}
+ malformed,_,err:=loadQAResearchEvidence(ctx,db,"tenant","project","world",visible)
+ if err!=nil||len(malformed)!=1||malformed[0].VerifiedLocalResponseRecorded{
+  t.Fatalf("QA accepted malformed Research response content: %+v %v",malformed,err)
+ }
  denied,_,err:=loadQAResearchEvidence(ctx,db,"tenant","project","other",
   []task.Task{{ID:"task-world",WorkspaceID:"tenant",ProjectID:&project,ProjectWorkspaceID:&world}})
  if err!=nil||len(denied)!=0{t.Fatalf("cross-Workspace QA scope leaked: %+v %v",denied,err)}

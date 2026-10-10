@@ -37,6 +37,11 @@ type TaskGraphNode struct {
  ProjectWorkspaceID string `json:"project_workspace_id"`
  DependsOn []string `json:"depends_on"`
  State task.State `json:"state"`
+ Archived bool `json:"archived"`
+ BlockedBy []string `json:"blocked_by"`
+ FailedOrIntervenedOn []string `json:"failed_or_intervened_on"`
+ Readiness string `json:"readiness"`
+ NextAction string `json:"next_action"`
 }
 type TaskGraph struct {
  ID string `json:"id"`
@@ -47,6 +52,8 @@ type TaskGraph struct {
  ManifestSHA256 string `json:"manifest_sha256"`
  CreatedBy string `json:"created_by"`
  CreatedAt int64 `json:"created_at"`
+ Status string `json:"status"`
+ Progress TaskGraphProgress `json:"progress"`
  Nodes []TaskGraphNode `json:"nodes"`
 }
 
@@ -221,8 +228,11 @@ func(s *Service) CreateTaskGraph(ctx context.Context,c CreateTaskGraphCommand)(T
 // exposes another Project's graph even if the opaque ID is guessed.
 func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGraph,error){
  if s==nil||s.db==nil||projectID==""||graphID==""{return TaskGraph{},ErrInvalid}
+ tx,err:=s.db.BeginTx(ctx,&sql.TxOptions{ReadOnly:true})
+ if err!=nil{return TaskGraph{},err}
+ defer tx.Rollback()
  var x TaskGraph
- err:=s.db.QueryRowContext(ctx,`SELECT g.id,g.project_id,g.workspace_id,
+ err=tx.QueryRowContext(ctx,`SELECT g.id,g.project_id,g.workspace_id,
   g.name,g.idempotency_key,g.manifest_sha256,g.created_by,g.created_at
   FROM project_orchestrator_task_graphs g
   JOIN projects p ON p.id=g.project_id AND p.status='active'
@@ -230,8 +240,8 @@ func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGra
   Scan(&x.ID,&x.ProjectID,&x.WorkspaceID,&x.Name,&x.IdempotencyKey,
    &x.ManifestSHA256,&x.CreatedBy,&x.CreatedAt)
  if err!=nil{return TaskGraph{},err}
- rows,err:=s.db.QueryContext(ctx,`SELECT n.node_key,n.task_id,
-  n.project_workspace_id,t.state
+ rows,err:=tx.QueryContext(ctx,`SELECT n.node_key,n.task_id,
+  n.project_workspace_id,t.state,t.archived_at
   FROM project_orchestrator_task_graph_nodes n
   JOIN tasks t ON t.id=n.task_id AND t.project_id=?
   WHERE n.graph_id=? ORDER BY n.position`,projectID,graphID)
@@ -239,29 +249,52 @@ func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGra
  x.Nodes=[]TaskGraphNode{}
  for rows.Next(){
   var n TaskGraphNode
-  if err=rows.Scan(&n.Key,&n.TaskID,&n.ProjectWorkspaceID,&n.State);err!=nil{break}
+  var archived sql.NullInt64
+  if err=rows.Scan(&n.Key,&n.TaskID,&n.ProjectWorkspaceID,&n.State,&archived);err!=nil{break}
+  n.Archived=archived.Valid
   n.DependsOn=[]string{}
+  n.BlockedBy=[]string{}
+  n.FailedOrIntervenedOn=[]string{}
   x.Nodes=append(x.Nodes,n)
  }
  if err==nil{err=rows.Err()}
  _=rows.Close()
  if err!=nil{return TaskGraph{},err}
  for i:=range x.Nodes{
-  depRows,depErr:=s.db.QueryContext(ctx,`SELECT pred.node_key
+  depRows,depErr:=tx.QueryContext(ctx,`SELECT COALESCE(pred.node_key,''),
+   dep.state,dep.archived_at
    FROM task_dependencies d
-   JOIN project_orchestrator_task_graph_nodes pred
-    ON pred.task_id=d.depends_on_task_id AND pred.graph_id=?
+   JOIN tasks dep ON dep.id=d.depends_on_task_id
+   LEFT JOIN project_orchestrator_task_graph_nodes pred
+    ON pred.task_id=dep.id AND pred.graph_id=?
    WHERE d.task_id=? AND d.dependency_type='hard'
-   ORDER BY pred.position`,graphID,x.Nodes[i].TaskID)
+   ORDER BY pred.position,pred.node_key`,graphID,x.Nodes[i].TaskID)
   if depErr!=nil{return TaskGraph{},depErr}
   for depRows.Next(){
    var key string
-   if depErr=depRows.Scan(&key);depErr!=nil{break}
+   var depState task.State
+   var archived sql.NullInt64
+   if depErr=depRows.Scan(&key,&depState,&archived);depErr!=nil{break}
+   if key=="" {
+    // A later foreign/unreviewed hard edge is not trusted as part of this
+    // approved DAG; never leak an unrelated Project's Task ID to the caller.
+    x.Nodes[i].BlockedBy=append(x.Nodes[i].BlockedBy,"unscoped_dependency")
+    x.Nodes[i].FailedOrIntervenedOn=append(x.Nodes[i].FailedOrIntervenedOn,"unscoped_dependency")
+    continue
+   }
    x.Nodes[i].DependsOn=append(x.Nodes[i].DependsOn,key)
+   if depState!=task.StateComplete||archived.Valid {
+    x.Nodes[i].BlockedBy=append(x.Nodes[i].BlockedBy,key)
+    if archived.Valid||isTaskDependencyNeedsAttention(depState){
+     x.Nodes[i].FailedOrIntervenedOn=append(x.Nodes[i].FailedOrIntervenedOn,key)
+    }
+   }
   }
   if depErr==nil{depErr=depRows.Err()}
   _=depRows.Close()
   if depErr!=nil{return TaskGraph{},depErr}
  }
+ x.Progress,x.Status=evaluateTaskGraph(&x)
+ if err:=tx.Commit();err!=nil{return TaskGraph{},err}
  return x,nil
 }

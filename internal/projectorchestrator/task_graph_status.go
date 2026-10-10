@@ -58,6 +58,10 @@ func evaluateTaskGraph(graph *TaskGraph)(TaskGraphProgress,string){
   case len(n.FailedOrIntervenedOn)>0:
    n.Readiness="needs_attention"
    n.NextAction="Prerequisite needs operator review; do not automatically retry or skip a hard dependency."
+  case len(n.BlockedBy)>0 &&
+   (n.State==task.StateComplete||n.State==task.StateRunning):
+   n.Readiness="needs_attention"
+   n.NextAction="Hard predecessor changed after execution started; review completion provenance and any side effects."
   case len(n.BlockedBy)>0:
    n.Readiness="waiting_prerequisites"
    n.NextAction="Wait for each hard predecessor to complete with independently verified evidence."

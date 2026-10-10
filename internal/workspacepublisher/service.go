@@ -122,8 +122,12 @@ func (s *Service) PublishWorkspaceFile(ctx context.Context,c sandboxrunner.Works
    "runtime_id":c.RuntimeID,"application_id":c.ApplicationID,"project_workspace_id":projectWorkspaceID,
    "relative_path":c.Path,"content_hash":c.ContentHash,
   })
+  // Origin-scoped artifacts must identify their actual approved local Node.
+  // Without this field policy.ValidateDataLabel rejects every genuine
+  // Workspace publication before the immutable artifact can be recorded.
   label:=policy.DataLabel{WorkspaceID:tenant,Confidentiality:policy.ConfidentialityInternal,
-   Residency:policy.ResidencyOriginNode,Trust:policy.TrustUntrustedContent}
+   Residency:policy.ResidencyOriginNode,OriginNodeID:s.localNodeID,
+   Trust:policy.TrustUntrustedContent}
   stored,e=s.artifacts.Create(ctx,artifact.CreateCommand{
    WorkspaceID:tenant,ProjectID:&projectID,MediaType:mime,Label:label,
    CreatedBy:&actor,ActorPrincipalID:&actor,Metadata:meta,

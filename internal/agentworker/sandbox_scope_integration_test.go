@@ -75,6 +75,17 @@ func TestAgentWorkerSandboxToolOwnershipIsBoundToTaskWorkspace(t *testing.T) {
  pinnedTask:=taskWorld
  pinnedTask.Completion=json.RawMessage(`{"toolchain_manifest_sha256":"`+approved.ManifestSHA256+`"}`)
  if _,err=applyApprovedWorkspaceToolchain(ctx,db.SQL(),pinnedTask,execInput);err!=nil{t.Fatal(err)}
+ godotInput:=json.RawMessage(`{"runtime_id":"`+worldRun.ID+`","application_id":"`+app.ID+`","action":"import"}`)
+ guardedGodot,err:=applyApprovedWorkspaceToolchain(ctx,db.SQL(),pinnedTask,godotInput)
+ if err!=nil{t.Fatalf("approved Godot build denied: %v",err)}
+ var godotReq struct{Required []string `json:"required_executables"`}
+ if err:=json.Unmarshal(guardedGodot,&godotReq);err!=nil||strings.Join(godotReq.Required,",")!="go,python3"{
+  t.Fatalf("Godot build bypassed approved executable requirements: %s %v",guardedGodot,err)
+ }
+ foreignGodot:=json.RawMessage(`{"runtime_id":"`+worldRun.ID+`","application_id":"`+storyApp.ID+`","action":"run"}`)
+ if _,err=applyApprovedWorkspaceToolchain(ctx,db.SQL(),pinnedTask,foreignGodot);err==nil{
+  t.Fatal("Godot build bypassed human-approved OCI application identity")
+ }
  for _,bad:=range []string{
   `{"runtime_id":"`+worldRun.ID+`","application_id":"`+app.ID+`","command":["go","version"],"required_executables":["go"]}`,
   `{"runtime_id":"`+worldRun.ID+`","application_id":"`+app.ID+`","command":["go","version"],"required_executables":[]}`,

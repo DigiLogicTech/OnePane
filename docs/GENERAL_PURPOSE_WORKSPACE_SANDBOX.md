@@ -267,3 +267,23 @@ assert a successful build. Routine-backed direct tools and external API callers
 have distinct admission paths; this increment specifically protects the Agent
 Worker. Physical trusted Node acceptance remains skipped until explicitly
 enabled with an approved pinned image.
+
+
+## RC11 specialised build admission and strict filesystem policy
+
+Agent Worker now applies the same human-approved OCI application identity,
+Task-pinned immutable toolchain digest, required executable preflight and
+durable resource waiting to both general `project.app.exec` and fixed-action
+`project.app.godot.build`. Godot gains only an optional strict bounded
+`required_executables` array; Agent Worker injects every operator-approved
+executable. The sandbox adapter runs a fixed read-only presence check in the
+independently verified OCI image **before** any specialised build. Missing,
+uncheckable or malformed prerequisites fail closed with no host fallback.
+
+Explicit Workspace `filesystem:none` denies specialised Godot execution,
+installed-tool discovery, prerequisite scans and Unreal editor probes because
+all of these tools enter an OCI application with a Workspace mount. Read-only
+registered container-status inspection and historical Project-only behavior
+remain unchanged. This does not attest installed package versions, install
+tools, prove physical Node readiness or verify build artifacts. The release
+review gates and real rootless Node acceptance remain outstanding.

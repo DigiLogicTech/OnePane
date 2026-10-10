@@ -114,3 +114,52 @@ func TestGodotToolTimeoutReturnsObservableCancellation(t *testing.T){
  _,err=adapter.Invoke(ctx,req)
  if !errors.Is(err,context.DeadlineExceeded){t.Fatalf("Godot timeout misreported as successful build: %v",err)}
 }
+
+
+func TestGodotApprovedPrerequisitesFailClosedBeforeBuild(t *testing.T) {
+ eng:=&fakeEngine{profile:EngineProfile{Kind:"podman",Rootless:true}}
+ adapter:=NewAdapter(t.TempDir(),eng)
+ root,ok,err:=managedWorkspacePath(adapter.dataDir,"world",true)
+ if err!=nil||!ok{t.Fatal(err)}
+ eng.inspectMount=root
+ request:=tool.AdapterRequest{ToolID:ToolAppGodotBuild,Input:json.RawMessage(
+  `{"runtime_id":"world","application_id":"engine","action":"import","required_executables":["godot","go"]}`)}
+ launched:=false
+ eng.execHandler=func(_ context.Context,cmd []string)(ExecResult,error){
+  if len(cmd)>0&&cmd[0]=="sh"{return ExecResult{Stdout:"go\t1\ngodot\t1"},nil}
+  launched=true
+  return ExecResult{Stdout:"build ran"},nil
+ }
+ result,err:=adapter.Invoke(context.Background(),request)
+ if err!=nil||!launched{t.Fatalf("ready approved prereqs did not allow build: %v",err)}
+ var got struct{Status string `json:"toolchain_preflight"`;Digest string `json:"toolchain_requirements_sha256"`;Succeeded bool `json:"succeeded"`}
+ if err:=json.Unmarshal(result.Result,&got);err!=nil{t.Fatal(err)}
+ if got.Status!="ready"||len(got.Digest)!=64||!got.Succeeded{t.Fatalf("receipt lost prerequisite evidence: %+v",got)}
+ for _,tc:=range []struct{name,output string;exit int}{
+  {"missing","go\t0\ngodot\t1",0},
+  {"uncheckable","",127},
+  {"spoofed","go\t1\ngodot\t1\nextra",0},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   launched=false
+   eng.execHandler=func(_ context.Context,cmd []string)(ExecResult,error){
+    if len(cmd)>0&&cmd[0]=="sh"{return ExecResult{Stdout:tc.output,ExitCode:tc.exit},nil}
+    launched=true
+    return ExecResult{},nil
+   }
+   if _,err:=adapter.Invoke(context.Background(),request);err==nil||launched{
+    t.Fatalf("build executed despite unverified dependencies: %v launched=%v",err,launched)
+   }
+  })
+ }
+ eng.execs=0
+ for _,bad:=range []string{
+ `{"runtime_id":"world","application_id":"engine","action":"run","required_executables":[]}`,
+ `{"runtime_id":"world","application_id":"engine","action":"run","required_executables":["go","go"]}`,
+ `{"runtime_id":"world","application_id":"engine","action":"run","required_executables":["/host/go"]}`,
+ `{"runtime_id":"world","application_id":"engine","action":"run","required_executables":["go"],"command":["id"]}`,
+ }{
+  if _,err:=adapter.Invoke(context.Background(),tool.AdapterRequest{ToolID:ToolAppGodotBuild,Input:json.RawMessage(bad)});err==nil{t.Fatalf("invalid prerequisites accepted: %s",bad)}
+ }
+ if eng.execs!=0{t.Fatal("invalid prerequisites reached OCI execution")}
+}

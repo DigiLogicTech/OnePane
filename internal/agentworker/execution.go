@@ -353,7 +353,7 @@ func (s *Service) handleTool(ctx context.Context, run Run, t task.Task, resp age
 	// A human-approved Workspace toolchain cannot be bypassed by leaving
 	// required_executables empty or naming another registered OCI application.
 	// Validate before consulting any authority lease or invoking a tool.
-	if p.ToolID=="project.app.exec"{
+	if p.ToolID=="project.app.exec"||p.ToolID=="project.app.godot.build"{
 		p.Input,err=applyApprovedWorkspaceToolchain(ctx,s.db,t,p.Input)
 		if err!=nil{
 			_ = s.journal(ctx,run.ID,"tool","denied",nil,nil,strPtr("tool"),nil,
@@ -362,7 +362,7 @@ func (s *Service) handleTool(ctx context.Context, run Run, t task.Task, resp age
 			return s.blockRun(ctx,run,res,"Workspace toolchain admission denied: "+err.Error())
 		}
 	}
-	if p.ToolID=="project.app.exec"{
+	if p.ToolID=="project.app.exec"||p.ToolID=="project.app.godot.build"{
 		// Preserve this same Task/Attempt if the exact human-approved OCI
 		// application has not yet been started by the Node reconciler.
 		// Planning/approval may continue separately, but a blocked build

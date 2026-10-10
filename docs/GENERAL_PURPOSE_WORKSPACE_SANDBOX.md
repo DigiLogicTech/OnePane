@@ -236,3 +236,34 @@ physical Node acceptance and complete automated recovery. Orchestrator status
 and model inference are distinct from OS scheduler readiness; a persisted
 `running` claim is not an externally refreshed Node health or execution
 postcondition. RC11 review gates #86 remain blockers to packaging.
+
+
+## RC11 approved Workspace OCI resource waits (durable Agent Worker)
+
+After a user or Agent has proposed `project.app.exec`, the Agent Worker
+rechecks the human-approved Task/Workspace toolchain, augments the command
+with every approved `required_executables` prerequisite, and checks the
+*registered status* of the exact approved OCI runtime and application.
+
+If the approved image has not yet been marked running by the governed Node
+reconciler, the Worker records a durable `toolchain_wait` continuation,
+moves the *existing* Task/Attempt to `waiting_dependency`, and exposes
+`waiting_toolchain` instead of repeatedly sending inference or launching
+a build against substitute software. A later Worker tick (including across
+service restarts) rechecks the exact approved manifest digest, runtime,
+application, live Project/Workspace ownership and registered desired/state.
+It waits at least 15 seconds between checks and **does not create a second
+Attempt** or replay the previous model-supplied Tool command. Once registered
+status is running, the same Worker/Attempt resumes to plan/issue a fresh
+proposal; normal rootless OCI verification and executable-presence preflight
+remain separate mandatory execution boundaries.
+
+**Honest limits:** This is not automatic package installation, a remote Node
+heartbeat proof, a physical OCI inspection or installed-version attestation.
+An expired/changed human approval cannot wake the wait; human review is
+required. A runtime that merely *reports* running can still fail independent
+rootless OCI inspection; OnePane must surface that Tool failure rather than
+assert a successful build. Routine-backed direct tools and external API callers
+have distinct admission paths; this increment specifically protects the Agent
+Worker. Physical trusted Node acceptance remains skipped until explicitly
+enabled with an approved pinned image.

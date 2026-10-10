@@ -160,12 +160,15 @@ async function a61MountProjectTaskGraphs(project,workspace,container){
     const saved=await apiRequest(base+"/orchestrator/task-graphs",{
      method:"POST",body:JSON.stringify(body)
     });
+    // The graph is now durable. A list-refresh error must not imply rollback.
     notice("Operator-approved Task graph recorded; eligible Tasks can be admitted.");
-    const refreshed=await apiRequest(base+"/orchestrator/task-graphs?limit=20");
-    graphs=Array.isArray(refreshed)?refreshed:[saved];
     draft.idempotency_key="review-"+Date.now().toString(36);
     draft.approved=false;
     renderBuilder();
+    try{
+     const refreshed=await apiRequest(base+"/orchestrator/task-graphs?limit=20");
+     graphs=Array.isArray(refreshed)?refreshed:[saved];
+    }catch(_refreshError){graphs=[saved,...graphs.filter(g=>g.id!==saved.id)].slice(0,20)}
     renderInventory();
    }catch(err){submit.disabled=false;notice("Graph submission blocked: "+err.message,"bad")}
   });

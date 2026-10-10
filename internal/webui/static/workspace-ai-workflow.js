@@ -372,11 +372,13 @@ async function a49MountDevelopmentTasks(project,workspace,container){
  // preview. No new data enters the ZIP: only the exact prepared preview does.
  // This requires a live authenticated backend; an offline/revoked session fails closed.
  const reauthorizeSupportSources=async selected=>{
-  await apiRequest("/v1/qa/workspace-snapshot?"+qaQuery);
+  // Bypass browser HTTP cache, otherwise a cached 200 might mask revocation.
+  const liveOnly={cache:"no-store"};
+  await apiRequest("/v1/qa/workspace-snapshot?"+qaQuery,liveOnly);
   if(selected.model)await apiRequest("/v1/qa/model-deployments/"+
-   encodeURIComponent(selected.modelID)+"/agent-check");
+   encodeURIComponent(selected.modelID)+"/agent-check",liveOnly);
   if(selected.node)await apiRequest("/v1/qa/nodes/"+
-   encodeURIComponent(selected.nodeID)+"/evidence");
+   encodeURIComponent(selected.nodeID)+"/evidence",liveOnly);
  };
  const supportReviewStillValid=(reviewed,epoch)=>Boolean(
   reviewed&&supportReviewed===reviewed&&supportEpoch===epoch&&section.isConnected&&

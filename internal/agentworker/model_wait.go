@@ -4,7 +4,6 @@ import (
  "context"
  "encoding/json"
  "errors"
- "fmt"
  "strings"
 
  "github.com/DigiLogicTech/OnePane/internal/scheduler"
@@ -58,31 +57,19 @@ func shouldWaitForLocalModel(t task.Task, routeErr error, rejected []scheduler.R
 
 func (s *Service) waitForLocalModel(ctx context.Context, run Run, res TickResult, reason string) TickResult {
  attempt:=1
- if previous:=decodeModelWait(run.Continuation);previous!=nil{
-  attempt=previous.Attempt+1
- }
+ if previous:=decodeModelWait(run.Continuation);previous!=nil{attempt=previous.Attempt+1}
  if attempt>1000000{attempt=1000000}
  retryAt:=s.clock.UnixMilli()+modelWaitDelayMS(attempt)
- state,_:=json.Marshal(modelWaitEnvelope{ModelWait:&modelWaitRecord{
+ state,err:=json.Marshal(modelWaitEnvelope{ModelWait:&modelWaitRecord{
   Attempt:attempt,RetryAtMS:retryAt,Reason:boundedString(reason,512),
  }})
- if err:=s.updateRun(ctx,run.ID,run.Revision,RunWaiting,state,nil,0,0,nil,nil,strPtr(reason));err!=nil{
-  return failedResult(res,err)
- }
- current,err:=s.tasks.Get(ctx,run.TaskID)
  if err!=nil{return failedResult(res,err)}
- actor:=WorkerPrincipal
- if current.State!=task.StateRunning {
-  return failedResult(res,fmt.Errorf("cannot wait for model from Task state %s",current.State))
- }
- if _,err:=s.tasks.WaitDependency(ctx,task.TransitionCommand{
-  TaskID:current.ID,ExpectedRevision:current.Revision,
-  ActorPrincipalID:&actor,Reason:"awaiting an eligible local model; cloud substitution disabled",
- });err!=nil{
-  return failedResult(res,err)
- }
- _=s.journal(ctx,run.ID,"route","waiting",nil,nil,nil,nil,
-  map[string]any{"kind":"model_resources","retry_after_ms":retryAt,"wait_attempt":attempt})
+ err=s.suspendForResource(ctx,run,state,
+  "awaiting an eligible local model; cloud substitution disabled",
+  "route",map[string]any{
+   "kind":"model_resources","retry_after_ms":retryAt,"wait_attempt":attempt,
+  },strPtr(reason))
+ if err!=nil{return failedResult(res,err)}
  res.Status="waiting_model"
  res.Error=reason
  return res

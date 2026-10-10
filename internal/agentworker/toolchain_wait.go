@@ -99,32 +99,22 @@ func isApprovedToolchainRegisteredRunning(ctx context.Context,db *sql.DB,w *tool
 
 func (s *Service) waitForWorkspaceToolchain(ctx context.Context,run Run,res TickResult,wait *toolchainWaitRecord)TickResult{
  if wait==nil{return failedResult(res,fmt.Errorf("nil Workspace toolchain wait"))}
- // Fifteen seconds bounds repeated failed checks without burning inference.
- // No Tool command from the previous model output is replayed automatically.
+ // An existing Attempt and the pinned approved toolchain survive restart.
+ // This continuation contains no executable command to replay automatically.
  wait.RetryAtMS=s.clock.UnixMilli()+15000
- state,_:=json.Marshal(toolchainWaitEnvelope{ToolchainWait:wait})
- if err:=s.updateRun(ctx,run.ID,run.Revision,RunWaiting,state,nil,0,0,nil,nil,nil);err!=nil{
-  return failedResult(res,err)
- }
- current,err:=s.tasks.Get(ctx,run.TaskID)
+ state,err:=json.Marshal(toolchainWaitEnvelope{ToolchainWait:wait})
  if err!=nil{return failedResult(res,err)}
- if current.State!=task.StateRunning{
-  return failedResult(res,fmt.Errorf("cannot wait for toolchain from Task state %s",current.State))
- }
- actor:=WorkerPrincipal
- if _,err:=s.tasks.WaitDependency(ctx,task.TransitionCommand{
-  TaskID:current.ID,ExpectedRevision:current.Revision,ActorPrincipalID:&actor,
-  Reason:"waiting for the explicitly approved Workspace toolchain runtime",
- });err!=nil{return failedResult(res,err)}
- _=s.journal(ctx,run.ID,"toolchain","waiting",nil,nil,nil,nil,map[string]any{
-  "kind":"approved_toolchain_resources","manifest_sha256":wait.ManifestSHA256,
-  "retry_at_ms":wait.RetryAtMS,
- })
+ err=s.suspendForResource(ctx,run,state,
+  "waiting for the explicitly approved Workspace toolchain runtime",
+  "wait",map[string]any{
+   "kind":"approved_toolchain_resources","manifest_sha256":wait.ManifestSHA256,
+   "retry_at_ms":wait.RetryAtMS,
+  },nil)
+ if err!=nil{return failedResult(res,err)}
  res.Status="waiting_toolchain"
  res.Error="approved Workspace toolchain runtime unavailable; awaiting resource reconciliation"
  return res
 }
-
 
 // deferWorkspaceToolchainWait enforces the 15-second interval *between*
 // resource checks, including after a Worker restart. The original run/Attempt

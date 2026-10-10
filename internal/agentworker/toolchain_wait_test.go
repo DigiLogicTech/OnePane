@@ -69,8 +69,42 @@ func TestApprovedWorkspaceToolchainWaitSurvivesRestartAndAvoidsDuplicateAttempt(
  if err!=nil||waitingOn==nil||waitingOn.ManifestSHA256!=approved.ManifestSHA256{
   t.Fatalf("stopped approved OCI didn't require resource wait: %+v %v",waitingOn,err)
  }
+ // Force journal insertion to fail after both wait state updates have
+ // executed. A correctly atomic suspension must roll back all three rows.
+ if _,err:=db.SQL().ExecContext(ctx,`CREATE TRIGGER reject_resource_wait_journal
+  BEFORE INSERT ON agent_worker_steps
+  BEGIN SELECT RAISE(ABORT,'injected journal failure'); END`);err!=nil{t.Fatal(err)}
+ crashed:=original.waitForWorkspaceToolchain(ctx,run,TickResult{TaskID:created.ID,RunID:run.ID},waitingOn)
+ if crashed.Status=="waiting_toolchain"||crashed.Error==""{
+  t.Fatalf("journal fault was accepted as durable wait: %+v",crashed)
+ }
+ taskBefore,err:=tasks.Get(ctx,created.ID)
+ if err!=nil||taskBefore.State!=task.StateRunning{
+  t.Fatalf("Task changed despite rolled-back wait: %+v %v",taskBefore,err)
+ }
+ runBefore,err:=original.getRun(ctx,run.ID)
+ if err!=nil||runBefore.Status!=RunRunning{
+  t.Fatalf("Worker wait committed despite failed journal: %+v %v",runBefore,err)
+ }
+ var runningAttempt int
+ if err:=db.SQL().QueryRowContext(ctx,
+  `SELECT COUNT(*) FROM task_attempts WHERE id=? AND status='running'`,
+  run.AttemptID).Scan(&runningAttempt);err!=nil||runningAttempt!=1{
+  t.Fatalf("Attempt changed despite rolled-back wait: %d %v",runningAttempt,err)
+ }
+ if _,err:=db.SQL().ExecContext(ctx,`DROP TRIGGER reject_resource_wait_journal`);err!=nil{t.Fatal(err)}
+
  waiting:=original.waitForWorkspaceToolchain(ctx,run,TickResult{TaskID:created.ID,RunID:run.ID},waitingOn)
  if waiting.Status!="waiting_toolchain"{t.Fatalf("no durable resource wait: %+v",waiting)}
+ var recordedWait int
+ if err:=db.SQL().QueryRowContext(ctx,
+  `SELECT COUNT(*) FROM agent_worker_steps
+   WHERE run_id=? AND step_kind='wait' AND status='waiting'`,run.ID).
+   Scan(&recordedWait);err!=nil||recordedWait!=1{
+  t.Fatalf("approved OCI wait did not persist schema-valid audit journal: count=%d err=%v",
+   recordedWait,err)
+ }
+
  suspended,err:=tasks.Get(ctx,created.ID)
  if err!=nil||suspended.State!=task.StateWaitingDependency{
   t.Fatalf("Task should wait on existing Attempt: %+v %v",suspended,err)

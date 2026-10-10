@@ -36,9 +36,32 @@ sudo -u onepane /usr/bin/onepane -startup-evidence-root /var/lib/onepane
 
 For custom non-Debian installations, use the configured `ONEPANE_DATA_DIR` and the correct binary path. If the directory doesn't exist, is inaccessible, or is unsafe, the command fails with a generic message rather than showing source paths or OS exceptions. Since the results reflect local files, they are *diagnostic hints*, not trusted proof of a particular execution or absence of prior failures.
 
+## Opt-in MSI log analysis (separate local source-only tool)
+
+The WiX MSI may fail before OnePane's service or backend ever runs. An operator may deliberately capture a standard Windows Installer verbose log to a local storage location using **Windows Installer itself**, for example:
+
+```powershell
+# Choose a private location on a drive with sufficient free space.
+# This example is illustrative: do not assume D:\OnePane is every user's root.
+New-Item -ItemType Directory -Force -Path 'D:\OnePane\diagnostics\operator-msi'
+msiexec.exe /i 'C:\Path\To\OnePane.msi' /L*v 'D:\OnePane\diagnostics\operator-msi\msi-raw.log'
+```
+
+This **raw MSI log may contain usernames, custom install paths, property values, service information and sensitive data**. It may also grow substantially during installation. It is deliberately **not captured automatically** and is **not part of any QA ZIP**. Choose a private directory with appropriate ACLs; remove the raw log after you no longer need it.
+
+After the MSI run, the separate source-controlled helper can read up to **16 MiB / 50,000 lines** from an operator-selected local log and emit **only fixed typed indicators**:
+
+```powershell
+.\packaging\windows\Read-OnePaneMsiLog.ps1 -LogPath 'D:\OnePane\diagnostics\operator-msi\msi-raw.log'
+```
+
+It prints a small JSON report to standard output. It recognises only fixed MSI engine result categories, standard action names and specific numeric error categories such as service-start, registry-write, file/payload and custom-action failures. Raw lines, paths, timestamps from the log, property values and exception messages are **never copied** into the JSON. Oversized/truncated input and redirected source files are rejected. The helper does not call `msiexec`, touch the installer, write diagnostic files, upload anything, repair or undo a failed installation. It can be used when OnePane itself is completely offline.
+
+The sanitised indicators do not prove causation or that an MSI log is genuine. Windows-native CI exercises the parser against synthetic logs containing deliberate private-data canaries. The helper is present in source; it is not a claim that it has been bundled into the protected RC10 MSI or distributed as part of an RC11 installer.
+
 ## Gaps to retain on #85
 
-- WiX/MSI transaction capture requires opt-in `msiexec /L*v` (raw log can contain sensitive public properties, custom paths and machine information); do **not** auto-package raw installer logs.
+- WiX/MSI transaction capture still requires an explicit operator-run `msiexec /L*v` and a private local log location. The typed MSI log reader is available as a **separate tool**, not automatic application telemetry; do **not** auto-package raw installer logs.
 - No collection of Windows SCM event logs, old systemd journals, crashes that occur before the service wrapper runs, uncaught OS termination without recording, or host-wide temp files.
 - Not yet embedded as an operator-reviewed source in the browser-generated consolidated QA ZIP. The API may be unavailable; avoid making the support ZIP require it.
 - Real Windows MSI upgrade/reinstall, Linux service boot and disk-full/ACL faults still require physical operator verification. An absent journal means *not observed*, never that startup was successful.

@@ -121,3 +121,38 @@ This is **bounded artifact exchange**, not rootless runtime-to-runtime service
 connectivity, desktop preview forwarding, a transitively propagated Library
 grant, or a lease to use another Workspace's secrets/tools. RC11-03 #21 remains
 open for separately governed service connectivity and installed UI acceptance.
+
+## RC11-03 — scoped service-link authorisation groundwork (2026-10-10)
+
+Service connections are a **separate, deliberately narrower** control-plane
+grant from immutable Library artifact links. Schema migration 0046 and the
+operator-authenticated Workspace service-link API introduce a revocable,
+directional approval pinned to:
+
+- One active Project, exact source and target canonical Workspaces.
+- One previously verified **HTTP** endpoint belonging to a running, owned OCI
+  application in the source Workspace. No model-selected host/port/URL.
+- The application's revision, endpoint's revision, container spec fingerprint
+  and verification identifier; rebuilding/re-verifying requires explicit
+  operator reapproval.
+- One fixed, path-only HTTP resource, e.g. `/health`; no query strings,
+  URL-escaped traversal, remote hosts, arbitrary methods, headers or secrets.
+- A mandatory expiry at most 30 days ahead, an optimistic revision for every
+  approval/revocation, and event provenance. Only active *human* operators can
+  approve or renew.
+
+A trusted internal resolver can check whether a particular target Workspace
+still has an unexpired grant pointing to the exact currently verified loopback
+route. It rejects stale runtime/endpoint state, changed verified identities,
+inactive Projects/Workspaces and foreign/transitive consumers. **It does not
+send requests or publish an address to the browser or an Agent.**
+
+**Remaining before service connectivity is genuinely usable:** a trusted
+Node-local mediation layer must independently re-inspect the actual rootless
+container and its approved loopback mapping at request time, strongly bind
+authorization to the requesting Task/Workspace, limit method/path/headers/
+response size and duration, reject redirects, enforce immediate revocation,
+and prove it on the physical Ubuntu Node with two isolated Workspaces.
+Do not connect OCI networks, expose an unauthenticated endpoint, or describe
+these metadata-only grants as functional service forwarding. The absence of
+physical acceptance remains a release blocker under #19 and #21.

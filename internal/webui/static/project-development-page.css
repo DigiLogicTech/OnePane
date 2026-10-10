@@ -112,3 +112,24 @@
  padding:10px;margin:8px 0 12px;border:1px solid var(--border);
  border-radius:8px;background:var(--panel-2);color:var(--text);
  font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}
+
+/* RC11 operator-reviewed Project Task graphs: themed and drawer-responsive. */
+.a61-task-graphs{min-width:0}
+.a61-task-graphs>h3{margin:0 0 6px}
+.a61-graph-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin:8px 0}
+.a61-graph-card,.a61-create-graph{background:var(--panel-2);border:1px solid var(--border);border-radius:10px;margin:10px 0;min-width:0}
+.a61-graph-card>summary,.a61-create-graph>summary{display:flex;align-items:center;flex-wrap:wrap;gap:10px;cursor:pointer;padding:12px;color:var(--text)}
+.a61-graph-card .list-meta{overflow-wrap:anywhere}
+.a61-graph-nodes{display:grid;gap:8px;padding:8px 12px 12px}
+.a61-graph-node{border:1px solid var(--border);border-radius:8px;padding:10px;display:grid;gap:5px;min-width:0}
+.a61-graph-node>div,.a61-graph-node strong{overflow-wrap:anywhere}
+.a61-graph-node>.pill{justify-self:start}
+.a61-graph-form{padding:12px;display:grid;gap:12px}
+.a61-graph-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:10px}
+.a61-graph-fields label{display:flex;flex-direction:column;gap:5px;min-width:0;overflow-wrap:anywhere}
+.a61-graph-fields input,.a61-graph-fields textarea,.a61-graph-fields select{box-sizing:border-box;max-width:100%;min-width:0;width:100%}
+.a61-graph-step{border:1px solid var(--border);border-radius:8px;min-width:0}
+.a61-graph-step legend{padding:0 5px;font-weight:600}
+.a61-objective,.a61-depends{grid-column:1/-1}
+.a61-graph-form .inline-check{display:flex;align-items:flex-start;gap:9px;line-height:1.45}
+.a61-graph-form .inline-check input{flex:none;margin-top:2px}

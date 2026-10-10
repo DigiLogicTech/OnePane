@@ -323,3 +323,11 @@ The graph evaluator **never** auto-retries a possibly side-effecting Task,
 silently replaces an approved model, skips a prerequisite, or claims a
 failed Node has recovered. Human-led reconciliation and safe retry policies
 are separate upcoming work, together with Project Orchestrator GUI support.
+
+## RC11-04 — operator Task DAG console (UI)
+
+The Workspace Development surface now includes Project Task graphs, a Project-scoped console showing bounded graph inventory, persisted readiness and next_action per node, exact approved dependency keys, attention and progress counters. Statuses use the canonical backend; no browser-generated state is treated as execution evidence. The panel scales with the existing Workspace Development layout and shares theme tokens.
+
+A human operator can compose up to 32 explicitly named steps across registered, active canonical Project Workspaces, express hard predecessor keys, and supply a Project-scoped idempotency key. The UI requires an explicit approval checkbox and warns that submitting a graph can enqueue runnable Tasks immediately. The backend revalidates the authenticated human, DAG topology and Workspace isolation. Graph submission is not an arbitrary model tool and does not grant remote inference, host files, Vault or network access.
+
+The panel handles list refresh failures without wrongly telling the operator that a successfully committed graph was rejected. Node regression checks verify dependency input, approval messaging, mounting, canonical Workspace IDs and HTML escaping. Future iteration should add direct Task/open-in-Inspector links, richer visual DAG editing, controlled recovery actions and Project-level navigation.

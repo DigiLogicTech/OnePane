@@ -2,9 +2,7 @@ package projectworkspace
 
 import (
  "context"
- "database/sql"
  "encoding/json"
- "errors"
  "strings"
 
  "github.com/DigiLogicTech/OnePane/internal/event"

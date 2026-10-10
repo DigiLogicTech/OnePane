@@ -61,6 +61,7 @@ type baseInput struct {
 	EnvironmentBindings json.RawMessage `json:"environment_bindings,omitempty"`
 	NetworkPolicy       json.RawMessage `json:"network_policy,omitempty"`
 	Command             []string        `json:"command,omitempty"`
+	RequiredExecutables json.RawMessage `json:"required_executables,omitempty"`
 	Message             string          `json:"message,omitempty"`
 	TimeoutSeconds      int             `json:"timeout_seconds,omitempty"`
 	Endpoints           []PortSpec      `json:"endpoints,omitempty"`
@@ -91,6 +92,7 @@ func Register(reg *tool.Registry, adapter *Adapter) error {
 		{ID: ToolImageInspect, Version: "1", CapabilityID: CapabilityObserve, Mode: authority.ActionObserve, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskLow, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppExec, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppToolsDiscover, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskLow, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
+		{ID: ToolAppToolchainPreflight, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskLow, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppGodotBuild, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppUnrealMCPProbe, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskLow, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
 		{ID: ToolAppGitInspect, Version: "1", CapabilityID: CapabilityExecute, Mode: authority.ActionExecuteSandboxed, AdapterID: AdapterID, AdapterVersion: AdapterVersion, Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV1, MinimumApproval: policy.ApprovalNone},
@@ -395,6 +397,43 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 			"action":in.Action,"succeeded":success,"result":observed,
 			"container":state,"engine":profile,
 		},summary)
+	case ToolAppToolchainPreflight:
+        // This is a user/Task-declared requirements check, not an installation
+        // operation or proof of permission to execute any binary. Unknown
+        // executable names are supported, but command/options/host paths are
+        // never accepted as requirements.
+        declared,err:=decodeToolchainRequirements(req.Input)
+        if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        if !workspaceExists{
+            return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: Workspace not provisioned",ErrInvalidInput))
+        }
+        state,err:=a.engine.InspectContainer(ctx,declared.RuntimeID,declared.ApplicationID)
+        if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        if state.Status!="running"||!state.IsolationVerified||
+           state.RuntimeID!=declared.RuntimeID||state.ApplicationID!=declared.ApplicationID||
+           state.SpecHash==""||!exactWorkspaceMount(state,workspace){
+            return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: preflight requires a running and independently verified Workspace OCI application",ErrInvalidInput))
+        }
+        checkCtx,cancel:=context.WithTimeout(ctx,12*time.Second)
+        defer cancel()
+        observed,err:=a.engine.ExecContainer(checkCtx,declared.RuntimeID,declared.ApplicationID,
+            workspaceToolchainPreflightCommand(declared))
+        if checkCtx.Err()!=nil{return tool.AdapterResult{},checkCtx.Err()}
+        if err!=nil{return tool.AdapterResult{},err}
+        var check ToolchainPreflightResult
+        if observed.ExitCode!=0{
+            // Distroless/no POSIX shell (or inability to inspect) is an
+            // unknown preflight, never evidence that dependencies are absent.
+            check=toolchainPreflightUnavailable(declared,state.SpecHash)
+        }else{
+            check,err=parseToolchainPreflight(observed.Stdout,declared,state.SpecHash)
+            if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+        }
+        return result(map[string]any{
+            "runtime_id":declared.RuntimeID,"application_id":declared.ApplicationID,
+            "preflight":check,"sandbox_verified":true,
+            "note":"Executable presence is not package/version qualification, successful execution, or an authority grant. Missing prerequisites require an explicitly approved toolchain image.",
+        },"Workspace toolchain preflight: "+check.Status)
 	case ToolAppToolsDiscover:
         // Broad, read-only toolchain discovery executes a *fixed* scanner in
         // the same verified rootless application as project.app.exec.
@@ -540,6 +579,34 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 		}
 		execCtx, cancel := context.WithTimeout(ctx, time.Duration(in.TimeoutSeconds)*time.Second)
 		defer cancel()
+        preflightStatus:="not_requested"
+        preflightFingerprint:=""
+        if len(in.RequiredExecutables)>0{
+            var names []string
+            if err:=json.Unmarshal(in.RequiredExecutables,&names);err!=nil{
+                return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: invalid required_executables",ErrInvalidInput))
+            }
+            required,err:=normalizeToolchainPrerequisites(names)
+            if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+            checkRequest:=ToolchainRequirements{
+                RuntimeID:in.RuntimeID,ApplicationID:in.ApplicationID,Required:required,
+            }
+            preflightFingerprint=fingerprintToolchainRequirements(required)
+            observed,err:=a.engine.ExecContainer(execCtx,in.RuntimeID,in.ApplicationID,
+                workspaceToolchainPreflightCommand(checkRequest))
+            if execCtx.Err()!=nil{return tool.AdapterResult{},execCtx.Err()}
+            if err!=nil{return tool.AdapterResult{},err}
+            if observed.ExitCode!=0{
+                return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: toolchain prerequisites could not be inspected inside the approved OCI image; no command executed",ErrInvalidInput))
+            }
+            preflight,err:=parseToolchainPreflight(observed.Stdout,checkRequest,state.SpecHash)
+            if err!=nil{return tool.AdapterResult{},tool.KnownFailure(err)}
+            if len(preflight.Missing)>0{
+                return tool.AdapterResult{},tool.KnownFailure(fmt.Errorf("%w: missing Workspace toolchain executables: %s; no build command executed",
+                    ErrInvalidInput,strings.Join(preflight.Missing,", ")))
+            }
+            preflightStatus="ready"
+        }
 		execResult, err := a.engine.ExecContainer(execCtx, in.RuntimeID, in.ApplicationID, in.Command)
 		// Return the cancellation cause (rather than an engine-specific
 		// "signal: killed") so the Gateway records timed_out/cancelled.
@@ -559,6 +626,7 @@ func (a *Adapter) Invoke(ctx context.Context, req tool.AdapterRequest) (tool.Ada
 		}
 		return result(map[string]any{"runtime_id": in.RuntimeID, "application_id": in.ApplicationID,
 			"command": in.Command, "timeout_seconds": in.TimeoutSeconds,
+            "toolchain_preflight": preflightStatus, "toolchain_requirements_sha256": preflightFingerprint,
 			"succeeded": succeeded, "result": execResult, "container": state, "engine": profile}, summary)
 	case ToolRuntimeEnsure:
 		workspace, workspaceExists, err = managedWorkspacePath(a.dataDir, in.RuntimeID, true)

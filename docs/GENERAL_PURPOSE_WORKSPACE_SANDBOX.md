@@ -94,3 +94,50 @@ A loopback-only unauthenticated MCP endpoint is **never** automatically forwarde
 The mandatory first code audit, user vision-alignment interview and second
 code audit precede release packaging. Green hosted CI does not replace the
 skipped physical rootless Node acceptance test.
+
+
+## RC11 scoped toolchain prerequisite preflight
+
+The existing `project.app.tools.discover` inventory lists installed executable
+names, but a truncated inventory cannot establish that an unlisted dependency
+is absent. The new `project.app.toolchain.preflight` Tool checks **specific
+declared executable requirements** directly in one independently inspected,
+running, rootless OCI application. It is registered with the existing
+`project.app.execute` Task capability/lease.
+
+A request consists of exact `runtime_id`, `application_id` and an array of
+**1–32 unique executable names**. Unknown language/framework names are valid,
+subject only to a pathless and shell-safe character check; no predefined engine
+or language allowlist is used. OnePane normalises names and computes a stable
+requirements digest. The fixed POSIX script looks only for regular executable
+files in **absolute OCI PATH directories**, never invokes them, follows no
+remote URL, does not report filesystem paths or environment variables, and
+does not download missing packages. The host accepts only an exact,
+bounded (8 KiB) ordered list of present/absent flags. Reported states are:
+
+- `ready`: every declared executable was observed on this exact running
+  sandbox image; **not** a version, dependency or functional qualification
+- `missing`: the fixed scanner ran and could not find one or more names;
+  does **not** authorise automatic installation or fallback
+- `unavailable`: the image cannot run the fixed scanner, or it reports
+  failure; the requested binaries are **unknown**, not proven missing
+
+The optional `required_executables` field on existing `project.app.exec`
+checks the same requirements **before** the actual Task command. The command
+is not launched when prerequisites are missing, unverifiable or malformed;
+the Gateway receives a known failure. Existing Task commands without the
+opt-in field retain their current behavior. The successful execution receipt
+includes the requirements SHA-256 and `toolchain_preflight=ready`, while
+output status zero **still does not prove artifact integrity**; separate
+independent readback and Task-owned Library publication are required.
+
+**Important scope limit:** Prerequisites are currently declared *per Task
+Tool invocation*, not yet an approved, persistent Project/Workspace policy.
+A model with ordinary execute permission can omit the optional list; this
+does not replace a security grant, a mandatory fleet-wide toolchain policy or
+a locked software bill of materials. Persistent toolchain manifests with
+image digest, package versions, build lockfile hashes, tracked approvals and
+Node/GPU compatibility must be implemented before claiming full managed
+provisioning. The same physical, opt-in rootless Python OCI smoke now checks
+a real `ready` preflight, a guarded Python command and a denied missing
+dependency; it is **not passed** while runner/image prerequisites are skipped.

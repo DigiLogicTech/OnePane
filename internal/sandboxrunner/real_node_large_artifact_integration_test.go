@@ -7,6 +7,7 @@ import (
  "crypto/sha256"
  "encoding/hex"
  "encoding/json"
+ "errors"
  "fmt"
  "os"
  "regexp"
@@ -103,6 +104,49 @@ finally:os.close(fd)`
  if strings.Contains(string(result.Result),"content_base64")||
   strings.Contains(string(result.Result),string(diskBytes[:64])){
   t.Fatal("physical publication exposed raw bytes to Agent tool result")
+ }
+ // The same trusted Python-capable immutable image also proves that
+ // arbitrary toolchain prerequisites are checked only in this OCI namespace,
+ // and that a declared required tool can guard a real Task command.
+ required,_:=json.Marshal(map[string]any{
+  "runtime_id":runtimeID,"application_id":appID,"required":[]string{"python3","sh"},
+ })
+ checked,err:=adapter.Invoke(ctx,tool.AdapterRequest{
+  ToolID:ToolAppToolchainPreflight,WorkspaceID:"tenant",Input:required,
+ })
+ if err!=nil{t.Fatalf("physical toolchain preflight denied: %v",err)}
+ var readiness struct{Preflight ToolchainPreflightResult `json:"preflight"`}
+ if err=json.Unmarshal(checked.Result,&readiness);err!=nil||readiness.Preflight.Status!="ready"||
+  !readiness.Preflight.Observed||len(readiness.Preflight.Missing)!=0{
+  t.Fatalf("actual OCI image requirements not verified: %+v %v",readiness,err)
+ }
+ guarded,_:=json.Marshal(map[string]any{
+  "runtime_id":runtimeID,"application_id":appID,
+  "command":[]string{"python3","-I","-S","-c","print('onepane-approved-toolchain')"},
+  "required_executables":[]string{"sh","python3"},
+ })
+ ran,err:=adapter.Invoke(ctx,tool.AdapterRequest{
+  ToolID:ToolAppExec,WorkspaceID:"tenant",Input:guarded,
+ })
+ if err!=nil{t.Fatalf("physical guarded general-purpose execution failed: %v",err)}
+ var executed struct{
+  Succeeded bool `json:"succeeded"`
+  ToolchainPreflight string `json:"toolchain_preflight"`
+  Result ExecResult `json:"result"`
+ }
+ if err=json.Unmarshal(ran.Result,&executed);err!=nil||!executed.Succeeded||
+  executed.ToolchainPreflight!="ready"||executed.Result.Stdout!="onepane-approved-toolchain"{
+  t.Fatalf("OCI required software was not independently checked before launch: %+v %v",executed,err)
+ }
+ missing,_:=json.Marshal(map[string]any{
+  "runtime_id":runtimeID,"application_id":appID,
+  "command":[]string{"python3","-I","-S","-c","print('UNSAFE_SHOULD_NOT_RUN')"},
+  "required_executables":[]string{"onepane-definitely-missing-preflight-tool"},
+ })
+ if _,err:=adapter.Invoke(ctx,tool.AdapterRequest{
+  ToolID:ToolAppExec,WorkspaceID:"tenant",Input:missing,
+ });!errors.Is(err,ErrInvalidInput){
+  t.Fatalf("missing required physical OCI tool did not block command: %v",err)
  }
  t.Logf("Real rootless OCI 2.5 MiB published via 5 bounded chunks; source/host checksum %s",digest)
 }

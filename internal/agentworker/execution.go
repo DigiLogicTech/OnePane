@@ -362,6 +362,16 @@ func (s *Service) handleTool(ctx context.Context, run Run, t task.Task, resp age
 			return s.blockRun(ctx,run,res,"Workspace toolchain admission denied: "+err.Error())
 		}
 	}
+	if p.ToolID=="project.app.exec"{
+		// Preserve this same Task/Attempt if the exact human-approved OCI
+		// application has not yet been started by the Node reconciler.
+		// Planning/approval may continue separately, but a blocked build
+		// never runs on a substitute image or consumes another model turn.
+		wait,waitErr:=approvedToolchainWaitCandidate(ctx,s.db,t,p.Input)
+		if waitErr!=nil{return s.blockRun(ctx,run,res,
+			"Workspace toolchain resource admission denied: "+waitErr.Error())}
+		if wait!=nil{return s.waitForWorkspaceToolchain(ctx,run,res,wait)}
+	}
 	leaseID, err := s.findLease(ctx, run.WorkspaceID, run.TaskID, def.CapabilityID, def.Mode, p.ResourceRef)
 	if err != nil {
 		cont, _ := json.Marshal(map[string]any{"authority_required": map[string]any{"capability_id": def.CapabilityID, "action": def.Mode, "resource_ref": p.ResourceRef, "tool_id": p.ToolID, "tool_version": p.ToolVersion}})

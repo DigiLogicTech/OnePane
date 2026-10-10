@@ -212,6 +212,12 @@ func(s *Service) ResearchSeatEvidenceApproval(
  FROM research_evidence_seat_approvals e
  JOIN team_sessions ss ON ss.id=e.session_id AND ss.workspace_id=e.workspace_id
  JOIN teams tm ON tm.id=ss.team_id AND tm.workspace_id=ss.workspace_id
+  AND tm.status='active'
+ JOIN projects p ON p.id=e.project_id AND p.workspace_id=ss.workspace_id
+  AND p.status='active'
+ JOIN project_workspaces w ON w.id=e.project_workspace_id
+  AND w.project_id=p.id AND w.status='active'
+ JOIN workspaces tenant ON tenant.id=ss.workspace_id AND tenant.status='active'
  JOIN principals principal ON principal.id=? AND principal.status='active'
   AND principal.principal_type='human'
  JOIN workspace_memberships member ON member.workspace_id=ss.workspace_id

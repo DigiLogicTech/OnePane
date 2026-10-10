@@ -32,7 +32,7 @@ func researchEvidenceCouncilIsolationSafe(snapshotJSON string,approved []string)
  var snapshot team.SessionSnapshot
  if json.Unmarshal([]byte(snapshotJSON),&snapshot)!=nil||
   !snapshot.ResearchMode||snapshot.ExecutionMode!="council"||
-  len(snapshot.Members)==0{return false}
+  snapshot.Research.ChairMode=="manual"||len(snapshot.Members)==0{return false}
  set:=make(map[string]bool,len(approved))
  for _,id:=range approved{set[id]=true}
  active:=0

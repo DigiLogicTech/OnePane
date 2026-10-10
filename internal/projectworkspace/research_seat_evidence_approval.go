@@ -273,5 +273,12 @@ func(s *Service) RevokeResearchSeatEvidence(
    ActorPrincipalID:&actor,Payload:payload,OccurredAt:now})
  })
  if err!=nil{return ResearchSeatEvidenceApproval{},err}
- return s.ResearchSeatEvidenceApproval(ctx,sessionID,actor)
+ // A revoked consent must remain revocable even if its Team or Project was
+ // archived, and archived data must not be redisclosed by calling GET.
+ // The response is an intentionally minimal, content-free revocation receipt.
+ return ResearchSeatEvidenceApproval{
+  SessionID:sessionID,Policy:"local_only",State:"revoked",
+  RevokedBy:&actor,RevokedAt:&now,
+  ModelVisible:false,DispatchEnabled:false,
+ },nil
 }

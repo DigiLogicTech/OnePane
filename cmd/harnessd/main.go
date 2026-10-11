@@ -474,21 +474,14 @@ func main() {
 			}()
 		}
 		go func() {
-			lastReceiptPrune := time.Time{}
+			var receiptPrune federationReceiptPruneSchedule
 			run := func() {
-				// Retire only the transport's cached private responses.
-				// Keep request-ID/identity tombstones to block accidental replays.
-				// Bound the daily work to 16 small SQLite write batches.
-				if time.Since(lastReceiptPrune) >= 24*time.Hour {
-					lastReceiptPrune = time.Now()
-					for i:=0;i<16;i++ {
-						n,err:=runtime.Federation.PruneCachedInferenceResponses(ctx,nodefederation.DefaultInboundReceiptRetention)
-						if err!=nil {
-							if ctx.Err()==nil {log.Printf("federation cached response retention: %v",err)}
-							break
-						}
-						if n<128 {break}
-					}
+				// Retry transient SQLite failures after a bounded delay rather
+				// than suppressing transport-cache hygiene for an entire day.
+				if err := receiptPrune.RunIfDue(time.Now(), func() (int, error) {
+					return runtime.Federation.PruneCachedInferenceResponses(ctx, nodefederation.DefaultInboundReceiptRetention)
+				}); err != nil && ctx.Err() == nil {
+					log.Printf("federation cached response retention: %v", err)
 				}
 				if err := runtime.Federation.HeartbeatPeers(ctx); err != nil && ctx.Err() == nil {
 					log.Printf("node federation heartbeat: %v", err)

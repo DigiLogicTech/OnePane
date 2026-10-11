@@ -76,6 +76,21 @@ func TestLevel5GoalObservationAttestationIsScopedAndDoesNotStartMonitoring(t *te
    ExpectedRevision:revision,ActorPrincipalID:actor,
   })
  }
+ // Defend the final attachment boundary against a corrupted legacy
+ // source allowlist. A second JSON field must not silently replace the
+ // operator-approved source ID, even when the attached observation is valid.
+ corrupt:=`{"version":1,"source_ids":["uptime"],"source_ids":["unapproved"]}`
+ if _,err:=db.SQL().ExecContext(ctx,
+   "UPDATE project_continuous_goals SET monitoring_plan_json=? WHERE id=?",corrupt,goal.ID);err!=nil{t.Fatal(err)}
+ if _,err:=attach(unknownSource.ID,project.ID,"owner",goal.Revision);err==nil{
+  t.Fatal("tampered stored source list granted an unapproved observation")
+ }
+ if _,err:=svc.GoalEvidenceCoverage(ctx,project.ID,goal.ID);err==nil{
+  t.Fatal("tampered monitoring plan was presented as valid coverage")
+ }
+ if _,err:=db.SQL().ExecContext(ctx,
+   "UPDATE project_continuous_goals SET monitoring_plan_json=? WHERE id=?",
+   string(goal.MonitoringPlanJSON),goal.ID);err!=nil{t.Fatal(err)}
  for _,tc:=range []struct{name,id,projectID,actor string;revision int64}{
   {"foreign observation",unrelated.ID,project.ID,"owner",1},
   {"unapproved source",unknownSource.ID,project.ID,"owner",1},

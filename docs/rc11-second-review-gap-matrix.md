@@ -213,10 +213,10 @@ Completed in this integration branch, with source and regression tests:
   check for direct callers, in addition to its preexisting schema,
   objective, Workspace and dependency validation. Unit regressions
   cover repeated action, destination, plan and step fields.
-- [ ] Hosted CI for the latest parser hardening commit is required before
-  considering this gate verified. A transient sequence of failed builds
-  after an incorrectly escaped Go string was remedied in `499b252c`;
-  the current head must be checked independently.
+- [x] Hosted Go/SQLite/WebUI regression and cross-platform compilation
+  validated the strict planner after the escaped Go string was corrected:
+  [run #38184374215](https://github.com/DigiLogicTech/OnePane/actions/runs/38184374215)
+  passed. Later integration source head is also verified below.
 - [ ] P0-D remains incomplete: durable L4 task execution/recovery across
   actual runtimes and CPU/GPU/model swaps, and fully approved L5 recurring
   observe->respond->verify loops must be tested on installed hardware.
@@ -228,8 +228,10 @@ Completed in this integration branch, with source and regression tests:
   any durable goal. Added focused unit tests; an empty plan still grants
   no probe/network execution. This is source-list input validation, not
   an active Level 5 monitor or automatic remediation capability.
-- [ ] Validate the latest combined model-plan and L5-source changes in
-  hosted Go/SQLite/WebUI CI and preserve the full unmerged review gate.
+- [x] Combined model-plan and configured L5 source-list changes passed
+  hosted Go/SQLite/WebUI validation at
+  [run #38184550038](https://github.com/DigiLogicTech/OnePane/actions/runs/38184550038);
+  the full unmerged review gate remains mandatory.
 
 
 ## RC11 P0-D Level 5 evidence isolation checkpoint — 2026-10-12
@@ -252,9 +254,14 @@ Completed in this integration branch, with source and regression tests:
   to be rechecked in the transaction; the preflight is not treated as
   irrevocable authority. Regression asserts generic early denial with
   no raw observation subject/value disclosure.
-- [ ] **CI gate for the newest preflight and integration tests:** verify
-  [run #38184761818](https://github.com/DigiLogicTech/OnePane/actions/runs/38184761818)
-  and later documentation head before calling the batch green.
+- [x] **Final application-code CI gate for this batch:** corrected non-human
+  attestation to retain HTTP 403 (rather than 400), with an explicit
+  privacy-scoped domain regression. The final application code head
+  `72c50b00` passed hosted Go/SQLite, cross-platform and UI checks at
+  [run #38184872468](https://github.com/DigiLogicTech/OnePane/actions/runs/38184872468).
+  Earlier source runs failed only during the now-corrected response contract.
+- [ ] Verify CI on the final documentation-only checkpoint; this evidence
+  is not a final RC11 release/security sign-off.
 - [ ] **Next implementation:** Level 5 independently consented source/probe
   registration and revocable execution leases; crash-safe cadence claims,
   evidence-baseline comparison, graded defensive playbooks and postcondition

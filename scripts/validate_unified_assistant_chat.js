@@ -31,3 +31,11 @@ assert(schedulerAPI.includes('"hard_zero_incremental_cost": c.HardZeroIncrementa
 assert(picker.includes("!!c.local&&!!c.hard_zero_incremental_cost"),"Assistant picker offers unverified provider models");
 assert(picker.includes("const available=ready&&verifiedLocal"),"Assistant picker availability contradicts backend policy");
 console.log("Unified Assistant context, no implicit tabs and task-scope contracts: PASS");
+
+const agentScreen=fs.readFileSync("internal/webui/static/app.js","utf8");
+for(const token of ["data-a31-profile-restrictions", "a31EditAgentRestrictions(profile)",
+ "existing[key]==='disabled'", "policy[key]=checked?'disabled':'inherited'",
+ "Removing an existing restriction requires human approval.",
+ "expected_revision:Number(current.revision||0)"]){
+ assert(agentScreen.includes(token),"versioned Agent restrictions UI missing "+token);
+}

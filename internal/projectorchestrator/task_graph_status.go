@@ -52,6 +52,9 @@ func evaluateTaskGraph(graph *TaskGraph)(TaskGraphProgress,string){
   case needsAttemptRecoveryReview(n.AttemptHealth):
    n.Readiness="needs_attention"
    n.NextAction="Attempt/Worker ownership is inconsistent or orphaned; inspect recovery records and reconcile unknown side effects before resuming."
+  case n.DependencyDrift:
+   n.Readiness="needs_attention"
+   n.NextAction="Approved Task graph dependencies are missing, modified, or not independently attested for this legacy graph; obtain human review before any replay."
   case n.ScopeDrift:
    n.Readiness="needs_attention"
    n.NextAction="Approved Project Workspace is inactive, missing, or no longer owns this Task; review canonical identity before any worker admission."

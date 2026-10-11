@@ -39,14 +39,25 @@ func (x *revokeBeforeWorkerAdmission) Within(ctx context.Context, fn func(contex
 func configuredWorkerAdmission(t *testing.T)(context.Context,*sqlite.DB,*task.Service,*Service,task.Task,string){
  t.Helper()
  ctx,db,tasks,svc,ready:=setupAdmissionFixture(t)
+ // This fixture explicitly represents the human who approved autonomy
+ // before testing revocation during Worker admission. System principals
+ // cannot mint new Project or Workspace execution privileges.
+ for _,q:=range []string{
+  `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at)
+    VALUES('policy-reviewer','human','Operator','active',1,1,1)`,
+  `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at)
+    VALUES('ws','policy-reviewer','active',1,1)`,
+ }{
+  if _,err:=db.SQL().ExecContext(ctx,q);err!=nil{t.Fatal(err)}
+ }
  projects:=projectworkspace.NewService(db.SQL(),db,clock.Real{})
  p,err:=projects.CreateProject(ctx,projectworkspace.CreateProjectCommand{
-  WorkspaceID:"ws",Name:"Game project",CreatedBy:AuthorityPrincipal,
+  WorkspaceID:"ws",Name:"Game project",CreatedBy:"policy-reviewer",
   ProjectPolicyJSON:json.RawMessage(`{"feature_policy":{"AutonomousRoutines":"enabled","AutomaticFallback":"enabled"}}`),
  })
  if err!=nil{t.Fatal(err)}
  view,err:=projects.CreateWorkspaceView(ctx,projectworkspace.CreateWorkspaceViewCommand{
-  ProjectID:p.ID,Name:"World",ActorPrincipalID:AuthorityPrincipal,
+  ProjectID:p.ID,Name:"World",ActorPrincipalID:"policy-reviewer",
   AISettingsJSON:json.RawMessage(`{"feature_policy":{"AutonomousRoutines":"enabled","AutomaticFallback":"enabled"}}`),
  })
  if err!=nil{t.Fatal(err)}

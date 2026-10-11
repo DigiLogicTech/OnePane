@@ -98,7 +98,7 @@ func TestAgentWorkerDispatchRejectsStaleOrForeignActiveAttempt(t *testing.T) {
 		`UPDATE agent_worker_runs SET attempt_id=? WHERE id=?`,
 		victim.AttemptID,victim.ID);err!=nil{t.Fatal(err)}
 	if _,err:=db.SQL().ExecContext(ctx,
-		`UPDATE workspaces SET status='inactive' WHERE id='tenant'`);err!=nil{t.Fatal(err)}
+		`UPDATE workspaces SET status='suspended' WHERE id='tenant'`);err!=nil{t.Fatal(err)}
 	deny("tenant_disabled_after_task_start")
 	if _,err:=db.SQL().ExecContext(ctx,
 		`UPDATE workspaces SET status='active' WHERE id='tenant'`);err!=nil{t.Fatal(err)}

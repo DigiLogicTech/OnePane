@@ -96,6 +96,78 @@ func TestPublishingOCIArtifactRequiresActiveOwnedTaskAndOnlyGrantsSourceWorkspac
   t.Fatalf("published receipt mismatch: %+v",published)
  }
  if err:=artifacts.VerifyContent(ctx,published.ArtifactID);err!=nil{t.Fatal(err)}
+ // The Project Library service is a SECOND commit-time authority boundary.
+ // The OCI publisher's earlier preflight cannot authorize a write after an
+ // Attempt, Task, Project, Workspace or stored Artifact changes.
+ domainCmd:=projectworkspace.PublishWorkspaceFileVersionCommand{
+  ProjectID:p.ID,SourceWorkspaceID:world.ID,
+  RelativePath:"maps/unauthorized-direct-version.txt",
+  Name:"Unauthorized new source",MIMEType:"text/plain",
+  ArtifactID:published.ArtifactID,ContentHash:request.ContentHash,
+  SizeBytes:published.SizeBytes,ActorPrincipalID:actor,
+  TaskID:ready.ID,AttemptID:attempt.ID,
+ }
+ denied:=func(label string,change func()error,restore func()error){
+  t.Helper()
+  t.Run(label,func(t *testing.T){
+   if err:=change();err!=nil{t.Fatal(err)}
+   if _,err:=projects.PublishWorkspaceFileVersion(ctx,domainCmd);err==nil{
+    t.Fatal("untrusted direct Library version committed after source authority drift")
+   }
+   if err:=restore();err!=nil{t.Fatal(err)}
+   var bad int
+   if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*)
+    FROM workspace_published_file_assets
+    WHERE project_workspace_id=? AND relative_path=?`,
+    world.ID,domainCmd.RelativePath).Scan(&bad);err!=nil{t.Fatal(err)}
+   if bad!=0{t.Fatalf("failed commit persisted %d Library mappings",bad)}
+  })
+ }
+ denied("attempt_interrupted",func()error{
+  _,e:=db.SQL().ExecContext(ctx,`UPDATE task_attempts SET status='interrupted' WHERE id=?`,attempt.ID);return e
+ },func()error{
+  _,e:=db.SQL().ExecContext(ctx,`UPDATE task_attempts SET status='running' WHERE id=?`,attempt.ID);return e
+ })
+ denied("task_archived",func()error{
+  _,e:=db.SQL().ExecContext(ctx,`UPDATE tasks SET archived_at=? WHERE id=?`,now,ready.ID);return e
+ },func()error{
+  _,e:=db.SQL().ExecContext(ctx,`UPDATE tasks SET archived_at=NULL WHERE id=?`,ready.ID);return e
+ })
+ denied("task_moved_to_story",func()error{
+  _,e:=db.SQL().ExecContext(ctx,`UPDATE tasks SET project_workspace_id=? WHERE id=?`,story.ID,ready.ID);return e
+ },func()error{
+  _,e:=db.SQL().ExecContext(ctx,`UPDATE tasks SET project_workspace_id=? WHERE id=?`,world.ID,ready.ID);return e
+ })
+ denied("workspace_archived",func()error{
+  _,e:=db.SQL().ExecContext(ctx,`UPDATE project_workspaces SET status='archived' WHERE id=?`,world.ID);return e
+ },func()error{
+  _,e:=db.SQL().ExecContext(ctx,`UPDATE project_workspaces SET status='active' WHERE id=?`,world.ID);return e
+ })
+ denied("project_archived",func()error{
+  _,e:=db.SQL().ExecContext(ctx,`UPDATE projects SET status='archived' WHERE id=?`,p.ID);return e
+ },func()error{
+  _,e:=db.SQL().ExecContext(ctx,`UPDATE projects SET status='active' WHERE id=?`,p.ID);return e
+ })
+ denied("parent_tenant_suspended",func()error{
+  _,e:=db.SQL().ExecContext(ctx,`UPDATE workspaces SET status='suspended' WHERE id='tenant'`);return e
+ },func()error{
+  _,e:=db.SQL().ExecContext(ctx,`UPDATE workspaces SET status='active' WHERE id='tenant'`);return e
+ })
+ tamperedHash:=domainCmd
+ tamperedHash.ContentHash="0000000000000000000000000000000000000000000000000000000000000000"
+ if _,err:=projects.PublishWorkspaceFileVersion(ctx,tamperedHash);err==nil{
+  t.Fatal("stored Artifact hash mismatch authorized Library commit")
+ }
+ tamperedSize:=domainCmd
+ tamperedSize.SizeBytes++
+ if _,err:=projects.PublishWorkspaceFileVersion(ctx,tamperedSize);err==nil{
+  t.Fatal("stored Artifact size mismatch authorized Library commit")
+ }
+ tamperedArtifact:=domainCmd
+ tamperedArtifact.ArtifactID="unknown-artifact"
+ if _,err:=projects.PublishWorkspaceFileVersion(ctx,tamperedArtifact);err==nil{
+  t.Fatal("missing stored Artifact authorized Library commit")
+ }
  repeated,err:=publisher.PublishWorkspaceFile(ctx,request)
  if err!=nil{t.Fatalf("duplicate publication should reuse verified receipt: %v",err)}
  if repeated.ArtifactID!=published.ArtifactID||repeated.LibraryAssetID!=published.LibraryAssetID||

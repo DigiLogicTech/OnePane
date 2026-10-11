@@ -64,6 +64,14 @@ func TestV0DeclarationCompletionIsAtomicAndNeverIndependentAssurance(t *testing.
   if e!=nil{t.Fatal(e)}
   return v
  }
+ // A V1 checkpoint cannot be silently downgraded to the V0 shortcut.
+ // Make V1 first: the next checkpoint supersedes its predecessor.
+ v1:=create(policy.VerificationV1)
+ cp1,err:=verifier.CreateCheckpoint(ctx,verification.CheckpointCommand{
+  WorkspaceID:"tenant",TaskID:created.ID,VerificationID:v1.ID,
+  State:[]byte(`{"level":"V1"}`),
+ })
+ if err!=nil{t.Fatal(err)}
  v:=create(policy.VerificationV0)
  cp,err:=verifier.CreateCheckpoint(ctx,verification.CheckpointCommand{
   WorkspaceID:"tenant",TaskID:created.ID,VerificationID:v.ID,
@@ -73,13 +81,6 @@ func TestV0DeclarationCompletionIsAtomicAndNeverIndependentAssurance(t *testing.
  result:=[]byte(`{"declared":"done"}`)
  if err:=worker.completeV0InTransaction(ctx,run,verifying,"not-the-verification",cp.ID,result);
   !errors.Is(err,ErrInvalidWorkerState){t.Fatalf("foreign Verification finalized: %v",err)}
- // A V1 checkpoint cannot be silently downgraded to the V0 shortcut.
- v1:=create(policy.VerificationV1)
- cp1,err:=verifier.CreateCheckpoint(ctx,verification.CheckpointCommand{
-  WorkspaceID:"tenant",TaskID:created.ID,VerificationID:v1.ID,
-  State:[]byte(`{"level":"V1"}`),
- })
- if err!=nil{t.Fatal(err)}
  if err:=worker.completeV0InTransaction(ctx,run,verifying,v1.ID,cp1.ID,result);
   !errors.Is(err,ErrInvalidWorkerState){t.Fatalf("V1 evidence bypassed independent assurance: %v",err)}
  // The V0 completion's terminal Task/Attempt and Worker update must be

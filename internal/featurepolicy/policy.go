@@ -76,9 +76,9 @@ func MinimalDefaults() Policy {
 // restrictive parent. Inherited preserves the parent's value.
 func Resolve(parent, child State) State {
 	if parent != Enabled && parent != Disabled && parent != Unavailable {
-    return Unavailable
-  }
-  if parent == Unavailable || parent == Disabled {
+		return Unavailable
+	}
+	if parent == Unavailable || parent == Disabled {
 		return parent
 	}
 	if child == Inherited || strings.TrimSpace(string(child)) == "" {

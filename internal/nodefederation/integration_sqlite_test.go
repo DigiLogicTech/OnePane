@@ -201,6 +201,18 @@ func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {
 	}
 	// A live paired mTLS peer must not gain inference authority if the
 	// receiver's local admission manager disappears after startup.
+	// The receiver must reject a lapsed heartbeat even if TLS is paired.
+	if _,err:=dbB.SQL().ExecContext(ctx,`UPDATE node_capability_manifests
+	 SET expires_at=? WHERE peer_node_id='node-a'`,now-1000);err!=nil{t.Fatal(err)}
+	stale:=in
+	stale.RequestID="expired-capability"
+	var unused RemoteInferenceResponse
+	if err:=postJSON(ctx,svcA.pinnedClient(identB.Fingerprint,true),
+	 ts.URL+"/federation/v1/inference",stale,&unused);err==nil{
+	 t.Fatal("stale heartbeat accepted by the inference receiver")
+	}
+	if _,err:=dbB.SQL().ExecContext(ctx,`UPDATE node_capability_manifests
+	 SET expires_at=? WHERE peer_node_id='node-a'`,now+3600000);err!=nil{t.Fatal(err)}
 	server.models=nil
 	newReq:=in
 	newReq.RequestID="missing-local-model-admission"

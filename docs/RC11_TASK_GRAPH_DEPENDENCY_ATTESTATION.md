@@ -47,6 +47,15 @@ Attempt or `task.started` event is inserted. A deleted edge, an unattested
 historical graph, a newly inserted unapproved predecessor, or an archived
 Workspace cannot make a Task runnable merely because a UI/Orchestrator
 snapshot is stale. Ordinary non-graph Tasks keep the existing Task lifecycle.
+
+**General Workspace Task lifecycle fence:** Tasks created directly within a
+canonical Project Workspace are also checked against the *currently active*
+Workspace, Project and parent tenancy at every Task start or Attempt resume.
+Archiving a Workspace or Project after the Task becomes READY must not
+authorize later execution. This check is performed in the same write
+transaction as Task/Attempt state mutation, and deliberately does not require
+the Task to belong to an operator-reviewed DAG. Legacy tenancy-only Tasks
+without a canonical Project Workspace retain their established admission path.
 A Task graph's read-only recovery checkpoint is not an admission lease.
 The same write-transaction admission fence also applies whenever an
 **existing Attempt re-enters RUNNING**: operator Resume, autonomous

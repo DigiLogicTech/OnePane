@@ -548,6 +548,73 @@ func (s *Service) Fail(ctx context.Context, cmd TransitionCommand) (Task, error)
 	return s.transitionWithOptionalAttempt(ctx, cmd, StateFailed, AttemptFailed, "task.failed")
 }
 
+// TransitionWorkerTerminalInTransaction is a trusted control-plane-only
+// terminal transition for the ORIGINAL Agent Worker Attempt. It belongs to
+// the same transaction as Worker terminalization and the immutable journal.
+// Unlike the ordinary optional-attempt API it cannot fail the wrong Attempt
+// or mark a Task terminal after Worker ownership has drifted.
+func (s *Service) TransitionWorkerTerminalInTransaction(
+ ctx context.Context,tx storage.Tx,cmd TransitionCommand,
+ attemptID,workerPrincipalID string,blocked bool,
+)error{
+ if tx==nil||strings.TrimSpace(cmd.TaskID)==""||cmd.ExpectedRevision<1||
+  strings.TrimSpace(attemptID)==""||strings.TrimSpace(workerPrincipalID)==""{
+  return ErrInvalidCommand
+ }
+ next:=StateFailed
+ attemptNext:=AttemptFailed
+ eventType:="task.failed"
+ if blocked{
+  next=StateBlocked
+  attemptNext=AttemptWaiting
+  eventType="task.blocked"
+ }
+ t,err:=s.repo.GetForUpdate(ctx,tx,cmd.TaskID)
+ if err!=nil{return err}
+ if t.Revision!=cmd.ExpectedRevision{return ErrRevisionConflict}
+ // A blocked Worker is only legitimate from RUNNING. A failed Worker may
+ // additionally terminate a completion proposal already being verified.
+ if !CanTransition(t.State,next){return ErrInvalidTransition}
+ if blocked&&t.State!=StateRunning{return ErrInvalidTransition}
+ if !blocked&&t.State!=StateRunning&&t.State!=StateVerifying&&
+  t.State!=StateCompletionRequested{return ErrInvalidTransition}
+ active,err:=s.repo.ActiveAttempt(ctx,tx,t.ID)
+ if err!=nil{return err}
+ if active==nil||active.ID!=attemptID||
+  active.WorkerPrincipalID==nil||
+  *active.WorkerPrincipalID!=workerPrincipalID{
+  return ErrInvalidAttempt
+ }
+ if blocked&&active.State!=AttemptRunning{return ErrInvalidAttempt}
+ if !blocked&&active.State!=AttemptRunning&&active.State!=AttemptWaiting{
+  return ErrInvalidAttempt
+ }
+ var authorized int
+ err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM task_attempts a
+  WHERE a.id=? AND a.task_id=? AND a.worker_principal_id=?
+   AND a.status=? AND json_valid(a.metadata_json)=1
+   AND json_extract(a.metadata_json,'$.agent_worker')='v1'`,
+  active.ID,t.ID,workerPrincipalID,active.State).Scan(&authorized)
+ if err!=nil{return err}
+ if authorized!=1{return ErrInvalidAttempt}
+ now:=s.clock.UnixMilli()
+ if err=s.repo.TransitionAttempt(ctx,tx,active.ID,active.State,attemptNext,now);err!=nil{return err}
+ if err=s.repo.Transition(ctx,tx,transitionRecord{
+  TaskID:t.ID,ExpectedRevision:t.Revision,From:t.State,To:next,UpdatedAt:now,
+ });err!=nil{return err}
+ eventID,err:=s.ids.New("evt")
+ if err!=nil{return err}
+ payload,_:=json.Marshal(map[string]any{
+  "task_id":t.ID,"from":t.State,"to":next,"reason":cmd.Reason,
+  "revision":t.Revision+1,"attempt_id":active.ID,
+ })
+ return s.events.Append(ctx,tx,event.Event{
+  ID:eventID,WorkspaceID:&t.WorkspaceID,Type:eventType,
+  AggregateType:"task",AggregateID:t.ID,ActorPrincipalID:cmd.ActorPrincipalID,
+  RequestID:cmd.RequestID,TraceID:cmd.TraceID,Payload:payload,OccurredAt:now,
+ })
+}
+
 func (s *Service) RequestCancel(ctx context.Context, cmd TransitionCommand) (Task, error) {
 	return s.transition(ctx, cmd, StateCancelRequested, "task.cancel_requested", func(tr *transitionRecord, now int64) {
 		tr.CancelRequestedAt = &now

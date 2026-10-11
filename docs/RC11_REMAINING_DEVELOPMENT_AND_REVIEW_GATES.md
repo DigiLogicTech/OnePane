@@ -1095,3 +1095,19 @@ explicit healthy test watchdog to satisfy the current fail-closed
 mutation policy; production watchdog requirements are unchanged.
 The complete Operation integration suite, including original
 mutation lifecycle and restart recovery tests, is now mandatory CI.
+
+## Task Graph — compensating external effect remains operator-visible
+
+A Task in RUNNING state is not proof that an external compensation
+is ordinary forward execution. The read-only Project DAG now
+separately classifies a compensating Operation as
+`compensation_in_progress` and flags the Task
+`needs_attention`, even if its parent Task remains RUNNING.
+When the Task is no longer RUNNING, the existing stronger
+`inflight_effect_outlived_task` status remains in force.
+Unknown outcomes and failed compensation retain higher priority.
+
+The status contains no Tool inputs, secrets, receipts or resource refs.
+It also changes the derived recovery checkpoint observation digest,
+never permits automatic replay, and is tested against an actual
+Task-scoped SQLite read snapshot and checkpoint recovery classes.

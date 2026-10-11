@@ -4,6 +4,7 @@ import (
  "context"
  "encoding/json"
  "fmt"
+ "reflect"
  "strings"
 )
 
@@ -74,4 +75,28 @@ func CanonicalRestrictiveAgentPolicy(raw []byte)([]byte,error){
  out,err:=json.Marshal(map[string]any{"feature_policy":p})
  if err!=nil{return nil,err}
  return out,nil
+}
+
+
+// AgentRestrictionBroadens detects when a new version removes a denial.
+// Agents may submit stricter policies, but lifting a previous denial requires
+// a human reattestation even if Project/Workspace grants are unchanged.
+func AgentRestrictionBroadens(before,after []byte)(bool,error){
+ old,_,err:=parseFeatureDocument(before,Policy{})
+ if err!=nil{return false,err}
+ next,_,err:=parseFeatureDocument(after,Policy{})
+ if err!=nil{return false,err}
+ a,b:=reflect.ValueOf(old),reflect.ValueOf(next)
+ for i:=0;i<a.NumField();i++{
+  if a.Type().Field(i).Name=="ConfigAuthority"{continue}
+  prev,curr:=State(a.Field(i).String()),State(b.Field(i).String())
+  if (prev==Disabled||prev==Unavailable)&&
+   (curr==""||curr==Inherited){return true,nil}
+ }
+ rank:=func(a Authority)int{
+  switch a {case AuthorityNever:return 0;case AuthorityRead:return 1;
+   case AuthorityPropose:return 2;case AuthorityAuto:return 3
+   default:return 3}
+ }
+ return rank(next.ConfigAuthority)>rank(old.ConfigAuthority),nil
 }

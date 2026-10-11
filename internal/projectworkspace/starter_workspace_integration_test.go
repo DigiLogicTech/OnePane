@@ -62,15 +62,23 @@ func TestNewProjectStarterWorkspaceIsAtomicUnprivilegedAndHumanAuthorised(t *tes
  // view even with no persisted canonical Project Workspace. Assert the
  // database record count rather than mistaking that virtual UI adapter for
  // a new user-authorised Workspace.
- legacyViews,err:=svc.WorkspaceViews(ctx,legacy.ID)
- if err!=nil||len(legacyViews)!=1||legacyViews[0].Name!="Main"{
-  t.Fatalf("existing legacy compatibility view changed: %+v %v",legacyViews,err)
- }
+ // Legacy WorkspaceViews intentionally materialises "Main" during its
+ // first read. The explicit starter flag must not have inserted that row
+ // during Project creation; the pre-read DB check proves opt-in behaviour.
  var persistedLegacy int
  if err:=db.SQL().QueryRowContext(ctx,
   "SELECT COUNT(*) FROM project_workspaces WHERE project_id=?",legacy.ID).Scan(&persistedLegacy);
   err!=nil||persistedLegacy!=0{
-  t.Fatalf("legacy Project unexpectedly persisted canonical Workspace: %d %v",persistedLegacy,err)
+  t.Fatalf("legacy Project was changed at creation: %d %v",persistedLegacy,err)
+ }
+ legacyViews,err:=svc.WorkspaceViews(ctx,legacy.ID)
+ if err!=nil||len(legacyViews)!=1||legacyViews[0].Name!="Main"{
+  t.Fatalf("existing legacy lazy-Main behaviour changed: %+v %v",legacyViews,err)
+ }
+ if err:=db.SQL().QueryRowContext(ctx,
+  "SELECT COUNT(*) FROM project_workspaces WHERE project_id=?",legacy.ID).Scan(&persistedLegacy);
+  err!=nil||persistedLegacy!=1{
+  t.Fatalf("legacy first-read migration was not preserved: %d %v",persistedLegacy,err)
  }
  if _,err:=svc.CreateProject(ctx,CreateProjectCommand{
   WorkspaceID:"tenant",Name:"Robot starter",CreatedBy:"robot",

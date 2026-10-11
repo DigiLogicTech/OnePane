@@ -7,16 +7,17 @@ import (
 )
 
 // requireCurrentDispatchIdentity prevents model-queue/recovery latency from
-// changing the approved destination. This applies to Task inferences too,
-// not only the narrower, hard-local general Assistant policy. Compare the
-// canonical full records, not a claimed class from scheduler metadata.
+// changing the approved destination. This applies to Task inferences too.
+// CPU/GPU residency and verified capacity may legitimately change as a model
+// cold-loads. They are *observations*, not a new right to change runtime,
+// model, provider, endpoint or destination, which still fail closed.
 func(s *Service)requireCurrentDispatchIdentity(ctx context.Context,
  selectedDeployment ModelDeployment,selectedModel Model,
  selectedProvider *ProviderConnection)error{
  if s==nil||s.repo==nil{return fmt.Errorf("%w: inference catalog unavailable",ErrInformationFlow)}
  currentDeployment,err:=s.repo.Deployment(ctx,selectedDeployment.ID)
  if err!=nil||currentDeployment.Status!=DeploymentReady||
-  !reflect.DeepEqual(currentDeployment,selectedDeployment){
+  !sameInferenceSecurityDeployment(selectedDeployment,currentDeployment){
   return fmt.Errorf("%w: deployment identity or runtime configuration changed while queued",ErrInformationFlow)
  }
  currentModel,err:=s.repo.Model(ctx,selectedModel.ID)
@@ -45,4 +46,24 @@ func(s *Service)requireCurrentDispatchIdentity(ctx context.Context,
   }
  }
  return nil
+}
+
+// sameInferenceSecurityDeployment permits monotone, observed residency and
+// context-capacity changes during a legitimate cold load. A rollback of the
+// revision or ANY destination/runtime/security field remains forbidden.
+// This comparison is deliberately separate from whole-row equality: the
+// local-first Worker may queue work until the model is loaded into memory.
+func sameInferenceSecurityDeployment(before,after ModelDeployment)bool{
+ if after.Revision<before.Revision{return false}
+ before.ResidencyState=nil
+ after.ResidencyState=nil
+ before.ContextMaxReported=nil
+ after.ContextMaxReported=nil
+ before.ContextMaxVerified=nil
+ after.ContextMaxVerified=nil
+ before.Revision=0
+ after.Revision=0
+ before.UpdatedAt=0
+ after.UpdatedAt=0
+ return reflect.DeepEqual(before,after)
 }

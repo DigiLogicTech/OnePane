@@ -200,3 +200,26 @@ func (p Policy) CanUseAutomaticFallback() bool {
 func (p Policy) CanShareAcrossProjects() bool {
 	return p.CrossProjectShare == Enabled
 }
+
+// ExecutionGrants is the small, explicit capability set that must be checked
+// at the point of use. Never infer cloud or cross-project authority from a
+// model candidate list, task payload or an Agent role alone.
+type ExecutionGrants struct {
+	LocalInference bool
+	CloudInference bool
+	AutomaticFallback bool
+	FileAccess bool
+	CrossProjectShare bool
+	AutonomousTasks bool
+}
+
+func (p Policy) ExecutionGrants() ExecutionGrants {
+	return ExecutionGrants{
+		LocalInference: p.ProjectAI == Enabled && p.ModelRouting == Enabled,
+		CloudInference: p.CanUseCloudModel(),
+		AutomaticFallback: p.CanUseAutomaticFallback(),
+		FileAccess: p.Files == Enabled,
+		CrossProjectShare: p.CanShareAcrossProjects(),
+		AutonomousTasks: p.ProjectAI == Enabled && p.AutonomousRoutines == Enabled,
+	}
+}

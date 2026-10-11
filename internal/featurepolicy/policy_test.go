@@ -176,3 +176,19 @@ func TestCrossProjectSharingRequiresExplicitGrant(t *testing.T) {
 		t.Fatal("explicitly granted sharing denied")
 	}
 }
+
+func TestExecutionGrantsFailClosed(t *testing.T) {
+	defaults := AssistedDefaults().ExecutionGrants()
+	if defaults.CloudInference || defaults.CrossProjectShare || defaults.AutonomousTasks {
+		t.Fatalf("defaults leaked privileged execution grants: %+v", defaults)
+	}
+	project := AssistedDefaults()
+	project.CloudRouting = Enabled
+	project.AutonomousRoutines = Enabled
+	workspace := Policy{CloudRouting: Disabled, Files: Disabled}
+	agent := Policy{CloudRouting: Enabled, Files: Enabled}
+	got := ResolvePolicyChain(project, workspace, agent).ExecutionGrants()
+	if got.CloudInference || got.FileAccess || got.CrossProjectShare {
+		t.Fatalf("agent expanded Workspace grants: %+v", got)
+	}
+}

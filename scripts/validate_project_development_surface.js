@@ -42,6 +42,11 @@ assertContains(foundation,'value="continuous_operations"','Level 5 is an explici
 assertContains(foundation,'name="autonomous_local_tasks" checked',"new Project setup must offer the default Level 4 local Task autonomy option");
 assertContains(foundation,"AutonomousRoutines:f.autonomous_local_tasks?'enabled':'disabled'","autonomy must be an explicit user-selected Project feature policy");
 assertContains(foundation,"create_starter_workspace:true","new Project dialog must request atomic canonical starter Workspace");
+for(const marker of ['name="initial_objective"','name="queue_initial_task" checked',
+ "objective,project_workspace_id:starter.id","force_task:true,allow_task_creation:true",
+ "Project created, but initial Task was not queued:"]){
+ assertContains(foundation,marker,"initial Project Task queue contract missing "+marker);
+}
 assertContains(foundation,"This does not enable shell, network, secret access or provider spending.","local Task autonomy must not grant external permissions");
 assertContains(foundation,'onepane_operations:{version:1,mode:f.operating_mode','mode selection must persist in actual Project policy');
 assertContains(foundation,"id=\"qa4SaveProjectOperatingMode\"",'Project Inspector must offer an operating-mode save action');

@@ -881,8 +881,42 @@ async function renderProjects(){
 }
 
 function openProjectDialog(){
-  openModal('Configure project',`<form id="projectForm" class="qa-form"><label>Name<input name="name" required placeholder="My project"></label><label>Description<textarea name="description" rows="3"></textarea></label><label>Operating mode<select name="operating_mode"><option value="autonomous_project" selected>Autonomous Project (Level 4 — default)</option><option value="continuous_operations">Continuous Operations (Level 5)</option></select></label><label class="inline-check"><input type="checkbox" name="autonomous_local_tasks" checked> Allow automatic local Task execution within existing Project/Workspace grants</label><p class="page-subtitle">Level 4 defaults to local autonomous Task execution. This does not enable shell, network, secret access or provider spending. Level 5 requires separate monitoring and remediation approval. You can disable automatic Task execution here.</p><div class="error" id="projectError"></div><button class="btn primary" type="submit">Create project</button></form>`);
-  $('#projectForm').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.currentTarget));try{const p=await apiRequest('/v1/projects',{method:'POST',body:JSON.stringify({workspace_id:onepaneWorkspace,name:f.name,description:f.description,create_starter_workspace:true,project_policy:{onepane_operations:{version:1,mode:f.operating_mode||'autonomous_project'},feature_policy:{AutonomousRoutines:f.autonomous_local_tasks?'enabled':'disabled'}}})});uiProjects.unshift(p);closeModal();renderProjects();notice('Project configured.');}catch(ex){$('#projectError').textContent=ex.message;}};
+  openModal('Configure project',`<form id="projectForm" class="qa-form"><label>Name<input name="name" required placeholder="My project"></label><label>Description<textarea name="description" rows="3"></textarea></label><label>Initial objective (optional)<textarea name="initial_objective" rows="3" maxlength="4096" placeholder="Describe the first deliverable or project task"></textarea></label><label class="inline-check"><input type="checkbox" name="queue_initial_task" checked> Queue the initial objective in the starter Workspace</label><label>Operating mode<select name="operating_mode"><option value="autonomous_project" selected>Autonomous Project (Level 4 — default)</option><option value="continuous_operations">Continuous Operations (Level 5)</option></select></label><label class="inline-check"><input type="checkbox" name="autonomous_local_tasks" checked> Allow automatic local Task execution within existing Project/Workspace grants</label><p class="page-subtitle">Level 4 defaults to local autonomous Task execution. This does not enable shell, network, secret access or provider spending. Level 5 requires separate monitoring and remediation approval. You can disable automatic Task execution here.</p><div class="error" id="projectError"></div><button class="btn primary" type="submit">Create project</button></form>`);
+  $('#projectForm').onsubmit=async e=>{
+    e.preventDefault();
+    const button=e.currentTarget.querySelector('button[type="submit"]');
+    button.disabled=true;
+    const f=Object.fromEntries(new FormData(e.currentTarget));
+    try{
+      const p=await apiRequest('/v1/projects',{method:'POST',body:JSON.stringify({
+        workspace_id:onepaneWorkspace,name:f.name,description:f.description,
+        create_starter_workspace:true,
+        project_policy:{onepane_operations:{version:1,mode:f.operating_mode||'autonomous_project'},
+          feature_policy:{AutonomousRoutines:f.autonomous_local_tasks?'enabled':'disabled'}}
+      })});
+      uiProjects.unshift(p);closeModal();renderProjects();
+      const objective=String(f.initial_objective||'').trim();
+      if(objective&&f.queue_initial_task){
+        // Project and Workspace creation has already committed. A failed
+        // Task handoff must never delete those user-owned assets; surface
+        // the partial state so the operator can retry the existing Project.
+        try{
+          const scope=await apiRequest('/v1/projects/'+encodeURIComponent(p.id)+'/workspaces');
+          const starter=Array.isArray(scope)?scope.find(w=>w.name==='Development'&&w.status==='active'):null;
+          if(!starter)throw new Error('Canonical Development Workspace unavailable');
+          const turn=await apiRequest('/v1/projects/'+encodeURIComponent(p.id)+'/orchestrator/turns',{
+            method:'POST',body:JSON.stringify({objective,project_workspace_id:starter.id,
+              force_task:true,allow_task_creation:true})
+          });
+          if(!turn.task_id)throw new Error('Task was not queued; inspect the Orchestrator turn');
+          notice('Project established; initial Task queued in its Development Workspace.');
+        }catch(ex){notice('Project created, but initial Task was not queued: '+ex.message,'bad')}
+      }else notice('Project and starter Workspace configured.');
+    }catch(ex){
+      const field=$('#projectError');
+      if(field)field.textContent=ex.message;
+    }finally{if(button.isConnected)button.disabled=false}
+  };
 }
 
 async function renderNodes(){

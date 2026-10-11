@@ -135,6 +135,11 @@ func (s *Service) ensureWorkspaceViews(ctx context.Context, projectID string) er
 	if err != nil {
 		return err
 	}
+	if p.Status!="active" {
+		// Reading an archived Project must never materialise new durable
+		// Workspace objects, even on the legacy compatibility path.
+		return ErrProjectInactive
+	}
 	var doc map[string]any
 	_ = json.Unmarshal(p.ProjectPolicyJSON, &doc)
 	var legacy []any
@@ -146,6 +151,15 @@ func (s *Service) ensureWorkspaceViews(ctx context.Context, projectID string) er
 	}
 	now := s.clock.UnixMilli()
 	return s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		// The pre-transaction COUNT above is only a fast path. Two readers
+		// can race to migrate the same old Project: recheck ownership inside
+		// the serialised writer transaction to avoid duplicate Main Workspaces.
+		var already int
+		if err:=tx.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM project_workspaces WHERE project_id=?",projectID).Scan(&already);err!=nil{
+			return err
+		}
+		if already!=0{return nil}
 		for i, item := range legacy {
 			m, _ := item.(map[string]any)
 			name, _ := m["name"].(string)

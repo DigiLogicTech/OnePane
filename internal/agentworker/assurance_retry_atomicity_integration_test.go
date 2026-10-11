@@ -62,6 +62,16 @@ func TestAssuranceRetryAtomicOriginalAttemptAndJournalRollback(t *testing.T){
  if err:=worker.AssuranceRetry(ctx,run.ID,"unrelated-verification",[]byte(`{}`));!errors.Is(err,ErrInvalidWorkerState){
   t.Fatalf("unrelated verification resumed execution: %v",err)
  }
+ // The same Task's failed Verification is not sufficient: it must have
+ // been issued to the exact Agent Worker run being reactivated.
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE verifications
+  SET spec_json='{"source":"agent_completion_proposal","worker_run_id":"old-worker"}'
+  WHERE id=?`,v.ID);err!=nil{t.Fatal(err)}
+ if err:=worker.AssuranceRetry(ctx,run.ID,v.ID,[]byte(`{}`));!errors.Is(err,ErrInvalidWorkerState){
+  t.Fatalf("foreign Worker provenance resumed current Attempt: %v",err)
+ }
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE verifications SET spec_json=?
+  WHERE id=?`,`{"source":"agent_completion_proposal","worker_run_id":"`+run.ID+`"}`,v.ID);err!=nil{t.Fatal(err)}
  if _,err:=db.SQL().ExecContext(ctx,`CREATE TRIGGER refuse_assurance_retry
   BEFORE INSERT ON agent_worker_steps
   WHEN NEW.step_kind='verification' AND NEW.status='failed'

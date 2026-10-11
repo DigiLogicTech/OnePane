@@ -28,6 +28,28 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/verification"
 )
 
+// activeProjectTaskScope checks the currently authorized canonical Project
+// and Workspace before an already-running Worker starts its next model/tool
+// reasoning step. Task Start/Resume perform stronger transaction-scoped
+// checks separately; this is the continuation fence on every Worker tick.
+func (s *Service) activeProjectTaskScope(ctx context.Context,t task.Task)(bool,error){
+	if t.ProjectID==nil && t.ProjectWorkspaceID==nil{return true,nil}
+	if t.ProjectID==nil||strings.TrimSpace(*t.ProjectID)==""{return false,nil}
+	var selectedID string
+	if t.ProjectWorkspaceID!=nil{selectedID=strings.TrimSpace(*t.ProjectWorkspaceID)}
+	var valid int
+	err:=s.db.QueryRowContext(ctx,`SELECT EXISTS(
+		SELECT 1 FROM projects p
+		JOIN workspaces w ON w.id=p.workspace_id AND w.status='active'
+		LEFT JOIN project_workspaces pw ON pw.id=? AND pw.project_id=p.id
+			AND pw.status='active'
+		WHERE p.id=? AND p.workspace_id=? AND p.status='active'
+			AND (?='' OR pw.id IS NOT NULL)
+	)`,selectedID,*t.ProjectID,t.WorkspaceID,selectedID).Scan(&valid)
+	if err!=nil{return false,err}
+	return valid==1,nil
+}
+
 func (s *Service) step(ctx context.Context, run Run) TickResult {
 	res := TickResult{TaskID: run.TaskID, RunID: run.ID, Status: "running"}
 	current, err := s.getRun(ctx, run.ID)
@@ -41,6 +63,14 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	}
 	if run.Status != RunRunning || t.State != task.StateRunning {
 		return failedResult(res, ErrInvalidWorkerState)
+	}
+	active,scopeErr:=s.activeProjectTaskScope(ctx,t)
+	if scopeErr!=nil{
+		// A broken scope observation must not fall through to inference.
+		return failedResult(res,fmt.Errorf("verify active Project Workspace before Worker step: %w",scopeErr))
+	}
+	if !active {
+		return s.blockRun(ctx,run,res,"Project or canonical Workspace is inactive; stop Worker execution and require operator review")
 	}
 	if run.StepCount >= run.MaxSteps {
 		return s.failRun(ctx, run, res, ErrStepLimit)

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/DigiLogicTech/OnePane/internal/clock"
+	"github.com/DigiLogicTech/OnePane/internal/projectworkspace"
 	"github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
 	"github.com/DigiLogicTech/OnePane/internal/task"
 )
@@ -197,4 +198,90 @@ func TestCrashRecoveryContinuesAcrossIndependentCorruptTasks(t *testing.T){
  if err!=nil||count!=1{t.Fatalf("repaired Task should recover without duplicate healthy transition: count=%d err=%v",count,err)}
  if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events WHERE event_type='task.attempt_interrupted'`).Scan(&events);err!=nil{t.Fatal(err)}
  if events!=2{t.Fatalf("expected exactly one recovery audit per Task: %d",events)}
+}
+
+
+// A running Worker previously skipped the canonical Project/Workspace
+// lifecycle check that guards NEW Task admission. No later model/tool step
+// may proceed after its owner is archived, even when the Attempt predated it.
+func TestRunningWorkerCannotReasonAfterProjectOrWorkspaceArchived(t *testing.T){
+	ctx:=context.Background()
+	db,err:=sqlite.Open(filepath.Join(t.TempDir(),"live-scope.db"))
+	if err!=nil{t.Fatal(err)}
+	defer db.Close()
+	if err:=db.Migrate(ctx);err!=nil{t.Fatal(err)}
+	now:=clock.Real{}.UnixMilli()
+	for _,sql:=range []string{
+		`INSERT INTO workspaces(id,name,status,revision,created_at,updated_at)
+		  VALUES('tenant','Tenant','active',1,?,?)`,
+		`INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at)
+		  VALUES('operator','human','Operator','active',1,?,?)`,
+		`INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at)
+		  VALUES('tenant','operator','active',?,?)`,
+	}{
+		if _,err:=db.SQL().ExecContext(ctx,sql,now,now);err!=nil{t.Fatal(err)}
+	}
+	clk:=clock.Real{}
+	projectSvc:=projectworkspace.NewService(db.SQL(),db,clk)
+	project,err:=projectSvc.CreateProject(ctx,projectworkspace.CreateProjectCommand{
+		WorkspaceID:"tenant",Name:"Live run isolation",CreatedBy:"operator",
+	})
+	if err!=nil{t.Fatal(err)}
+	world,err:=projectSvc.CreateWorkspaceView(ctx,projectworkspace.CreateWorkspaceViewCommand{
+		ProjectID:project.ID,Name:"World",ActorPrincipalID:"operator",
+	})
+	if err!=nil{t.Fatal(err)}
+	story,err:=projectSvc.CreateWorkspaceView(ctx,projectworkspace.CreateWorkspaceViewCommand{
+		ProjectID:project.ID,Name:"Story",ActorPrincipalID:"operator",
+	})
+	if err!=nil{t.Fatal(err)}
+	taskSvc:=task.NewService(db.SQL(),db,clk)
+	// Deliberately no inference/scheduler dependency: a guard failure must
+	// happen before those dependencies can be reached.
+	worker:=New(db.SQL(),db,clk,"node-local",taskSvc,nil,nil,nil,nil,nil,nil,nil,nil,nil,nil)
+	if err:=worker.ensureWorkspaceAccess(ctx,"tenant");err!=nil{t.Fatal(err)}
+	start:=func(ws string)(task.Task,Run){
+		t.Helper()
+		created,err:=taskSvc.Create(ctx,task.CreateCommand{
+			WorkspaceID:"tenant",ProjectID:&project.ID,ProjectWorkspaceID:&ws,
+			Objective:"Continue project deliverable",
+		})
+		if err!=nil{t.Fatal(err)}
+		ready,err:=taskSvc.MarkReady(ctx,task.TransitionCommand{
+			TaskID:created.ID,ExpectedRevision:created.Revision,
+		})
+		if err!=nil{t.Fatal(err)}
+		run,res:=worker.startRun(ctx,ready)
+		if res.Error!=""||run.Status!=RunRunning{t.Fatalf("start blocked unexpectedly: %+v",res)}
+		return ready,run
+	}
+	_,worldRun:=start(world.ID)
+	_,storyRun:=start(story.ID)
+	if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_workspaces SET status='archived'
+	  WHERE id=?`,world.ID);err!=nil{t.Fatal(err)}
+	if result:=worker.step(ctx,worldRun);result.Status!="blocked"{
+		t.Fatalf("archived Workspace allowed existing Worker to reason: %+v",result)
+	}
+	var taskState,runStatus string
+	if err:=db.SQL().QueryRowContext(ctx,`SELECT state FROM tasks WHERE id=?`,
+		worldRun.TaskID).Scan(&taskState);err!=nil{t.Fatal(err)}
+	if err:=db.SQL().QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=?`,
+		worldRun.ID).Scan(&runStatus);err!=nil{t.Fatal(err)}
+	if taskState!=string(task.StateBlocked)||runStatus!=string(RunBlocked){
+		t.Fatalf("archived Workspace Worker/Task status mismatch: %s/%s",taskState,runStatus)
+	}
+	if _,err:=db.SQL().ExecContext(ctx,`UPDATE projects SET status='archived'
+	  WHERE id=?`,project.ID);err!=nil{t.Fatal(err)}
+	if result:=worker.step(ctx,storyRun);result.Status!="blocked"{
+		t.Fatalf("archived Project allowed independent Worker to reason: %+v",result)
+	}
+	if err:=db.SQL().QueryRowContext(ctx,`SELECT state FROM tasks WHERE id=?`,
+		storyRun.TaskID).Scan(&taskState);err!=nil{t.Fatal(err)}
+	if taskState!=string(task.StateBlocked){
+		t.Fatalf("Project archive did not stop active Story Task: %s",taskState)
+	}
+	var inferences int
+	if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM inference_requests
+	  WHERE task_id IN (?,?)`,worldRun.TaskID,storyRun.TaskID).Scan(&inferences);err!=nil{t.Fatal(err)}
+	if inferences!=0{t.Fatalf("archived scope dispatched %d inference requests",inferences)}
 }

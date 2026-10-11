@@ -324,42 +324,75 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
 	return out,tickErrors
 }
 
-func (s *Service) admitCreated(ctx context.Context, limit int) (int, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT t.id,t.revision FROM tasks t
-WHERE t.state='created'
-AND NOT EXISTS (SELECT 1 FROM task_execution_profiles ep LEFT JOIN team_sessions ts ON ts.id=ep.team_session_id WHERE ep.task_id=t.id AND ep.execution_mode='team' AND (ts.accepted_plan_id IS NULL OR ts.status NOT IN ('plan_accepted','executing')))
-AND NOT EXISTS (SELECT 1 FROM routine_occurrences ro JOIN project_routine_bindings b ON b.routine_id=ro.routine_id AND b.status='active' AND b.action_kind='app_command' WHERE ro.task_id=t.id)
-AND NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks dep ON dep.id=d.depends_on_task_id WHERE d.task_id=t.id AND d.dependency_type='hard' AND (dep.state<>'complete' OR dep.archived_at IS NOT NULL))
-ORDER BY t.priority DESC,t.created_at,t.id LIMIT ?`, limit)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-	type x struct {
-		id  string
-		rev int64
-	}
-	var xs []x
-	for rows.Next() {
-		var v x
-		if err := rows.Scan(&v.id, &v.rev); err != nil {
-			return 0, err
-		}
-		xs = append(xs, v)
-	}
-	n := 0
-	actor := AuthorityPrincipal
-	var problems []error
-	for _, v := range xs {
-		if _, err := s.tasks.MarkReady(ctx, task.TransitionCommand{TaskID: v.id, ExpectedRevision: v.rev, ActorPrincipalID: &actor, Reason: "autonomous worker admission"}); err == nil {
-			n++
-		} else if !task.IsRevisionConflict(err) {
-			// Do not convert a failure into success, and do not silently
-			// discard its Task ID. Other Task admissions still proceed.
-			problems=append(problems,fmt.Errorf("admit created Task %s: %w",v.id,err))
-		}
-	}
-	return n,errors.Join(append(problems,rows.Err())...)
+// admitCreated pages independently eligible CREATED Tasks by stable priority
+// cursor until LIMIT successful admissions are found. The old LIMIT-before-
+// transition behavior repeatedly selected the same corrupt high-priority
+// records, starving all healthy lower-priority Tasks on every Tick.
+// Failed Tasks are never silently marked READY, and their IDs remain visible.
+func (s *Service) admitCreated(ctx context.Context,limit int)(int,error){
+ if limit<=0{return 0,nil}
+ const pageSize=64
+ first:=1
+ lastPriority:=0
+ var lastCreated int64
+ lastID:=""
+ admitted:=0
+ var problems []error
+ var overflow int
+ actor:=AuthorityPrincipal
+ for admitted<limit{
+  rows,err:=s.db.QueryContext(ctx,`SELECT t.id,t.revision,t.priority,t.created_at
+   FROM tasks t WHERE t.state='created'
+   AND NOT EXISTS(SELECT 1 FROM task_execution_profiles ep
+    LEFT JOIN team_sessions ts ON ts.id=ep.team_session_id
+    WHERE ep.task_id=t.id AND ep.execution_mode='team'
+    AND (ts.accepted_plan_id IS NULL OR ts.status NOT IN ('plan_accepted','executing')))
+   AND NOT EXISTS(SELECT 1 FROM routine_occurrences ro
+    JOIN project_routine_bindings b ON b.routine_id=ro.routine_id
+    AND b.status='active' AND b.action_kind='app_command'
+    WHERE ro.task_id=t.id)
+   AND NOT EXISTS(SELECT 1 FROM task_dependencies d
+    JOIN tasks dep ON dep.id=d.depends_on_task_id
+    WHERE d.task_id=t.id AND d.dependency_type='hard'
+     AND (dep.state<>'complete' OR dep.archived_at IS NOT NULL))
+   AND (?=1 OR t.priority<? OR
+    (t.priority=? AND (t.created_at>? OR
+     (t.created_at=? AND t.id>?))))
+   ORDER BY t.priority DESC,t.created_at,t.id LIMIT ?`,
+   first,lastPriority,lastPriority,lastCreated,lastCreated,lastID,pageSize)
+  if err!=nil{return admitted,errors.Join(append(problems,err)...)}
+  type item struct{id string;revision int64;priority int;created int64}
+  page:=make([]item,0,pageSize)
+  for rows.Next(){
+   var candidate item
+   if err=rows.Scan(&candidate.id,&candidate.revision,
+    &candidate.priority,&candidate.created);err!=nil{break}
+   page=append(page,candidate)
+  }
+  if err==nil{err=rows.Err()}
+  closeErr:=rows.Close()
+  if err==nil{err=closeErr}
+  if err!=nil{return admitted,errors.Join(append(problems,err)...)}
+  if len(page)==0{break}
+  first=0
+  for _,candidate:=range page{
+   lastPriority,lastCreated,lastID=candidate.priority,candidate.created,candidate.id
+   _,promoteErr:=s.tasks.MarkReady(ctx,task.TransitionCommand{
+    TaskID:candidate.id,ExpectedRevision:candidate.revision,
+    ActorPrincipalID:&actor,Reason:"autonomous worker admission",
+   })
+   if promoteErr==nil{admitted++}else if !task.IsRevisionConflict(promoteErr){
+    if len(problems)<32{
+     problems=append(problems,fmt.Errorf("admit created Task %s: %w",candidate.id,promoteErr))
+    }else{overflow++}
+   }
+   if admitted>=limit{break}
+  }
+  if len(page)<pageSize{break}
+ }
+ if overflow>0{problems=append(problems,
+  fmt.Errorf("%d additional failed CREATED Task admissions require operator review",overflow))}
+ return admitted,errors.Join(problems...)
 }
 
 func (s *Service) syncResumedRuns(ctx context.Context) error {

@@ -83,6 +83,29 @@ func TestOrchestratorRuntimeContextIsBoundToSelectedWorkspace(t *testing.T) {
  check(world.ID,worldRuntime.ID,"defined")
  check(story.ID,storyRuntime.ID,"defined")
  check(assets.ID,"","not_provisioned")
+ if selected:=selectModelProposedWorkspace(ctx,db.SQL(),p.ID,world.ID,world.ID,story.ID);selected!=world.ID{
+  t.Fatalf("model overrode explicitly selected World Workspace with %s",selected)
+ }
+ if selected:=selectModelProposedWorkspace(ctx,db.SQL(),p.ID,"",world.ID,story.ID);selected!=story.ID{
+  t.Fatalf("model could not select valid sibling for unscoped operator request: %s",selected)
+ }
+ if selected:=selectModelProposedWorkspace(ctx,db.SQL(),p.ID,"",world.ID,"does-not-exist");selected!=world.ID{
+  t.Fatalf("model redirected to nonexistent Workspace: %s",selected)
+ }
+ foreignProject,err:=projects.CreateProject(ctx,projectworkspace.CreateProjectCommand{
+  WorkspaceID:"tenant",Name:"Foreign Project",CreatedBy:"operator",
+ })
+ if err!=nil{t.Fatal(err)}
+ foreign,err:=projects.CreateWorkspaceView(ctx,projectworkspace.CreateWorkspaceViewCommand{
+  ProjectID:foreignProject.ID,Name:"Foreign Workspace",ActorPrincipalID:"operator",
+ })
+ if err!=nil{t.Fatal(err)}
+ if selected:=selectModelProposedWorkspace(ctx,db.SQL(),p.ID,"",world.ID,foreign.ID);selected!=world.ID{
+  t.Fatalf("model selected another Project's Workspace: %s",selected)
+ }
+ if _,_,_,_,err:=orchestrator.contextSnapshot(ctx,p.ID,foreign.ID);!errors.Is(err,ErrInvalid){
+  t.Fatalf("foreign Workspace explicit selector incorrectly accepted: %v",err)
+ }
 
  // Invalid, stale, and cross-Project selectors fail closed instead of
  // silently choosing whichever sibling was most recently updated.
@@ -101,6 +124,9 @@ func TestOrchestratorRuntimeContextIsBoundToSelectedWorkspace(t *testing.T) {
   WHERE id=?`,assets.ID);err!=nil {t.Fatal(err)}
  if _,_,_,_,err:=orchestrator.contextSnapshot(ctx,p.ID,assets.ID);!errors.Is(err,ErrInvalid){
   t.Fatalf("archived Workspace silently rerouted: %v",err)
+ }
+ if selected:=selectModelProposedWorkspace(ctx,db.SQL(),p.ID,"",world.ID,assets.ID);selected!=world.ID{
+  t.Fatalf("model redirected to archived Workspace: %s",selected)
  }
  var count int
  if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM project_orchestrator_turns`).Scan(&count);err!=nil{t.Fatal(err)}

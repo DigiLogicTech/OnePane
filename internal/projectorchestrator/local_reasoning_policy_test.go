@@ -89,3 +89,36 @@ func TestProjectReasoningRejectsDeniedProjectAndSiblingScopeBeforeRouting(t *tes
   t.Fatal("invalid policy object allowed")
  }
 }
+
+
+// A scheduler candidate may have been selected while an operator revoked the
+// Workspace policy. The reasoning service must stop before inference dispatch.
+type policyRevokingModelRoute struct {
+ db *sql.DB
+ calls int
+}
+func(m *policyRevokingModelRoute)Route(ctx context.Context, _ scheduler.RouteRequest)(scheduler.Decision,error){
+ m.calls++
+ _,err:=m.db.ExecContext(ctx,`UPDATE project_workspaces
+  SET ai_settings_json='{"feature_policy":{"ProjectAI":"disabled"}}'
+  WHERE id='world'`)
+ if err!=nil{return scheduler.Decision{},err}
+ return scheduler.Decision{
+  Selected:&scheduler.RankedCandidate{Candidate:scheduler.Candidate{
+   ID:"fake-host-model",Kind:scheduler.CandidateModel,Local:true,
+   CostClass:scheduler.CostLocal,HardZeroIncrementalCost:true,
+  }},
+ },nil
+}
+func TestRevokedProjectReasoningStopsBeforeInferenceTransport(t *testing.T){
+ db:=testReasoningPolicyDB(t)
+ router:=&policyRevokingModelRoute{db:db}
+ svc:=&Service{db:db,scheduler:router}
+ _,_,_,err:=svc.reason(context.Background(),"tenant","project","world","operator",
+  "perform Project work",json.RawMessage(`{"project":{"id":"project"}}`))
+ if err==nil||router.calls!=1{
+  t.Fatalf("live Workspace revocation did not block inference: err=%v routes=%d",err,router.calls)
+ }
+ // No inference or artifact implementation is present; reaching it would
+ // cause a panic. A clean policy error proves the last local admission held.
+}

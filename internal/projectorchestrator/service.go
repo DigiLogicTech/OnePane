@@ -321,6 +321,15 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 	pwsID, mode, teamID, err = resolveOrchestratorWorkspaceProfile(ctx, s.db, c.ProjectID,
 		resolvedPin, pwsID, plan["project_workspace_id"])
 	if err != nil { return TurnResult{}, err }
+	// Even when the operator selected Run, a revoked Project/Workspace
+	// reasoning policy must not be bypassed by ForceTask after inference.
+	// Resource-unavailable reasoning may still queue an otherwise permitted
+	// explicit Task; this only blocks invalidated authority.
+	if err=s.requireProjectReasoning(ctx,o.WorkspaceID,c.ProjectID,pwsID);err!=nil{
+		_,_=s.db.ExecContext(ctx,`UPDATE project_orchestrators SET status='blocked',
+			revision=revision+1,updated_at=? WHERE id=?`,s.clock.UnixMilli(),o.ID)
+		return TurnResult{},err
+	}
 	if reasonErr!=nil { answer="Project Orchestrator is available, but no eligible reasoning model could complete this turn: "+reasonErr.Error(); action="answer" }
 	if c.ForceTask { action="task"; c.AllowTaskCreation=true }
 	if action=="task" && !c.AllowTaskCreation { action="answer"; answer=answer+"\n\nThis turn was read-only; no Task was created." }

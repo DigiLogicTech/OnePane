@@ -11,6 +11,8 @@ Base: feature/rc11-featurepolicy-fail-closed-20261011
 - [x] Autonomous-task escalation regression test
 - [x] Scoped action matrix tests
 
+- [x] Additional scoped authorization matrix and research fallback coverage
+
 ## Remaining
 - [ ] Wire effective policy checks into live inference and tool gateways
 - [ ] Execute Go regression tests and fix failures

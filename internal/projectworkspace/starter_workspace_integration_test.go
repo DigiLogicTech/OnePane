@@ -5,6 +5,7 @@ package projectworkspace
 import (
  "context"
  "encoding/json"
+ "sync"
  "testing"
 
  "github.com/DigiLogicTech/OnePane/internal/clock"
@@ -84,6 +85,51 @@ func TestNewProjectStarterWorkspaceIsAtomicUnprivilegedAndHumanAuthorised(t *tes
   WorkspaceID:"tenant",Name:"Robot starter",CreatedBy:"robot",
   CreateStarterWorkspace:true,
  });err==nil{t.Fatal("Agent minted Project and Workspace without human approval")}
+ // Concurrent old clients must not mint multiple compatibility Main
+ // Workspaces for a Project without an explicit starter selection.
+ db.SQL().SetMaxOpenConns(1)
+ legacyConcurrent,err:=svc.CreateProject(ctx,CreateProjectCommand{
+  WorkspaceID:"tenant",Name:"Concurrent legacy",CreatedBy:"operator",
+ })
+ if err!=nil{t.Fatal(err)}
+ const parallel=8
+ var wg sync.WaitGroup
+ resultErrors:=make(chan error,parallel)
+ start:=make(chan struct{})
+ for i:=0;i<parallel;i++{
+  wg.Add(1)
+  go func(){
+   defer wg.Done()
+   <-start
+   views,err:=svc.WorkspaceViews(ctx,legacyConcurrent.ID)
+   if err==nil&&(len(views)!=1||views[0].Name!="Main"){
+    err=ErrInvalidCommand
+   }
+   resultErrors<-err
+  }()
+ }
+ close(start)
+ wg.Wait();close(resultErrors)
+ for err:=range resultErrors{if err!=nil{t.Fatalf("concurrent legacy migration failed: %v",err)}}
+ var mains int
+ if err:=db.SQL().QueryRowContext(ctx,
+  "SELECT COUNT(*) FROM project_workspaces WHERE project_id=?",legacyConcurrent.ID).Scan(&mains);err!=nil||mains!=1{
+  t.Fatalf("concurrent legacy reads duplicated Main: count=%d err=%v",mains,err)
+ }
+ archived,err:=svc.CreateProject(ctx,CreateProjectCommand{
+  WorkspaceID:"tenant",Name:"Archived unmigrated",CreatedBy:"operator",
+ })
+ if err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,
+  "UPDATE projects SET status='archived' WHERE id=?",archived.ID);err!=nil{t.Fatal(err)}
+ if _,err=svc.WorkspaceViews(ctx,archived.ID);err==nil{
+  t.Fatal("read of archived Project materialised new Workspace")
+ }
+ var archivedMains int
+ if err:=db.SQL().QueryRowContext(ctx,
+  "SELECT COUNT(*) FROM project_workspaces WHERE project_id=?",archived.ID).Scan(&archivedMains);err!=nil||archivedMains!=0{
+  t.Fatalf("archived Project mutated on read: count=%d err=%v",archivedMains,err)
+ }
  var robotCount int
  if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM projects
   WHERE name='Robot starter'`).Scan(&robotCount);err!=nil||robotCount!=0{

@@ -150,6 +150,19 @@ func ResolveAuthorityChain(root Authority, descendants ...Authority) Authority {
 	return effective
 }
 
+// The legacy Files master grant predates independent Read/Write states.
+// For older root Policy objects without the new fields, preserve the
+// historical file capability and then apply monotonic child restrictions.
+func resolveFileSubGrant(parent,child,legacy State)State{
+    if parent==""||parent==Inherited {
+        switch legacy{
+        case Enabled,Disabled,Unavailable:parent=legacy
+        default:parent=Unavailable
+        }
+    }
+    return Resolve(parent,child)
+}
+
 // ResolvePolicy computes an effective policy for a child scope. Every feature
 // must pass through the same fail-closed resolution; new fields must be added
 // here before they can be granted to an execution scope.
@@ -166,8 +179,8 @@ func ResolvePolicy(parent, child Policy) Policy {
 		CloudRouting: Resolve(parent.CloudRouting, child.CloudRouting),
 		Images: Resolve(parent.Images, child.Images),
 		Files: Resolve(parent.Files, child.Files),
-		FileRead: Resolve(parent.FileRead, child.FileRead),
-		FileWrite: Resolve(parent.FileWrite, child.FileWrite),
+		FileRead: resolveFileSubGrant(parent.FileRead, child.FileRead, parent.Files),
+		FileWrite: resolveFileSubGrant(parent.FileWrite, child.FileWrite, parent.Files),
 		ProcessExecute: Resolve(parent.ProcessExecute, child.ProcessExecute),
 		NetworkAccess: Resolve(parent.NetworkAccess, child.NetworkAccess),
 		SecretsAccess: Resolve(parent.SecretsAccess, child.SecretsAccess),

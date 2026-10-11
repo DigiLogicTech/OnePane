@@ -122,13 +122,37 @@ func forTaskWithReader(ctx context.Context, reader scopedRowReader, tenantID, ta
 		"SELECT project_id,project_workspace_id,COALESCE(completion_json,'{}') FROM tasks WHERE id=? AND workspace_id=?",
 		taskID,tenantID).Scan(&projectID,&workspaceID,&completion)
 	if err != nil { return ScopedDecision{}, fmt.Errorf("resolve canonical Task scope: %w",err) }
-	var source struct{ Source string `json:"source"` }
+	var source struct{
+		Source string `json:"source"`
+		GraphID string `json:"graph_id"`
+		NodeKey string `json:"node_key"`
+		StandingAutonomyPolicy bool `json:"standing_autonomy_policy"`
+		OperatorApproved bool `json:"operator_approved"`
+	}
 	if err:=json.Unmarshal([]byte(completion),&source);err!=nil{
 		return ScopedDecision{},fmt.Errorf("invalid Task origin")
 	}
 	autoGraph:=source.Source=="project-orchestrator-autonomous-graph"
-	if autoGraph&&(!projectID.Valid||!workspaceID.Valid){
-		return ScopedDecision{},fmt.Errorf("autonomous graph Task requires a canonical Project Workspace")
+	if autoGraph{
+		if !projectID.Valid||!workspaceID.Valid||!source.StandingAutonomyPolicy||
+			source.OperatorApproved||strings.TrimSpace(source.GraphID)==""||
+			strings.TrimSpace(source.NodeKey)==""{
+			return ScopedDecision{},fmt.Errorf("autonomous Task missing canonical graph provenance")
+		}
+		// Task completion JSON is not a signed or authoritative grant.
+		// A Task or model can claim any source string: require real membership
+		// in the canonical, Project-owned, dependency-attested graph.
+		var count int
+		err:=reader.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_orchestrator_task_graph_nodes n
+			JOIN project_orchestrator_task_graphs g ON g.id=n.graph_id
+			WHERE n.task_id=? AND n.graph_id=? AND n.node_key=?
+			  AND n.project_workspace_id=? AND n.approved_dependencies_recorded=1
+			  AND g.project_id=? AND g.workspace_id=?`,
+			taskID,source.GraphID,source.NodeKey,workspaceID.String,
+			projectID.String,tenantID).Scan(&count)
+		if err!=nil||count!=1{
+			return ScopedDecision{},fmt.Errorf("autonomous Task graph membership missing or forged")
+		}
 	}
 	if !projectID.Valid {
 		if workspaceID.Valid {

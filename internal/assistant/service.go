@@ -134,6 +134,13 @@ func (s *Service) SetModel(ctx context.Context, threadID string, deploymentID *s
    if !candidate.Schedulable||candidate.Qualification==scheduler.QualIncompatible{
     return Thread{},fmt.Errorf("%w: selected model is not admitted or available for Assistant inference",ErrInvalid)
    }
+   // A pin is not an authorisation to transmit chat context to a provider.
+   // Verify scheduling provenance rather than relying on the UI's filters
+   // or on a deployment's friendly name.
+   if !candidate.Local||!candidate.HardZeroIncrementalCost||
+      (candidate.CostClass!=scheduler.CostLocal&&candidate.CostClass!=scheduler.CostFree){
+    return Thread{},fmt.Errorf("%w: general Assistant model must be verified host-local and zero-cost",ErrInvalid)
+   }
    found=true;break
   }
   if !found{return Thread{},fmt.Errorf("%w: selected model is not available to this workspace",ErrInvalid)}

@@ -123,3 +123,5 @@ Completed in this integration branch, with source and regression tests:
 - [x] **L5 management UI subset:** operator sees configured/paused/retired state and can pause a configured goal or confirm irreversible retirement in the Project Inspector. Calls the scoped CAS endpoints; does not depict paused/retired monitoring as active. CI now includes a lightweight frontend/backend goal-lifecycle contract script. This is a stop/control foundation, not finished recurring Level 5 monitoring.
 
 - [x] **L5 agent-denial regression:** a Workspace-member Agent with `project.write` may not retire a Level 5 goal. Both domain/SQLite integration and authenticated HTTP tests verify that terminal retirement requires an active human principal, not merely write capability.
+
+- [x] **Assistant pin admission:** direct model-selection API rejects remote, paid or unverifiably zero-cost deployments before storing a general Assistant pin. The scheduler still rechecks local-only zero-cost at inference time. Regression protects against bypassing frontend disabled options with an API request.

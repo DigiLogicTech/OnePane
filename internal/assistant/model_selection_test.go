@@ -37,7 +37,7 @@ func TestAssistantThreadModelChoicePersistsAndPinsRouting(t *testing.T){
  }
  for _,query:=range seed{if _,err:=db.SQL().ExecContext(ctx,query);err!=nil{t.Fatal(err)}}
  fake:=&assistantModelScheduler{options:[]scheduler.Candidate{
-  {ID:"deployment",Kind:scheduler.CandidateModel,Schedulable:true,Status:"ready"},
+  {ID:"deployment",Kind:scheduler.CandidateModel,Schedulable:true,Status:"ready",Local:true,CostClass:scheduler.CostLocal,HardZeroIncrementalCost:true},
  }}
  svc:=NewService(db.SQL(),clock.Real{},fake,nil,nil,nil)
  thread,err:=svc.CreateThread(ctx,"ws","OnePane Assistant","admin");if err!=nil{t.Fatal(err)}
@@ -56,6 +56,19 @@ func TestAssistantThreadModelChoicePersistsAndPinsRouting(t *testing.T){
  }
  fake.options[0].Schedulable=false
  if _,err=svc.SetModel(ctx,thread.ID,&chosen);!errors.Is(err,ErrInvalid){t.Fatalf("inactive deployment accepted: %v",err)}
+ fake.options[0].Schedulable=true
+ for _,test:=range []struct{name string;mutate func(*scheduler.Candidate)}{
+  {"cloud",func(c *scheduler.Candidate){c.Local=false;c.CostClass=scheduler.CostFree}},
+  {"paid",func(c *scheduler.Candidate){c.CostClass=scheduler.CostPaid}},
+  {"unverified zero-cost",func(c *scheduler.Candidate){c.HardZeroIncrementalCost=false}},
+ } {
+  saved:=fake.options[0]
+  test.mutate(&fake.options[0])
+  if _,err=svc.SetModel(ctx,thread.ID,&chosen);!errors.Is(err,ErrInvalid){
+   t.Fatalf("%s candidate accepted as general Assistant pin: %v",test.name,err)
+  }
+  fake.options[0]=saved
+ }
  reset,err:=svc.SetModel(ctx,thread.ID,nil);if err!=nil{t.Fatal(err)}
  if reset.PreferredModelDeploymentID!=nil{t.Fatalf("Auto did not remove pin: %+v",reset)}
  _,_,err=svc.reasonGlobal(ctx,"ws","admin","general question",nil)

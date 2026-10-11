@@ -144,6 +144,11 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 	if err != nil {
 		return s.finishPreDispatchError(ctx, q.ID, err, cmd)
 	}
+	// Bind the Task's current custom Agent revision before waiting on a
+	// model lease. An archived or foreign profile must not be inferred using
+	// previously compiled instructions or an implicit default profile.
+	agentBinding,err:=s.pinnedAgentProfileAtInference(ctx,cmd)
+	if err!=nil{return s.finishPreDispatchError(ctx,q.ID,err,cmd)}
 	// General Assistant and Project Orchestrator are taskless and have no
 	// approved off-host transfer or paid-provider authority. Use the actual
 	// persisted deployment identity rather than scheduler-selected labels.
@@ -249,6 +254,13 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 		s.releaseBudgetBeforeDispatch(ctx,cmd)
 		return s.finishTransportError(ctx,q.ID,nil,
 			&TransportError{Code:"private_chat_locality_revoked",OutcomeKnown:true,Err:err},cmd)
+	}
+	// Prevent the scheduler/model queue from exporting an old Agent prompt
+	// if the operator updated, archived or rehomed that Agent meanwhile.
+	if err:=s.revalidateTaskAgentBeforeTransport(ctx,cmd,agentBinding);err!=nil{
+		s.releaseBudgetBeforeDispatch(ctx,cmd)
+		return s.finishTransportError(ctx,q.ID,nil,
+			&TransportError{Code:"task_agent_profile_revoked",OutcomeKnown:true,Err:err},cmd)
 	}
 	result, dispatchErr := transport.Dispatch(ctx, DispatchRequest{RequestID: q.ID, Model: m, Deployment: d, Provider: p, RequestJSON: requestJSON}, s.secrets)
 	if dispatchErr != nil {

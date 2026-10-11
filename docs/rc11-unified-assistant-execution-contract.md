@@ -88,9 +88,15 @@ Execute, Network and Secrets controls enforced across all tools, with
 optional advanced scoping (decision 3). See the dedicated operating-mode
 and universal Workspace permissions specifications.
 
-Still undecided: Agent policy versioning and live revocation (decision 4),
-diagnostic live-stream defaults (decision 5), and remote Node/provider
-trust classification (decision 6). Do not infer those from local-first intent.
+Confirmed: Agent policies have immutable versioned revisions for
+reproducibility and provenance, with active permission revocation at
+every relevant side-effect boundary (decision 4). Read the dedicated
+Agent policy provenance and live revocation contract for implementation,
+cancellation and unknown-outcome acceptance cases.
+
+Still undecided: diagnostic live-stream defaults (decision 5), and remote
+Node/provider trust classification (decision 6). Do not infer those
+from local-first intent.
 
 ## Gate
 

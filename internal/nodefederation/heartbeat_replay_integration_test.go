@@ -24,6 +24,14 @@ func TestPairedHeartbeatSequenceCannotReanimateWithdrawnRemoteCapabilities(t *te
   protocol_json,capabilities_json,last_seen_at,revision,created_at,updated_at)
   VALUES('peer','Peer',0,'peer-fp','paired','PAIRED_MTLS','{}','{}',?,1,?,?)`,
   now,now,now);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`INSERT INTO node_pairings(
+  id,peer_node_id,direction,status,pairing_token,pairing_token_hash,
+  pairing_code,pairing_code_hash,local_confirmed,peer_confirmed,
+  peer_tls_fingerprint,peer_certificate_pem,expires_at,paired_at,
+  revision,created_at,updated_at) VALUES(
+  'pair-peer','peer','outbound','paired','token','hash','000000','hash',
+  1,1,'sha256:peer','',?,?,1,?,?)`,
+  now+60000,now,now,now);err!=nil{t.Fatal(err)}
  svc:=NewService(db.SQL(),db,clock.Real{},NodeView{ID:"origin",Local:true},
   Identity{},"",30*time.Second)
  mk:=func(seq int64,dep,model string)Heartbeat{
@@ -88,9 +96,30 @@ func TestPairedHeartbeatSequenceCannotReanimateWithdrawnRemoteCapabilities(t *te
  if afterRev!=rev||status(oldID)!="unavailable"{
   t.Fatal("duplicate manifest re-imported stale model capability")
  }
+ // A delayed exact duplicate cannot revive an expired peer whose models
+ // the expiry sweep already disabled; only a new manifest may re-import.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE node_capability_manifests
+  SET expires_at=? WHERE peer_node_id='peer'`,now-1000);err!=nil{t.Fatal(err)}
  if _,err=db.SQL().ExecContext(ctx,`UPDATE harness_nodes
   SET trust_state='unavailable' WHERE id='peer'`);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE model_deployments
+  SET status='unavailable' WHERE id=?`,currentID);err!=nil{t.Fatal(err)}
+ if err=svc.ReceiveHeartbeat(ctx,"peer",latest);!errors.Is(err,ErrHeartbeatReplay){
+  t.Fatalf("expired duplicate incorrectly resurrected peer: %v",err)
+ }
+ if status(currentID)!="unavailable"{t.Fatal("expired duplicate restored remote model")}
+ var unavailable string
+ if err=db.SQL().QueryRowContext(ctx,`SELECT trust_state FROM harness_nodes WHERE id='peer'`).Scan(&unavailable);
+  err!=nil||unavailable!="unavailable"{t.Fatalf("expired duplicate restored Node: %v %s",err,unavailable)}
+ // Pairing revocation is also enforced inside the import transaction.
  renewed:=mk(300,"current-dep","example/current")
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE node_pairings
+  SET status='revoked' WHERE peer_node_id='peer'`);err!=nil{t.Fatal(err)}
+ if err=svc.ReceiveHeartbeat(ctx,"peer",renewed);!errors.Is(err,ErrNodeNotPaired){
+  t.Fatalf("revoked pairing was permitted to recover Node: %v",err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE node_pairings
+  SET status='paired' WHERE peer_node_id='peer'`);err!=nil{t.Fatal(err)}
  if err=svc.ReceiveHeartbeat(ctx,"peer",renewed);err!=nil{
   t.Fatalf("new monotonic manifest could not recover paired Node: %v",err)
  }
@@ -99,4 +128,5 @@ func TestPairedHeartbeatSequenceCannotReanimateWithdrawnRemoteCapabilities(t *te
   WHERE id='peer'`).Scan(&trust);err!=nil||trust!="paired"{
   t.Fatalf("monotonic recovery did not restore paired trust state: %s %v",trust,err)
  }
+ if status(currentID)!="ready"{t.Fatal("new manifest did not requalify remote model")}
 }

@@ -144,6 +144,12 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 	if err != nil {
 		return s.finishPreDispatchError(ctx, q.ID, err, cmd)
 	}
+	// General Assistant and Project Orchestrator are taskless and have no
+	// approved off-host transfer or paid-provider authority. Use the actual
+	// persisted deployment identity rather than scheduler-selected labels.
+	if err:=requireTasklessLocalDeployment(cmd,d,s.localNodeID);err!=nil{
+		return s.finishPreDispatchError(ctx,q.ID,err,cmd)
+	}
 	// Off-host inference transports require live, scope-bound explicit
 	// transfer consent independently from model capability or cloud budgets.
 	if err:=s.authorizeTrustedNodeTaskDispatch(ctx,cmd,d);err!=nil{
@@ -236,6 +242,13 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 		s.releaseBudgetBeforeDispatch(ctx,cmd)
 		return s.finishTransportError(ctx,q.ID,nil,
 			&TransportError{Code:"trusted_node_transfer_revoked",OutcomeKnown:true,Err:err},cmd)
+	}
+	// A provider or Node association may change while waiting for runtime
+	// acquisition and reservation. Check it again before exporting tokens.
+	if err:=s.requireTasklessLocalAtTransport(ctx,cmd,d);err!=nil{
+		s.releaseBudgetBeforeDispatch(ctx,cmd)
+		return s.finishTransportError(ctx,q.ID,nil,
+			&TransportError{Code:"private_chat_locality_revoked",OutcomeKnown:true,Err:err},cmd)
 	}
 	result, dispatchErr := transport.Dispatch(ctx, DispatchRequest{RequestID: q.ID, Model: m, Deployment: d, Provider: p, RequestJSON: requestJSON}, s.secrets)
 	if dispatchErr != nil {

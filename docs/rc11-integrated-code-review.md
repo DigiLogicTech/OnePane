@@ -33,3 +33,6 @@ without merging any of them into main or packaging an installer.
 
 ## Initial technical audit
 The preliminary code audit and decision register are in `docs/rc11-integration-code-audit.md`. Product alignment, second audit and installed-build QA are not complete.
+
+## Review checkpoint (2026-10-11)
+Assistant implementation audit and corrective tests are complete. Latest application-code CI passed (#38118997403). See docs/rc11-integration-code-audit.md and docs/rc11-vision-decision-register.md for remaining design approvals; no release merge has been performed.

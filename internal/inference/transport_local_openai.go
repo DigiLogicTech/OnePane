@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -26,6 +29,30 @@ type LocalEndpointLeaseResolver interface {
 type LocalOpenAITransport struct {
 	Resolver LocalEndpointResolver
 	Client   *http.Client
+}
+
+// validatedLoopbackBase accepts an exact HTTP loopback origin with a
+// numeric port. A prefix check is unsafe: 127.0.0.1:8080@evil.example
+// parses as user-info with an off-host destination. No DNS aliases,
+// credentials, path, fragment, or query are permitted here.
+func validatedLoopbackBase(raw string)(string,error){
+ u,err:=url.Parse(raw)
+ if err!=nil||u==nil||u.Scheme!="http"||u.User!=nil||u.Opaque!=""||
+   u.RawQuery!=""||u.ForceQuery||u.Fragment!=""||u.RawFragment!=""||
+   (u.Path!=""&&u.Path!="/")||u.RawPath!=""{
+  return "",fmt.Errorf("unsafe local runtime endpoint")
+ }
+ host:=u.Hostname()
+ if host!="127.0.0.1"&&host!="::1"{
+  return "",fmt.Errorf("local runtime endpoint must use numeric loopback")
+ }
+ rawPort:=u.Port()
+ port,err:=strconv.Atoi(rawPort)
+ if err!=nil||port<1||port>65535{
+  return "",fmt.Errorf("local runtime endpoint needs a valid TCP port")
+ }
+ canonical:=(&url.URL{Scheme:"http",Host:net.JoinHostPort(host,strconv.Itoa(port))}).String()
+ return canonical,nil
 }
 
 func (t LocalOpenAITransport) Dispatch(ctx context.Context, req DispatchRequest, _ SecretResolver) (DispatchResult, error) {
@@ -53,8 +80,11 @@ func (t LocalOpenAITransport) Dispatch(ctx context.Context, req DispatchRequest,
 	if err != nil {
 		return DispatchResult{}, &TransportError{Code: "local_runtime_unavailable", OutcomeKnown: true, Err: err}
 	}
-	if !strings.HasPrefix(base, "http://127.0.0.1:") && !strings.HasPrefix(base, "http://[::1]:") {
-		return DispatchResult{}, &TransportError{Code: "unsafe_local_endpoint", OutcomeKnown: true}
+	// Resolve the *parsed* target origin before constructing a request.
+	// Never forward the model prompt to a user-info substituted remote host.
+	base,err=validatedLoopbackBase(base)
+	if err!=nil{
+		return DispatchResult{}, &TransportError{Code:"unsafe_local_endpoint",OutcomeKnown:true,Err:err}
 	}
 	var bodyObj map[string]any
 	if err := json.Unmarshal(req.RequestJSON, &bodyObj); err != nil {
@@ -76,6 +106,13 @@ func (t LocalOpenAITransport) Dispatch(ctx context.Context, req DispatchRequest,
 		client = &http.Client{Timeout: 10 * time.Minute}
 	}
 	clone := *client
+	// Default proxy environment variables must not redirect private model
+	// prompts out of process, even if the destination URL is loopback.
+	if clone.Transport==nil {
+		baseTransport:=http.DefaultTransport.(*http.Transport).Clone()
+		baseTransport.Proxy=nil
+		clone.Transport=baseTransport
+	}
 	clone.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := clone.Do(httpReq)
 	if err != nil {

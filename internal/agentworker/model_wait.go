@@ -1,0 +1,87 @@
+package agentworker
+
+import (
+ "context"
+ "encoding/json"
+ "errors"
+ "strings"
+
+ "github.com/DigiLogicTech/OnePane/internal/scheduler"
+ "github.com/DigiLogicTech/OnePane/internal/task"
+)
+
+// modelWaitRecord is persisted in the existing agent_worker_runs continuation.
+// It deliberately carries no model substitution or authority grant. A worker
+// re-evaluates the *original* Task routing on wake after a resource pause.
+type modelWaitRecord struct {
+ Attempt int `json:"attempt"`
+ RetryAtMS int64 `json:"retry_at_ms"`
+ Reason string `json:"reason"`
+}
+type modelWaitEnvelope struct {
+ ModelWait *modelWaitRecord `json:"model_wait,omitempty"`
+}
+
+// A malformed saved resource-wait envelope cannot be treated as an ordinary
+// dependency with no resource precondition. In particular, JSON null or a
+// wrong-type model_wait must never let a Task wake on the next Worker tick.
+func hasModelWaitField(raw json.RawMessage) bool {
+ var fields map[string]json.RawMessage
+ if err:=json.Unmarshal(raw,&fields);err!=nil{return true}
+ _,ok:=fields["model_wait"]
+ return ok
+}
+
+func decodeModelWait(raw json.RawMessage) *modelWaitRecord {
+ var state modelWaitEnvelope
+ if len(raw)==0||json.Unmarshal(raw,&state)!=nil{return nil}
+ if state.ModelWait==nil||state.ModelWait.Attempt<1||state.ModelWait.RetryAtMS<1{return nil}
+ return state.ModelWait
+}
+
+func modelWaitDelayMS(attempt int) int64 {
+ // 15s, 30s, 60s, 120s, 240s, then capped at 5 min.
+ if attempt<1{attempt=1}
+ if attempt>6{attempt=6}
+ delay:=int64(15000) << uint(attempt-1)
+ if delay>300000{return 300000}
+ return delay
+}
+
+// Only resource availability and model-admission work can initiate a model
+// wait. Permanently incompatible, over-budget, disallowed, or too-small
+// candidates remain explicit blockers requiring an operator decision.
+func shouldWaitForLocalModel(t task.Task, routeErr error, rejected []scheduler.Rejection) bool {
+ if t.ProjectWorkspaceID==nil||!errors.Is(routeErr,scheduler.ErrNoEligibleCandidate){return false}
+ if len(rejected)==0{return true} // No qualified model installed/registered yet.
+ for _,c:=range rejected{
+  switch strings.TrimSpace(c.Reason) {
+  case "candidate is not schedulable","candidate is degraded","candidate is untested",
+   "not_selected_by_request", // A pinned candidate may not be registered yet.
+   "remote candidate disallowed by workspace policy",
+   "workspace requires CPU placement","workspace requires GPU placement":
+   return true
+  }
+ }
+ return false
+}
+
+func (s *Service) waitForLocalModel(ctx context.Context, run Run, res TickResult, reason string) TickResult {
+ attempt:=1
+ if previous:=decodeModelWait(run.Continuation);previous!=nil{attempt=previous.Attempt+1}
+ if attempt>1000000{attempt=1000000}
+ retryAt:=s.clock.UnixMilli()+modelWaitDelayMS(attempt)
+ state,err:=json.Marshal(modelWaitEnvelope{ModelWait:&modelWaitRecord{
+  Attempt:attempt,RetryAtMS:retryAt,Reason:boundedString(reason,512),
+ }})
+ if err!=nil{return failedResult(res,err)}
+ err=s.suspendForResource(ctx,run,state,
+  "awaiting an eligible local model; cloud substitution disabled",
+  "route",map[string]any{
+   "kind":"model_resources","retry_after_ms":retryAt,"wait_attempt":attempt,
+  },strPtr(reason))
+ if err!=nil{return failedResult(res,err)}
+ res.Status="waiting_model"
+ res.Error=reason
+ return res
+}

@@ -19,6 +19,7 @@ import (
 	"unsafe"
 
 	"github.com/DigiLogicTech/OnePane/internal/buildinfo"
+	"github.com/DigiLogicTech/OnePane/internal/startupevidence"
 )
 
 const (
@@ -142,6 +143,16 @@ func installProduct(installDirArg, projectRootArg, modelPoolArg string, repair, 
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return err
 	}
+	// Legacy EXE installer only. MSI transaction failures must be diagnosed
+	// separately through explicitly requested Windows Installer logs.
+	installerEvidence:=func(stage startupevidence.Stage,outcome startupevidence.Outcome){
+		_=startupevidence.Record(dataDir,startupevidence.LegacySetup,stage,outcome)
+	}
+	installerEvidence(startupevidence.Installer,startupevidence.Begin)
+	defer func(){
+		if retErr!=nil{installerEvidence(startupevidence.Installer,startupevidence.Failed)
+		}else{installerEvidence(startupevidence.Installer,startupevidence.OK)}
+	}()
 	if err := os.WriteFile(filepath.Join(dataDir, "install-path.txt"), []byte(installDir), 0o644); err != nil {
 		return err
 	}
@@ -168,11 +179,14 @@ func installProduct(installDirArg, projectRootArg, modelPoolArg string, repair, 
 			return
 		}
 		logf("installation failed after payload replacement; restoring previous OnePane application")
+		installerEvidence(startupevidence.Rollback,startupevidence.Begin)
 		if rollbackErr := rollback.Restore(); rollbackErr != nil {
+			installerEvidence(startupevidence.Rollback,startupevidence.Failed)
 			retErr = fmt.Errorf("%w; application payload rollback failed: %v", retErr, rollbackErr)
 			logf("application payload rollback failed: %v", rollbackErr)
 			return
 		}
+		installerEvidence(startupevidence.Rollback,startupevidence.OK)
 		logf("previous OnePane application payload restored and service is healthy")
 	}()
 
@@ -182,11 +196,13 @@ func installProduct(installDirArg, projectRootArg, modelPoolArg string, repair, 
 		"OnePane.Desktop.exe": "b9f2c9514ad7ac91c1918b10bed52b0a393f3a079990bda9f243224b27947a66",
 		"OnePane.ico":         "c383c69b14d111e0affa2576950654aea244b533e33e5bffaaf29fac3ac7dd6c",
 	}
+	installerEvidence(startupevidence.Payload,startupevidence.Begin)
 	for name, want := range payloads {
 		if err := extractVerified(name, filepath.Join(installDir, name), want); err != nil {
 			return fmt.Errorf("write %s: %w", name, err)
 		}
 	}
+	installerEvidence(startupevidence.Payload,startupevidence.OK)
 	self, err := os.Executable()
 	if err == nil {
 		_ = copyFile(self, filepath.Join(installDir, "OnePane.Setup.exe"))
@@ -292,6 +308,7 @@ func installProduct(installDirArg, projectRootArg, modelPoolArg string, repair, 
 	if !waitForServiceDeletion(20 * time.Second) {
 		return fmt.Errorf("previous OnePane service is still pending deletion before registration")
 	}
+	installerEvidence(startupevidence.ServiceRegister,startupevidence.Begin)
 	serviceExe := filepath.Join(installDir, "OnePane.Service.exe")
 	var createErr error
 	for attempt := 0; attempt < 12; attempt++ {
@@ -302,8 +319,10 @@ func installProduct(installDirArg, projectRootArg, modelPoolArg string, repair, 
 		time.Sleep(750 * time.Millisecond)
 	}
 	if createErr != nil {
+		installerEvidence(startupevidence.ServiceRegister,startupevidence.Failed)
 		return fmt.Errorf("register Windows service: %w", createErr)
 	}
+	installerEvidence(startupevidence.ServiceRegister,startupevidence.OK)
 	_ = runHidden("sc.exe", "description", serviceName, "OnePane local-first autonomous AI control plane")
 	_ = runHidden("sc.exe", "failure", serviceName, "reset=", "86400", "actions=", "restart/5000/restart/15000/restart/60000")
 	_ = runHidden("sc.exe", "failureflag", serviceName, "1")
@@ -313,13 +332,17 @@ func installProduct(installDirArg, projectRootArg, modelPoolArg string, repair, 
 	}
 	desktopExe := filepath.Join(installDir, "OnePane.Desktop.exe")
 	_ = runHidden("reg.exe", "add", `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "/v", "OnePane", "/t", "REG_SZ", "/d", `"`+desktopExe+`"`, "/f")
+	installerEvidence(startupevidence.ServiceReady,startupevidence.Begin)
 	if err := runHidden("sc.exe", "start", serviceName); err != nil {
+		installerEvidence(startupevidence.ServiceReady,startupevidence.Failed)
 		return fmt.Errorf("start OnePane service: %w", err)
 	}
 	if !waitForHealth(75 * time.Second) {
 		logf("service did not become healthy within 75 seconds")
+		installerEvidence(startupevidence.ServiceReady,startupevidence.Failed)
 		return fmt.Errorf("the OnePane service installed but did not become healthy; inspect %s", filepath.Join(logDir, "onepane.log"))
 	}
+	installerEvidence(startupevidence.ServiceReady,startupevidence.OK)
 
 	uninstallCmd := `"` + filepath.Join(installDir, "OnePane.Setup.exe") + `" --uninstall`
 	repairCmd := `"` + filepath.Join(installDir, "OnePane.Setup.exe") + `" --repair`

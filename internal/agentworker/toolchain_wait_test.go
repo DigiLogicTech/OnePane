@@ -1,0 +1,227 @@
+package agentworker
+
+import (
+ "context"
+ "encoding/json"
+ "errors"
+ "path/filepath"
+ "strings"
+ "testing"
+
+ "github.com/DigiLogicTech/OnePane/internal/clock"
+ "github.com/DigiLogicTech/OnePane/internal/projectworkspace"
+ sqlitestore "github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
+ "github.com/DigiLogicTech/OnePane/internal/task"
+)
+
+func TestApprovedWorkspaceToolchainWaitSurvivesRestartAndAvoidsDuplicateAttempt(t *testing.T){
+ ctx:=context.Background()
+ db,err:=sqlitestore.Open(filepath.Join(t.TempDir(),"wait.db"))
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ if err=db.Migrate(ctx);err!=nil{t.Fatal(err)}
+ now:=clock.Real{}.UnixMilli()
+ for _,q:=range []string{
+  `INSERT INTO workspaces(id,name,status,revision,created_at,updated_at) VALUES('tenant','Tenant','active',1,?,?)`,
+  `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at) VALUES('operator','human','Operator','active',1,?,?)`,
+  `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at) VALUES('tenant','operator','active',?,?)`,
+ }{
+  if _,err:=db.SQL().ExecContext(ctx,q,now,now);err!=nil{t.Fatal(err)}
+ }
+ projects:=projectworkspace.NewService(db.SQL(),db,clock.Real{})
+ project,err:=projects.CreateProject(ctx,projectworkspace.CreateProjectCommand{
+  WorkspaceID:"tenant",Name:"Application",CreatedBy:"operator"})
+ if err!=nil{t.Fatal(err)}
+ workspace,err:=projects.CreateWorkspaceView(ctx,projectworkspace.CreateWorkspaceViewCommand{
+  ProjectID:project.ID,Name:"Build",ActorPrincipalID:"operator"})
+ if err!=nil{t.Fatal(err)}
+ runtime,err:=projects.CreateRuntime(ctx,projectworkspace.CreateRuntimeCommand{
+  ProjectID:project.ID,ProjectWorkspaceID:&workspace.ID,CreatedBy:"operator"})
+ if err!=nil{t.Fatal(err)}
+ image:="registry.example/tool@sha256:"+strings.Repeat("a",64)
+ app,err:=projects.DeclareApplication(ctx,projectworkspace.DeclareApplicationCommand{
+  RuntimeID:runtime.ID,Name:"Compiler",SourceKind:projectworkspace.AppOCIImage,
+  SourceRef:image,CreatedBy:"operator"})
+ if err!=nil{t.Fatal(err)}
+ approved,err:=projects.ApproveWorkspaceToolchainManifest(ctx,projectworkspace.ApproveToolchainManifestCommand{
+  ProjectID:project.ID,ProjectWorkspaceID:workspace.ID,
+  ApplicationID:app.ID,ActorPrincipalID:"operator",
+  Requirements:[]projectworkspace.ToolchainRequirement{{Executable:"go",VersionConstraint:">=1.23"}},
+ })
+ if err!=nil{t.Fatal(err)}
+ tasks:=task.NewService(db.SQL(),db,clock.Real{})
+ completion,_:=json.Marshal(map[string]string{"toolchain_manifest_sha256":approved.ManifestSHA256})
+ created,err:=tasks.Create(ctx,task.CreateCommand{
+  WorkspaceID:"tenant",ProjectID:&project.ID,ProjectWorkspaceID:&workspace.ID,
+  Objective:"Compile local Workspace binary",Completion:completion,
+ })
+ if err!=nil{t.Fatal(err)}
+ ready,err:=tasks.MarkReady(ctx,task.TransitionCommand{TaskID:created.ID,ExpectedRevision:created.Revision})
+ if err!=nil{t.Fatal(err)}
+ original:=New(db.SQL(),db,clock.Real{},"local",tasks,nil,nil,nil,nil,nil,nil,nil,nil,nil,nil)
+ run,start:=original.startRun(ctx,ready)
+ if start.Error!=""{t.Fatal(start.Error)}
+ raw,_:=json.Marshal(map[string]any{
+  "runtime_id":runtime.ID,"application_id":app.ID,"command":[]string{"go","version"},
+ })
+ admitted,err:=applyApprovedWorkspaceToolchain(ctx,db.SQL(),ready,raw)
+ if err!=nil{t.Fatalf("approved exec rejected before runtime wait: %v",err)}
+ waitingOn,err:=approvedToolchainWaitCandidate(ctx,db.SQL(),ready,admitted)
+ if err!=nil||waitingOn==nil||waitingOn.ManifestSHA256!=approved.ManifestSHA256{
+  t.Fatalf("stopped approved OCI didn't require resource wait: %+v %v",waitingOn,err)
+ }
+ // Force journal insertion to fail after both wait state updates have
+ // executed. A correctly atomic suspension must roll back all three rows.
+ if _,err:=db.SQL().ExecContext(ctx,`CREATE TRIGGER reject_resource_wait_journal
+  BEFORE INSERT ON agent_worker_steps
+  BEGIN SELECT RAISE(ABORT,'injected journal failure'); END`);err!=nil{t.Fatal(err)}
+ crashed:=original.waitForWorkspaceToolchain(ctx,run,TickResult{TaskID:created.ID,RunID:run.ID},waitingOn)
+ if crashed.Status=="waiting_toolchain"||crashed.Error==""{
+  t.Fatalf("journal fault was accepted as durable wait: %+v",crashed)
+ }
+ taskBefore,err:=tasks.Get(ctx,created.ID)
+ if err!=nil||taskBefore.State!=task.StateRunning{
+  t.Fatalf("Task changed despite rolled-back wait: %+v %v",taskBefore,err)
+ }
+ runBefore,err:=original.getRun(ctx,run.ID)
+ if err!=nil||runBefore.Status!=RunRunning{
+  t.Fatalf("Worker wait committed despite failed journal: %+v %v",runBefore,err)
+ }
+ var runningAttempt int
+ if err:=db.SQL().QueryRowContext(ctx,
+  `SELECT COUNT(*) FROM task_attempts WHERE id=? AND status='running'`,
+  run.AttemptID).Scan(&runningAttempt);err!=nil||runningAttempt!=1{
+  t.Fatalf("Attempt changed despite rolled-back wait: %d %v",runningAttempt,err)
+ }
+ if _,err:=db.SQL().ExecContext(ctx,`DROP TRIGGER reject_resource_wait_journal`);err!=nil{t.Fatal(err)}
+
+ waiting:=original.waitForWorkspaceToolchain(ctx,run,TickResult{TaskID:created.ID,RunID:run.ID},waitingOn)
+ if waiting.Status!="waiting_toolchain"{t.Fatalf("no durable resource wait: %+v",waiting)}
+ var recordedWait int
+ if err:=db.SQL().QueryRowContext(ctx,
+  `SELECT COUNT(*) FROM agent_worker_steps
+   WHERE run_id=? AND step_kind='wait' AND status='waiting'`,run.ID).
+   Scan(&recordedWait);err!=nil||recordedWait!=1{
+  t.Fatalf("approved OCI wait did not persist schema-valid audit journal: count=%d err=%v",
+   recordedWait,err)
+ }
+
+ suspended,err:=tasks.Get(ctx,created.ID)
+ if err!=nil||suspended.State!=task.StateWaitingDependency{
+  t.Fatalf("Task should wait on existing Attempt: %+v %v",suspended,err)
+ }
+ saved,err:=original.getRun(ctx,run.ID)
+ if err!=nil||saved.Status!=RunWaiting||decodeToolchainWait(saved.Continuation)==nil{
+  t.Fatalf("Worker lost approved software wait: %+v %v",saved,err)
+ }
+ // New Worker instance: no automatic new Attempt, no model/tool invocation.
+ restarted:=New(db.SQL(),db,clock.Real{},"local",tasks,nil,nil,nil,nil,nil,nil,nil,nil,nil,nil)
+ if err:=restarted.syncResumedRuns(ctx);err!=nil{t.Fatal(err)}
+ stillWaiting,err:=tasks.Get(ctx,created.ID)
+ if err!=nil||stillWaiting.State!=task.StateWaitingDependency{
+  t.Fatalf("Worker resumed before retry deadline: %+v %v",stillWaiting,err)
+ }
+ // Force due without sleeping, using only durable continuation state.
+ savedWait:=decodeToolchainWait(saved.Continuation)
+ savedWait.RetryAtMS=now-1000
+ due,_:=json.Marshal(toolchainWaitEnvelope{ToolchainWait:savedWait})
+ if _,err:=db.SQL().ExecContext(ctx,
+  `UPDATE agent_worker_runs SET continuation_json=? WHERE id=?`,string(due),run.ID);err!=nil{t.Fatal(err)}
+ if err:=restarted.syncResumedRuns(ctx);err!=nil{t.Fatal(err)}
+ notYet,err:=tasks.Get(ctx,created.ID)
+ if err!=nil||notYet.State!=task.StateWaitingDependency{
+  t.Fatalf("stopped OCI resumed work despite observed resources not running: %+v %v",notYet,err)
+ }
+ deferred,err:=restarted.getRun(ctx,run.ID)
+ if err!=nil{t.Fatal(err)}
+ next:=decodeToolchainWait(deferred.Continuation)
+ if next==nil||next.RetryAtMS<=(clock.Real{}).UnixMilli(){
+  t.Fatalf("expired wait was not deferred after unavailable resource check: %+v",next)
+ }
+ if err:=restarted.syncResumedRuns(ctx);err!=nil{t.Fatal(err)}
+ stillDeferred,err:=restarted.getRun(ctx,run.ID)
+ if err!=nil{t.Fatal(err)}
+ if again:=decodeToolchainWait(stillDeferred.Continuation);again==nil||again.RetryAtMS!=next.RetryAtMS{
+  t.Fatalf("resource wait got repeatedly polled before deadline: %+v",again)
+ }
+ // A stale poller must see its lost compare-and-swap. It must not report
+ // a successful retry checkpoint or bump the live Worker revision.
+ revBefore:=stillDeferred.Revision
+ if err:=restarted.deferWorkspaceToolchainWait(ctx,run.ID,string(saved.Continuation),savedWait);
+    !errors.Is(err,ErrInvalidWorkerState){
+  t.Fatalf("stale previous continuation looked persisted: %v",err)
+ }
+ noChange,err:=restarted.getRun(ctx,run.ID)
+ if err!=nil||noChange.Revision!=revBefore||
+  string(noChange.Continuation)!=string(stillDeferred.Continuation){
+  t.Fatalf("stale CAS mutated a newer wait: %+v %v",noChange,err)
+ }
+
+ if _,err:=db.SQL().ExecContext(ctx,
+  `UPDATE project_runtimes SET desired_state='running',status='running' WHERE id=?`,runtime.ID);err!=nil{t.Fatal(err)}
+ if _,err:=db.SQL().ExecContext(ctx,
+  `UPDATE project_applications SET status='running' WHERE id=?`,app.ID);err!=nil{t.Fatal(err)}
+ // The recently re-armed deadline must still hold even after the app
+ // becomes ready. Force the exact durable deadline due without sleeping.
+ if err:=restarted.syncResumedRuns(ctx);err!=nil{t.Fatal(err)}
+ beforeDeadline,err:=tasks.Get(ctx,created.ID)
+ if err!=nil||beforeDeadline.State!=task.StateWaitingDependency{
+  t.Fatalf("toolchain wait resumed early: %+v %v",beforeDeadline,err)
+ }
+ nowDue:=*next
+ nowDue.RetryAtMS=clock.Real{}.UnixMilli()-1000
+ dueAgain,_:=json.Marshal(toolchainWaitEnvelope{ToolchainWait:&nowDue})
+ if _,err:=db.SQL().ExecContext(ctx,
+  `UPDATE agent_worker_runs SET continuation_json=? WHERE id=?`,string(dueAgain),run.ID);err!=nil{t.Fatal(err)}
+ if err:=restarted.syncResumedRuns(ctx);err!=nil{t.Fatal(err)}
+ resumed,err:=tasks.Get(ctx,created.ID)
+ if err!=nil||resumed.State!=task.StateRunning{
+  t.Fatalf("approved OCI never woke its existing Attempt: %+v %v",resumed,err)
+ }
+ r,err:=restarted.getRun(ctx,run.ID)
+ if err!=nil||r.Status!=RunRunning{
+  t.Fatalf("resumed worker created a different run: %+v %v",r,err)
+ }
+ // A retry deadline observed before the Task resumed cannot clobber a
+ // now-active Worker, even if the old continuation bytes still match.
+ revRunning:=r.Revision
+ if err:=restarted.deferWorkspaceToolchainWait(ctx,run.ID,string(r.Continuation),savedWait);
+    !errors.Is(err,ErrInvalidWorkerState){
+  t.Fatalf("resumed Worker accepted a stale waiting checkpoint: %v",err)
+ }
+ activeAgain,err:=restarted.getRun(ctx,run.ID)
+ if err!=nil||activeAgain.Status!=RunRunning||activeAgain.Revision!=revRunning{
+  t.Fatalf("stale retry changed active Worker: %+v %v",activeAgain,err)
+ }
+
+ var attempts int
+ if err:=db.SQL().QueryRowContext(ctx,
+  `SELECT COUNT(*) FROM task_attempts WHERE task_id=?`,created.ID).Scan(&attempts);err!=nil{t.Fatal(err)}
+ if attempts!=1{t.Fatalf("resource wait duplicated Task Attempt: %d",attempts)}
+ // Changing the human-approved OCI application revision invalidates the
+ // original wait identity; it can never resume on replacement software.
+ if _,err:=db.SQL().ExecContext(ctx,
+  `UPDATE project_applications SET revision=revision+1 WHERE id=?`,app.ID);err!=nil{t.Fatal(err)}
+ safe,err:=isApprovedToolchainRegisteredRunning(ctx,db.SQL(),savedWait)
+ if err!=nil||safe{
+  t.Fatalf("stale application approval silently reused: ready=%v error=%v",safe,err)
+ }
+ if _,err=applyApprovedWorkspaceToolchain(ctx,db.SQL(),ready,raw);err==nil{
+  t.Fatal("stale approved toolchain was allowed to run")
+ }
+}
+func TestApprovedToolchainWaitNeverWakesWithChangedManifestOrWrongWorkspace(t *testing.T){
+ // A forged or corrupted continuation is not a grant. The helper itself
+ // requires the exact stored approval/image/running OCI pair before wake.
+ if decodeToolchainWait(json.RawMessage(`{"toolchain_wait":{"manifest_sha256":"short","retry_at_ms":1}}`))!=nil{
+  t.Fatal("malformed approved resource wait was trusted")
+ }
+ if decodeToolchainWait(json.RawMessage(`{"toolchain_wait":{"project_id":"x","project_workspace_id":"y","runtime_id":"z","application_id":"a","manifest_sha256":"`+
+  strings.Repeat("f",64)+`","retry_at_ms":1}}`))==nil{
+  t.Fatal("well-formed record was not parseable")
+ }
+ // Ensure production wait helper is not fooled by mere boolean JSON flags.
+ if decodeToolchainWait(json.RawMessage(`{"toolchain_wait":{"ready":true}}`))!=nil{
+  t.Fatal("untrusted ready field bypassed persisted approval checks")
+ }
+}

@@ -58,6 +58,25 @@ func NormalizeResearchSettings(in ResearchSettings) ResearchSettings {
 	return in
 }
 
+// StrictResearchSettings is applied *only when starting a new Research Council
+// session*. These integrity controls are non-optional under Research mode:
+// model seats cannot be silently replaced, missing seats cannot be dropped,
+// and independent evidence/provenance must be preserved. A disabled Research
+// mode or a previously frozen session manifest is never rewritten here.
+func StrictResearchSettings(in ResearchSettings) ResearchSettings {
+ in=NormalizeResearchSettings(in)
+ in.PinModels=true
+ in.DisableModelSubstitution=true
+ in.SameModelRetries=true
+ in.PreserveFailedSeats=true
+ in.IndependentFirstPass=true
+ in.ScopedEvidence=true
+ in.RecordRawOutputs=true
+ in.FullProvenance=true
+ in.RequireAllSeats=true
+ return in
+}
+
 func ResearchTotalRounds(in ResearchSettings) int64 {
 	in = NormalizeResearchSettings(in)
 	total := int64(1 + in.CritiqueRounds)

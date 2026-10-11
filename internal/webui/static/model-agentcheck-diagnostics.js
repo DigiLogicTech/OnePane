@@ -40,8 +40,14 @@ qa5AgentCheck=async function(dep){
   await qa5LoadManagedDeployments();
   const fresh=qa5ManagedDeployments.find(x=>String(x.deployment_id)===id)||current;
   await qa5InspectModel(fresh);
-  if(failures.length)notice("Agent Check completed with limitations: "+failures.join(" · "),"bad");
-  else notice("Agent Check completed; Spec Sheet updated and idle model unloaded.");
+  // Qualification is not residency: never claim memory was unloaded
+  // unless the backend confirms the managed runtime actually stopped.
+  const residency=String(fresh.residency_state||"unknown").toLowerCase();
+  const residencyNotice=residency==="stopped"?"idle model unloaded":
+   residency==="busy"?"runtime retained for active inference":
+   "model residency is "+residency+"; unload not confirmed";
+  if(failures.length)notice("Agent Check completed with limitations: "+failures.join(" · ")+" · "+residencyNotice,"bad");
+  else notice("Agent Check completed; Spec Sheet updated; "+residencyNotice+".");
   if(currentTab()?.route==="models")renderModels();
  }catch(ex){
   // Failed first probes never reach /complete. Explicitly close the testbed
@@ -76,6 +82,50 @@ qa5AgentCheck=async function(dep){
  }
 };
 
+/* Read-only Agent Check QA evidence. The permission-checked API responds
+ * with only deployment status and persisted testbed turn counts; this view
+ * deliberately does not fetch transcript/turn request and response bodies. */
+async function a55ShowAgentCheckEvidence(deploymentID){
+ const id=String(deploymentID||"");
+ if(!id)return;
+ openModal("Agent Check · QA evidence",'<div class="widget-body">'+
+  '<p class="page-subtitle">Observed local model status and recent testbed session counts only. No raw prompts, tool answers, model files, backend error messages or measured GPU/CPU residency are included.</p>'+
+  '<p id="a55EvidenceStatus" class="list-meta" role="status">Checking model.read access and available evidence…</p>'+
+  '<pre id="a55EvidenceView" class="log-entry" style="max-height:45vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere"></pre>'+
+  '<div class="toolbar"><button type="button" class="btn" id="a55EvidenceClose">Close</button>'+
+  '<button type="button" class="btn" disabled id="a55EvidenceDownload">Download reviewed JSON</button></div></div>');
+ const panel=document.querySelector("#a55EvidenceView");
+ const status=document.querySelector("#a55EvidenceStatus");
+ const exportButton=document.querySelector("#a55EvidenceDownload");
+ document.querySelector("#a55EvidenceClose").onclick=closeModal;
+ try{
+  const evidence=await apiRequest("/v1/qa/model-deployments/"+
+   encodeURIComponent(id)+"/agent-check");
+  if(!panel?.isConnected||!exportButton?.isConnected)return;
+  const report=JSON.stringify(evidence,null,2);
+  if(report.length>24000)throw Error("QA evidence too large to display safely");
+  panel.textContent=report; // never interpret evidence as HTML
+  status.textContent="Review included metadata before exporting. Cancelled sessions do not establish the cause of inference failure; CPU/GPU residency remains unverified.";
+  exportButton.disabled=false;
+  exportButton.onclick=()=>{
+   if(!panel.isConnected||panel.textContent!==report)return;
+   const payload=new Blob([report],{type:"application/json"});
+   if(payload.size>25000){status.textContent="QA evidence exceeded export limit";return}
+   const url=URL.createObjectURL(payload);
+   try{
+    const link=document.createElement("a");
+    link.href=url;link.download="onepane-agent-check-qa.json";
+    link.style.display="none";document.body.appendChild(link);link.click();link.remove();
+   }finally{URL.revokeObjectURL(url)}
+   status.textContent="Sanitized Agent Check evidence downloaded locally. Inspect before sharing.";
+  };
+ }catch(error){
+  if(!panel?.isConnected)return;
+  panel.textContent="";
+  status.textContent="QA evidence unavailable. Confirm model permissions and local diagnostics service.";
+ }
+}
+
 /* A single explicit configuration/check workflow. It never silently changes
  * the deployment compute policy or treats planned placement as measured GPU
  * residency. Results remain separate from production admission. */
@@ -92,9 +142,10 @@ qa5AgentCheck=async function(dep){
  }catch(e){/* Configuration read errors do not imply a placement change. */}
  const compute=String(policy.preference||current.compute_mode||"auto");
  const mode=String(policy.placement_mode||"automatic");
- openModal("Agent Check · "+String(current.display_name||current.model_ref||"Model"),`<div class="widget-body a43-agent-check-review"><p class="page-subtitle">Agent Check tests the configured deployment. Select compute separately if it needs changing; GPU Required must not silently fall back to CPU.</p><dl class="definition-grid"><dt>Quantization</dt><dd>${escapeHtml(current.quantization||"Unknown")}</dd><dt>Compute policy</dt><dd>${escapeHtml(compute)}</dd><dt>Planned placement</dt><dd>${escapeHtml(mode)} (not measured residency)</dd><dt>Current Agent Check</dt><dd>${escapeHtml(current.agent_check_status||"Not run")}</dd><dt>Production admission</dt><dd>${escapeHtml(current.admission_status||"pending")}</dd></dl><p class="list-meta">Completing this check tests inference and records evidence; it does not grant production admission or verify the full context window.</p><div class="toolbar"><button class="btn" id="a43AgentCheckCancel">Cancel</button><button class="btn" id="a43AgentCheckCompute">Configure compute</button><button class="btn primary" id="a43AgentCheckRun">Run Agent Check</button></div></div>`);
+ openModal("Agent Check · "+String(current.display_name||current.model_ref||"Model"),`<div class="widget-body a43-agent-check-review"><p class="page-subtitle">Agent Check tests the configured deployment. Select compute separately if it needs changing; GPU Required must not silently fall back to CPU.</p><dl class="definition-grid"><dt>Quantization</dt><dd>${escapeHtml(current.quantization||"Unknown")}</dd><dt>Compute policy</dt><dd>${escapeHtml(compute)}</dd><dt>Planned placement</dt><dd>${escapeHtml(mode)} (not measured residency)</dd><dt>Current Agent Check</dt><dd>${escapeHtml(current.agent_check_status||"Not run")}</dd><dt>Observed model residency</dt><dd>${escapeHtml(current.residency_state||"unknown")}</dd><dt>Production admission</dt><dd>${escapeHtml(current.admission_status||"pending")}</dd></dl><p class="list-meta">Completing this check tests inference and records evidence; it does not grant production admission or verify the full context window.</p><div class="toolbar"><button class="btn" id="a43AgentCheckCancel">Cancel</button><button class="btn" id="a43AgentCheckCompute">Configure compute</button><button class="btn" id="a55AgentCheckEvidence">QA evidence</button><button class="btn primary" id="a43AgentCheckRun">Run Agent Check</button></div></div>`);
  $("#a43AgentCheckCancel").onclick=closeModal;
  $("#a43AgentCheckCompute").onclick=()=>{closeModal();a31OpenCompute(current)};
+ $("#a55AgentCheckEvidence").onclick=()=>a55ShowAgentCheckEvidence(id);
  $("#a43AgentCheckRun").onclick=async()=>{
   if(a43AgentCheckBusy.has(id))return;
   a43AgentCheckBusy.add(id);

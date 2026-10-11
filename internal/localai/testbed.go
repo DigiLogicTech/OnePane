@@ -292,12 +292,21 @@ func (s *Service) TestbedSession(ctx context.Context, idv string) (TestbedSessio
 // An unsuccessful run never changes admission or invents a benchmark.
 func (s *Service) markManualAgentCheckFailed(ctx context.Context, sess TestbedSession, failure error) {
  if failure==nil{return}
- msg:=strings.TrimSpace(failure.Error())
- if len(msg)>500{msg=msg[:500]+"…"}
- raw,_:=json.Marshal(map[string]any{"status":"blocked","profile_version":"onepane.manual-agent-check/v2","evidence":map[string]any{"errors":[]string{msg},"infrastructure_error":true},"session_id":sess.ID})
+ // The former v2 qualification stored raw runtime error text, potentially
+ // exposing local model paths, prompts, bearer tokens or process output to
+ // any Spec Sheet reader. The v3 record includes only fixed labels; the
+ // separately authorized QA evidence endpoint provides observed stages.
+ raw,_:=json.Marshal(map[string]any{
+  "status":"blocked","profile_version":"onepane.manual-agent-check/v3",
+  "evidence":map[string]any{
+   "infrastructure_error":true,
+   "failure_details":"inspect_structured_agentcheck_evidence",
+  },
+  "session_id":sess.ID,
+ })
  _,_=s.db.ExecContext(ctx,`UPDATE model_spec_sheets SET qualification_json=?,updated_at=?,revision=revision+1 WHERE deployment_id=? AND hardware_profile_id=?`,string(raw),s.clock.UnixMilli(),sess.DeploymentID,sess.HardwareProfileID)
 }
-func (s *Service) RunTestbedTurn(ctx context.Context, sessionID string, cmd TestbedTurnCommand) (TestbedTurn, error) {
+func (s *Service) RunTestbedTurn(ctx context.Context, sessionID string, cmd TestbedTurnCommand) (completed TestbedTurn, resultErr error) {
 	var out TestbedTurn
 	sess, err := s.TestbedSession(ctx, sessionID)
 	if err != nil {
@@ -327,28 +336,39 @@ func (s *Service) RunTestbedTurn(ctx context.Context, sessionID string, cmd Test
 		}
 		req, _ = json.Marshal(body)
 	}
-	// The manual Testbed is the qualification path for a newly installed model.
-	// Start the managed runtime here even while the deployment is still in the
-	// qualifying state; normal scheduler dispatch remains gated by admission.
+	// Each manual Agent Check turn holds an activity lease. A long-running
+	// CPU-only probe must not be evicted by the idle reaper or a concurrent
+	// Agent Check, even while deployment admission remains pending.
 	if s.supervisor != nil {
-		if _, err := s.supervisor.Start(ctx, sess.DeploymentID); err != nil {
+		if _,err:=s.supervisor.Acquire(ctx,sess.DeploymentID);err!=nil{
 			s.markManualAgentCheckFailed(ctx,sess,err)
-   return out, fmt.Errorf("start managed runtime for testbed: %w", err)
+			s.recordAgentCheckFailure(ctx,sess,"runtime_acquire",err)
+			return out,fmt.Errorf("acquire managed runtime for testbed: %w",err)
 		}
+		defer func(){
+			cleanupCtx,cancel:=context.WithTimeout(context.Background(),15*time.Second)
+			defer cancel()
+			if err:=s.supervisor.Release(cleanupCtx,sess.DeploymentID);err!=nil{
+				s.recordAgentCheckFailure(cleanupCtx,sess,"runtime_release",err)
+				resultErr=errors.Join(resultErr,fmt.Errorf("release Agent Check probe runtime: %w",err))
+			}
+		}()
 	}
 	dep, err := s.inference.Deployment(ctx, sess.DeploymentID)
 	if err != nil {
+		s.recordAgentCheckFailure(ctx,sess,"deployment_read",err)
 		return out, err
 	}
 	model, err := s.inference.Model(ctx, dep.ModelID)
 	if err != nil {
+		s.recordAgentCheckFailure(ctx,sess,"model_read",err)
 		return out, err
 	}
 	rid, _ := s.ids.New("tbreq")
 	start := time.Now()
 	transport := inference.LocalOpenAITransport{Resolver: s}
 	result, err := transport.Dispatch(ctx, inference.DispatchRequest{RequestID: rid, Model: model, Deployment: dep, RequestJSON: req}, nil)
- if err!=nil{s.markManualAgentCheckFailed(ctx,sess,err);return out,err}
+ if err!=nil{s.markManualAgentCheckFailed(ctx,sess,err);s.recordAgentCheckFailure(ctx,sess,"inference_dispatch",err);return out,err}
 	elapsed := time.Since(start)
 	metrics, _ := json.Marshal(map[string]any{"elapsed_ms": elapsed.Milliseconds(), "placement": sess.Placement, "synthetic_tool_probe": cmd.SyntheticToolProbe})
 	usage := result.UsageJSON
@@ -357,10 +377,13 @@ func (s *Service) RunTestbedTurn(ctx context.Context, sessionID string, cmd Test
 	}
 	resp := result.ResponseJSON
 	if len(resp) == 0 || !json.Valid(resp) {
-		return out, errors.New("testbed model returned invalid JSON")
+		err=errors.New("testbed model returned invalid JSON")
+		s.recordAgentCheckFailure(ctx,sess,"response_validation",err)
+		return out, err
 	}
 	var seq int64
 	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence_no),0)+1 FROM model_testbed_turns WHERE session_id=?`, sessionID).Scan(&seq); err != nil {
+		s.recordAgentCheckFailure(ctx,sess,"turn_store",err)
 		return out, err
 	}
 	tid, _ := s.ids.New("tbturn")
@@ -371,6 +394,7 @@ func (s *Service) RunTestbedTurn(ctx context.Context, sessionID string, cmd Test
 		probe = 1
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO model_testbed_turns(id,session_id,sequence_no,request_json,response_json,usage_json,metrics_json,synthetic_tool_probe,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, tid, sessionID, seq, string(req), string(resp), string(usage), string(metrics), probe, now)
+	if err!=nil{s.recordAgentCheckFailure(ctx,sess,"turn_store",err)}
 	return out, err
 }
 
@@ -418,7 +442,7 @@ func (s *Service) CompleteTestbed(ctx context.Context, sessionID string) error {
  sess,err:=s.TestbedSession(ctx,sessionID);if err!=nil{return err}
  if sess.Status!="active"{return errors.New("testbed session is not active")}
  turns,err:=s.ListTestbedTurns(ctx,sessionID);if err!=nil{return err}
- if len(turns)==0{return errors.New("cannot complete Agent Check: no successful model inference turns were recorded")}
+ if len(turns)==0{err=errors.New("cannot complete Agent Check: no successful model inference turns were recorded");s.recordAgentCheckFailure(ctx,sess,"completion_validation",err);return err}
  evidence:=map[string]any{"plain_ok":false,"json_ok":false,"schema_ok":false,"tools_ok":false,"context_probes":[]any{},"testbed_session_id":sessionID}
  plainChecked,jsonChecked,toolsChecked:=false,false,false
  var totalTokens int64
@@ -441,14 +465,16 @@ func (s *Service) CompleteTestbed(ctx context.Context, sessionID string) error {
   }
  }
  evidence["plain_tested"]=plainChecked;evidence["json_tested"]=jsonChecked;evidence["tools_tested"]=toolsChecked
- // Retain errors from unsuccessful probes in the same session; do not
- // confuse a failed network/runtime request with a capability rejection.
- if sheet,err:=s.SpecSheet(ctx,sess.DeploymentID);err==nil {
-  var prior struct {SessionID string `json:"session_id"`;Evidence struct{Errors []string `json:"errors"`} `json:"evidence"`}
-  if json.Unmarshal(sheet.Qualification,&prior)==nil&&prior.SessionID==sessionID&&len(prior.Evidence.Errors)>0{evidence["errors"]=prior.Evidence.Errors}
- }
+ // Read the separate typed, immutable failure journal rather than copying
+ // legacy qualification errors (which could contain arbitrary runtime text).
+ // An eventually-successful probe after an earlier infrastructure failure
+ // remains limited; it must not be silently promoted to fully passed.
+ var observedFailures int64
+ if err:=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM model_agentcheck_failure_observations
+   WHERE session_id=? AND deployment_id=?`,sessionID,sess.DeploymentID).Scan(&observedFailures);err!=nil{return err}
+ evidence["structured_failure_observations"]=observedFailures
  status:="limited"
- if evidence["plain_ok"]==true&&evidence["json_ok"]==true&&evidence["schema_ok"]==true&&evidence["tools_ok"]==true{status="passed"}
+ if observedFailures==0&&evidence["plain_ok"]==true&&evidence["json_ok"]==true&&evidence["schema_ok"]==true&&evidence["tools_ok"]==true{status="passed"}
  metrics:=map[string]any{"successful_turns":len(turns)}
  if totalTokens>0&&totalElapsed>0{metrics["completion_tokens_per_second"]=float64(totalTokens)*1000/float64(totalElapsed)}
  quality:=map[string]any{"status":status,"profile_version":"onepane.manual-agent-check/v2","evidence":evidence,"metrics":metrics}
@@ -460,11 +486,12 @@ func (s *Service) CompleteTestbed(ctx context.Context, sessionID string) error {
   // Never promote admission or claim context verification from a manual probe.
   _,err=tx.ExecContext(ctx,`UPDATE model_spec_sheets SET qualification_json=?,updated_at=?,revision=revision+1 WHERE deployment_id=? AND hardware_profile_id=?`,string(raw),now,sess.DeploymentID,sess.HardwareProfileID)
   return err
- });err!=nil{return err}
+ });err!=nil{s.recordAgentCheckFailure(ctx,sess,"completion_persist",err);return err}
  // All probes and evidence are persisted. Release the model's CPU/GPU memory.
  // Do not evict concurrent inference, which is protected by StopIfIdle.
  if s.supervisor!=nil{
   if _,err:=s.supervisor.StopIfIdle(ctx,sess.DeploymentID);err!=nil{
+   s.recordAgentCheckFailure(ctx,sess,"runtime_unload",err)
    return fmt.Errorf("Agent Check evidence saved but runtime could not be unloaded: %w",err)
   }
  }
@@ -492,8 +519,9 @@ func (s *Service) AbortTestbed(ctx context.Context, sessionID string, cause stri
  n,err:=res.RowsAffected();if err!=nil{return err}
  if n!=1{return errors.New("Agent Check session was already finalized")}
  s.markManualAgentCheckFailed(ctx,sess,errors.New(cause))
+ s.recordAgentCheckFailure(ctx,sess,"session_abort",errors.New("Agent Check abort requested"))
  if s.supervisor!=nil{
-  if _,err:=s.supervisor.StopIfIdle(ctx,sess.DeploymentID);err!=nil{return fmt.Errorf("Agent Check stopped, but model unload failed: %w",err)}
+  if _,err:=s.supervisor.StopIfIdle(ctx,sess.DeploymentID);err!=nil{s.recordAgentCheckFailure(ctx,sess,"runtime_unload",err);return fmt.Errorf("Agent Check stopped, but model unload failed: %w",err)}
  }
  return nil
 }

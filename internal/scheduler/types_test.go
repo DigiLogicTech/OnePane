@@ -241,3 +241,34 @@ func TestRouteLocalOnlyRejectsRemoteCandidate(t *testing.T) {
 		t.Fatalf("expected local candidate, got %#v", decision.Selected)
 	}
 }
+
+func TestRouteResourceAdaptiveLimitedCandidateStillChecksProtocolAndContext(t *testing.T) {
+    c := baseCandidate("local-small")
+    c.Local = true
+    c.CostClass = CostLocal
+    c.Qualification = QualLimited
+    c.ComputeMode = "cpu"
+    c.ProtocolLevel = "L1"
+    c.ContextMax = 2048
+
+    request := RouteRequest{WorkspaceID:"ws",CapabilityID:"agent.reason",ProtocolLevel:"L1",
+       DataLabel:label(),ContextTokens:1024,AllowLimited:true,PreferZeroIncrementalCost:true}
+    d,err:=Route(request,[]Candidate{c})
+    if err!=nil || d.Selected==nil || d.Selected.Candidate.ID!="local-small" {
+        t.Fatalf("admitted CPU-only limited model should remain eligible: %v %#v",err,d.Selected)
+    }
+    request.AllowLimited=false
+    if _,err=Route(request,[]Candidate{c});err!=ErrNoEligibleCandidate {
+        t.Fatalf("operator-disabled limited admission must remain disallowed: %v",err)
+    }
+    request.AllowLimited=true
+    request.ContextTokens=4096
+    if _,err=Route(request,[]Candidate{c});err!=ErrNoEligibleCandidate {
+        t.Fatalf("context overflow must not bypass candidate limits: %v",err)
+    }
+    request.ContextTokens=1024
+    request.ProtocolLevel="L2"
+    if _,err=Route(request,[]Candidate{c});err!=ErrNoEligibleCandidate {
+        t.Fatalf("L1-limited models cannot satisfy stronger L2 protocol: %v",err)
+    }
+}

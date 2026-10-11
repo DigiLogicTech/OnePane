@@ -115,6 +115,7 @@ function nextNodeDraw(){
  root.scrollTop=previousScroll;
  $$("[data-next-node]",root).forEach(function(b){b.onclick=async function(){nextNodeUI.selected=b.dataset.nextNode;nextNodeUI.tab="overview";await nextNodeLoadDetail(nextNodeUI.selected);nextNodeDraw();};});
  $$("[data-next-node-tab]",root).forEach(function(b){b.onclick=function(){nextNodeUI.tab=b.dataset.nextNodeTab;nextNodeDraw();};});
+ $("#nextNodeQAEvidence")?.addEventListener("click",()=>nextNodeShowQAEvidence(nextNodeUI.selected));
  $("#nextNodeRefresh")?.addEventListener("click",function(){nextNodeLoadDetail(nextNodeUI.selected).then(nextNodeDraw).catch(function(e){notice(e.message,"bad");});});
  $("#nextNodePairAgain")?.addEventListener("click",openPairNode);
  $("#nextNodeOpenModels")?.addEventListener("click",function(){openRoute("models");});
@@ -138,7 +139,7 @@ function nextNodeDraw(){
 function nextNodeDetail(n){
  var tabs=[["overview","Overview"],["models","Models"],["compute","Compute"],["access","Access & Policy"],["activity","Activity"]];
  var nav='<div class="subtabs next-node-tabs">'+tabs.map(function(t){return '<button class="subtab'+(nextNodeUI.tab===t[0]?' active':'')+'" data-next-node-tab="'+t[0]+'">'+t[1]+'</button>';}).join("")+(n.local?'<button class="btn next-node-local-models" id="nextNodeOpenModels" type="button">Manage local models</button>':'')+'</div>';
- var header='<div class="card-header"><div><div class="card-title">'+nextNodeEsc(nextNodeName(n))+' · Management</div><div class="list-meta">'+nextNodeEsc(n.trust_state||"Local node")+' · '+nextNodeEsc(n.id)+'</div></div><button class="btn" id="nextNodeRefresh">Refresh</button></div>';
+ var header='<div class="card-header"><div><div class="card-title">'+nextNodeEsc(nextNodeName(n))+' · Management</div><div class="list-meta">'+nextNodeEsc(n.trust_state||"Local node")+' · '+nextNodeEsc(n.id)+'</div></div><div class="toolbar"><button class="btn" type="button" id="nextNodeQAEvidence">QA evidence</button><button class="btn" id="nextNodeRefresh">Refresh</button></div></div>';
  var body=nextNodeUI.tab==="models"?nextNodeModels(n):nextNodeUI.tab==="compute"?nextNodeCompute(n):nextNodeUI.tab==="access"?nextNodeAccess(n):nextNodeUI.tab==="activity"?nextNodeActivity(n):nextNodeOverview(n);
  return '<section class="panel-card next-node-manager">'+header+nav+'<div class="widget-body">'+body+'</div></section>';
 }
@@ -183,6 +184,50 @@ function nextNodeActivity(n){
  return '<p class="page-subtitle">Recent remote model jobs are retained on this control-plane installation. Open a job to fetch its current state directly from the target node.</p>'+
  (nextNodeUI.jobs.length?nextNodeUI.jobs.map(function(j){return '<div class="list-row"><div class="list-main"><strong>'+nextNodeEsc(j.model_ref)+'</strong><div class="list-meta">'+nextNodeEsc(j.id)+'</div></div><button class="btn tiny" data-next-node-job="'+nextNodeEsc(j.id)+'">View progress</button></div>';}).join(""):'<div class="empty-state compact">No remote installation jobs recorded for this node.</div>');
 }
+// Admin-scoped, read-only Node QA evidence. Neither the preview nor export
+// calls a remote Node or collects logs/credentials. The authorized API returns
+// only fixed enums/timestamps and historical counts for the selected Node.
+async function nextNodeShowQAEvidence(nodeID){
+ const selected=String(nodeID||"");
+ if(!selected)return;
+ openModal("Node QA evidence",'<div class="widget-body">'+
+  '<p class="page-subtitle">Read-only control-plane report. For the local Node only, a systemd/Windows SCM status may be queried; remote services are not collected. A service marked running does not establish application readiness, and historical Node timestamps do not prove reachability. Pairing material, raw errors, telemetry and remote payloads are excluded.</p>'+
+  '<p class="list-meta" id="nextNodeQAStatus" role="status">Checking Node administrator permissions and recorded evidence…</p>'+
+  '<pre class="json-preview" id="nextNodeQAPreview" style="max-height:45vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere"></pre>'+
+  '<div class="toolbar"><button class="btn" type="button" id="nextNodeQAClose">Close</button>'+
+  '<button class="btn" type="button" id="nextNodeQADownload" disabled>Download reviewed JSON</button></div></div>');
+ const preview=document.querySelector("#nextNodeQAPreview");
+ const status=document.querySelector("#nextNodeQAStatus");
+ const exportButton=document.querySelector("#nextNodeQADownload");
+ document.querySelector("#nextNodeQAClose").onclick=closeModal;
+ try{
+  const data=await apiRequest("/v1/qa/nodes/"+encodeURIComponent(selected)+"/evidence");
+  if(!preview?.isConnected||!exportButton?.isConnected||nextNodeUI.selected!==selected)return;
+  const report=JSON.stringify(data,null,2);
+  if(report.length>24000)throw Error("Report exceeds safe display size");
+  preview.textContent=report;
+  status.textContent="Review before export. Local OS service-manager status appears only when successfully observed; drivers, remote services and physical runtime diagnostics are not collected.";
+  exportButton.disabled=false;
+  exportButton.onclick=()=>{
+   if(!preview.isConnected||preview.textContent!==report||nextNodeUI.selected!==selected)return;
+   const payload=new Blob([report],{type:"application/json"});
+   if(payload.size>25000){status.textContent="Node QA report exceeds the export limit.";return}
+   const url=URL.createObjectURL(payload);
+   try{
+    const link=document.createElement("a");
+    link.href=url;link.download="onepane-node-qa-evidence.json";
+    link.style.display="none";
+    document.body.appendChild(link);link.click();link.remove();
+   }finally{URL.revokeObjectURL(url)}
+   status.textContent="Reviewed Node evidence saved locally. Inspect before sharing.";
+  };
+ }catch(_){
+  if(!preview?.isConnected)return;
+  preview.textContent="";
+  status.textContent="Node QA evidence unavailable. Check Admin permissions and the local diagnostic database.";
+ }
+}
+
 async function nextNodeRecommendations(){
  var id=nextNodeUI.selected;
  try{

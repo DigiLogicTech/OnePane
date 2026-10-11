@@ -20,6 +20,7 @@ import (
 	"unsafe"
 
 	"github.com/DigiLogicTech/OnePane/internal/buildinfo"
+	"github.com/DigiLogicTech/OnePane/internal/startupevidence"
 )
 
 const (
@@ -89,6 +90,15 @@ func main() {
 	}
 }
 
+// Even when the backend never binds HTTP, the Windows service records a
+// typed failure in its configured persistent data root, not SYSTEM temp.
+func serviceEvidence(stage startupevidence.Stage, outcome startupevidence.Outcome) {
+ programData:=os.Getenv("ProgramData")
+ if programData==""{programData=`C:\ProgramData`}
+ root:=configuredOnePaneDataRoot(filepath.Join(programData,"OnePane"))
+ _=startupevidence.Record(root,startupevidence.WindowsService,stage,outcome)
+}
+
 func serviceMain(argc uint32, argv **uint16) uintptr {
 	name, _ := syscall.UTF16PtrFromString(serviceName)
 	statusHandle, _, _ = procRegisterServiceCtrlHandlerExW.Call(
@@ -100,6 +110,7 @@ func serviceMain(argc uint32, argv **uint16) uintptr {
 		return 0
 	}
 	setStatus(serviceStartPending, 0, 1, 15000, 0)
+	serviceEvidence(startupevidence.ServiceLaunch,startupevidence.Begin)
 
 	done := make(chan error, 1)
 	go func() { done <- runBackend() }()
@@ -109,6 +120,7 @@ func serviceMain(argc uint32, argv **uint16) uintptr {
 	// readiness and surfaces bootstrap failures as service-start failures.
 	ready, startupErr := waitForBackendHealth(done, 60*time.Second)
 	if !ready {
+		serviceEvidence(startupevidence.ServiceReady,startupevidence.Failed)
 		if startupErr != nil {
 			fmt.Fprintln(os.Stderr, "OnePane backend failed during startup:", startupErr)
 			recordStartupError(startupErr)
@@ -117,6 +129,7 @@ func serviceMain(argc uint32, argv **uint16) uintptr {
 		return 0
 	}
 
+	serviceEvidence(startupevidence.ServiceReady,startupevidence.OK)
 	setStatus(serviceRunning, serviceAcceptStop|serviceAcceptShutdown, 0, 0, 0)
 
 	var exitCode uint32
@@ -138,6 +151,11 @@ func serviceMain(argc uint32, argv **uint16) uintptr {
 		}
 	}
 
+	if exitCode!=0{
+		serviceEvidence(startupevidence.ServiceStop,startupevidence.Failed)
+	}else{
+		serviceEvidence(startupevidence.ServiceStop,startupevidence.Stopped)
+	}
 	setStatus(serviceStopped, 0, 0, 0, exitCode)
 	return 0
 }
@@ -181,7 +199,7 @@ func waitForBackendHealth(done <-chan error, timeout time.Duration) (bool, error
 		resp, err := client.Get("http://127.0.0.1:18181/v1/health")
 		if err == nil {
 			_ = resp.Body.Close()
-			if resp.StatusCode >= 200 && resp.StatusCode < 500 {
+			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				return true, nil
 			}
 		}
@@ -296,7 +314,8 @@ func runBackend() (retErr error) {
 // One token per Windows service launch, never persisted on disk.
 	seed:=make([]byte,32);if _,err:=rand.Read(seed);err!=nil{return err}
 	token:=hex.EncodeToString(seed)
-	cmd.Env=append(os.Environ(),"ONEPANE_SERVICE_SHUTDOWN_TOKEN="+token)
+	cmd.Env=append(os.Environ(),"ONEPANE_SERVICE_SHUTDOWN_TOKEN="+token,
+        "ONEPANE_STARTUP_EVIDENCE_ROOT="+dataDir)
 	backendShutdownToken=token
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000} // CREATE_NO_WINDOW
 

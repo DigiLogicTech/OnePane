@@ -20,6 +20,7 @@ var (
 	ErrInvalidCommand               = errors.New("invalid project runtime reconciliation command")
 	ErrIndependentObserverRequired  = errors.New("project runtime verification requires an independent observer principal")
 	ErrUnsupportedBackend           = errors.New("project runtime backend is not supported by the active reconciler")
+	ErrNodePlacementUnsupported      = errors.New("project runtime is assigned to another Node; remote sandbox execution is not yet available")
 	ErrUnsupportedApplicationSource = errors.New("application source is declared but not executable by the current sandbox backend")
 	ErrPostcondition                = errors.New("sandbox mutation postcondition was not independently satisfied")
 	ErrRecoveryRequired             = errors.New("sandbox operation has an unknown outcome and requires reconciliation before retry")
@@ -64,10 +65,24 @@ type Reconciler struct {
 	tools         toolGateway
 	observations  observationService
 	verifications verificationService
+	localNodeID string
 }
 
-func New(projects workspaceService, operations operationCoordinator, tools toolGateway, observations observationService, verifications verificationService) *Reconciler {
-	return &Reconciler{projects: projects, operations: operations, tools: tools, observations: observations, verifications: verifications}
+// The optional local Node identity is supplied by the bootstrap control
+// plane. Historical unit callers with no Node placement remain compatible.
+func New(projects workspaceService, operations operationCoordinator, tools toolGateway, observations observationService, verifications verificationService, localNodeIDs ...string) *Reconciler {
+ localID:=""
+ if len(localNodeIDs)>0 {localID=strings.TrimSpace(localNodeIDs[0])}
+ return &Reconciler{projects:projects,operations:operations,tools:tools,observations:observations,verifications:verifications,localNodeID:localID}
+}
+
+// A local OCI adapter cannot execute on a different Node simply because a
+// runtime row contains that Node ID. Never silently substitute the service
+// host when explicitly assigned remote hardware is unavailable.
+func localPlacementAllowed(localNodeID string, assigned *string) bool {
+ if assigned==nil {return true}
+ if strings.TrimSpace(*assigned)=="" {return false}
+ return strings.TrimSpace(localNodeID)!="" && strings.TrimSpace(localNodeID)==strings.TrimSpace(*assigned)
 }
 
 type ReconcileCommand struct {
@@ -127,6 +142,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 	if err != nil {
 		return Result{}, err
 	}
+	if !localPlacementAllowed(r.localNodeID,runtime.NodeID){
+		return Result{},fmt.Errorf("%w: requested Node %q, service Node %q",ErrNodePlacementUnsupported,
+			func()string{if runtime.NodeID==nil{return ""};return *runtime.NodeID}(),r.localNodeID)
+	}
 	if runtime.Backend != "sandbox_runner" || runtime.IsolationMode != projectworkspace.IsolationSandboxedContainer {
 		return Result{}, ErrUnsupportedBackend
 	}
@@ -158,8 +177,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 	} else if runtime.DesiredState == projectworkspace.RuntimeDesiredSuspended {
 		runtimeStatus = projectworkspace.RuntimeSuspended
 	}
-	runtime, err = r.projects.Runtime(ctx, runtime.ID)
-	if err != nil {
+	// Tool/verification may have taken time: never attach its result to
+	// a changed Node assignment, Workspace policy or desired state.
+	if err := r.requireRuntimeRevision(ctx, runtime); err != nil {
 		return result, err
 	}
 	runtime, err = r.projects.ApplyRuntimeObservation(ctx, projectworkspace.ApplyRuntimeObservationCommand{RuntimeID: runtime.ID, ExpectedRevision: runtime.Revision, Status: runtimeStatus, ObservationID: ev.observation.ID, VerificationID: ev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
@@ -177,6 +197,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 		return result, err
 	}
 	for _, app := range apps {
+		// Recheck pinned runtime and app intent before every external effect.
+		if err := r.requireRuntimeRevision(ctx, runtime); err != nil {
+			return result, err
+		}
+		if err := r.requireApplicationRevision(ctx, app); err != nil {
+			return result, err
+		}
 		if app.SourceKind != projectworkspace.AppOCIImage {
 			return result, fmt.Errorf("%w: %s (%s)", ErrUnsupportedApplicationSource, app.ID, app.SourceKind)
 		}
@@ -189,11 +216,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			result.Operations = append(result.Operations, aev.operation.ID)
 			result.Observations = append(result.Observations, aev.observation.ID)
 			result.Verifications = append(result.Verifications, aev.verification.ID)
-			cur, e := r.projects.Application(ctx, app.ID)
-			if e != nil {
+			// Do not treat an old inspection as proof of changed desired state.
+			if e := r.requireRuntimeRevision(ctx, runtime); e != nil {
 				return result, e
 			}
-			cur, e = r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: cur.ID, ExpectedRevision: cur.Revision, Status: projectworkspace.AppStopped, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+			if e := r.requireApplicationRevision(ctx, app); e != nil {
+				return result, e
+			}
+			cur, e := r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: app.ID, ExpectedRevision: app.Revision, Status: projectworkspace.AppStopped, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 			if e != nil {
 				return result, e
 			}
@@ -210,7 +240,21 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			result.Operations = append(result.Operations, pev.operation.ID)
 			result.Observations = append(result.Observations, pev.observation.ID)
 			result.Verifications = append(result.Verifications, pev.verification.ID)
-			ensure := appEnsurePlan(runtime, app, endpointSpecsForApp(endpoints, app.ID))
+			// An image pull is itself a long-running external action. If
+			// operator changed its OCI reference, Node or environment while
+			// pulling, no stale container ensure may follow.
+			if e := r.requireRuntimeRevision(ctx, runtime); e != nil {
+				return result, e
+			}
+			if e := r.requireApplicationRevision(ctx, app); e != nil {
+				return result, e
+			}
+			// Do not launch a container using Endpoint ports read before a
+			// concurrent operator edit or a newly approved endpoint.
+			if e := r.requireEndpointManifest(ctx, runtime.ID, endpoints); e != nil {
+				return result, e
+			}
+			ensure := appEnsurePlan(runtime, app, endpointSpecsForApp(endpoints, app.ID), endpointPlanDigest(endpoints, app.ID))
 			aev, e := r.applyAndVerify(ctx, project.WorkspaceID, cmd, ensure)
 			if e != nil {
 				return result, e
@@ -218,15 +262,21 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			result.Operations = append(result.Operations, aev.operation.ID)
 			result.Observations = append(result.Observations, aev.observation.ID)
 			result.Verifications = append(result.Verifications, aev.verification.ID)
-			cur, e := r.projects.Application(ctx, app.ID)
+			// Do not treat an old inspection as proof of changed desired state.
+			if e := r.requireRuntimeRevision(ctx, runtime); e != nil {
+				return result, e
+			}
+			if e := r.requireApplicationRevision(ctx, app); e != nil {
+				return result, e
+			}
+			if e := r.requireEndpointManifest(ctx, runtime.ID, endpoints); e != nil {
+				return result, e
+			}
+			cur, e := r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: app.ID, ExpectedRevision: app.Revision, Status: projectworkspace.AppRunning, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 			if e != nil {
 				return result, e
 			}
-			cur, e = r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: cur.ID, ExpectedRevision: cur.Revision, Status: projectworkspace.AppRunning, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
-			if e != nil {
-				return result, e
-			}
-			routes, e := r.publishVerifiedEndpointRoutes(ctx, cmd, cur, endpoints, aev)
+			routes, e := r.publishVerifiedEndpointRoutes(ctx, cmd, runtime, cur, endpoints, aev)
 			if e != nil {
 				return result, e
 			}
@@ -240,11 +290,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			result.Operations = append(result.Operations, pev.operation.ID)
 			result.Observations = append(result.Observations, pev.observation.ID)
 			result.Verifications = append(result.Verifications, pev.verification.ID)
-			cur, e := r.projects.Application(ctx, app.ID)
-			if e != nil {
+			// Do not treat an old inspection as proof of changed desired state.
+			if e := r.requireRuntimeRevision(ctx, runtime); e != nil {
 				return result, e
 			}
-			cur, e = r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: cur.ID, ExpectedRevision: cur.Revision, Status: projectworkspace.AppInstalled, ObservationID: pev.observation.ID, VerificationID: pev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+			if e := r.requireApplicationRevision(ctx, app); e != nil {
+				return result, e
+			}
+			cur, e := r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: app.ID, ExpectedRevision: app.Revision, Status: projectworkspace.AppInstalled, ObservationID: pev.observation.ID, VerificationID: pev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 			if e != nil {
 				return result, e
 			}
@@ -257,11 +310,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			result.Operations = append(result.Operations, aev.operation.ID)
 			result.Observations = append(result.Observations, aev.observation.ID)
 			result.Verifications = append(result.Verifications, aev.verification.ID)
-			cur, e := r.projects.Application(ctx, app.ID)
-			if e != nil {
+			// Do not treat an old inspection as proof of changed desired state.
+			if e := r.requireRuntimeRevision(ctx, runtime); e != nil {
 				return result, e
 			}
-			cur, e = r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: cur.ID, ExpectedRevision: cur.Revision, Status: projectworkspace.AppStopped, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+			if e := r.requireApplicationRevision(ctx, app); e != nil {
+				return result, e
+			}
+			cur, e := r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: app.ID, ExpectedRevision: app.Revision, Status: projectworkspace.AppStopped, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 			if e != nil {
 				return result, e
 			}
@@ -275,7 +331,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 	return result, nil
 }
 
-func (r *Reconciler) publishVerifiedEndpointRoutes(ctx context.Context, cmd ReconcileCommand, app projectworkspace.Application, endpoints []projectworkspace.Endpoint, ev evidence) ([]projectworkspace.EndpointRoute, error) {
+func (r *Reconciler) publishVerifiedEndpointRoutes(ctx context.Context, cmd ReconcileCommand, runtime projectworkspace.ProjectRuntime, app projectworkspace.Application, endpoints []projectworkspace.Endpoint, ev evidence) ([]projectworkspace.EndpointRoute, error) {
 	var inspected struct {
 		Container sandboxrunner.ContainerState `json:"container"`
 	}
@@ -294,6 +350,17 @@ func (r *Reconciler) publishVerifiedEndpointRoutes(ctx context.Context, cmd Reco
 	}
 	out := []projectworkspace.EndpointRoute{}
 	for _, endpoint := range endpoints {
+		// A read-only comparison before each externally visible route
+		// complements the atomic Endpoint revision check in the service.
+		if err := r.requireRuntimeRevision(ctx, runtime); err != nil {
+			return nil, err
+		}
+		if err := r.requireApplicationRevision(ctx, app); err != nil {
+			return nil, err
+		}
+		if err := r.requireEndpointManifest(ctx, app.ProjectRuntimeID, endpoints); err != nil {
+			return nil, err
+		}
 		if endpoint.ApplicationID == nil || *endpoint.ApplicationID != app.ID || endpoint.DesiredState != "enabled" {
 			continue
 		}
@@ -301,7 +368,7 @@ func (r *Reconciler) publishVerifiedEndpointRoutes(ctx context.Context, cmd Reco
 		if !ok {
 			return nil, fmt.Errorf("%w: verified container omitted endpoint %s port %d", ErrPostcondition, endpoint.ID, endpoint.InternalPort)
 		}
-		route, err := r.projects.ApplyEndpointRoute(ctx, projectworkspace.ApplyEndpointRouteCommand{EndpointID: endpoint.ID, ApplicationID: app.ID, ApplicationRevision: app.Revision, HostIP: p.HostIP, HostPort: p.HostPort, TransportProtocol: "tcp", ContainerSpecHash: inspected.Container.SpecHash, ObservationID: ev.observation.ID, VerificationID: ev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+		route, err := r.projects.ApplyEndpointRoute(ctx, projectworkspace.ApplyEndpointRouteCommand{EndpointID: endpoint.ID, ExpectedEndpointRevision: endpoint.Revision, ApplicationID: app.ID, ApplicationRevision: app.Revision, HostIP: p.HostIP, HostPort: p.HostPort, TransportProtocol: "tcp", ContainerSpecHash: inspected.Container.SpecHash, ObservationID: ev.observation.ID, VerificationID: ev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 		if err != nil {
 			return nil, err
 		}
@@ -397,24 +464,24 @@ func (r *Reconciler) applyAndVerify(ctx context.Context, workspaceID string, cmd
 func runtimeEnsurePlan(r projectworkspace.ProjectRuntime) mutationPlan {
 	input := mustJSON(map[string]any{"runtime_id": r.ID, "network_policy": rawOrObject(r.NetworkPolicyJSON), "action": "ensure"})
 	expectInternal := runtimeNetworkInternal(r.NetworkPolicyJSON)
-	return mutationPlan{ToolID: sandboxrunner.ToolRuntimeEnsure, InspectToolID: sandboxrunner.ToolRuntimeInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_runtime:" + r.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID}), DesiredState: mustJSON(map[string]any{"workspace_exists": true, "rootless": true, "network_internal": expectInternal}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolRuntimeInspect}), IdempotencyKey: fmt.Sprintf("project-runtime:%s:rev:%d:ensure", r.ID, r.Revision), ObservationType: "project_runtime_state", Postcondition: func(raw json.RawMessage) bool { return runtimeWorkspacePresent(raw, expectInternal) }}
+	return mutationPlan{ToolID: sandboxrunner.ToolRuntimeEnsure, InspectToolID: sandboxrunner.ToolRuntimeInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_runtime:" + r.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID}), DesiredState: mustJSON(map[string]any{"workspace_exists": true, "rootless": true, "network_internal": expectInternal}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolRuntimeInspect}), IdempotencyKey: fmt.Sprintf("project-runtime:%s:rev:%d:ensure", r.ID, r.Revision), ObservationType: "project_runtime_state", Postcondition: func(raw json.RawMessage) bool { return runtimeWorkspacePresent(raw, r.ID, expectInternal) }}
 }
 func runtimeStopPlan(r projectworkspace.ProjectRuntime) mutationPlan {
 	input := mustJSON(map[string]any{"runtime_id": r.ID, "action": "stop"})
-	return mutationPlan{ToolID: sandboxrunner.ToolRuntimeStop, InspectToolID: sandboxrunner.ToolRuntimeInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_runtime:" + r.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID}), DesiredState: mustJSON(map[string]any{"all_containers_stopped": true}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolRuntimeInspect}), IdempotencyKey: fmt.Sprintf("project-runtime:%s:rev:%d:stop", r.ID, r.Revision), ObservationType: "project_runtime_state", Postcondition: runtimeStopped}
+	return mutationPlan{ToolID: sandboxrunner.ToolRuntimeStop, InspectToolID: sandboxrunner.ToolRuntimeInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_runtime:" + r.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID}), DesiredState: mustJSON(map[string]any{"all_containers_stopped": true}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolRuntimeInspect}), IdempotencyKey: fmt.Sprintf("project-runtime:%s:rev:%d:stop", r.ID, r.Revision), ObservationType: "project_runtime_state", Postcondition: func(raw json.RawMessage) bool { return runtimeStopped(raw, r.ID) }}
 }
 func appPullPlan(r projectworkspace.ProjectRuntime, a projectworkspace.Application) mutationPlan {
 	input := mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID, "image": a.SourceRef, "action": "pull"})
 	inspect := mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID, "image": a.SourceRef})
 	return mutationPlan{ToolID: sandboxrunner.ToolAppPull, InspectToolID: sandboxrunner.ToolImageInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_app:" + a.ID, Input: input, InspectInput: inspect, DesiredState: mustJSON(map[string]any{"image_present": a.SourceRef}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolImageInspect}), IdempotencyKey: fmt.Sprintf("project-app:%s:rev:%d:pull", a.ID, a.Revision), ObservationType: "project_application_image", Postcondition: func(raw json.RawMessage) bool { return imagePresent(raw, a.SourceRef) }}
 }
-func appEnsurePlan(r projectworkspace.ProjectRuntime, a projectworkspace.Application, endpoints []sandboxrunner.PortSpec) mutationPlan {
+func appEnsurePlan(r projectworkspace.ProjectRuntime, a projectworkspace.Application, endpoints []sandboxrunner.PortSpec, endpointSHA256 string) mutationPlan {
 	input := mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID, "image": a.SourceRef, "runtime_spec": rawOrObject(a.RuntimeSpecJSON), "resource_limits": rawOrObject(r.ResourceLimitsJSON), "environment_bindings": rawOrObject(a.EnvironmentBindingsJSON), "network_policy": rawOrObject(r.NetworkPolicyJSON), "endpoints": endpoints, "action": "ensure"})
-	return mutationPlan{ToolID: sandboxrunner.ToolAppEnsure, InspectToolID: sandboxrunner.ToolAppInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_app:" + a.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID}), DesiredState: mustJSON(map[string]any{"status": "running", "isolation_verified": true}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppInspect}), Compensation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppStop, "runtime_id": r.ID, "application_id": a.ID}), IdempotencyKey: fmt.Sprintf("project-app:%s:rev:%d:ensure", a.ID, a.Revision), ObservationType: "project_application_state", Postcondition: appRunningIsolated}
+	return mutationPlan{ToolID: sandboxrunner.ToolAppEnsure, InspectToolID: sandboxrunner.ToolAppInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_app:" + a.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID}), DesiredState: mustJSON(map[string]any{"status": "running", "isolation_verified": true}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppInspect}), Compensation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppStop, "runtime_id": r.ID, "application_id": a.ID}), IdempotencyKey: fmt.Sprintf("project-app:%s:rev:%d:runtime-rev:%d:routes:%s:ensure", a.ID, a.Revision, r.Revision, endpointSHA256), ObservationType: "project_application_state", Postcondition: func(raw json.RawMessage) bool { return appRunningIsolated(raw, r.ID, a.ID) }}
 }
 func appStopPlan(r projectworkspace.ProjectRuntime, a projectworkspace.Application) mutationPlan {
 	input := mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID, "action": "stop"})
-	return mutationPlan{ToolID: sandboxrunner.ToolAppStop, InspectToolID: sandboxrunner.ToolAppInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_app:" + a.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID}), DesiredState: mustJSON(map[string]any{"status": []string{"stopped", "exited", "absent"}}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppInspect}), IdempotencyKey: fmt.Sprintf("project-app:%s:rev:%d:stop", a.ID, a.Revision), ObservationType: "project_application_state", Postcondition: appStopped}
+	return mutationPlan{ToolID: sandboxrunner.ToolAppStop, InspectToolID: sandboxrunner.ToolAppInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_app:" + a.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID}), DesiredState: mustJSON(map[string]any{"status": []string{"stopped", "exited", "absent"}}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppInspect}), IdempotencyKey: fmt.Sprintf("project-app:%s:rev:%d:stop", a.ID, a.Revision), ObservationType: "project_application_state", Postcondition: func(raw json.RawMessage) bool { return appStopped(raw, r.ID, a.ID) }}
 }
 
 func runtimeNetworkInternal(raw json.RawMessage) bool {
@@ -426,49 +493,67 @@ func runtimeNetworkInternal(raw json.RawMessage) bool {
 	}
 	return v.Mode != "external"
 }
-func runtimeWorkspacePresent(raw json.RawMessage, expectInternal bool) bool {
-	var v struct {
-		WorkspaceExists bool                        `json:"workspace_exists"`
-		Network         sandboxrunner.NetworkState  `json:"network"`
-		Engine          sandboxrunner.EngineProfile `json:"engine"`
-	}
-	return json.Unmarshal(raw, &v) == nil && v.WorkspaceExists && v.Engine.Rootless && v.Network.Internal == expectInternal
+func runtimeWorkspacePresent(raw json.RawMessage, runtimeID string, expectInternal bool) bool {
+ var v struct {
+  RuntimeID string `json:"runtime_id"`
+  WorkspaceExists bool `json:"workspace_exists"`
+  Network sandboxrunner.NetworkState `json:"network"`
+  Engine sandboxrunner.EngineProfile `json:"engine"`
+ }
+ return json.Unmarshal(raw,&v)==nil && runtimeID!="" && v.RuntimeID==runtimeID &&
+  v.WorkspaceExists && v.Engine.Rootless && v.Network.RuntimeID==runtimeID &&
+  v.Network.Name!="" && v.Network.Internal==expectInternal
 }
-func runtimeStopped(raw json.RawMessage) bool {
-	var v struct {
-		Containers []sandboxrunner.ContainerState `json:"containers"`
-		Engine     sandboxrunner.EngineProfile    `json:"engine"`
-	}
-	if json.Unmarshal(raw, &v) != nil || !v.Engine.Rootless {
-		return false
-	}
-	for _, c := range v.Containers {
-		if c.Status == "running" || c.Status == "starting" || c.Status == "restarting" {
-			return false
-		}
-	}
-	return true
+func runtimeStopped(raw json.RawMessage, runtimeID string) bool {
+ var v struct {
+  RuntimeID string `json:"runtime_id"`
+  Containers []sandboxrunner.ContainerState `json:"containers"`
+  Engine sandboxrunner.EngineProfile `json:"engine"`
+ }
+ if json.Unmarshal(raw,&v)!=nil || !v.Engine.Rootless || runtimeID=="" || v.RuntimeID!=runtimeID {
+  return false
+ }
+ // Unknown, paused and transitional states are NOT a verified stop.
+ for _,container:=range v.Containers {
+  switch container.Status {
+  case "stopped","exited","absent","created","configured":
+  default:
+   return false
+  }
+ }
+ return true
 }
-func appRunningIsolated(raw json.RawMessage) bool {
-	var v struct {
-		Container sandboxrunner.ContainerState `json:"container"`
-		Engine    sandboxrunner.EngineProfile  `json:"engine"`
-	}
-	return json.Unmarshal(raw, &v) == nil && v.Engine.Rootless && v.Container.Status == "running" && v.Container.IsolationVerified
+func appRunningIsolated(raw json.RawMessage, runtimeID, applicationID string) bool {
+ var v struct {
+  RuntimeID string `json:"runtime_id"`
+  ApplicationID string `json:"application_id"`
+  Container sandboxrunner.ContainerState `json:"container"`
+  Engine sandboxrunner.EngineProfile `json:"engine"`
+ }
+ return json.Unmarshal(raw,&v)==nil && runtimeID!="" && applicationID!="" &&
+  v.RuntimeID==runtimeID && v.ApplicationID==applicationID &&
+  v.Container.RuntimeID==runtimeID && v.Container.ApplicationID==applicationID &&
+  v.Container.SpecHash!="" && v.Engine.Rootless &&
+  v.Container.Status=="running" && v.Container.IsolationVerified
 }
-func appStopped(raw json.RawMessage) bool {
-	var v struct {
-		Container sandboxrunner.ContainerState `json:"container"`
-		Engine    sandboxrunner.EngineProfile  `json:"engine"`
-	}
-	if json.Unmarshal(raw, &v) != nil || !v.Engine.Rootless {
-		return false
-	}
-	switch v.Container.Status {
-	case "stopped", "exited", "absent", "created":
-		return true
-	}
-	return false
+func appStopped(raw json.RawMessage, runtimeID, applicationID string) bool {
+ var v struct {
+  RuntimeID string `json:"runtime_id"`
+  ApplicationID string `json:"application_id"`
+  Container sandboxrunner.ContainerState `json:"container"`
+  Engine sandboxrunner.EngineProfile `json:"engine"`
+ }
+ if json.Unmarshal(raw,&v)!=nil || !v.Engine.Rootless || runtimeID=="" ||
+   applicationID=="" || v.RuntimeID!=runtimeID || v.ApplicationID!=applicationID {
+  return false
+ }
+ if v.Container.RuntimeID!="" && v.Container.RuntimeID!=runtimeID {return false}
+ if v.Container.ApplicationID!="" && v.Container.ApplicationID!=applicationID {return false}
+ switch v.Container.Status {
+ case "stopped","exited","absent","created":
+  return true
+ }
+ return false
 }
 func imagePresent(raw json.RawMessage, ref string) bool {
 	var v struct {

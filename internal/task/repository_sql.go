@@ -118,6 +118,29 @@ FROM tasks WHERE workspace_id=? AND archived_at IS NULL ORDER BY updated_at DESC
 	return out, nil
 }
 
+// ListProjectWorkspace searches *within* one canonical Workspace before the
+// limit is applied. Scanning an arbitrary top-N tenancy Task list and filtering
+// in JavaScript can silently hide real jobs in active multi-Project installs.
+func (r *sqlRepository) ListProjectWorkspace(ctx context.Context, tenancyID, projectID, projectWorkspaceID string, limit int) ([]Task,error) {
+ if limit<1||limit>500{limit=100}
+ rows,err:=r.db.QueryContext(ctx,`SELECT
+ id,workspace_id,project_id,project_workspace_id,artifact_session_id,plan_id,parent_task_id,
+ objective,state,scheduling_class,priority,completion_json,result_json,
+ revision,ready_at,cancel_requested_at,archived_at,created_at,updated_at
+ FROM tasks
+ WHERE workspace_id=? AND project_id=? AND project_workspace_id=? AND archived_at IS NULL
+ ORDER BY updated_at DESC,id DESC LIMIT ?`,tenancyID,projectID,projectWorkspaceID,limit)
+ if err!=nil{return nil,fmt.Errorf("list scoped Workspace tasks: %w",err)}
+ defer rows.Close()
+ out:=make([]Task,0)
+ for rows.Next(){
+  t,err:=scanTask(rows)
+  if err!=nil{return nil,err}
+  out=append(out,t)
+ }
+ return out,rows.Err()
+}
+
 func (r *sqlRepository) ListArchived(ctx context.Context, workspaceID string, limit int) ([]Task, error) {
 	if limit < 1 || limit > 500 {
 		limit = 100
@@ -190,6 +213,14 @@ WHERE id = ? AND revision = ?`, archivedAt, updatedAt, taskID, expectedRevision)
 }
 
 func (r *sqlRepository) Transition(ctx context.Context, tx storage.Tx, tr transitionRecord) error {
+	// tasks.result_json is STRICT TEXT. database/sql binds a []byte as a
+	// BLOB even when those bytes contain valid JSON; therefore pass the
+	// validated JSON as a string while preserving nil as SQL NULL/no update.
+	// This is required for real independently verified Task completion.
+	var resultJSON any
+	if tr.Result != nil {
+		resultJSON=string(tr.Result)
+	}
 	res, err := tx.ExecContext(ctx, `
 UPDATE tasks
 SET state = ?,
@@ -202,7 +233,7 @@ WHERE id = ? AND revision = ? AND state = ?`,
 		tr.To,
 		tr.ReadyAt, tr.ReadyAt,
 		tr.CancelRequestedAt, tr.CancelRequestedAt,
-		tr.Result, tr.Result,
+		resultJSON,resultJSON,
 		tr.UpdatedAt,
 		tr.TaskID, tr.ExpectedRevision, tr.From,
 	)
@@ -278,6 +309,16 @@ func scanAttempt(row rowScanner) (Attempt, error) {
 	return a, nil
 }
 
+// The dependency predicate must use the caller's write transaction, so
+// predecessor completion and the new Attempt cannot race.
+func (r *sqlRepository) HardDependenciesSatisfied(ctx context.Context,tx storage.Tx,taskID string)(bool,error){
+ var blocked int
+ err:=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM task_dependencies d
+  JOIN tasks dep ON dep.id=d.depends_on_task_id
+  WHERE d.task_id=? AND d.dependency_type='hard'
+  AND (dep.state<>'complete' OR dep.archived_at IS NOT NULL)`,taskID).Scan(&blocked)
+ return blocked==0,err
+}
 func (r *sqlRepository) ActiveAttempt(ctx context.Context, tx storage.Tx, taskID string) (*Attempt, error) {
 	a, err := scanAttempt(tx.QueryRowContext(ctx, `
 SELECT id,task_id,attempt_number,worker_principal_id,status,recovery_snapshot_id,

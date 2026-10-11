@@ -90,3 +90,13 @@ The read-only plan endpoint requires the `coli` Python launcher to be present. W
 Colibri's `coli tune` profiling and a model download/format-conversion wizard are **separate future integration tasks**, not implied by this feature. Do not report the tier as tuned until a measured profile exists.
 
 Upstream references: https://github.com/JustVugg/colibri/blob/v1.12.1/docs/SETTINGS.md and https://github.com/JustVugg/colibri/blob/v1.12.1/docs/ENVIRONMENT.md.
+
+## RC11 Local Models — opt-in Colibri pin
+
+**Models → Local → Installed Models** now includes a checkbox named **Pin to Colibri** on each managed local model tile. It is enabled only when the deployed model is genuinely registered with **Colibri's native model-folder runtime**. Existing llama.cpp/GGUF deployments display the reason the checkbox is unavailable; OnePane does **not** silently convert models or install a different runtime.
+
+Checking the box saves the opt-in pin to that model deployment's persisted `runtime_config_json` (`colibri_pinned`). Once the Colibri model is activated by inference or **Hot swap**, the normal OnePane idle runtime reaper no longer stops it; a competing automatic or explicit Colibri-to-Colibri swap refuses to evict it until the operator unpins it. SQLite migration `0043_colibri_model_pin.sql` atomically restricts each Node to **one** pinned Colibri deployment; a second pin attempt fails without changing the existing selection. A separately managed Node may have its own pin. The pin survives OnePane service restart and model inventory rescans. Unpinning restores regular idle cleanup and hot swapping.
+
+**Pinning is neither CPU/GPU expert pinning nor a promise of permanent residency.** The Colibri expert tier settings still control SSD/RAM/VRAM placement, model loading remains on-demand, and a Node shutdown or an independently required host/resource recovery operation can stop a runtime. The checkbox does not reassign a Workspace's selected Assistant model, change Team/Research model seats, override security/authority rules, or create new automatic cloud fallbacks. Existing Colibri qualification, Agent Check, model routing and provider policies remain authoritative.
+
+Tests cover persisted configuration and unrelated tier preservation, uniqueness under same-node conflict, supported versus unsupported model types, reconciliation-facing inventory field, idle reaper protection, non-evictable pinned swap behaviour, and UI rollback on server rejection. Real Windows/Ubuntu installed-runtime and GPU residency acceptance remain outstanding before RC11 release.

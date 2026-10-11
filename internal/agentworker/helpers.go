@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/DigiLogicTech/OnePane/internal/authority"
 	"github.com/DigiLogicTech/OnePane/internal/event"
@@ -40,6 +41,57 @@ func boundedJSON(v json.RawMessage, n int) any {
 	}
 	return map[string]any{"truncated": true, "bytes": len(v)}
 }
+// diagnosticTail retains the most actionable last lines from compiler/test
+// output without cutting a UTF-8 codepoint or flooding a model's context.
+func diagnosticTail(v string,maxBytes int) string {
+ if maxBytes<=0{return ""}
+ if len(v)<=maxBytes{return v}
+ start:=len(v)-maxBytes
+ for start<len(v)&&!utf8.RuneStart(v[start]){start++}
+ return v[start:]
+}
+
+// boundedToolResult retains exit status and bounded stderr/stdout tails when
+// a governed sandbox tool result exceeds the normal Agent Worker context cap.
+// The full trusted ToolGateway result remains stored for provenance; only the
+// compact LLM continuation is reduced. Other tools use the existing limiter.
+func boundedToolResult(v json.RawMessage,maxBytes int) any {
+ if len(v)<=maxBytes{return boundedJSON(v,maxBytes)}
+ if maxBytes<1024{return boundedJSON(v,maxBytes)}
+ var payload struct{
+  RuntimeID string `json:"runtime_id"`
+  ApplicationID string `json:"application_id"`
+  Command []string `json:"command"`
+  Succeeded *bool `json:"succeeded"`
+  Result struct{
+   ExitCode *int `json:"exit_code"`
+   Stdout string `json:"stdout"`
+   Stderr string `json:"stderr"`
+  } `json:"result"`
+ }
+ if json.Unmarshal(v,&payload)!=nil||payload.Succeeded==nil||payload.Result.ExitCode==nil{
+  return boundedJSON(v,maxBytes)
+ }
+ args:=make([]string,0,8)
+ for i,arg:=range payload.Command{
+  if i>=8{break}
+  args=append(args,boundedString(arg,128))
+ }
+ tailLimit:=maxBytes/3
+ return map[string]any{
+  "truncated":true,"bytes":len(v),
+  "runtime_id":boundedString(payload.RuntimeID,128),
+  "application_id":boundedString(payload.ApplicationID,128),
+  "command_prefix":args,
+  "succeeded":*payload.Succeeded,
+  "exit_code":*payload.Result.ExitCode,
+  "stdout_bytes":len(payload.Result.Stdout),
+  "stderr_bytes":len(payload.Result.Stderr),
+  "stdout_tail":diagnosticTail(payload.Result.Stdout,tailLimit),
+  "stderr_tail":diagnosticTail(payload.Result.Stderr,tailLimit),
+ }
+}
+
 func defaultJSON(v json.RawMessage) json.RawMessage {
 	if len(v) == 0 || !json.Valid(v) {
 		return json.RawMessage(`{}`)
@@ -84,7 +136,14 @@ func completionAssuranceCriteria(raw json.RawMessage) json.RawMessage {
 
 func (s *Service) markReasoningDispatch(ctx context.Context, r *Run, kind, id string) error {
 	now := s.clock.UnixMilli()
-	res, err := s.db.ExecContext(ctx, `UPDATE agent_worker_runs SET step_count=step_count+1,last_candidate_kind=?,last_candidate_id=?,revision=revision+1,updated_at=? WHERE id=? AND revision=? AND status='running' AND step_count<max_steps`, kind, id, now, r.ID, r.Revision)
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE agent_worker_runs AS r
+		 SET step_count=step_count+1,last_candidate_kind=?,
+			 last_candidate_id=?,revision=revision+1,updated_at=?
+		 WHERE r.id=? AND r.revision=? AND r.status='running'
+			AND r.step_count<r.max_steps AND `+
+			activeWorkerExecutionBindingPredicate,
+		kind,id,now,r.ID,r.Revision)
 	if err != nil {
 		return err
 	}
@@ -142,27 +201,78 @@ func (s *Service) finishRun(ctx context.Context, id string, status RunStatus, la
 	return nil
 }
 
-func (s *Service) failRun(ctx context.Context, run Run, res TickResult, cause error) TickResult {
-	cur, err := s.tasks.Get(ctx, run.TaskID)
-	actor := WorkerPrincipal
-	if err == nil && (cur.State == task.StateRunning || cur.State == task.StateVerifying || cur.State == task.StateCompletionRequested) {
-		_, _ = s.tasks.Fail(ctx, task.TransitionCommand{TaskID: cur.ID, ExpectedRevision: cur.Revision, ActorPrincipalID: &actor, Reason: boundedString(cause.Error(), 1024)})
-	}
-	_ = s.finishRun(ctx, run.ID, RunFailed, cause.Error())
-	res.Status = "failed"
-	res.Error = cause.Error()
-	return res
+// transitionTerminalWorker commits Task, original Attempt, Worker, journal
+// and event in ONE transaction. A stale/foreign Worker may not terminalize a
+// different Task incarnation. Failure leaves the original states untouched
+// for explicit operator recovery, not an invented successful transition.
+func (s *Service) transitionTerminalWorker(
+ ctx context.Context,run Run,reason string,blocked bool,
+)error{
+ if s==nil||s.tx==nil||s.tasks==nil||run.ID==""||run.TaskID==""||
+  run.AttemptID==""||run.WorkspaceID==""||run.Revision<1||
+  run.WorkerPrincipalID!=WorkerPrincipal{return ErrInvalidWorkerState}
+ status:=RunFailed
+ stepStatus:="failed"
+ stepKind:="fail"
+ if blocked{status=RunBlocked;stepStatus="waiting";stepKind="wait"}
+ reason=boundedString(reason,1024)
+ return s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+  var taskRevision int64
+  var workerState RunStatus
+  err:=tx.QueryRowContext(ctx,`SELECT r.status,t.revision
+   FROM agent_worker_runs r
+   JOIN tasks t ON t.id=r.task_id AND t.workspace_id=r.workspace_id
+   WHERE r.id=? AND r.workspace_id=? AND r.task_id=? AND r.attempt_id=?
+    AND r.worker_principal_id=? AND r.revision=?`,
+   run.ID,run.WorkspaceID,run.TaskID,run.AttemptID,
+   WorkerPrincipal,run.Revision).Scan(&workerState,&taskRevision)
+  if err!=nil{return fmt.Errorf("%w: terminal Worker ownership unavailable: %v",ErrInvalidWorkerState,err)}
+  if workerState!=RunRunning{return ErrInvalidWorkerState}
+  actor:=WorkerPrincipal
+  err=s.tasks.TransitionWorkerTerminalInTransaction(ctx,tx,
+   task.TransitionCommand{
+    TaskID:run.TaskID,ExpectedRevision:taskRevision,
+    ActorPrincipalID:&actor,Reason:reason,
+   },run.AttemptID,WorkerPrincipal,blocked)
+  if err!=nil{return err}
+  now:=s.clock.UnixMilli()
+  var completed any=now
+  if blocked{completed=nil}
+  changed,err:=tx.ExecContext(ctx,`UPDATE agent_worker_runs
+   SET status=?,last_error=?,revision=revision+1,updated_at=?,completed_at=?
+   WHERE id=? AND workspace_id=? AND task_id=? AND attempt_id=?
+    AND worker_principal_id=? AND status='running' AND revision=?`,
+   status,reason,now,completed,run.ID,run.WorkspaceID,run.TaskID,
+   run.AttemptID,WorkerPrincipal,run.Revision)
+  if err!=nil{return err}
+  n,err:=changed.RowsAffected()
+  if err!=nil{return err}
+  if n!=1{return ErrInvalidWorkerState}
+  return s.journalInTransaction(ctx,tx,run.ID,stepKind,stepStatus,
+   nil,nil,nil,nil,map[string]any{
+    "action":"terminal_worker","reason":reason,
+    "task_id":run.TaskID,"attempt_id":run.AttemptID,
+   })
+ })
 }
-func (s *Service) blockRun(ctx context.Context, run Run, res TickResult, reason string) TickResult {
-	cur, err := s.tasks.Get(ctx, run.TaskID)
-	actor := WorkerPrincipal
-	if err == nil && cur.State == task.StateRunning {
-		_, _ = s.tasks.MarkBlocked(ctx, task.TransitionCommand{TaskID: cur.ID, ExpectedRevision: cur.Revision, ActorPrincipalID: &actor, Reason: boundedString(reason, 1024)})
-	}
-	_ = s.finishRun(ctx, run.ID, RunBlocked, reason)
-	res.Status = "blocked"
-	res.Error = reason
-	return res
+
+func (s *Service) failRun(ctx context.Context,run Run,res TickResult,cause error)TickResult{
+ if cause==nil{cause=ErrInvalidWorkerState}
+ if err:=s.transitionTerminalWorker(ctx,run,cause.Error(),false);err!=nil{
+  return failedResult(res,fmt.Errorf("Worker failure not committed (requires operator reconciliation): %w; original cause: %v",err,cause))
+ }
+ res.Status="failed"
+ res.Error=cause.Error()
+ return res
+}
+
+func (s *Service) blockRun(ctx context.Context,run Run,res TickResult,reason string)TickResult{
+ if err:=s.transitionTerminalWorker(ctx,run,reason,true);err!=nil{
+  return failedResult(res,fmt.Errorf("Worker block not committed (requires operator reconciliation): %w",err))
+ }
+ res.Status="blocked"
+ res.Error=reason
+ return res
 }
 
 func (s *Service) continueWithError(ctx context.Context, run Run, res TickResult, code string, cause error) TickResult {
@@ -175,7 +285,14 @@ func (s *Service) continueWithError(ctx context.Context, run Run, res TickResult
 	return res
 }
 
-func (s *Service) journal(ctx context.Context, runID, kind, status string, candidateKind, candidateID, proposalType, resultRef *string, detail any) error {
+// journal stores one immutable Worker observation and its audit event.
+// The regular path owns its transaction; atomic delegation may pass its own.
+func (s *Service) journal(ctx context.Context,runID,kind,status string,candidateKind,candidateID,proposalType,resultRef *string,detail any) error {
+ return s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx) error {
+  return s.journalInTransaction(ctx,tx,runID,kind,status,candidateKind,candidateID,proposalType,resultRef,detail)
+ })
+}
+func (s *Service) journalInTransaction(ctx context.Context,tx storage.Tx,runID,kind,status string,candidateKind,candidateID,proposalType,resultRef *string,detail any) error {
 	if detail == nil {
 		detail = map[string]any{}
 	}
@@ -185,23 +302,21 @@ func (s *Service) journal(ctx context.Context, runID, kind, status string, candi
 	}
 	now := s.clock.UnixMilli()
 	sid, _ := s.ids.New("awstep")
-	return s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		var seq int64
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(step_number),0)+1 FROM agent_worker_steps WHERE run_id=?`, runID).Scan(&seq); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_worker_steps(id,run_id,step_number,step_kind,status,candidate_kind,candidate_id,proposal_type,result_ref,detail_json,started_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, sid, runID, seq, kind, status, candidateKind, candidateID, proposalType, resultRef, string(raw), now, now); err != nil {
-			return err
-		}
-		var ws, taskID string
-		if err := tx.QueryRowContext(ctx, `SELECT workspace_id,task_id FROM agent_worker_runs WHERE id=?`, runID).Scan(&ws, &taskID); err != nil {
-			return err
-		}
-		eid, _ := s.ids.New("evt")
-		p, _ := json.Marshal(map[string]any{"run_id": runID, "task_id": taskID, "step_id": sid, "step_number": seq, "kind": kind, "status": status, "candidate_kind": candidateKind, "candidate_id": candidateID, "proposal_type": proposalType, "result_ref": resultRef, "detail": detail})
-		actor := WorkerPrincipal
-		return s.events.Append(ctx, tx, event.Event{ID: eid, WorkspaceID: &ws, Type: "agent_worker.step", AggregateType: "agent_worker_run", AggregateID: runID, ActorPrincipalID: &actor, Payload: p, OccurredAt: now})
-	})
+	var seq int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(step_number),0)+1 FROM agent_worker_steps WHERE run_id=?`, runID).Scan(&seq); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_worker_steps(id,run_id,step_number,step_kind,status,candidate_kind,candidate_id,proposal_type,result_ref,detail_json,started_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, sid, runID, seq, kind, status, candidateKind, candidateID, proposalType, resultRef, string(raw), now, now); err != nil {
+		return err
+	}
+	var ws, taskID string
+	if err := tx.QueryRowContext(ctx, `SELECT workspace_id,task_id FROM agent_worker_runs WHERE id=?`, runID).Scan(&ws, &taskID); err != nil {
+		return err
+	}
+	eid, _ := s.ids.New("evt")
+	p, _ := json.Marshal(map[string]any{"run_id": runID, "task_id": taskID, "step_id": sid, "step_number": seq, "kind": kind, "status": status, "candidate_kind": candidateKind, "candidate_id": candidateID, "proposal_type": proposalType, "result_ref": resultRef, "detail": detail})
+	actor := WorkerPrincipal
+	return s.events.Append(ctx, tx, event.Event{ID: eid, WorkspaceID: &ws, Type: "agent_worker.step", AggregateType: "agent_worker_run", AggregateID: runID, ActorPrincipalID: &actor, Payload: p, OccurredAt: now})
 }
 
 func (s *Service) findLease(ctx context.Context, workspaceID, taskID, capability string, action authority.ActionMode, resource string) (string, error) {

@@ -138,7 +138,9 @@ function a31HardwareMarkup(){
   return `<div class="hardware-summary"><strong>${escapeHtml(localProfileQA.cpu?.name||"CPU")}</strong><div>${bytesQA(localProfileQA.memory?.total_bytes||0)} RAM${localProfileQA.storage?.available_bytes?` · ${bytesQA(localProfileQA.storage.available_bytes)} free`:""}</div>${gpus.length?gpus.map((g,i)=>`<div>${escapeHtml(g.name||`GPU ${i}`)} · ${bytesQA(g.vram_bytes||0)} VRAM</div>`).join(""):"<div>No GPU detected</div>"}</div>`
 }
 function a31InstalledModelsMarkup(deployments){
-  return deployments.length?deployments.map(d=>`<article class="model-tile"><div><strong>${escapeHtml(d.display_name||d.model_ref)}</strong><div class="list-meta">${escapeHtml(d.quantization||"")} · ${escapeHtml(d.runtime_name||d.runtime_backend||"managed")} · ${escapeHtml(d.status||"unknown")}</div><div class="list-meta"><span class="pill">${escapeHtml(String(d.compute_mode||"auto").toUpperCase())}</span> · Agent Check: <strong>${escapeHtml(String(d.agent_check_status||"not_run").replaceAll("_"," "))}</strong> · Admission: ${escapeHtml(d.admission_status||"pending")}</div></div><div class="toolbar">${String(d.runtime_name||"").toLowerCase()==="colibri"?`<button class="btn" data-a42-colibri-tier="${escapeHtml(d.deployment_id)}">Tiering</button><button class="btn" data-a42-colibri-swap="${escapeHtml(d.deployment_id)}">Hot swap</button>`:`<button class="btn" data-a31-compute="${escapeHtml(d.deployment_id)}">Compute</button>`}<button class="btn" data-a31-model-spec="${escapeHtml(d.deployment_id)}">Spec sheet</button><button class="btn primary" data-a31-agent-check="${escapeHtml(d.deployment_id)}">Agent Check</button><button class="btn danger" data-a31-delete-model="${escapeHtml(d.deployment_id)}">Delete</button></div></article>`).join(""):'<div class="empty-state compact">No managed local models yet.</div>'
+  return deployments.length?deployments.map(d=>`<article class="model-tile"><div><strong>${escapeHtml(d.display_name||d.model_ref)}</strong><div class="list-meta">${escapeHtml(d.quantization||"")} · ${escapeHtml(d.runtime_name||d.runtime_backend||"managed")} · ${escapeHtml(d.status||"unknown")}</div><div class="list-meta"><span class="pill">${escapeHtml(String(d.compute_mode||"auto").toUpperCase())}</span> · Residency: <strong>${escapeHtml(String(d.residency_state||"unknown").replaceAll("_"," "))}</strong> · Agent Check: <strong>${escapeHtml(String(d.agent_check_status||"not_run").replaceAll("_"," "))}</strong> · Admission: ${escapeHtml(d.admission_status||"pending")}</div></div><div class="toolbar"><label class="a31-colibri-pin" title="${String(d.runtime_name||"").toLowerCase()==="colibri"?"Pin this Colibri model after activation so idle cleanup or other Colibri hot-swaps do not silently evict it. One pinned model per Node; unpin to switch.":"This GGUF/llama.cpp model cannot be used by Colibri without a compatible Colibri-native model folder. Register one from the model pool first."}">
+  <input type="checkbox" data-a31-colibri-pin="${escapeHtml(d.deployment_id)}" ${d.colibri_pinned?"checked":""} ${String(d.runtime_name||"").toLowerCase()==="colibri"&&String(d.runtime_backend||"").toLowerCase()==="colibri"?"":"disabled"}>
+  Pin to Colibri${d.colibri_pinned?" · pinned":""}</label>${String(d.runtime_name||"").toLowerCase()==="colibri"?`<button class="btn" data-a42-colibri-tier="${escapeHtml(d.deployment_id)}">Tiering</button><button class="btn" data-a42-colibri-swap="${escapeHtml(d.deployment_id)}">Hot swap</button>`:`<button class="btn" data-a31-compute="${escapeHtml(d.deployment_id)}">Compute</button>`}<button class="btn" data-a31-model-spec="${escapeHtml(d.deployment_id)}">Spec sheet</button><button class="btn primary" data-a31-agent-check="${escapeHtml(d.deployment_id)}">Agent Check</button><button class="btn danger" data-a31-delete-model="${escapeHtml(d.deployment_id)}">Delete</button></div></article>`).join(""):'<div class="empty-state compact">No managed local models yet.</div>'
 }
 function a31LlamaRuntimeCard(c,rows){
   const recommended=a31Array(rows).filter(x=>x.recommended),installed=a31Array(rows).filter(x=>x.installed);
@@ -162,7 +164,20 @@ async function a31RenderLocalModels(){
 
   a31BindComponentButtons(root,components);
   $$("[data-a31-compute]").forEach(b=>b.onclick=()=>a31OpenCompute(deployments.find(d=>d.deployment_id===b.dataset.a31Compute)));
-  $$("[data-a42-colibri-tier]").forEach(b=>b.onclick=()=>a42OpenColibriTier(deployments.find(d=>d.deployment_id===b.dataset.a42ColibriTier)));
+  $("[data-a31-colibri-pin]").forEach(box=>box.onchange=async()=>{
+    const desired=box.checked;box.disabled=true;
+    try{
+      const state=await apiRequest("/v1/local-ai/deployments/"+encodeURIComponent(box.dataset.a31ColibriPin)+"/colibri-pin",{
+        method:"PATCH",body:JSON.stringify({workspace_id:onepaneWorkspace,pinned:desired})
+      });
+      notice(desired?"Colibri pin saved. Model remains ready after its next activation.":"Colibri pin removed. Normal idle cleanup and model switching resumed.");
+      await renderModels();
+    }catch(ex){
+      box.checked=!desired;box.disabled=false;
+      notice("Colibri pin unchanged: "+ex.message,"bad");
+    }
+  });
+  $("[data-a42-colibri-tier]").forEach(b=>b.onclick=()=>a42OpenColibriTier(deployments.find(d=>d.deployment_id===b.dataset.a42ColibriTier)));
   $$("[data-a42-colibri-swap]").forEach(b=>b.onclick=()=>a42SwapColibri(deployments.find(d=>d.deployment_id===b.dataset.a42ColibriSwap),b));
   $$("[data-a31-model-spec]").forEach(b=>b.onclick=()=>qa5InspectModel(deployments.find(d=>d.deployment_id===b.dataset.a31ModelSpec)));
   $$("[data-a31-agent-check]").forEach(b=>b.onclick=()=>qa5AgentCheck(deployments.find(d=>d.deployment_id===b.dataset.a31AgentCheck)));

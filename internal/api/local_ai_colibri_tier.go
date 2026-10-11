@@ -21,6 +21,43 @@ func (s *Server) requireColibriTier(w http.ResponseWriter) (colibriTierService,b
     return service,true
 }
 
+type colibriPinService interface {
+ ColibriPin(context.Context,string)(localai.ColibriPinState,error)
+ SetColibriPin(context.Context,string,bool)(localai.ColibriPinState,error)
+}
+func(s *Server)getColibriPin(w http.ResponseWriter,r *http.Request){
+ i,ok:=s.authenticate(w,r);if !ok{return}
+ ws:=strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+ dep:=strings.TrimSpace(r.PathValue("deploymentID"))
+ if !s.authorizeColibriDeployment(w,r,ws,dep,"model.read"){return}
+ if !s.authorize(w,r,i,ws,"model.read"){return}
+ svc,ok:=s.localAI.(colibriPinService)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Colibri pin unavailable");return}
+ out,err:=svc.ColibriPin(r.Context(),dep)
+ respondDomain(w,out,err,http.StatusOK)
+}
+func(s *Server)setColibriPin(w http.ResponseWriter,r *http.Request){
+ i,ok:=s.authenticate(w,r);if !ok{return}
+ var in struct{
+  WorkspaceID string `json:"workspace_id"`
+  Pinned *bool `json:"pinned"`
+ }
+ if !decodeJSON(w,r,&in){return}
+ if in.Pinned==nil{writeError(w,http.StatusBadRequest,"pinned must be a boolean");return}
+ ws:=strings.TrimSpace(in.WorkspaceID)
+ dep:=strings.TrimSpace(r.PathValue("deploymentID"))
+ if !s.authorizeColibriDeployment(w,r,ws,dep,"model.write"){return}
+ if !s.authorize(w,r,i,ws,"model.write"){return}
+ svc,ok:=s.localAI.(colibriPinService)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Colibri pin unavailable");return}
+ out,err:=svc.SetColibriPin(r.Context(),dep,*in.Pinned)
+ if err!=nil{
+  writeError(w,http.StatusConflict,"Colibri pin unavailable: check model compatibility and existing Node pin")
+  return
+ }
+ writeJSON(w,http.StatusOK,out)
+}
+
 type colibriSwapService interface {
     ColibriHotSwap(context.Context, string) (localai.ColibriSwapState, error)
     ColibriHotSwapStatus(context.Context, string) (localai.ColibriSwapState, error)

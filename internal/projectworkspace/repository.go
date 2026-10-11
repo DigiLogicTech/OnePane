@@ -19,6 +19,7 @@ type repository interface {
 	Runtime(context.Context, string) (ProjectRuntime, error)
 	RuntimeTx(context.Context, storage.Tx, string) (ProjectRuntime, error)
 	RuntimeByProject(context.Context, string) (ProjectRuntime, error)
+	RuntimeByProjectWorkspace(context.Context, string, string) (ProjectRuntime, error)
 	InsertRuntime(context.Context, storage.Tx, ProjectRuntime) error
 	UpdateRuntimeDesired(context.Context, storage.Tx, ProjectRuntime, RuntimeDesiredState, int64) error
 	UpdateRuntimePolicy(context.Context, storage.Tx, ProjectRuntime, json.RawMessage, json.RawMessage, int64) error
@@ -27,6 +28,7 @@ type repository interface {
 	ListApplications(context.Context, string) ([]Application, error)
 	ApplicationTx(context.Context, storage.Tx, string) (Application, error)
 	InsertApplication(context.Context, storage.Tx, Application) error
+	UpdateApplicationDesired(context.Context, storage.Tx, Application, AppDesiredState, int64) error
 	UpdateApplicationObserved(context.Context, storage.Tx, Application, AppStatus, int64) error
 	InsertEndpoint(context.Context, storage.Tx, Endpoint) error
 	Endpoint(context.Context, string) (Endpoint, error)

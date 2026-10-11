@@ -17,6 +17,7 @@ type repository interface {
 	NextAttemptNumber(context.Context, storage.Tx, string) (int64, error)
 	InsertAttempt(context.Context, storage.Tx, Attempt) error
 	ActiveAttempt(context.Context, storage.Tx, string) (*Attempt, error)
+	HardDependenciesSatisfied(context.Context, storage.Tx, string) (bool, error)
 	TransitionAttempt(context.Context, storage.Tx, string, AttemptState, AttemptState, int64) error
 	ValidCompletionEvidence(context.Context, storage.Tx, string, string) (bool, error)
 }

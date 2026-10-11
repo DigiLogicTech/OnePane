@@ -246,7 +246,7 @@ function a43WorkspaceContext(workspace){
  const role=mode==="council"?cfg.council:mode==="team"?cfg.team:cfg.supervisor;
  const values=[["Mode",titleCase(mode)],["Model",String(role?.model||"auto")],
   ["Routing",workspace.routing?.enabled===false?"Off":"On"],
-  ["Sandbox",workspace.sandbox?.internet?"Internet allowed":"Restricted"]];
+  ["Execution","Workspace isolation pending"]];
  return `<div class="a43-workspace-context">${values.map(([name,value])=>`<span class="a43-context-chip"><small>${escapeHtml(name)}</small><strong>${escapeHtml(value)}</strong></span>`).join("")}</div>`;
 }
 async function renderWorkspaces(){

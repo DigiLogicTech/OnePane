@@ -154,42 +154,71 @@ func (s *Service) Turns(ctx context.Context, projectID string, limit int) ([]Tur
 }
 
 func (s *Service) contextSnapshot(ctx context.Context, projectID, requestedPWS string) (json.RawMessage, string, string, string, error) {
-	var projectName, workspaceID, projectPolicy string
-	if err := s.db.QueryRowContext(ctx, `SELECT name,workspace_id,project_policy_json FROM projects WHERE id=? AND status='active'`, projectID).Scan(&projectName, &workspaceID, &projectPolicy); err != nil { return nil,"","","",err }
+	requestedPWS = strings.TrimSpace(requestedPWS)
+	var projectName, workspaceID string
+	// Project policy is authoritative service configuration. It may carry
+	// operator restrictions, provider rules or opaque credential references;
+	// none of it is implicitly approved as model context.
+	if err := s.db.QueryRowContext(ctx, `SELECT name,workspace_id FROM projects WHERE id=? AND status='active'`, projectID).Scan(&projectName, &workspaceID); err != nil { return nil,"","","",err }
 	type pwsRow struct{ ID, Name, Settings string }
 	pwsRows := []pwsRow{}
 	rows, err := s.db.QueryContext(ctx, `SELECT id,name,ai_settings_json FROM project_workspaces WHERE project_id=? AND status='active' ORDER BY updated_at DESC,id`, projectID)
 	if err != nil { return nil,"","","",err }
 	for rows.Next(){ var x pwsRow; if err:=rows.Scan(&x.ID,&x.Name,&x.Settings);err!=nil{rows.Close();return nil,"","","",err};pwsRows=append(pwsRows,x) }; rows.Close()
 	selected := pwsRow{}
-	for _,x:=range pwsRows { if requestedPWS!=""&&x.ID==requestedPWS { selected=x;break } }
-	if selected.ID==""&&len(pwsRows)>0 { selected=pwsRows[0] }
-	mode := "direct"; teamID := ""
-	if selected.Settings!="" {
-		var cfg map[string]any
-		if json.Unmarshal([]byte(selected.Settings), &cfg)==nil {
-			if o,ok:=cfg["orchestration"].(map[string]any);ok {
-				if m,ok:=o["mode"].(string);ok { switch strings.ToLower(m){case "team","council":mode=strings.ToLower(m)} }
-				if r,ok:=cfg["routing"].(map[string]any);ok { if enabled,ok:=r["enabled"].(bool);ok&&!enabled { mode="direct" } }
-				if role,ok:=o[mode].(map[string]any);ok { if v,ok:=role["team_id"].(string);ok { teamID=v } }
-				if v,ok:=o["team_id"].(string);ok&&teamID=="" { teamID=v }
+	for _, x := range pwsRows {
+		if requestedPWS != "" && x.ID == requestedPWS { selected = x; break }
+	}
+	if requestedPWS != "" && selected.ID == "" {
+		// Never silently switch a requested Workspace to a newer sibling,
+		// particularly when the requested Workspace was archived or removed.
+		return nil, "", "", "", fmt.Errorf("%w: Project Workspace is inactive or outside the selected Project", ErrInvalid)
+	}
+	if selected.ID == "" && len(pwsRows) > 0 { selected = pwsRows[0] }
+	mode, teamID := workspaceExecutionProfile(selected.Settings)
+	// Task objectives and event identities are Workspace-private; the
+	// Project Orchestrator receives only selected Workspace activity plus
+	// bounded Project aggregate events. No implicit peer evidence sharing.
+	tasks, events, err := workspaceOrchestratorActivity(ctx, s.db, workspaceID, projectID, selected.ID)
+	if err != nil { return nil, "", "", "", fmt.Errorf("read scoped Project Workspace activity: %w", err) }
+	// Runtime context belongs to this precise canonical Workspace. A
+	// Project-wide ORDER BY updated_at used to impersonate whichever sibling
+	// runtime last changed as the currently selected development environment.
+	runtime := map[string]any{}
+	if selected.ID != "" {
+		runtime = map[string]any{
+			"scope": "project_workspace", "project_workspace_id": selected.ID,
+			"status": "not_provisioned",
+		}
+		var runtimeID, runtimeStatus, runtimeDesired, runtimeBackend string
+		var runtimeUpdated int64
+		err = s.db.QueryRowContext(ctx, `SELECT id,status,desired_state,backend,updated_at
+			FROM project_runtimes WHERE project_id=? AND project_workspace_id=?`,
+			projectID, selected.ID).Scan(&runtimeID, &runtimeStatus, &runtimeDesired, &runtimeBackend, &runtimeUpdated)
+		if err == nil {
+			runtime = map[string]any{
+				"id": runtimeID, "status": runtimeStatus, "desired_state": runtimeDesired,
+				"backend": runtimeBackend, "updated_at": runtimeUpdated,
+				"scope": "project_workspace", "project_workspace_id": selected.ID,
 			}
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return nil, "", "", "", fmt.Errorf("read scoped Workspace runtime: %w", err)
 		}
 	}
-	tasks := []map[string]any{}
-	tr, _ := s.db.QueryContext(ctx, `SELECT id,objective,state,scheduling_class,priority,created_at,updated_at FROM tasks WHERE project_id=? ORDER BY updated_at DESC LIMIT 24`, projectID)
-	if tr!=nil { defer tr.Close(); for tr.Next(){var idv,obj,st,sc string;var pr int;var ca,ua int64;if tr.Scan(&idv,&obj,&st,&sc,&pr,&ca,&ua)==nil{tasks=append(tasks,map[string]any{"id":idv,"objective":obj,"state":st,"scheduling_class":sc,"priority":pr,"created_at":ca,"updated_at":ua})}} }
-	events := []map[string]any{}
-	er,_:=s.db.QueryContext(ctx, `SELECT sequence,event_type,aggregate_type,aggregate_id,occurred_at FROM events WHERE workspace_id=? AND (aggregate_id=? OR json_extract(payload_json,'$.project_id')=? OR aggregate_id IN (SELECT id FROM tasks WHERE project_id=?)) ORDER BY sequence DESC LIMIT 20`,workspaceID,projectID,projectID,projectID)
-	if er!=nil { defer er.Close(); for er.Next(){var seq,at int64;var et,ag,aid string;if er.Scan(&seq,&et,&ag,&aid,&at)==nil{events=append(events,map[string]any{"sequence":seq,"type":et,"aggregate_type":ag,"aggregate_id":aid,"occurred_at":at})}} }
-	runtime := map[string]any{}
-	var runtimeID,runtimeStatus,runtimeDesired,runtimeBackend string
-	var runtimeUpdated int64
-	if s.db.QueryRowContext(ctx, `SELECT id,status,desired_state,backend,updated_at FROM project_runtimes WHERE project_id=? ORDER BY updated_at DESC LIMIT 1`, projectID).Scan(&runtimeID,&runtimeStatus,&runtimeDesired,&runtimeBackend,&runtimeUpdated)==nil {
-		runtime=map[string]any{"id":runtimeID,"status":runtimeStatus,"desired_state":runtimeDesired,"backend":runtimeBackend,"updated_at":runtimeUpdated}
+	// Cross-Workspace orchestration needs names and canonical IDs, not the
+	// raw sibling AI configuration. Routing, access, tokens or future
+	// credential refs in ai_settings_json must not enter model context.
+	// The trusted service has already derived the selected execution_mode.
+	pwss:=[]map[string]any{}
+	for _,x:=range pwsRows{
+		pwss=append(pwss,map[string]any{"id":x.ID,"name":x.Name})
 	}
-	pwss:=[]map[string]any{};for _,x:=range pwsRows{pwss=append(pwss,map[string]any{"id":x.ID,"name":x.Name,"ai_settings":json.RawMessage(x.Settings)})}
-	snapshot:=map[string]any{"project":map[string]any{"id":projectID,"name":projectName,"policy":json.RawMessage(projectPolicy)},"project_workspaces":pwss,"selected_project_workspace_id":selected.ID,"execution_mode":mode,"tasks":tasks,"recent_events":events,"runtime":runtime}
+	snapshot:=map[string]any{"project":map[string]any{"id":projectID,"name":projectName},"project_workspaces":pwss,"selected_project_workspace_id":selected.ID,"execution_mode":mode,"tasks":tasks,"recent_events":events,"runtime":runtime}
+	if selected.ID!=""{
+		readiness,err:=inspectWorkspaceToolchain(ctx,s.db,projectID,selected.ID)
+		if err!=nil{return nil,"","","",fmt.Errorf("Project Workspace toolchain readiness: %w",err)}
+		snapshot["toolchain_readiness"]=readiness
+	}
 	raw,_:=json.Marshal(snapshot)
 	return raw,selected.ID,mode,teamID,nil
 }
@@ -211,10 +240,13 @@ func extractText(raw []byte) string {
 
 func (s *Service) reason(ctx context.Context, workspaceID, actor, objective string, snapshot json.RawMessage) (string, map[string]any, *string, error) {
 	label:=policy.DataLabel{WorkspaceID:workspaceID,Confidentiality:policy.ConfidentialityInternal,Residency:policy.ResidencyAny,Trust:policy.TrustUserInstruction}
-	decision,err:=s.scheduler.Route(ctx,scheduler.RouteRequest{WorkspaceID:workspaceID,CapabilityID:"inference.general",RoleName:"project-orchestrator",ProtocolLevel:"L1",ContextTokens:8192,DataLabel:label,AllowUntested:true,AllowLimited:true,AllowMediated:true,AllowDegraded:true,PreferZeroIncrementalCost:true,AllowedKinds:[]scheduler.CandidateKind{scheduler.CandidateModel},ComputePreference:"auto"})
+	// No per-Project opt-in for external Orchestrator reasoning exists yet.
+	// Never send ungranted Project snapshots to free/remote/cloud providers,
+	// and never use an untested deployment merely to satisfy a route.
+	decision,err:=s.scheduler.Route(ctx,scheduler.RouteRequest{WorkspaceID:workspaceID,CapabilityID:"inference.general",RoleName:"project-orchestrator",ProtocolLevel:"L1",ContextTokens:8192,DataLabel:label,AllowUntested:false,AllowLimited:true,AllowMediated:true,AllowDegraded:true,RequireZeroIncrementalCost:true,PreferZeroIncrementalCost:true,LocalOnly:true,AllowedKinds:[]scheduler.CandidateKind{scheduler.CandidateModel},ComputePreference:"auto"})
 	if err!=nil||decision.Selected==nil{return "",nil,nil,fmt.Errorf("route project orchestrator: %w",err)}
 	dep:=decision.Selected.Candidate.ID
-	system:=`You are the logical OnePane Project Orchestrator. Coordinate project work but never claim direct tool, filesystem, secret, node, or approval authority. Use only the supplied bounded Project context. Return one JSON object: {"answer":"...", "action":"answer|task", "objective":"...", "project_workspace_id":"...", "mode":"direct|team|council"}. Use action=task only when the user is asking OnePane to perform work rather than explain or report state.`
+	system:=`You are the logical OnePane Project Orchestrator. Coordinate project work but never claim direct tool, filesystem, secret, node, or approval authority. Use only the supplied bounded Project context. Return one JSON object: {"answer":"...", "action":"answer|task", "objective":"...", "project_workspace_id":"..."}. You may suggest a Workspace for requests without an explicit Workspace choice, but execution mode and Team are locked to the selected Workspace's operator configuration. Use action=task only when the user is asking OnePane to perform work rather than explain or report state.`
 	req,_:=json.Marshal(map[string]any{"messages":[]map[string]string{{"role":"system","content":system},{"role":"user","content":"Project context:\n"+string(snapshot)+"\n\nUser objective:\n"+objective}},"max_tokens":1200,"temperature":0.2})
 	manifest,_:=json.Marshal(map[string]any{"project_context":json.RawMessage(snapshot),"logical_role":"project-orchestrator"})
 	inf,err:=s.inference.Execute(ctx,inference.ExecuteCommand{WorkspaceID:workspaceID,PrincipalID:actor,DeploymentID:dep,CapabilityJSON:json.RawMessage(`{"id":"inference.general"}`),ContextManifestJSON:manifest,ClassificationMetadata:json.RawMessage(`{"source":"project-orchestrator"}`),InputLabel:label,RequestJSON:req,ActorPrincipalID:&actor})
@@ -229,31 +261,75 @@ func (s *Service) reason(ctx context.Context, workspaceID, actor, objective stri
 
 func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 	c.ProjectID,c.Objective,c.ActorPrincipalID=strings.TrimSpace(c.ProjectID),strings.TrimSpace(c.Objective),strings.TrimSpace(c.ActorPrincipalID)
+	c.ProjectWorkspaceID = strings.TrimSpace(c.ProjectWorkspaceID)
 	if c.ProjectID==""||c.Objective==""||c.ActorPrincipalID==""{return TurnResult{},ErrInvalid}
 	o,err:=s.Ensure(ctx,c.ProjectID);if err!=nil{return TurnResult{},err}
 	snapshot,pwsID,mode,teamID,err:=s.contextSnapshot(ctx,c.ProjectID,c.ProjectWorkspaceID);if err!=nil{return TurnResult{},err}
 	userTurnID,_:=s.ids.New("pturn");now:=s.clock.UnixMilli()
-	_,_ = s.db.ExecContext(ctx,`INSERT INTO project_orchestrator_turns(id,orchestrator_id,assistant_thread_id,task_id,role,content,context_json,provenance_json,created_at) VALUES(?,?,?,NULL,'user',?,'{}','{}',?)`,userTurnID,o.ID,c.AssistantThreadID,c.Objective,now)
-	_,_ = s.db.ExecContext(ctx,`UPDATE project_orchestrators SET status='working',revision=revision+1,updated_at=? WHERE id=?`,now,o.ID)
+	// Audit admission must be durable before any model inference or Task
+	// creation. Never suppress a failed turn insert or state transition.
+	// Recording both changes atomically also prevents orphan user turns
+	// when an Orchestrator status write is rejected by SQLite.
+	if err:=s.tx.Within(ctx,func(ctx context.Context, tx storage.Tx) error{
+		if _,e:=tx.ExecContext(ctx,`INSERT INTO project_orchestrator_turns(id,orchestrator_id,assistant_thread_id,task_id,role,content,context_json,provenance_json,created_at) VALUES(?,?,?,NULL,'user',?,'{}','{}',?)`,userTurnID,o.ID,c.AssistantThreadID,c.Objective,now);e!=nil{return e}
+		result,e:=tx.ExecContext(ctx,`UPDATE project_orchestrators SET status='working',revision=revision+1,updated_at=? WHERE id=?`,now,o.ID)
+		if e!=nil{return e}
+		changed,e:=result.RowsAffected()
+		if e!=nil{return e}
+		if changed!=1{return fmt.Errorf("Project Orchestrator status changed unexpectedly")}
+		return nil
+	});err!=nil{return TurnResult{},fmt.Errorf("persist Project Orchestrator user turn: %w",err)}
 	text,plan,deploymentID,reasonErr:=s.reason(ctx,o.WorkspaceID,c.ActorPrincipalID,c.Objective,snapshot)
+	// An unscoped initial turn may suggest a *different* active Workspace.
+	// The first reasoning pass was supplied the original Workspace's private
+	// Task context. Never persist that pass or use its proposed objective for
+	// another Workspace. Rebuild the snapshot for the destination and reason
+	// once more using only that Workspace's own evidence. A second proposal
+	// cannot trigger an unbounded series of redirections.
+	resolvedPin:=c.ProjectWorkspaceID
+	if reasonErr==nil && resolvedPin=="" {
+		candidate:=selectModelProposedWorkspace(ctx,s.db,c.ProjectID,"",pwsID,plan["project_workspace_id"])
+		if candidate!=pwsID {
+			boundSnapshot,boundID,_,_,snapshotErr:=s.contextSnapshot(ctx,c.ProjectID,candidate)
+			if snapshotErr!=nil{return TurnResult{},snapshotErr}
+			snapshot=boundSnapshot
+			resolvedPin=boundID
+			text,plan,deploymentID,reasonErr=s.reason(ctx,o.WorkspaceID,c.ActorPrincipalID,c.Objective,snapshot)
+		}
+	}
 	answer:=strings.TrimSpace(text);action:="answer";objective:=c.Objective
 	if v,ok:=plan["answer"].(string);ok&&strings.TrimSpace(v)!=""{answer=strings.TrimSpace(v)}
 	if v,ok:=plan["action"].(string);ok{action=strings.ToLower(strings.TrimSpace(v))}
 	if v,ok:=plan["objective"].(string);ok&&strings.TrimSpace(v)!=""{objective=strings.TrimSpace(v)}
-	if v,ok:=plan["project_workspace_id"].(string);ok&&strings.TrimSpace(v)!="" {
-		proposed:=strings.TrimSpace(v)
-		var exists int
-		if s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_workspaces WHERE id=? AND project_id=? AND status='active'`,proposed,c.ProjectID).Scan(&exists)==nil&&exists==1 { pwsID=proposed }
-	}
-	if v,ok:=plan["mode"].(string);ok {switch strings.ToLower(v){case "direct","team","council":mode=strings.ToLower(v)}}
+	// Keep the operator's explicit Workspace selection authoritative even
+	// when an untrusted model proposes a different active sibling.
+	pwsID, mode, teamID, err = resolveOrchestratorWorkspaceProfile(ctx, s.db, c.ProjectID,
+		resolvedPin, pwsID, plan["project_workspace_id"])
+	if err != nil { return TurnResult{}, err }
 	if reasonErr!=nil { answer="Project Orchestrator is available, but no eligible reasoning model could complete this turn: "+reasonErr.Error(); action="answer" }
 	if c.ForceTask { action="task"; c.AllowTaskCreation=true }
 	if action=="task" && !c.AllowTaskCreation { action="answer"; answer=answer+"\n\nThis turn was read-only; no Task was created." }
 	var taskID,sessionID *string
 	disposition:="answered"
 	if action=="task" {
-		completion,_:=json.Marshal(map[string]any{"source":"project-orchestrator","project_workspace_id":pwsID,"requested_mode":mode})
-		t,terr:=s.tasks.Create(ctx,task.CreateCommand{WorkspaceID:o.WorkspaceID,ProjectID:&c.ProjectID,Objective:objective,SchedulingClass:task.ClassUserInteractive,Priority:10,Completion:completion,ActorPrincipalID:&c.ActorPrincipalID})
+		// Use canonical relational ownership, not only model-supplied JSON.
+		// When an approved toolchain exists, pin its exact digest to this Task,
+		// so later approval changes cannot silently substitute a build image.
+		completionState:=map[string]any{"source":"project-orchestrator","project_workspace_id":pwsID,"requested_mode":mode}
+		var canonicalPWS *string
+		if pwsID!=""{
+			canonicalPWS=&pwsID
+			readiness,checkErr:=inspectWorkspaceToolchain(ctx,s.db,c.ProjectID,pwsID)
+			if checkErr!=nil{return TurnResult{},checkErr}
+			if readiness.ManifestSHA256!=""{
+				completionState["toolchain_manifest_sha256"]=readiness.ManifestSHA256
+			}
+			if readiness.Status!="ready_for_preflight"{
+				answer=answer+"\\n\\nWorkspace toolchain: "+readiness.Status+". "+readiness.NextAction
+			}
+		}
+		completion,_:=json.Marshal(completionState)
+		t,terr:=s.tasks.Create(ctx,task.CreateCommand{WorkspaceID:o.WorkspaceID,ProjectID:&c.ProjectID,ProjectWorkspaceID:canonicalPWS,Objective:objective,SchedulingClass:task.ClassUserInteractive,Priority:10,Completion:completion,ActorPrincipalID:&c.ActorPrincipalID})
 		if terr!=nil { disposition="blocked"; answer=answer+"\n\nTask creation was blocked: "+terr.Error() } else {
 			taskID=&t.ID;disposition="task_created"
 			if (mode=="team"||mode=="council")&&teamID!=""&&s.teams!=nil {

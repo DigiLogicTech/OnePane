@@ -67,3 +67,49 @@ func TestManualWebCouncilTaskExecutionIsBlocked(t *testing.T) {
 		}
 	}
 }
+
+func TestResearchModeEnforcesStrictModelSeatsEvenWithoutOptionalFlags(t *testing.T){
+ mode,settings:=researchConfiguration(json.RawMessage(`{"research_mode":true,"research":{"critique_rounds":3,"synthesis_pass":true,"anonymized_cross_critique":true}}`))
+ if !mode{t.Fatal("Research mode was lost")}
+ if !settings.PinModels||!settings.DisableModelSubstitution||
+  !settings.SameModelRetries||!settings.PreserveFailedSeats||
+  !settings.IndependentFirstPass||!settings.ScopedEvidence||
+  !settings.RecordRawOutputs||!settings.FullProvenance||
+  !settings.RequireAllSeats{
+  t.Fatalf("incomplete mandatory Research integrity profile: %+v",settings)
+ }
+ if settings.CritiqueRounds!=3||!settings.SynthesisPass||!settings.AnonymizedCrossCritique{
+  t.Fatalf("strict mode discarded explicit research workflow configuration: %+v",settings)
+ }
+ if got:=ResearchTotalRounds(settings);got!=5{t.Fatalf("unexpected round count: %d",got)}
+}
+
+func TestResearchModeCannotDisableStrictSettingsExplicitly(t *testing.T){
+ raw:=json.RawMessage(`{"research_mode":true,"research":{"pin_models":false,
+  "disable_model_substitution":false,"same_model_retries":false,
+  "preserve_failed_seats":false,"independent_first_pass":false,
+  "scoped_evidence":false,"record_raw_outputs":false,"full_provenance":false,
+  "require_all_seats":false}}`)
+ _,settings:=researchConfiguration(raw)
+ strict:=StrictResearchSettings(ResearchSettings{})
+ if settings.PinModels!=strict.PinModels||
+  settings.DisableModelSubstitution!=strict.DisableModelSubstitution||
+  settings.SameModelRetries!=strict.SameModelRetries||
+  settings.RequireAllSeats!=strict.RequireAllSeats||
+  settings.FullProvenance!=strict.FullProvenance{
+  t.Fatalf("explicit false flags weakened Research integrity: %+v",settings)
+ }
+ // The frozen session settings are separate data, not mutated in-place.
+ if got:=string(raw);!json.Valid([]byte(got))||got==""{
+  t.Fatal("original team configuration lost")
+ }
+}
+
+func TestOrdinaryTeamModeNotForcedIntoResearchDefaults(t *testing.T){
+ mode,settings:=researchConfiguration(json.RawMessage(`{"research_mode":false,"research":{"critique_rounds":4}}`))
+ if mode||settings.PinModels||settings.DisableModelSubstitution||
+  settings.RequireAllSeats||settings.IndependentFirstPass{
+  t.Fatalf("ordinary Team unexpectedly became strict Research: %+v",settings)
+ }
+ if settings.CritiqueRounds!=4{t.Fatal("ordinary team options unexpectedly mutated")}
+}

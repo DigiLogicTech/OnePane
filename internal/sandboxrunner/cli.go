@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type CLIEngine struct{}
@@ -186,31 +188,63 @@ func (e *CLIEngine) InspectImage(ctx context.Context, image string) (ImageState,
 	_ = json.Unmarshal([]byte(out), &digests)
 	return ImageState{Reference: image, Digests: digests}, nil
 }
+// verifiedOwnedContainer ensures an OCI engine has not silently reused a
+// differently owned, privileged or host-mounted container under the expected
+// generated name. The spec hash label alone does not establish identity.
+func verifiedOwnedContainer(spec ContainerSpec, state ContainerState) bool {
+ return state.IsolationVerified &&
+  state.RuntimeID==spec.RuntimeID &&
+  state.ApplicationID==spec.ApplicationID &&
+  state.SpecHash!="" &&
+  exactWorkspaceMount(state,spec.WorkspacePath)
+}
+
+func verifiedDesiredContainer(spec ContainerSpec, state ContainerState) bool {
+ return verifiedOwnedContainer(spec,state) &&
+  state.SpecHash==specHash(spec) &&
+  state.Image==spec.Image &&
+  state.NetworkInternal==spec.NetworkInternal
+}
+
 func (e *CLIEngine) EnsureContainer(ctx context.Context, s ContainerSpec) (ContainerState, error) {
-	p, err := e.Probe(ctx)
-	if err != nil {
-		return ContainerState{}, err
-	}
-	name := containerName(s.RuntimeID, s.ApplicationID)
-	hash := specHash(s)
-	out, stderr, inspectErr := runCLI(ctx, p.Executable, "container", "inspect", name, "--format", `{{index .Config.Labels "io.harness.spec-hash"}}|{{.State.Status}}|{{.Id}}`)
-	if inspectErr == nil {
-		parts := strings.SplitN(out, "|", 3)
-		if len(parts) == 3 && parts[0] == hash {
-			if parts[1] == "running" {
-				return ContainerState{Name: name, ID: parts[2], Status: parts[1], SpecHash: hash}, nil
-			}
-			if _, stderr, err := runCLI(ctx, p.Executable, "start", name); err != nil {
-				return ContainerState{}, fmt.Errorf("start container: %v: %s", err, stderr)
-			}
-			return ContainerState{Name: name, ID: parts[2], Status: "running", SpecHash: hash}, nil
-		}
-		if _, stderr, err := runCLI(ctx, p.Executable, "rm", "-f", name); err != nil {
-			return ContainerState{}, fmt.Errorf("replace container: %v: %s", err, stderr)
-		}
-	} else if !containerNotFound(stderr) {
-		return ContainerState{}, fmt.Errorf("inspect container: %v: %s", inspectErr, stderr)
-	}
+ p,err:=e.Probe(ctx)
+ if err!=nil{return ContainerState{},err}
+ if !p.Rootless{return ContainerState{},ErrRootlessRequired}
+ name:=containerName(s.RuntimeID,s.ApplicationID)
+ hash:=specHash(s)
+ // Never use a caller-supplied hash, engine label or container name as
+ // proof of isolation: inspect the actual OCI config before reuse or removal.
+ _,stderr,inspectErr:=runCLI(ctx,p.Executable,"container","inspect",name,
+  "--format",`{{.Id}}`)
+ if inspectErr==nil{
+  state,err:=e.InspectContainer(ctx,s.RuntimeID,s.ApplicationID)
+  if err!=nil{return ContainerState{},err}
+  if !verifiedOwnedContainer(s,state){
+   return ContainerState{},fmt.Errorf("%w: existing container fails Workspace ownership/isolation checks",ErrInvalidInput)
+  }
+  if verifiedDesiredContainer(s,state){
+   if state.Status=="running"{return state,nil}
+   if state.Status!="exited"&&state.Status!="stopped"&&state.Status!="created"{
+    return ContainerState{},fmt.Errorf("%w: cannot start container in state %q",ErrInvalidInput,state.Status)
+   }
+   if _,stderr,err:=runCLI(ctx,p.Executable,"start",name);err!=nil{
+    return ContainerState{},fmt.Errorf("start container: %v: %s",err,stderr)
+   }
+   observed,err:=e.InspectContainer(ctx,s.RuntimeID,s.ApplicationID)
+   if err!=nil{return ContainerState{},err}
+   if !verifiedDesiredContainer(s,observed)||observed.Status!="running"{
+    return ContainerState{},fmt.Errorf("%w: started container was not independently verified",ErrInvalidInput)
+   }
+   return observed,nil
+  }
+  // A verified container with a changed pinned image/spec is a supported
+  // upgrade; an unverified container is never removed or overwritten.
+  if _,stderr,err:=runCLI(ctx,p.Executable,"rm","-f",name);err!=nil{
+   return ContainerState{},fmt.Errorf("replace managed container: %v: %s",err,stderr)
+  }
+ }else if !containerNotFound(stderr){
+  return ContainerState{},fmt.Errorf("inspect container: %v: %s",inspectErr,stderr)
+ }
 	network, err := e.EnsureNetwork(ctx, s.RuntimeID, s.NetworkInternal)
 	if err != nil || network.Internal != s.NetworkInternal || network.RuntimeID != s.RuntimeID {
 		if err == nil {
@@ -229,7 +263,7 @@ func (e *CLIEngine) EnsureContainer(ctx context.Context, s ContainerSpec) (Conta
 		}
 		args = append(args, "--publish", fmt.Sprintf("127.0.0.1::%d/%s", port.InternalPort, proto))
 	}
-	envFile, err := writeEnvFile(s.Environment)
+	envFile, err := writeEnvFile(s.WorkspacePath, s.Environment)
 	if err != nil {
 		return ContainerState{}, err
 	}
@@ -239,11 +273,18 @@ func (e *CLIEngine) EnsureContainer(ctx context.Context, s ContainerSpec) (Conta
 	}
 	args = append(args, s.Image)
 	args = append(args, s.Command...)
-	id, stderr, err := runCLI(ctx, p.Executable, args...)
+	_, stderr, err = runCLI(ctx, p.Executable, args...)
 	if err != nil {
 		return ContainerState{}, fmt.Errorf("run container: %v: %s", err, stderr)
 	}
-	return ContainerState{Name: name, ID: strings.TrimSpace(id), Status: "running", SpecHash: hash}, nil
+	// Detached OCI launch is not proof that the process is still running or
+	// the actual mounts match the managed Workspace. Observe before success.
+	observed,err:=e.InspectContainer(ctx,s.RuntimeID,s.ApplicationID)
+	if err!=nil{return ContainerState{},err}
+	if !verifiedDesiredContainer(s,observed)||observed.Status!="running"{
+		return ContainerState{},fmt.Errorf("%w: new container did not pass independent OCI verification",ErrInvalidInput)
+	}
+	return observed,nil
 }
 func (e *CLIEngine) InspectContainer(ctx context.Context, runtimeID, applicationID string) (ContainerState, error) {
 	p, err := e.Probe(ctx)
@@ -352,7 +393,7 @@ func (e *CLIEngine) ListRuntime(ctx context.Context, runtimeID string) ([]Contai
 	if err != nil {
 		return nil, err
 	}
-	out, stderr, err := runCLI(ctx, p.Executable, "ps", "-a", "--filter", "label=io.harness.runtime-id="+runtimeID, "--format", `{{.Names}}|{{.Status}}|{{.ID}}`)
+	out, stderr, err := runCLI(ctx, p.Executable, "ps", "-a", "--no-trunc", "--filter", "label=io.harness.runtime-id="+runtimeID, "--format", `{{.Names}}|{{.Status}}|{{.ID}}`)
 	if err != nil {
 		return nil, fmt.Errorf("list runtime containers: %v: %s", err, stderr)
 	}
@@ -384,77 +425,144 @@ func (e *CLIEngine) ListRuntime(ctx context.Context, runtimeID string) ([]Contai
 	}
 	return states, nil
 }
+// classifyContainerExecResult distinguishes a failed *program* from a
+// failed/unavailable sandbox runtime. Nonzero test/build exit codes are
+// observations that autonomous agents can inspect and correct; a container
+// engine failure is an adapter error and must not be reported as a completed
+// command. Podman/Docker reserve exit status 125 for engine-level failures.
+func classifyContainerExecResult(stdout, stderr string, err error) (ExecResult, error) {
+ result:=ExecResult{Stdout:stdout,Stderr:stderr}
+ if err==nil{return result,nil}
+ var exit *exec.ExitError
+ if !errors.As(err,&exit) || exit.ExitCode()<0 || exit.ExitCode()==125 {
+  return ExecResult{},fmt.Errorf("sandbox command invocation failed: %w",err)
+ }
+ result.ExitCode=exit.ExitCode()
+ return result,nil
+}
+
+// verifiedCommandTarget requires evidence of exact OCI ownership immediately
+// before a command. The caller must address the immutable inspected container
+// ID, not a predictable mutable name that could be replaced after inspection.
+func verifiedCommandTarget(runtimeID,applicationID string,st ContainerState)bool{
+ return st.ID!=""&&st.Status=="running"&&st.IsolationVerified&&
+  st.RuntimeID==runtimeID&&st.ApplicationID==applicationID&&
+  st.Name==containerName(runtimeID,applicationID)&&st.SpecHash!=""
+}
+
 func (e *CLIEngine) ExecContainer(ctx context.Context, runtimeID, applicationID string, command []string) (ExecResult, error) {
-	if len(command) == 0 || len(command) > 128 {
-		return ExecResult{}, ErrInvalidInput
-	}
-	for _, arg := range command {
-		if strings.ContainsRune(arg, '\x00') {
-			return ExecResult{}, ErrInvalidInput
-		}
-	}
-	p, err := e.Probe(ctx)
-	if err != nil {
-		return ExecResult{}, err
-	}
-	name := containerName(runtimeID, applicationID)
-	args := append([]string{"exec", name}, command...)
-	stdout, stderr, err := runCLI(ctx, p.Executable, args...)
-	if err != nil {
-		return ExecResult{Stdout: stdout, Stderr: stderr}, fmt.Errorf("exec sandbox command: %v: %s", err, stderr)
-	}
-	return ExecResult{Stdout: stdout, Stderr: stderr}, nil
+ if len(command)==0||len(command)>128{return ExecResult{},ErrInvalidInput}
+ for _,arg:=range command{
+  if strings.ContainsRune(arg,'\x00'){return ExecResult{},ErrInvalidInput}
+ }
+ p,err:=e.Probe(ctx)
+ if err!=nil{return ExecResult{},err}
+ if !p.Rootless{return ExecResult{},ErrRootlessRequired}
+ st,err:=e.InspectContainer(ctx,runtimeID,applicationID)
+ if err!=nil{return ExecResult{},err}
+ if !verifiedCommandTarget(runtimeID,applicationID,st){
+  return ExecResult{},fmt.Errorf("%w: refused command on unverified Workspace OCI container",ErrInvalidInput)
+ }
+ args:=append([]string{"exec",st.ID},command...)
+ stdout,stderr,err:=runCLI(ctx,p.Executable,args...)
+ if ctx.Err()!=nil{return ExecResult{},ctx.Err()}
+ return classifyContainerExecResult(stdout,stderr,err)
 }
 
 func (e *CLIEngine) StopContainer(ctx context.Context, runtimeID, applicationID string) (ContainerState, error) {
-	p, err := e.Probe(ctx)
-	if err != nil {
-		return ContainerState{}, err
-	}
-	name := containerName(runtimeID, applicationID)
-	out, stderr, err := runCLI(ctx, p.Executable, "container", "inspect", name, "--format", `{{.State.Status}}|{{.Id}}`)
-	if err != nil {
-		if containerNotFound(stderr) {
-			return ContainerState{Name: name, Status: "absent"}, nil
-		}
-		return ContainerState{}, fmt.Errorf("inspect container: %v: %s", err, stderr)
-	}
-	parts := strings.SplitN(out, "|", 2)
-	id := ""
-	status := ""
-	if len(parts) > 0 {
-		status = parts[0]
-	}
-	if len(parts) > 1 {
-		id = parts[1]
-	}
-	if status == "running" {
-		if _, stderr, err := runCLI(ctx, p.Executable, "stop", "--time", "10", name); err != nil {
-			return ContainerState{}, fmt.Errorf("stop container: %v: %s", err, stderr)
-		}
-		status = "stopped"
-	}
-	return ContainerState{Name: name, ID: id, Status: status}, nil
+ p,err:=e.Probe(ctx)
+ if err!=nil{return ContainerState{},err}
+ if !p.Rootless{return ContainerState{},ErrRootlessRequired}
+ st,err:=e.InspectContainer(ctx,runtimeID,applicationID)
+ if err!=nil{return ContainerState{},err}
+ if st.Status=="absent"{return st,nil}
+ if st.ID==""||!st.IsolationVerified||st.RuntimeID!=runtimeID||
+  st.ApplicationID!=applicationID||st.Name!=containerName(runtimeID,applicationID)||
+  st.SpecHash==""{
+  return ContainerState{},fmt.Errorf("%w: refused stop of unverified Workspace OCI container",ErrInvalidInput)
+ }
+ if st.Status=="running"{
+  if _,stderr,err:=runCLI(ctx,p.Executable,"stop","--time","10",st.ID);err!=nil{
+   return ContainerState{},fmt.Errorf("stop container: %v: %s",err,stderr)
+  }
+ }
+ // An engine command returning zero is not evidence that the exact
+ // container actually stopped. Check the pinned ID and terminal state.
+ verified,err:=e.InspectContainer(ctx,runtimeID,applicationID)
+ if err!=nil{return ContainerState{},err}
+ if verified.ID!=st.ID||!verified.IsolationVerified||
+  verified.Status=="running"||verified.Status=="restarting"{
+  return ContainerState{},fmt.Errorf("%w: managed container stop not independently verified",ErrInvalidInput)
+ }
+ return verified,nil
 }
+// verifiedRuntimeStopTarget refuses to rely on a name or a caller-writable
+// OCI label alone. Both the full container ID and independent configured
+// runtime/app isolation must agree before a destructive engine command.
+func (e *CLIEngine) verifiedRuntimeStopTarget(ctx context.Context,p EngineProfile,runtimeID string,listed ContainerState)(ContainerState,error){
+ if listed.ID==""||listed.Name==""{
+  return ContainerState{},fmt.Errorf("%w: malformed runtime container enumeration",ErrInvalidInput)
+ }
+ raw,stderr,err:=runCLI(ctx,p.Executable,"container","inspect",listed.ID)
+ if err!=nil{return ContainerState{},fmt.Errorf("inspect runtime container: %v: %s",err,stderr)}
+ var records []struct{
+  ID string `json:"Id"`
+  Config struct{Labels map[string]string `json:"Labels"`} `json:"Config"`
+ }
+ if json.Unmarshal([]byte(raw),&records)!=nil||len(records)!=1||
+  records[0].ID!=listed.ID{
+  return ContainerState{},fmt.Errorf("%w: OCI enumeration identity changed",ErrInvalidInput)
+ }
+ labels:=records[0].Config.Labels
+ appID:=labels["io.harness.application-id"]
+ if appID==""||labels["io.harness.runtime-id"]!=runtimeID||
+  listed.Name!=containerName(runtimeID,appID){
+  return ContainerState{},fmt.Errorf("%w: runtime container ownership mismatch",ErrInvalidInput)
+ }
+ observed,err:=e.InspectContainer(ctx,runtimeID,appID)
+ if err!=nil{return ContainerState{},err}
+ if observed.ID!=listed.ID||observed.Name!=listed.Name||
+  observed.RuntimeID!=runtimeID||observed.ApplicationID!=appID||
+  observed.SpecHash==""||!observed.IsolationVerified{
+  return ContainerState{},fmt.Errorf("%w: runtime OCI isolation/identity not verified",ErrInvalidInput)
+ }
+ return observed,nil
+}
+
 func (e *CLIEngine) StopRuntime(ctx context.Context, runtimeID string) ([]ContainerState, error) {
-	p, err := e.Probe(ctx)
-	if err != nil {
-		return nil, err
-	}
-	states, err := e.ListRuntime(ctx, runtimeID)
-	if err != nil {
-		return nil, err
-	}
-	for i := range states {
-		if states[i].Status != "running" {
-			continue
-		}
-		if _, stderr, err := runCLI(ctx, p.Executable, "stop", "--time", "10", states[i].Name); err != nil && !strings.Contains(strings.ToLower(stderr), "not running") {
-			return states, fmt.Errorf("stop runtime container %s: %v: %s", states[i].Name, err, stderr)
-		}
-		states[i].Status = "stopped"
-	}
-	return states, nil
+ p,err:=e.Probe(ctx)
+ if err!=nil{return nil,err}
+ if !p.Rootless{return nil,ErrRootlessRequired}
+ states,err:=e.ListRuntime(ctx,runtimeID)
+ if err!=nil{return nil,err}
+ // Preflight the entire candidate set before stopping any container.
+ // Even a forged/foreign label must not trigger a partial destructive sweep.
+ verified:=make([]ContainerState,0,len(states))
+ for _,candidate:=range states{
+  st,err:=e.verifiedRuntimeStopTarget(ctx,p,runtimeID,candidate)
+  if err!=nil{return nil,err}
+  if st.Status!="running"&&st.Status!="exited"&&
+   st.Status!="stopped"&&st.Status!="created"{
+   return nil,fmt.Errorf("%w: unsupported runtime container state",ErrInvalidInput)
+  }
+  verified=append(verified,st)
+ }
+ for i:=range verified{
+  if verified[i].Status!="running"{continue}
+  if _,stderr,err:=runCLI(ctx,p.Executable,"stop","--time","10",verified[i].ID);err!=nil{
+   return verified,fmt.Errorf("stop runtime container by pinned OCI ID: %v: %s",err,stderr)
+  }
+  // Re-observe before declaring success. A mismatched ID cannot be silently
+  // accepted as a stopped managed container after an external replacement.
+  observed,err:=e.InspectContainer(ctx,runtimeID,verified[i].ApplicationID)
+  if err!=nil{return verified,err}
+  if observed.ID!=verified[i].ID||!observed.IsolationVerified||
+   observed.Status=="running"||observed.Status=="restarting"{
+   return verified,fmt.Errorf("%w: runtime stop postcondition failed",ErrInvalidInput)
+  }
+  verified[i]=observed
+ }
+ return verified,nil
 }
 func containerName(runtimeID, appID string) string {
 	return trimName("harness-"+sanitize(runtimeID)+"-"+sanitize(appID), 63)
@@ -498,45 +606,70 @@ func runtimeNetworkName(runtimeID string) string {
 	return trimName("harness-"+sanitize(runtimeID)+"-net", 63)
 }
 
-func writeEnvFile(env map[string]string) (string, error) {
-	if len(env) == 0 {
-		return "", nil
-	}
-	keys := make([]string, 0, len(env))
-	for k := range env {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	f, err := os.CreateTemp("", "onepane-sandbox-env-*")
-	if err != nil {
-		return "", err
-	}
-	path := f.Name()
-	cleanup := func() {
-		_ = f.Close()
-		_ = os.Remove(path)
-	}
-	if err := f.Chmod(0o600); err != nil {
-		cleanup()
-		return "", err
-	}
-	for _, k := range keys {
-		v := env[k]
-		if strings.ContainsAny(k, "=\x00\r\n") || strings.ContainsAny(v, "\x00\r\n") {
-			cleanup()
-			return "", ErrInvalidInput
-		}
-		if _, err := f.WriteString(k + "=" + v + "\n"); err != nil {
-			cleanup()
-			return "", err
-		}
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(path)
-		return "", err
-	}
-	return path, nil
+// writeEnvFile stages credentials outside the container-mounted Workspace,
+// under the configured OnePane runtime root instead of global/system TMP.
+// Only the trusted rootless service account may read the 0700 staging folder.
+func writeEnvFile(workspacePath string, env map[string]string) (string, error) {
+ workspacePath,err:=filepath.Abs(workspacePath)
+ if err!=nil{return "",err}
+ root:=filepath.Dir(workspacePath)
+ for _,path:=range []string{root,workspacePath}{
+  st,err:=os.Lstat(path)
+  if err!=nil{return "",err}
+  if !st.IsDir()||st.Mode()&os.ModeSymlink!=0{return "",ErrInvalidInput}
+ }
+ staging:=filepath.Join(root,".onepane-private-env")
+ if err:=os.Mkdir(staging,0o700);err!=nil&&!os.IsExist(err){return "",err}
+ info,err:=os.Lstat(staging)
+ if err!=nil{return "",err}
+ if !info.IsDir()||info.Mode()&os.ModeSymlink!=0||info.Mode().Perm()&0o077!=0{
+  return "",ErrInvalidInput
+ }
+ // Apply retention even when this particular tool has no secret bindings:
+ // a previous process crash must not leave old credentials indefinitely.
+ if err:=cleanupStaleEnvFiles(staging,time.Now());err!=nil{return "",err}
+ if len(env)==0{return "",nil}
+ keys:=make([]string,0,len(env))
+ for key:=range env{keys=append(keys,key)}
+ sort.Strings(keys)
+ f,err:=os.CreateTemp(staging,"onepane-sandbox-env-*")
+ if err!=nil{return "",err}
+ path:=f.Name()
+ cleanup:=func(){_=f.Close();_=os.Remove(path)}
+ if err=f.Chmod(0o600);err!=nil{cleanup();return "",err}
+ for _,k:=range keys{
+  v:=env[k]
+  if strings.ContainsAny(k,"=\x00\r\n")||strings.ContainsAny(v,"\x00\r\n"){
+   cleanup();return "",ErrInvalidInput
+  }
+  if _,err=f.WriteString(k+"="+v+"\n");err!=nil{cleanup();return "",err}
+ }
+ if err=f.Close();err!=nil{_=os.Remove(path);return "",err}
+ return path,nil
 }
+const sandboxEnvStaleAfter = 24 * time.Hour
+
+// cleanupStaleEnvFiles only removes old regular files matching OnePane's
+// private env-file prefix from the already validated 0700 runtime staging
+// directory. It never traverses subdirectories, follows links, or edits user
+// Project/Workspace files. Recent files remain untouched for active engines.
+func cleanupStaleEnvFiles(dir string, now time.Time) error {
+ entries,err:=os.ReadDir(dir)
+ if err!=nil{return err}
+ for _,entry:=range entries {
+  name:=entry.Name()
+  if !strings.HasPrefix(name,"onepane-sandbox-env-"){continue}
+  path:=filepath.Join(dir,name)
+  info,err:=os.Lstat(path)
+  if os.IsNotExist(err){continue}
+  if err!=nil{return err}
+  if !info.Mode().IsRegular(){continue}
+  if now.Sub(info.ModTime())<sandboxEnvStaleAfter{continue}
+  if err:=os.Remove(path);err!=nil&&!os.IsNotExist(err){return err}
+ }
+ return nil
+}
+
 func containerNotFound(stderr string) bool {
 	v := strings.ToLower(stderr)
 	return strings.Contains(v, "no such container") || strings.Contains(v, "no container with name") || strings.Contains(v, "does not exist") || strings.Contains(v, "not found")

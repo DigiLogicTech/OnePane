@@ -16,6 +16,13 @@ import (
 	sqliteStore "github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
 )
 
+// The test fixture exercises only inference admission, not the separately
+// governed remote install/management surface. Production uses LocalAI.
+type admittedLocalFederationModel struct{LocalModelManager}
+func(admittedLocalFederationModel)FederatedInferenceAllowed(_ context.Context, deploymentID string)bool{
+ return deploymentID=="local-dep"
+}
+
 type noSecrets struct{}
 
 func (noSecrets) Resolve(context.Context, string) (string, error) { return "", nil }
@@ -44,6 +51,11 @@ func TestPairedNodeManifestBecomesSchedulerCandidate(t *testing.T) {
 	defer db.Close()
 	_, err := db.SQL().ExecContext(ctx, `INSERT INTO harness_nodes(id,name,local,identity_fingerprint,trust_state,trust_zone,endpoint_json,protocol_json,capabilities_json,last_seen_at,revision,created_at,updated_at) VALUES('peer','peer',0,'peer-fp','paired','PAIRED_MTLS','{"federation_url":"https://127.0.0.1:9","tls_fingerprint":"sha256:dead"}','{}','{}',?,1,?,?)`, now, now, now)
 	if err != nil {
+		t.Fatal(err)
+	}
+	// A discovered Node is not eligible for remote compute until there is
+	// an explicitly confirmed pairing, not merely a TRUST_STATE string.
+	if _, err := db.SQL().ExecContext(ctx, `INSERT INTO node_pairings(id,peer_node_id,direction,status,pairing_token,pairing_token_hash,pairing_code,pairing_code_hash,local_confirmed,peer_confirmed,peer_tls_fingerprint,peer_certificate_pem,expires_at,paired_at,revision,created_at,updated_at) VALUES('pair-peer','peer','outbound','paired','token','hashed','000000','hashed',1,1,'sha256:dead','',?,?,1,?,?)`, now+60000, now, now, now); err != nil {
 		t.Fatal(err)
 	}
 	ident, err := EnsureIdentity(t.TempDir(), "origin")
@@ -80,6 +92,31 @@ func TestPairedNodeManifestBecomesSchedulerCandidate(t *testing.T) {
 	if !found {
 		t.Fatal("remote model candidate not imported")
 	}
+	// A READY deployment is only a stored historical record. Eligibility
+	// requires a live paired peer with a nonexpired capability manifest.
+	check := func(label string, schedulable bool) {
+		t.Helper()
+		items, err := cat.Candidates(ctx, ws, "reasoning", "")
+		if err != nil { t.Fatal(err) }
+		for _, candidate := range items {
+			if candidate.DisplayName == "example/remote" {
+				if candidate.Schedulable != schedulable {
+					t.Fatalf("%s: remote was schedulable=%t, want %t", label, candidate.Schedulable, schedulable)
+				}
+				return
+			}
+		}
+		t.Fatalf("%s: imported remote missing", label)
+	}
+	if _, err := db.SQL().ExecContext(ctx, `UPDATE node_capability_manifests SET expires_at=? WHERE peer_node_id='peer'`, now-1000); err != nil { t.Fatal(err) }
+	check("expired heartbeat", false)
+	if _, err := db.SQL().ExecContext(ctx, `UPDATE node_capability_manifests SET expires_at=? WHERE peer_node_id='peer'`, now+3600000); err != nil { t.Fatal(err) }
+	check("fresh paired heartbeat", true)
+	if _, err := db.SQL().ExecContext(ctx, `UPDATE node_pairings SET status='revoked' WHERE peer_node_id='peer'`); err != nil { t.Fatal(err) }
+	check("revoked pairing", false)
+	if _, err := db.SQL().ExecContext(ctx, `UPDATE node_pairings SET status='paired' WHERE peer_node_id='peer'`); err != nil { t.Fatal(err) }
+	if _, err := db.SQL().ExecContext(ctx, `UPDATE harness_nodes SET trust_state='unavailable' WHERE id='peer'`); err != nil { t.Fatal(err) }
+	check("unavailable peer", false)
 }
 
 func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {
@@ -130,9 +167,13 @@ func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	manifestJSON:=`{"protocol":"onepane-federation-v1","node_id":"node-a","models":[]}`
+	if _,err:=dbB.SQL().ExecContext(ctx,`INSERT INTO node_capability_manifests(
+	 peer_node_id,sequence,manifest_json,received_at,expires_at,revision,updated_at)
+	 VALUES('node-a',1,?,?,?,1,?)`,manifestJSON,now,now+3600000,now);err!=nil{t.Fatal(err)}
 	type echoExec struct{}
 	_ = echoExec{}
-	server := NewServer(svcB, echoExecutor{})
+	server := NewServer(svcB, echoExecutor{}, admittedLocalFederationModel{})
 	ts := httptest.NewUnstartedServer(server.Handler())
 	ts.TLS = server.TLSConfig()
 	ts.StartTLS()
@@ -157,6 +198,46 @@ func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {
 	}
 	if string(out.ResponseJSON) != string(out2.ResponseJSON) {
 		t.Fatal("idempotent replay changed response")
+	}
+	// A live paired mTLS peer must not gain inference authority if the
+	// receiver's local admission manager disappears after startup.
+	// The receiver must reject a lapsed heartbeat even if TLS is paired.
+	if _,err:=dbB.SQL().ExecContext(ctx,`UPDATE node_capability_manifests
+	 SET expires_at=? WHERE peer_node_id='node-a'`,now-1000);err!=nil{t.Fatal(err)}
+	stale:=in
+	stale.RequestID="expired-capability"
+	var unused RemoteInferenceResponse
+	if err:=postJSON(ctx,svcA.pinnedClient(identB.Fingerprint,true),
+	 ts.URL+"/federation/v1/inference",stale,&unused);err==nil{
+	 t.Fatal("stale heartbeat accepted by the inference receiver")
+	}
+	if _,err:=dbB.SQL().ExecContext(ctx,`UPDATE node_capability_manifests
+	 SET expires_at=? WHERE peer_node_id='node-a'`,now+3600000);err!=nil{t.Fatal(err)}
+	if _,err:=dbB.SQL().ExecContext(ctx,`UPDATE node_pairings SET peer_confirmed=0
+	 WHERE peer_node_id='node-a'`);err!=nil{t.Fatal(err)}
+	oneSided:=in
+	oneSided.RequestID="one-sided-pairing"
+	var unusedPair RemoteInferenceResponse
+	if err:=postJSON(ctx,svcA.pinnedClient(identB.Fingerprint,true),
+	 ts.URL+"/federation/v1/inference",oneSided,&unusedPair);err==nil{
+	 t.Fatal("one-sided pairing unexpectedly authorized a model request")
+	}
+	if _,err:=dbB.SQL().ExecContext(ctx,`UPDATE node_pairings SET peer_confirmed=1
+	 WHERE peer_node_id='node-a'`);err!=nil{t.Fatal(err)}
+	server.models=nil
+	newReq:=in
+	newReq.RequestID="missing-local-model-admission"
+	var denied RemoteInferenceResponse
+	if err:=postJSON(ctx,svcA.pinnedClient(identB.Fingerprint,true),
+		ts.URL+"/federation/v1/inference",newReq,&denied);err==nil{
+		t.Fatal("federated inference accepted without an admission authority")
+	}
+	var requests int
+	if err:=dbB.SQL().QueryRowContext(ctx,`SELECT COUNT(*)
+	 FROM node_federated_inference_receipts
+	 WHERE remote_request_id='missing-local-model-admission'`).Scan(&requests);err!=nil{t.Fatal(err)}
+	if requests!=0{
+		t.Fatal("unadmitted inference payload reached execution receipt storage")
 	}
 }
 

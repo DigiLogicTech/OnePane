@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/DigiLogicTech/OnePane/internal/authority"
+	"github.com/DigiLogicTech/OnePane/internal/task"
 )
 
 type workspaceAccessPolicy struct {
@@ -27,6 +28,7 @@ type onePaneRoutingPolicy struct {
 	AgentProfile          string                `json:"agent_profile,omitempty"`
 	FallbackAgentProfiles []string              `json:"fallback_agent_profiles,omitempty"`
 	ProjectWorkspaceID    string                `json:"project_workspace_id,omitempty"`
+	ComputePreference string `json:"compute_preference,omitempty"`
 	WorkspaceAccess       workspaceAccessPolicy `json:"workspace_access,omitempty"`
 }
 
@@ -38,6 +40,20 @@ func routingPolicyFromCompletion(raw json.RawMessage) onePaneRoutingPolicy {
 	return envelope.OnePaneRouting
 }
 
+// effectiveRemoteModelAllowance preserves legacy Project-only routing while
+// preventing pre-policy named Workspace Tasks from silently selecting cloud.
+// A deliberate Workspace remote_models=true remains governed by scheduler,
+// provider approval and budget checks.
+func effectiveRemoteModelAllowance(t task.Task, p onePaneRoutingPolicy, legacyDefault bool) bool {
+	if p.WorkspaceAccess.RemoteModels != nil {
+		return *p.WorkspaceAccess.RemoteModels
+	}
+	if t.ProjectWorkspaceID != nil {
+		return false
+	}
+	return legacyDefault
+}
+
 // inheritOnePaneRouting preserves the parent workspace routing/access envelope for
 // delegated child tasks. A delegated model may narrow its own completion contract,
 // but it cannot drop or widen the workspace security/routing policy.
@@ -46,15 +62,21 @@ func inheritOnePaneRouting(parent, child json.RawMessage) json.RawMessage {
 	if json.Unmarshal(parent, &parentEnvelope) != nil {
 		return child
 	}
-	routing, ok := parentEnvelope["onepane_routing"]
-	if !ok || len(routing) == 0 {
+	routing, hasRouting := parentEnvelope["onepane_routing"]
+	pinnedManifest, hasManifest := parentEnvelope["toolchain_manifest_sha256"]
+	if (!hasRouting || len(routing)==0) && (!hasManifest || len(pinnedManifest)==0){
 		return child
 	}
 	childEnvelope := map[string]json.RawMessage{}
 	if len(child) > 0 {
 		_ = json.Unmarshal(child, &childEnvelope)
 	}
-	childEnvelope["onepane_routing"] = routing
+	if hasRouting && len(routing)>0{childEnvelope["onepane_routing"]=routing}
+	// A child Task must inherit its parent's reviewed toolchain digest.
+	// Model-authored delegation cannot remove or replace that approval pin.
+	if hasManifest && len(pinnedManifest)>0{
+		childEnvelope["toolchain_manifest_sha256"]=pinnedManifest
+	}
 	b, err := json.Marshal(childEnvelope)
 	if err != nil {
 		return child
@@ -62,11 +84,49 @@ func inheritOnePaneRouting(parent, child json.RawMessage) json.RawMessage {
 	return b
 }
 
+// workspaceToolAllowedForTask enforces the *persisted* Project Workspace
+// identity even for Tasks created before the new Task creation invariant.
+// Model-generated completion or missing legacy scope cannot grant extra tools.
+func workspaceToolAllowedForTask(t task.Task, capabilityID string, mode authority.ActionMode, toolID, resourceRef string) error {
+ if t.ProjectWorkspaceID==nil{
+  return workspaceToolAllowed(t.Completion,capabilityID,mode,toolID,resourceRef)
+ }
+ if t.ProjectID==nil || *t.ProjectID=="" || *t.ProjectWorkspaceID=="" {
+  return fmt.Errorf("named Workspace Task requires persisted Project identity")
+ }
+ routing:=routingPolicyFromCompletion(t.Completion)
+ if routing.ProjectWorkspaceID!=""&&routing.ProjectWorkspaceID!=*t.ProjectWorkspaceID{
+  return fmt.Errorf("Workspace routing identity does not match persisted Task ownership")
+ }
+ p:=routing.WorkspaceAccess
+ if p.ProjectWorkspaceID!=""&&p.ProjectWorkspaceID!=*t.ProjectWorkspaceID{
+  return fmt.Errorf("Workspace access identity does not match persisted Task ownership")
+ }
+ if p.Mode!=""&&p.Mode!="brokered"{
+  return fmt.Errorf("named Workspace Task requires brokered access")
+ }
+ if p.Filesystem!=""&&p.Filesystem!="none"&&p.Filesystem!="workspace-only"{
+  return fmt.Errorf("named Workspace Task cannot access host filesystems")
+ }
+ if p.Internet||p.LAN||p.Browser||p.Computer||(p.Secrets!=""&&p.Secrets!="none"){
+  return fmt.Errorf("Workspace Task tool privileges require independently authorised grants")
+ }
+ p.Mode="brokered"
+ p.ProjectWorkspaceID=*t.ProjectWorkspaceID
+ if p.Filesystem==""{p.Filesystem="workspace-only"}
+ p.Secrets="none"
+ return workspaceToolAllowedWithPolicy(p,capabilityID,mode,toolID,resourceRef)
+}
+
 func workspaceToolAllowed(raw json.RawMessage, capabilityID string, mode authority.ActionMode, toolID, resourceRef string) error {
-	p := routingPolicyFromCompletion(raw).WorkspaceAccess
-	if strings.TrimSpace(p.Mode) == "" && strings.TrimSpace(p.ProjectWorkspaceID) == "" {
-		return nil // Legacy task without project-workspace policy.
-	}
+ p:=routingPolicyFromCompletion(raw).WorkspaceAccess
+ if strings.TrimSpace(p.Mode)==""&&strings.TrimSpace(p.ProjectWorkspaceID)==""{
+  return nil // Historical Project-only Tasks retain their existing semantics.
+ }
+ return workspaceToolAllowedWithPolicy(p,capabilityID,mode,toolID,resourceRef)
+}
+
+func workspaceToolAllowedWithPolicy(p workspaceAccessPolicy, capabilityID string, mode authority.ActionMode, toolID, resourceRef string) error {
 	if p.Mode != "brokered" {
 		return fmt.Errorf("workspace policy requires brokered access")
 	}
@@ -86,6 +146,16 @@ func workspaceToolAllowed(raw json.RawMessage, capabilityID string, mode authori
 	if !p.LAN && (strings.Contains(hay, "network.lan") || strings.Contains(hay, "lan://")) {
 		return fmt.Errorf("LAN access is disabled for this workspace")
 	}
+	// OCI application execution/creation always uses a read-write managed
+	// /workspace bind even when neither the tool ID nor resource_ref mentions
+	// a filename. An explicit filesystem:none policy must deny that implicit
+	// mount access before a lease lookup or container invocation.
+	if p.Filesystem=="none" {
+		switch toolID {
+		case "project.app.exec","project.app.git.inspect","project.app.git.mutate","project.app.files.inspect","project.app.files.edit","project.app.files.publish","project.app.godot.build","project.app.tools.discover","project.app.toolchain.preflight","project.app.unreal.mcp.probe","project.app.ensure","project.runtime.ensure":
+			return fmt.Errorf("filesystem access is disabled for this workspace")
+		}
+	}
 	if p.Filesystem == "none" && (strings.Contains(hay, "file") || strings.Contains(hay, "filesystem") || strings.Contains(hay, "/workspace")) {
 		return fmt.Errorf("filesystem access is disabled for this workspace")
 	}
@@ -95,4 +165,19 @@ func workspaceToolAllowed(raw json.RawMessage, capabilityID string, mode authori
 	// workspace-only filesystem boundaries are additionally enforced by the
 	// CapabilityLease/resource scope. This policy can narrow access, never widen it.
 	return nil
+}
+
+func validComputePlacement(v string)bool{
+ switch v{
+ case "","auto","prefer_cpu","cpu_only","prefer_gpu","gpu_only":return true
+ default:return false
+ }
+}
+// No Task or delegated Agent can widen its original Project scope by
+// choosing an otherwise valid compute preference.
+func computePlacementForTask(t task.Task)(string,error){
+ value:=routingPolicyFromCompletion(t.Completion).ComputePreference
+ if !validComputePlacement(value){return "",fmt.Errorf("persisted Task has unsupported compute placement")}
+ if value==""{return "auto",nil}
+ return value,nil
 }

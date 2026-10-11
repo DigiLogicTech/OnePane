@@ -21,9 +21,12 @@ func scanVerification(row rowScanner) (Verification, error) {
 	var v Verification
 	var taskID, operationID, achieved, result, verifiedBy sql.NullString
 	var completed sql.NullInt64
-	if err := row.Scan(&v.ID, &v.WorkspaceID, &taskID, &operationID, &v.SubjectRef, &v.RequiredLevel, &achieved, &v.Status, &v.Spec, &result, &verifiedBy, &v.StartedAt, &completed, &v.Revision); err != nil {
+	var specJSON string
+	if err := row.Scan(&v.ID, &v.WorkspaceID, &taskID, &operationID, &v.SubjectRef, &v.RequiredLevel, &achieved, &v.Status, &specJSON, &result, &verifiedBy, &v.StartedAt, &completed, &v.Revision); err != nil {
 		return Verification{}, err
 	}
+	// SQLite JSON TEXT is a driver string, not a direct *json.RawMessage Scan.
+	v.Spec=[]byte(specJSON)
 	if taskID.Valid {
 		x := taskID.String
 		v.TaskID = &x
@@ -114,9 +117,11 @@ const checkpointSelect = `SELECT id,workspace_id,task_id,verification_id,state_j
 func scanCheckpoint(row rowScanner) (Checkpoint, error) {
 	var c Checkpoint
 	var invalid sql.NullInt64
-	if err := row.Scan(&c.ID, &c.WorkspaceID, &c.TaskID, &c.VerificationID, &c.State, &c.Status, &c.CreatedAt, &invalid); err != nil {
+	var stateJSON string
+	if err := row.Scan(&c.ID, &c.WorkspaceID, &c.TaskID, &c.VerificationID, &stateJSON, &c.Status, &c.CreatedAt, &invalid); err != nil {
 		return Checkpoint{}, err
 	}
+	c.State=[]byte(stateJSON)
 	if invalid.Valid {
 		x := invalid.Int64
 		c.InvalidatedAt = &x

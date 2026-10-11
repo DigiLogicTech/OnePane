@@ -294,6 +294,15 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		if err!=nil{return s.fail(ctx,res,err)}
 		sections=append(sections,chairEvidence...)
 	}
+	// Every Research turn (including manual Web and Chair seats) is checked
+	// before any prompt handoff. A prior protected approval makes the whole
+	// Council a local-only information-flow domain, including quoted replies.
+	// A revoked or partially approved Council pauses, never downgrades to web.
+	var evidenceConsent researchSeatConsent
+	if researchMode {
+		evidenceConsent, err = s.consentForSeat(ctx,ws,ss.ID,member.ID,manifestRecord.SnapshotSHA256)
+		if err != nil { return s.pauseResearch(ctx,res,ss,turnID,err) }
+	}
 	// Web Chat seats are human-mediated. They never call an inference API,
 	// consume a scheduled provider candidate or acquire tool permissions.
 	// Snapshot config and evidence filtering above still govern their prompt.
@@ -316,6 +325,12 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 	_ = json.Unmarshal(member.RoutePolicy, &rp)
 	label := policy.DataLabel{WorkspaceID: ws, Confidentiality: policy.ConfidentialityInternal, Residency: policy.ResidencyAny, Trust: policy.TrustUserInstruction}
 	request := scheduler.RouteRequest{WorkspaceID: ws, CapabilityID: member.CapabilityID, RoleName: member.RoleName, ProtocolLevel: member.ProtocolLevel, ContextTokens: int64((used + 3) / 4), DataLabel: label, AllowUntested: rp.AllowUntested, AllowLimited: rp.AllowLimited, AllowMediated: rp.AllowMediated, AllowDegraded: rp.AllowDegraded, RequireZeroIncrementalCost: rp.RequireZeroIncrementalCost, PreferZeroIncrementalCost: rp.PreferZeroIncrementalCost, AllowSubscriptionUsage: rp.AllowSubscriptionUsage, AllowPotentialMonetarySpend: rp.AllowPotentialMonetarySpend}
+	if evidenceConsent.Active{
+		applyResearchEvidenceRouteFence(&request)
+		// The local model needs headroom for the entire possible evidence
+		// packet, not just the existing Council conversation.
+		request.ContextTokens+=(researchSeatDeliveryMaxTotalBytes+3)/4+1024
+	}
 	pinSeat := researchMode && (research.PinModels || research.DisableModelSubstitution || research.SameModelRetries)
 	var seatBinding team.SeatBinding
 	if pinSeat {
@@ -337,6 +352,9 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		return s.block(ctx, res, err)
 	}
 	cand := decision.Selected.Candidate
+	if evidenceConsent.Active&&!researchEvidenceCandidateAllowed(cand){
+		return s.pauseResearch(ctx,res,ss,turnID,fmt.Errorf("approved Research evidence seat requires a strictly local origin-node model"))
+	}
 	if pinSeat && seatBinding.CandidateID == "" {
 		raw,_:=json.Marshal(map[string]any{"id":cand.ID,"kind":cand.Kind,"display_name":cand.DisplayName,"provider":cand.Provider,"node_id":cand.NodeID,"compute_mode":cand.ComputeMode,"runtime_backend":cand.RuntimeBackend,"local":cand.Local,"cost_class":cand.CostClass,"qualification":cand.Qualification,"protocol_level":cand.ProtocolLevel,"context_max":cand.ContextMax,"metadata":cand.Metadata})
 		bound, bindErr := s.teams.BindSeat(ctx, ss.ID, member.ID, string(cand.Kind), cand.ID, raw)
@@ -355,6 +373,25 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 				return s.block(ctx, res, err)
 			}
 			cand = decision.Selected.Candidate
+		}
+	}
+	if evidenceConsent.Active&&!researchEvidenceCandidateAllowed(cand){
+		return s.pauseResearch(ctx,res,ss,turnID,fmt.Errorf("pinned Research seat resolved to nonlocal model"))
+	}
+	var deliveredResearch researchSeatEvidenceInput
+	if evidenceConsent.Active {
+		deliveredResearch,err=s.loadResearchSeatEvidence(ctx,ws,ss.ID,member.ID,
+			manifestRecord.SnapshotSHA256,evidenceConsent)
+		if err!=nil{return s.pauseResearch(ctx,res,ss,turnID,err)}
+		for _,section:=range deliveredResearch.Sections{
+			sections=append(sections,section)
+			used+=len(section.Content)
+		}
+		// Unknown or too-small model context is not approval to truncate
+		// frozen evidence. Pause instead of omitting a document silently.
+		if cand.ContextMax<=0||int64((used+3)/4)+1024>cand.ContextMax{
+			return s.pauseResearch(ctx,res,ss,turnID,
+				fmt.Errorf("pinned local model has insufficient verified context for Research evidence"))
 		}
 	}
 	kind, cid := string(cand.Kind), cand.ID
@@ -384,9 +421,44 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 	contextHash:=hex.EncodeToString(contextSum[:])
 	manifestPayload:=map[string]any{"session_id":ss.ID,"message_count":len(sections)-1,"bytes":used,"round":turnRound,"research_phase":researchPhase,"research_total_rounds":team.ResearchTotalRounds(research),"critique_rounds":research.CritiqueRounds,"context_sha256":contextHash,"research_mode":researchMode,"candidate_id":cand.ID,"candidate_kind":cand.Kind,"profile_id":profileID,"profile_revision":profileRevision}
 	if hasManifest { manifestPayload["session_manifest_sha256"]=manifestRecord.SnapshotSHA256 }
+	if evidenceConsent.Active {
+		manifestPayload["research_evidence_consent_sha256"]=evidenceConsent.EvidenceSHA256
+		manifestPayload["research_evidence_content_delivered"]=true
+		manifestPayload["research_evidence_document_count"]=deliveredResearch.DocumentCount
+		manifestPayload["research_evidence_verified_bytes"]=deliveredResearch.Bytes
+		manifestPayload["research_evidence_manifest_sha256"]=deliveredResearch.ManifestSHA256
+	}
 	if seatBinding.CandidateID!="" { manifestPayload["seat_binding_candidate_id"]=seatBinding.CandidateID }
 	manifest,_:=json.Marshal(manifestPayload)
 	areq := agentprotocol.Request{ProtocolVersion: agentprotocol.Version, RequestID: "", WorkspaceID: ws, TaskID: ss.TaskID, PrincipalID: WorkerPrincipal, Role: member.RoleName, Objective: objective, Constraints: json.RawMessage(`{"deliberation_only":true,"no_side_effects":true}`), Context: sections, ContextManifest: manifest, PermittedProposalTypes: []agentprotocol.ProposalType{agentprotocol.ProposalReplan, agentprotocol.ProposalHuman, agentprotocol.ProposalComplete, agentprotocol.ProposalWait, agentprotocol.ProposalFail}, ToolCallback: false}
+	// Last practical permission check before locally dispatching plaintext.
+	// Existing Team routing has already enforced an origin-node model.
+	if evidenceConsent.Active{
+		// Candidate classification and live eligibility can change after the
+		// first scheduler decision. Re-route only the exact already selected
+		// deployment; never substitute another seat or cloud provider.
+		recheck:=request
+		recheck.IncludeCandidateIDs=[]string{cand.ID}
+		live,routeErr:=s.scheduler.Route(ctx,recheck)
+		if routeErr!=nil||live.Selected==nil||
+			live.Selected.Candidate.ID!=cand.ID||
+			!researchEvidenceCandidateAllowed(live.Selected.Candidate){
+			s.release(ctx,reservationID)
+			return s.pauseResearch(ctx,res,ss,turnID,
+				fmt.Errorf("Research evidence route is no longer pinned to an eligible origin-node model"))
+		}
+		fresh,freshErr:=s.consentForSeat(ctx,ws,ss.ID,member.ID,manifestRecord.SnapshotSHA256)
+		if freshErr!=nil||!fresh.Active||fresh.EvidenceSHA256!=evidenceConsent.EvidenceSHA256{
+			s.release(ctx,reservationID)
+			return s.pauseResearch(ctx,res,ss,turnID,
+				fmt.Errorf("Research seat evidence consent revoked before local dispatch"))
+		}
+	}
+	if _,proofErr:=proveResearchTurnEvidence(areq,cand);proofErr!=nil{
+		s.release(ctx,reservationID)
+		if researchMode{return s.pauseResearch(ctx,res,ss,turnID,proofErr)}
+		return s.fail(ctx,res,proofErr)
+	}
 	response, err := s.dispatch(ctx, areq, cand, label, reservationID)
 	if err != nil {
 		s.release(ctx, reservationID)
@@ -395,15 +467,45 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		}
 		return s.fail(ctx, res, err)
 	}
-	content, _ := json.Marshal(map[string]any{"text": response.Message, "proposal_type": response.ProposalType, "proposal": json.RawMessage(response.Proposal), "candidate_kind": kind, "candidate_id": cid, "research_phase": researchPhase, "round": turnRound})
-	msg, err := s.teams.PostMessage(ctx, team.PostMessageCommand{SessionID: ss.ID, AuthorPrincipalID: WorkerPrincipal, AuthorMemberID: &member.ID, Kind: "agent", Content: content})
-	if err != nil {
-		return s.fail(ctx, res, err)
+	// Record immutable input/seat/response fingerprints in the durable
+	// Council message. This metadata is created only *after* the seat responds,
+	// and same-round/independent-pass visibility filters still apply.
+	messageContent:=map[string]any{"text": response.Message, "proposal_type": response.ProposalType,
+		"proposal": json.RawMessage(response.Proposal), "candidate_kind": kind,
+		"candidate_id": cid, "research_phase": researchPhase, "round": turnRound}
+	if researchMode {
+		provenance,provenanceErr:=buildCouncilTurnProvenance(
+			s.clock.UnixMilli(),manifestRecord.SnapshotSHA256,contextHash,
+			areq,response,cand,profileID,profileRevision,turnRound,researchPhase,
+			seatBinding.CandidateID)
+		if provenanceErr!=nil {
+			return s.fail(ctx,res,fmt.Errorf("capture Research Council provenance: %w",provenanceErr))
+		}
+		messageContent["research_provenance"]=provenance
 	}
-	completed := s.clock.UnixMilli()
-	_, err = s.db.ExecContext(ctx, `UPDATE team_turn_requests SET status='succeeded',response_message_id=?,updated_at=?,completed_at=? WHERE id=? AND status='running'`, msg.ID, completed, completed, turnID)
-	if err != nil {
-		return s.fail(ctx, res, err)
+	content,err:=json.Marshal(messageContent)
+	if err!=nil{return s.fail(ctx,res,err)}
+	if evidenceConsent.Active{
+		// Local inference may have completed after a human revoked approval.
+		// The result is discarded, and no Council message or successful turn
+		// is persisted unless BOTH pass the same SQLite write transaction.
+		_,completeErr:=s.completeProtectedResearchTurn(ctx,ws,ss.ID,turnID,member.ID,
+			manifestRecord.SnapshotSHA256,evidenceConsent.EvidenceSHA256,turnRound,content)
+		if completeErr!=nil{
+			return s.pauseResearch(ctx,res,ss,turnID,
+				fmt.Errorf("protected Research response discarded: %w",completeErr))
+		}
+	}else{
+		msg,postErr:=s.teams.PostMessage(ctx,team.PostMessageCommand{
+			SessionID:ss.ID,AuthorPrincipalID:WorkerPrincipal,
+			AuthorMemberID:&member.ID,Kind:"agent",Content:content,
+		})
+		if postErr!=nil{return s.fail(ctx,res,postErr)}
+		completed:=s.clock.UnixMilli()
+		_,err=s.db.ExecContext(ctx,`UPDATE team_turn_requests
+		 SET status='succeeded',response_message_id=?,updated_at=?,completed_at=?
+		 WHERE id=? AND status='running'`,msg.ID,completed,completed,turnID)
+		if err!=nil{return s.fail(ctx,res,err)}
 	}
 	res.Status = "succeeded"
 	return res

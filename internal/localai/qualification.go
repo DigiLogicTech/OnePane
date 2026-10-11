@@ -137,7 +137,7 @@ type qualificationEvidence struct {
 	Errors        []string `json:"errors,omitempty"`
 }
 
-func (q *Qualifier) Qualify(ctx context.Context, req QualificationRequest) (QualificationRun, error) {
+func (q *Qualifier) Qualify(ctx context.Context, req QualificationRequest) (qualificationResult QualificationRun, resultErr error) {
 	if q == nil || q.supervisor == nil || q.inference == nil || strings.TrimSpace(req.DeploymentID) == "" || strings.TrimSpace(req.HardwareProfileID) == "" || strings.TrimSpace(req.CapabilityID) == "" || req.RequestedContext <= 0 {
 		return QualificationRun{}, errors.New("invalid qualification request")
 	}
@@ -148,10 +148,22 @@ func (q *Qualifier) Qualify(ctx context.Context, req QualificationRequest) (Qual
 	if dep.Status != inference.DeploymentQualifying && dep.Status != inference.DeploymentDegraded {
 		return QualificationRun{}, fmt.Errorf("deployment must be qualifying or degraded")
 	}
-	inst, err := q.supervisor.Start(ctx, req.DeploymentID)
+	// Hold a real activity lease throughout Agent Check, including embeddings,
+	// so memory pressure or concurrent checks cannot evict the model mid-probe.
+	inst, err := q.supervisor.Acquire(ctx, req.DeploymentID)
 	if err != nil {
 		return QualificationRun{}, err
 	}
+	defer func(){
+		// Always release the runtime even if the request context was cancelled.
+		// Colibri may require a longer cooperative drain than llama.cpp.
+		cleanupCtx,cancel:=context.WithTimeout(context.Background(),55*time.Second)
+		defer cancel()
+		_,cleanupErr:=cleanupQualificationResidency(cleanupCtx,q.supervisor,req.DeploymentID)
+		if cleanupErr!=nil{
+			resultErr=errors.Join(resultErr,fmt.Errorf("Agent Check model unload incomplete: %w",cleanupErr))
+		}
+	}()
 	runID, _ := q.ids.New("qual")
 	now := q.clock.UnixMilli()
 	run := QualificationRun{ID: runID, DeploymentID: req.DeploymentID, HardwareProfileID: req.HardwareProfileID, RuntimeInstanceID: inst.ID, Status: QualificationRunning, RequestedContext: req.RequestedContext, MetricsJSON: json.RawMessage(`{}`), EvidenceJSON: json.RawMessage(`{}`), Revision: 1, CreatedAt: now, UpdatedAt: now}

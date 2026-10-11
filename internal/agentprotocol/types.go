@@ -44,6 +44,9 @@ type Request struct {
 	ContextManifest        json.RawMessage  `json:"context_manifest"`
 	PermittedProposalTypes []ProposalType   `json:"permitted_proposal_types"`
 	ToolCallback           bool             `json:"tool_callback"`
+	// JSONToolProposals allows a qualified structured-JSON model to request
+	// brokered tools without native function calling. This is NOT tool authority.
+	JSONToolProposals      bool             `json:"json_tool_proposals,omitempty"`
 }
 
 type Response struct {
@@ -114,7 +117,7 @@ func (r Response) ValidateFor(req Request) error {
 	if !allowed {
 		return fmt.Errorf("%w: proposal type %q was not permitted", ErrInvalidProtocol, r.ProposalType)
 	}
-	if r.ProposalType == ProposalTool && !req.ToolCallback {
+	if r.ProposalType == ProposalTool && !req.ToolCallback && !req.JSONToolProposals {
 		return fmt.Errorf("%w: tool proposal requires gateway-mediated request", ErrInvalidProtocol)
 	}
 	if len(r.Usage) > 0 && !json.Valid(r.Usage) {

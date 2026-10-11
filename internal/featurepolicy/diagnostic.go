@@ -24,7 +24,7 @@ func DecisionDiagnostic(at time.Time, correlationID, action string, allowed bool
 	if allowed {
 		category = "policy.allowed"
 	}
-	if !safeDiagnosticToken.MatchString(correlationID) || !strings.Contains(correlationID, ":") {
+	if !safeDiagnosticToken.MatchString(correlationID) || !(strings.HasPrefix(correlationID, "run:") || strings.HasPrefix(correlationID, "task:") || strings.HasPrefix(correlationID, "attempt:") || strings.HasPrefix(correlationID, "request:") || strings.HasPrefix(correlationID, "trace:")) {
 		correlationID = "redacted"
 	}
 	if !safeDiagnosticToken.MatchString(action) || !knownDiagnosticAction(action) {

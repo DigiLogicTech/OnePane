@@ -48,4 +48,26 @@ for(const term of ["fetch(", "XMLHttpRequest", "localStorage", "sessionStorage",
  assert.ok(!fs.readFileSync(path.join(root,"internal/webui/static/policy-diagnostic-review.js"),"utf8").includes(term),"No automatic transmission, persistence or unsafe rendering: "+term);
 assert.ok(reviewer.markup().includes("a62PolicyInput"));
 assert.ok(reviewer.markup().includes("a62PolicyDownload"));
+// Bind the real panel logic against inert DOM stubs to verify raw input eviction.
+const nodes=Object.fromEntries([
+ "a62PolicyInput","a62PolicyReview","a62PolicyClear","a62PolicyDownload",
+ "a62PolicyStatus","a62PolicyDetails","a62PolicyPreview"
+].map(id=>[id,{value:"",textContent:"",disabled:false,open:false,
+ listeners:{},addEventListener(type,fn){this.listeners[type]=fn}}]));
+reviewer.bind({querySelector(sel){return nodes[sel.slice(1)]}});
+nodes.a62PolicyInput.value=sample;
+nodes.a62PolicyReview.onclick();
+assert.equal(nodes.a62PolicyInput.value,"","Untrusted raw JSON must be cleared after review");
+assert.ok(!nodes.a62PolicyPreview.textContent.includes("PRIVATE_PASSWORD_EXAMPLE"));
+assert.equal(nodes.a62PolicyDownload.disabled,false);
+nodes.a62PolicyInput.value="{bad}";
+nodes.a62PolicyReview.onclick();
+assert.equal(nodes.a62PolicyInput.value,"","Malformed raw JSON must be cleared");
+assert.equal(nodes.a62PolicyDownload.disabled,true);
+nodes.a62PolicyInput.value=sample;
+nodes.a62PolicyReview.onclick();
+nodes.a62PolicyClear.onclick();
+assert.equal(nodes.a62PolicyPreview.textContent,"");
+assert.equal(nodes.a62PolicyDownload.disabled,true);
+
 console.log("PASS: offline policy review sanitization, schema, boundaries and Debug Centre integration");

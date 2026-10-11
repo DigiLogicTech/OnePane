@@ -41,9 +41,9 @@ func TestAssuranceRestartRequeueIsAtomicAndRepairsStrandedInterrupted(t *testing
   {"run-human","verification-human","waiting_human"},
  }{
   if _,err:=db.SQL().ExecContext(ctx,`INSERT INTO assurance_runs(
-   id,verification_id,workspace_id,status,required_level,revision,
+   id,verification_id,workspace_id,status,required_level,result_json,revision,
    started_at,updated_at)
-   VALUES(?,?,'tenant',?,'V1',1,?,?)`,
+   VALUES(?,?,'tenant',?,'V1','{}',1,?,?)`,
    r.id,r.vid,r.status,now,now);err!=nil{t.Fatal(err)}
  }
  svc:=New(db.SQL(),db,clock.Real{},nil,nil,nil,nil,nil)

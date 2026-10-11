@@ -30,7 +30,20 @@ func approvedTaskGraphDependenciesTx(ctx context.Context, tx storage.Tx, t Task)
 			AND pw.project_id=g.project_id AND pw.status='active'
 		WHERE n.task_id=?`,t.ID).Scan(&graphID,&nodeKey,&nodeWorkspace,
 			&projectID,&tenant,&approvedJSON,&recorded,&activeWorkspace)
-	if errors.Is(err,sql.ErrNoRows){return nil}
+	if errors.Is(err,sql.ErrNoRows){
+		// A Task created as part of an approved graph must not turn into
+		// an ordinary Task if its canonical graph-node row is missing.
+		var provenance struct {
+			Source string `json:"source"`
+			GraphID string `json:"graph_id"`
+		}
+		if json.Unmarshal(t.Completion,&provenance)==nil &&
+			(provenance.Source=="project-orchestrator-task-graph"||
+				strings.TrimSpace(provenance.GraphID)!="") {
+			return ErrHardDependencyUnsatisfied
+		}
+		return nil
+	}
 	if err!=nil{return err}
 	if t.ProjectID==nil||t.ProjectWorkspaceID==nil||
 		*t.ProjectID!=projectID||*t.ProjectWorkspaceID!=nodeWorkspace||

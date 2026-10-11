@@ -56,7 +56,7 @@ func TestWorkerTerminalTransitionsRollbackAcrossTaskAttemptWorkerAndJournal(t *t
   }
   var n int
   if e=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM agent_worker_steps
-   WHERE run_id=? AND step_kind='control'`,r.ID).Scan(&n);e!=nil{t.Fatal(e)}
+   WHERE run_id=? AND step_kind IN ('fail','wait')`,r.ID).Scan(&n);e!=nil{t.Fatal(e)}
   if n!=audit{t.Fatalf("Worker journal count=%d want=%d",n,audit)}
  }
  for _,tc:=range []struct{run Run;status string;blocked bool}{
@@ -65,7 +65,7 @@ func TestWorkerTerminalTransitionsRollbackAcrossTaskAttemptWorkerAndJournal(t *t
   // If any immutable journal insert fails, even the Task's event and
   // Attempt transition must roll back. A false terminal result is forbidden.
   if _,err:=db.SQL().ExecContext(ctx,`CREATE TRIGGER refuse_terminal_journal
-   BEFORE INSERT ON agent_worker_steps WHEN NEW.step_kind='control'
+   BEFORE INSERT ON agent_worker_steps WHEN NEW.step_kind IN ('fail','wait')
    BEGIN SELECT RAISE(ABORT,'synthetic Worker journal outage'); END`);err!=nil{t.Fatal(err)}
   e:=worker.transitionTerminalWorker(ctx,tc.run,"operator-visible failure",tc.blocked)
   if e==nil{t.Fatalf("journal failure committed terminal status on %s",tc.run.ID)}

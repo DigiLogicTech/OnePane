@@ -2,6 +2,7 @@ package featurepolicy
 
 import (
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -23,7 +24,7 @@ func DecisionDiagnostic(at time.Time, correlationID, action string, allowed bool
 	if allowed {
 		category = "policy.allowed"
 	}
-	if !safeDiagnosticToken.MatchString(correlationID) {
+	if !safeDiagnosticToken.MatchString(correlationID) || !strings.Contains(correlationID, ":") {
 		correlationID = "redacted"
 	}
 	if !safeDiagnosticToken.MatchString(action) || !knownDiagnosticAction(action) {

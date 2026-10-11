@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/DigiLogicTech/OnePane/internal/clock"
+	"github.com/DigiLogicTech/OnePane/internal/featurepolicy"
 	"github.com/DigiLogicTech/OnePane/internal/event"
 	"github.com/DigiLogicTech/OnePane/internal/id"
 	"github.com/DigiLogicTech/OnePane/internal/outbox"
@@ -168,6 +169,8 @@ func (s *Service) CreateProject(ctx context.Context, cmd CreateProjectCommand) (
 	}
 	mode,err:=operatingModeFromPolicy(pol)
 	if err!=nil{return Project{},fmt.Errorf("%w: operating mode: %v",ErrInvalidCommand,err)}
+	grantExpansion,err:=featurepolicy.TrustedNodeGrantExpands([]byte("{}"),pol)
+	if err!=nil{return Project{},fmt.Errorf("%w: trusted Node policy: %v",ErrInvalidCommand,err)}
 	idx, err := canonicalJSON(cmd.IndexingConfigJSON, "{}")
 	if err != nil {
 		return Project{}, fmt.Errorf("%w: indexing: %v", ErrInvalidCommand, err)
@@ -188,7 +191,9 @@ func (s *Service) CreateProject(ctx context.Context, cmd CreateProjectCommand) (
 	}
 	p := Project{ID: pid, WorkspaceID: cmd.WorkspaceID, Name: strings.TrimSpace(cmd.Name), Description: dp, Status: "active", OperatingMode:mode, ProjectPolicyJSON: pol, IndexingConfigJSON: idx, Revision: 1, CreatedBy: cmd.CreatedBy, CreatedAt: now, UpdatedAt: now}
 	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		if err := s.requireActor(ctx, tx, p.WorkspaceID, cmd.CreatedBy); err != nil {
+		if grantExpansion {
+			if err:=s.requireHumanNodeApproval(ctx,tx,p.WorkspaceID,cmd.CreatedBy);err!=nil{return err}
+		} else if err := s.requireActor(ctx, tx, p.WorkspaceID, cmd.CreatedBy); err != nil {
 			return err
 		}
 		if err := s.repo.InsertProject(ctx, tx, p); err != nil {
@@ -230,7 +235,11 @@ func (s *Service) UpdateProjectPolicy(ctx context.Context, cmd UpdateProjectPoli
 		if p.Status != "active" {
 			return ErrProjectInactive
 		}
-		if err := s.requireActor(ctx, tx, p.WorkspaceID, cmd.ActorPrincipalID); err != nil {
+		expands,err:=featurepolicy.TrustedNodeGrantExpands(p.ProjectPolicyJSON,policy)
+		if err!=nil{return fmt.Errorf("%w: trusted Node policy: %v",ErrInvalidCommand,err)}
+		if expands{
+			if err:=s.requireHumanNodeApproval(ctx,tx,p.WorkspaceID,cmd.ActorPrincipalID);err!=nil{return err}
+		} else if err := s.requireActor(ctx, tx, p.WorkspaceID, cmd.ActorPrincipalID); err != nil {
 			return err
 		}
 		if err := s.repo.UpdateProjectPolicy(ctx, tx, p, policy, now); err != nil {

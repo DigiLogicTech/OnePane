@@ -32,7 +32,8 @@ type Gateway struct {
 	store           invocationStore
 	policy          policyEvaluator
 	authority       authorityConsumer
-	registry        *Registry	scopes          featurepolicy.StoredScopes
+	registry        *Registry
+	scopes          featurepolicy.StoredScopes
 
 	mutationPermits MutationPermitValidator
 	sandboxAdapters map[string]struct{}

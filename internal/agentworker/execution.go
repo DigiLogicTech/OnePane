@@ -72,6 +72,12 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	if !active {
 		return s.blockRun(ctx,run,res,"Project or canonical Workspace is inactive; stop Worker execution and require operator review")
 	}
+	// Archive handling stays operator-visible as BLOCKED. For otherwise
+	// active scopes, do not route a model or tool with a stale Attempt.
+	// The final dispatch CAS independently repeats this SQL invariant.
+	if err:=s.requireActiveWorkerExecutionBinding(ctx,run);err!=nil{
+		return failedResult(res,err)
+	}
 	if run.StepCount >= run.MaxSteps {
 		return s.failRun(ctx, run, res, ErrStepLimit)
 	}
@@ -115,7 +121,9 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	}
 	if err := s.markReasoningDispatch(ctx, &run, kind, cid); err != nil {
 		s.releaseBudgetIfReserved(ctx, reservationID)
-		return s.failRun(ctx, run, res, err)
+		// Dispatch ownership may have changed while selecting a model.
+		// Do not mutate a potentially foreign Task/Attempt through failRun.
+		return failedResult(res,err)
 	}
 
 	constraints, _ := json.Marshal(map[string]any{"completion": json.RawMessage(t.Completion), "worker": map[string]any{"max_steps": run.MaxSteps, "steps_used": run.StepCount, "max_replans": run.MaxReplans, "replans_used": run.ReplanCount, "max_escalations": run.MaxEscalations, "escalations_used": run.EscalationCount}})

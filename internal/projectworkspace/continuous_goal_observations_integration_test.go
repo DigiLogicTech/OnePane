@@ -91,6 +91,21 @@ func TestLevel5GoalObservationAttestationIsScopedAndDoesNotStartMonitoring(t *te
  if _,err:=db.SQL().ExecContext(ctx,
    "UPDATE project_continuous_goals SET monitoring_plan_json=? WHERE id=?",
    string(goal.MonitoringPlanJSON),goal.ID);err!=nil{t.Fatal(err)}
+ // The scope preflight runs before fetching or integrity-checking
+ // foreign observations. Denials are indistinguishable from an unknown
+ // observation ID and cannot reveal a private observation value.
+ for _,candidate:=range []struct{label,id,actor string}{
+  {"foreign observation",unrelated.ID,"owner"},
+  {"unprivileged agent",fresh.ID,"robot"},
+  {"unknown observation","absent-observation","owner"},
+ }{
+  _,err:=attach(candidate.id,project.ID,candidate.actor,goal.Revision)
+  if !errors.Is(err,ErrInvalidCommand)||!strings.Contains(err.Error(),"scope unavailable")||
+   strings.Contains(err.Error(),"NEVER_COPY_SENSOR_VALUE")||
+   strings.Contains(err.Error(),"device://private"){
+   t.Fatalf("%s escaped the early scope gate: %v",candidate.label,err)
+  }
+ }
  for _,tc:=range []struct{name,id,projectID,actor string;revision int64}{
   {"foreign observation",unrelated.ID,project.ID,"owner",1},
   {"unapproved source",unknownSource.ID,project.ID,"owner",1},

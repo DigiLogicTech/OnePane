@@ -45,11 +45,13 @@ to observe or manage. Do not probe third-party networks.
    health, and roll back on failed verification when safe. Examples may
    include restarting an authorised monitoring probe or updating a
    previously approved safe-list policy within bounds.
-5. **Ask before high-impact changes:** router/firewall rule modifications,
-   device quarantine, WAN exposure changes, VLAN reconfiguration,
-   revoking user access, secrets changes, shutdown and destructive actions
-   require a separate explicit permit unless later specifically approved
-   through a narrowly scoped playbook.
+5. **High-impact approval by default, optional preauthorisation:** router/
+   firewall rule modifications, device quarantine, WAN exposure changes,
+   VLAN reconfiguration, access revocation, credentials and shutdown require
+   per-action approval in the default operating mode. The user may opt in to
+   precisely scoped, independently approved high-impact playbooks; those may
+   execute without repeated prompts only while their permit remains valid
+   and all target, parameter, safety and cooldown bounds match.
 6. **Keep the objective alive:** persist health snapshots, incident and
    remediation history, last-successful evaluation, next scheduled check
    and unresolved exceptions. Report "degraded", "unobserved" or
@@ -58,6 +60,54 @@ to observe or manage. Do not probe third-party networks.
    continuous local LLM residency. Use lightweight probes and rules when
    possible; queue model inference for meaningful anomalies or reviews.
    Release RAM/VRAM after each stage and resume correctly after downtime.
+
+## Confirmed Level 5 remediation authorization model (2026-10-11)
+
+**Both options required; safe-by-default is mandatory.** Provide a simple
+Project setting labelled "Automatic fixes":
+
+- **Recommended default — Low-risk only:** permit granted, reversible,
+  bounded low-impact maintenance. Queue high-impact actions for a human
+  approval decision; no automatic escalation just because a task is blocked.
+- **Advanced opt-in — Include specifically preapproved playbooks:** the user
+  explicitly approves individual high-impact actions, selected targets and
+  limits in advance. Only those precise approvals can run automatically.
+  A new action, target, wider parameter range or expired permit requires
+  a fresh approval. There is no "unrestricted administrator" switch.
+
+Every permit must record who approved it, canonical Project/Workspace,
+action/tool identity, target resource identifiers, bounded parameters,
+risk class, expiry/revocation state, permitted frequency and maintenance
+window, an immutable policy revision, and an audit/provenance reference.
+Approval must bind to the actual side-effect execution, not simply to an
+Assistant's chat message or recommendation.
+
+Safeguards: recheck the permit before execution, prevent duplicate execution
+using an operation identity, restrict concurrency/cooldowns, snapshot the
+prior state where appropriate, verify postconditions, and use safe rollback
+when available. Unknown external outcomes pause for reconciliation. Failed
+health verification cannot silently escalate permissions or continue an
+unbounded retry loop.
+
+**Example:** the operator may preapprove temporarily blocking outbound
+access from **a single explicitly identified IoT device** under specific
+conditions and for a fixed duration. That does not grant blanket permission
+to quarantine other devices, alter WAN firewall rules or disable the
+router. The system must retain an operator-accessible emergency stop and
+a verified recovery path to avoid self-lockout.
+
+**UI:** use checkbox/drop-down affordances for mode choice and authorised
+playbooks, individual target selectors, time/window and expiry settings,
+plus visible pause, revoke and "approval required" states. Start all
+Projects and upgraded installations in Low-risk only; do not activate
+advanced grants through migration or choosing Level 5 alone.
+
+**Required negative tests:** invalid/missing approval; revoked/expired
+permit; different target, action or parameters; policy changes before
+side effect; approval escalation through alternative tools or a spawned
+Worker; duplicate incident delivery; cooldown breach; unverified rollback;
+unknown outcome; service restart; emergency pause; insufficient network
+telemetry; and loss of operator connectivity.
 
 ## Implementation backlog — ordered, independently testable
 
@@ -81,10 +131,12 @@ to observe or manage. Do not probe third-party networks.
       and evidence with provenance, capability grant, freshness and
       confidence. Build on `internal/observation` and
       `internal/projectworkspace`. No implicit LAN discovery.
-- [ ] **OPM-05: Playbook policy and enforcement.** Add read-only by default,
-      explicit action classes, maintenance windows, pre/post verification,
-      idempotent permitted remediations, approval escalation, safe
-      rollback and unknown-outcome holds via `internal/operation`,
+- [ ] **OPM-05: Playbook policy and enforcement.** Default to low-risk,
+      reversible fixes plus required approval for higher-impact actions.
+      Implement opt-in, per-playbook preauthorisation with target/parameter
+      bounds, expiry/revocation, maintenance windows, transaction-aware
+      permission rechecks, pre/post verification, safe rollback, audit,
+      idempotency and unknown-outcome holds via `internal/operation`,
       `internal/tool` and `internal/featurepolicy`.
 - [ ] **OPM-06: Local-first runtime resource plan.** Queue monitoring
       evaluations, opportunistically run models, use Colibri and
@@ -127,11 +179,12 @@ to observe or manage. Do not probe third-party networks.
 
 ## Design decisions still pending
 
-- Exact automated remediation scope for Level 5 (read-only,
-  reversible low-risk, or user-designated high-impact playbooks).
-- Approval semantics, critical alert escalation, allowed sensors and
-  monitoring frequency; separate permissions to touch routers, hosts
-  and network devices.
+- **Decided:** low-risk-only automatic remediation by default, plus an
+  opt-in preauthorisation mode for individually bounded high-impact
+  playbooks; never a blanket high-impact switch.
+- **Outstanding:** concrete risk classification per adapter and action,
+  permitted sensors/monitoring frequency, alert escalation, and target-
+  specific permissions for routers, hosts and other devices.
 - Other vision register decisions 3–6 (tool classification, Agent policy,
   diagnostics and local/remote compute trust).
 

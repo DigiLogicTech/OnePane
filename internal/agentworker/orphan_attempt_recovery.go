@@ -20,8 +20,8 @@ type orphanAgentAttempt struct {
 }
 
 // recoverOrphanedAgentAttempts runs only during a known Worker startup.
-// A live waiting Worker is intentionally retained for its original Task,
-// model/resource wait, and toolchain continuation. No unknown external
+// A waiting or operator/verification-BLOCKED Worker retains its original Task,
+// model/resource wait and verification continuation. No unknown external
 // operation is replayed. Each independent orphan is blocked and audited
 // atomically using the ordinary Task recovery transaction.
 func(s *Service) recoverOrphanedAgentAttempts(ctx context.Context)(int,error){
@@ -41,7 +41,7 @@ func(s *Service) recoverOrphanedAgentAttempts(ctx context.Context)(int,error){
    SELECT 1 FROM agent_worker_runs r
    WHERE r.attempt_id=a.id AND r.task_id=a.task_id
     AND r.workspace_id=t.workspace_id
-    AND r.status IN ('running','waiting')
+    AND r.status IN ('running','waiting','blocked')
   )
  ORDER BY t.created_at,t.id,a.attempt_number LIMIT 256`,WorkerPrincipal)
  if err!=nil{return 0,err}
@@ -73,7 +73,7 @@ func(s *Service) recoverOrphanedAgentAttempts(ctx context.Context)(int,error){
     AND NOT EXISTS(
      SELECT 1 FROM agent_worker_runs r WHERE r.attempt_id=a.id
       AND r.task_id=t.id AND r.workspace_id=t.workspace_id
-      AND r.status IN ('running','waiting')
+      AND r.status IN ('running','waiting','blocked')
     )`,c.AttemptID,c.TaskID,c.Revision,WorkerPrincipal).
     Scan(&currentAttemptID)
    if errors.Is(err,sql.ErrNoRows){return task.ErrRevisionConflict}

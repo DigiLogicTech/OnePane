@@ -422,6 +422,11 @@ func (s *Service) resumeWaitingWorkerAndAttempt(
   if errors.Is(err,sql.ErrNoRows){return task.ErrRevisionConflict}
   if err!=nil{return err}
   if taskWorkspace!=workspaceID{return ErrInvalidWorkerState}
+  // Resume is a new admission decision. A suspended Task cannot regain
+  // model/tool execution after Project or Workspace autonomy was revoked.
+  allowed,policyErr:=(featurepolicy.StoredScopes{DB:s.db}).AuthorizeTaskTx(ctx,tx,workspaceID,taskID,"tasks.autonomous")
+  if policyErr!=nil{return fmt.Errorf("Worker resume scope unavailable: %w",policyErr)}
+  if !allowed{return fmt.Errorf("autonomous Worker permission revoked before resume")}
   changed,err:=tx.ExecContext(ctx,`UPDATE agent_worker_runs
    SET status='running',revision=revision+1,updated_at=?
    WHERE id=? AND task_id=? AND workspace_id=? AND attempt_id=?

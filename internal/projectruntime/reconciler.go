@@ -254,7 +254,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			if e := r.requireEndpointManifest(ctx, runtime.ID, endpoints); e != nil {
 				return result, e
 			}
-			ensure := appEnsurePlan(runtime, app, endpointSpecsForApp(endpoints, app.ID))
+			ensure := appEnsurePlan(runtime, app, endpointSpecsForApp(endpoints, app.ID), endpointPlanDigest(endpoints, app.ID))
 			aev, e := r.applyAndVerify(ctx, project.WorkspaceID, cmd, ensure)
 			if e != nil {
 				return result, e
@@ -475,9 +475,9 @@ func appPullPlan(r projectworkspace.ProjectRuntime, a projectworkspace.Applicati
 	inspect := mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID, "image": a.SourceRef})
 	return mutationPlan{ToolID: sandboxrunner.ToolAppPull, InspectToolID: sandboxrunner.ToolImageInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_app:" + a.ID, Input: input, InspectInput: inspect, DesiredState: mustJSON(map[string]any{"image_present": a.SourceRef}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolImageInspect}), IdempotencyKey: fmt.Sprintf("project-app:%s:rev:%d:pull", a.ID, a.Revision), ObservationType: "project_application_image", Postcondition: func(raw json.RawMessage) bool { return imagePresent(raw, a.SourceRef) }}
 }
-func appEnsurePlan(r projectworkspace.ProjectRuntime, a projectworkspace.Application, endpoints []sandboxrunner.PortSpec) mutationPlan {
+func appEnsurePlan(r projectworkspace.ProjectRuntime, a projectworkspace.Application, endpoints []sandboxrunner.PortSpec, endpointSHA256 string) mutationPlan {
 	input := mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID, "image": a.SourceRef, "runtime_spec": rawOrObject(a.RuntimeSpecJSON), "resource_limits": rawOrObject(r.ResourceLimitsJSON), "environment_bindings": rawOrObject(a.EnvironmentBindingsJSON), "network_policy": rawOrObject(r.NetworkPolicyJSON), "endpoints": endpoints, "action": "ensure"})
-	return mutationPlan{ToolID: sandboxrunner.ToolAppEnsure, InspectToolID: sandboxrunner.ToolAppInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_app:" + a.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID}), DesiredState: mustJSON(map[string]any{"status": "running", "isolation_verified": true}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppInspect}), Compensation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppStop, "runtime_id": r.ID, "application_id": a.ID}), IdempotencyKey: fmt.Sprintf("project-app:%s:rev:%d:ensure", a.ID, a.Revision), ObservationType: "project_application_state", Postcondition: func(raw json.RawMessage) bool { return appRunningIsolated(raw, r.ID, a.ID) }}
+	return mutationPlan{ToolID: sandboxrunner.ToolAppEnsure, InspectToolID: sandboxrunner.ToolAppInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_app:" + a.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID}), DesiredState: mustJSON(map[string]any{"status": "running", "isolation_verified": true}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppInspect}), Compensation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppStop, "runtime_id": r.ID, "application_id": a.ID}), IdempotencyKey: fmt.Sprintf("project-app:%s:rev:%d:routes:%s:ensure", a.ID, a.Revision, endpointSHA256), ObservationType: "project_application_state", Postcondition: func(raw json.RawMessage) bool { return appRunningIsolated(raw, r.ID, a.ID) }}
 }
 func appStopPlan(r projectworkspace.ProjectRuntime, a projectworkspace.Application) mutationPlan {
 	input := mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID, "action": "stop"})

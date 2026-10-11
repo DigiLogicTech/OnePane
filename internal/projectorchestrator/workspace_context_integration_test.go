@@ -75,8 +75,27 @@ func TestOrchestratorRuntimeContextIsBoundToSelectedWorkspace(t *testing.T) {
  })
  if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_workspaces
   SET ai_settings_json=? WHERE id=?`,string(worldSettings),world.ID);err!=nil{t.Fatal(err)}
+ // A Project-level orchestration model can coordinate known Workspace
+ // names, but it cannot inspect another Workspace's unpublished objectives,
+ // Task IDs or recent Task event identities without an explicit grant.
+ taskSvc:=task.NewService(db.SQL(),db,clock.Real{})
+ worldTask,err:=taskSvc.Create(ctx,task.CreateCommand{
+  WorkspaceID:"tenant",ProjectID:&p.ID,ProjectWorkspaceID:&world.ID,
+  Objective:"WORLD_PRIVATE_OBJECTIVE_NEVER_SHARED_WITH_STORY",
+ })
+ if err!=nil{t.Fatal(err)}
+ storyTask,err:=taskSvc.Create(ctx,task.CreateCommand{
+  WorkspaceID:"tenant",ProjectID:&p.ID,ProjectWorkspaceID:&story.ID,
+  Objective:"STORY_PRIVATE_OBJECTIVE_NEVER_SHARED_WITH_WORLD",
+ })
+ if err!=nil{t.Fatal(err)}
+ legacyTask,err:=taskSvc.Create(ctx,task.CreateCommand{
+  WorkspaceID:"tenant",ProjectID:&p.ID,
+  Objective:"LEGACY_SHARED_TASK_NOT_AUTOMATICALLY_WORKSPACE_EVIDENCE",
+ })
+ if err!=nil{t.Fatal(err)}
  orchestrator:=NewService(db.SQL(),db,clock.Real{},unavailableOrchestratorReasoning{},nil,nil,
-  task.NewService(db.SQL(),db,clock.Real{}),nil)
+  taskSvc,nil)
  type snapshot struct {
   Runtime struct {
    ID string `json:"id"`
@@ -99,6 +118,30 @@ func TestOrchestratorRuntimeContextIsBoundToSelectedWorkspace(t *testing.T) {
  check(world.ID,worldRuntime.ID,"defined")
  check(story.ID,storyRuntime.ID,"defined")
  check(assets.ID,"","not_provisioned")
+ worldSnapshot,_,_,_,err:=orchestrator.contextSnapshot(ctx,p.ID,world.ID)
+ if err!=nil{t.Fatal(err)}
+ storySnapshot,_,_,_,err:=orchestrator.contextSnapshot(ctx,p.ID,story.ID)
+ if err!=nil{t.Fatal(err)}
+ for _,tc:=range []struct{name string;raw json.RawMessage;allowed,denied,deniedID string}{
+  {"world",worldSnapshot,worldTask.Objective,storyTask.Objective,storyTask.ID},
+  {"story",storySnapshot,storyTask.Objective,worldTask.Objective,worldTask.ID},
+ }{
+  if !strings.Contains(string(tc.raw),tc.allowed)||
+   strings.Contains(string(tc.raw),tc.denied)||
+   strings.Contains(string(tc.raw),tc.deniedID)||
+   strings.Contains(string(tc.raw),legacyTask.Objective)||
+   strings.Contains(string(tc.raw),legacyTask.ID){
+   t.Fatalf("%s Workspace context disclosed private or unscoped Tasks: %s",tc.name,tc.raw)
+  }
+ }
+ assetSnapshot,_,_,_,err:=orchestrator.contextSnapshot(ctx,p.ID,assets.ID)
+ if err!=nil{t.Fatal(err)}
+ if strings.Contains(string(assetSnapshot),worldTask.Objective)||
+  strings.Contains(string(assetSnapshot),storyTask.Objective)||
+  strings.Contains(string(assetSnapshot),worldTask.ID)||
+  strings.Contains(string(assetSnapshot),storyTask.ID){
+  t.Fatalf("unprovisioned Assets Workspace received peer Task evidence: %s",assetSnapshot)
+ }
  for _,selectedID:=range []string{world.ID,story.ID}{
   raw,_,mode,_,err:=orchestrator.contextSnapshot(ctx,p.ID,selectedID)
   if err!=nil{t.Fatal(err)}

@@ -72,7 +72,7 @@ func recoveryCheckpointForGraph(graph TaskGraph) RecoveryCheckpoint {
    current.RecoveryClass="operator_review"
    out.NeedsOperatorReview=true
   }
-  if n.ScopeDrift||n.Archived||len(n.FailedOrIntervenedOn)>0{
+  if n.ScopeDrift||n.DependencyDrift||n.Archived||len(n.FailedOrIntervenedOn)>0{
    current.RecoveryClass="operator_review"
    current.CanExistingWorkerAdmit=false
    out.NeedsOperatorReview=true

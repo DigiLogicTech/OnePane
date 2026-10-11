@@ -261,11 +261,13 @@ func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGra
  if err!=nil{return TaskGraph{},err}
  rows,err:=tx.QueryContext(ctx,`SELECT n.node_key,n.task_id,
   n.project_workspace_id,t.project_workspace_id,t.state,t.archived_at,t.completion_json,
-  pw.id,n.approved_dependencies_json,n.approved_dependencies_recorded
+  pw.id,n.approved_dependencies_json,n.approved_dependencies_recorded,
+  t.workspace_id,tenant.id
   FROM project_orchestrator_task_graph_nodes n
   JOIN tasks t ON t.id=n.task_id AND t.project_id=?
   LEFT JOIN project_workspaces pw ON pw.id=n.project_workspace_id
     AND pw.project_id=? AND pw.status='active'
+  LEFT JOIN workspaces tenant ON tenant.id=t.workspace_id AND tenant.status='active'
   WHERE n.graph_id=? ORDER BY n.position`,projectID,projectID,graphID)
  if err!=nil{return TaskGraph{},err}
  x.Nodes=[]TaskGraphNode{}
@@ -273,16 +275,18 @@ func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGra
  for rows.Next(){
   var n TaskGraphNode
   var archived sql.NullInt64
-  var actualWorkspace,activeWorkspace sql.NullString
-  var completion,approvedJSON string
+  var actualWorkspace,activeWorkspace,activeTenant sql.NullString
+  var taskTenant,completion,approvedJSON string
   var approvedRecorded int
-  if err=rows.Scan(&n.Key,&n.TaskID,&n.ProjectWorkspaceID,&actualWorkspace,&n.State,&archived,&completion,&activeWorkspace,&approvedJSON,&approvedRecorded);err!=nil{break}
+  if err=rows.Scan(&n.Key,&n.TaskID,&n.ProjectWorkspaceID,&actualWorkspace,&n.State,&archived,&completion,&activeWorkspace,&approvedJSON,&approvedRecorded,
+   &taskTenant,&activeTenant);err!=nil{break}
   var metadata struct{ OnePaneRouting struct{ ComputePreference string `json:"compute_preference"` } `json:"onepane_routing"` }
   if err=json.Unmarshal([]byte(completion),&metadata);err!=nil{return TaskGraph{},err}
   n.ComputePreference=metadata.OnePaneRouting.ComputePreference
   if n.ComputePreference==""{n.ComputePreference="auto"}
   n.Archived=archived.Valid
-  n.ScopeDrift=!actualWorkspace.Valid||actualWorkspace.String!=n.ProjectWorkspaceID||!activeWorkspace.Valid
+  n.ScopeDrift=!actualWorkspace.Valid||actualWorkspace.String!=n.ProjectWorkspaceID||
+   !activeWorkspace.Valid||taskTenant!=x.WorkspaceID||!activeTenant.Valid
   // Historical DAGs have no independently recorded approved predecessor
   // set. Do not infer it from mutable Task edges during a migration.
   if approvedRecorded!=1{
@@ -314,22 +318,42 @@ func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGra
  if len(x.Nodes)!=expectedNodeCount{return TaskGraph{},ErrGraphConflict}
  for i:=range x.Nodes{
   depRows,depErr:=tx.QueryContext(ctx,`SELECT COALESCE(pred.node_key,''),
-   dep.state,dep.archived_at
+   dep.state,dep.archived_at,d.dependency_type,d.dependency_mode,
+   COALESCE(pred.approved_dependencies_recorded,0),
+   dep.workspace_id,dep.project_id,dep.project_workspace_id,
+   pred.project_workspace_id,COALESCE(predws.status,'')
    FROM task_dependencies d
    JOIN tasks dep ON dep.id=d.depends_on_task_id
    LEFT JOIN project_orchestrator_task_graph_nodes pred
     ON pred.task_id=dep.id AND pred.graph_id=?
-   WHERE d.task_id=? AND d.dependency_type='hard'
-   ORDER BY pred.position,pred.node_key`,graphID,x.Nodes[i].TaskID)
+   LEFT JOIN project_workspaces predws ON predws.id=pred.project_workspace_id
+    AND predws.project_id=?
+   WHERE d.task_id=?
+   ORDER BY pred.position,pred.node_key`,graphID,x.ProjectID,x.Nodes[i].TaskID)
   if depErr!=nil{return TaskGraph{},depErr}
   for depRows.Next(){
-   var key string
+   var key,kind,mode,depTenant,predStatus string
    var depState task.State
    var archived sql.NullInt64
-   if depErr=depRows.Scan(&key,&depState,&archived);depErr!=nil{break}
+   var predecessorRecorded int
+   var depProject,depActual,depCanonical sql.NullString
+   if depErr=depRows.Scan(&key,&depState,&archived,&kind,&mode,
+    &predecessorRecorded,&depTenant,&depProject,&depActual,
+    &depCanonical,&predStatus);depErr!=nil{break}
+   // Read-time readiness must match the actual start/resume authority
+   // predicate, which checks ALL edges, not just hard edges. In particular
+   // a soft edge or an 'any' mode is an unreviewed graph modification.
+   if kind!="hard"||mode!="all"||predecessorRecorded!=1||
+    predStatus!="active"||depTenant!=x.WorkspaceID||
+    !depProject.Valid||depProject.String!=x.ProjectID||
+    !depActual.Valid||!depCanonical.Valid||
+    depActual.String!=depCanonical.String||archived.Valid{
+    x.Nodes[i].DependencyDrift=true
+   }
    if key=="" {
-    // A later foreign/unreviewed hard edge is not trusted as part of this
-    // approved DAG; never leak an unrelated Project's Task ID to the caller.
+    // Foreign/unreviewed dependencies are sanitized; opaque Task IDs or
+    // Workspace identities must not leak through the graph read result.
+    x.Nodes[i].DependencyDrift=true
     x.Nodes[i].BlockedBy=append(x.Nodes[i].BlockedBy,"unscoped_dependency")
     x.Nodes[i].FailedOrIntervenedOn=append(x.Nodes[i].FailedOrIntervenedOn,"unscoped_dependency")
     continue

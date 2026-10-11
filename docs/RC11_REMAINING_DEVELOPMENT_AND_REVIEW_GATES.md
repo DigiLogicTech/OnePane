@@ -1081,3 +1081,17 @@ a second startup recovery produces no additional transitions.
 This is startup-only recovery with no physical control-plane Node or
 process lease acceptance asserted. A pending manual reconciliation
 must still satisfy the existing verification and approval gates.
+
+### Storage decoding exposed by expanded recovery CI
+
+Enabling the previously omitted Operation SQLite integration suite
+exposed that the persisted JSON TEXT fields in Operation, Verification
+and Checkpoint repositories were scanned directly into named
+`json.RawMessage` values. The SQLite driver returns text as a string;
+these scans fail for durable records. The repositories now scan into
+temporary strings then copy to the raw JSON fields, preserving the
+stored bytes. The historical mutating-Tool test also supplies its
+explicit healthy test watchdog to satisfy the current fail-closed
+mutation policy; production watchdog requirements are unchanged.
+The complete Operation integration suite, including original
+mutation lifecycle and restart recovery tests, is now mandatory CI.

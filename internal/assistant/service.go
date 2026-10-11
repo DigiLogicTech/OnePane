@@ -198,7 +198,11 @@ func(s *Service) reasonGlobal(ctx context.Context,workspaceID,actor,content stri
 	label:=policy.DataLabel{WorkspaceID:workspaceID,Confidentiality:policy.ConfidentialityInternal,Residency:policy.ResidencyAny,Trust:policy.TrustUserInstruction}
 	selected:=""
  if pin!=nil{selected=strings.TrimSpace(*pin)}
- route:=scheduler.RouteRequest{WorkspaceID:workspaceID,CapabilityID:"inference.general",RoleName:"onepane-assistant",ProtocolLevel:"L1",ContextTokens:8192,DataLabel:label,AllowUntested:true,AllowLimited:true,AllowMediated:true,AllowDegraded:true,PreferZeroIncrementalCost:true,AllowedKinds:[]scheduler.CandidateKind{scheduler.CandidateModel}}
+ // General Assistant context includes Project names and operational counts.
+ // No approved off-host data transfer or paid inference grant exists at this
+ // taskless-chat boundary. Both automatic and pinned routes must fail closed
+ // to verified local, zero-incremental-cost compute; no cloud substitution.
+ route:=scheduler.RouteRequest{WorkspaceID:workspaceID,CapabilityID:"inference.general",RoleName:"onepane-assistant",ProtocolLevel:"L1",ContextTokens:8192,DataLabel:label,AllowUntested:true,AllowLimited:true,AllowMediated:true,AllowDegraded:true,PreferZeroIncrementalCost:true,RequireZeroIncrementalCost:true,LocalOnly:true,AllowedKinds:[]scheduler.CandidateKind{scheduler.CandidateModel}}
  if selected!=""{
   route.IncludeCandidateIDs=[]string{selected}
   // Manual model selection may use a smaller verified context than the

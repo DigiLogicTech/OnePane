@@ -51,8 +51,16 @@ func TestAssistantThreadModelChoicePersistsAndPinsRouting(t *testing.T){
  if err==nil||!strings.Contains(err.Error(),"no substitution"){t.Fatalf("expected a hard failure on pinned model: %v",err)}
  if len(fake.last.IncludeCandidateIDs)!=1||fake.last.IncludeCandidateIDs[0]!=chosen{t.Fatalf("pinned route did not constrain deployment: %+v",fake.last)}
  if fake.last.ContextTokens!=2048{t.Fatalf("expected bounded manual context, got %d",fake.last.ContextTokens)}
+ if !fake.last.LocalOnly||!fake.last.RequireZeroIncrementalCost {
+  t.Fatalf("pinned Assistant inference could move global context off-host or incur paid spend: %+v",fake.last)
+ }
  fake.options[0].Schedulable=false
  if _,err=svc.SetModel(ctx,thread.ID,&chosen);!errors.Is(err,ErrInvalid){t.Fatalf("inactive deployment accepted: %v",err)}
  reset,err:=svc.SetModel(ctx,thread.ID,nil);if err!=nil{t.Fatal(err)}
  if reset.PreferredModelDeploymentID!=nil{t.Fatalf("Auto did not remove pin: %+v",reset)}
+ _,_,err=svc.reasonGlobal(ctx,"ws","admin","general question",nil)
+ if err==nil{t.Fatal("test scheduler should have denied automatic routing")}
+ if !fake.last.LocalOnly||!fake.last.RequireZeroIncrementalCost||len(fake.last.IncludeCandidateIDs)>0{
+  t.Fatalf("automatic Assistant inference permitted off-host, paid or pinned fallback: %+v",fake.last)
+ }
 }

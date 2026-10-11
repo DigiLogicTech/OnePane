@@ -10,11 +10,13 @@ PR: #226
 - [x] Scoped authorization diagnostic helper and denial test
 
 ## Remaining
-- [ ] Implement structured redacted diagnostic event schema
-- [ ] Add event validation and secret-redaction tests
+- [x] Implement structured redacted policy decision event schema
+- [x] Add policy decision event redaction and JSON serialization tests
 - [ ] Integrate diagnostics into existing debug surface
 - [ ] Run relevant tests and CI
 - [ ] Review diff and satisfy integration gates
 
 ## Continuation
+Policy diagnostic schema and tests are committed. Remaining integration and CI validation have not been completed.
+
 Inspect existing debug and diagnostics architecture, implement event schema and redaction without logging credentials, test and validate. No merge before validation.

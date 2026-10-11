@@ -180,6 +180,29 @@ func(s *Server) getProjectTaskGraphRecoveryCheckpoint(w http.ResponseWriter,r *h
  writeJSON(w,http.StatusOK,out)
 }
 
+// Reattestation is a separate explicitly reviewed human-only operation.
+// API task.write is necessary but not sufficient: the domain also requires
+// an active human, original graph SHA-256 and exact unexecuted Task DAG.
+type projectTaskGraphLegacyReviewService interface {
+ ReattestLegacyTaskGraph(context.Context,projectorchestrator.ReattestLegacyTaskGraphCommand)(projectorchestrator.TaskGraph,error)
+}
+func(s *Server) reattestLegacyProjectTaskGraph(w http.ResponseWriter,r *http.Request){
+ i,ok:=s.authenticate(w,r);if !ok{return}
+ p,err:=s.projects.Project(r.Context(),r.PathValue("projectID"))
+ if err!=nil{respondDomain(w,nil,err,0);return}
+ if !s.authorize(w,r,i,p.WorkspaceID,"task.write"){return}
+ reviewer,ok:=s.projectOrchestrator.(projectTaskGraphLegacyReviewService)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Legacy Task graph review unavailable");return}
+ var input projectorchestrator.ReattestLegacyTaskGraphCommand
+ if !decodeJSON(w,r,&input){return}
+ input.ProjectID=p.ID
+ input.GraphID=r.PathValue("graphID")
+ input.ActorPrincipalID=i.PrincipalID
+ result,err:=reviewer.ReattestLegacyTaskGraph(r.Context(),input)
+ if err!=nil{respondDomain(w,nil,err,0);return}
+ w.Header().Set("Cache-Control","no-store, private")
+ writeJSON(w,http.StatusOK,result)
+}
 func(s *Server) getProjectTaskGraph(w http.ResponseWriter,r *http.Request){
  i,ok:=s.authenticate(w,r);if !ok{return}
  p,err:=s.projects.Project(r.Context(),r.PathValue("projectID"))

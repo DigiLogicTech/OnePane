@@ -30,7 +30,8 @@
    const safeAt=typeof at==="string"&&at.length<=40&&timestamp.test(at)&&
     Number.isFinite(Date.parse(at))?at:"unavailable";
    const safeID=typeof id==="string"&&correlation.test(id)?id:"redacted";
-   events.push({at_utc:safeAt,action,allowed,category,correlation_id:safeID});
+   events.push({at_utc:safeAt,action,allowed,category,correlation_id:safeID,
+    remediation:allowed?"No permission change required.":"Review effective Project, Workspace and Agent policy; do not auto-escalate permissions."});
   }
   if(!events.length)throw Error("No valid policy decisions found");
   return {schema_version:1,source:"local_operator_policy_decisions",

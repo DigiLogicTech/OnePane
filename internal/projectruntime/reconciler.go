@@ -276,7 +276,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			if e != nil {
 				return result, e
 			}
-			routes, e := r.publishVerifiedEndpointRoutes(ctx, cmd, cur, endpoints, aev)
+			routes, e := r.publishVerifiedEndpointRoutes(ctx, cmd, runtime, cur, endpoints, aev)
 			if e != nil {
 				return result, e
 			}
@@ -331,7 +331,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 	return result, nil
 }
 
-func (r *Reconciler) publishVerifiedEndpointRoutes(ctx context.Context, cmd ReconcileCommand, app projectworkspace.Application, endpoints []projectworkspace.Endpoint, ev evidence) ([]projectworkspace.EndpointRoute, error) {
+func (r *Reconciler) publishVerifiedEndpointRoutes(ctx context.Context, cmd ReconcileCommand, runtime projectworkspace.ProjectRuntime, app projectworkspace.Application, endpoints []projectworkspace.Endpoint, ev evidence) ([]projectworkspace.EndpointRoute, error) {
 	var inspected struct {
 		Container sandboxrunner.ContainerState `json:"container"`
 	}
@@ -352,6 +352,12 @@ func (r *Reconciler) publishVerifiedEndpointRoutes(ctx context.Context, cmd Reco
 	for _, endpoint := range endpoints {
 		// A read-only comparison before each externally visible route
 		// complements the atomic Endpoint revision check in the service.
+		if err := r.requireRuntimeRevision(ctx, runtime); err != nil {
+			return nil, err
+		}
+		if err := r.requireApplicationRevision(ctx, app); err != nil {
+			return nil, err
+		}
 		if err := r.requireEndpointManifest(ctx, app.ProjectRuntimeID, endpoints); err != nil {
 			return nil, err
 		}

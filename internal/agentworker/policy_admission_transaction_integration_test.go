@@ -86,3 +86,37 @@ func TestWorkerAdmissionRejectsChangedFallbackAtCommitBoundary(t *testing.T){
  }
  assertAdmissionUnchanged(t,ctx,db,tasks,ready)
 }
+
+func TestWorkerResumeRejectsRevokedAutonomyAtomically(t *testing.T){
+ ctx,db,tasks,svc,ready,viewID:=configuredWorkerAdmission(t)
+ run,result:=svc.startRun(ctx,ready)
+ if result.Error!=""||run.ID==""{t.Fatalf("start fixture: %+v %+v",run,result)}
+ if err:=svc.suspendForResource(ctx,run,json.RawMessage(`{}`),
+  "temporary local resource wait","route",map[string]any{"kind":"local"},nil);err!=nil{t.Fatal(err)}
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_workspaces
+  SET ai_settings_json='{"feature_policy":{"AutonomousRoutines":"disabled"}}'
+  WHERE id=?`,viewID);err!=nil{t.Fatal(err)}
+ waiting,err:=tasks.Get(ctx,ready.ID)
+ if err!=nil{t.Fatal(err)}
+ if waiting.State!=task.StateWaitingDependency{t.Fatalf("not waiting: %s",waiting.State)}
+ var continuation,status string
+ if err:=db.SQL().QueryRowContext(ctx,
+  "SELECT continuation_json,status FROM agent_worker_runs WHERE id=?",run.ID).
+  Scan(&continuation,&status);err!=nil{t.Fatal(err)}
+ if status!=string(RunWaiting){t.Fatalf("unexpected Worker status: %s",status)}
+ err=svc.resumeWaitingWorkerAndAttempt(ctx,run.ID,ready.ID,waiting.Revision,continuation)
+ if err==nil||!strings.Contains(err.Error(),"revoked before resume"){
+  t.Fatalf("revoked Workspace resumed Worker: %v",err)
+ }
+ after,err:=tasks.Get(ctx,ready.ID)
+ if err!=nil{t.Fatal(err)}
+ if after.State!=task.StateWaitingDependency||after.Revision!=waiting.Revision{
+  t.Fatalf("denied resume changed Task: %+v",after)
+ }
+ var workerStatus,attemptStatus string
+ if err:=db.SQL().QueryRowContext(ctx,"SELECT status FROM agent_worker_runs WHERE id=?",run.ID).Scan(&workerStatus);err!=nil{t.Fatal(err)}
+ if err:=db.SQL().QueryRowContext(ctx,"SELECT status FROM task_attempts WHERE id=?",run.AttemptID).Scan(&attemptStatus);err!=nil{t.Fatal(err)}
+ if workerStatus!=string(RunWaiting)||attemptStatus!=string(task.AttemptWaiting){
+  t.Fatalf("denied resume changed Worker or Attempt: %s %s",workerStatus,attemptStatus)
+ }
+}

@@ -56,12 +56,17 @@ func (s *Service) AssurancePassed(ctx context.Context,runID,verificationID,check
 		 JOIN verifications v ON v.id=c.verification_id
 		  AND v.task_id=t.id AND v.workspace_id=t.workspace_id
 		  AND v.status='pass' AND v.achieved_level IS NOT NULL
+		  AND v.subject_ref='agent_worker_run:' || ?
+		  AND json_valid(v.spec_json)=1
+		  AND json_extract(v.spec_json,'$.source')='agent_completion_proposal'
+		  AND json_extract(v.spec_json,'$.worker_run_id')=?
 		 JOIN events e ON e.aggregate_type='task' AND e.aggregate_id=t.id
 		  AND e.workspace_id=t.workspace_id AND e.event_type='task.completed'
 		  AND json_valid(e.payload_json)=1
 		  AND json_extract(e.payload_json,'$.checkpoint_id')=c.id
 		 WHERE t.id=? AND t.workspace_id=? AND t.state='complete'`,
-		 attemptID,WorkerPrincipal,checkpointID,verificationID,taskID,workspaceID).
+		 attemptID,WorkerPrincipal,checkpointID,verificationID,
+		 runID,runID,taskID,workspaceID).
 		 Scan(&evidence)
 		if err!=nil{return err}
 		if evidence!=1{return ErrInvalidWorkerState}
@@ -127,8 +132,12 @@ func (s *Service) AssuranceRetry(ctx context.Context,runID,verificationID string
 		var approved int
 		err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM verifications v
 		 WHERE v.id=? AND v.task_id=? AND v.workspace_id=?
-		  AND v.status IN ('fail','inconclusive') AND v.verified_by IS NOT NULL`,
-		  verificationID,taskID,workspaceID).Scan(&approved)
+		  AND v.status IN ('fail','inconclusive') AND v.verified_by IS NOT NULL
+		  AND v.subject_ref='agent_worker_run:' || ?
+		  AND json_valid(v.spec_json)=1
+		  AND json_extract(v.spec_json,'$.source')='agent_completion_proposal'
+		  AND json_extract(v.spec_json,'$.worker_run_id')=?`,
+		  verificationID,taskID,workspaceID,runID,runID).Scan(&approved)
 		if err!=nil{return err}
 		if approved!=1{return ErrInvalidWorkerState}
 		var taskRevision int64

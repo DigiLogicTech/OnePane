@@ -39,6 +39,9 @@ assertContains(foundation,'not runtime permissions','do not misstate runtime pol
 assertContains(foundation,'name="operating_mode"','Project creation must expose L4/L5 modes in a dropdown');
 assertContains(foundation,'value="autonomous_project" selected','Level 4 is the UI default');
 assertContains(foundation,'value="continuous_operations"','Level 5 is an explicit Project selection');
+assertContains(foundation,'name="autonomous_local_tasks" checked',"new Project setup must offer the default Level 4 local Task autonomy option");
+assertContains(foundation,"AutonomousRoutines:f.autonomous_local_tasks?'enabled':'disabled'","autonomy must be an explicit user-selected Project feature policy");
+assertContains(foundation,"This does not enable shell, network, secret access or provider spending.","local Task autonomy must not grant external permissions");
 assertContains(foundation,'onepane_operations:{version:1,mode:f.operating_mode','mode selection must persist in actual Project policy');
 assertContains(foundation,"id=\"qa4SaveProjectOperatingMode\"",'Project Inspector must offer an operating-mode save action');
 assertContains(foundation,'Level 5 monitoring and remediation require separately authorised setup','mode selection must not claim permission to monitor or remediate');

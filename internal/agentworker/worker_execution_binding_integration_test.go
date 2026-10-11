@@ -91,12 +91,12 @@ func TestAgentWorkerDispatchRejectsStaleOrForeignActiveAttempt(t *testing.T) {
 		`UPDATE task_attempts SET metadata_json='{"agent_worker":"v1"}'
 		 WHERE id=?`,victim.AttemptID);err!=nil{t.Fatal(err)}
 	if _,err:=db.SQL().ExecContext(ctx,
-		`UPDATE agent_worker_runs SET attempt_id=? WHERE id=?`,
-		other.AttemptID,victim.ID);err!=nil{t.Fatal(err)}
+		`UPDATE agent_worker_runs SET task_id=? WHERE id=?`,
+		other.TaskID,victim.ID);err!=nil{t.Fatal(err)}
 	deny("attempt_from_another_task")
 	if _,err:=db.SQL().ExecContext(ctx,
-		`UPDATE agent_worker_runs SET attempt_id=? WHERE id=?`,
-		victim.AttemptID,victim.ID);err!=nil{t.Fatal(err)}
+		`UPDATE agent_worker_runs SET task_id=? WHERE id=?`,
+		victim.TaskID,victim.ID);err!=nil{t.Fatal(err)}
 	if _,err:=db.SQL().ExecContext(ctx,
 		`UPDATE workspaces SET status='suspended' WHERE id='tenant'`);err!=nil{t.Fatal(err)}
 	deny("tenant_disabled_after_task_start")

@@ -310,15 +310,29 @@ func (s *Service) ReceiveHeartbeat(ctx context.Context, peerID string, h Heartbe
  now:=s.clock.UnixMilli()
  expires:=now+s.staleAfter.Milliseconds()
  return s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
-  var trust string
-  if err:=tx.QueryRowContext(ctx,`SELECT trust_state FROM harness_nodes
-   WHERE id=?`,peerID).Scan(&trust);err!=nil{return err}
-  if trust!="paired"&&trust!="unavailable"{return ErrNodeNotPaired}
+  // Recheck the live mTLS pairing under the *same* write transaction as
+  // Node liveness and remote model imports. A caller of this service must
+  // not revive a peer using only a stale trust_state bit.
+  var trust,pairState string
+  var isLocal,localConfirmed,peerConfirmed int
+  if err:=tx.QueryRowContext(ctx,`SELECT h.trust_state,h.local,
+    p.status,p.local_confirmed,p.peer_confirmed
+    FROM harness_nodes h JOIN node_pairings p ON p.peer_node_id=h.id
+    WHERE h.id=?`,peerID).
+    Scan(&trust,&isLocal,&pairState,&localConfirmed,&peerConfirmed);err!=nil{
+    if errors.Is(err,sql.ErrNoRows){return ErrNodeNotPaired}
+    return err
+  }
+  if isLocal!=0||(trust!="paired"&&trust!="unavailable")||
+    pairState!="paired"||localConfirmed!=1||peerConfirmed!=1{
+    return ErrNodeNotPaired
+  }
   var previousSeq int64
   var previousJSON string
-  oldErr:=tx.QueryRowContext(ctx,`SELECT sequence,manifest_json
+  var previousExpiry int64
+  oldErr:=tx.QueryRowContext(ctx,`SELECT sequence,manifest_json,expires_at
    FROM node_capability_manifests WHERE peer_node_id=?`,peerID).
-   Scan(&previousSeq,&previousJSON)
+   Scan(&previousSeq,&previousJSON,&previousExpiry)
   if oldErr!=nil&&!errors.Is(oldErr,sql.ErrNoRows){return oldErr}
   if oldErr==nil{
    if h.Manifest.Sequence<previousSeq||
@@ -328,15 +342,18 @@ func (s *Service) ReceiveHeartbeat(ctx context.Context, peerID string, h Heartbe
     return ErrHeartbeatReplay
    }
    if h.Manifest.Sequence==previousSeq{
-    // Exact duplicate = a liveness refresh, not another import of the
-    // same model capabilities. Keep the original manifest immutable.
+    // A duplicate may extend only a *currently live* paired session.
+    // After an expiry/recovery boundary the remote deployments have been
+    // withdrawn; a new sequence is required to re-import them atomically.
+    if trust!="paired"||previousExpiry<=now{return ErrHeartbeatReplay}
+    // Exact live duplicate = a liveness refresh, never another import.
     if _,err:=tx.ExecContext(ctx,`UPDATE node_capability_manifests
      SET received_at=?,expires_at=?,updated_at=?
      WHERE peer_node_id=? AND sequence=? AND manifest_json=?`,
      now,expires,now,peerID,previousSeq,previousJSON);err!=nil{return err}
     result,err:=tx.ExecContext(ctx,`UPDATE harness_nodes SET
      trust_state='paired',last_seen_at=?,revision=revision+1,updated_at=?
-     WHERE id=? AND trust_state IN ('paired','unavailable')`,now,now,peerID)
+     WHERE id=? AND trust_state='paired'`,now,now,peerID)
     if err!=nil{return err}
     changed,_:=result.RowsAffected()
     if changed!=1{return ErrNodeNotPaired}

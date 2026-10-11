@@ -1039,3 +1039,21 @@ by a renewed manifest before the guarded transition, checks no
 erroneous disable, then checks a genuinely expired peer and
 idempotent re-sweep. The mechanism remains a local SQLite recovery
 fence, not a remote physical heartbeat acceptance result.
+
+## Peer recovery: pairing authority and live-manifest freshness
+
+A re-imported peer capability heartbeat must be paired through the
+actual confirmed mTLS pairing record, not merely appear in a Node trust
+column. `ReceiveHeartbeat` now requires a non-local Node, confirmed
+pairing on both sides, and active pairing status **within the same
+write transaction** that updates liveness and imports remote models.
+
+An exact duplicate heartbeat can refresh a genuinely live paired
+manifest without reimporting capacities. It can no longer restore an
+expired or unavailable peer: after either recovery boundary, the peer
+must publish a strictly newer capability sequence so withdrawn remote
+models are imported consistently with the Node trust change. Stale
+and conflicting sequences remain rejected. SQLite regression tests
+cover expired duplicate rejection, revoked-pair denial, and recovery
+with a new sequence and restored model status. This does not assert
+physical mTLS acceptance or remote host uptime.

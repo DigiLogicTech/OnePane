@@ -50,8 +50,9 @@ func TestWorkerAssuranceSuccessRequiresExactDurableTaskVerificationAndAudit(t *t
 	if err!=nil{t.Fatal(err)}
 	ver:=verification.NewService(db.SQL(),db,clock.Real{})
 	v,err:=ver.Create(ctx,verification.CreateCommand{
-		WorkspaceID:"tenant",TaskID:&created.ID,SubjectRef:"task:"+created.ID,
+		WorkspaceID:"tenant",TaskID:&created.ID,SubjectRef:"agent_worker_run:"+run.ID,
 		RequiredLevel:policy.VerificationV1,
+		Spec:[]byte(`{"source":"agent_completion_proposal","worker_run_id":"`+run.ID+`"}`),
 	})
 	if err!=nil{t.Fatal(err)}
 	lvl:=policy.VerificationV1

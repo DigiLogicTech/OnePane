@@ -19,4 +19,8 @@ for(const token of ["monitoring_plan:{version:1,source_ids:sourceIDs}","data-goa
  assert(ui.includes(token), "L5 evidence UI contract missing "+token);
 }
 assert(server.includes("/continuous-goals/{goalID}/observations"),"goal evidence HTTP route missing");
+assert(server.includes("/continuous-goals/{goalID}/coverage"),"goal evidence coverage route missing");
+for(const token of ["data-goal-coverage=","Evidence coverage only — not verified health.","No monitoring is activated by this check."]){
+ assert(ui.includes(token),"L5 read-only coverage UI missing: "+token);
+}
 console.log("L5 pause/retire UI and fail-closed goal lifecycle: PASS");

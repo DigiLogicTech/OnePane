@@ -1796,7 +1796,8 @@ async function qa4BindL5GoalConfigurator(project){
         `<div class="page-subtitle">Approved sources: ${escapeHtml(sourceIDs.join(', '))}. Evidence is metadata-only, not a health verification.</div>
          <div class="toolbar"><input type="text" aria-label="Existing observation ID" data-goal-observation-id placeholder="Existing observation ID" maxlength="160">
          <button type="button" class="btn" data-goal-attach="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">Attach evidence</button>
-         <button type="button" class="btn" data-goal-list-evidence="${escapeHtml(g.id)}">View evidence</button></div>
+         <button type="button" class="btn" data-goal-list-evidence="${escapeHtml(g.id)}">View evidence</button>
+         <button type="button" class="btn" data-goal-coverage="${escapeHtml(g.id)}">Evidence coverage</button></div>
          <div data-goal-evidence-results></div>`: '';
       return `<div class="list-row"><strong>${escapeHtml(g.objective||'Objective')}</strong> <span class="pill">${escapeHtml(g.status||'configured')}</span>
         <div class="page-subtitle">Health: ${escapeHtml(g.health||'unobserved')} · ${stopped?'No future monitoring due':'Monitoring not activated; no check scheduled'}</div>
@@ -1814,6 +1815,23 @@ async function qa4BindL5GoalConfigurator(project){
   // A two-click confirmation is required for terminal retirement. The
   // backend independently requires human authority and a current revision.
   list.onclick=async event=>{
+    const coverageButton=event.target.closest('button[data-goal-coverage]');
+    if(coverageButton&&list.contains(coverageButton)){
+      event.preventDefault();
+      const holder=coverageButton.closest('.list-row')?.querySelector('[data-goal-evidence-results]');
+      if(!holder)return;
+      holder.textContent='Checking attached observation timestamps…';
+      try{
+        const result=await apiRequest(base+'/continuous-goals/'+encodeURIComponent(coverageButton.dataset.goalCoverage)+'/coverage');
+        if(!holder.isConnected)return;
+        const entries=Array.isArray(result.sources)?result.sources:[];
+        holder.innerHTML='<div class="page-subtitle"><strong>Evidence coverage only — not verified health.</strong> No monitoring is activated by this check.</div>'+
+          (entries.length?entries.map(x=>`<div class="page-subtitle">${escapeHtml(x.source_id||'Source')}: ${escapeHtml(x.evidence_state||'missing')}
+            ${x.last_observed_at?' · observed '+escapeHtml(new Date(x.last_observed_at).toLocaleString()):''}</div>`).join(''):
+          '<div class="page-subtitle">No approved observation sources configured.</div>');
+      }catch(ex){if(holder.isConnected)holder.textContent='Coverage unavailable: '+ex.message}
+      return;
+    }
     const attach=event.target.closest('button[data-goal-attach]');
     if(attach&&list.contains(attach)){
       event.preventDefault();

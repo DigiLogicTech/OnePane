@@ -8,7 +8,9 @@
 - Allowed actions are a fixed execution-capability vocabulary. Unknown actions
   become `redacted`; only `run:`, `task:`, `attempt:`, `request:` and
   `trace:` correlation namespaces are accepted and their original suffixes
-  are replaced with a stable, truncated SHA-256 fingerprint.
+  are replaced with a process-local, keyed HMAC-SHA-256 fingerprint.
+  The ephemeral key is never stored or exported; identifiers are not
+  correlatable across separate application restarts.
 - The existing **Settings > Debug & Diagnostics** surface includes an explicit,
   offline policy evidence reviewer. The operator must paste an authorised
   diagnostic export; the viewer never fetches evidence or grants permissions.

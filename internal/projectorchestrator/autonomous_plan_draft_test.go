@@ -81,7 +81,7 @@ func TestBoundedAutonomousPlanCapsCountAndPayloadBytes(t *testing.T){
 func TestPlannerJSONRejectsDuplicateActionWorkspaceAndNestedPlanKeys(t *testing.T) {
   ambiguous:=[]string{
     `{"action":"answer","action":"task"}`,
-    `{"action":"answer","acti\\u006fn":"task"}`,
+    `{"action":"answer","acti\u006fn":"task"}`,
     `{"project_workspace_id":"safe","project_workspace_id":"other"}`,
     `{"plan":{"version":1,"steps":[{"key":"a","objective":"safe","objective":"changed"}]}}`,
     `{"plan":{"version":1,"steps":[{"key":"a","depends_on":[],"depends_on":["another"]}]}}`,

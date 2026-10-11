@@ -154,6 +154,7 @@ func (s *Service) Turns(ctx context.Context, projectID string, limit int) ([]Tur
 }
 
 func (s *Service) contextSnapshot(ctx context.Context, projectID, requestedPWS string) (json.RawMessage, string, string, string, error) {
+	requestedPWS = strings.TrimSpace(requestedPWS)
 	var projectName, workspaceID, projectPolicy string
 	if err := s.db.QueryRowContext(ctx, `SELECT name,workspace_id,project_policy_json FROM projects WHERE id=? AND status='active'`, projectID).Scan(&projectName, &workspaceID, &projectPolicy); err != nil { return nil,"","","",err }
 	type pwsRow struct{ ID, Name, Settings string }
@@ -162,8 +163,15 @@ func (s *Service) contextSnapshot(ctx context.Context, projectID, requestedPWS s
 	if err != nil { return nil,"","","",err }
 	for rows.Next(){ var x pwsRow; if err:=rows.Scan(&x.ID,&x.Name,&x.Settings);err!=nil{rows.Close();return nil,"","","",err};pwsRows=append(pwsRows,x) }; rows.Close()
 	selected := pwsRow{}
-	for _,x:=range pwsRows { if requestedPWS!=""&&x.ID==requestedPWS { selected=x;break } }
-	if selected.ID==""&&len(pwsRows)>0 { selected=pwsRows[0] }
+	for _, x := range pwsRows {
+		if requestedPWS != "" && x.ID == requestedPWS { selected = x; break }
+	}
+	if requestedPWS != "" && selected.ID == "" {
+		// Never silently switch a requested Workspace to a newer sibling,
+		// particularly when the requested Workspace was archived or removed.
+		return nil, "", "", "", fmt.Errorf("%w: Project Workspace is inactive or outside the selected Project", ErrInvalid)
+	}
+	if selected.ID == "" && len(pwsRows) > 0 { selected = pwsRows[0] }
 	mode := "direct"; teamID := ""
 	if selected.Settings!="" {
 		var cfg map[string]any
@@ -182,11 +190,29 @@ func (s *Service) contextSnapshot(ctx context.Context, projectID, requestedPWS s
 	events := []map[string]any{}
 	er,_:=s.db.QueryContext(ctx, `SELECT sequence,event_type,aggregate_type,aggregate_id,occurred_at FROM events WHERE workspace_id=? AND (aggregate_id=? OR json_extract(payload_json,'$.project_id')=? OR aggregate_id IN (SELECT id FROM tasks WHERE project_id=?)) ORDER BY sequence DESC LIMIT 20`,workspaceID,projectID,projectID,projectID)
 	if er!=nil { defer er.Close(); for er.Next(){var seq,at int64;var et,ag,aid string;if er.Scan(&seq,&et,&ag,&aid,&at)==nil{events=append(events,map[string]any{"sequence":seq,"type":et,"aggregate_type":ag,"aggregate_id":aid,"occurred_at":at})}} }
+	// Runtime context belongs to this precise canonical Workspace. A
+	// Project-wide ORDER BY updated_at used to impersonate whichever sibling
+	// runtime last changed as the currently selected development environment.
 	runtime := map[string]any{}
-	var runtimeID,runtimeStatus,runtimeDesired,runtimeBackend string
-	var runtimeUpdated int64
-	if s.db.QueryRowContext(ctx, `SELECT id,status,desired_state,backend,updated_at FROM project_runtimes WHERE project_id=? ORDER BY updated_at DESC LIMIT 1`, projectID).Scan(&runtimeID,&runtimeStatus,&runtimeDesired,&runtimeBackend,&runtimeUpdated)==nil {
-		runtime=map[string]any{"id":runtimeID,"status":runtimeStatus,"desired_state":runtimeDesired,"backend":runtimeBackend,"updated_at":runtimeUpdated}
+	if selected.ID != "" {
+		runtime = map[string]any{
+			"scope": "project_workspace", "project_workspace_id": selected.ID,
+			"status": "not_provisioned",
+		}
+		var runtimeID, runtimeStatus, runtimeDesired, runtimeBackend string
+		var runtimeUpdated int64
+		err = s.db.QueryRowContext(ctx, `SELECT id,status,desired_state,backend,updated_at
+			FROM project_runtimes WHERE project_id=? AND project_workspace_id=?`,
+			projectID, selected.ID).Scan(&runtimeID, &runtimeStatus, &runtimeDesired, &runtimeBackend, &runtimeUpdated)
+		if err == nil {
+			runtime = map[string]any{
+				"id": runtimeID, "status": runtimeStatus, "desired_state": runtimeDesired,
+				"backend": runtimeBackend, "updated_at": runtimeUpdated,
+				"scope": "project_workspace", "project_workspace_id": selected.ID,
+			}
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return nil, "", "", "", fmt.Errorf("read scoped Workspace runtime: %w", err)
+		}
 	}
 	pwss:=[]map[string]any{};for _,x:=range pwsRows{pwss=append(pwss,map[string]any{"id":x.ID,"name":x.Name,"ai_settings":json.RawMessage(x.Settings)})}
 	snapshot:=map[string]any{"project":map[string]any{"id":projectID,"name":projectName,"policy":json.RawMessage(projectPolicy)},"project_workspaces":pwss,"selected_project_workspace_id":selected.ID,"execution_mode":mode,"tasks":tasks,"recent_events":events,"runtime":runtime}
@@ -234,6 +260,7 @@ func (s *Service) reason(ctx context.Context, workspaceID, actor, objective stri
 
 func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 	c.ProjectID,c.Objective,c.ActorPrincipalID=strings.TrimSpace(c.ProjectID),strings.TrimSpace(c.Objective),strings.TrimSpace(c.ActorPrincipalID)
+	c.ProjectWorkspaceID = strings.TrimSpace(c.ProjectWorkspaceID)
 	if c.ProjectID==""||c.Objective==""||c.ActorPrincipalID==""{return TurnResult{},ErrInvalid}
 	o,err:=s.Ensure(ctx,c.ProjectID);if err!=nil{return TurnResult{},err}
 	snapshot,pwsID,mode,teamID,err:=s.contextSnapshot(ctx,c.ProjectID,c.ProjectWorkspaceID);if err!=nil{return TurnResult{},err}
@@ -245,10 +272,14 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 	if v,ok:=plan["answer"].(string);ok&&strings.TrimSpace(v)!=""{answer=strings.TrimSpace(v)}
 	if v,ok:=plan["action"].(string);ok{action=strings.ToLower(strings.TrimSpace(v))}
 	if v,ok:=plan["objective"].(string);ok&&strings.TrimSpace(v)!=""{objective=strings.TrimSpace(v)}
-	if v,ok:=plan["project_workspace_id"].(string);ok&&strings.TrimSpace(v)!="" {
-		proposed:=strings.TrimSpace(v)
-		var exists int
-		if s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_workspaces WHERE id=? AND project_id=? AND status='active'`,proposed,c.ProjectID).Scan(&exists)==nil&&exists==1 { pwsID=proposed }
+	// An explicit operator Workspace choice is authoritative. A model cannot
+	// silently redirect a Project Task to a different sibling Workspace.
+	if c.ProjectWorkspaceID == "" {
+		if v,ok:=plan["project_workspace_id"].(string);ok&&strings.TrimSpace(v)!="" {
+			proposed:=strings.TrimSpace(v)
+			var exists int
+			if s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_workspaces WHERE id=? AND project_id=? AND status='active'`,proposed,c.ProjectID).Scan(&exists)==nil&&exists==1 { pwsID=proposed }
+		}
 	}
 	if v,ok:=plan["mode"].(string);ok {switch strings.ToLower(v){case "direct","team","council":mode=strings.ToLower(v)}}
 	if reasonErr!=nil { answer="Project Orchestrator is available, but no eligible reasoning model could complete this turn: "+reasonErr.Error(); action="answer" }

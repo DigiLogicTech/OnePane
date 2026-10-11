@@ -96,6 +96,13 @@ func (s *Service) ensureWorkspaceAccess(ctx context.Context, workspaceID string)
 	if strings.TrimSpace(workspaceID) == "" {
 		return fmt.Errorf("workspace id is required")
 	}
+	var currentStatus string
+	if err := s.db.QueryRowContext(ctx, "SELECT status FROM workspaces WHERE id=?", workspaceID).Scan(&currentStatus); err != nil {
+	return err
+	}
+	if currentStatus != "active" {
+	return fmt.Errorf("Workspace is not active")
+	}
 	if err := s.EnsureSystemPrincipals(ctx); err != nil {
 		return err
 	}

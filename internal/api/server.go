@@ -779,6 +779,7 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		Description        string          `json:"description"`
 		ProjectPolicyJSON  json.RawMessage `json:"project_policy"`
 		IndexingConfigJSON json.RawMessage `json:"indexing_config"`
+		CreateStarterWorkspace bool `json:"create_starter_workspace"`
 	}
 	if !decodeJSON(w, r, &in) {
 		return
@@ -786,7 +787,7 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	if !s.authorize(w, r, i, in.WorkspaceID, "project.write") {
 		return
 	}
-	p, err := s.projects.CreateProject(r.Context(), projectworkspace.CreateProjectCommand{WorkspaceID: in.WorkspaceID, Name: in.Name, Description: in.Description, CreatedBy: i.PrincipalID, ProjectPolicyJSON: in.ProjectPolicyJSON, IndexingConfigJSON: in.IndexingConfigJSON, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
+	p, err := s.projects.CreateProject(r.Context(), projectworkspace.CreateProjectCommand{WorkspaceID: in.WorkspaceID, Name: in.Name, Description: in.Description, CreatedBy: i.PrincipalID, CreateStarterWorkspace:in.CreateStarterWorkspace, ProjectPolicyJSON: in.ProjectPolicyJSON, IndexingConfigJSON: in.IndexingConfigJSON, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
 	respondDomain(w, p, err, http.StatusCreated)
 }
 func (s *Server) updateProjectPolicy(w http.ResponseWriter, r *http.Request) {

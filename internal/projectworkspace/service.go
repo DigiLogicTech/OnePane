@@ -187,6 +187,11 @@ func (s *Service) CreateProject(ctx context.Context, cmd CreateProjectCommand) (
 		return Project{}, err
 	}
 	now := s.clock.UnixMilli()
+	starterID:=""
+	if cmd.CreateStarterWorkspace {
+		starterID,err=s.ids.New("pws")
+		if err!=nil{return Project{},err}
+	}
 	desc := strings.TrimSpace(cmd.Description)
 	var dp *string
 	if desc != "" {
@@ -194,7 +199,9 @@ func (s *Service) CreateProject(ctx context.Context, cmd CreateProjectCommand) (
 	}
 	p := Project{ID: pid, WorkspaceID: cmd.WorkspaceID, Name: strings.TrimSpace(cmd.Name), Description: dp, Status: "active", OperatingMode:mode, ProjectPolicyJSON: pol, IndexingConfigJSON: idx, Revision: 1, CreatedBy: cmd.CreatedBy, CreatedAt: now, UpdatedAt: now}
 	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		if grantExpansion {
+		// Creating the starter Workspace is an explicit human Project
+		// establishment step; an Agent cannot silently expand the topology.
+		if grantExpansion||cmd.CreateStarterWorkspace {
 			if err:=s.requireHumanNodeApproval(ctx,tx,p.WorkspaceID,cmd.CreatedBy);err!=nil{return err}
 		} else if err := s.requireActor(ctx, tx, p.WorkspaceID, cmd.CreatedBy); err != nil {
 			return err
@@ -202,8 +209,32 @@ func (s *Service) CreateProject(ctx context.Context, cmd CreateProjectCommand) (
 		if err := s.repo.InsertProject(ctx, tx, p); err != nil {
 			return err
 		}
-		payload, _ := json.Marshal(map[string]any{"project_id": p.ID, "name": p.Name, "revision": 1})
-		return s.events.Append(ctx, tx, event.Event{ID: eid, WorkspaceID: &p.WorkspaceID, Type: "project.created", AggregateType: "project", AggregateID: p.ID, ActorPrincipalID: &cmd.CreatedBy, RequestID: cmd.RequestID, TraceID: cmd.TraceID, Payload: payload, OccurredAt: now})
+		payload, _ := json.Marshal(map[string]any{"project_id": p.ID, "name": p.Name, "revision": 1,"starter_workspace_id":starterID})
+		if err:=s.events.Append(ctx,tx,event.Event{ID:eid,WorkspaceID:&p.WorkspaceID,Type:"project.created",
+			AggregateType:"project",AggregateID:p.ID,ActorPrincipalID:&cmd.CreatedBy,
+			RequestID:cmd.RequestID,TraceID:cmd.TraceID,Payload:payload,OccurredAt:now});err!=nil{return err}
+		if starterID!="" {
+			// Atomic topology only; this does not create a privileged OCI
+			// runtime, mount the host filesystem or start an Agent/LLM.
+			_,err=tx.ExecContext(ctx,`INSERT INTO project_workspaces(
+				id,project_id,name,description,status,layout_json,ai_settings_json,
+				resource_scope_json,state_json,storage_root,revision,created_at,updated_at)
+				VALUES(?,?,?,'','active',?,?, '{}','{}','',1,?,?)`,
+				starterID,p.ID,"Development",
+				`{"schema_version":1,"components":[]}`,
+				`{"version":1,"routing":{"enabled":true,"strategy":"hybrid"},"direct":{},"team":{},"council":{}}`,
+				now,now)
+			if err!=nil{return err}
+			starterEventID,err:=s.ids.New("evt")
+			if err!=nil{return err}
+			b,_:=json.Marshal(map[string]any{"project_id":p.ID,"project_workspace_id":starterID,
+				"name":"Development","origin":"explicit_project_starter"})
+			return s.events.Append(ctx,tx,event.Event{ID:starterEventID,
+				WorkspaceID:&p.WorkspaceID,Type:"project_workspace.created",
+				AggregateType:"project_workspace",AggregateID:starterID,
+				ActorPrincipalID:&cmd.CreatedBy,Payload:b,OccurredAt:now})
+		}
+		return nil
 	})
 	if err != nil {
 		return Project{}, err

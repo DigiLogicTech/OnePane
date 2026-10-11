@@ -154,6 +154,9 @@ type RoutineBinding struct {
 
 type CreateProjectCommand struct {
 	WorkspaceID, Name, Description, CreatedBy string
+	// Explicit user choice: atomically create one safe Development Workspace.
+	// Existing automation/API callers that omit this flag are unchanged.
+	CreateStarterWorkspace bool
 	ProjectPolicyJSON, IndexingConfigJSON     json.RawMessage
 	RequestID, TraceID                        *string
 }

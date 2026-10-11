@@ -20,6 +20,29 @@ func hasTaskGraphProvenance(raw json.RawMessage) bool {
 			strings.TrimSpace(provenance.GraphID)!="")
 }
 
+// canonicalProjectWorkspaceActiveTx applies to EVERY Workspace-owned Task,
+// not just operator-created DAG Tasks. An archived Project/Workspace or
+// disabled parent tenancy is never permission to start/resume work. The
+// check is in the same transaction as the Task/Attempt transition.
+func canonicalProjectWorkspaceActiveTx(ctx context.Context,tx storage.Tx,t Task) error {
+	if t.ProjectWorkspaceID==nil{return nil}
+	if t.ProjectID==nil||*t.ProjectID==""||*t.ProjectWorkspaceID==""{
+		return ErrHardDependencyUnsatisfied
+	}
+	var present int
+	err:=tx.QueryRowContext(ctx,`SELECT 1
+		FROM project_workspaces pw
+		JOIN projects p ON p.id=pw.project_id AND p.status='active'
+		JOIN workspaces w ON w.id=p.workspace_id AND w.status='active'
+		WHERE pw.id=? AND pw.project_id=?
+			AND pw.status='active' AND p.workspace_id=?`,
+		*t.ProjectWorkspaceID,*t.ProjectID,t.WorkspaceID).Scan(&present)
+	if errors.Is(err,sql.ErrNoRows){return ErrHardDependencyUnsatisfied}
+	if err!=nil{return err}
+	if present!=1{return ErrHardDependencyUnsatisfied}
+	return nil
+}
+
 // requireRuntimeDependencyIntegrityTx protects Task execution and all
 // existing-Attempt wake paths. Live SQL edges cannot silently loosen the
 // original Task graph, and stopped/archived Workspaces cannot resume work.
@@ -27,6 +50,7 @@ func (s *Service) requireRuntimeDependencyIntegrityTx(ctx context.Context,tx sto
 	satisfied,err:=s.repo.HardDependenciesSatisfied(ctx,tx,t.ID)
 	if err!=nil{return err}
 	if !satisfied{return ErrHardDependencyUnsatisfied}
+	if err:=canonicalProjectWorkspaceActiveTx(ctx,tx,t);err!=nil{return err}
 	if t.ProjectWorkspaceID!=nil||hasTaskGraphProvenance(t.Completion){
 		return approvedTaskGraphDependenciesTx(ctx,tx,t)
 	}

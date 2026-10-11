@@ -66,10 +66,15 @@ func TestOrchestratorRuntimeContextIsBoundToSelectedWorkspace(t *testing.T) {
  secretMarker:="STORY_PRIVATE_CONFIG_MARKER_NEVER_IN_MODEL_CONTEXT"
  settings,_:=json.Marshal(map[string]any{
   "private_model_setting":secretMarker,
-  "orchestration":map[string]any{"mode":"team"},
+  "orchestration":map[string]any{"mode":"team","team":map[string]any{"team_id":"story-team"}},
  })
  if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_workspaces
   SET ai_settings_json=? WHERE id=?`,string(settings),story.ID);err!=nil{t.Fatal(err)}
+ worldSettings,_:=json.Marshal(map[string]any{
+  "orchestration":map[string]any{"mode":"council","council":map[string]any{"team_id":"world-council"}},
+ })
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_workspaces
+  SET ai_settings_json=? WHERE id=?`,string(worldSettings),world.ID);err!=nil{t.Fatal(err)}
  orchestrator:=NewService(db.SQL(),db,clock.Real{},unavailableOrchestratorReasoning{},nil,nil,
   task.NewService(db.SQL(),db,clock.Real{}),nil)
  type snapshot struct {
@@ -105,6 +110,20 @@ func TestOrchestratorRuntimeContextIsBoundToSelectedWorkspace(t *testing.T) {
    t.Fatalf("removing raw settings broke the trusted mode derivation: %s",mode)
   }
  }
+ // Final Team and mode must come from the chosen Workspace, never an
+ // earlier sibling or a model-generated "mode" response.
+ pinned,mode,teamID,err:=resolveOrchestratorWorkspaceProfile(ctx,db.SQL(),p.ID,world.ID,world.ID,story.ID)
+ if err!=nil||pinned!=world.ID||mode!="council"||teamID!="world-council"{
+  t.Fatalf("operator-pinned World Council profile changed: %s %s %s %v",pinned,mode,teamID,err)
+ }
+ suggested,mode,teamID,err:=resolveOrchestratorWorkspaceProfile(ctx,db.SQL(),p.ID,"",world.ID,story.ID)
+ if err!=nil||suggested!=story.ID||mode!="team"||teamID!="story-team"{
+  t.Fatalf("model-selected Story inherited World Council: %s %s %s %v",suggested,mode,teamID,err)
+ }
+ unchanged,mode,teamID,err:=resolveOrchestratorWorkspaceProfile(ctx,db.SQL(),p.ID,"",world.ID,"invalid")
+ if err!=nil||unchanged!=world.ID||mode!="council"||teamID!="world-council"{
+  t.Fatalf("invalid model suggestion changed selected execution profile: %s %s %s %v",unchanged,mode,teamID,err)
+ }
  if selected:=selectModelProposedWorkspace(ctx,db.SQL(),p.ID,world.ID,world.ID,story.ID);selected!=world.ID{
   t.Fatalf("model overrode explicitly selected World Workspace with %s",selected)
  }
@@ -127,6 +146,19 @@ func TestOrchestratorRuntimeContextIsBoundToSelectedWorkspace(t *testing.T) {
  }
  if _,_,_,_,err:=orchestrator.contextSnapshot(ctx,p.ID,foreign.ID);!errors.Is(err,ErrInvalid){
   t.Fatalf("foreign Workspace explicit selector incorrectly accepted: %v",err)
+ }
+ if selected,_,_,err:=resolveOrchestratorWorkspaceProfile(ctx,db.SQL(),p.ID,foreign.ID,world.ID,world.ID);!errors.Is(err,ErrInvalid)||selected!=""{
+  t.Fatalf("foreign Workspace inherited local Team configuration: %s %v",selected,err)
+ }
+ disabled,_:=json.Marshal(map[string]any{
+  "orchestration":map[string]any{"mode":"team","team":map[string]any{"team_id":"story-team"}},
+  "routing":map[string]any{"enabled":false},
+ })
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_workspaces SET ai_settings_json=?
+  WHERE id=?`,string(disabled),story.ID);err!=nil{t.Fatal(err)}
+ selected,mode,teamID,err:=resolveOrchestratorWorkspaceProfile(ctx,db.SQL(),p.ID,"",world.ID,story.ID)
+ if err!=nil||selected!=story.ID||mode!="direct"||teamID!=""{
+  t.Fatalf("disabled Workspace routing started a Team anyway: %s %s %s %v",selected,mode,teamID,err)
  }
 
  // Invalid, stale, and cross-Project selectors fail closed instead of

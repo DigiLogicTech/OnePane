@@ -15,7 +15,7 @@ assert(service.includes('principalType!="human"'),"retirement not gated on human
 assert(api.includes("TransitionContinuousGoal"),"goal transition handler missing");
 assert(server.includes("/continuous-goals/{goalID}/{transition}"),"transition route missing");
 for(const token of ["monitoring_plan:{version:1,source_ids:sourceIDs}","data-goal-attach=","data-goal-list-evidence=",
- "goal health remains unobserved", "Existing evidence linked","data-goal-evidence-results"]){
+ "Goal health remains unobserved", "Existing evidence linked","data-goal-evidence-results"]){
  assert(ui.includes(token), "L5 evidence UI contract missing "+token);
 }
 assert(server.includes("/continuous-goals/{goalID}/observations"),"goal evidence HTTP route missing");

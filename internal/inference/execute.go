@@ -144,6 +144,11 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 	if err != nil {
 		return s.finishPreDispatchError(ctx, q.ID, err, cmd)
 	}
+	// Off-host inference transports require live, scope-bound explicit
+	// transfer consent independently from model capability or cloud budgets.
+	if err:=s.authorizeTrustedNodeTaskDispatch(ctx,cmd,d);err!=nil{
+		return s.finishPreDispatchError(ctx,q.ID,err,cmd)
+	}
 	// Evaluate persisted Project, canonical Workspace and Task restrictions before
 	// provider recovery, runtime acquisition, budget usage or model dispatch.
 	// Legacy Tasks with no feature_policy retain existing authorization gates.
@@ -224,6 +229,13 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 			return s.finishTransportError(ctx, q.ID, nil,
 				&TransportError{Code:"feature_policy_revoked", OutcomeKnown:true}, cmd)
 		}
+	}
+	// Revalidate transfer policy and live pairing after resource acquisition
+	// and budget operations, immediately before any remote side effect.
+	if err:=s.authorizeTrustedNodeTaskDispatch(ctx,cmd,d);err!=nil{
+		s.releaseBudgetBeforeDispatch(ctx,cmd)
+		return s.finishTransportError(ctx,q.ID,nil,
+			&TransportError{Code:"trusted_node_transfer_revoked",OutcomeKnown:true,Err:err},cmd)
 	}
 	result, dispatchErr := transport.Dispatch(ctx, DispatchRequest{RequestID: q.ID, Model: m, Deployment: d, Provider: p, RequestJSON: requestJSON}, s.secrets)
 	if dispatchErr != nil {

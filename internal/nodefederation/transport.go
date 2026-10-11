@@ -168,11 +168,17 @@ func (s *Service) peerFromTLS(r *http.Request) (string, error) {
 	}
 	fp := CertificateFingerprint(r.TLS.PeerCertificates[0].Raw)
 	var peer, state, stored string
-	err := s.db.QueryRowContext(r.Context(), `SELECT np.peer_node_id,hn.trust_state,np.peer_tls_fingerprint FROM node_pairings np JOIN harness_nodes hn ON hn.id=np.peer_node_id WHERE np.status='paired' AND np.peer_tls_fingerprint=?`, fp).Scan(&peer, &state, &stored)
+	var localConfirmed,peerConfirmed int
+	err := s.db.QueryRowContext(r.Context(), `SELECT np.peer_node_id,hn.trust_state,np.peer_tls_fingerprint,
+	 np.local_confirmed,np.peer_confirmed
+	 FROM node_pairings np JOIN harness_nodes hn ON hn.id=np.peer_node_id
+	 WHERE np.status='paired' AND np.peer_tls_fingerprint=?`, fp).
+	 Scan(&peer, &state, &stored, &localConfirmed, &peerConfirmed)
 	if err != nil {
 		return "", ErrPeerCertificate
 	}
-	if (state != "paired" && state != "unavailable") || stored != fp {
+	if (state != "paired" && state != "unavailable") || stored != fp ||
+	 localConfirmed!=1 || peerConfirmed!=1 {
 		return "", ErrNodeNotPaired
 	}
 	return peer, nil
@@ -421,10 +427,27 @@ func (s *Server) remoteModelAdmit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, x)
 }
 
+func (s *Service) peerAdmittedForInboundInference(ctx context.Context,peer string)bool{
+	if s==nil||s.db==nil||s.clock==nil||peer==""{return false}
+	var eligible int
+	err:=s.db.QueryRowContext(ctx,`SELECT EXISTS(
+	 SELECT 1 FROM harness_nodes n
+	 JOIN node_pairings p ON p.peer_node_id=n.id
+	 JOIN node_capability_manifests m ON m.peer_node_id=n.id
+	 WHERE n.id=? AND n.local=0 AND n.trust_state='paired'
+	  AND p.status='paired' AND p.local_confirmed=1 AND p.peer_confirmed=1
+	  AND m.expires_at>?)`,peer,s.clock.UnixMilli()).Scan(&eligible)
+	return err==nil&&eligible==1
+}
+
 func (s *Server) remoteInference(w http.ResponseWriter, r *http.Request) {
 	peer, err := s.svc.peerFromTLS(r)
 	if err != nil {
 		writeJSON(w, 401, map[string]string{"error": "unpaired client certificate"})
+		return
+	}
+	if !s.svc.peerAdmittedForInboundInference(r.Context(),peer){
+		writeJSON(w, 403, map[string]string{"error": "peer Node capability heartbeat is unavailable"})
 		return
 	}
 	var in RemoteInferenceRequest

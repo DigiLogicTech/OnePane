@@ -167,6 +167,10 @@ func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	manifestJSON:=`{"protocol":"onepane-federation-v1","node_id":"node-a","models":[]}`
+	if _,err:=dbB.SQL().ExecContext(ctx,`INSERT INTO node_capability_manifests(
+	 peer_node_id,sequence,manifest_json,received_at,expires_at,revision,updated_at)
+	 VALUES('node-a',1,?,?,?,1,?)`,manifestJSON,now,now+3600000,now);err!=nil{t.Fatal(err)}
 	type echoExec struct{}
 	_ = echoExec{}
 	server := NewServer(svcB, echoExecutor{}, admittedLocalFederationModel{})
@@ -197,6 +201,29 @@ func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {
 	}
 	// A live paired mTLS peer must not gain inference authority if the
 	// receiver's local admission manager disappears after startup.
+	// The receiver must reject a lapsed heartbeat even if TLS is paired.
+	if _,err:=dbB.SQL().ExecContext(ctx,`UPDATE node_capability_manifests
+	 SET expires_at=? WHERE peer_node_id='node-a'`,now-1000);err!=nil{t.Fatal(err)}
+	stale:=in
+	stale.RequestID="expired-capability"
+	var unused RemoteInferenceResponse
+	if err:=postJSON(ctx,svcA.pinnedClient(identB.Fingerprint,true),
+	 ts.URL+"/federation/v1/inference",stale,&unused);err==nil{
+	 t.Fatal("stale heartbeat accepted by the inference receiver")
+	}
+	if _,err:=dbB.SQL().ExecContext(ctx,`UPDATE node_capability_manifests
+	 SET expires_at=? WHERE peer_node_id='node-a'`,now+3600000);err!=nil{t.Fatal(err)}
+	if _,err:=dbB.SQL().ExecContext(ctx,`UPDATE node_pairings SET peer_confirmed=0
+	 WHERE peer_node_id='node-a'`);err!=nil{t.Fatal(err)}
+	oneSided:=in
+	oneSided.RequestID="one-sided-pairing"
+	var unusedPair RemoteInferenceResponse
+	if err:=postJSON(ctx,svcA.pinnedClient(identB.Fingerprint,true),
+	 ts.URL+"/federation/v1/inference",oneSided,&unusedPair);err==nil{
+	 t.Fatal("one-sided pairing unexpectedly authorized a model request")
+	}
+	if _,err:=dbB.SQL().ExecContext(ctx,`UPDATE node_pairings SET peer_confirmed=1
+	 WHERE peer_node_id='node-a'`);err!=nil{t.Fatal(err)}
 	server.models=nil
 	newReq:=in
 	newReq.RequestID="missing-local-model-admission"

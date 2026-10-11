@@ -43,6 +43,11 @@ assertContains(foundation,'onepane_operations:{version:1,mode:f.operating_mode',
 assertContains(foundation,"id=\"qa4SaveProjectOperatingMode\"",'Project Inspector must offer an operating-mode save action');
 assertContains(foundation,'Level 5 monitoring and remediation require separately authorised setup','mode selection must not claim permission to monitor or remediate');
 assertContains(foundation,'expected_revision:Number(active.revision||1)','mode edit must have optimistic revision compare-and-swap');
+assertContains(foundation,'qa4L5GoalForm','Level 5 must provide a usable objective form');
+assertContains(foundation,"base+'/workspaces'","L5 goal selector must load canonical Workspaces rather than local UI ghosts");
+assertContains(foundation,"base+'/continuous-goals'","L5 goal state must originate from backend");
+assertContains(foundation,"monitoring_plan:{version:1,source_ids:[]}","L5 goal setup must not invent monitoring sources");
+assertContains(foundation,'Monitoring and remediation are still inactive.','configured objectives must not be represented as active protection');
 assertContains(architecture,'project_runtimes.project_id','known schema blocker must be documented');
 assertContains(architecture,'Workspace-environment ownership','required backend migration must be documented');
 assert.ok(!/privileged[=:]true|--privileged/.test(ui),'UI must never enable privileged execution');

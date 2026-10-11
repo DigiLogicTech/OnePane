@@ -7,6 +7,7 @@ import (
  "encoding/json"
  "testing"
  "strings"
+ "time"
 
  "github.com/DigiLogicTech/OnePane/internal/clock"
  "github.com/DigiLogicTech/OnePane/internal/observation"
@@ -70,6 +71,14 @@ func TestGoalEvidenceCoverageReportsMissingAndRecentReceiptsWithoutClaimingHealt
  }
  raw,_:=json.Marshal(after)
  if string(raw)==""||containsSensitiveCoverage(string(raw)){t.Fatalf("coverage response disclosed private observation: %s",raw)}
+ future:=NewService(db.SQL(),db,coverageTime{ms:clock.Real{}.UnixMilli()+61*60*1000})
+ stale,err:=future.GoalEvidenceCoverage(ctx,project.ID,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ if stale.Sources[0].EvidenceState!="stale_attached"||
+   stale.Sources[1].EvidenceState!="missing"||
+   stale.GoalHealth!="unobserved"||stale.MonitoringActive{
+  t.Fatalf("old attached observation was treated as recent or healthy: %+v",stale)
+ }
  if _,err=db.SQL().ExecContext(ctx,"UPDATE project_workspaces SET status='archived' WHERE id=?",ws.ID);err!=nil{t.Fatal(err)}
  if _,err=svc.GoalEvidenceCoverage(ctx,project.ID,goal.ID);err==nil{
   t.Fatal("archived Workspace yielded current evidence coverage")
@@ -78,3 +87,7 @@ func TestGoalEvidenceCoverageReportsMissingAndRecentReceiptsWithoutClaimingHealt
 func containsSensitiveCoverage(v string)bool{
  return strings.Contains(v,"secret-host")||strings.Contains(v,"CANARY_DO_NOT_EXPOSE")
 }
+
+type coverageTime struct{ms int64}
+func(c coverageTime)Now()time.Time{return time.UnixMilli(c.ms)}
+func(c coverageTime)UnixMilli()int64{return c.ms}

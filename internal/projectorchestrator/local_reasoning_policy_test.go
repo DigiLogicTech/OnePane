@@ -6,6 +6,7 @@ import (
  "database/sql"
  "path/filepath"
  "testing"
+ "strings"
 
  _ "modernc.org/sqlite"
 
@@ -121,4 +122,31 @@ func TestRevokedProjectReasoningStopsBeforeInferenceTransport(t *testing.T){
  }
  // No inference or artifact implementation is present; reaching it would
  // cause a panic. A clean policy error proves the last local admission held.
+}
+
+
+type fabricatedOrchestratorRoute struct{ candidate scheduler.Candidate }
+func(f fabricatedOrchestratorRoute)Route(_ context.Context,_ scheduler.RouteRequest)(scheduler.Decision,error){
+ return scheduler.Decision{Selected:&scheduler.RankedCandidate{Candidate:f.candidate}},nil
+}
+func TestProjectReasoningRejectsUnsafeSchedulerReturnBeforeInference(t *testing.T){
+ db:=testReasoningPolicyDB(t)
+ for _,tc:=range []struct{name string;edit func(*scheduler.Candidate)}{
+  {"provider cloud",func(c *scheduler.Candidate){c.Local=false}},
+  {"paid",func(c *scheduler.Candidate){c.CostClass=scheduler.CostPaid}},
+  {"unknown trust",func(c *scheduler.Candidate){c.HardZeroIncrementalCost=false}},
+  {"wrong runtime type",func(c *scheduler.Candidate){c.Kind=scheduler.CandidateAgentRuntime}},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   candidate:=scheduler.Candidate{ID:"candidate",Kind:scheduler.CandidateModel,Local:true,
+    CostClass:scheduler.CostLocal,HardZeroIncrementalCost:true}
+   tc.edit(&candidate)
+   svc:=&Service{db:db,scheduler:fabricatedOrchestratorRoute{candidate:candidate}}
+   _,_,_,err:=svc.reason(context.Background(),"tenant","project","world","operator","private Project objective",
+    json.RawMessage(`{"private":"unexported"}`))
+   if err==nil||!strings.Contains(err.Error(),"remote or paid"){
+    t.Fatalf("unsafe scheduler candidate reached Project inference: %v",err)
+   }
+  })
+ }
 }

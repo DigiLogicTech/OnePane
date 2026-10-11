@@ -14,12 +14,14 @@ import (
 type assistantModelScheduler struct {
  options []scheduler.Candidate
  last scheduler.RouteRequest
+ selected *scheduler.Candidate
 }
 func(m *assistantModelScheduler) Candidates(_ context.Context,_,_,_ string)([]scheduler.Candidate,error){
  return m.options,nil
 }
 func(m *assistantModelScheduler) Route(_ context.Context,req scheduler.RouteRequest)(scheduler.Decision,error){
  m.last=req
+ if m.selected!=nil{return scheduler.Decision{Selected:&scheduler.RankedCandidate{Candidate:*m.selected}},nil}
  return scheduler.Decision{},scheduler.ErrNoEligibleCandidate
 }
 
@@ -75,5 +77,33 @@ func TestAssistantThreadModelChoicePersistsAndPinsRouting(t *testing.T){
  if err==nil{t.Fatal("test scheduler should have denied automatic routing")}
  if !fake.last.LocalOnly||!fake.last.RequireZeroIncrementalCost||len(fake.last.IncludeCandidateIDs)>0{
   t.Fatalf("automatic Assistant inference permitted off-host, paid or pinned fallback: %+v",fake.last)
+ }
+}
+
+
+func TestGeneralAssistantRefusesUnsafeSchedulerSelectionsBeforeInference(t *testing.T){
+ for _,tc:=range []struct{
+  name string
+  change func(*scheduler.Candidate)
+ }{
+  {"remote",func(c *scheduler.Candidate){c.Local=false}},
+  {"paid",func(c *scheduler.Candidate){c.CostClass=scheduler.CostPaid}},
+  {"unverified",func(c *scheduler.Candidate){c.HardZeroIncrementalCost=false}},
+  {"provider runtime",func(c *scheduler.Candidate){c.Kind=scheduler.CandidateAgentRuntime}},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   candidate:=scheduler.Candidate{ID:"candidate",Kind:scheduler.CandidateModel,Local:true,
+    CostClass:scheduler.CostLocal,HardZeroIncrementalCost:true}
+   tc.change(&candidate)
+   route:=&assistantModelScheduler{selected:&candidate}
+   svc:=NewService(nil,clock.Real{},route,nil,nil,nil)
+   _,_,err:=svc.reasonGlobal(context.Background(),"tenant","operator","private request",nil)
+   if err==nil||!strings.Contains(err.Error(),"remote or paid"){
+    t.Fatalf("untrusted scheduler output reached global snapshot/inference: %v",err)
+   }
+   if !route.last.LocalOnly||!route.last.RequireZeroIncrementalCost{
+    t.Fatalf("route admission was weakened: %+v",route.last)
+   }
+  })
  }
 }

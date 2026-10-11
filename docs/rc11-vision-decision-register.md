@@ -2,8 +2,10 @@
 
 This register follows the **first assistant code/security review** of draft
 [PR #227](https://github.com/DigiLogicTech/OnePane/pull/227).
-The core vision and Decisions 1–3 (including Level 5 remediation approval
-defaults and universal Workspace permissions) have been confirmed by the user. Decisions 4–6 remain open.
+The core vision and Decisions 1–4 have been confirmed by the user,
+including default Level 4, selectable Level 5, safe preapproval rules,
+universal Workspace permissions, and versioned Agent policy with live
+revocation. Decisions 5–6 remain open.
 Approval of a design direction does not grant runtime privileges, authorise
 release packaging, or approve a merge.
 
@@ -185,16 +187,56 @@ enforcement adapters, UI behaviour and negative-path tests.
 **Status:** CONFIRMED BY USER — design and UX requirements approved.
 Complete end-to-end enforcement is still implementation work.
 
-## Decision 4 — Agent policy and revocation
-**Question:** Should Agent policies use immutable versioned snapshots,
-live revocation checks, or both?
+## Decision 4 — versioned Agent policies and live revocation
 
-**Proposed starting position:** Versioned Agent policies for provenance,
-plus rechecks at each Task, inference and tool side-effect boundary.
-A revoked Agent must not start a new action; in-flight external calls
-need explicit cancellation/unknown-outcome semantics and safe recovery.
+**User decision (2026-10-11):** CONFIRMED. OnePane must support
+**both** immutable versioned Agent policy records for reproducible
+execution, research provenance and audit, **and** live permission
+revocation for every Agent while it is operating.
 
-**Status:** AWAITING USER.
+**Confirmed operating contract:**
+- Every Agent, Team seat, Task, delegated Worker and research round records
+  a stable Agent identity plus policy revision, origin, effective
+  Project/Workspace/Agent/Task grants, model/runtime provenance and
+  approval references. Historical records are immutable; editing an Agent
+  creates a new policy revision.
+- At scheduling, start, resume, model dispatch and any side-effecting
+  tool action, use the **current effective policy** as the enforcement
+  authority. A recorded older grant is evidence, never a way to regain
+  a permission that was subsequently revoked.
+- On revocation, stop admission of new operations immediately at
+  enforceable boundaries, invalidate affected permits/leases and cancel
+  queued work as applicable. Attempt to cancel in-flight operations
+  where supported; do not claim that external side effects can always
+  be recalled or undone.
+- Preserve in-flight work with an **unknown-outcome/reconciliation**
+  state when its effects cannot be safely established; never
+  automatically re-execute a potentially non-idempotent action.
+- When a permission is revoked mid-project, other authorised work may
+  continue. If a whole Agent or Project is paused, its dependent queue
+  should pause predictably without losing its checkpoints.
+- Versioned snapshots, live policy decisions, cancellation outcomes,
+  approval changes and resumptions must be auditable while excluding
+  credentials, prompts and sensitive raw tool inputs from diagnostic
+  exports.
+- A newly spawned Agent or replacement model inherits restrictive
+  Project/Workspace bounds and cannot circumvent a revoked privilege.
+  Delegation never increases available authority.
+- Research mode retains pinned model identities, per-seat isolation,
+  policy revision, reproducible round provenance and explicit failure
+  handling. Permission revocation remains effective even for a pinned
+  round or preapproved Level 5 playbook.
+- Present policies with simple user-facing controls, readable reasons
+  for a blocked action, and version history/revert proposals; reversing
+  a policy edit never silently re-enables an expired or revoked permit.
+
+**Implementation and negative-path acceptance:** See
+`docs/rc11-agent-policy-provenance-and-revocation.md`.
+This is an approved design, not confirmation that all runtime gateways
+or cancellation paths are already implemented.
+
+**Status:** CONFIRMED BY USER — versioned provenance plus live revocation
+as OnePane's standard Agent behaviour.
 
 ## Decision 5 — diagnostics visibility and privacy
 **Question:** Is operator-controlled, time-limited live policy tracing

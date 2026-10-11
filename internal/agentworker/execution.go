@@ -657,6 +657,74 @@ func (s *Service) handleFail(ctx context.Context, run Run, t task.Task, resp age
 	return res
 }
 
+
+// completeV0InTransaction records only the limited declaration V0 semantics.
+// It cannot bypass higher verification, create or swap an Attempt, accept a
+// foreign callback, or silently lose the immutable Worker completion journal.
+func (s *Service) completeV0InTransaction(ctx context.Context,run Run,
+	t task.Task,verificationID,checkpointID string,result json.RawMessage) error {
+	if s==nil||s.tx==nil||s.tasks==nil||run.ID==""||run.TaskID==""||
+		run.AttemptID==""||verificationID==""||checkpointID==""||
+		run.TaskID!=t.ID||t.State!=task.StateVerifying||!json.Valid(result){
+		return ErrInvalidWorkerState
+	}
+	return s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+		var count int
+		err:=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM agent_worker_runs r
+		 JOIN tasks t ON t.id=r.task_id AND t.workspace_id=r.workspace_id
+		 JOIN task_attempts a ON a.id=r.attempt_id AND a.task_id=t.id
+		  AND a.worker_principal_id=r.worker_principal_id
+		  AND a.status='waiting' AND json_valid(a.metadata_json)=1
+		  AND json_extract(a.metadata_json,'$.agent_worker')='v1'
+		 JOIN workspaces tenant ON tenant.id=t.workspace_id AND tenant.status='active'
+		 LEFT JOIN projects p ON p.id=t.project_id
+		 LEFT JOIN project_workspaces pw ON pw.id=t.project_workspace_id
+		 JOIN checkpoints c ON c.id=? AND c.task_id=t.id AND c.workspace_id=t.workspace_id
+		  AND c.status='valid' AND c.verification_id=?
+		 JOIN verifications v ON v.id=c.verification_id AND v.task_id=t.id
+		  AND v.workspace_id=t.workspace_id AND v.subject_ref='agent_worker_run:' || r.id
+		  AND v.required_level='V0' AND v.achieved_level='V0' AND v.status='pass'
+		  AND json_valid(v.spec_json)=1
+		  AND json_extract(v.spec_json,'$.worker_run_id')=r.id
+		  AND json_extract(v.spec_json,'$.source')='agent_completion_proposal'
+		 WHERE r.id=? AND r.task_id=? AND r.workspace_id=?
+		  AND r.worker_principal_id=? AND r.attempt_id=?
+		  AND r.status='running' AND r.revision=?
+		  AND t.state='verifying' AND t.archived_at IS NULL
+		  AND (t.project_id IS NULL OR
+		   (p.id=t.project_id AND p.workspace_id=t.workspace_id AND p.status='active'))
+		  AND (t.project_workspace_id IS NULL OR
+		   (t.project_id IS NOT NULL AND pw.id=t.project_workspace_id
+		    AND pw.project_id=t.project_id AND pw.status='active'))`,
+		 checkpointID,verificationID,run.ID,run.TaskID,run.WorkspaceID,
+		 WorkerPrincipal,run.AttemptID,run.Revision).Scan(&count)
+		if err!=nil{return err}
+		if count!=1{return ErrInvalidWorkerState}
+		actor:=VerifierPrincipal
+		if err:=s.tasks.CompleteVerifiedInTransaction(ctx,tx,task.CompleteCommand{
+			TaskID:t.ID,ExpectedRevision:t.Revision,CheckpointID:checkpointID,
+			Result:result,ActorPrincipalID:&actor,
+		});err!=nil{return err}
+		now:=s.clock.UnixMilli()
+		written,err:=tx.ExecContext(ctx,`UPDATE agent_worker_runs
+		 SET status='succeeded',last_error=NULL,revision=revision+1,
+		  updated_at=?,completed_at=?
+		 WHERE id=? AND task_id=? AND attempt_id=? AND workspace_id=?
+		  AND worker_principal_id=? AND status='running' AND revision=?`,
+		 now,now,run.ID,run.TaskID,run.AttemptID,run.WorkspaceID,
+		 WorkerPrincipal,run.Revision)
+		if err!=nil{return err}
+		n,err:=written.RowsAffected()
+		if err!=nil{return err}
+		if n!=1{return ErrInvalidWorkerState}
+		return s.journalInTransaction(ctx,tx,run.ID,"verification","succeeded",
+			nil,nil,strPtr("complete"),strPtr(checkpointID),
+			map[string]any{"verification_id":verificationID,
+				"checkpoint_id":checkpointID,"level":"V0",
+				"independent":false,"semantics":"model_declaration_only"})
+	})
+}
+
 func (s *Service) handleComplete(ctx context.Context, run Run, t task.Task, resp agentprotocol.Response, res TickResult) TickResult {
 	var p completeProposal
 	if err := json.Unmarshal(resp.Proposal, &p); err != nil {
@@ -728,12 +796,13 @@ func (s *Service) handleComplete(ctx context.Context, run Run, t task.Task, resp
 	if err != nil {
 		return s.failRun(ctx, run, res, err)
 	}
-	_, err = s.tasks.CompleteVerified(ctx, task.CompleteCommand{TaskID: cur.ID, ExpectedRevision: cur.Revision, CheckpointID: cp.ID, Result: p.Result, ActorPrincipalID: &verifier})
-	if err != nil {
-		return s.failRun(ctx, run, res, err)
+	// V0 is a model declaration, NOT independent evidence. Its Task,
+	// original Attempt, Worker and declaration-only audit must nevertheless
+	// finalize in one SQLite transaction; an ignored journal error previously
+	// left an untraceable 'succeeded' Worker on a failed write.
+	if err := s.completeV0InTransaction(ctx,run,cur,v.ID,cp.ID,p.Result);err!=nil{
+		return failedResult(res,err)
 	}
-	_ = s.finishRun(ctx, run.ID, RunSucceeded, "")
-	_ = s.journal(ctx, run.ID, "verification", "succeeded", nil, nil, strPtr("complete"), strPtr(cp.ID), map[string]any{"verification_id": v.ID, "checkpoint_id": cp.ID, "level": "V0"})
 	res.Status = "complete"
 	return res
 }

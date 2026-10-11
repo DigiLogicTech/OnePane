@@ -221,3 +221,12 @@ Completed in this integration branch, with source and regression tests:
   actual runtimes and CPU/GPU/model swaps, and fully approved L5 recurring
   observe->respond->verify loops must be tested on installed hardware.
   This parser fix is not end-to-end autonomous-operation sign-off.
+
+- [x] **P0-D L5 monitoring-plan admission:** configured source allowlists
+  now reject duplicate keys, escaped-key duplicates, trailing JSON,
+  unexpected authority fields and oversized payloads *before* creating
+  any durable goal. Added focused unit tests; an empty plan still grants
+  no probe/network execution. This is source-list input validation, not
+  an active Level 5 monitor or automatic remediation capability.
+- [ ] Validate the latest combined model-plan and L5-source changes in
+  hosted Go/SQLite/WebUI CI and preserve the full unmerged review gate.

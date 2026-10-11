@@ -109,6 +109,59 @@ func TestProjectTaskGraphAtomicDependencyAndIdempotency(t *testing.T){
    t.Fatalf("Graph unexpectedly enabled remote models, Internet or Vault: %s",persisted.Completion)
   }
  }
+ // The approved graph's hard edges are separately persisted so that
+ // deleting a predecessor cannot silently make the successor runnable.
+ var approvedJSON string
+ var approvedRecorded int
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT approved_dependencies_json,
+  approved_dependencies_recorded FROM project_orchestrator_task_graph_nodes
+  WHERE graph_id=? AND node_key='story'`,graph.ID).
+  Scan(&approvedJSON,&approvedRecorded);err!=nil{t.Fatal(err)}
+ if approvedRecorded!=1||!strings.Contains(approvedJSON,"assets"){
+  t.Fatalf("operator-reviewed Story dependency was not pinned: %s %d",approvedJSON,approvedRecorded)
+ }
+ if _,err:=db.SQL().ExecContext(ctx,`DELETE FROM task_dependencies
+  WHERE task_id=? AND depends_on_task_id=?`,
+  lookup["story"].TaskID,lookup["assets"].TaskID);err!=nil{t.Fatal(err)}
+ missingEdge,err:=svc.TaskGraph(ctx,p.ID,graph.ID)
+ if err!=nil{t.Fatal(err)}
+ byKey:=map[string]TaskGraphNode{}
+ for _,n:=range missingEdge.Nodes{byKey[n.Key]=n}
+ if !byKey["story"].DependencyDrift||
+  byKey["story"].Readiness!="needs_attention"||
+  missingEdge.Status!="needs_attention"||
+  byKey["assets"].Readiness!="admission_eligible"{
+  t.Fatalf("deleted approved edge made Story runnable or blocked independent Assets: %+v",missingEdge)
+ }
+ checkpoint,err:=svc.TaskGraphRecoveryCheckpoint(ctx,p.ID,graph.ID)
+ if err!=nil{t.Fatal(err)}
+ if !checkpoint.NeedsOperatorReview||checkpoint.AutomaticRetryAllowed{
+  t.Fatalf("deleted approved edge authorised unsafe replay: %+v",checkpoint)
+ }
+ if _,err:=db.SQL().ExecContext(ctx,`INSERT INTO task_dependencies(
+  task_id,depends_on_task_id,dependency_type,dependency_mode,metadata_json)
+  VALUES(?,?,'hard','all','{"source":"operator_approved_project_graph"}')`,
+  lookup["story"].TaskID,lookup["assets"].TaskID);err!=nil{t.Fatal(err)}
+ restoredEdge,err:=svc.TaskGraph(ctx,p.ID,graph.ID)
+ if err!=nil{t.Fatal(err)}
+ for _,n:=range restoredEdge.Nodes{
+  if n.DependencyDrift{t.Fatalf("approved edge restoration failed: %+v",n)}
+ }
+ // Historical graphs without independently attested predecessor snapshots
+ // must not be silently grandfathered into an unsafe worker recovery.
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_orchestrator_task_graph_nodes
+  SET approved_dependencies_recorded=0 WHERE graph_id=? AND node_key='story'`,
+  graph.ID);err!=nil{t.Fatal(err)}
+ oldGraph,err:=svc.TaskGraph(ctx,p.ID,graph.ID)
+ if err!=nil{t.Fatal(err)}
+ for _,n:=range oldGraph.Nodes{
+  if n.Key=="story"&&(!n.DependencyDrift||n.Readiness!="needs_attention"){
+   t.Fatalf("unattested legacy dependencies were treated as approved: %+v",n)
+  }
+ }
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_orchestrator_task_graph_nodes
+  SET approved_dependencies_recorded=1 WHERE graph_id=? AND node_key='story'`,
+  graph.ID);err!=nil{t.Fatal(err)}
  retried,err:=svc.CreateTaskGraph(ctx,plan)
  if err!=nil||retried.ID!=graph.ID{
   t.Fatalf("retry duplicated Task graph: %+v %v",retried,err)

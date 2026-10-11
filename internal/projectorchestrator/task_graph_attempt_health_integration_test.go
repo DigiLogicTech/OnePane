@@ -100,11 +100,11 @@ func TestTaskGraphSnapshotMarksOrphanAttemptAsOperatorReview(t *testing.T){
   foreign.Progress.NeedsAttention!=1{
   t.Fatalf("unverified executor was shown as safely running: %+v",foreign)
  }
- checkpoint,err=svc.TaskGraphRecoveryCheckpoint(ctx,project.ID,graph.ID)
+ reviewCheckpoint,err:=svc.TaskGraphRecoveryCheckpoint(ctx,project.ID,graph.ID)
  if err!=nil{t.Fatal(err)}
- if !checkpoint.NeedsOperatorReview||checkpoint.AutomaticRetryAllowed||
-  checkpoint.Nodes[0].CanExistingWorkerAdmit||
-  checkpoint.Nodes[0].RecoveryClass!="operator_review"{
-  t.Fatalf("unverified executor was allowed to auto-resume: %+v",checkpoint)
+ if !reviewCheckpoint.NeedsOperatorReview||reviewCheckpoint.AutomaticRetryAllowed||
+  reviewCheckpoint.Nodes[0].CanExistingWorkerAdmit||
+  reviewCheckpoint.Nodes[0].RecoveryClass!="operator_review"{
+  t.Fatalf("unverified executor was allowed to auto-resume: %+v",reviewCheckpoint)
  }
 }

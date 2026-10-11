@@ -167,6 +167,10 @@ func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	manifestJSON:=`{"protocol":"onepane-federation-v1","node_id":"node-a","models":[]}`
+	if _,err:=dbB.SQL().ExecContext(ctx,`INSERT INTO node_capability_manifests(
+	 peer_node_id,sequence,manifest_json,received_at,expires_at,revision,updated_at)
+	 VALUES('node-a',1,?,?,?,1,?)`,manifestJSON,now,now+3600000,now);err!=nil{t.Fatal(err)}
 	type echoExec struct{}
 	_ = echoExec{}
 	server := NewServer(svcB, echoExecutor{}, admittedLocalFederationModel{})

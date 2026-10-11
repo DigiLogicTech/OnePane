@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -124,6 +125,14 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	if err := d.Decode(v); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid request"})
+		return false
+	}
+	// A federation call is exactly one JSON document. Decoder.Decode
+	// otherwise accepts and silently ignores subsequent JSON values.
+	// Require EOF after optional whitespace, under the same 4 MiB cap.
+	var extra json.RawMessage
+	if err := d.Decode(&extra); err != io.EOF {
 		writeJSON(w, 400, map[string]string{"error": "invalid request"})
 		return false
 	}

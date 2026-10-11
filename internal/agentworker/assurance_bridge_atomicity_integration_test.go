@@ -76,6 +76,17 @@ func TestWorkerAssuranceSuccessRequiresExactDurableTaskVerificationAndAudit(t *t
 	})
 	if err!=nil{t.Fatal(err)}
 	if complete.State!=task.StateComplete{t.Fatalf("not complete: %+v",complete)}
+	// A previously valid Verification cannot close an unrelated Worker run
+	// if its original issued Worker provenance is missing or changed.
+	if _,err:=db.SQL().ExecContext(ctx,`UPDATE verifications
+	 SET spec_json='{"source":"agent_completion_proposal","worker_run_id":"foreign-run"}'
+	 WHERE id=?`,v.ID);err!=nil{t.Fatal(err)}
+	if err:=worker.AssurancePassed(ctx,run.ID,v.ID,cp.ID);!errors.Is(err,ErrInvalidWorkerState){
+		t.Fatalf("foreign-issued Verification claimed completed Worker: %v",err)
+	}
+	if _,err:=db.SQL().ExecContext(ctx,`UPDATE verifications
+	 SET spec_json=? WHERE id=?`,
+	 `{"source":"agent_completion_proposal","worker_run_id":"`+run.ID+`"}`,v.ID);err!=nil{t.Fatal(err)}
 	for _,bad:=range []struct{name,verificationID,checkpointID string}{
 		{"wrong_verification","other",cp.ID},
 		{"wrong_checkpoint",v.ID,"other"},

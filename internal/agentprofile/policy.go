@@ -140,3 +140,31 @@ func(s *Service)UpdatePolicy(ctx context.Context,cmd UpdateAgentPolicyCommand)(P
  if err!=nil{return PolicyRevision{},err}
  return s.Policy(ctx,cmd.ProfileID,cmd.WorkspaceID)
 }
+
+
+// PolicyHistory is intentionally bounded and Workspace-scoped. It returns
+// only immutable reviewed denial documents and metadata, never Agent
+// prompt contents, credentials, model-generated transcripts or Tool inputs.
+func(s *Service)PolicyHistory(ctx context.Context,profileID,workspaceID string,limit int)([]PolicyRevision,error){
+ profileID,workspaceID=strings.TrimSpace(profileID),strings.TrimSpace(workspaceID)
+ if profileID==""||workspaceID==""{return nil,ErrInvalid}
+ if limit<1||limit>50{limit=20}
+ // Policy() confirms active custom Agent ownership. Do not infer tenancy
+ // from a policy revision ID or accept a caller-supplied alternate Workspace.
+ if _,err:=s.Policy(ctx,profileID,workspaceID);err!=nil{return nil,err}
+ rows,err:=s.db.QueryContext(ctx,`SELECT profile_id,workspace_id,revision,policy_json,issued_by,issued_at
+  FROM agent_policy_revisions WHERE profile_id=? AND workspace_id=?
+  ORDER BY revision DESC LIMIT ?`,profileID,workspaceID,limit)
+ if err!=nil{return nil,err}
+ defer rows.Close()
+ out:=[]PolicyRevision{}
+ for rows.Next(){
+  var item PolicyRevision
+  var raw string
+  if err:=rows.Scan(&item.ProfileID,&item.WorkspaceID,&item.Revision,&raw,
+   &item.IssuedBy,&item.IssuedAt);err!=nil{return nil,err}
+  item.PolicyJSON=json.RawMessage(raw)
+  out=append(out,item)
+ }
+ return out,rows.Err()
+}

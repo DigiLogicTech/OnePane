@@ -44,6 +44,31 @@ func (s *Service) AttachGoalObservation(ctx context.Context, cmd AttachGoalObser
  cmd.ActorPrincipalID=strings.TrimSpace(cmd.ActorPrincipalID)
  if cmd.ProjectID==""||cmd.GoalID==""||cmd.ObservationID==""||
   cmd.ActorPrincipalID==""||cmd.ExpectedRevision<1{return GoalObservationReceipt{},ErrInvalidCommand}
+ // Scope admission must precede the expensive integrity/Get lookup:
+ // neither an untrusted Observation ID nor a foreign tenant is allowed to
+ // make this endpoint load or process another Workspace's sensor payload.
+ // This read-only proof is NOT the final grant; the transaction below
+ // rechecks current Project, principal, source and observation identity.
+ var visible int
+ err:=s.db.QueryRowContext(ctx,`SELECT 1
+   FROM observations o
+   JOIN projects p ON p.workspace_id=o.workspace_id AND p.id=?
+   JOIN project_continuous_goals g ON g.project_id=p.id AND g.id=?
+   JOIN project_workspaces pw ON pw.id=g.project_workspace_id
+      AND pw.project_id=p.id AND pw.status='active'
+   JOIN workspaces tenant ON tenant.id=p.workspace_id AND tenant.status='active'
+   JOIN principals actor ON actor.id=? AND actor.status='active'
+      AND actor.principal_type='human'
+   JOIN workspace_memberships membership ON membership.workspace_id=p.workspace_id
+      AND membership.principal_id=actor.id AND membership.status='active'
+   WHERE o.id=? AND p.status='active' AND g.status='configured'
+   LIMIT 1`,cmd.ProjectID,cmd.GoalID,cmd.ActorPrincipalID,cmd.ObservationID).Scan(&visible)
+ if err!=nil{
+  if errors.Is(err,sql.ErrNoRows){
+   return GoalObservationReceipt{},fmt.Errorf("%w: observation or goal scope unavailable",ErrInvalidCommand)
+  }
+  return GoalObservationReceipt{},err
+ }
  // Observation rows are immutable by schema; preflight verifies their full
  // stored JSON value's hash, without returning that value to the caller.
  source:=observation.NewService(s.db,s.tx,s.clock)

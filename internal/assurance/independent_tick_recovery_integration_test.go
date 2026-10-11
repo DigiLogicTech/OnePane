@@ -37,6 +37,10 @@ func TestAssuranceTickDoesNotStarveIndependentResolvedVerification(t *testing.T)
  if _,err:=db.SQL().ExecContext(ctx,`INSERT INTO verifications(
   id,workspace_id,subject_ref,required_level,status,spec_json,started_at,revision)
   VALUES('bad','tenant','bad-evidence','V0','pending',?,?,1)`,spec,now-2);err!=nil{t.Fatal(err)}
+ // More than one bad sibling must preserve both actionable IDs.
+ if _,err:=db.SQL().ExecContext(ctx,`INSERT INTO verifications(
+  id,workspace_id,subject_ref,required_level,status,spec_json,started_at,revision)
+  VALUES('bad-2','tenant','other-bad-evidence','V0','pending',?,?,1)`,spec,now-2);err!=nil{t.Fatal(err)}
  if _,err:=db.SQL().ExecContext(ctx,`INSERT INTO verifications(
   id,workspace_id,subject_ref,required_level,achieved_level,status,spec_json,
   result_json,verified_by,started_at,completed_at,revision)
@@ -55,7 +59,7 @@ func TestAssuranceTickDoesNotStarveIndependentResolvedVerification(t *testing.T)
   artifact.NewService(db.SQL(),db,nil,clk),
   observation.NewService(db.SQL(),db,clk),nil)
  completed,problem:=svc.Tick(ctx,10)
- if problem==nil||!strings.Contains(problem.Error(),"bad")||
+ if problem==nil||(!strings.Contains(problem.Error(),"bad")||!strings.Contains(problem.Error(),"bad-2"))||
   len(completed)!=1||completed[0].VerificationID!="good"||
   completed[0].Status!=RunPassed{
   t.Fatalf("corrupt earlier verification starved valid later verification: completed=%+v error=%v",completed,problem)

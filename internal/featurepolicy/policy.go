@@ -84,6 +84,10 @@ func Resolve(parent, child State) State {
 	if child == Unavailable || child == Disabled {
 		return child
 	}
+	if child != Enabled {
+		// Unknown policy values must never grant a capability.
+		return Unavailable
+	}
 	return Enabled
 }
 
@@ -92,7 +96,12 @@ func ResolveAuthority(parent, child Authority) Authority {
 		return parent
 	}
 	rank := map[Authority]int{AuthorityNever: 0, AuthorityRead: 1, AuthorityPropose: 2, AuthorityAuto: 3}
-	if rank[child] < rank[parent] {
+	parentRank, parentOK := rank[parent]
+	childRank, childOK := rank[child]
+	if !parentOK || !childOK {
+		return AuthorityNever
+	}
+	if childRank < parentRank {
 		return child
 	}
 	return parent

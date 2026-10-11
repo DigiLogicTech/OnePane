@@ -120,8 +120,8 @@ func TestOrchestratorHandoffRebindsReasoningToDestinationWorkspace(t *testing.T)
  persisted,err:=taskSvc.Get(ctx,*result.TaskID)
  if err!=nil{t.Fatal(err)}
  if persisted.ProjectWorkspaceID==nil||*persisted.ProjectWorkspaceID!=destID||
-  persisted.Objective!="DESTINATION_SAFE_OBJECTIVE"{
-  t.Fatalf("model transferred source private objective across Workspace boundary: %+v",persisted)
+  persisted.Objective!="Create a deliverable in the appropriate Workspace"{
+  t.Fatalf("model rewrote the user-approved Task objective across Workspace boundary: %+v",persisted)
  }
  if len(infer.contexts)!=2||
   !strings.Contains(infer.contexts[0],"SOURCE_PRIVATE_TASK_CONTEXT_CANARY")||

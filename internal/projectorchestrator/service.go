@@ -257,7 +257,7 @@ func (s *Service) reason(ctx context.Context, workspaceID, projectID, projectWor
 		return "",nil,nil,fmt.Errorf("unverified remote or paid model refused for Project Orchestrator")
 	}
 	dep:=decision.Selected.Candidate.ID
-	system:=`You are the logical OnePane Project Orchestrator. Coordinate project work but never claim direct tool, filesystem, secret, node, or approval authority. Use only the supplied bounded Project context. Return one JSON object: {"answer":"...", "action":"answer|task", "objective":"...", "project_workspace_id":"..."}. You may suggest a Workspace for requests without an explicit Workspace choice, but execution mode and Team are locked to the selected Workspace's operator configuration. Use action=task only when the user is asking OnePane to perform work rather than explain or report state.`
+	system:=`You are the logical OnePane Project Orchestrator. Coordinate project work but never claim direct tool, filesystem, secret, node, or approval authority. Use only the supplied bounded Project context. Return one JSON object: {"answer":"...", "action":"answer|task", "project_workspace_id":"..."}. You may suggest a Workspace for requests without an explicit Workspace choice, but execution mode and Team are locked to the selected Workspace's operator configuration. Use action=task only when the user is asking OnePane to perform work rather than explain or report state.`
 	req,_:=json.Marshal(map[string]any{"messages":[]map[string]string{{"role":"system","content":system},{"role":"user","content":"Project context:\n"+string(snapshot)+"\n\nUser objective:\n"+objective}},"max_tokens":1200,"temperature":0.2})
 	manifest,_:=json.Marshal(map[string]any{"project_context":json.RawMessage(snapshot),"logical_role":"project-orchestrator"})
 	// Recheck the canonical scopes after routing, immediately before this
@@ -318,7 +318,10 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 	answer:=strings.TrimSpace(text);action:="answer";objective:=c.Objective
 	if v,ok:=plan["answer"].(string);ok&&strings.TrimSpace(v)!=""{answer=strings.TrimSpace(v)}
 	if v,ok:=plan["action"].(string);ok{action=strings.ToLower(strings.TrimSpace(v))}
-	if v,ok:=plan["objective"].(string);ok&&strings.TrimSpace(v)!=""{objective=strings.TrimSpace(v)}
+	// A model is allowed to *suggest* how to pursue a Project objective,
+	// but cannot substitute an unapproved objective into a runnable Task.
+	// Future multi-step plans need separately scoped Task specs and the
+	// standing Level 4 grant; they cannot smuggle an action through this field.
 	// Keep the operator's explicit Workspace selection authoritative even
 	// when an untrusted model proposes a different active sibling.
 	pwsID, mode, teamID, err = resolveOrchestratorWorkspaceProfile(ctx, s.db, c.ProjectID,

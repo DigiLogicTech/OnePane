@@ -77,3 +77,36 @@ func TestBoundedAutonomousPlanCapsCountAndPayloadBytes(t *testing.T){
   t.Fatal("oversized JSON plan admitted")
  }
 }
+
+func TestPlannerJSONRejectsDuplicateActionWorkspaceAndNestedPlanKeys(t *testing.T) {
+  ambiguous:=[]string{
+    `{"action":"answer","action":"task"}`,
+    `{"action":"answer","acti\\u006fn":"task"}`,
+    `{"project_workspace_id":"safe","project_workspace_id":"other"}`,
+    `{"plan":{"version":1,"steps":[{"key":"a","objective":"safe","objective":"changed"}]}}`,
+    `{"plan":{"version":1,"steps":[{"key":"a","depends_on":[],"depends_on":["another"]}]}}`,
+    `{"plan":{},"plan":{"version":1,"steps":[]}}`,
+    `{"answer":"safe"}{"action":"task"}`,
+  }
+  for _,raw:=range ambiguous {
+    if err:=rejectAmbiguousPlannerJSON([]byte(raw));err==nil{
+      t.Errorf("conflicting model response was not rejected: %s",raw)
+    }
+  }
+  valid:=`{"answer":"Fine","action":"answer","plan":{"version":1,"steps":[{"key":"a","objective":"Approved local work"}]}}`
+  if err:=rejectAmbiguousPlannerJSON([]byte(valid));err!=nil{
+    t.Fatalf("valid model response rejected: %v",err)
+  }
+}
+
+func TestBoundedAutonomousPlanParserRejectsDuplicateFieldsDirectly(t *testing.T) {
+  for _,raw:=range []string{
+    `{"version":1,"version":1,"steps":[{"key":"a","objective":"Work"}]}`,
+    `{"version":1,"steps":[{"key":"a","objective":"Work","objective":"Other"}]}`,
+    `{"version":1,"steps":[{"key":"a","key":"b","objective":"Work"}]}`,
+  } {
+    if _,err:=ParseAutonomousPlanDraft(json.RawMessage(raw),"project","workspace","Approved objective");!errors.Is(err,ErrInvalid){
+      t.Errorf("duplicate planner field bypassed direct parse: %s: %v",raw,err)
+    }
+  }
+}

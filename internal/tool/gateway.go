@@ -15,6 +15,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/authority"
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/id"
+	"github.com/DigiLogicTech/OnePane/internal/featurepolicy"
 	"github.com/DigiLogicTech/OnePane/internal/policy"
 	"github.com/DigiLogicTech/OnePane/internal/storage"
 )
@@ -32,6 +33,8 @@ type Gateway struct {
 	policy          policyEvaluator
 	authority       authorityConsumer
 	registry        *Registry
+	scopes          featurepolicy.StoredScopes
+
 	mutationPermits MutationPermitValidator
 	sandboxAdapters map[string]struct{}
 	ids             id.Generator
@@ -39,7 +42,7 @@ type Gateway struct {
 }
 
 func NewGateway(db *sql.DB, tx storage.Transactor, p policyEvaluator, a authorityConsumer, registry *Registry, clk clock.Clock) *Gateway {
-	return &Gateway{store: newSQLInvocationStore(db, tx), policy: p, authority: a, registry: registry, sandboxAdapters: map[string]struct{}{}, ids: id.Generator{}, clock: clk}
+	return &Gateway{store: newSQLInvocationStore(db, tx), scopes:featurepolicy.StoredScopes{DB:db}, policy: p, authority: a, registry: registry, sandboxAdapters: map[string]struct{}{}, ids: id.Generator{}, clock: clk}
 }
 
 func newGateway(store invocationStore, p policyEvaluator, a authorityConsumer, registry *Registry, clk clock.Clock) *Gateway {
@@ -139,6 +142,18 @@ func (g *Gateway) Invoke(ctx context.Context, cmd InvokeCommand) (Invocation, er
 		return g.fail(ctx, inv, meta, "policy_denied", "policy denied: "+strings.Join(reasons, ","), ErrPolicyDenied)
 	}
 
+	// Authoritative feature policy restrictions are additional to the existing
+	// lease, approval, adapter and Workspace sandbox checks. Never trust
+	// a tool payload as the source of Project/Workspace permissions.
+	if action := scopedFileAction(binding.Definition.CapabilityID, binding.Definition.ID); action != "" && cmd.TaskID != nil && g.scopes.DB != nil {
+		allowed, scopeErr := g.scopes.AuthorizeTask(ctx, cmd.WorkspaceID, *cmd.TaskID, action)
+		if scopeErr != nil {
+			return g.fail(ctx, inv, meta, "feature_policy_unavailable", "scoped feature policy unavailable", ErrPolicyDenied)
+		}
+		if !allowed {
+			return g.fail(ctx, inv, meta, "feature_policy_denied", "scoped feature policy denied file access", ErrPolicyDenied)
+		}
+	}
 	if err := g.store.ValidateExecutionContext(ctx, cmd.WorkspaceID, cmd.PrincipalID, cmd.TaskID, cmd.AttemptID); err != nil {
 		return g.fail(ctx, inv, meta, "execution_context_invalid", err.Error(), fmt.Errorf("%w: %v", ErrExecutionContext, err))
 	}
@@ -182,6 +197,16 @@ func (g *Gateway) Invoke(ctx context.Context, cmd InvokeCommand) (Invocation, er
 	}
 	if err := g.transition(ctx, &inv, meta, StatusRunning, nil, nil, nil); err != nil {
 		return inv, err
+	}
+
+	// Re-evaluate revocable grants immediately before side effects. A policy
+	// change while consuming permits or an authority lease must not be bypassed.
+	if action := scopedFileAction(binding.Definition.CapabilityID, binding.Definition.ID); action != "" && cmd.TaskID != nil && g.scopes.DB != nil {
+		allowed, scopeErr := g.scopes.AuthorizeTask(ctx, cmd.WorkspaceID, *cmd.TaskID, action)
+		if scopeErr != nil || !allowed {
+			return g.failFrom(ctx, inv, meta, StatusRunning, "feature_policy_revoked",
+				"scoped file permission revoked before adapter invocation", ErrPolicyDenied)
+		}
 	}
 
 	result, callErr := callAdapter(ctx, binding.Adapter, AdapterRequest{

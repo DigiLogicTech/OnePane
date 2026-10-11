@@ -4,6 +4,7 @@ import(
  "context"
  "errors"
  "testing"
+ "strings"
 
  "github.com/DigiLogicTech/OnePane/internal/projectorchestrator"
 
@@ -172,4 +173,60 @@ func TestUnifiedAssistantUnscopedRunDeniedBeforeHistoryWrite(t *testing.T){
  if err:=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM assistant_turns WHERE thread_id=?",thread.ID).Scan(&turns);err!=nil{t.Fatal(err)}
  if err:=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM assistant_project_handoffs WHERE assistant_thread_id=?",thread.ID).Scan(&handoffs);err!=nil{t.Fatal(err)}
  if turns!=0||handoffs!=0{t.Fatalf("denied Run persisted state: turns=%d handoffs=%d",turns,handoffs)}
+}
+
+
+type capturedAutonomousGraphHandoff struct{ graphID string }
+func(f capturedAutonomousGraphHandoff)Ensure(_ context.Context,projectID string)(projectorchestrator.Orchestrator,error){
+ return projectorchestrator.Orchestrator{ID:"graph-orchestrator",ProjectID:projectID},nil
+}
+func(f capturedAutonomousGraphHandoff)Turn(_ context.Context,c projectorchestrator.TurnCommand)(projectorchestrator.TurnResult,error){
+ t:="first-graph-node"
+ return projectorchestrator.TurnResult{
+  Turn:projectorchestrator.Turn{ID:"orchestrator-turn",Content:"Bounded Task graph queued"},
+  TaskID:&t,TaskGraphID:&f.graphID,Disposition:"task_graph_created",
+ },nil
+}
+func TestUnifiedAssistantPersistsOnlyCanonicalOrchestratorGraphProvenance(t *testing.T){
+ ctx:=context.Background()
+ db,err:=sqliteStore.Open(t.TempDir()+"/unified-graph-history.db")
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ if err=db.Migrate(ctx);err!=nil{t.Fatal(err)}
+ for _,q:=range []string{
+  `INSERT INTO workspaces(id,name,status,revision,created_at,updated_at) VALUES('tenant','Tenant','active',1,1,1)`,
+  `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at) VALUES('human','human','Human','active',1,1,1)`,
+  `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at) VALUES('tenant','human','active',1,1)`,
+ }{if _,err:=db.SQL().ExecContext(ctx,q);err!=nil{t.Fatal(err)}}
+ projects:=projectworkspace.NewService(db.SQL(),db,clock.Real{})
+ p,err:=projects.CreateProject(ctx,projectworkspace.CreateProjectCommand{
+  WorkspaceID:"tenant",Name:"Scoped graph",CreatedBy:"human"})
+ if err!=nil{t.Fatal(err)}
+ ws,err:=projects.CreateWorkspaceView(ctx,projectworkspace.CreateWorkspaceViewCommand{
+  ProjectID:p.ID,Name:"Development",ActorPrincipalID:"human"})
+ if err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`INSERT INTO project_orchestrators
+  (id,project_id,workspace_id,status,configuration_json,last_event_sequence,revision,created_at,updated_at)
+  VALUES('graph-orchestrator',?,?,'ready','{}',0,1,1,1)`,p.ID,"tenant");err!=nil{t.Fatal(err)}
+ svc:=NewService(db.SQL(),clock.Real{},nil,nil,nil,capturedAutonomousGraphHandoff{graphID:"reviewed-graph"})
+ thread,err:=svc.CreateThread(ctx,"tenant","Graph authority","human")
+ if err!=nil{t.Fatal(err)}
+ projectID:=p.ID
+ result,err:=svc.Submit(ctx,SubmitCommand{
+  ThreadID:thread.ID,Content:"Create a safe local deliverable",ActorPrincipalID:"human",
+  ProjectID:&projectID,ProjectWorkspaceID:ws.ID,ForceTask:true,AllowTaskCreation:true,
+ })
+ if err!=nil{t.Fatal(err)}
+ if !result.Delegated||result.Orchestrator==nil||
+  result.Orchestrator.TaskGraphID==nil||
+  *result.Orchestrator.TaskGraphID!="reviewed-graph"{
+  t.Fatalf("Assistant lost authorised Project graph: %+v",result)
+ }
+ if !strings.Contains(string(result.Turn.ProvenanceJSON),`"task_graph_id":"reviewed-graph"`)||
+  !strings.Contains(string(result.Turn.ProvenanceJSON),`"task_origin":"standing_L4_autonomy_policy"`){
+  t.Fatalf("unified Assistant history omitted graph provenance: %s",result.Turn.ProvenanceJSON)
+ }
+ var stored string
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT provenance_json FROM assistant_turns WHERE id=?`,result.Turn.ID).Scan(&stored);err!=nil{t.Fatal(err)}
+ if stored!=string(result.Turn.ProvenanceJSON){t.Fatalf("Assistant replay lost graph provenance: %q",stored)}
 }

@@ -43,9 +43,9 @@ func TestFederatedMissingCachedOutcomeNeverBecomesSuccessOrReexecutes(t *testing
   want string
  }{
   {name:"missing successful response",status:"succeeded",want:"remote_cached_response_unavailable"},
-  {name:"expired successful response",status:"succeeded",errorCode:stringPtr("remote_cached_response_expired"),want:"remote_cached_response_expired"},
+  {name:"expired successful response",status:"succeeded",errorCode:receiptTestStringPtr("remote_cached_response_expired"),want:"remote_cached_response_expired"},
   {name:"failed receipt without failure code",status:"failed",want:"remote_receipt_unavailable"},
-  {name:"failed receipt with explicit code",status:"failed",errorCode:stringPtr("remote_inference_failed"),want:"remote_inference_failed"},
+  {name:"failed receipt with explicit code",status:"failed",errorCode:receiptTestStringPtr("remote_inference_failed"),want:"remote_inference_failed"},
  }{
   t.Run(tt.name,func(t *testing.T){
    if _,err:=db.SQL().ExecContext(ctx,`UPDATE node_federated_inference_receipts
@@ -62,4 +62,4 @@ func TestFederatedMissingCachedOutcomeNeverBecomesSuccessOrReexecutes(t *testing
  }
 }
 
-func stringPtr(s string)*string{return &s}
+func receiptTestStringPtr(s string)*string{return &s}

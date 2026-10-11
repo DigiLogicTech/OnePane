@@ -75,7 +75,10 @@ func MinimalDefaults() Policy {
 // Resolve applies a child override without permitting a child to escape a
 // restrictive parent. Inherited preserves the parent's value.
 func Resolve(parent, child State) State {
-	if parent == Unavailable || parent == Disabled {
+	if parent != Enabled && parent != Disabled && parent != Unavailable {
+\t\treturn Unavailable
+\t}
+\tif parent == Unavailable || parent == Disabled {
 		return parent
 	}
 	if child == Inherited || strings.TrimSpace(string(child)) == "" {
@@ -93,7 +96,7 @@ func Resolve(parent, child State) State {
 
 func ResolveAuthority(parent, child Authority) Authority {
 	if child == "" {
-		return parent
+		child = parent
 	}
 	rank := map[Authority]int{AuthorityNever: 0, AuthorityRead: 1, AuthorityPropose: 2, AuthorityAuto: 3}
 	parentRank, parentOK := rank[parent]
@@ -117,4 +120,25 @@ func (p Policy) PersistentMemoryActive() bool {
 
 func (p Policy) AutomaticRoutingActive() bool {
 	return p.ModelRouting == Enabled && p.CapabilityRouting == Enabled
+}
+
+// ResolveChain calculates the effective state across Project, Workspace,
+// Agent and execution overrides. Each descendant can restrict but never
+// expand its ancestor's effective capability.
+func ResolveChain(root State, descendants ...State) State {
+	effective := Resolve(root, Inherited)
+	for _, child := range descendants {
+		effective = Resolve(effective, child)
+	}
+	return effective
+}
+
+// ResolveAuthorityChain applies the same monotonic restriction to
+// configuration authority across the execution hierarchy.
+func ResolveAuthorityChain(root Authority, descendants ...Authority) Authority {
+	effective := ResolveAuthority(root, "")
+	for _, child := range descendants {
+		effective = ResolveAuthority(effective, child)
+	}
+	return effective
 }

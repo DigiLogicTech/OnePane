@@ -151,13 +151,24 @@ func forTaskWithReader(ctx context.Context, reader scopedRowReader, tenantID, ta
 	}
 	taskOverride:=Policy{}
 	fromTask:=false
+	agentOverride:=Policy{}
+	fromAgent:=false
 	if routing,ok:=taskDoc["onepane_routing"];ok {
 		taskOverride,fromTask,err=parseFeatureDocument(routing,Policy{})
 		if err!=nil{return ScopedDecision{},err}
+		var route struct{AgentProfile string `json:"agent_profile"`}
+		if err:=json.Unmarshal(routing,&route);err!=nil{
+			return ScopedDecision{},fmt.Errorf("invalid Task Agent routing document")
+		}
+		profileID:=strings.TrimSpace(route.AgentProfile)
+		if profileID!=""&&profileID!="agent.md"&&!strings.EqualFold(profileID,"onepane-default"){
+			agentOverride,fromAgent,err=forAgentWithReader(ctx,reader,tenantID,profileID)
+			if err!=nil{return ScopedDecision{},err}
+		}
 	}
 	return ScopedDecision{
-		Effective:ResolvePolicyChain(project,workspace,taskOverride),
-		Configured:fromProject||fromWorkspace||fromTask,
+		Effective:ResolvePolicyChain(project,workspace,agentOverride,taskOverride),
+		Configured:fromProject||fromWorkspace||fromAgent||fromTask,
 	},nil
 }
 

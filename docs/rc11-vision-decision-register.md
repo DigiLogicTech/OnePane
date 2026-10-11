@@ -2,10 +2,10 @@
 
 This register follows the **first assistant code/security review** of draft
 [PR #227](https://github.com/DigiLogicTech/OnePane/pull/227).
-Decision 1 and the core product vision have been confirmed by the user.
-Decisions 1–2 have confirmed direction; autonomy authority details and
-Decisions 3–6 remain open. Approval of a design direction is not approval
-to merge, package, or grant new runtime privileges.
+The core vision and Decisions 1–2 (including Level 5 remediation approval
+defaults) have been confirmed by the user. Decisions 3–6 remain open.
+Approval of a design direction does not grant runtime privileges, authorise
+release packaging, or approve a merge.
 
 ## Product purpose — confirmed by user (2026-10-11)
 
@@ -103,13 +103,39 @@ with an objective, not a single terminal deliverable.
 - All user workflows should be accessible through simple toggles, dropdowns
   and descriptions, with advanced policy panels optional.
 
-**Still to align:** Exactly which security changes Level 5 may apply without
-asking (for example, reversible Pi-hole changes versus firewall rule changes,
-device quarantining or router reconfiguration). The user has approved the
-mode's existence and general autonomy, not unbounded action privileges.
+**User decision — remediation authority (2026-10-11):** Both choices
+must be supported. By default, Level 5 can autonomously execute only
+preapproved, reversible, low-risk fixes within granted Project/Workspace
+scope. High-impact changes require explicit per-action approval. Users may
+opt in to **specific preauthorised high-impact playbooks**, allowing those
+actions to execute without asking again when all of their constraints match.
 
-**Status:** CONFIRMED BY USER — default Level 4 + implemented Level 5
-capability are required. Operational authority thresholds are pending.
+**Permission invariants and UI:**
+- Default mode: `safe_automatic` — low-risk, reversible, bounded actions
+  automatically; disruptive or ambiguous effects escalate for approval.
+- Optional advanced mode: `custom_preapproved` — individual higher-impact
+  playbooks must be selected and explicitly authorised by the user.
+- Never provide an unrestricted "allow anything" grant. Every playbook
+  constrains Project/Workspace, resource/device targets, capability/action,
+  allowed arguments, effect/risk class, approval owner, permit lifetime,
+  cooldown, execution-count limits, and permitted maintenance windows.
+- Capture pre-state/backup where supported, check fresh permissions at the
+  actual side-effect boundary, record an auditable decision, verify post-state
+  and roll back when both safe and supported. If outcomes are uncertain, hold
+  for reconciliation; no blind repeat of risky changes.
+- Revocation and pause must immediately prevent **new** invocations, including
+  those made by newly created Agents/Workers or through a different adapter.
+  Existing external side effects may not be reversible; report this honestly.
+- New Projects and upgrades retain the safe default; selecting Level 5 alone
+  never activates high-impact rules. Use clear checkboxes, playbook-specific
+  prompts, an easily accessible kill switch and plain-language risk labels.
+- The user can authorise a narrowly scoped router/firewall/device action in
+  advance, but OnePane may not silently extrapolate that permission to other
+  rules, targets, networks or hosts.
+
+**Status:** CONFIRMED BY USER — Level 4 default, Level 5 required, and both
+remediation approval strategies supported; safer approval-gated mode is the
+default. Implementation and testing are outstanding.
 
 ## Decision 3 — file permissions across all tools
 **Question:** Should disabling Files block all file-capable paths including

@@ -1,7 +1,9 @@
 package projectworkspace
 
 import (
+    "bytes"
     "context"
+    "io"
     "database/sql"
     "encoding/json"
     "fmt"
@@ -120,6 +122,40 @@ type goalMonitorPlan struct {
 
 func canonicalGoalPlan(raw json.RawMessage)(json.RawMessage,error){
     if len(raw)==0 {raw=json.RawMessage(`{"version":1,"source_ids":[]}`)}
+    if len(raw)>8*1024 {
+        return nil,fmt.Errorf("monitoring plan exceeds the bounded source-list size")
+    }
+    // A Level 5 source allowlist is a security-sensitive user instruction.
+    // encoding/json silently accepts duplicate members, including escaped
+    // spellings such as "source\\u005fids"; refuse ambiguous grants before
+    // canonicalising or storing the monitoring plan.
+    dec:=json.NewDecoder(bytes.NewReader(raw))
+    first,err:=dec.Token()
+    if err!=nil||first!=json.Delim('{'){
+        return nil,fmt.Errorf("monitoring plan must be an object")
+    }
+    keys:=map[string]struct{}{}
+    for dec.More(){
+        token,err:=dec.Token()
+        if err!=nil{return nil,fmt.Errorf("invalid monitoring plan member: %w",err)}
+        key,ok:=token.(string)
+        if !ok{return nil,fmt.Errorf("invalid monitoring plan member")}
+        if _,duplicate:=keys[key];duplicate{
+            return nil,fmt.Errorf("duplicate monitoring plan member %q",key)
+        }
+        keys[key]=struct{}{}
+        var value json.RawMessage
+        if err:=dec.Decode(&value);err!=nil{
+            return nil,fmt.Errorf("invalid monitoring plan value: %w",err)
+        }
+    }
+    end,err:=dec.Token()
+    if err!=nil||end!=json.Delim('}'){
+        return nil,fmt.Errorf("invalid monitoring plan terminator")
+    }
+    if _,err:=dec.Token();err!=io.EOF{
+        return nil,fmt.Errorf("monitoring plan contains trailing data")
+    }
     var obj map[string]json.RawMessage
     if err:=json.Unmarshal(raw,&obj);err!=nil||obj==nil{
         return nil,fmt.Errorf("monitoring plan must be an object")

@@ -299,8 +299,10 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 		if node.Valid && local == 0 && !provider.Valid {
 			// A persisted READY deployment cannot authorize a dispatch after
 			// its Node's signed/mTLS-paired capability heartbeat has expired.
-			// Do not silently route a stale model or substitute local capacity.
-			if nodeTrust != "paired" || pairingStatus != "paired" || manifestExpires <= time.Now().UnixMilli() {
+			// This flag is catalogue-derived, not a model-provided label.
+			cand.TrustedNodeVerified = nodeTrust == "paired" &&
+				pairingStatus == "paired" && manifestExpires > time.Now().UnixMilli()
+			if !cand.TrustedNodeVerified {
 				cand.Schedulable = false
 				cand.NodeStatus = "unavailable"
 			}
@@ -309,6 +311,7 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 			if err == nil {
 				if enabled == 0 {
 					cand.Schedulable = false
+					cand.TrustedNodeVerified = false
 				}
 				if idleOnly != 0 && strings.EqualFold(cand.NodeStatus, "busy") {
 					cand.Schedulable = false

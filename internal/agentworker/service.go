@@ -534,7 +534,11 @@ func (s *Service) startRun(ctx context.Context, t task.Task) (Run, TickResult) {
  // a new Task/Attempt or a model dispatch.
  scopes:=featurepolicy.StoredScopes{DB:s.db}
  allowed,scopeErr:=scopes.AuthorizeTask(ctx,t.WorkspaceID,t.ID,"tasks.autonomous")
- if scopeErr!=nil||!allowed{
+ if scopeErr!=nil{
+  res.Error="stored Project or Workspace feature policy scope unavailable: "+scopeErr.Error()
+  return Run{},res
+ }
+ if !allowed{
   res.Error="stored Project or Workspace feature policy denied autonomous Worker admission"
   return Run{},res
  }

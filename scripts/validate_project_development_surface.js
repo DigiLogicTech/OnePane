@@ -46,7 +46,10 @@ assertContains(foundation,'expected_revision:Number(active.revision||1)','mode e
 assertContains(foundation,'qa4L5GoalForm','Level 5 must provide a usable objective form');
 assertContains(foundation,"base+'/workspaces'","L5 goal selector must load canonical Workspaces rather than local UI ghosts");
 assertContains(foundation,"base+'/continuous-goals'","L5 goal state must originate from backend");
-assertContains(foundation,"monitoring_plan:{version:1,source_ids:[]}","L5 goal setup must not invent monitoring sources");
+assertContains(foundation,"monitoring_plan:{version:1,source_ids:sourceIDs}","L5 goal setup must use reviewed operator-entered sources, not infer network targets");
+assertContains(foundation,"String(data.source_ids||'').split(',')","source IDs must come only from user form input");
+assertContains(foundation,"new Set(sourceIDs).size!==sourceIDs.length","duplicates in source plan must be rejected");
+assertContains(foundation,"Listing a source does not enable probes or network access.","source selection must never imply monitoring activation");
 assertContains(foundation,'Monitoring and remediation are still inactive.','configured objectives must not be represented as active protection');
 assertContains(architecture,'project_runtimes.project_id','known schema blocker must be documented');
 assertContains(architecture,'Workspace-environment ownership','required backend migration must be documented');

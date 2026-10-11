@@ -11,11 +11,16 @@ The local Node now performs a bounded, daily cache-retention sweep
 using `DefaultInboundReceiptRetention` (seven days). Only successfully
 completed `node_federated_inference_receipts.response_json` and
 `usage_json` are logically cleared in 128-row SQLite batches, up to
-16 batches in one daily pass; the old receipt ID, peer, model,
+16 batches in one successful daily pass; the old receipt ID, peer, model,
 `request_hash` and success state remain intact as an immutable
 tombstone. Duplicate retries of such an expired success receive
 `remote_cached_response_expired` with a known outcome and **never
 trigger the remote model again** or fabricate a success response.
+
+If SQLite maintenance temporarily fails, the heartbeat loop retries after
+15 minutes (rather than delaying a failed attempt for a full day). A
+successful sweep is scheduled for the next day; the per-pass 2,048-row
+budget remains unchanged. Heartbeats continue independently of retention.
 
 Recent receipt responses remain available for normal idempotent
 replay, and unknown/in-progress receipts remain unchanged. The sweep

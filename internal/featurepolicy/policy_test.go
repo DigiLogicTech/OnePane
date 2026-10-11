@@ -101,3 +101,42 @@ func TestAuthorityChainCannotExpandWorkspaceOrProject(t *testing.T) {
 		}
 	}
 }
+
+func TestCompletePolicyInheritanceRestrictsAllCapabilities(t *testing.T) {
+	project := AssistedDefaults()
+	project.CloudRouting = Enabled
+	workspace := Policy{
+		Files: Disabled,
+		CloudRouting: Disabled,
+		CrossProjectShare: Enabled,
+		ConfigAuthority: AuthorityRead,
+	}
+	agent := Policy{
+		Files: Enabled,
+		CloudRouting: Enabled,
+		CrossProjectShare: Enabled,
+		ConfigAuthority: AuthorityAuto,
+	}
+	effective := ResolvePolicyChain(project, workspace, agent)
+	if effective.Files != Disabled || effective.CloudRouting != Disabled {
+		t.Fatalf("agent escaped Workspace restriction: %+v", effective)
+	}
+	if effective.CrossProjectShare != Disabled {
+		t.Fatalf("agent escaped Project cross-sharing restriction: %+v", effective)
+	}
+	if effective.ConfigAuthority != AuthorityRead {
+		t.Fatalf("agent expanded Workspace authority: %q", effective.ConfigAuthority)
+	}
+	if effective.ProjectAI != Enabled {
+		t.Fatalf("unrestricted inherited capability was lost: %q", effective.ProjectAI)
+	}
+}
+
+func TestCompletePolicyUnknownValueDenied(t *testing.T) {
+	project := AssistedDefaults()
+	workspace := Policy{ModelRouting: State("invalid")}
+	effective := ResolvePolicyChain(project, workspace, Policy{ModelRouting: Enabled})
+	if effective.ModelRouting != Unavailable || effective.AutomaticRoutingActive() {
+		t.Fatalf("malformed Workspace routing unexpectedly enabled: %+v", effective)
+	}
+}

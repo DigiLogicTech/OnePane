@@ -122,3 +122,7 @@ emergency pause/revoke.
 **Status:** Requirements accepted; implementation and full adapter
 coverage pending. Do not merge to release or publish an installer before
 vision alignment, second audit and user approval.
+
+## Partial enforcement checkpoint
+
+`internal/featurepolicy/policy.go` now separately models FileRead, FileWrite, ProcessExecute, NetworkAccess and SecretsAccess. The legacy Files flag is retained as an upper-bound master grant to avoid weakening historical decisions. `internal/tool/feature_action.go` classifies known file, Git, OCI, command, MCP probe, network and secret actions, and `internal/tool/gateway.go` checks all required actions both before consuming authority and immediately before adapter dispatch. Unknown configured operations are denied. Project/Workspace policy editors block Agent-initiated expansion of these feature grants while permitting restriction. **Still incomplete:** universal sandbox OS policy enforcement for arbitrary spawned code, all host/network/secret APIs, operation/playbook classification, UI permission presets and full cross-adapter end-to-end tests. Do not claim the full five-switch product is complete.

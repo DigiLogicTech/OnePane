@@ -89,5 +89,20 @@ this manifest, and continue automatically where dependencies permit.
 ## Incremental remediation after this review
 
 - [x] Trusted-node scheduler candidate proof added: pairing and capability-manifest freshness are checked by the catalogue, and a local-first route may admit such a candidate only with positive `AllowTrustedNodes` and a matching explicit Node allowlist. Unit and node-federation integration regressions added.
-- [ ] Wire the allowlist to **authoritative persisted Workspace/Agent transfer approval**, not to model output or an arbitrary request. Until then, legacy caller behaviour must remain conservative and no new off-host grant is issued.
+- [x] Canonical Task→Project/Workspace persisted trusted Node allowlist now restricts Worker routing and inference preflight/last-transport boundary. New grants require a human principal, and live pairing/manifests are checked. Agent-specific grants and full transport-identity verification remain outstanding.
 - [ ] Verify endpoint trust for provider-backed localhost and Node transports before reclassifying them as host-local or trusted rather than cloud.
+
+## Branch execution checkpoint — 2026-10-11, next implementation gates
+
+Completed in this integration branch, with source and regression tests:
+
+- [x] **NODE-03 subset:** project+Workspace double-consent for off-host transfers, strict allowed Node ID intersection, tenant and active-Workspace checks; human approval for expanding transfer authority and live revocation on Node routing/dispatch.
+- [x] **NODE-04/05 subset:** Worker supplies persisted allowlist to scheduler each tick; inference gateway revalidates scoped off-host transfer and fresh pairing/manifest before the external transport. Taskless remote transfer remains denied.
+- [x] **OPM-01 subset:** an existing Project resolves safely to Level 4; an explicitly selected Level 5 mode is stored/revised with no silent monitor activation or permission expansion. Level 4/5 selector is exposed in Project creation and Inspector.
+- [x] **OPM-01/04 subset:** additive `migrations/0054_project_continuous_goals.sql`; canonical Project/Workspace goal records start `configured` and `unobserved`. The approved goal has a typed limited monitoring plan, never an automatic network probe.
+- [x] **OPM-07 subset:** authenticated read/configure continuous-goal REST endpoints and a Project Inspector form selecting actual canonical Workspaces. The GUI displays configured/unobserved honestly and does not imply deployed protection.
+- [x] **PERM-01/02 subset:** distinct Read, Write, Execute, Network and Secrets effective feature states; monotonic inheritance and legacy Files compatibility; explicit policy expansion requires human approval, while Agents may narrow grants.
+- [x] **PERM-03/08 subset:** File Gateway and known shell/OCI/Git/MCP/network/secrets operation effects classified at tool admission and rechecked at the last adapter boundary. Unknown effects fail closed for configured policies. Negative tests include revoked Execute, Write denial, and unclassified mutation.
+- [x] **CI and rollback:** initial failing Worker admission regressions were due to a system principal authorising new autonomy under the stronger approval gate. Fixture changed to an explicit human operator; [re-run #38125542945](https://github.com/DigiLogicTech/OnePane/actions/runs/38125542945) passed. Subsequent goal API code [#38125753168](https://github.com/DigiLogicTech/OnePane/actions/runs/38125753168) passed. Latest UI commit CI must be checked before calling this head green.
+
+**Next continuation (priority order):** P0-A unify Assistant and canonical chat/Task authority; P0-B complete process/container/network/secret hard isolation across every adapter and operation path, with attack-path tests; P0-C verify localhost OpenAI-compatible endpoint identities, paired-node transport binding, transfer and cancellation reconciliation; P0-D actual Level 4 planning and Level 5 durable trigger→observe→respond→verify lifecycle; P1 live/historical diagnostics and final Agent policy snapshots. Then run a fresh security/code audit, cross-platform CI, **user-approved packaging** and installed QA. Never infer branch completeness or release approval from green partial CI.

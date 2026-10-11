@@ -185,8 +185,12 @@ telemetry; and loss of operator connectivity.
 - **Outstanding:** concrete risk classification per adapter and action,
   permitted sensors/monitoring frequency, alert escalation, and target-
   specific permissions for routers, hosts and other devices.
-- Other vision register decisions 3–6 (tool classification, Agent policy,
-  diagnostics and local/remote compute trust).
+- All six vision decisions are confirmed. Runtime implementation and
+  full negative-path testing are still required.
 
 **Status:** VISION CONFIRMED; IMPLEMENTATION PENDING and release review gates
 remain in effect.
+
+## Partial implementation checkpoint
+
+The Project operating-mode representation is durable and nonactivating: existing Projects resolve to Level 4, while explicitly selected Level 5 appears in the create dialog and Inspector. An additive SQLite migration and authenticated API now support canonical scoped continuous goals with strict `configured/unobserved` initial state; a Project Inspector form uses verified canonical Workspace choices. No periodic triggers, probes, remediation, or claims of network protection have been activated. OPM-01 and OPM-07 remain **partial**; OPM-02 through OPM-10 require completion and full acceptance QA.

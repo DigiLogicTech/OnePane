@@ -41,3 +41,7 @@ Assistant implementation audit and corrective tests are complete. Latest applica
 ## Second-review checkpoint
 
 All six product decisions are user-confirmed; this is an approved design baseline, **not** release approval. See `docs/rc11-second-review-gap-matrix.md` for P0/P1 implementation and safety gaps. Provider-backed deployments cannot claim free local scheduling based on a local Node record or unverified deployment cost metadata (green CI #38122612493). Trusted-node scheduler opt-in and pairing verification are being tested, but the Worker/API authorization pipeline is not yet wired to issue the required verified transfer grants. No installers or release merge are approved.
+
+## Post-vision implementation checkpoint (2026-10-11)
+
+The six design decisions are all approved. Canonical paired-Node transfer policy, human-only privilege expansions, default L4/explicit L5 project modes, a nonactivating continuous-goal registry and configuration UI/API, plus typed five-capability tool gateway checks have been committed with negative-path tests. Latest independently confirmed green runs include Worker admission [#38125542945](https://github.com/DigiLogicTech/OnePane/actions/runs/38125542945) and continuous-goal API [#38125753168](https://github.com/DigiLogicTech/OnePane/actions/runs/38125753168). Newer UI-head CI must finish before being marked green. The second source-level gap review is maintained in `docs/rc11-second-review-gap-matrix.md`. Final implementation-complete audit, approved installers and real hardware QA remain outstanding.

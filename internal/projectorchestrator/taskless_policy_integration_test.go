@@ -122,3 +122,54 @@ func TestExplicitProjectRunPersistsCanonicalQueuedTaskWithoutLocalReasoningModel
  }
  if result.Turn.Content==""{t.Fatal("unavailable local model was not reported")}
 }
+
+
+func TestUnplannedRunNeverGuessesAmongIsolatedWorkspaces(t *testing.T){
+ ctx:=context.Background()
+ db,err:=sqliteStore.Open(t.TempDir()+"/ambiguous-workspaces.db")
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ if err:=db.Migrate(ctx);err!=nil{t.Fatal(err)}
+ for _,stmt:=range []string{
+  `INSERT INTO workspaces(id,name,status,revision,created_at,updated_at)
+   VALUES('tenant','Tenant','active',1,1,1)`,
+  `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at)
+   VALUES('owner','human','Owner','active',1,1,1)`,
+  `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at)
+   VALUES('tenant','owner','active',1,1)`,
+ }{if _,err:=db.SQL().ExecContext(ctx,stmt);err!=nil{t.Fatal(err)}}
+ projects:=projectworkspace.NewService(db.SQL(),db,clock.Real{})
+ p,err:=projects.CreateProject(ctx,projectworkspace.CreateProjectCommand{
+  WorkspaceID:"tenant",Name:"Multi-Workspace work",CreatedBy:"owner",
+ })
+ if err!=nil{t.Fatal(err)}
+ first,err:=projects.CreateWorkspaceView(ctx,projectworkspace.CreateWorkspaceViewCommand{
+  ProjectID:p.ID,Name:"World",ActorPrincipalID:"owner",
+ })
+ if err!=nil{t.Fatal(err)}
+ _,err=projects.CreateWorkspaceView(ctx,projectworkspace.CreateWorkspaceViewCommand{
+  ProjectID:p.ID,Name:"Assets",ActorPrincipalID:"owner",
+ })
+ if err!=nil{t.Fatal(err)}
+ tasks:=task.NewService(db.SQL(),db,clock.Real{})
+ svc:=NewService(db.SQL(),db,clock.Real{},queuedProjectNoModelRoute{},nil,nil,tasks,nil)
+ unscoped,err:=svc.Turn(ctx,TurnCommand{
+  ProjectID:p.ID,ActorPrincipalID:"owner",Objective:"Build the next asset",
+  ForceTask:true,AllowTaskCreation:true,
+ })
+ if err!=nil{t.Fatal(err)}
+ if unscoped.TaskID!=nil||unscoped.Disposition!="waiting"{
+  t.Fatalf("unspecified Workspace was guessed despite no available planner: %+v",unscoped)
+ }
+ var count int
+ if err:=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM tasks").Scan(&count);err!=nil||count!=0{
+  t.Fatalf("an ambiguous isolated Workspace produced %d Tasks: %v",count,err)
+ }
+ explicitlyScoped,err:=svc.Turn(ctx,TurnCommand{
+  ProjectID:p.ID,ProjectWorkspaceID:first.ID,ActorPrincipalID:"owner",
+  Objective:"Build in World",ForceTask:true,AllowTaskCreation:true,
+ })
+ if err!=nil||explicitlyScoped.TaskID==nil{
+  t.Fatalf("explicit Workspace Run was incorrectly blocked: %+v %v",explicitlyScoped,err)
+ }
+}

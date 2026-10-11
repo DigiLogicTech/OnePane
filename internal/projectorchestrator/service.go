@@ -336,6 +336,25 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 	var taskID,sessionID *string
 	disposition:="answered"
 	if action=="task" {
+		// If several isolated Workspaces exist and neither the operator nor
+		// a successful model decision chose one, NEVER silently create work
+		// in whichever sibling happened to be most recently updated.
+		var activeCount int
+		if err:=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_workspaces
+			WHERE project_id=? AND status='active'`,c.ProjectID).Scan(&activeCount);err!=nil{
+			return TurnResult{},err
+		}
+		modelChoseWorkspace:=false
+		if selected,ok:=plan["project_workspace_id"].(string);ok&&reasonErr==nil{
+			modelChoseWorkspace=strings.TrimSpace(selected)==pwsID&&pwsID!=""
+		}
+		if pwsID==""||(c.ProjectWorkspaceID==""&&activeCount>1&&!modelChoseWorkspace){
+			action="answer"
+			disposition="waiting"
+			answer+="\n\nSelect a canonical Workspace before running this Task. OnePane will not guess between isolated Workspaces while planning is unavailable."
+		}
+	}
+	if action=="task" {
 		// Use canonical relational ownership, not only model-supplied JSON.
 		// When an approved toolchain exists, pin its exact digest to this Task,
 		// so later approval changes cannot silently substitute a build image.

@@ -94,9 +94,12 @@ every relevant side-effect boundary (decision 4). Read the dedicated
 Agent policy provenance and live revocation contract for implementation,
 cancellation and unknown-outcome acceptance cases.
 
-Still undecided: diagnostic live-stream defaults (decision 5), and remote
-Node/provider trust classification (decision 6). Do not infer those
-from local-first intent.
+Confirmed: the Debug & Diagnostics Centre will provide low-overhead live
+health and durable historical incident evidence by default, with bounded,
+opt-in detailed tracing per Project or Agent (decision 5).
+
+Still undecided: classification and grants for local, trusted-Node and
+external/cloud compute (decision 6). Do not infer these from the local-first objective.
 
 ## Gate
 

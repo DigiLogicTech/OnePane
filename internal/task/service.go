@@ -306,8 +306,10 @@ func (s *Service) StartInTransaction(ctx context.Context, tx storage.Tx, cmd Sta
  // The mutable live dependency table alone is not authorization to execute.
  // Recheck that snapshot inside this same write transaction, after the
  // ordinary hard-dependency predicate and before opening an Attempt.
- if err:=approvedTaskGraphDependenciesTx(ctx,tx,t);err!=nil{
-  return Task{},Attempt{},err
+ if t.ProjectWorkspaceID!=nil||hasTaskGraphProvenance(t.Completion){
+  if err:=approvedTaskGraphDependenciesTx(ctx,tx,t);err!=nil{
+   return Task{},Attempt{},err
+  }
  }
  n,err:=s.repo.NextAttemptNumber(ctx,tx,t.ID)
  if err!=nil{return Task{},Attempt{},err}

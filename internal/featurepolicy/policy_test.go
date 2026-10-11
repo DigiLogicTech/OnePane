@@ -192,3 +192,15 @@ func TestExecutionGrantsFailClosed(t *testing.T) {
 		t.Fatalf("agent expanded Workspace grants: %+v", got)
 	}
 }
+
+func TestExecutionActionUnknownAndDeniedAreRejected(t *testing.T) {
+	p := ResolvePolicyChain(AssistedDefaults(), Policy{Files: Disabled})
+	for _, action := range []string{"files.read", "files.write", "inference.cloud", "projects.share", "tasks.autonomous", "unknown", ""} {
+		if p.ValidateExecution(action) {
+			t.Errorf("unexpected execution grant for %q", action)
+		}
+	}
+	if !p.ValidateExecution("inference.local") {
+		t.Fatal("explicitly enabled local inference unexpectedly denied")
+	}
+}

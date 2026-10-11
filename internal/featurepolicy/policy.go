@@ -223,3 +223,26 @@ func (p Policy) ExecutionGrants() ExecutionGrants {
 		AutonomousTasks: p.ProjectAI == Enabled && p.AutonomousRoutines == Enabled,
 	}
 }
+
+// ValidateExecution refuses actions that are not explicitly authorised by
+// the effective Project/Workspace/Agent policy. The caller must resolve
+// the complete policy chain before invoking this boundary check.
+func (p Policy) ValidateExecution(action string) bool {
+	grants := p.ExecutionGrants()
+	switch action {
+	case "inference.local":
+		return grants.LocalInference
+	case "inference.cloud":
+		return grants.CloudInference
+	case "inference.fallback":
+		return grants.AutomaticFallback
+	case "files.read", "files.write":
+		return grants.FileAccess
+	case "projects.share":
+		return grants.CrossProjectShare
+	case "tasks.autonomous":
+		return grants.AutonomousTasks
+	default:
+		return false
+	}
+}

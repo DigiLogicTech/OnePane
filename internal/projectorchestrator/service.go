@@ -273,7 +273,19 @@ func (s *Service) reason(ctx context.Context, workspaceID, projectID, projectWor
 	rc,_,err:=s.artifacts.Open(ctx,*inf.ResponseArtifactID);if err!=nil{return "",nil,&dep,err};defer rc.Close()
 	body,err:=io.ReadAll(io.LimitReader(rc,4<<20));if err!=nil{return "",nil,&dep,err}
 	text:=extractText(body)
-	plan:=map[string]any{};trim:=strings.TrimSpace(text);trim=strings.TrimPrefix(trim,"```json");trim=strings.TrimPrefix(trim,"```");trim=strings.TrimSuffix(trim,"```");_ = json.Unmarshal([]byte(strings.TrimSpace(trim)),&plan)
+	plan:=map[string]any{}
+ trim:=strings.TrimSpace(text)
+ trim=strings.TrimPrefix(trim,"\`\`\`json")
+ trim=strings.TrimPrefix(trim,"\`\`\`")
+ trim=strings.TrimSuffix(trim,"\`\`\`")
+ // A model response is untrusted. Ambiguous duplicate fields must not be
+ // allowed to change the action, destination Workspace or Task graph.
+ // If its directive is invalid, retain the answer as text but grant no
+ // model-directed actions. Never fall back to a permissive JSON decoder.
+ directive:=[]byte(strings.TrimSpace(trim))
+ if rejectAmbiguousPlannerJSON(directive)==nil{
+  _=json.Unmarshal(directive,&plan)
+ }
 	return text,plan,&dep,nil
 }
 

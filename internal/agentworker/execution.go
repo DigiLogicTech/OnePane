@@ -91,6 +91,11 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	if run.StepCount >= run.MaxSteps {
 		return s.failRun(ctx, run, res, ErrStepLimit)
 	}
+	// Bind an explicitly chosen Agent's active revision before constructing
+	// any context. A missing/archived custom Agent cannot fall back to default.
+	agentBinding,err:=resolveTaskAgentProfileBinding(ctx,s.db,run.WorkspaceID,
+		routingPolicyFromCompletion(t.Completion).AgentProfile)
+	if err!=nil{return s.blockRun(ctx,run,res,"pinned Agent profile unavailable or revoked: "+err.Error())}
 
 	compiled, err := s.compileContext(ctx, run, t)
 	if err != nil {
@@ -136,6 +141,12 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	if reservationID != "" {
 		_ = s.journal(ctx, run.ID, "budget", "reserved", &kind, &cid, nil, &reservationID, map[string]any{"budget_account_id": rp.BudgetAccountID})
 	}
+	// A human may update or archive an Agent during model queue selection.
+	// Do not dispatch inference with stale prompt/Agent provenance.
+	if err:=enforceTaskAgentProfileBinding(ctx,s.db,run.WorkspaceID,agentBinding);err!=nil{
+		s.releaseBudgetIfReserved(ctx,reservationID)
+		return s.blockRun(ctx,run,res,"pinned Agent profile changed during model selection: "+err.Error())
+	}
 	if err := s.markReasoningDispatch(ctx, &run, kind, cid); err != nil {
 		s.releaseBudgetIfReserved(ctx, reservationID)
 		// Dispatch ownership may have changed while selecting a model.
@@ -144,6 +155,12 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	}
 
 	constraints, _ := json.Marshal(map[string]any{"completion": json.RawMessage(t.Completion), "worker": map[string]any{"max_steps": run.MaxSteps, "steps_used": run.StepCount, "max_replans": run.MaxReplans, "replans_used": run.ReplanCount, "max_escalations": run.MaxEscalations, "escalations_used": run.EscalationCount}})
+	// Repeat the revision check at the last Worker-owned call boundary.
+	// Inference and gateway paths must still enforce their own revocations.
+	if err:=enforceTaskAgentProfileBinding(ctx,s.db,run.WorkspaceID,agentBinding);err!=nil{
+		s.releaseBudgetIfReserved(ctx,reservationID)
+		return s.blockRun(ctx,run,res,"pinned Agent profile changed before dispatch: "+err.Error())
+	}
 	response, ref, dispatchErr := s.dispatch(ctx, run, t, cand, compiled, constraints, label, reservationID)
 	stepKind := "model"
 	if cand.Kind == scheduler.CandidateAgentRuntime {
@@ -171,7 +188,12 @@ func (s *Service) compileContext(ctx context.Context, run Run, t task.Task) (con
 	if err := s.db.QueryRowContext(ctx, `SELECT name,instructions_md,default_role,revision FROM agent_profiles WHERE id=? AND status='active' AND (workspace_id=? OR workspace_id IS NULL) ORDER BY CASE WHEN workspace_id=? THEN 0 ELSE 1 END LIMIT 1`, profileID, run.WorkspaceID, run.WorkspaceID).Scan(&profileName,&profileInstructions,&profileRole,&profileRevision); err == nil {
 		profileRaw,_:=json.Marshal(map[string]any{"profile_id":profileID,"name":profileName,"role":profileRole,"revision":profileRevision,"instructions":profileInstructions,"authority":false,"note":"Profile instructions affect reasoning only and grant no capabilities or permissions."})
 		sections=append(sections,contextcompiler.Section{ID:"agent-profile",Kind:"agent_profile",Trust:"USER_INSTRUCTION",Authoritative:false,Required:true,Priority:99,Content:profileRaw})
-	} else if !errors.Is(err,sql.ErrNoRows) { return contextcompiler.Result{},err }
+	} else if errors.Is(err,sql.ErrNoRows) {
+		explicit:=strings.TrimSpace(routing.AgentProfile)
+		if explicit!=""&&!strings.EqualFold(explicit,"onepane-default")&&explicit!="agent.md"{
+			return contextcompiler.Result{},fmt.Errorf("explicit custom Agent profile is unavailable or revoked")
+		}
+	} else { return contextcompiler.Result{},err }
 	// Resource backoff is internal scheduler bookkeeping, not an instruction
 	// to the model. Once it becomes available, don't tell the model that it is
 	// still unavailable or let historical wait data bias tool selection.

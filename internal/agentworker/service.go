@@ -596,6 +596,12 @@ func (s *Service) startRun(ctx context.Context, t task.Task) (Run, TickResult) {
   var workspaceStatus string
   if err:=tx.QueryRowContext(ctx,`SELECT status FROM workspaces WHERE id=?`,t.WorkspaceID).Scan(&workspaceStatus);err!=nil{return fmt.Errorf("verify Worker Workspace %s state: %w",t.WorkspaceID,err)}
   if workspaceStatus!="active"{return fmt.Errorf("Workspace %s is not active (state=%s)",t.WorkspaceID,workspaceStatus)}
+  granted,grantErr:=scopes.AuthorizeTaskTx(ctx,tx,t.WorkspaceID,t.ID,"tasks.autonomous")
+  if grantErr!=nil{return fmt.Errorf("transactional Worker policy unavailable: %w",grantErr)}
+  if !granted{return fmt.Errorf("autonomous Worker execution revoked before admission")}
+  currentFallback,fbCheckErr:=scopes.AuthorizeTaskTx(ctx,tx,t.WorkspaceID,t.ID,"inference.fallback")
+  if fbCheckErr!=nil{return fmt.Errorf("transactional fallback policy unavailable: %w",fbCheckErr)}
+  if currentFallback!=fallbackAllowed{return fmt.Errorf("Worker routing policy changed during admission")}
   started,attempt,startErr:=s.tasks.StartInTransaction(ctx,tx,cmd)
   if startErr!=nil{return startErr}
   r=Run{

@@ -64,6 +64,7 @@ func assertAdmissionUnchanged(t *testing.T,ctx context.Context,db *sqlite.DB,tas
 		"SELECT COUNT(*) FROM agent_worker_runs",
 		"SELECT COUNT(*) FROM task_attempts WHERE task_id='"+ready.ID+"'",
 		"SELECT COUNT(*) FROM events WHERE event_type='agent_worker.started'",
+		"SELECT COUNT(*) FROM events WHERE event_type='task.started'",
 	}{
 		var n int
 		if err:=db.SQL().QueryRowContext(ctx,q).Scan(&n);err!=nil{t.Fatal(err)}
@@ -106,8 +107,9 @@ func TestWorkspaceSuspendedBetweenPreflightAndTransactionFailsClosed(t *testing.
 
 func TestWorkerStartRollsBackTaskAndAttemptWhenJournalWriteFails(t *testing.T){
 	ctx,db,tasks,svc,ready:=setupAdmissionFixture(t)
-	_,err:=db.SQL().ExecContext(ctx,`CREATE TRIGGER reject_worker_record BEFORE INSERT ON agent_worker_runs
-	BEGIN SELECT RAISE(ABORT,'injected worker record failure'); END`)
+	_,err:=db.SQL().ExecContext(ctx,`CREATE TRIGGER reject_worker_start_event BEFORE INSERT ON events
+	WHEN NEW.event_type='agent_worker.started'
+	BEGIN SELECT RAISE(ABORT,'injected Worker audit event failure'); END`)
 	if err!=nil{t.Fatal(err)}
 	run,result:=svc.startRun(ctx,ready)
 	if run.ID!=""||result.Error==""{t.Fatalf("injected Worker write unexpectedly admitted: %+v %+v",run,result)}

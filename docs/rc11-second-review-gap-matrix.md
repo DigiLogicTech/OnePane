@@ -194,3 +194,30 @@ Completed in this integration branch, with source and regression tests:
 - [ ] **Remaining security / QA:** consistent hard host-level sandbox isolation and permissions for every adapter and helper, real authenticated paired-Node transport, final end-to-end revocation/spend QA, scoped live/historical diagnostics, full code audit, and explicit user approval before release packaging.
 
 - [x] **P0-D bounded local plan draft subset:** a local Project Orchestrator model can optionally return a versioned 1–8-step DAG draft. The parser binds every step to the already selected canonical Workspace, rejects unknown fields, credentials/tool-permission declarations, out-of-Workspace placement, cycles, missing/duplicate edges, and oversized objectives. Only validated drafts enter the original scoped Turn's provenance and answer; they do **not** create a Task graph, mint grants or run tools. SQLite handoff regression proves validated model drafts stay within the rebound destination Workspace and remain nonexecuting. Actual autonomous graph admission/standing grants are still the next P0-D blocker.
+
+
+## RC11 model-authored Task graph JSON ambiguity gate — 2026-10-12
+
+- [x] The Level 4 local model plan has progressed beyond a nonexecuting
+  preview: the existing branch now admits bounded Task DAGs only under
+  persisted human-granted and revocable Project/Workspace autonomy.
+  Durable Assistant provenance tracks approved graph identity and rejects
+  arbitrary graph IDs without SQLite-backed ownership. These are *not*
+  unrestricted Agent or tool grants.
+- [x] **P0-D hardening:** reject duplicate JSON member names (including
+  escaped equivalents) at the initial Project Orchestrator response
+  parsing boundary, before reading a model-authored action, Workspace
+  suggestion or graph. Invalid directives cannot trigger a model-directed
+  action; the plain answer remains available.
+- [x] The bounded DAG parser independently performs the same ambiguity
+  check for direct callers, in addition to its preexisting schema,
+  objective, Workspace and dependency validation. Unit regressions
+  cover repeated action, destination, plan and step fields.
+- [ ] Hosted CI for the latest parser hardening commit is required before
+  considering this gate verified. A transient sequence of failed builds
+  after an incorrectly escaped Go string was remedied in `499b252c`;
+  the current head must be checked independently.
+- [ ] P0-D remains incomplete: durable L4 task execution/recovery across
+  actual runtimes and CPU/GPU/model swaps, and fully approved L5 recurring
+  observe->respond->verify loops must be tested on installed hardware.
+  This parser fix is not end-to-end autonomous-operation sign-off.

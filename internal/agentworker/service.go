@@ -167,6 +167,14 @@ func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
    var status string
    if err:=tx.QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=? AND task_id=?`,v.run,v.task).Scan(&status);err!=nil{return err}
    if status!=string(RunRunning){return fmt.Errorf("worker recovery run %s is no longer running",v.run)}
+   // A completed model proposal may already have entered VERIFYING and
+   // created a pending independent Verification before the Worker handoff
+   // was durably recorded. This is NOT an in-flight inference or Tool effect.
+   // Reattach its exact pending Verification atomically without cancelling
+   // the original WAITING Attempt or losing verified evidence.
+   rebound,boundErr:=s.reconcilePendingAssuranceHandoffTx(ctx,tx,v.run,v.task)
+   if boundErr!=nil{return boundErr}
+   if rebound{return nil}
    actor:=AuthorityPrincipal
    if err:=s.tasks.InterruptForRecoveryInTransaction(ctx,tx,task.TransitionCommand{
     TaskID:v.task,ExpectedRevision:v.rev,ActorPrincipalID:&actor,
@@ -197,6 +205,86 @@ func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
  orphans,orphanErr:=s.recoverOrphanedAgentAttempts(ctx)
  if orphanErr!=nil{problems=append(problems,orphanErr)}
  return n+orphans,errors.Join(problems...)
+}
+
+// reconcilePendingAssuranceHandoffTx reconstructs only an already-issued,
+// uniquely scoped independent verification handoff. The model completion
+// proposal must have committed Task VERIFYING, original Attempt WAITING and
+// a pending V1+ Verification tied to this Worker before the crash. It never
+// retries inference, publishes evidence, or substitutes a different Worker.
+// If evidence is ambiguous, operator review is required, not auto-selection.
+func (s *Service) reconcilePendingAssuranceHandoffTx(
+ ctx context.Context,tx storage.Tx,runID,taskID string,
+)(bool,error){
+ if tx==nil||runID==""||taskID==""{return false,ErrInvalidWorkerState}
+ rows,err:=tx.QueryContext(ctx,`SELECT v.id,v.required_level,r.attempt_id,
+  r.workspace_id,r.revision
+  FROM agent_worker_runs r
+  JOIN tasks t ON t.id=r.task_id AND t.workspace_id=r.workspace_id
+    AND t.state='verifying' AND t.archived_at IS NULL
+  JOIN task_attempts a ON a.id=r.attempt_id AND a.task_id=t.id
+    AND a.worker_principal_id=r.worker_principal_id AND a.status='waiting'
+    AND json_valid(a.metadata_json)=1
+    AND json_extract(a.metadata_json,'$.agent_worker')='v1'
+  JOIN workspaces w ON w.id=t.workspace_id AND w.status='active'
+  LEFT JOIN projects p ON p.id=t.project_id
+  LEFT JOIN project_workspaces pw ON pw.id=t.project_workspace_id
+  JOIN verifications v ON v.task_id=t.id AND v.workspace_id=t.workspace_id
+   AND v.status='pending' AND v.required_level<>'V0'
+   AND v.subject_ref='agent_worker_run:' || r.id
+   AND json_valid(v.spec_json)=1
+   AND json_extract(v.spec_json,'$.source')='agent_completion_proposal'
+   AND json_extract(v.spec_json,'$.worker_run_id')=r.id
+  WHERE r.id=? AND r.task_id=? AND r.status='running'
+   AND r.worker_principal_id=?
+   AND (t.project_id IS NULL OR
+    (p.id=t.project_id AND p.workspace_id=t.workspace_id AND p.status='active'))
+   AND (t.project_workspace_id IS NULL OR
+    (t.project_id IS NOT NULL AND pw.id=t.project_workspace_id
+     AND pw.project_id=t.project_id AND pw.status='active'))
+  LIMIT 2`,runID,taskID,WorkerPrincipal)
+ if err!=nil{return false,err}
+ type binding struct{verification,level,attempt,workspace string;revision int64}
+ var bindings []binding
+ for rows.Next(){
+  var b binding
+  if err=rows.Scan(&b.verification,&b.level,&b.attempt,&b.workspace,&b.revision);err!=nil{break}
+  bindings=append(bindings,b)
+ }
+ if err==nil{err=rows.Err()}
+ closeErr:=rows.Close()
+ if err!=nil{return false,err}
+ if closeErr!=nil{return false,closeErr}
+ if len(bindings)==0{return false,nil}
+ if len(bindings)!=1{
+  return false,fmt.Errorf("ambiguous pending independent assurance handoff for Worker %s: operator review required",runID)
+ }
+ b:=bindings[0]
+ continuation,err:=json.Marshal(map[string]any{
+  "verification_id":b.verification,"required_verification":b.level,
+  "reconciled_after_restart":true,
+ })
+ if err!=nil{return false,err}
+ now:=s.clock.UnixMilli()
+ result,err:=tx.ExecContext(ctx,`UPDATE agent_worker_runs
+  SET status='blocked',continuation_json=?,last_error=?,
+    revision=revision+1,updated_at=?
+  WHERE id=? AND task_id=? AND attempt_id=? AND workspace_id=?
+    AND worker_principal_id=? AND status='running' AND revision=?`,
+  string(continuation),"pending independent assurance restored after restart",
+  now,runID,taskID,b.attempt,b.workspace,WorkerPrincipal,b.revision)
+ if err!=nil{return false,err}
+ affected,err:=result.RowsAffected()
+ if err!=nil{return false,err}
+ if affected!=1{return false,ErrInvalidWorkerState}
+ err=s.journalInTransaction(ctx,tx,runID,"verification","waiting",
+  nil,nil,strPtr("complete"),strPtr(b.verification),map[string]any{
+   "verification_id":b.verification,"required_level":b.level,
+   "action":"restart_reconcile_independent_assurance",
+   "no_model_or_tool_replay":true,
+  })
+ if err!=nil{return false,err}
+ return true,nil
 }
 
 func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {

@@ -109,9 +109,13 @@ func (t LocalOpenAITransport) Dispatch(ctx context.Context, req DispatchRequest,
 	// Default proxy environment variables must not redirect private model
 	// prompts out of process, even if the destination URL is loopback.
 	if clone.Transport==nil {
-		baseTransport:=http.DefaultTransport.(*http.Transport).Clone()
-		baseTransport.Proxy=nil
-		clone.Transport=baseTransport
+		clone.Transport=&http.Transport{Proxy:nil}
+	} else if httpTransport,ok:=clone.Transport.(*http.Transport);ok{
+		// The caller may supply a tuned client. Preserve its safe network
+		// settings while stripping even an explicitly configured HTTP proxy.
+		direct:=httpTransport.Clone()
+		direct.Proxy=nil
+		clone.Transport=direct
 	}
 	clone.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := clone.Do(httpReq)

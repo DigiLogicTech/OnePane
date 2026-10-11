@@ -172,18 +172,7 @@ func (s *Service) contextSnapshot(ctx context.Context, projectID, requestedPWS s
 		return nil, "", "", "", fmt.Errorf("%w: Project Workspace is inactive or outside the selected Project", ErrInvalid)
 	}
 	if selected.ID == "" && len(pwsRows) > 0 { selected = pwsRows[0] }
-	mode := "direct"; teamID := ""
-	if selected.Settings!="" {
-		var cfg map[string]any
-		if json.Unmarshal([]byte(selected.Settings), &cfg)==nil {
-			if o,ok:=cfg["orchestration"].(map[string]any);ok {
-				if m,ok:=o["mode"].(string);ok { switch strings.ToLower(m){case "team","council":mode=strings.ToLower(m)} }
-				if r,ok:=cfg["routing"].(map[string]any);ok { if enabled,ok:=r["enabled"].(bool);ok&&!enabled { mode="direct" } }
-				if role,ok:=o[mode].(map[string]any);ok { if v,ok:=role["team_id"].(string);ok { teamID=v } }
-				if v,ok:=o["team_id"].(string);ok&&teamID=="" { teamID=v }
-			}
-		}
-	}
+	mode, teamID := workspaceExecutionProfile(selected.Settings)
 	tasks := []map[string]any{}
 	tr, _ := s.db.QueryContext(ctx, `SELECT id,objective,state,scheduling_class,priority,created_at,updated_at FROM tasks WHERE project_id=? ORDER BY updated_at DESC LIMIT 24`, projectID)
 	if tr!=nil { defer tr.Close(); for tr.Next(){var idv,obj,st,sc string;var pr int;var ca,ua int64;if tr.Scan(&idv,&obj,&st,&sc,&pr,&ca,&ua)==nil{tasks=append(tasks,map[string]any{"id":idv,"objective":obj,"state":st,"scheduling_class":sc,"priority":pr,"created_at":ca,"updated_at":ua})}} }
@@ -252,7 +241,7 @@ func (s *Service) reason(ctx context.Context, workspaceID, actor, objective stri
 	decision,err:=s.scheduler.Route(ctx,scheduler.RouteRequest{WorkspaceID:workspaceID,CapabilityID:"inference.general",RoleName:"project-orchestrator",ProtocolLevel:"L1",ContextTokens:8192,DataLabel:label,AllowUntested:true,AllowLimited:true,AllowMediated:true,AllowDegraded:true,PreferZeroIncrementalCost:true,AllowedKinds:[]scheduler.CandidateKind{scheduler.CandidateModel},ComputePreference:"auto"})
 	if err!=nil||decision.Selected==nil{return "",nil,nil,fmt.Errorf("route project orchestrator: %w",err)}
 	dep:=decision.Selected.Candidate.ID
-	system:=`You are the logical OnePane Project Orchestrator. Coordinate project work but never claim direct tool, filesystem, secret, node, or approval authority. Use only the supplied bounded Project context. Return one JSON object: {"answer":"...", "action":"answer|task", "objective":"...", "project_workspace_id":"...", "mode":"direct|team|council"}. Use action=task only when the user is asking OnePane to perform work rather than explain or report state.`
+	system:=`You are the logical OnePane Project Orchestrator. Coordinate project work but never claim direct tool, filesystem, secret, node, or approval authority. Use only the supplied bounded Project context. Return one JSON object: {"answer":"...", "action":"answer|task", "objective":"...", "project_workspace_id":"..."}. You may suggest a Workspace for requests without an explicit Workspace choice, but execution mode and Team are locked to the selected Workspace's operator configuration. Use action=task only when the user is asking OnePane to perform work rather than explain or report state.`
 	req,_:=json.Marshal(map[string]any{"messages":[]map[string]string{{"role":"system","content":system},{"role":"user","content":"Project context:\n"+string(snapshot)+"\n\nUser objective:\n"+objective}},"max_tokens":1200,"temperature":0.2})
 	manifest,_:=json.Marshal(map[string]any{"project_context":json.RawMessage(snapshot),"logical_role":"project-orchestrator"})
 	inf,err:=s.inference.Execute(ctx,inference.ExecuteCommand{WorkspaceID:workspaceID,PrincipalID:actor,DeploymentID:dep,CapabilityJSON:json.RawMessage(`{"id":"inference.general"}`),ContextManifestJSON:manifest,ClassificationMetadata:json.RawMessage(`{"source":"project-orchestrator"}`),InputLabel:label,RequestJSON:req,ActorPrincipalID:&actor})
@@ -281,9 +270,9 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 	if v,ok:=plan["objective"].(string);ok&&strings.TrimSpace(v)!=""{objective=strings.TrimSpace(v)}
 	// Keep the operator's explicit Workspace selection authoritative even
 	// when an untrusted model proposes a different active sibling.
-	pwsID = selectModelProposedWorkspace(ctx, s.db, c.ProjectID,
+	pwsID, mode, teamID, err = resolveOrchestratorWorkspaceProfile(ctx, s.db, c.ProjectID,
 		c.ProjectWorkspaceID, pwsID, plan["project_workspace_id"])
-	if v,ok:=plan["mode"].(string);ok {switch strings.ToLower(v){case "direct","team","council":mode=strings.ToLower(v)}}
+	if err != nil { return TurnResult{}, err }
 	if reasonErr!=nil { answer="Project Orchestrator is available, but no eligible reasoning model could complete this turn: "+reasonErr.Error(); action="answer" }
 	if c.ForceTask { action="task"; c.AllowTaskCreation=true }
 	if action=="task" && !c.AllowTaskCreation { action="answer"; answer=answer+"\n\nThis turn was read-only; no Task was created." }

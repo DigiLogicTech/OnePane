@@ -1,9 +1,12 @@
 package featurepolicy
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,6 +21,10 @@ type Diagnostic struct {
 	Category string `json:"category"`
 	Remediation string `json:"remediation"`
 }
+
+var diagnosticHashKey [32]byte
+var diagnosticHashOnce sync.Once
+var diagnosticHashErr error
 
 func safeCorrelationID(id string) string {
 	if len(id) < 5 || len(id) > 104 {
@@ -38,10 +45,15 @@ func safeCorrelationID(id string) string {
 			return "redacted"
 		}
 	}
-	// Hash even well-formed IDs: a typed, harmless-looking token may still
-	// carry a password or private identifier in its suffix.
-	sum := sha256.Sum256([]byte(id))
-	return parts[0]+":"+hex.EncodeToString(sum[:12])
+	// Keyed, process-local correlation prevents offline dictionary guessing
+	// of private or low-entropy IDs in exported support bundles.
+	diagnosticHashOnce.Do(func() {
+		_, diagnosticHashErr = rand.Read(diagnosticHashKey[:])
+	})
+	if diagnosticHashErr != nil { return "redacted" }
+	mac := hmac.New(sha256.New, diagnosticHashKey[:])
+	_, _ = mac.Write([]byte(id))
+	return parts[0]+":"+hex.EncodeToString(mac.Sum(nil)[:12])
 }
 
 // DecisionDiagnostic emits a safe, fixed-shape policy decision without logging

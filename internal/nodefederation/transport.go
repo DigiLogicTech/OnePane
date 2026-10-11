@@ -516,15 +516,30 @@ func (s *Service) executeInbound(ctx context.Context,peer string,in RemoteInfere
   if recordedDigest==""||recordedDigest!=digest||recordedModel!=in.DeploymentID{
    return RemoteInferenceResponse{ErrorCode:"remote_request_identity_conflict",OutcomeKnown:true},nil
   }
-  if status=="succeeded"&&response.Valid{
-   out:=RemoteInferenceResponse{ResponseJSON:json.RawMessage(response.String),OutcomeKnown:true}
-   if usage.Valid {out.UsageJSON=json.RawMessage(usage.String)}
-   return out,nil
+  if status=="succeeded"{
+   // A redacted, truncated or corrupt success receipt is a known past
+   // execution but NOT a replayable success. Never run the model again.
+   if response.Valid&&json.Valid([]byte(response.String))&&
+    (!usage.Valid||json.Valid([]byte(usage.String))){
+    out:=RemoteInferenceResponse{ResponseJSON:json.RawMessage(response.String),OutcomeKnown:true}
+    if usage.Valid {out.UsageJSON=json.RawMessage(usage.String)}
+    return out,nil
+   }
+   code:="remote_cached_response_unavailable"
+   if errorCode.String=="remote_cached_response_expired"{
+    code=errorCode.String
+   }
+   return RemoteInferenceResponse{ErrorCode:code,OutcomeKnown:true},nil
   }
   if status=="executing"||status=="unknown"{
    return RemoteInferenceResponse{ErrorCode:"duplicate_or_unknown_remote_request",OutcomeKnown:false},nil
   }
-  return RemoteInferenceResponse{ErrorCode:errorCode.String,OutcomeKnown:true},nil
+  if status=="failed"&&errorCode.Valid&&errorCode.String!=""{
+   return RemoteInferenceResponse{ErrorCode:errorCode.String,OutcomeKnown:true},nil
+  }
+  // A failed or otherwise unexpected receipt without an error code must
+  // not be returned as an empty successful inference either.
+  return RemoteInferenceResponse{ErrorCode:"remote_receipt_unavailable",OutcomeKnown:true},nil
  }
  result,dispatchErr:=exec.DispatchFederatedLocal(ctx,in.DeploymentID,in.RequestID,in.RequestJSON)
  completed:=s.clock.UnixMilli()

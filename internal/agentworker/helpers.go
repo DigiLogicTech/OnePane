@@ -136,7 +136,14 @@ func completionAssuranceCriteria(raw json.RawMessage) json.RawMessage {
 
 func (s *Service) markReasoningDispatch(ctx context.Context, r *Run, kind, id string) error {
 	now := s.clock.UnixMilli()
-	res, err := s.db.ExecContext(ctx, `UPDATE agent_worker_runs SET step_count=step_count+1,last_candidate_kind=?,last_candidate_id=?,revision=revision+1,updated_at=? WHERE id=? AND revision=? AND status='running' AND step_count<max_steps`, kind, id, now, r.ID, r.Revision)
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE agent_worker_runs AS r
+		 SET step_count=step_count+1,last_candidate_kind=?,
+			 last_candidate_id=?,revision=revision+1,updated_at=?
+		 WHERE r.id=? AND r.revision=? AND r.status='running'
+			AND r.step_count<r.max_steps AND `+
+			activeWorkerExecutionBindingPredicate,
+		kind,id,now,r.ID,r.Revision)
 	if err != nil {
 		return err
 	}

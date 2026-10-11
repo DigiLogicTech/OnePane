@@ -39,3 +39,17 @@ cancel a mutation already dispatched during a concurrent edit, and it
 is not proof of physical Node acceptance or remote sandbox execution.
 RC11 packaging still requires the comprehensive code review, vision
 realignment and second review before user QA.
+
+## Idempotency across Endpoint-only edits
+
+An Endpoint declaration can change without incrementing the owning
+application's revision. An OCI ensure keyed only to that application
+revision would reuse a previously committed external Operation even
+when the requested ports have changed. The ensure idempotency key
+therefore also includes the SHA-256 of a canonical, application-scoped
+declarative Endpoint plan. Ordering differences and unrelated
+applications do not cause reexecution; a changed/added/removed Endpoint,
+port, revision, desired state or exposure produces a distinct
+operation. Tool mutation remains subject to normal authority,
+independent inspection and V2 verification; no automatic replay of
+unknown-outcome operations is introduced.

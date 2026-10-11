@@ -2,7 +2,7 @@ package featurepolicy
 
 import (
 	"regexp"
-		"time"
+	"time"
 )
 
 // Diagnostic records a bounded policy decision without persisting credentials.

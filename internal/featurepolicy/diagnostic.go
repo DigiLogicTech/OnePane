@@ -1,6 +1,8 @@
 package featurepolicy
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"time"
 )
@@ -36,7 +38,10 @@ func safeCorrelationID(id string) string {
 			return "redacted"
 		}
 	}
-	return id
+	// Hash even well-formed IDs: a typed, harmless-looking token may still
+	// carry a password or private identifier in its suffix.
+	sum := sha256.Sum256([]byte(id))
+	return parts[0]+":"+hex.EncodeToString(sum[:12])
 }
 
 // DecisionDiagnostic emits a safe, fixed-shape policy decision without logging

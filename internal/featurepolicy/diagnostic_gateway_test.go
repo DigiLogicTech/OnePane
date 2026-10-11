@@ -12,7 +12,7 @@ func TestAuthorizeWithDiagnosticPreservesDenial(t *testing.T) {
 	if allowed || record.Allowed || record.Category != "policy.denied" {
 		t.Fatalf("denied action reported as granted: %+v", record)
 	}
-	if record.CorrelationID != "run:42" || record.Action != "inference.cloud" {
+	if record.CorrelationID != safeCorrelationID("run:42") || record.Action != "inference.cloud" {
 		t.Fatalf("lost safe decision metadata: %+v", record)
 	}
 }

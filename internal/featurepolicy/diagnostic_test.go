@@ -22,7 +22,7 @@ func TestDecisionDiagnosticDoesNotEchoCredentialLikeInput(t *testing.T) {
 
 func TestDecisionDiagnosticKeepsSafeIdentifiers(t *testing.T) {
 	got := DecisionDiagnostic(time.Unix(2, 0), "run:123", "inference.local", true)
-	if got.CorrelationID != "run:123" || got.Action != "inference.local" || got.Category != "policy.allowed" {
+	if got.CorrelationID != safeCorrelationID("run:123") || got.CorrelationID == "run:123" || got.Action != "inference.local" || got.Category != "policy.allowed" {
 		t.Fatalf("safe diagnostic changed: %+v", got)
 	}
 }

@@ -7,16 +7,16 @@ const root=path.resolve(__dirname,"..");
 const reviewer=require("../internal/webui/static/policy-diagnostic-review.js");
 const record={
  At:"2026-10-11T00:00:00Z",Component:"featurepolicy",
- CorrelationID:"run:42",Action:"inference.cloud",
+ CorrelationID:"run:0123456789abcdef01234567",Action:"inference.cloud",
  Allowed:false,Category:"policy.denied",
  Password:"PRIVATE_PASSWORD_EXAMPLE",prompt:"PRIVATE_PROMPT_EXAMPLE"
 };
-const sample=JSON.stringify([record,{...record,CorrelationID:"attempt:1",Allowed:true,Category:"policy.allowed",Action:"files.read"}]);
+const sample=JSON.stringify([record,{...record,CorrelationID:"attempt:abcdef0123456789abcdef01",Allowed:true,Category:"policy.allowed",Action:"files.read"}]);
 const projected=reviewer.project(sample);
 assert.equal(projected.denied,1);
 assert.equal(projected.allowed,1);
 assert.equal(projected.total,2);
-assert.equal(projected.events[0].correlation_id,"run:42");
+assert.equal(projected.events[0].correlation_id,"run:0123456789abcdef01234567");
 const safe=JSON.stringify(projected);
 assert.ok(!safe.includes("PRIVATE_PASSWORD_EXAMPLE"));
 assert.ok(!safe.includes("PRIVATE_PROMPT_EXAMPLE"));
@@ -29,6 +29,7 @@ assert.equal(reviewer.project(JSON.stringify([{
 assert.equal(reviewer.project(JSON.stringify([{
  ...record,CorrelationID:"run:Bearer:credential",At:"sensitive date"
 }])).events[0].at_utc,"unavailable");
+assert.equal(reviewer.project(JSON.stringify([{...record,CorrelationID:"run:MYPRIVATEPASSWORD"}])).events[0].correlation_id,"redacted");
 assert.throws(()=>reviewer.project(""),/at most/);
 assert.throws(()=>reviewer.project("{"),/Invalid JSON/);
 assert.throws(()=>reviewer.project(JSON.stringify(Array(65).fill(record))),/1–64/);

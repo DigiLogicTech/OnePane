@@ -63,7 +63,8 @@ func TestAssuranceRetryAtomicOriginalAttemptAndJournalRollback(t *testing.T){
  }
  if _,err:=db.SQL().ExecContext(ctx,`CREATE TRIGGER refuse_assurance_retry
   BEFORE INSERT ON agent_worker_steps
-  WHEN NEW.step_kind='verification' AND NEW.status='retry'
+  WHEN NEW.step_kind='verification' AND NEW.status='failed'
+   AND json_extract(NEW.detail_json,'$.action')='retry'
   BEGIN SELECT RAISE(ABORT,'inject retry journal failure'); END`);err!=nil{t.Fatal(err)}
  if err:=worker.AssuranceRetry(ctx,run.ID,v.ID,[]byte(`{"reason":"insufficient evidence"}`));err==nil{
   t.Fatal("injected journal failure did not abort coordinated assurance retry")
@@ -103,6 +104,7 @@ func TestAssuranceRetryAtomicOriginalAttemptAndJournalRollback(t *testing.T){
   t.Fatalf("RUNNING Worker silently accepted unrelated evidence: %v",err)
  }
  if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM agent_worker_steps
-  WHERE run_id=? AND step_kind='verification' AND status='retry'`,run.ID).Scan(&audit);err!=nil{t.Fatal(err)}
+  WHERE run_id=? AND step_kind='verification' AND status='failed'
+  AND json_extract(detail_json,'$.action')='retry'`,run.ID).Scan(&audit);err!=nil{t.Fatal(err)}
  if audit!=1{t.Fatalf("retry recorded %d journal entries; want 1",audit)}
 }

@@ -77,3 +77,10 @@ func TestStoredScopesPreservesUnconfiguredLegacyTask(t *testing.T){
  allowed,err:=reader.AuthorizeTask(context.Background(),"tenant","legacy-task","inference.cloud")
  if err!=nil||!allowed{t.Fatalf("existing legacy authority boundary should remain responsible: %v",err)}
 }
+
+func TestOrphanedCanonicalWorkspaceDoesNotBecomeLegacyTask(t *testing.T) {
+ db:=setupStoredPolicyDB(t)
+ if _,err:=db.Exec(`UPDATE tasks SET project_id=NULL WHERE id='world-task'`);err!=nil{t.Fatal(err)}
+ allowed,err:=(StoredScopes{DB:db}).AuthorizeTask(context.Background(),"tenant","world-task","files.read")
+ if err==nil||allowed{t.Fatalf("orphaned Workspace bypassed Project policy: allowed=%v err=%v",allowed,err)}
+}

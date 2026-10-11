@@ -72,3 +72,63 @@ func TestSQLiteSchedulerProtectsSubscriptionAndPrefersStrictFree(t *testing.T) {
 		t.Fatalf("explicit subscription opt-in failed: %v %#v", err, d.Selected)
 	}
 }
+
+
+func TestSQLiteProviderBackedOriginNodeCannotMasqueradeAsFreeLocal(t *testing.T) {
+ ctx:=context.Background()
+ db,err:=sqliteStore.Open(t.TempDir()+"/provider-origin.db")
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ if err:=db.Migrate(ctx);err!=nil{t.Fatal(err)}
+ for i,q:=range []string{
+  `INSERT INTO workspaces(id,name,status,revision,created_at,updated_at)
+   VALUES('ws','Test','active',1,1,1)`,
+  `INSERT INTO harness_nodes(id,name,local,identity_fingerprint,trust_state,trust_zone,
+   protocol_json,capabilities_json,last_seen_at,revision,created_at,updated_at)
+   VALUES('origin','Origin',1,'origin-fp','local','LOCAL_TRUSTED','{}','{}',1,1,1,1)`,
+  `INSERT INTO provider_connections(id,workspace_id,provider,display_name,auth_type,status,
+   connection_json,revision,created_at,updated_at) VALUES(
+   'provider','ws','openai-compatible','Provider','none','connected',
+   '{"data_policy":{"max_confidentiality":"public","allowed_residency":["any"],
+   "destination_kind":"cloud"},"scheduling":{"cost_class":"paid",
+   "hard_zero_incremental_cost":false}}',1,1,1)`,
+  `INSERT INTO models(id,provider_name,model_ref,modalities_json,static_metadata_json,
+   trust_state,created_at,updated_at)
+   VALUES('model','openai-compatible','some/model','["text"]','{}','user_trusted',1,1)`,
+  `INSERT INTO model_deployments(id,model_id,node_id,provider_connection_id,runtime_name,
+   runtime_config_json,status,deployment_fingerprint,revision,discovered_at,updated_at)
+   VALUES('deployment','model','origin','provider','openai-compatible',
+   '{"scheduling":{"cost_class":"local","hard_zero_incremental_cost":true},
+   "compute":{"mode":"cpu"}}','ready','fp',1,1,1)`,
+  `INSERT INTO compatibility_profiles(id,deployment_id,capability_id,protocol_level,
+   context_min,context_max_supported,risk_class,qualification,mediation_json,
+   evidence_json,profile_fingerprint,revision,created_at,updated_at)
+   VALUES('compat','deployment','agent.reason','L1',0,4000,'low','verified',
+   '{}','{}','cpf',1,1,1)`,
+ }{
+  if _,err:=db.SQL().ExecContext(ctx,q);err!=nil{t.Fatalf("seed %d: %v",i,err)}
+ }
+ svc:=NewService(db.SQL(),db,clock.Real{})
+ label:=policy.DataLabel{WorkspaceID:"ws",Confidentiality:policy.ConfidentialityPublic,
+  Residency:policy.ResidencyAny,Trust:policy.TrustUserInstruction}
+ base:=RouteRequest{WorkspaceID:"ws",CapabilityID:"agent.reason",ProtocolLevel:"L1",DataLabel:label}
+ checkDenied:=func(name string,q RouteRequest){
+  t.Helper()
+  dec,err:=svc.Route(ctx,q)
+  if err!=ErrNoEligibleCandidate||dec.Selected!=nil{
+   t.Fatalf("%s bypassed provider classification: selected=%+v err=%v",name,dec.Selected,err)
+  }
+ }
+ localOnly:=base;localOnly.LocalOnly=true;localOnly.AllowPotentialMonetarySpend=true
+ checkDenied("local-only",localOnly)
+ checkDenied("no-spend default",base)
+ noCost:=base;noCost.AllowPotentialMonetarySpend=true;noCost.RequireZeroIncrementalCost=true
+ checkDenied("zero-cost",noCost)
+ paid:=base;paid.AllowPotentialMonetarySpend=true
+ dec,err:=svc.Route(ctx,paid)
+ if err!=nil||dec.Selected==nil{t.Fatalf("explicit paid provider route unavailable: %v",err)}
+ c:=dec.Selected.Candidate
+ if c.ID!="deployment"||c.Local||c.CostClass!=CostPaid||c.HardZeroIncrementalCost{
+  t.Fatalf("unverified provider presented as local or free: %+v",c)
+ }
+}

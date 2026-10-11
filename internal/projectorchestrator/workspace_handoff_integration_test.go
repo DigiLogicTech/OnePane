@@ -45,6 +45,9 @@ func (a handoffArtifacts) Open(_ context.Context,id string)(io.ReadCloser,artifa
   plan=map[string]any{
    "answer":"Destination-scoped plan",
    "action":"task","objective":"DESTINATION_SAFE_OBJECTIVE",
+   "plan":map[string]any{"version":1,"steps":[]map[string]any{
+     {"key":"plan_step","objective":"Draft a local-only deliverable"},
+   }},
    // A second model suggestion must never loop or override chosen target.
    "project_workspace_id":a.third,
   }
@@ -123,7 +126,18 @@ func TestOrchestratorHandoffRebindsReasoningToDestinationWorkspace(t *testing.T)
   persisted.Objective!="Create a deliverable in the appropriate Workspace"{
   t.Fatalf("model rewrote the user-approved Task objective across Workspace boundary: %+v",persisted)
  }
- if len(infer.contexts)!=2||
+ if !strings.Contains(string(result.Turn.ProvenanceJSON),"draft_only_no_task_authority")||
+  !strings.Contains(string(result.Turn.ProvenanceJSON),destID)||
+  !strings.Contains(result.Turn.Content,"Draft a local-only deliverable"){
+  t.Fatalf("safe model plan was not retained as nonexecuting scoped draft: %+v",result.Turn)
+ }
+ var autoGraphs int
+ if err:=db.SQL().QueryRowContext(ctx,
+  "SELECT COUNT(*) FROM project_orchestrator_task_graphs WHERE project_id=?",p.ID).
+  Scan(&autoGraphs);err!=nil||autoGraphs!=0{
+  t.Fatalf("model draft was executed as an unapproved Task graph: count=%d err=%v",autoGraphs,err)
+ }
+  if len(infer.contexts)!=2||
   !strings.Contains(infer.contexts[0],"SOURCE_PRIVATE_TASK_CONTEXT_CANARY")||
   strings.Contains(infer.contexts[0],"DESTINATION_PRIVATE_TASK_CONTEXT_CANARY")||
   !strings.Contains(infer.contexts[1],"DESTINATION_PRIVATE_TASK_CONTEXT_CANARY")||

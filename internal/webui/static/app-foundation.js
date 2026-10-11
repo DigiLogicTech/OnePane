@@ -1354,7 +1354,7 @@ function qa4InspectorTabs(){let extra=[];try{extra=JSON.parse(localStorage.getIt
 function qa4Inspect(kind,id,title,data){qa4Inspector={kind,id,title:title||id,data:data||{}};qa4InspectorTab='overview';setInspectorOpen(true);renderInspector();if(kind==='task')a32LoadResearchIntegrity(id);}
 function qa4FindEntity(kind,id){if(kind==='task')return liveOps.tasks.find(x=>x.id===id)||{};if(kind==='routine')return qa4ProjectHub.routines.find(x=>x.id===id)||{};if(kind==='node')return liveOps.nodes.find(x=>(x.id||x.node_id)===id)||{};if(kind==='provider')return liveOps.providers.find(x=>x.id===id)||{};if(kind==='event')return liveOps.events.find(x=>String(x.id||x.sequence)===String(id))||{};if(kind==='attention')return ATTENTION_ITEMS[Number(id)]||{};return qa4Inspector.data||{};}
 function qa4InspectorOverview(){const d=qa4FindEntity(qa4Inspector.kind,qa4Inspector.id);if(qa4Inspector.kind==='workspace'){const w=d.workspace||{},p=d.project||{},sb=qa4ProjectSandbox(p);return `<dl class="definition-grid"><dt>Project</dt><dd>${escapeHtml(p.name||p.id||'')}</dd><dt>Workspace</dt><dd>${escapeHtml(w.name||w.id||'')}</dd><dt>Project sandbox</dt><dd>${sb.internet?'Internet allowed':'Internet blocked'} · ${sb.computer?'Computer allowed':'Computer blocked'}</dd><dt>Mode</dt><dd>${escapeHtml(titleCase(w.orchestration?.mode||'supervisor'))}</dd></dl>`;}if(qa4Inspector.kind==='project'){return `<dl class="definition-grid"><dt>Name</dt><dd>${escapeHtml(d.name||'')}</dd><dt>Status</dt><dd>${escapeHtml(d.status||'')}</dd><dt>Revision</dt><dd>${Number(d.revision||0)}</dd><dt>ID</dt><dd class="mono-cell">${escapeHtml(d.id||'')}</dd></dl>`;}const entries=Object.entries(d||{}).filter(([,v])=>['string','number','boolean'].includes(typeof v)).slice(0,14);return entries.length?`<dl class="definition-grid">${entries.map(([k,v])=>`<dt>${escapeHtml(titleCase(k))}</dt><dd>${escapeHtml(v)}</dd>`).join('')}</dl>`:'<div class="page-subtitle">No additional structured detail is available for this item.</div>';}
-function qa4InspectorConfiguration(){const d=qa4Inspector.data||{};let project=d.project||d,workspace=d.workspace;if(qa4Inspector.kind==='project'){const savedMode=project.operating_mode||qa4ProjectPolicy(project).onepane_operations?.mode||'autonomous_project';return `<div class="inspector-section"><strong>Project operating mode</strong><label>Mode<select id="qa4ProjectOperatingMode"><option value="autonomous_project" ${savedMode==='autonomous_project'?'selected':''}>Level 4 — Autonomous Project</option><option value="continuous_operations" ${savedMode==='continuous_operations'?'selected':''}>Level 5 — Continuous Operations</option></select></label><p class="page-subtitle">The mode changes Project lifecycle intent, not sandbox permissions. Level 5 monitoring and remediation require separately authorised setup; no background monitoring is activated by this selection alone.</p><button class="btn primary" id="qa4SaveProjectOperatingMode">Save operating mode</button><div id="qa4OperatingModeStatus" class="page-subtitle" role="status"></div><p class="page-subtitle">Workspace-specific sandbox, model and Agent routing settings remain separately governed.</p><button class="btn" id="qa4OpenFirstWorkspaceConfig">Configure first workspace</button>${savedMode==='continuous_operations'?'<fieldset class="inspector-fieldset"><legend>Level 5 ongoing objectives — configuration only</legend><p class="page-subtitle">Creating an objective does not start monitoring, scan the network or authorise remediation. Sources and automation require separate setup.</p><div id="qa4L5GoalList" class="page-subtitle">Loading configured objectives…</div><form id="qa4L5GoalForm" class="qa-form"><label>Canonical Workspace<select name="project_workspace_id" id="qa4L5Workspace" required></select></label><label>Ongoing objective<textarea name="objective" rows="3" required maxlength="8192" placeholder="Protect authorised devices and services"></textarea></label><label>Planned review cadence (minutes)<input name="cadence_minutes" type="number" min="5" max="10080" value="60" required></label><button class="btn primary" type="submit">Configure objective</button><div id="qa4L5GoalStatus" class="page-subtitle" role="status"></div></form></fieldset>':''}</div>`;}if(!workspace||!project)return '<div class="page-subtitle">Workspace configuration unavailable.</div>';const s=qa4ProjectSandbox(project),o=workspace.orchestration||{},models=qa4ModelOptions(),agents=qa4AgentOptions();const role=(key,label)=>{const x=o[key]||{};return `<fieldset class="inspector-fieldset"><legend>${label}</legend><label>Model<select data-qa4-route-model="${key}">${qa4OptionRows(models,x.model||'auto')}</select></label><label>Agent<select data-qa4-route-agent="${key}">${qa4OptionRows(agents,x.agent||'onepane-default')}</select></label></fieldset>`;};return `<div class="inspector-config"><label>Workspace name<input id="qa4WorkspaceName" value="${escapeHtml(workspace.name||'Workspace')}"></label><fieldset class="inspector-fieldset"><legend>Project sandbox (shared by all project workspaces)</legend>${[['network','Project network'],['internet','Internet'],['lan','LAN'],['computer','Computer control'],['browser','Browser']].map(([k,l])=>`<label class="inline-check"><input type="checkbox" data-qa4-sandbox="${k}" ${s[k]?'checked':''}> ${l}</label>`).join('')}<label>Host files<select id="qa4HostFiles"><option value="workspace-only" selected>Project workspace only</option></select></label><div class="page-subtitle">Extra host mounts, Docker socket and device passthrough remain blocked by the sandbox. Internet/LAN currently share the same explicit external-network boundary on the rootless backend.</div><label>Secrets<select id="qa4SecretPolicy"><option value="none" ${s.secrets==='none'?'selected':''}>None</option><option value="selected" ${s.secrets!=='none'?'selected':''}>Selected Vault handles</option></select></label></fieldset><label>Orchestration mode<select id="qa4Mode">${['direct','team','council'].map(x=>`<option value="${x}" ${o.mode===x?'selected':''}>${titleCase(x)}</option>`).join('')}</select></label>${role('supervisor','Direct')}${role('team','Team')}${role('council','Council')}<button class="btn primary" id="qa4SaveWorkspaceConfig">Save workspace policy</button><div class="page-subtitle" id="qa4WorkspaceConfigStatus"></div></div>`;}
+function qa4InspectorConfiguration(){const d=qa4Inspector.data||{};let project=d.project||d,workspace=d.workspace;if(qa4Inspector.kind==='project'){const savedMode=project.operating_mode||qa4ProjectPolicy(project).onepane_operations?.mode||'autonomous_project';return `<div class="inspector-section"><strong>Project operating mode</strong><label>Mode<select id="qa4ProjectOperatingMode"><option value="autonomous_project" ${savedMode==='autonomous_project'?'selected':''}>Level 4 — Autonomous Project</option><option value="continuous_operations" ${savedMode==='continuous_operations'?'selected':''}>Level 5 — Continuous Operations</option></select></label><p class="page-subtitle">The mode changes Project lifecycle intent, not sandbox permissions. Level 5 monitoring and remediation require separately authorised setup; no background monitoring is activated by this selection alone.</p><button class="btn primary" id="qa4SaveProjectOperatingMode">Save operating mode</button><div id="qa4OperatingModeStatus" class="page-subtitle" role="status"></div><p class="page-subtitle">Workspace-specific sandbox, model and Agent routing settings remain separately governed.</p><button class="btn" id="qa4OpenFirstWorkspaceConfig">Configure first workspace</button>${savedMode==='continuous_operations'?'<fieldset class="inspector-fieldset"><legend>Level 5 ongoing objectives — configuration only</legend><p class="page-subtitle">Creating an objective does not start monitoring, scan the network or authorise remediation. Sources and automation require separate setup.</p><div id="qa4L5GoalList" class="page-subtitle">Loading configured objectives…</div><form id="qa4L5GoalForm" class="qa-form"><label>Canonical Workspace<select name="project_workspace_id" id="qa4L5Workspace" required></select></label><label>Ongoing objective<textarea name="objective" rows="3" required maxlength="8192" placeholder="Protect authorised devices and services"></textarea></label><label>Planned review cadence (minutes)<input name="cadence_minutes" type="number" min="5" max="10080" value="60" required></label><label>Approved observation source IDs (comma separated)<input name="source_ids" placeholder="uptime,dns" maxlength="4096"></label><p class="page-subtitle">These must match registered observation probe-tool IDs. Listing a source does not enable probes or network access.</p><button class="btn primary" type="submit">Configure objective</button><div id="qa4L5GoalStatus" class="page-subtitle" role="status"></div></form></fieldset>':''}</div>`;}if(!workspace||!project)return '<div class="page-subtitle">Workspace configuration unavailable.</div>';const s=qa4ProjectSandbox(project),o=workspace.orchestration||{},models=qa4ModelOptions(),agents=qa4AgentOptions();const role=(key,label)=>{const x=o[key]||{};return `<fieldset class="inspector-fieldset"><legend>${label}</legend><label>Model<select data-qa4-route-model="${key}">${qa4OptionRows(models,x.model||'auto')}</select></label><label>Agent<select data-qa4-route-agent="${key}">${qa4OptionRows(agents,x.agent||'onepane-default')}</select></label></fieldset>`;};return `<div class="inspector-config"><label>Workspace name<input id="qa4WorkspaceName" value="${escapeHtml(workspace.name||'Workspace')}"></label><fieldset class="inspector-fieldset"><legend>Project sandbox (shared by all project workspaces)</legend>${[['network','Project network'],['internet','Internet'],['lan','LAN'],['computer','Computer control'],['browser','Browser']].map(([k,l])=>`<label class="inline-check"><input type="checkbox" data-qa4-sandbox="${k}" ${s[k]?'checked':''}> ${l}</label>`).join('')}<label>Host files<select id="qa4HostFiles"><option value="workspace-only" selected>Project workspace only</option></select></label><div class="page-subtitle">Extra host mounts, Docker socket and device passthrough remain blocked by the sandbox. Internet/LAN currently share the same explicit external-network boundary on the rootless backend.</div><label>Secrets<select id="qa4SecretPolicy"><option value="none" ${s.secrets==='none'?'selected':''}>None</option><option value="selected" ${s.secrets!=='none'?'selected':''}>Selected Vault handles</option></select></label></fieldset><label>Orchestration mode<select id="qa4Mode">${['direct','team','council'].map(x=>`<option value="${x}" ${o.mode===x?'selected':''}>${titleCase(x)}</option>`).join('')}</select></label>${role('supervisor','Direct')}${role('team','Team')}${role('council','Council')}<button class="btn primary" id="qa4SaveWorkspaceConfig">Save workspace policy</button><div class="page-subtitle" id="qa4WorkspaceConfigStatus"></div></div>`;}
 function qa4InspectorExtras(){let extra=[];try{extra=JSON.parse(localStorage.getItem(QA4_INSPECTOR_TAB_KEY)||'[]')}catch{}return extra.filter(x=>['notes','chat'].includes(x)).filter((x,i,a)=>a.indexOf(x)===i);}
 function qa4SaveInspectorExtras(extra){localStorage.setItem(QA4_INSPECTOR_TAB_KEY,JSON.stringify(extra.filter(x=>['notes','chat'].includes(x))));}
 function qa4DragInspectorTab(from,to){
@@ -1791,9 +1791,16 @@ async function qa4BindL5GoalConfigurator(project){
         ${g.status!=='paused'?`<button class="btn" type="button" data-goal-transition="paused" data-goal-id="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">Pause</button>`:''}
         <button class="btn" type="button" data-goal-transition="retired" data-goal-id="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">Retire…</button>
       </div>`;
+      const sourceIDs=Array.isArray(g.monitoring_plan?.source_ids)?g.monitoring_plan.source_ids:[];
+      const evidence=g.status==='configured'&&sourceIDs.length?
+        `<div class="page-subtitle">Approved sources: ${escapeHtml(sourceIDs.join(', '))}. Evidence is metadata-only, not a health verification.</div>
+         <div class="toolbar"><input type="text" aria-label="Existing observation ID" data-goal-observation-id placeholder="Existing observation ID" maxlength="160">
+         <button type="button" class="btn" data-goal-attach="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">Attach evidence</button>
+         <button type="button" class="btn" data-goal-list-evidence="${escapeHtml(g.id)}">View evidence</button></div>
+         <div data-goal-evidence-results></div>`: '';
       return `<div class="list-row"><strong>${escapeHtml(g.objective||'Objective')}</strong> <span class="pill">${escapeHtml(g.status||'configured')}</span>
         <div class="page-subtitle">Health: ${escapeHtml(g.health||'unobserved')} · ${stopped?'No future monitoring due':'Monitoring not activated; no check scheduled'}</div>
-        ${actions}</div>`;
+        ${evidence}${actions}</div>`;
     }).join(''):'<p class="page-subtitle">No ongoing objectives configured.</p>';
   };
   try{
@@ -1807,6 +1814,47 @@ async function qa4BindL5GoalConfigurator(project){
   // A two-click confirmation is required for terminal retirement. The
   // backend independently requires human authority and a current revision.
   list.onclick=async event=>{
+    const attach=event.target.closest('button[data-goal-attach]');
+    if(attach&&list.contains(attach)){
+      event.preventDefault();
+      const id=String(attach.dataset.goalAttach),revision=Number(attach.dataset.goalRevision);
+      const input=attach.closest('.list-row')?.querySelector('[data-goal-observation-id]');
+      const observationID=String(input?.value||'').trim();
+      if(!observationID){if(input)input.focus();return}
+      attach.disabled=true;
+      try{
+        await apiRequest(base+'/continuous-goals/'+encodeURIComponent(id)+'/observations',{
+          method:'POST',body:JSON.stringify({observation_id:observationID,expected_revision:revision})
+        });
+        const status=$('#qa4L5GoalStatus');
+        if(status)status.textContent='Existing evidence linked. Goal health remains unobserved; no probes or fixes started.';
+        await refresh();
+      }catch(ex){
+        const status=$('#qa4L5GoalStatus');
+        if(status)status.textContent='Evidence attachment denied: '+ex.message;
+        attach.disabled=false;
+      }
+      return;
+    }
+    const inspect=event.target.closest('button[data-goal-list-evidence]');
+    if(inspect&&list.contains(inspect)){
+      event.preventDefault();
+      const holder=inspect.closest('.list-row')?.querySelector('[data-goal-evidence-results]');
+      if(!holder)return;
+      holder.textContent='Loading observation references…';
+      try{
+        const records=await apiRequest(base+'/continuous-goals/'+encodeURIComponent(inspect.dataset.goalListEvidence)+'/observations');
+        if(!holder.isConnected)return;
+        holder.innerHTML=Array.isArray(records)&&records.length?
+          records.map(item=>`<div class="page-subtitle"><strong>${escapeHtml(item.source_id||'Source')}</strong>
+            · observation ${escapeHtml(item.observation_id||'')}
+            · ${escapeHtml(new Date(item.observed_at).toLocaleString())}
+            · integrity ${escapeHtml(item.integrity_hash||'unknown')}
+            · not a verified health result</div>`).join(''):
+          '<div class="page-subtitle">No evidence references attached.</div>';
+      }catch(ex){if(holder.isConnected)holder.textContent='Unable to read evidence: '+ex.message}
+      return;
+    }
     const button=event.target.closest('button[data-goal-transition]');
     if(!button||!list.contains(button))return;
     event.preventDefault();event.stopPropagation();
@@ -1835,13 +1883,20 @@ async function qa4BindL5GoalConfigurator(project){
     const button=form.querySelector('button[type="submit"]'),status=$('#qa4L5GoalStatus');
     if(!select.value)return;
     const data=Object.fromEntries(new FormData(form));
+    const sourceIDs=String(data.source_ids||'').split(',').map(x=>x.trim()).filter(Boolean);
+    if(sourceIDs.length>32||sourceIDs.some(x=>!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(x))||
+      new Set(sourceIDs).size!==sourceIDs.length){
+      const status=$('#qa4L5GoalStatus');
+      if(status)status.textContent='Enter up to 32 unique, valid observation probe-tool IDs.';
+      return;
+    }
     button.disabled=true;
     try{
       await apiRequest(base+'/continuous-goals',{method:'POST',body:JSON.stringify({
         project_workspace_id:String(data.project_workspace_id),
         objective:String(data.objective||'').trim(),
         cadence_minutes:Number(data.cadence_minutes||60),
-        monitoring_plan:{version:1,source_ids:[]}
+        monitoring_plan:{version:1,source_ids:sourceIDs}
       })});
       if(status)status.textContent='Objective configured. Monitoring and remediation are still inactive.';
       await refresh();form.querySelector('textarea[name="objective"]').value='';

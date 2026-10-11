@@ -2,6 +2,7 @@ package featurepolicy
 
 import (
  "context"
+ "encoding/json"
  "fmt"
  "strings"
 )
@@ -40,4 +41,37 @@ func forAgentWithReader(ctx context.Context,reader scopedRowReader,tenantID,prof
  if err!=nil{return Policy{},false,fmt.Errorf("invalid Agent policy revision: %w",err)}
  if !configured{return Policy{},false,fmt.Errorf("Agent policy head missing feature_policy")}
  return p,true,nil
+}
+
+
+// CanonicalRestrictiveAgentPolicy validates a separately versioned Agent
+// policy. Agents inherit existing Project/Workspace permissions and can only
+// explicitly deny actions; enabling a disabled parent is never meaningful and
+// is refused, not silently treated as a grant.
+func CanonicalRestrictiveAgentPolicy(raw []byte)([]byte,error){
+ var top map[string]json.RawMessage
+ if err:=json.Unmarshal(raw,&top);err!=nil||len(top)!=1{
+  return nil,fmt.Errorf("Agent policy requires exactly one feature_policy object")
+ }
+ if _,ok:=top["feature_policy"];!ok{return nil,fmt.Errorf("feature_policy is required")}
+ p,configured,err:=parseFeatureDocument(raw,Policy{})
+ if err!=nil||!configured{return nil,fmt.Errorf("invalid Agent restriction document: %v",err)}
+ for _,state:=range []State{
+  p.Assistant,p.ProjectAI,p.ProjectMemory,p.TelemetryAccess,p.TelemetryAutonomy,
+  p.ModelRouting,p.AutomaticFallback,p.CapabilityRouting,p.CloudRouting,
+  p.Images,p.Files,p.FileRead,p.FileWrite,p.ProcessExecute,p.NetworkAccess,
+  p.SecretsAccess,p.AudioInput,p.AudioOutput,p.Camera,p.Video,
+  p.Team,p.Council,p.CrossProjectShare,p.AutonomousRoutines,
+ }{
+  if state!=""&&state!=Inherited&&state!=Disabled&&state!=Unavailable{
+   return nil,fmt.Errorf("Agent policies can only deny or inherit rights")
+  }
+ }
+ if p.ConfigAuthority!=""&&p.ConfigAuthority!=AuthorityNever&&
+  p.ConfigAuthority!=AuthorityRead&&p.ConfigAuthority!=AuthorityPropose{
+  return nil,fmt.Errorf("Agent policy cannot authorise configuration changes")
+ }
+ out,err:=json.Marshal(map[string]any{"feature_policy":p})
+ if err!=nil{return nil,err}
+ return out,nil
 }

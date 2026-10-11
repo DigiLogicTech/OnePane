@@ -17,7 +17,7 @@ for(const token of [
   'id="controlChatProject"','id="controlChatWorkspace"',
   "/v1/assistant/threads/","/scope","project_workspace_id:selectedWorkspace?.id||\"\"",
   'project_id:project?.id||""',"allow_task_creation:run","force_task:run",
-  "Select a Project before running tasks","a31AssistantModelPicker(id)"
+  "Select an active Project Workspace to run tasks.","a31AssistantModelPicker(id)"
 ])assert(render.includes(token),`unified chat contract missing: ${token}`);
 assert(!render.includes("allow_task_creation:run,force_task:false"),"Run still depends on a model choosing the Task action");
 assert(render.includes("const canRun=!!project&&workspaces.length>0"),"Run enabled without canonical active Workspace");

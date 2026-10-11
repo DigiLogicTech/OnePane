@@ -344,9 +344,13 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 			WHERE project_id=? AND status='active'`,c.ProjectID).Scan(&activeCount);err!=nil{
 			return TurnResult{},err
 		}
-		modelChoseWorkspace:=false
-		if selected,ok:=plan["project_workspace_id"].(string);ok&&reasonErr==nil{
-			modelChoseWorkspace=strings.TrimSpace(selected)==pwsID&&pwsID!=""
+		// The first reasoning pass may have selected a verified active sibling,
+		// after which the destination-scoped second pass omits its ID.
+		// Preserve that validated rebind rather than guessing a recent sibling.
+		modelChoseWorkspace:=resolvedPin!=""&&resolvedPin==pwsID&&reasonErr==nil
+		if selected,ok:=plan["project_workspace_id"].(string);ok&&reasonErr==nil&&
+			strings.TrimSpace(selected)==pwsID&&pwsID!=""{
+			modelChoseWorkspace=true
 		}
 		if pwsID==""||(c.ProjectWorkspaceID==""&&activeCount>1&&!modelChoseWorkspace){
 			action="answer"

@@ -209,23 +209,23 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
 	// Continue independent work after a corrupt waiting continuation.
 	// Return the actionable per-run error with any completed tick results.
 	wakeErr:=s.syncResumedRuns(ctx)
-	if _, err := s.admitCreated(ctx, limit); err != nil {
-		return nil, errors.Join(wakeErr,err)
-	}
+	_,admissionErr:=s.admitCreated(ctx,limit)
+	// Per-Task admissions are independent. A corrupt CREATED Task cannot
+	// starve already running Workers or eligible siblings in this tick.
 	runs, err := s.activeRuns(ctx, limit)
 	if err != nil {
-		return nil, errors.Join(wakeErr,err)
+		return nil, errors.Join(wakeErr,admissionErr,err)
 	}
 	out := make([]TickResult, 0, limit)
 	for _, r := range runs {
 		out = append(out, s.step(ctx, r))
 		if len(out) >= limit {
-			return out,wakeErr
+			return out,errors.Join(wakeErr,admissionErr)
 		}
 	}
 	ready, err := s.readyTasks(ctx, limit-len(out))
 	if err != nil {
-		return out,errors.Join(wakeErr,err)
+		return out,errors.Join(wakeErr,admissionErr,err)
 	}
 	for _, t := range ready {
 		r, res := s.startRun(ctx, t)
@@ -235,7 +235,7 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
 		}
 		out = append(out, s.step(ctx, r))
 	}
-	return out,wakeErr
+	return out,errors.Join(wakeErr,admissionErr)
 }
 
 func (s *Service) admitCreated(ctx context.Context, limit int) (int, error) {
@@ -263,14 +263,17 @@ ORDER BY t.priority DESC,t.created_at,t.id LIMIT ?`, limit)
 	}
 	n := 0
 	actor := AuthorityPrincipal
+	var problems []error
 	for _, v := range xs {
 		if _, err := s.tasks.MarkReady(ctx, task.TransitionCommand{TaskID: v.id, ExpectedRevision: v.rev, ActorPrincipalID: &actor, Reason: "autonomous worker admission"}); err == nil {
 			n++
 		} else if !task.IsRevisionConflict(err) {
-			return n, err
+			// Do not convert a failure into success, and do not silently
+			// discard its Task ID. Other Task admissions still proceed.
+			problems=append(problems,fmt.Errorf("admit created Task %s: %w",v.id,err))
 		}
 	}
-	return n, rows.Err()
+	return n,errors.Join(append(problems,rows.Err())...)
 }
 
 func (s *Service) syncResumedRuns(ctx context.Context) error {

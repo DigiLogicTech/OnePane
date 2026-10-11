@@ -84,8 +84,11 @@ func (s StoredScopes) ForTask(ctx context.Context, tenantID, taskID string) (Sco
 		return ScopedDecision{}, fmt.Errorf("scope resolver unavailable")
 	}
 	var topStatus string
-	if err := s.DB.QueryRowContext(ctx,"SELECT status FROM workspaces WHERE id=?",tenantID).Scan(&topStatus); err != nil || topStatus != "active" {
-		return ScopedDecision{}, fmt.Errorf("execution tenant is not active")
+	if err := s.DB.QueryRowContext(ctx,"SELECT status FROM workspaces WHERE id=?",tenantID).Scan(&topStatus); err != nil {
+		return ScopedDecision{}, fmt.Errorf("execution Workspace unavailable")
+	}
+	if topStatus != "active" {
+		return ScopedDecision{}, fmt.Errorf("Workspace %s is not active (state=%s)",tenantID,topStatus)
 	}
 	var projectID,workspaceID sql.NullString
 	var completion string

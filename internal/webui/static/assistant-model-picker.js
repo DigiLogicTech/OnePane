@@ -15,10 +15,13 @@ async function a31AssistantModelPicker(threadID) {
  // No model selection is allowed if current eligibility could not be read.
  const opts=candidates.map(c=>{
   const ready=!!c.schedulable&&["ready","degraded"].includes(String(c.status||""));
-  const costly=!["local","free"].includes(String(c.cost_class||"unknown"))||
-   c.cost_class==="free"&&!c.local;
-  const available=ready&&!costly;
-  const label=[c.display_name||c.id,c.provider|| (c.local?"Local":"Remote"),!ready?"Not admitted":costly?"Usage policy required":""].filter(Boolean).join(" · ");
+  // Mirror the backend's fail-closed pin admission. A model label or
+  // superficially free provider is not proof of host-local zero-cost use.
+  const verifiedLocal=!!c.local&&!!c.hard_zero_incremental_cost&&
+   ["local","free"].includes(String(c.cost_class||"unknown"));
+  const available=ready&&verifiedLocal;
+  const label=[c.display_name||c.id,c.provider||(c.local?"Local":"Remote"),
+   !ready?"Not admitted":!verifiedLocal?"Host-local zero-cost verification required":""].filter(Boolean).join(" · ");
   return '<option value="'+escapeHtml(c.id)+'" '+(preference===String(c.id)?'selected ':'')+(available?'':'disabled ')+'>'+escapeHtml(label)+'</option>';
  }).join("");
  const missing=preference&&!known?'<option value="'+escapeHtml(preference)+'" selected disabled>Previously selected model unavailable</option>':"";

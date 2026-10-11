@@ -2040,6 +2040,7 @@ func (s *Server) listSchedulerCandidates(w http.ResponseWriter, r *http.Request)
 		out = append(out, map[string]any{
 			"id": c.ID, "kind": c.Kind, "display_name": c.DisplayName, "provider": c.Provider,
 			"status": c.Status, "local": c.Local, "cost_class": c.CostClass,
+            "hard_zero_incremental_cost": c.HardZeroIncrementalCost,
 			"qualification": c.Qualification, "schedulable": c.Schedulable,
 			"role_names": c.RoleNames, "capability_ids": c.CapabilityIDs, "context_max": c.ContextMax,
 		})

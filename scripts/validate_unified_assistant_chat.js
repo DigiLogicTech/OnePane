@@ -7,6 +7,8 @@ const app=fs.readFileSync("internal/webui/static/app.js","utf8");
 const html=fs.readFileSync("internal/webui/static/index.html","utf8");
 const assistant=fs.readFileSync("internal/assistant/service.go","utf8");
 const api=fs.readFileSync("internal/api/assistant_orchestrator.go","utf8");
+const schedulerAPI=fs.readFileSync("internal/api/server.go","utf8");
+const picker=fs.readFileSync("internal/webui/static/assistant-model-picker.js","utf8");
 const render=app.split("async function a31RenderControlChat(){")[1]?.split("/* Settings */")[0]||"";
 assert(render,"unified Assistant chat is missing");
 assert(!html.includes("controlChatOrchestratorTab"),"duplicate Orchestrator tab resurrected");
@@ -22,4 +24,7 @@ assert(assistant.includes("ProjectWorkspaceID:selectedWorkspace"),"Assistant did
 assert(assistant.includes("project_id=? AND status='active'"),"canonical Workspace membership check missing");
 assert(api.includes('json:"project_workspace_id"'),"Assistant API omitted explicit Workspace");
 assert(api.includes("ProjectWorkspaceID:in.ProjectWorkspaceID"),"Assistant API did not forward Workspace");
+assert(schedulerAPI.includes('"hard_zero_incremental_cost": c.HardZeroIncrementalCost'),"candidate API does not surface verified zero-cost classification");
+assert(picker.includes("!!c.local&&!!c.hard_zero_incremental_cost"),"Assistant picker offers unverified provider models");
+assert(picker.includes("const available=ready&&verifiedLocal"),"Assistant picker availability contradicts backend policy");
 console.log("Unified Assistant context, no implicit tabs and task-scope contracts: PASS");

@@ -6,6 +6,7 @@ import (
  "context"
  "encoding/json"
  "errors"
+ "strings"
  "testing"
 
  "github.com/DigiLogicTech/OnePane/internal/clock"
@@ -59,6 +60,16 @@ func TestOrchestratorRuntimeContextIsBoundToSelectedWorkspace(t *testing.T) {
  // Make the wrong sibling runtime more recent than the selected one.
  if _,err=db.SQL().ExecContext(ctx,`UPDATE project_runtimes SET updated_at=?
    WHERE id=?`,now+60000,storyRuntime.ID);err!=nil {t.Fatal(err)}
+ // Workspace AI settings remain private service configuration. The
+ // Orchestrator derives execution mode but must not disclose sibling values
+ // or even its selected raw settings to a language model.
+ secretMarker:="STORY_PRIVATE_CONFIG_MARKER_NEVER_IN_MODEL_CONTEXT"
+ settings,_:=json.Marshal(map[string]any{
+  "private_model_setting":secretMarker,
+  "orchestration":map[string]any{"mode":"team"},
+ })
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_workspaces
+  SET ai_settings_json=? WHERE id=?`,string(settings),story.ID);err!=nil{t.Fatal(err)}
  orchestrator:=NewService(db.SQL(),db,clock.Real{},unavailableOrchestratorReasoning{},nil,nil,
   task.NewService(db.SQL(),db,clock.Real{}),nil)
  type snapshot struct {
@@ -83,6 +94,17 @@ func TestOrchestratorRuntimeContextIsBoundToSelectedWorkspace(t *testing.T) {
  check(world.ID,worldRuntime.ID,"defined")
  check(story.ID,storyRuntime.ID,"defined")
  check(assets.ID,"","not_provisioned")
+ for _,selectedID:=range []string{world.ID,story.ID}{
+  raw,_,mode,_,err:=orchestrator.contextSnapshot(ctx,p.ID,selectedID)
+  if err!=nil{t.Fatal(err)}
+  if strings.Contains(string(raw),secretMarker)||strings.Contains(string(raw),"private_model_setting")||
+   strings.Contains(string(raw),"\"ai_settings\""){
+   t.Fatalf("raw Workspace AI settings leaked to reasoning snapshot: %s",raw)
+  }
+  if selectedID==story.ID&&mode!="team"{
+   t.Fatalf("removing raw settings broke the trusted mode derivation: %s",mode)
+  }
+ }
  if selected:=selectModelProposedWorkspace(ctx,db.SQL(),p.ID,world.ID,world.ID,story.ID);selected!=world.ID{
   t.Fatalf("model overrode explicitly selected World Workspace with %s",selected)
  }

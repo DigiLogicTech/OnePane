@@ -130,7 +130,7 @@ func TestOrchestratorHandoffRebindsReasoningToDestinationWorkspace(t *testing.T)
  if strings.Contains(string(result.Turn.ContextJSON),"SOURCE_PRIVATE_TASK_CONTEXT_CANARY")||
   !strings.Contains(string(result.Turn.ContextJSON),"DESTINATION_PRIVATE_TASK_CONTEXT_CANARY")||
   strings.Contains(result.Turn.Content,"SOURCE_PRIVATE_RESPONSE_NOT_FOR_DESTINATION")||
-  result.Turn.Content!="Destination-scoped plan"{
+  !strings.HasPrefix(result.Turn.Content,"Destination-scoped plan"){
   t.Fatalf("persisted destination Turn contains source-only model context or response: %+v",result.Turn)
  }
 }

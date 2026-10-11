@@ -213,7 +213,8 @@ func (s *Service) transitionTerminalWorker(
   run.WorkerPrincipalID!=WorkerPrincipal{return ErrInvalidWorkerState}
  status:=RunFailed
  stepStatus:="failed"
- if blocked{status=RunBlocked;stepStatus="waiting"}
+ stepKind:="fail"
+ if blocked{status=RunBlocked;stepStatus="waiting";stepKind="wait"}
  reason=boundedString(reason,1024)
  return s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
   var taskRevision int64
@@ -247,7 +248,7 @@ func (s *Service) transitionTerminalWorker(
   n,err:=changed.RowsAffected()
   if err!=nil{return err}
   if n!=1{return ErrInvalidWorkerState}
-  return s.journalInTransaction(ctx,tx,run.ID,"control",stepStatus,
+  return s.journalInTransaction(ctx,tx,run.ID,stepKind,stepStatus,
    nil,nil,nil,nil,map[string]any{
     "action":"terminal_worker","reason":reason,
     "task_id":run.TaskID,"attempt_id":run.AttemptID,

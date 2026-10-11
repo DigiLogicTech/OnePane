@@ -371,41 +371,31 @@ func (s *Service) releaseBudgetBeforeDispatch(ctx context.Context, cmd ExecuteCo
 	_, _ = s.budgets.Release(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 }
 
+// Provider-backed deployments are not proven host-local merely because
+// their runtime JSON advertises "local" or "free". Budget classification
+// comes exclusively from the registered provider connection, never from
+// model deployment metadata supplied by a routing client or a model.
 func inferenceRouteRequiresBudget(d ModelDeployment, p *ProviderConnection) bool {
-	// Local deployments are zero incremental cost. Provider-backed routes are
-	// protected unless they explicitly prove a hard-zero route. Deployment
-	// runtime scheduling metadata may override the provider classification.
-	type sched struct {
-		CostClass string `json:"cost_class"`
-		HardZero  bool   `json:"hard_zero_incremental_cost"`
-	}
-	type wrapped struct {
-		Scheduling sched `json:"scheduling"`
-	}
-	var effective sched
-	if p != nil {
-		var c wrapped
-		if json.Unmarshal(p.ConnectionJSON, &c) == nil {
-			effective = c.Scheduling
-		}
-	}
-	var dc wrapped
-	if json.Unmarshal(d.RuntimeConfigJSON, &dc) == nil && strings.TrimSpace(dc.Scheduling.CostClass) != "" {
-		effective = dc.Scheduling
-	}
 	if p == nil {
+		// Non-provider deployments run on the local runtime or a separately
+		// approved paired Node; they have no per-request provider charge.
 		return false
 	}
-	switch strings.ToLower(strings.TrimSpace(effective.CostClass)) {
-	case "local":
-		return false
-	case "free":
-		return !effective.HardZero
-	case "included_subscription", "provider_managed", "paid", "unknown", "":
-		return true
-	default:
+	type schedulingPolicy struct {
+		Scheduling struct {
+			CostClass string `json:"cost_class"`
+			HardZero bool `json:"hard_zero_incremental_cost"`
+		} `json:"scheduling"`
+	}
+	var effective schedulingPolicy
+	if json.Unmarshal(p.ConnectionJSON,&effective)!=nil{
 		return true
 	}
+	// A claimed "local" provider can still name an outbound endpoint until
+	// its transport/identity has been independently verified. Deny a
+	// zero-budget route for this ambiguous provider type.
+	return !(strings.EqualFold(strings.TrimSpace(effective.Scheduling.CostClass),"free") &&
+		effective.Scheduling.HardZero)
 }
 
 func storageConfidentiality(v string) policy.Confidentiality {

@@ -81,6 +81,46 @@ func TestContinuousGoalRegistrationRequiresL5AndCanonicalWorkspace(t *testing.T)
   "UPDATE project_continuous_goals SET status='retired',next_due_at=123 WHERE id=?",g.ID);err==nil{
   t.Fatal("database accepted recurring dispatch after retirement")
  }
+ if _,err=db.SQL().ExecContext(ctx,
+    "UPDATE project_continuous_goals SET next_due_at=123 WHERE id=?",g.ID);err!=nil{t.Fatal(err)}
+ // User-triggered pause atomically invalidates the next due time and health.
+ paused,err:=svc.TransitionContinuousGoal(ctx,TransitionContinuousGoalCommand{
+   ProjectID:p.ID,GoalID:g.ID,TargetStatus:"paused",
+   ExpectedRevision:g.Revision,ActorPrincipalID:"owner",
+ })
+ if err!=nil{t.Fatal(err)}
+ if paused.Status!="paused"||paused.NextDueAt!=0||paused.Health!="unobserved"||
+    paused.Revision!=g.Revision+1{t.Fatalf("pause did not revoke schedule atomically: %+v",paused)}
+ if _,err=svc.TransitionContinuousGoal(ctx,TransitionContinuousGoalCommand{
+   ProjectID:p.ID,GoalID:g.ID,TargetStatus:"retired",
+   ExpectedRevision:g.Revision,ActorPrincipalID:"owner",
+ });err!=ErrRevisionConflict{t.Fatalf("stale retirement revision accepted: %v",err)}
+ if _,err=svc.TransitionContinuousGoal(ctx,TransitionContinuousGoalCommand{
+   ProjectID:other.ID,GoalID:g.ID,TargetStatus:"retired",
+   ExpectedRevision:paused.Revision,ActorPrincipalID:"owner",
+ });err==nil{t.Fatal("foreign Project retired a goal")}
+ if _,err=svc.TransitionContinuousGoal(ctx,TransitionContinuousGoalCommand{
+   ProjectID:p.ID,GoalID:g.ID,TargetStatus:"active",
+   ExpectedRevision:paused.Revision,ActorPrincipalID:"owner",
+ });err==nil{t.Fatal("goal activation bypassed monitor readiness")}
+ retired,err:=svc.TransitionContinuousGoal(ctx,TransitionContinuousGoalCommand{
+   ProjectID:p.ID,GoalID:g.ID,TargetStatus:"retired",
+   ExpectedRevision:paused.Revision,ActorPrincipalID:"owner",
+ })
+ if err!=nil{t.Fatal(err)}
+ if retired.Status!="retired"||retired.NextDueAt!=0||retired.Revision!=paused.Revision+1{
+    t.Fatalf("retirement retained a schedule: %+v",retired)
+ }
+ if _,err=svc.TransitionContinuousGoal(ctx,TransitionContinuousGoalCommand{
+   ProjectID:p.ID,GoalID:g.ID,TargetStatus:"paused",
+   ExpectedRevision:retired.Revision,ActorPrincipalID:"owner",
+ });err!=ErrInvalidTransition{t.Fatalf("retired goal could be revived: %v",err)}
+ var count int
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events WHERE
+    aggregate_type='project_continuous_goal' AND aggregate_id=?`,g.ID).Scan(&count);err!=nil{
+    t.Fatal(err)
+ }
+ if count!=3{t.Fatalf("expected configured+paused+retired event ledger, got %d",count)}
  var result string
  if err:=db.SQL().QueryRowContext(ctx,"PRAGMA quick_check").Scan(&result);err!=nil||result!="ok"{
   t.Fatalf("goal migration failed integrity check: %v %s",err,result)

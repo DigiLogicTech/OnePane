@@ -84,6 +84,34 @@ func TestContinuousGoalsAPIRequiresProjectAuthorizationAndNeverActivatesMonitori
  if listed.Code!=200||!strings.Contains(listed.Body.String(),g.ID){
   t.Fatalf("configured goal not listed %d %s",listed.Code,listed.Body.String())
  }
+ transition:=func(goalID,action,token,body string)*httptest.ResponseRecorder{
+  req:=httptest.NewRequest("POST","/v1/projects/"+p.ID+"/continuous-goals/"+goalID+"/"+action,strings.NewReader(body))
+  if token!=""{req.Header.Set("Authorization","Bearer "+token)}
+  req.Header.Set("Content-Type","application/json")
+  rw:=httptest.NewRecorder();h.ServeHTTP(rw,req);return rw
+ }
+ pauseBody:=`{"expected_revision":1}`
+ if got:=transition(g.ID,"paused","outsider",pauseBody);got.Code!=403{
+  t.Fatalf("outsider paused goal: %d %s",got.Code,got.Body.String())
+ }
+ if got:=transition(g.ID,"active","operator",pauseBody);got.Code!=400{
+  t.Fatalf("unverified activation accepted: %d %s",got.Code,got.Body.String())
+ }
+ paused:=transition(g.ID,"paused","operator",pauseBody)
+ if paused.Code!=200{t.Fatalf("pause denied %d %s",paused.Code,paused.Body.String())}
+ var pg projectworkspace.ContinuousGoal
+ if err:=json.Unmarshal(paused.Body.Bytes(),&pg);err!=nil{t.Fatal(err)}
+ if pg.Status!="paused"||pg.Revision!=2||pg.NextDueAt!=0{t.Fatalf("pause state invalid %+v",pg)}
+ if got:=transition(g.ID,"retired","operator",pauseBody);got.Code!=409{
+  t.Fatalf("stale revision was accepted: %d %s",got.Code,got.Body.String())
+ }
+ retired:=transition(g.ID,"retired","operator",`{"expected_revision":2}`)
+ if retired.Code!=200||!strings.Contains(retired.Body.String(),`"status":"retired"`){
+  t.Fatalf("retirement denied %d %s",retired.Code,retired.Body.String())
+ }
+ if got:=transition(g.ID,"paused","operator",`{"expected_revision":3}`);got.Code!=400{
+  t.Fatalf("retired goal could be re-enabled %d %s",got.Code,got.Body.String())
+ }
  var count int
  if err:=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM tasks").Scan(&count);err!=nil||count!=0{
   t.Fatalf("goal API unexpectedly launched task: %d %v",count,err)

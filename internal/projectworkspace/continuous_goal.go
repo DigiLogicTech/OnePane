@@ -41,6 +41,77 @@ type ConfigureContinuousGoalCommand struct {
     ActorPrincipalID string
 }
 
+// TransitionContinuousGoalCommand only stops or retires a registered goal.
+// Activation remains unavailable until verified monitor admission exists.
+type TransitionContinuousGoalCommand struct {
+    ProjectID string
+    GoalID string
+    TargetStatus string
+    ExpectedRevision int64
+    ActorPrincipalID string
+}
+
+// TransitionContinuousGoal performs a bounded, audited lifecycle change.
+// This does not cancel already-started external effects: once operational
+// monitoring exists, its execution leases must independently observe status.
+func(s *Service)TransitionContinuousGoal(ctx context.Context,cmd TransitionContinuousGoalCommand)(ContinuousGoal,error){
+    cmd.ProjectID=strings.TrimSpace(cmd.ProjectID)
+    cmd.GoalID=strings.TrimSpace(cmd.GoalID)
+    cmd.ActorPrincipalID=strings.TrimSpace(cmd.ActorPrincipalID)
+    if cmd.ProjectID==""||cmd.GoalID==""||cmd.ActorPrincipalID==""||
+       cmd.ExpectedRevision<1||(cmd.TargetStatus!="paused"&&cmd.TargetStatus!="retired"){
+        return ContinuousGoal{},ErrInvalidCommand
+    }
+    eventID,err:=s.ids.New("evt")
+    if err!=nil{return ContinuousGoal{},err}
+    now:=s.clock.UnixMilli()
+    err=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+        project,err:=s.repo.ProjectTx(ctx,tx,cmd.ProjectID)
+        if err!=nil{return err}
+        if err=s.requireActor(ctx,tx,project.WorkspaceID,cmd.ActorPrincipalID);err!=nil{return err}
+        // Retirement discards an objective. It must be explicitly human
+        // directed, never self-authorised by a background Agent.
+        if cmd.TargetStatus=="retired"{
+            var principalType string
+            if err=tx.QueryRowContext(ctx,`SELECT principal_type FROM principals
+              WHERE id=? AND status='active'`,cmd.ActorPrincipalID).Scan(&principalType);err!=nil{return err}
+            if principalType!="human"{return fmt.Errorf("%w: retirement requires human operator",ErrPrincipalIneligible)}
+        }
+        var currentStatus,workspaceID string
+        var revision int64
+        err=tx.QueryRowContext(ctx,`SELECT status,project_workspace_id,revision
+         FROM project_continuous_goals WHERE id=? AND project_id=?`,
+         cmd.GoalID,cmd.ProjectID).Scan(&currentStatus,&workspaceID,&revision)
+        if err!=nil{return err}
+        if revision!=cmd.ExpectedRevision{return ErrRevisionConflict}
+        if currentStatus=="retired"||currentStatus==cmd.TargetStatus||
+          (currentStatus!="configured"&&currentStatus!="active"&&currentStatus!="paused"){
+            return ErrInvalidTransition
+        }
+        result,err:=tx.ExecContext(ctx,`UPDATE project_continuous_goals
+          SET status=?,health='unobserved',next_due_at=0,revision=revision+1,updated_at=?
+          WHERE id=? AND project_id=? AND revision=? AND status=?`,
+          cmd.TargetStatus,now,cmd.GoalID,cmd.ProjectID,revision,currentStatus)
+        if err!=nil{return err}
+        affected,err:=result.RowsAffected()
+        if err!=nil{return err}
+        if affected!=1{return ErrRevisionConflict}
+        payload,_:=json.Marshal(map[string]any{
+          "goal_id":cmd.GoalID,"project_id":cmd.ProjectID,
+          "project_workspace_id":workspaceID,"previous_status":currentStatus,
+          "status":cmd.TargetStatus,"revision":revision+1,
+        })
+        return s.events.Append(ctx,tx,event.Event{
+          ID:eventID,WorkspaceID:&project.WorkspaceID,
+          Type:"project.goal_"+cmd.TargetStatus,
+          AggregateType:"project_continuous_goal",AggregateID:cmd.GoalID,
+          ActorPrincipalID:&cmd.ActorPrincipalID,Payload:payload,OccurredAt:now,
+        })
+    })
+    if err!=nil{return ContinuousGoal{},err}
+    return s.ContinuousGoal(ctx,cmd.GoalID)
+}
+
 var goalSourceID=regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
 type goalMonitorPlan struct {
     Version int `json:"version"`

@@ -15,6 +15,7 @@ import (
 type continuousGoalService interface{
  ContinuousGoals(context.Context,string)([]projectworkspace.ContinuousGoal,error)
  ConfigureContinuousGoal(context.Context,projectworkspace.ConfigureContinuousGoalCommand)(projectworkspace.ContinuousGoal,error)
+ TransitionContinuousGoal(context.Context,projectworkspace.TransitionContinuousGoalCommand)(projectworkspace.ContinuousGoal,error)
 }
 
 func(s *Server)listProjectContinuousGoals(w http.ResponseWriter,r *http.Request){
@@ -55,4 +56,25 @@ func(s *Server)configureProjectContinuousGoal(w http.ResponseWriter,r *http.Requ
  }
  goal,err:=svc.ConfigureContinuousGoal(r.Context(),cmd)
  respondDomain(w,goal,err,http.StatusCreated)
+}
+
+
+// Pause and retire never start a monitor. They use a revision precondition and
+// the same canonical Project authorization as goal creation.
+func(s *Server)transitionProjectContinuousGoal(w http.ResponseWriter,r *http.Request){
+ identity,ok:=s.authenticate(w,r)
+ if !ok{return}
+ if s.projects==nil{writeError(w,http.StatusServiceUnavailable,"Project service unavailable");return}
+ p,err:=s.projects.Project(r.Context(),strings.TrimSpace(r.PathValue("projectID")))
+ if err!=nil{respondDomain(w,nil,err,0);return}
+ if !s.authorize(w,r,identity,p.WorkspaceID,"project.write"){return}
+ var in struct{ExpectedRevision int64 `json:"expected_revision"`}
+ if !decodeJSON(w,r,&in){return}
+ svc,ok:=s.projects.(continuousGoalService)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"continuous goal service unavailable");return}
+ goal,err:=svc.TransitionContinuousGoal(r.Context(),projectworkspace.TransitionContinuousGoalCommand{
+  ProjectID:p.ID,GoalID:r.PathValue("goalID"),TargetStatus:r.PathValue("transition"),
+  ExpectedRevision:in.ExpectedRevision,ActorPrincipalID:identity.PrincipalID,
+ })
+ respondDomain(w,goal,err,http.StatusOK)
 }

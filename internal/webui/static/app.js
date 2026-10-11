@@ -575,13 +575,14 @@ async function a31RenderControlChat(){
   body.innerHTML='<div class="control-chat-loading">Loading Assistant…</div>';
   try{
     const id=await a31EnsureAssistantThread();
-    const [turns,picker,projectRows]=await Promise.all([
+    const [turns,projectRows]=await Promise.all([
       apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/turns?limit=100`),
-      a31AssistantModelPicker(id),
       apiRequest(`/v1/projects?workspace_id=${encodeURIComponent(onepaneWorkspace)}`)
     ]);
     const projects=a31Array(projectRows).filter(p=>p.status==="active");
     const project=projects.find(p=>p.id===a31AssistantProjectID)||null;
+    // Avoid unnecessary model inventory requests while Project routing owns execution.
+    const picker=project?null:await a31AssistantModelPicker(id);
     const workspaceRows=project?await apiRequest(`/v1/projects/${encodeURIComponent(project.id)}/workspaces`):[];
     const workspaces=a31Array(workspaceRows).filter(w=>w.status==="active");
     const selectedWorkspace=workspaces.find(w=>w.id===a31AssistantWorkspaceID)||null;
@@ -592,11 +593,11 @@ async function a31RenderControlChat(){
         ${projects.map(p=>`<option value="${escapeHtml(p.id)}" ${project?.id===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join("")}
       </select></label>
       ${project?`<label>Workspace<select id="controlChatWorkspace" aria-label="Assistant Workspace context">
-        <option value="" ${!selectedWorkspace?'selected':''}>Project-wide</option>
+        <option value="" ${!selectedWorkspace?'selected':''}>Automatic Workspace</option>
         ${workspaces.map(w=>`<option value="${escapeHtml(w.id)}" ${selectedWorkspace?.id===w.id?'selected':''}>${escapeHtml(w.name)}</option>`).join("")}
       </select></label>`:""}
     </div>`;
-    const scope=project?(selectedWorkspace?`Project · ${project.name} / ${selectedWorkspace.name}`:`Project · ${project.name} (Project-wide)`):"General OnePane Assistant";
+    const scope=project?(selectedWorkspace?`Project · ${project.name} / ${selectedWorkspace.name}`:`Project · ${project.name} (automatic Workspace)`):"General OnePane Assistant";
     const prompt=project?"Ask OnePane to plan or execute within the selected Project…":"Ask OnePane a general question…";
     body.innerHTML=`${selector}<div class="control-chat-scope">${escapeHtml(scope)}</div>
       ${project?'<div class="control-chat-model-status">Project execution uses the authorised Project Orchestrator and Workspace routing; conversation alone grants no tools.</div>':picker.ui}

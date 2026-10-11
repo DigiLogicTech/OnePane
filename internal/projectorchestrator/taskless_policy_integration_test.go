@@ -9,6 +9,8 @@ import (
 
  "github.com/DigiLogicTech/OnePane/internal/clock"
  "github.com/DigiLogicTech/OnePane/internal/projectworkspace"
+ "github.com/DigiLogicTech/OnePane/internal/task"
+ "github.com/DigiLogicTech/OnePane/internal/scheduler"
  sqliteStore "github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
 )
 
@@ -70,4 +72,53 @@ func TestDeniedTasklessProjectPolicyWritesNoTurnAndSpawnsNoTask(t *testing.T){
   "SELECT COUNT(*) FROM project_orchestrator_turns").Scan(&turns);err!=nil||turns!=0{
   t.Fatalf("Workspace denial persisted a turn: %d %v",turns,err)
  }
+}
+
+
+type queuedProjectNoModelRoute struct{}
+func(queuedProjectNoModelRoute)Route(_ context.Context,_ scheduler.RouteRequest)(scheduler.Decision,error){
+ return scheduler.Decision{},scheduler.ErrNoEligibleCandidate
+}
+
+func TestExplicitProjectRunPersistsCanonicalQueuedTaskWithoutLocalReasoningModel(t *testing.T){
+ ctx:=context.Background()
+ db,err:=sqliteStore.Open(t.TempDir()+"/queued-project-run.db")
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ if err:=db.Migrate(ctx);err!=nil{t.Fatal(err)}
+ for _,stmt:=range []string{
+  `INSERT INTO workspaces(id,name,status,revision,created_at,updated_at)
+   VALUES('tenant','Tenant','active',1,1,1)`,
+  `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at)
+   VALUES('owner','human','Owner','active',1,1,1)`,
+  `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at)
+   VALUES('tenant','owner','active',1,1)`,
+ }{if _,err:=db.SQL().ExecContext(ctx,stmt);err!=nil{t.Fatal(err)}}
+ projects:=projectworkspace.NewService(db.SQL(),db,clock.Real{})
+ p,err:=projects.CreateProject(ctx,projectworkspace.CreateProjectCommand{
+  WorkspaceID:"tenant",Name:"Slow local development",CreatedBy:"owner",
+ })
+ if err!=nil{t.Fatal(err)}
+ w,err:=projects.CreateWorkspaceView(ctx,projectworkspace.CreateWorkspaceViewCommand{
+  ProjectID:p.ID,Name:"Build",ActorPrincipalID:"owner",
+ })
+ if err!=nil{t.Fatal(err)}
+ tasks:=task.NewService(db.SQL(),db,clock.Real{})
+ svc:=NewService(db.SQL(),db,clock.Real{},queuedProjectNoModelRoute{},nil,nil,tasks,nil)
+ result,err:=svc.Turn(ctx,TurnCommand{
+  ProjectID:p.ID,ProjectWorkspaceID:w.ID,ActorPrincipalID:"owner",
+  Objective:"Create a verified local-only artifact",ForceTask:true,AllowTaskCreation:true,
+ })
+ if err!=nil{t.Fatal(err)}
+ if result.TaskID==nil||result.ProjectWorkspaceID==nil||
+  *result.ProjectWorkspaceID!=w.ID||result.Disposition!="task_created"{
+  t.Fatalf("Run discarded or misrouted a canonical Task when no model fitted: %+v",result)
+ }
+ stored,err:=tasks.Get(ctx,*result.TaskID)
+ if err!=nil{t.Fatal(err)}
+ if stored.ProjectWorkspaceID==nil||*stored.ProjectWorkspaceID!=w.ID||
+   stored.Objective!="Create a verified local-only artifact"{
+  t.Fatalf("Task was not persisted in approved Project Workspace: %+v",stored)
+ }
+ if result.Turn.Content==""{t.Fatal("unavailable local model was not reported")}
 }

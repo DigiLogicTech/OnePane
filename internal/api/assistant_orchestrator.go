@@ -100,11 +100,11 @@ func (s *Server) listAssistantTurns(w http.ResponseWriter,r *http.Request){
 func (s *Server) submitAssistantTurn(w http.ResponseWriter,r *http.Request){
 	i,ok:=s.authenticate(w,r);if !ok{return};t,err:=s.assistant.Thread(r.Context(),r.PathValue("threadID"));if err!=nil{respondDomain(w,nil,err,0);return}
 	if !s.authorize(w,r,i,t.WorkspaceID,"project.read"){return}
-	var in struct{Content string `json:"content"`;ProjectID *string `json:"project_id"`;AllowTaskCreation *bool `json:"allow_task_creation"`;ForceTask bool `json:"force_task"`}
+	var in struct{Content string `json:"content"`;ProjectID *string `json:"project_id"`;ProjectWorkspaceID string `json:"project_workspace_id"`;AllowTaskCreation *bool `json:"allow_task_creation"`;ForceTask bool `json:"force_task"`}
 	if !decodeJSON(w,r,&in){return}
 	allow:=false;if in.AllowTaskCreation!=nil{allow=*in.AllowTaskCreation}
 	if allow||in.ForceTask{if !s.authorize(w,r,i,t.WorkspaceID,"task.write"){return}}
-	out,err:=s.assistant.Submit(r.Context(),assistant.SubmitCommand{ThreadID:t.ID,Content:in.Content,ActorPrincipalID:i.PrincipalID,ProjectID:in.ProjectID,ForceTask:in.ForceTask,AllowTaskCreation:allow})
+	out,err:=s.assistant.Submit(r.Context(),assistant.SubmitCommand{ThreadID:t.ID,Content:in.Content,ActorPrincipalID:i.PrincipalID,ProjectID:in.ProjectID,ProjectWorkspaceID:in.ProjectWorkspaceID,ForceTask:in.ForceTask,AllowTaskCreation:allow})
 	respondDomain(w,out,err,http.StatusOK)
 }
 

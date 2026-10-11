@@ -29,6 +29,11 @@ func ParseAutonomousPlanDraft(raw json.RawMessage,projectID,workspaceID,userObje
   len(userObjective)>4096||len(raw)==0||len(raw)>16*1024{
   return AutonomousPlanDraft{},ErrInvalid
  }
+ // Even direct parser callers must reject conflicting JSON fields. A
+ // model must not win Task admission by repeating a key with new semantics.
+ if err:=rejectAmbiguousPlannerJSON(raw);err!=nil{
+  return AutonomousPlanDraft{},fmt.Errorf("%w: ambiguous local plan: %v",ErrInvalid,err)
+ }
  var input struct{
   Version int `json:"version"`
   Steps []struct{

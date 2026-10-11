@@ -5,7 +5,7 @@
  "use strict";
  const MAX_INPUT_BYTES=32768,MAX_EVENTS=64;
  const actions=new Set(["inference.local","inference.cloud","inference.fallback","files.read","files.write","projects.share","tasks.autonomous"]);
- const correlation=/^(run|task|attempt|request|trace):[a-zA-Z0-9_.-]{1,96}$/;
+ const correlation=/^(run|task|attempt|request|trace):[a-f0-9]{24}$/;
  const timestamp=/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/;
  function project(input){
   if(typeof input!=="string"||!input.trim()||new TextEncoder().encode(input).length>MAX_INPUT_BYTES)
@@ -44,7 +44,7 @@
     <h3>Policy decisions — local review</h3>
     <p class="list-meta">Paste up to 64 diagnostic decision records from an authorised export. This is an offline evidence viewer, not live policy enforcement or automatic telemetry. Unknown fields, prompts and secrets are discarded. Nothing is sent to OnePane or another service.</p>
     <label for="a62PolicyInput">Diagnostic JSON</label>
-    <textarea id="a62PolicyInput" rows="3" maxlength="32768" autocomplete="off" spellcheck="false" placeholder='[{"At":"2026-10-11T00:00:00Z","Component":"featurepolicy","CorrelationID":"run:1","Action":"files.read","Allowed":false,"Category":"policy.denied"}]'></textarea>
+    <textarea id="a62PolicyInput" rows="3" maxlength="32768" autocomplete="off" spellcheck="false" placeholder='[{"At":"2026-10-11T00:00:00Z","Component":"featurepolicy","CorrelationID":"run:0123456789abcdef01234567","Action":"files.read","Allowed":false,"Category":"policy.denied"}]'></textarea>
     <div class="a58-debug-actions">
      <button class="btn primary" id="a62PolicyReview" type="button">Review sanitised decisions</button>
      <button class="btn" id="a62PolicyClear" type="button">Clear</button>

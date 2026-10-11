@@ -14,7 +14,7 @@ func TestDiagnosticCorrelationNamespace(t *testing.T) {
 	}
 	for _, id := range []string{"run:123", "task:abc", "attempt:7", "request:9", "trace:xyz"} {
 		got := DecisionDiagnostic(time.Unix(1, 0), id, "inference.local", true)
-		if got.CorrelationID != id {
+		if got.CorrelationID != safeCorrelationID(id) || got.CorrelationID == id {
 			t.Fatalf("safe identifier lost: %q", id)
 		}
 	}

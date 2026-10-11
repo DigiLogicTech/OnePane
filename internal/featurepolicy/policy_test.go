@@ -214,3 +214,18 @@ func TestDeniedParentCannotBeOverridden(t *testing.T) {
 		}
 	}
 }
+
+func TestExecutionGrantsCannotExpandAcrossScopes(t *testing.T) {
+	project := AssistedDefaults()
+	project.CloudRouting = Enabled
+	project.CrossProjectShare = Enabled
+	project.AutonomousRoutines = Enabled
+	workspace := Policy{CloudRouting: Disabled, CrossProjectShare: Disabled, AutonomousRoutines: Disabled}
+	agent := Policy{CloudRouting: Enabled, CrossProjectShare: Enabled, AutonomousRoutines: Enabled}
+	effective := ResolvePolicyChain(project, workspace, agent)
+	for _, action := range []string{"inference.cloud", "projects.share", "tasks.autonomous"} {
+		if effective.ValidateExecution(action) {
+			t.Fatalf("descendant escaped Workspace denial for %q", action)
+		}
+	}
+}

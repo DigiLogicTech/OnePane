@@ -255,6 +255,14 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 		return s.finishTransportError(ctx,q.ID,nil,
 			&TransportError{Code:"private_chat_locality_revoked",OutcomeKnown:true,Err:err},cmd)
 	}
+	// Admission and budget reservation may have waited for old hardware or
+	// provider capacity. A Task may keep its authority, but may not silently
+	// switch model, Node, provider, secret ref or transport runtime.
+	if err:=s.requireCurrentDispatchIdentity(ctx,d,m,p);err!=nil{
+		s.releaseBudgetBeforeDispatch(ctx,cmd)
+		return s.finishTransportError(ctx,q.ID,nil,
+			&TransportError{Code:"inference_route_identity_revoked",OutcomeKnown:true,Err:err},cmd)
+	}
 	// Prevent the scheduler/model queue from exporting an old Agent prompt
 	// if the operator updated, archived or rehomed that Agent meanwhile.
 	if err:=s.revalidateTaskAgentBeforeTransport(ctx,cmd,agentBinding);err!=nil{

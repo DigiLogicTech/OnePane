@@ -1,45 +1,32 @@
-# RC11 diagnostics branch task manifest
+# RC11 diagnostics — branch completion manifest
 
-Branch: `feature/rc11-batch-diagnostics-v2-20261011`
-PR: [#226](https://github.com/DigiLogicTech/OnePane/pull/226)
-Base: `feature/rc11-featurepolicy-fail-closed-20261011`
+Branch: `feature/rc11-batch-diagnostics-v2-20261011`  
+Review PR: [#226](https://github.com/DigiLogicTech/OnePane/pull/226)  
+Combined review PR: [#227](https://github.com/DigiLogicTech/OnePane/pull/227)
 
 ## Completed implementation
-- [x] Bounded, redacted policy decision schema with explicit JSON keys and fixed remediation hints.
-- [x] Typed correlation ID validation and unknown action redaction.
-- [x] Effective scoped policy decision helper with denial regression.
-- [x] Unit tests for JSON allowlist, malformed identifiers, secret canaries and redaction.
-- [x] Integrated offline policy decision evidence review into existing Settings Debug & Diagnostics Centre.
-- [x] Explicit review and local export: maximum 32 KiB, maximum 64 records, no automatic uploads or storage.
-- [x] JavaScript privacy, UI binding, raw-input eviction and boundary tests.
-- [x] Embedded WebUI asset/package and script load-order regression.
-- [x] CI path filters and dedicated Go/Node diagnostic tests added.
-- [x] Reviewed PR diff for accidental data transport, storage and unsafe HTML insertion.
+- [x] Fixed-shape bounded policy decision schema and allowlisted actions.
+- [x] Redact malformed correlation IDs and hash otherwise-valid IDs before export.
+- [x] Validate diagnostics serialization, field allowlist and credential canaries.
+- [x] Restrict correlation identifier namespaces and reject malformed values.
+- [x] Integrate policy evidence review into the existing Settings Debug & Diagnostics Centre.
+- [x] Explicit local paste, redaction, preview and export, without automatic network transfer or persistence.
+- [x] Test capped input, raw-input eviction, safe text rendering and packaged WebUI load order.
+- [x] Wire relevant Go/Node tests into GitHub CI.
+- [x] Contribute diagnostics workstream to combined PR #227 for cross-component testing.
 
 ## Verified CI
-- Code head `79f3a6a8802b8cd7d3e9a5bfb825e1c7b58ced65`:
-  Project Workspace Development Architecture run
-  [#38115854959](https://github.com/DigiLogicTech/OnePane/actions/runs/38115854959)
-  **completed successfully** (frontend validators, Go unit/integration regression,
-  WebUI embedded asset tests, cross-platform checks and Windows MSI log reader).
-- Earlier CI failures were caused by a malformed `diagnostic.go` write; source
-  was replaced and later complete CI runs passed. Do not reuse those failed heads.
-- The current branch documentation update is not intended to alter executable code.
+Code commit `f4e23697f6b84644108b15b5ddc90c5ca862ac86` passed
+[Project Workspace Development Architecture #38118198387](https://github.com/DigiLogicTech/OnePane/actions/runs/38118198387).
+These tests do not establish live telemetry, physical Node health or visual QA.
 
-## Release and human QA gates (not waived)
-- [ ] Human code/security review and architecture alignment approval.
-- [ ] Merge upstream policy runtime only after its live inference and tool
-      permission checks independently pass.
-- [ ] Human WebUI QA in Windows/Ubuntu across themes and drawer sizes.
-- [ ] Final code review, packaging CI and release approval per OnePane process.
-
-## Important scope limitation
-This branch provides an **offline operator-initiated policy evidence viewer**.
-It does not implement live policy event collection or enforce policy at
-runtime. Avoid presenting pasted evidence as proof of runtime enforcement.
-Existing separate authorised diagnostic panels cover Worker, Node and API data.
+## Outstanding review and acceptance
+- [ ] First user code/security review and product vision alignment.
+- [ ] Decide whether a privileged live policy-decision event collector is necessary.
+- [ ] Evaluate keyed identifiers and permitted correlation across app restarts.
+- [ ] Manual Windows/Ubuntu Debug Centre theme, resizing and download QA.
+- [ ] Second code audit, approved packaging and release.
 
 ## Continuation
-The scoped diagnostic implementation and branch CI are complete. Keep PR #226
-draft until the upstream policy enforcement and user review gates are satisfied.
-Do not merge or cut a QA installer from this branch alone.
+The bounded offline diagnostic workstream is implemented and CI-green. The
+integration branch remains draft. No release merge or QA installer was produced.

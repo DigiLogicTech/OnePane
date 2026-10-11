@@ -12,7 +12,7 @@ without merging any of them into main or packaging an installer.
 - Go unit/integration coverage, frontend security scripts and embedded WebUI tests.
 
 ## Acceptance gates
-- [ ] Latest integrated commit passes Linux/Windows CI and all new integration tests.
+- [x] Integrated code commit `8c2fdc429118e84850d92f6ff81a590f3e55d14d` passed [CI run #38118216676](https://github.com/DigiLogicTech/OnePane/actions/runs/38118216676), including Go/SQLite inference, tool and Worker tests, WebUI privacy scripts and Windows checks.
 - [ ] First code and security review on **combined** diff.
 - [ ] User vision alignment interview and recorded functional decisions.
 - [ ] Second audit against the updated vision, followed by any remediation.
@@ -30,3 +30,6 @@ without merging any of them into main or packaging an installer.
 4. The Debug Centre policy viewer is offline/opt-in, not a live policy event tap.
 5. Hosted CI cannot establish physical Node, packaged installer, model GPU or
    visual theme/drawer QA. This is a **draft code review**, not QA-ready release.
+
+## Initial technical audit
+The preliminary code audit and decision register are in `docs/rc11-integration-code-audit.md`. Product alignment, second audit and installed-build QA are not complete.

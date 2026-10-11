@@ -55,3 +55,61 @@ func TestEndpointReconciliationManifestRejectsChangedOrReplacedRoutes(t *testing
   })
  }
 }
+
+func TestEndpointPlanDigestPinsIdempotentOCIEnsureToCurrentRouteIntent(t *testing.T){
+ app:="app"
+ unrelated:="another-app"
+ a:=projectworkspace.Endpoint{
+  ID:"api",ProjectRuntimeID:"runtime",ApplicationID:&app,
+  Name:"api",Protocol:"http",InternalPort:8080,
+  Exposure:projectworkspace.ExposurePreview,Revision:1,DesiredState:"enabled",
+ }
+ other:=projectworkspace.Endpoint{
+  ID:"other",ProjectRuntimeID:"runtime",ApplicationID:&unrelated,
+  Protocol:"http",InternalPort:9000,Revision:1,DesiredState:"enabled",
+ }
+ original:=[]projectworkspace.Endpoint{a,other}
+ first:=endpointPlanDigest(original,app)
+ if first==""{t.Fatal("missing stable endpoint hash")}
+ if first!=endpointPlanDigest([]projectworkspace.Endpoint{other,a},app){
+  t.Fatal("different DB scan order altered OCI operation identity")
+ }
+ unrelatedChanged:=other
+ unrelatedChanged.InternalPort=9999
+ if first!=endpointPlanDigest([]projectworkspace.Endpoint{a,unrelatedChanged},app){
+  t.Fatal("unrelated Workspace application forced a new OCI mutation")
+ }
+ revised:=a
+ revised.Revision++
+ if first==endpointPlanDigest([]projectworkspace.Endpoint{revised,other},app){
+  t.Fatal("revised endpoint reused old OCI ensure operation")
+ }
+ changedPort:=a
+ changedPort.InternalPort=8443
+ if first==endpointPlanDigest([]projectworkspace.Endpoint{changedPort,other},app){
+  t.Fatal("changed declared OCI port reused old operation")
+ }
+ changedDesired:=a
+ changedDesired.DesiredState="disabled"
+ if first==endpointPlanDigest([]projectworkspace.Endpoint{changedDesired,other},app){
+  t.Fatal("disabled port retained old operation identity")
+ }
+ added:=append(append([]projectworkspace.Endpoint(nil),original...),
+  projectworkspace.Endpoint{ID:"new",ProjectRuntimeID:"runtime",
+   ApplicationID:&app,InternalPort:8181,Revision:1,DesiredState:"enabled"})
+ if first==endpointPlanDigest(added,app){
+  t.Fatal("newly declared port incorrectly reused old committed operation")
+ }
+ runtime:=projectworkspace.ProjectRuntime{ID:"runtime",Revision:7}
+ application:=projectworkspace.Application{ID:app,Revision:3}
+ plans:=func(es []projectworkspace.Endpoint)string{
+  return appEnsurePlan(runtime,application,endpointSpecsForApp(es,app),
+   endpointPlanDigest(es,app)).IdempotencyKey
+ }
+ if plans(original)==plans([]projectworkspace.Endpoint{changedPort,other}){
+  t.Fatal("OCI ensure operation key did not change for edited port")
+ }
+ if plans(original)!=plans([]projectworkspace.Endpoint{other,a}){
+  t.Fatal("equivalent route plans have different OCI ensure operation keys")
+ }
+}

@@ -54,7 +54,7 @@ func evaluateTaskGraph(graph *TaskGraph)(TaskGraphProgress,string){
    n.NextAction="Attempt/Worker ownership is inconsistent or orphaned; inspect recovery records and reconcile unknown side effects before resuming."
   case n.ScopeDrift:
    n.Readiness="needs_attention"
-   n.NextAction="Persisted Task no longer belongs to its approved Project Workspace; review identity and isolate execution."
+   n.NextAction="Approved Project Workspace is inactive, missing, or no longer owns this Task; review canonical identity before any worker admission."
   case n.Archived:
    n.Readiness="needs_attention"
    n.NextAction="Archived Task cannot satisfy the approved graph; operator must review restoration or replacement."

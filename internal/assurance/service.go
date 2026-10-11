@@ -144,14 +144,19 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
 		return nil, err
 	}
 	out := make([]TickResult, 0, len(ids))
+	var problems []error
 	for _, idv := range ids {
 		r, e := s.evaluateOne(ctx, idv)
 		if e != nil {
-			return out, e
+			// A malformed or interrupted verification may require human
+			// recovery, but it must not starve unrelated Project Tasks.
+			// Keep its exact ID and error visible; do not silently pass it.
+			problems=append(problems,fmt.Errorf("evaluate independent verification %s: %w",idv,e))
+			continue
 		}
 		out = append(out, r)
 	}
-	return out, nil
+	return out, errors.Join(problems...)
 }
 
 func (s *Service) evaluateOne(ctx context.Context, verificationID string) (TickResult, error) {

@@ -9,7 +9,7 @@ import (
 func TestL5MonitoringPlanRejectsAmbiguousSourceAllowlists(t *testing.T){
  cases:=[]struct{name string; raw string}{
   {"duplicate sources",`{"version":1,"source_ids":["dns"],"source_ids":["uptime"]}`},
-  {"escaped duplicate sources",`{"version":1,"source_ids":["dns"],"source\\u005fids":["uptime"]}`},
+  {"escaped duplicate sources",`{"version":1,"source_ids":["dns"],"source\u005fids":["uptime"]}`},
   {"duplicate version",`{"version":1,"version":2,"source_ids":["dns"]}`},
   {"trailing object",`{"version":1,"source_ids":[]}{"version":1}`},
   {"unknown authority",`{"version":1,"source_ids":["dns"],"network":true}`},

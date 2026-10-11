@@ -142,3 +142,41 @@ func ResolveAuthorityChain(root Authority, descendants ...Authority) Authority {
 	}
 	return effective
 }
+
+// ResolvePolicy computes an effective policy for a child scope. Every feature
+// must pass through the same fail-closed resolution; new fields must be added
+// here before they can be granted to an execution scope.
+func ResolvePolicy(parent, child Policy) Policy {
+	return Policy{
+		Assistant: Resolve(parent.Assistant, child.Assistant),
+		ProjectAI: Resolve(parent.ProjectAI, child.ProjectAI),
+		ProjectMemory: Resolve(parent.ProjectMemory, child.ProjectMemory),
+		TelemetryAccess: Resolve(parent.TelemetryAccess, child.TelemetryAccess),
+		TelemetryAutonomy: Resolve(parent.TelemetryAutonomy, child.TelemetryAutonomy),
+		ModelRouting: Resolve(parent.ModelRouting, child.ModelRouting),
+		AutomaticFallback: Resolve(parent.AutomaticFallback, child.AutomaticFallback),
+		CapabilityRouting: Resolve(parent.CapabilityRouting, child.CapabilityRouting),
+		CloudRouting: Resolve(parent.CloudRouting, child.CloudRouting),
+		Images: Resolve(parent.Images, child.Images),
+		Files: Resolve(parent.Files, child.Files),
+		AudioInput: Resolve(parent.AudioInput, child.AudioInput),
+		AudioOutput: Resolve(parent.AudioOutput, child.AudioOutput),
+		Camera: Resolve(parent.Camera, child.Camera),
+		Video: Resolve(parent.Video, child.Video),
+		Team: Resolve(parent.Team, child.Team),
+		Council: Resolve(parent.Council, child.Council),
+		CrossProjectShare: Resolve(parent.CrossProjectShare, child.CrossProjectShare),
+		AutonomousRoutines: Resolve(parent.AutonomousRoutines, child.AutonomousRoutines),
+		ConfigAuthority: ResolveAuthority(parent.ConfigAuthority, child.ConfigAuthority),
+	}
+}
+
+// ResolvePolicyChain applies successive Workspace, Agent and execution
+// overrides without allowing any descendant to restore a denied capability.
+func ResolvePolicyChain(project Policy, descendants ...Policy) Policy {
+	effective := ResolvePolicy(project, Policy{})
+	for _, child := range descendants {
+		effective = ResolvePolicy(effective, child)
+	}
+	return effective
+}

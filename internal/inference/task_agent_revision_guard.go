@@ -11,6 +11,9 @@ import (
 type taskAgentProfileRevision struct{
  ProfileID string
  Revision int64
+ // Unlike editable instructions, the Agent capability policy has an
+ // independent revision head. Both must stay stable across queued inference.
+ PolicyRevision int64
 }
 
 // pinnedAgentProfileAtInference re-reads the Task's canonical completion
@@ -35,18 +38,28 @@ func(s *Service)pinnedAgentProfileAtInference(ctx context.Context,cmd ExecuteCom
  if id==""||id=="agent.md"||strings.EqualFold(id,"onepane-default"){
   return taskAgentProfileRevision{},nil
  }
- var rev int64
- err=s.scopes.DB.QueryRowContext(ctx,`SELECT revision FROM agent_profiles
-  WHERE id=? AND workspace_id=? AND status='active'`,id,cmd.WorkspaceID).Scan(&rev)
- if err!=nil||rev<1{
-  return taskAgentProfileRevision{},fmt.Errorf("%w: Task Agent profile missing, archived or foreign",ErrInformationFlow)
+ var promptRevision,policyRevision int64
+ var missingPolicyRevision int
+ // Resolve active Agent ownership, prompt revision and policy-head
+ // provenance in one SQLite statement. A dangling Agent policy head is
+ // never treated as a legacy inherited-permissions profile.
+ err=s.scopes.DB.QueryRowContext(ctx,`SELECT a.revision,COALESCE(h.revision,0),
+  CASE WHEN h.revision IS NOT NULL AND r.revision IS NULL THEN 1 ELSE 0 END
+  FROM agent_profiles a
+  LEFT JOIN agent_policy_heads h ON h.profile_id=a.id
+  LEFT JOIN agent_policy_revisions r
+    ON r.profile_id=h.profile_id AND r.revision=h.revision AND r.workspace_id=a.workspace_id
+  WHERE a.id=? AND a.workspace_id=? AND a.status='active'`,id,cmd.WorkspaceID).
+  Scan(&promptRevision,&policyRevision,&missingPolicyRevision)
+ if err!=nil||promptRevision<1||missingPolicyRevision!=0 {
+  return taskAgentProfileRevision{},fmt.Errorf("%w: Task Agent prompt or policy missing, revoked or foreign",ErrInformationFlow)
  }
- return taskAgentProfileRevision{ProfileID:id,Revision:rev},nil
+ return taskAgentProfileRevision{ProfileID:id,Revision:promptRevision,PolicyRevision:policyRevision},nil
 }
 
-// A custom Agent may change while the inference runner is queued. Even if
-// the model routing choice and Task feature grant remain valid, a prompt
-// compiled under a retired Agent revision must not cross a transport.
+// A custom Agent or its independent deny-only capability policy may change
+// while the inference runner is queued. Even if a feature check happens to
+// allow the current action, the queued request cannot mix Agent revisions.
 func(s *Service)revalidateTaskAgentBeforeTransport(ctx context.Context,cmd ExecuteCommand,
  expected taskAgentProfileRevision)error{
  current,err:=s.pinnedAgentProfileAtInference(ctx,cmd)

@@ -173,12 +173,11 @@ func (s *Service) contextSnapshot(ctx context.Context, projectID, requestedPWS s
 	}
 	if selected.ID == "" && len(pwsRows) > 0 { selected = pwsRows[0] }
 	mode, teamID := workspaceExecutionProfile(selected.Settings)
-	tasks := []map[string]any{}
-	tr, _ := s.db.QueryContext(ctx, `SELECT id,objective,state,scheduling_class,priority,created_at,updated_at FROM tasks WHERE project_id=? ORDER BY updated_at DESC LIMIT 24`, projectID)
-	if tr!=nil { defer tr.Close(); for tr.Next(){var idv,obj,st,sc string;var pr int;var ca,ua int64;if tr.Scan(&idv,&obj,&st,&sc,&pr,&ca,&ua)==nil{tasks=append(tasks,map[string]any{"id":idv,"objective":obj,"state":st,"scheduling_class":sc,"priority":pr,"created_at":ca,"updated_at":ua})}} }
-	events := []map[string]any{}
-	er,_:=s.db.QueryContext(ctx, `SELECT sequence,event_type,aggregate_type,aggregate_id,occurred_at FROM events WHERE workspace_id=? AND (aggregate_id=? OR json_extract(payload_json,'$.project_id')=? OR aggregate_id IN (SELECT id FROM tasks WHERE project_id=?)) ORDER BY sequence DESC LIMIT 20`,workspaceID,projectID,projectID,projectID)
-	if er!=nil { defer er.Close(); for er.Next(){var seq,at int64;var et,ag,aid string;if er.Scan(&seq,&et,&ag,&aid,&at)==nil{events=append(events,map[string]any{"sequence":seq,"type":et,"aggregate_type":ag,"aggregate_id":aid,"occurred_at":at})}} }
+	// Task objectives and event identities are Workspace-private; the
+	// Project Orchestrator receives only selected Workspace activity plus
+	// bounded Project aggregate events. No implicit peer evidence sharing.
+	tasks, events, err := workspaceOrchestratorActivity(ctx, s.db, workspaceID, projectID, selected.ID)
+	if err != nil { return nil, "", "", "", fmt.Errorf("read scoped Project Workspace activity: %w", err) }
 	// Runtime context belongs to this precise canonical Workspace. A
 	// Project-wide ORDER BY updated_at used to impersonate whichever sibling
 	// runtime last changed as the currently selected development environment.

@@ -424,7 +424,10 @@ func (s *Server) remoteInference(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "invalid inference request"})
 		return
 	}
-	if s.models != nil && !s.models.FederatedInferenceAllowed(r.Context(), in.DeploymentID) {
+	// Missing local model-admission authority is a denial, not an
+	// implicit permit. Inference must never bypass admission merely
+	// because the model manager was not initialized or has been disabled.
+	if s.models == nil || !s.models.FederatedInferenceAllowed(r.Context(), in.DeploymentID) {
 		writeJSON(w, 403, map[string]string{"error": "model deployment is not admitted for federated inference"})
 		return
 	}

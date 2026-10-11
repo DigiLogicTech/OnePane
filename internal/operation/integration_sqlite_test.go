@@ -17,6 +17,12 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/verification"
 )
 
+// Mutating Tool policy requires a healthy watchdog. The historical test
+// predates that admission gate; supply only the test's explicit healthy
+// watchdog rather than relaxing production mutation policy.
+type healthyOperationTestWatchdog struct{}
+func (healthyOperationTestWatchdog) Healthy(context.Context) bool {return true}
+
 type mutationAdapter struct{ calls int }
 
 func (a *mutationAdapter) ID() string      { return "test.mutation.adapter" }
@@ -67,6 +73,7 @@ func TestSQLiteOperationCoordinatorMutationLifecycle(t *testing.T) {
 	}
 	sys := system.NewService(db.SQL(), db, clock.Real{})
 	pol := policy.NewEngine(auth, sys, clock.Real{})
+	pol.SetWatchdog(healthyOperationTestWatchdog{})
 	reg := tool.NewRegistry()
 	adapter := &mutationAdapter{}
 	if err := reg.Register(tool.Definition{ID: "test.resource.set", Version: "1", CapabilityID: "test.resource.set", Mode: authority.ActionMutate, AdapterID: adapter.ID(), AdapterVersion: adapter.Version(), Risk: policy.RiskMedium, MinimumVerification: policy.VerificationV2, MinimumApproval: policy.ApprovalNone}, adapter); err != nil {

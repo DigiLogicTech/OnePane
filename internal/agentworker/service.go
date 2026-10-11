@@ -101,7 +101,7 @@ func (s *Service) ensureWorkspaceAccess(ctx context.Context, workspaceID string)
 		return fmt.Errorf("load Workspace %s status: %w", workspaceID, err)
 	}
 	if currentStatus != "active" {
-		return fmt.Errorf("Workspace %s is not active", workspaceID)
+		return fmt.Errorf("Workspace %s is not active (state=%s)", workspaceID, currentStatus)
 	}
 	if err := s.EnsureSystemPrincipals(ctx); err != nil {
 		return err

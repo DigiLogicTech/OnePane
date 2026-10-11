@@ -587,6 +587,11 @@ async function a31RenderControlChat(){
     const workspaces=a31Array(workspaceRows).filter(w=>w.status==="active");
     const selectedWorkspace=workspaces.find(w=>w.id===a31AssistantWorkspaceID)||null;
     if(!selectedWorkspace)a31AssistantWorkspaceID="";
+    const canRun=!!project&&workspaces.length>0;
+    const workspaceAdvice=project&&workspaces.length>1&&!selectedWorkspace?
+      '<div class="control-chat-model-status">Multiple isolated Workspaces exist. Select a Workspace to queue Run immediately if the local planner is unavailable; automatic selection requires a successful planning decision.</div>':
+      project&&!workspaces.length?
+      '<div class="control-chat-model-status">Create an active Project Workspace before running tasks.</div>':'';
     const selector=`<div class="control-chat-selectors">
       <label>Context<select id="controlChatProject" aria-label="Assistant Project context">
         <option value="" ${!project?'selected':''}>General conversation</option>
@@ -601,9 +606,10 @@ async function a31RenderControlChat(){
     const prompt=project?"Ask OnePane to plan or execute within the selected Project…":"Ask OnePane a general question…";
     body.innerHTML=`${selector}<div class="control-chat-scope">${escapeHtml(scope)}</div>
       ${project?'<div class="control-chat-model-status">Project execution uses the authorised Project Orchestrator and Workspace routing; conversation alone grants no tools.</div>':picker.ui}
+      ${workspaceAdvice}
       <div class="control-chat-history">${a31Array(turns).map(t=>`<div class="control-chat-message ${escapeHtml(t.role||"")}"><strong>${escapeHtml(t.role||"OnePane")}</strong><span>${escapeHtml(t.content||t.text||"")}</span></div>`).join("")}</div>
       <form id="a31ControlChatForm" class="control-chat-form"><textarea rows="3" placeholder="${escapeHtml(prompt)}"></textarea>
-        <div><button class="btn" type="submit">Ask</button><button class="btn primary" type="submit" name="run" value="1" ${project?'':'disabled title="Select a Project before running tasks"'}>Run</button></div>
+        <div><button class="btn" type="submit">Ask</button><button class="btn primary" type="submit" name="run" value="1" ${canRun?'':'disabled title="Select a Project with an active Workspace before running tasks"'}>Run</button></div>
       </form>`;
     if(!project)a31BindAssistantModelPicker(id,picker);
     $("#controlChatProject").onchange=async e=>{
@@ -620,7 +626,7 @@ async function a31RenderControlChat(){
       const content=e.currentTarget.querySelector("textarea").value.trim();
       if(!content)return;
       const run=e.submitter?.value==="1";
-      if(run&&!project){notice("Select a Project to run tasks.","bad");return}
+      if(run&&!canRun){notice("Select an active Project Workspace to run tasks.","bad");return}
       try{
         await apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/turns`,{method:"POST",
           body:JSON.stringify({content,project_id:project?.id||"",project_workspace_id:selectedWorkspace?.id||"",allow_task_creation:run,force_task:run})});

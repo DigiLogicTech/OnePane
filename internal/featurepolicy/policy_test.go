@@ -241,3 +241,22 @@ func TestInvalidPolicyValuesNeverAuthoriseExecution(t *testing.T) {
 		}
 	}
 }
+
+func TestInheritedRootNeverGrantsCloud(t *testing.T) {
+	project := AssistedDefaults()
+	effective := ResolvePolicyChain(project)
+	if effective.CloudRouting == Enabled || effective.CanUseCloudModel() {
+		t.Fatalf("unresolved project cloud permission was granted: %+v", effective)
+	}
+}
+
+func TestExplicitRootCloudGrantPropagatesOnlyUntilDenied(t *testing.T) {
+	project := AssistedDefaults()
+	project.CloudRouting = Enabled
+	if !ResolvePolicyChain(project).CanUseCloudModel() {
+		t.Fatal("explicit project cloud grant not inherited")
+	}
+	if ResolvePolicyChain(project, Policy{CloudRouting: Disabled}, Policy{CloudRouting: Enabled}).CanUseCloudModel() {
+		t.Fatal("agent overrode Workspace cloud denial")
+	}
+}

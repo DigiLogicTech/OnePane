@@ -58,9 +58,19 @@ func TestNewProjectStarterWorkspaceIsAtomicUnprivilegedAndHumanAuthorised(t *tes
   WorkspaceID:"tenant",Name:"API without a starter",CreatedBy:"operator",
  })
  if err!=nil{t.Fatal(err)}
+ // Compatibility clients intentionally receive a synthetic "Main"
+ // view even with no persisted canonical Project Workspace. Assert the
+ // database record count rather than mistaking that virtual UI adapter for
+ // a new user-authorised Workspace.
  legacyViews,err:=svc.WorkspaceViews(ctx,legacy.ID)
- if err!=nil||len(legacyViews)!=0{
-  t.Fatalf("legacy API Project unexpectedly acquired Workspace: %+v %v",legacyViews,err)
+ if err!=nil||len(legacyViews)!=1||legacyViews[0].Name!="Main"{
+  t.Fatalf("existing legacy compatibility view changed: %+v %v",legacyViews,err)
+ }
+ var persistedLegacy int
+ if err:=db.SQL().QueryRowContext(ctx,
+  "SELECT COUNT(*) FROM project_workspaces WHERE project_id=?",legacy.ID).Scan(&persistedLegacy);
+  err!=nil||persistedLegacy!=0{
+  t.Fatalf("legacy Project unexpectedly persisted canonical Workspace: %d %v",persistedLegacy,err)
  }
  if _,err:=svc.CreateProject(ctx,CreateProjectCommand{
   WorkspaceID:"tenant",Name:"Robot starter",CreatedBy:"robot",

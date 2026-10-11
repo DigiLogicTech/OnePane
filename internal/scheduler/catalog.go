@@ -246,7 +246,10 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 			if dc.ToolCallback != nil {
 				cand.ToolCallback = *dc.ToolCallback
 			}
-			if dc.Compute.Mode != "" {
+			// A provider-backed route remains remote/cloud until verified
+			// destination attestation exists; model metadata cannot turn it
+			// into an apparent CPU or GPU placement on the current host.
+			if !providerID.Valid && dc.Compute.Mode != "" {
 				cand.ComputeMode = dc.Compute.Mode
 			}
 			if dc.Compute.Backend != "" {
@@ -257,7 +260,7 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 			if cand.RuntimeBackend == "" {
 				cand.RuntimeBackend = firstNonBlank(dc.Placement.Backend, dc.RuntimeBackend)
 			}
-			if dc.Compute.Mode == "" && dc.Placement.Mode != "" {
+			if !providerID.Valid && dc.Compute.Mode == "" && dc.Placement.Mode != "" {
 				hasCPU, hasGPU := false, false
 				for _, dev := range dc.Placement.Devices {
 					if dev.Kind == "cpu" {

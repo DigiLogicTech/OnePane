@@ -5,6 +5,7 @@ package projectworkspace
 import(
  "context"
  "encoding/json"
+ "errors"
  "testing"
 
  "github.com/DigiLogicTech/OnePane/internal/clock"
@@ -110,7 +111,7 @@ func TestContinuousGoalRegistrationRequiresL5AndCanonicalWorkspace(t *testing.T)
  if _,err=svc.TransitionContinuousGoal(ctx,TransitionContinuousGoalCommand{
    ProjectID:p.ID,GoalID:g.ID,TargetStatus:"retired",
    ExpectedRevision:paused.Revision,ActorPrincipalID:"robot",
- });err!=ErrPrincipalIneligible{t.Fatalf("Agent could retire a goal: %v",err)}
+ });!errors.Is(err,ErrPrincipalIneligible){t.Fatalf("Agent could retire a goal: %v",err)}
  retired,err:=svc.TransitionContinuousGoal(ctx,TransitionContinuousGoalCommand{
    ProjectID:p.ID,GoalID:g.ID,TargetStatus:"retired",
    ExpectedRevision:paused.Revision,ActorPrincipalID:"owner",

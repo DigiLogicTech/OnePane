@@ -145,14 +145,8 @@ func (g *Gateway) Invoke(ctx context.Context, cmd InvokeCommand) (Invocation, er
 	// Authoritative feature policy restrictions are additional to the existing
 	// lease, approval, adapter and Workspace sandbox checks. Never trust
 	// a tool payload as the source of Project/Workspace permissions.
-	if action := scopedFileAction(binding.Definition.CapabilityID, binding.Definition.ID); action != "" && cmd.TaskID != nil && g.scopes.DB != nil {
-		allowed, scopeErr := g.scopes.AuthorizeTask(ctx, cmd.WorkspaceID, *cmd.TaskID, action)
-		if scopeErr != nil {
-			return g.fail(ctx, inv, meta, "feature_policy_unavailable", "scoped feature policy unavailable", ErrPolicyDenied)
-		}
-		if !allowed {
-			return g.fail(ctx, inv, meta, "feature_policy_denied", "scoped feature policy denied file access", ErrPolicyDenied)
-		}
+	if err := g.authorizeToolFeatureActions(ctx, cmd, binding.Definition); err != nil {
+		return g.fail(ctx, inv, meta, "feature_policy_denied", "scoped tool action is unavailable or denied", ErrPolicyDenied)
 	}
 	if err := g.store.ValidateExecutionContext(ctx, cmd.WorkspaceID, cmd.PrincipalID, cmd.TaskID, cmd.AttemptID); err != nil {
 		return g.fail(ctx, inv, meta, "execution_context_invalid", err.Error(), fmt.Errorf("%w: %v", ErrExecutionContext, err))
@@ -201,12 +195,9 @@ func (g *Gateway) Invoke(ctx context.Context, cmd InvokeCommand) (Invocation, er
 
 	// Re-evaluate revocable grants immediately before side effects. A policy
 	// change while consuming permits or an authority lease must not be bypassed.
-	if action := scopedFileAction(binding.Definition.CapabilityID, binding.Definition.ID); action != "" && cmd.TaskID != nil && g.scopes.DB != nil {
-		allowed, scopeErr := g.scopes.AuthorizeTask(ctx, cmd.WorkspaceID, *cmd.TaskID, action)
-		if scopeErr != nil || !allowed {
-			return g.failFrom(ctx, inv, meta, StatusRunning, "feature_policy_revoked",
-				"scoped file permission revoked before adapter invocation", ErrPolicyDenied)
-		}
+	if err := g.authorizeToolFeatureActions(ctx, cmd, binding.Definition); err != nil {
+		return g.failFrom(ctx, inv, meta, StatusRunning, "feature_policy_revoked",
+			"scoped tool permission revoked before adapter invocation", ErrPolicyDenied)
 	}
 
 	result, callErr := callAdapter(ctx, binding.Adapter, AdapterRequest{

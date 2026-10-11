@@ -81,8 +81,8 @@ func TestPairedNodeManifestBecomesSchedulerCandidate(t *testing.T) {
 	for _, c := range cands {
 		if c.Kind == scheduler.CandidateModel && c.DisplayName == "example/remote" {
 			found = true
-			if !c.Schedulable {
-				t.Fatalf("remote candidate not schedulable: %+v", c)
+			if !c.Schedulable || !c.TrustedNodeVerified {
+				t.Fatalf("paired remote candidate has no verified trust: %+v", c)
 			}
 			if c.Destination.Kind != "trusted_node" {
 				t.Fatalf("destination=%s", c.Destination.Kind)
@@ -100,8 +100,9 @@ func TestPairedNodeManifestBecomesSchedulerCandidate(t *testing.T) {
 		if err != nil { t.Fatal(err) }
 		for _, candidate := range items {
 			if candidate.DisplayName == "example/remote" {
-				if candidate.Schedulable != schedulable {
-					t.Fatalf("%s: remote was schedulable=%t, want %t", label, candidate.Schedulable, schedulable)
+				if candidate.Schedulable != schedulable || candidate.TrustedNodeVerified != schedulable {
+					t.Fatalf("%s: remote status=%t verified=%t, want %t", label,
+						candidate.Schedulable, candidate.TrustedNodeVerified, schedulable)
 				}
 				return
 			}

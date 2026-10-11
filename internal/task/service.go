@@ -498,6 +498,48 @@ func (s *Service) ContinueAfterVerification(ctx context.Context, cmd TransitionC
 	return s.transitionWithAttempt(ctx, cmd, StateRunning, AttemptRunning, "task.verification_retry")
 }
 
+// ContinueAfterVerificationInTransaction resumes exactly the original
+// waiting Attempt after inconclusive/failed assurance. The Agent Worker
+// orchestrator commits the corresponding Worker transition and immutable
+// journal in the SAME transaction; no half-resumed Task can escape.
+func (s *Service) ContinueAfterVerificationInTransaction(
+ ctx context.Context,tx storage.Tx,cmd TransitionCommand,attemptID,workerPrincipalID string,
+)error{
+ if tx==nil||strings.TrimSpace(cmd.TaskID)==""||cmd.ExpectedRevision<1||
+  strings.TrimSpace(attemptID)==""||strings.TrimSpace(workerPrincipalID)==""{
+  return ErrInvalidCommand
+ }
+ t,err:=s.repo.GetForUpdate(ctx,tx,cmd.TaskID)
+ if err!=nil{return err}
+ if t.Revision!=cmd.ExpectedRevision{return ErrRevisionConflict}
+ if t.State!=StateVerifying||!CanTransition(t.State,StateRunning){
+  return fmt.Errorf("%w: assurance retry requires VERIFYING Task",ErrInvalidTransition)
+ }
+ if err:=s.requireRuntimeDependencyIntegrityTx(ctx,tx,t);err!=nil{return err}
+ active,err:=s.repo.ActiveAttempt(ctx,tx,t.ID)
+ if err!=nil{return err}
+ if active==nil||active.ID!=attemptID||active.State!=AttemptWaiting||
+  active.WorkerPrincipalID==nil||*active.WorkerPrincipalID!=workerPrincipalID{
+  return ErrInvalidAttempt
+ }
+ now:=s.clock.UnixMilli()
+ if err:=s.repo.TransitionAttempt(ctx,tx,active.ID,AttemptWaiting,AttemptRunning,now);err!=nil{return err}
+ if err:=s.repo.Transition(ctx,tx,transitionRecord{
+  TaskID:t.ID,ExpectedRevision:t.Revision,From:StateVerifying,To:StateRunning,UpdatedAt:now,
+ });err!=nil{return err}
+ eventID,err:=s.ids.New("evt")
+ if err!=nil{return err}
+ payload,_:=json.Marshal(map[string]any{
+  "task_id":t.ID,"from":StateVerifying,"to":StateRunning,
+  "attempt_id":attemptID,"reason":cmd.Reason,"revision":t.Revision+1,
+ })
+ return s.events.Append(ctx,tx,event.Event{
+  ID:eventID,WorkspaceID:&t.WorkspaceID,Type:"task.verification_retry",
+  AggregateType:"task",AggregateID:t.ID,ActorPrincipalID:cmd.ActorPrincipalID,
+  RequestID:cmd.RequestID,TraceID:cmd.TraceID,Payload:payload,OccurredAt:now,
+ })
+}
+
 func (s *Service) MarkBlocked(ctx context.Context, cmd TransitionCommand) (Task, error) {
 	return s.transitionWithOptionalAttempt(ctx, cmd, StateBlocked, AttemptWaiting, "task.blocked")
 }

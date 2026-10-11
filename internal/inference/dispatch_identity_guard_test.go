@@ -96,3 +96,52 @@ func TestInferenceLastDispatchBlocksProviderAndPairedNodeTrustRevocation(t *test
   t.Fatalf("unpaired Node still admitted: %v",err)
  }
 }
+
+
+func TestColdLoadResidencyAndVerifiedContextUpdatesDoNotCancelQueuedInference(t *testing.T){
+ ctx:=context.Background()
+ svc,d,m,p:=identityGuardFixture(t,false,false)
+ db:=svc.repo.(*sqlRepository).db
+ if _,err:=db.ExecContext(ctx,`UPDATE model_deployments SET
+  residency_state='resident',context_max_verified=32768,context_max_reported=32768,
+  revision=revision+1,updated_at=2 WHERE id='d'`);err!=nil{t.Fatal(err)}
+ current,err:=svc.repo.Deployment(ctx,"d")
+ if err!=nil{t.Fatal(err)}
+ if current.Revision<=d.Revision||current.ResidencyState==nil||
+  *current.ResidencyState!=ResidencyResident{
+  t.Fatalf("test did not change model residency: %+v",current)
+ }
+ if !sameInferenceSecurityDeployment(d,current){
+  t.Fatal("safe local model cold-load observations blocked an otherwise valid route")
+ }
+ if err:=svc.requireCurrentDispatchIdentity(ctx,d,m,p);err!=nil{
+  t.Fatalf("safe cold-load blocked Task inference: %v",err)
+ }
+ // A runtime or endpoint substitution remains denied even when it happens
+ // alongside benign residency changes; revision equality is not trusted.
+ if _,err:=db.ExecContext(ctx,`UPDATE model_deployments
+  SET runtime_config_json='{"base_url":"https://unapproved.example"}',revision=revision+1
+  WHERE id='d'`);err!=nil{t.Fatal(err)}
+ if err:=svc.requireCurrentDispatchIdentity(ctx,d,m,p);!errors.Is(err,ErrInformationFlow){
+  t.Fatalf("runtime endpoint changed while cold-loading: %v",err)
+ }
+}
+
+func TestInferenceRejectsRollbackOrReplacementDespiteValidResidency(t *testing.T){
+ state:=ResidencyLoading
+ base:=ModelDeployment{ID:"original",ModelID:"m",Status:DeploymentReady,
+  Revision:7,DeploymentFingerprint:"pinned",ResidencyState:&state}
+ after:=base
+ reported:=int64(4096)
+ after.ContextMaxReported=&reported
+ after.Revision=8
+ after.UpdatedAt=2
+ state2:=ResidencyResident
+ after.ResidencyState=&state2
+ if !sameInferenceSecurityDeployment(base,after){t.Fatal("valid residency progression rejected")}
+ after.Revision=6
+ if sameInferenceSecurityDeployment(base,after){t.Fatal("rollback to older catalog revision admitted")}
+ after.Revision=8
+ after.DeploymentFingerprint="replaced"
+ if sameInferenceSecurityDeployment(base,after){t.Fatal("runtime identity substituted under residency change")}
+}

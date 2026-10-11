@@ -147,6 +147,82 @@ func TestProjectTaskGraphAtomicDependencyAndIdempotency(t *testing.T){
  for _,n:=range restoredEdge.Nodes{
   if n.DependencyDrift{t.Fatalf("approved edge restoration failed: %+v",n)}
  }
+ // Advisory graph readiness must not claim 'admission_eligible'
+ // when the actual Task admission transaction rejects a changed edge mode.
+ assertGraphDrift:=func(label,key string){
+  t.Helper()
+  t.Run(label,func(t *testing.T){
+   reported,e:=svc.TaskGraph(ctx,p.ID,graph.ID)
+   if e!=nil{t.Fatal(e)}
+   var n TaskGraphNode
+   for _,item:=range reported.Nodes{if item.Key==key{n=item}}
+   if !n.DependencyDrift||n.Readiness!="needs_attention"||
+    reported.Status!="needs_attention"{
+    t.Fatalf("graph falsely reported admissible while runtime rejects drift: %+v",reported)
+   }
+  })
+ }
+ // Both 'any' and soft are disallowed by the immutable hard/all approval.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE task_dependencies
+  SET dependency_mode='any' WHERE task_id=? AND depends_on_task_id=?`,
+  lookup["story"].TaskID,lookup["assets"].TaskID);err!=nil{t.Fatal(err)}
+ assertGraphDrift("weakened_any_mode","story")
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE task_dependencies
+  SET dependency_mode='all',dependency_type='soft'
+  WHERE task_id=? AND depends_on_task_id=?`,
+  lookup["story"].TaskID,lookup["assets"].TaskID);err!=nil{t.Fatal(err)}
+ assertGraphDrift("soft_edge_hidden_by_former_hard_filter","story")
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE task_dependencies
+  SET dependency_type='hard' WHERE task_id=? AND depends_on_task_id=?`,
+  lookup["story"].TaskID,lookup["assets"].TaskID);err!=nil{t.Fatal(err)}
+ // A newly appended soft foreign predecessor must also be visible as
+ // drift, but its opaque Task identifier must never be revealed.
+ foreignTask,err:=task.NewService(db.SQL(),db,clock.Real{}).Create(ctx,task.CreateCommand{
+  WorkspaceID:"tenant",ProjectID:&p.ID,ProjectWorkspaceID:&source.ID,
+  Objective:"Unreviewed unrelated soft predecessor",
+ })
+ if err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`INSERT INTO task_dependencies(
+  task_id,depends_on_task_id,dependency_type,dependency_mode,metadata_json)
+  VALUES(?,?,'soft','all','{}')`,lookup["story"].TaskID,foreignTask.ID);err!=nil{t.Fatal(err)}
+ assertGraphDrift("unapproved_soft_foreign_edge","story")
+ sanitized,err:=svc.TaskGraph(ctx,p.ID,graph.ID)
+ if err!=nil{t.Fatal(err)}
+ raw,_:=json.Marshal(sanitized)
+ if strings.Contains(string(raw),foreignTask.ID){
+  t.Fatal("foreign soft predecessor leaked its opaque Task identifier")
+ }
+ if _,err=db.SQL().ExecContext(ctx,`DELETE FROM task_dependencies
+  WHERE task_id=? AND depends_on_task_id=?`,
+  lookup["story"].TaskID,foreignTask.ID);err!=nil{t.Fatal(err)}
+ // A predecessor removed from its approved Workspace must not display
+ // ready merely because its Task state was already COMPLETE.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_workspaces
+  SET status='archived' WHERE id=?`,source.ID);err!=nil{t.Fatal(err)}
+ assertGraphDrift("archived_predecessor_workspace","story")
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_workspaces
+  SET status='active' WHERE id=?`,source.ID);err!=nil{t.Fatal(err)}
+ // A suspended parent tenancy invalidates the actual Task admission and
+ // must be reflected as scope drift on EVERY graph node.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE workspaces
+  SET status='suspended' WHERE id='tenant'`);err!=nil{t.Fatal(err)}
+ inactiveTenant,err:=svc.TaskGraph(ctx,p.ID,graph.ID)
+ if err!=nil{t.Fatal(err)}
+ if inactiveTenant.Status!="needs_attention"{t.Fatalf("suspended tenancy falsely admitted graph: %+v",inactiveTenant)}
+ for _,node:=range inactiveTenant.Nodes{
+  if !node.ScopeDrift||node.Readiness!="needs_attention"{
+   t.Fatalf("suspended tenant not visible on node %s: %+v",node.Key,node)
+  }
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE workspaces
+  SET status='active' WHERE id='tenant'`);err!=nil{t.Fatal(err)}
+ canonical,err:=svc.TaskGraph(ctx,p.ID,graph.ID)
+ if err!=nil{t.Fatal(err)}
+ for _,node:=range canonical.Nodes{
+  if node.DependencyDrift||node.ScopeDrift{
+   t.Fatalf("restored immutable graph remained falsely in drift: %+v",node)
+  }
+ }
  // Historical graphs without independently attested predecessor snapshots
  // must not be silently grandfathered into an unsafe worker recovery.
  if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_orchestrator_task_graph_nodes

@@ -42,6 +42,8 @@ assertContains(foundation,'value="continuous_operations"','Level 5 is an explici
 assertContains(foundation,'name="autonomous_local_tasks" checked',"new Project setup must offer the default Level 4 local Task autonomy option");
 assertContains(foundation,"AutonomousRoutines:f.autonomous_local_tasks?'enabled':'disabled'","autonomy must be an explicit user-selected Project feature policy");
 assertContains(foundation,"create_starter_workspace:true","new Project dialog must request atomic canonical starter Workspace");
+assertContains(foundation,"initialObjective.trim().slice(0,4096)","Assistant draft must be length-bounded");
+assertContains(foundation,'${escapeHtml(suggestedObjective)}',"Assistant draft must be escaped in a human-reviewed form");
 for(const marker of ['name="initial_objective"','name="queue_initial_task" checked',
  "objective,project_workspace_id:starter.id","force_task:true,allow_task_creation:true",
  "Project created, but initial Task was not queued:"]){

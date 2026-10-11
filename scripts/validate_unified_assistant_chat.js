@@ -21,6 +21,10 @@ for(const token of [
 ])assert(render.includes(token),`unified chat contract missing: ${token}`);
 assert(!render.includes("allow_task_creation:run,force_task:false"),"Run still depends on a model choosing the Task action");
 assert(render.includes("const canRun=!!project&&workspaces.length>0"),"Run enabled without canonical active Workspace");
+for(const token of ['id="a31StartProjectFromAssistant"',"openProjectDialog(objective)",
+ "Start Project…","if(!project){"]){
+ assert(render.includes(token),"general Assistant Project creation shortcut missing "+token);
+}
 assert(render.includes("Multiple isolated Workspaces exist."),"automatic placement ambiguity must be explained");
 assert(render.includes("const picker=project?null:await a31AssistantModelPicker(id)"),"Project chat may needlessly probe Assistant models");
 assert(assistant.includes("ProjectWorkspaceID:selectedWorkspace"),"Assistant did not forward Workspace scope");

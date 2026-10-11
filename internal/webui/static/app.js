@@ -678,9 +678,17 @@ async function a31RenderControlChat(){
       ${workspaceAdvice}
       <div class="control-chat-history">${a31Array(turns).map(t=>`<div class="control-chat-message ${escapeHtml(t.role||"")}"><strong>${escapeHtml(t.role||"OnePane")}</strong><span>${escapeHtml(t.content||t.text||"")}</span></div>`).join("")}</div>
       <form id="a31ControlChatForm" class="control-chat-form"><textarea rows="3" placeholder="${escapeHtml(prompt)}"></textarea>
-        <div><button class="btn" type="submit">Ask</button><button class="btn primary" type="submit" name="run" value="1" ${canRun?'':'disabled title="Select a Project with an active Workspace before running tasks"'}>Run</button></div>
+        <div><button class="btn" type="submit">Ask</button><button class="btn primary" type="submit" name="run" value="1" ${canRun?'':'disabled title="Select a Project with an active Workspace before running tasks"'}>Run</button>${!project?'<button class="btn" id="a31StartProjectFromAssistant" type="button">Start Project…</button>':''}</div>
       </form>`;
-    if(!project)a31BindAssistantModelPicker(id,picker);
+    if(!project){
+      a31BindAssistantModelPicker(id,picker);
+      // General chat must obtain human Project creation confirmation.
+      const start=$('#a31StartProjectFromAssistant');
+      if(start)start.onclick=()=>{
+        const objective=String($('#a31ControlChatForm textarea')?.value||'').trim();
+        openProjectDialog(objective);
+      };
+    }
     $("#controlChatProject").onchange=async e=>{
       const next=String(e.target.value||"");e.target.disabled=true;
       try{

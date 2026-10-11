@@ -18,6 +18,7 @@ type continuousGoalService interface{
  TransitionContinuousGoal(context.Context,projectworkspace.TransitionContinuousGoalCommand)(projectworkspace.ContinuousGoal,error)
  AttachGoalObservation(context.Context,projectworkspace.AttachGoalObservationCommand)(projectworkspace.GoalObservationReceipt,error)
  GoalObservations(context.Context,string,string)([]projectworkspace.GoalObservationReceipt,error)
+ GoalEvidenceCoverage(context.Context,string,string)(projectworkspace.GoalEvidenceCoverage,error)
 }
 
 func(s *Server)listProjectContinuousGoals(w http.ResponseWriter,r *http.Request){
@@ -115,4 +116,19 @@ func(s *Server)attachProjectGoalObservation(w http.ResponseWriter,r *http.Reques
   ExpectedRevision:input.ExpectedRevision,ActorPrincipalID:identity.PrincipalID,
  })
  respondDomain(w,receipt,err,http.StatusCreated)
+}
+
+
+// Coverage is a read-only projection of attached evidence, not proof of health.
+func(s *Server)getProjectGoalEvidenceCoverage(w http.ResponseWriter,r *http.Request){
+ identity,ok:=s.authenticate(w,r)
+ if !ok{return}
+ if s.projects==nil{writeError(w,http.StatusServiceUnavailable,"Project service unavailable");return}
+ project,err:=s.projects.Project(r.Context(),strings.TrimSpace(r.PathValue("projectID")))
+ if err!=nil{respondDomain(w,nil,err,0);return}
+ if !s.authorize(w,r,identity,project.WorkspaceID,"project.read"){return}
+ svc,ok:=s.projects.(continuousGoalService)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"goal evidence coverage unavailable");return}
+ coverage,err:=svc.GoalEvidenceCoverage(r.Context(),project.ID,strings.TrimSpace(r.PathValue("goalID")))
+ respondDomain(w,coverage,err,http.StatusOK)
 }

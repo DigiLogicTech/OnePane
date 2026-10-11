@@ -70,12 +70,29 @@ func TestL5EvidenceHTTPIsAuthorisedMetadataOnlyAndDoesNotActivateMonitoring(t *t
  if got:=call("GET","operator",route,"");got.Code!=200||!strings.Contains(got.Body.String(),"[]"){
   t.Fatalf("initial evidence list mismatch %d %s",got.Code,got.Body)
  }
+ coverageRoute:="/v1/projects/"+p.ID+"/continuous-goals/"+goal.ID+"/coverage"
+ if got:=call("GET","outsider",coverageRoute,"");got.Code!=403{
+  t.Fatalf("unauthorised evidence coverage read %d",got.Code)
+ }
+ if got:=call("GET","operator",coverageRoute,"");
+   got.Code!=200||!strings.Contains(got.Body.String(),`"evidence_state":"missing"`){
+  t.Fatalf("missing coverage mismatch %d %s",got.Code,got.Body.String())
+ }
  created:=call("POST","operator",route,attach)
  if created.Code!=201{t.Fatalf("evidence attestation failed %d %s",created.Code,created.Body)}
  var receipt projectworkspace.GoalObservationReceipt
  if err:=json.Unmarshal(created.Body.Bytes(),&receipt);err!=nil{t.Fatal(err)}
  if receipt.ObservationID!=obs.ID||receipt.IntegrityHash!=obs.IntegrityHash{
   t.Fatalf("incorrect receipt %+v",receipt)
+ }
+ coverage:=call("GET","operator",coverageRoute,"")
+ if coverage.Code!=200||!strings.Contains(coverage.Body.String(),`"evidence_state":"recent_attached"`)||
+  !strings.Contains(coverage.Body.String(),`"monitoring_active":false`){
+  t.Fatalf("coverage incorrectly claimed monitoring %d %s",coverage.Code,coverage.Body.String())
+ }
+ if strings.Contains(coverage.Body.String(),"RAW_VALUE_MUST_NOT_LEAK")||
+   strings.Contains(coverage.Body.String(),"host://secret-device"){
+  t.Fatal("coverage API leaked raw observation")
  }
  listed:=call("GET","operator",route,"")
  if listed.Code!=200||!strings.Contains(listed.Body.String(),receipt.ID){

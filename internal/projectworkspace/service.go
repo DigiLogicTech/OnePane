@@ -171,6 +171,9 @@ func (s *Service) CreateProject(ctx context.Context, cmd CreateProjectCommand) (
 	if err!=nil{return Project{},fmt.Errorf("%w: operating mode: %v",ErrInvalidCommand,err)}
 	grantExpansion,err:=featurepolicy.TrustedNodeGrantExpands([]byte("{}"),pol)
 	if err!=nil{return Project{},fmt.Errorf("%w: trusted Node policy: %v",ErrInvalidCommand,err)}
+	featureExpansion,err:=featurepolicy.FeaturePrivilegeExpands([]byte("{}"),pol)
+	if err!=nil{return Project{},fmt.Errorf("%w: feature policy: %v",ErrInvalidCommand,err)}
+	grantExpansion=grantExpansion||featureExpansion
 	idx, err := canonicalJSON(cmd.IndexingConfigJSON, "{}")
 	if err != nil {
 		return Project{}, fmt.Errorf("%w: indexing: %v", ErrInvalidCommand, err)
@@ -237,6 +240,9 @@ func (s *Service) UpdateProjectPolicy(ctx context.Context, cmd UpdateProjectPoli
 		}
 		expands,err:=featurepolicy.TrustedNodeGrantExpands(p.ProjectPolicyJSON,policy)
 		if err!=nil{return fmt.Errorf("%w: trusted Node policy: %v",ErrInvalidCommand,err)}
+		featureExpansion,err:=featurepolicy.FeaturePrivilegeExpands(p.ProjectPolicyJSON,policy)
+		if err!=nil{return fmt.Errorf("%w: feature policy: %v",ErrInvalidCommand,err)}
+		expands=expands||featureExpansion
 		if expands{
 			if err:=s.requireHumanNodeApproval(ctx,tx,p.WorkspaceID,cmd.ActorPrincipalID);err!=nil{return err}
 		} else if err := s.requireActor(ctx, tx, p.WorkspaceID, cmd.ActorPrincipalID); err != nil {

@@ -182,6 +182,55 @@ func TestTaskStartFailsClosedOnDeletedOrUnattestedApprovedGraphDependencies(t *t
  });!errors.Is(err,task.ErrHardDependencyUnsatisfied){
   t.Fatalf("orphaned graph Task bypassed Task start admission: %v",err)
  }
+ // Non-graph Workspace Tasks must have the identical active canonical
+ // ownership fence. A Task can be READY before its Workspace is archived;
+ // the Worker must still refuse to open an Attempt in that Workspace.
+ ordinaryWorld,err:=tasks.Create(ctx,task.CreateCommand{
+  WorkspaceID:"tenant",ProjectID:&p.ID,ProjectWorkspaceID:&workspaces[0],
+  Objective:"Ordinary Workspace Task after archive",
+ })
+ if err!=nil{t.Fatal(err)}
+ ordinaryWorld,err=tasks.MarkReady(ctx,task.TransitionCommand{
+  TaskID:ordinaryWorld.ID,ExpectedRevision:ordinaryWorld.Revision,
+ })
+ if err!=nil{t.Fatal(err)}
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_workspaces SET status='archived' WHERE id=?`,
+  workspaces[0]);err!=nil{t.Fatal(err)}
+ if _,_,err:=tasks.Start(ctx,task.StartCommand{
+  TaskID:ordinaryWorld.ID,ExpectedRevision:ordinaryWorld.Revision,
+ });!errors.Is(err,task.ErrHardDependencyUnsatisfied){
+  t.Fatalf("ordinary Task admitted into archived Workspace: %v",err)
+ }
+ var attemptsInArchived int
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM task_attempts
+  WHERE task_id=?`,ordinaryWorld.ID).Scan(&attemptsInArchived);err!=nil{t.Fatal(err)}
+ if attemptsInArchived!=0{t.Fatalf("archived Workspace opened %d Task Attempts",attemptsInArchived)}
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_workspaces SET status='active' WHERE id=?`,
+  workspaces[0]);err!=nil{t.Fatal(err)}
+ if _,_,err:=tasks.Start(ctx,task.StartCommand{
+  TaskID:ordinaryWorld.ID,ExpectedRevision:ordinaryWorld.Revision,
+ });err!=nil{t.Fatalf("reactivated ordinary Workspace did not admit Task: %v",err)}
+ // Disabling the overarching Project must also deny already-READY
+ // ordinary Workspace Tasks, without changing their persisted state.
+ ordinaryAsset,err:=tasks.Create(ctx,task.CreateCommand{
+  WorkspaceID:"tenant",ProjectID:&p.ID,ProjectWorkspaceID:&workspaces[2],
+  Objective:"Ordinary Task under inactive Project",
+ })
+ if err!=nil{t.Fatal(err)}
+ ordinaryAsset,err=tasks.MarkReady(ctx,task.TransitionCommand{
+  TaskID:ordinaryAsset.ID,ExpectedRevision:ordinaryAsset.Revision,
+ })
+ if err!=nil{t.Fatal(err)}
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE projects SET status='archived' WHERE id=?`,p.ID);err!=nil{t.Fatal(err)}
+ if _,_,err:=tasks.Start(ctx,task.StartCommand{
+  TaskID:ordinaryAsset.ID,ExpectedRevision:ordinaryAsset.Revision,
+ });!errors.Is(err,task.ErrHardDependencyUnsatisfied){
+  t.Fatalf("ordinary Task admitted under archived Project: %v",err)
+ }
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE projects SET status='active' WHERE id=?`,p.ID);err!=nil{t.Fatal(err)}
+ if _,_,err:=tasks.Start(ctx,task.StartCommand{
+  TaskID:ordinaryAsset.ID,ExpectedRevision:ordinaryAsset.Revision,
+ });err!=nil{t.Fatalf("reactivated Project did not admit ordinary Task: %v",err)}
  standalone,err:=tasks.Create(ctx,task.CreateCommand{
   WorkspaceID:"tenant",ProjectID:&p.ID,
   Objective:"Non-graph Task must keep its established admission path",

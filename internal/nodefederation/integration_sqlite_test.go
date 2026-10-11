@@ -213,6 +213,17 @@ func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {
 	}
 	if _,err:=dbB.SQL().ExecContext(ctx,`UPDATE node_capability_manifests
 	 SET expires_at=? WHERE peer_node_id='node-a'`,now+3600000);err!=nil{t.Fatal(err)}
+	if _,err:=dbB.SQL().ExecContext(ctx,`UPDATE node_pairings SET peer_confirmed=0
+	 WHERE peer_node_id='node-a'`);err!=nil{t.Fatal(err)}
+	oneSided:=in
+	oneSided.RequestID="one-sided-pairing"
+	var unusedPair RemoteInferenceResponse
+	if err:=postJSON(ctx,svcA.pinnedClient(identB.Fingerprint,true),
+	 ts.URL+"/federation/v1/inference",oneSided,&unusedPair);err==nil{
+	 t.Fatal("one-sided pairing unexpectedly authorized a model request")
+	}
+	if _,err:=dbB.SQL().ExecContext(ctx,`UPDATE node_pairings SET peer_confirmed=1
+	 WHERE peer_node_id='node-a'`);err!=nil{t.Fatal(err)}
 	server.models=nil
 	newReq:=in
 	newReq.RequestID="missing-local-model-admission"

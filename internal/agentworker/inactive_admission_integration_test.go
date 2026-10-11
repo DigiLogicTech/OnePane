@@ -5,7 +5,6 @@ package agentworker
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -112,6 +111,5 @@ func TestWorkerStartRollsBackTaskAndAttemptWhenJournalWriteFails(t *testing.T){
 	if err!=nil{t.Fatal(err)}
 	run,result:=svc.startRun(ctx,ready)
 	if run.ID!=""||result.Error==""{t.Fatalf("injected Worker write unexpectedly admitted: %+v %+v",run,result)}
-	if errors.Is(err,sql.ErrNoRows){t.Fatal("unexpected fixture state")}
 	assertAdmissionUnchanged(t,ctx,db,tasks,ready)
 }

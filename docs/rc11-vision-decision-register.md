@@ -2,8 +2,8 @@
 
 This register follows the **first assistant code/security review** of draft
 [PR #227](https://github.com/DigiLogicTech/OnePane/pull/227).
-The core vision and Decisions 1–2 (including Level 5 remediation approval
-defaults) have been confirmed by the user. Decisions 4–6 remain open.
+The core vision and Decisions 1–3 (including Level 5 remediation approval
+defaults and universal Workspace permissions) have been confirmed by the user. Decisions 4–6 remain open.
 Approval of a design direction does not grant runtime privileges, authorise
 release packaging, or approve a merge.
 

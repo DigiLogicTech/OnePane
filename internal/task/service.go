@@ -302,6 +302,13 @@ func (s *Service) StartInTransaction(ctx context.Context, tx storage.Tx, cmd Sta
  satisfied,err:=s.repo.HardDependenciesSatisfied(ctx,tx,t.ID)
  if err!=nil{return Task{},Attempt{},err}
  if !satisfied{return Task{},Attempt{},ErrHardDependencyUnsatisfied}
+ // Task graphs have an independent, operator-attested predecessor snapshot.
+ // The mutable live dependency table alone is not authorization to execute.
+ // Recheck that snapshot inside this same write transaction, after the
+ // ordinary hard-dependency predicate and before opening an Attempt.
+ if err:=approvedTaskGraphDependenciesTx(ctx,tx,t);err!=nil{
+  return Task{},Attempt{},err
+ }
  n,err:=s.repo.NextAttemptNumber(ctx,tx,t.ID)
  if err!=nil{return Task{},Attempt{},err}
  created:=Attempt{

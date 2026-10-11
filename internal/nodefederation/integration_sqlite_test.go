@@ -16,6 +16,13 @@ import (
 	sqliteStore "github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
 )
 
+// The test fixture exercises only inference admission, not the separately
+// governed remote install/management surface. Production uses LocalAI.
+type admittedLocalFederationModel struct{LocalModelManager}
+func(admittedLocalFederationModel)FederatedInferenceAllowed(_ context.Context, deploymentID string)bool{
+ return deploymentID=="local-dep"
+}
+
 type noSecrets struct{}
 
 func (noSecrets) Resolve(context.Context, string) (string, error) { return "", nil }
@@ -162,7 +169,7 @@ func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {
 	}
 	type echoExec struct{}
 	_ = echoExec{}
-	server := NewServer(svcB, echoExecutor{})
+	server := NewServer(svcB, echoExecutor{}, admittedLocalFederationModel{})
 	ts := httptest.NewUnstartedServer(server.Handler())
 	ts.TLS = server.TLSConfig()
 	ts.StartTLS()
@@ -187,6 +194,23 @@ func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {
 	}
 	if string(out.ResponseJSON) != string(out2.ResponseJSON) {
 		t.Fatal("idempotent replay changed response")
+	}
+	// A live paired mTLS peer must not gain inference authority if the
+	// receiver's local admission manager disappears after startup.
+	server.models=nil
+	newReq:=in
+	newReq.RequestID="missing-local-model-admission"
+	var denied RemoteInferenceResponse
+	if err:=postJSON(ctx,svcA.pinnedClient(identB.Fingerprint,true),
+		ts.URL+"/federation/v1/inference",newReq,&denied);err==nil{
+		t.Fatal("federated inference accepted without an admission authority")
+	}
+	var requests int
+	if err:=dbB.SQL().QueryRowContext(ctx,`SELECT COUNT(*)
+	 FROM node_federated_inference_receipts
+	 WHERE remote_request_id='missing-local-model-admission'`).Scan(&requests);err!=nil{t.Fatal(err)}
+	if requests!=0{
+		t.Fatal("unadmitted inference payload reached execution receipt storage")
 	}
 }
 

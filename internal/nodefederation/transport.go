@@ -426,7 +426,9 @@ func (s *Server) remoteInference(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "invalid inference request"})
 		return
 	}
-	if s.models != nil && !s.models.FederatedInferenceAllowed(r.Context(), in.DeploymentID) {
+	// An unavailable or uninitialized local model manager must never
+	// implicitly authorise a paired peer to run an arbitrary deployment.
+	if s.models == nil || !s.models.FederatedInferenceAllowed(r.Context(), in.DeploymentID) {
 		writeJSON(w, 403, map[string]string{"error": "model deployment is not admitted for federated inference"})
 		return
 	}

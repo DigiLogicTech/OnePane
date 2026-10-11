@@ -166,6 +166,8 @@ func (s *Service) CreateProject(ctx context.Context, cmd CreateProjectCommand) (
 	if err != nil {
 		return Project{}, fmt.Errorf("%w: policy: %v", ErrInvalidCommand, err)
 	}
+	mode,err:=operatingModeFromPolicy(pol)
+	if err!=nil{return Project{},fmt.Errorf("%w: operating mode: %v",ErrInvalidCommand,err)}
 	idx, err := canonicalJSON(cmd.IndexingConfigJSON, "{}")
 	if err != nil {
 		return Project{}, fmt.Errorf("%w: indexing: %v", ErrInvalidCommand, err)
@@ -184,7 +186,7 @@ func (s *Service) CreateProject(ctx context.Context, cmd CreateProjectCommand) (
 	if desc != "" {
 		dp = &desc
 	}
-	p := Project{ID: pid, WorkspaceID: cmd.WorkspaceID, Name: strings.TrimSpace(cmd.Name), Description: dp, Status: "active", ProjectPolicyJSON: pol, IndexingConfigJSON: idx, Revision: 1, CreatedBy: cmd.CreatedBy, CreatedAt: now, UpdatedAt: now}
+	p := Project{ID: pid, WorkspaceID: cmd.WorkspaceID, Name: strings.TrimSpace(cmd.Name), Description: dp, Status: "active", OperatingMode:mode, ProjectPolicyJSON: pol, IndexingConfigJSON: idx, Revision: 1, CreatedBy: cmd.CreatedBy, CreatedAt: now, UpdatedAt: now}
 	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
 		if err := s.requireActor(ctx, tx, p.WorkspaceID, cmd.CreatedBy); err != nil {
 			return err
@@ -208,6 +210,9 @@ func (s *Service) UpdateProjectPolicy(ctx context.Context, cmd UpdateProjectPoli
 	policy, err := canonicalJSON(cmd.ProjectPolicyJSON, "{}")
 	if err != nil {
 		return Project{}, fmt.Errorf("%w: policy: %v", ErrInvalidCommand, err)
+	}
+	if _,err:=operatingModeFromPolicy(policy);err!=nil{
+		return Project{},fmt.Errorf("%w: operating mode: %v",ErrInvalidCommand,err)
 	}
 	eid, err := s.ids.New("evt")
 	if err != nil {

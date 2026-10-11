@@ -106,21 +106,23 @@ func (s *Service) ensureWorkspace(ctx context.Context, workspaceID string) error
 	})
 }
 
-func (s *Service) RecoverInterrupted(ctx context.Context) (int, error) {
-	now := s.clock.UnixMilli()
-	res, err := s.db.ExecContext(ctx, `UPDATE assurance_runs SET status='interrupted',failure_reason='daemon restart during assurance evaluation',revision=revision+1,updated_at=?,completed_at=? WHERE status='running'`, now, now)
-	if err != nil {
-		return 0, err
-	}
-	n, _ := res.RowsAffected()
-	// Interrupted deterministic evaluations are safe to requeue; no external
-	// side effect is performed by the assurance evaluator itself.
-	if n > 0 {
-		if _, err := s.db.ExecContext(ctx, `UPDATE assurance_runs SET status='queued',failure_reason=NULL,completed_at=NULL,revision=revision+1,updated_at=? WHERE status='interrupted'`, now); err != nil {
-			return int(n), err
-		}
-	}
-	return int(n), nil
+// RecoverInterrupted can safely requeue only deterministic assurance
+// evaluations. It never retries a tool, inference or external mutation.
+// Previously this was two commits: RUNNING -> INTERRUPTED, then every
+// INTERRUPTED -> QUEUED, which could strand rows on a crash between writes.
+// Make recovery a single atomic, idempotent state update, including records
+// stranded as INTERRUPTED by older two-phase recovery builds.
+func (s *Service) RecoverInterrupted(ctx context.Context) (int,error) {
+	if s==nil||s.db==nil{return 0,ErrInvalidSpec}
+	now:=s.clock.UnixMilli()
+	r,err:=s.db.ExecContext(ctx,`UPDATE assurance_runs
+	 SET status='queued',failure_reason=NULL,completed_at=NULL,
+	     revision=revision+1,updated_at=?
+	 WHERE status IN ('running','interrupted')`,now)
+	if err!=nil{return 0,err}
+	count,err:=r.RowsAffected()
+	if err!=nil{return 0,err}
+	return int(count),nil
 }
 
 func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {

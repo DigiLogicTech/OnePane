@@ -198,6 +198,9 @@ func (s *Service) CreateWorkspaceView(ctx context.Context, cmd CreateWorkspaceVi
 	}
 	expands,err:=featurepolicy.TrustedNodeGrantExpands([]byte("{}"),ai)
 	if err!=nil{return WorkspaceView{},ErrInvalidCommand}
+	featureExpansion,err:=featurepolicy.FeaturePrivilegeExpands([]byte("{}"),ai)
+	if err!=nil{return WorkspaceView{},ErrInvalidCommand}
+	expands=expands||featureExpansion
 	scope, err := canonicalObjectOr(cmd.ResourceScopeJSON, `{}`)
 	if err != nil {
 		return WorkspaceView{}, ErrInvalidCommand
@@ -272,6 +275,9 @@ func (s *Service) UpdateWorkspaceView(ctx context.Context, cmd UpdateWorkspaceVi
 		if project.Status!="active"{return ErrProjectInactive}
 		expands,err:=featurepolicy.TrustedNodeGrantExpands(current.AISettingsJSON,ai)
 		if err!=nil{return ErrInvalidCommand}
+		featureExpansion,err:=featurepolicy.FeaturePrivilegeExpands(current.AISettingsJSON,ai)
+		if err!=nil{return ErrInvalidCommand}
+		expands=expands||featureExpansion
 		if expands{
 			if err:=s.requireHumanNodeApproval(ctx,tx,project.WorkspaceID,cmd.ActorPrincipalID);err!=nil{return err}
 		} else if err:=s.requireActor(ctx,tx,project.WorkspaceID,cmd.ActorPrincipalID);err!=nil{return err}

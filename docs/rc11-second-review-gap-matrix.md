@@ -230,3 +230,33 @@ Completed in this integration branch, with source and regression tests:
   an active Level 5 monitor or automatic remediation capability.
 - [ ] Validate the latest combined model-plan and L5-source changes in
   hosted Go/SQLite/WebUI CI and preserve the full unmerged review gate.
+
+
+## RC11 P0-D Level 5 evidence isolation checkpoint — 2026-10-12
+
+- [x] The configured source-list format is bounded and rejects duplicate,
+  encoded-duplicate and malformed JSON fields rather than accepting the
+  last occurrence. Unit and Go/SQLite/Windows hosted validation passed at
+  `be6d5f6`, [run #38184680298](https://github.com/DigiLogicTech/OnePane/actions/runs/38184680298).
+- [x] Stored source policy is re-canonicalised at both metadata-only
+  coverage reads and the final SQLite observation attachment transaction.
+  Conflicting/unknown source grants fail closed rather than producing
+  apparently valid coverage or attaching an unapproved observation.
+  Integration regression mutates a stored source allowlist and asserts
+  that both paths refuse it.
+- [x] A **tenant, active Project/Workspace and human-member preflight**
+  now precedes full observation integrity verification and payload lookup.
+  A foreign/unknown Observation ID or Agent principal cannot cause this
+  API to process cross-tenant sensor values before scope admission.
+  Source identity, Project scope, human authority and freshness continue
+  to be rechecked in the transaction; the preflight is not treated as
+  irrevocable authority. Regression asserts generic early denial with
+  no raw observation subject/value disclosure.
+- [ ] **CI gate for the newest preflight and integration tests:** verify
+  [run #38184761818](https://github.com/DigiLogicTech/OnePane/actions/runs/38184761818)
+  and later documentation head before calling the batch green.
+- [ ] **Next implementation:** Level 5 independently consented source/probe
+  registration and revocable execution leases; crash-safe cadence claims,
+  evidence-baseline comparison, graded defensive playbooks and postcondition
+  verification. Do not activate monitors, call a Project healthy, package
+  an installer or merge a release merely because intake tests pass.

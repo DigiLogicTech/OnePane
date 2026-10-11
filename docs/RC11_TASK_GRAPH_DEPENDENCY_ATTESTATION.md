@@ -48,6 +48,13 @@ historical graph, a newly inserted unapproved predecessor, or an archived
 Workspace cannot make a Task runnable merely because a UI/Orchestrator
 snapshot is stale. Ordinary non-graph Tasks keep the existing Task lifecycle.
 A Task graph's read-only recovery checkpoint is not an admission lease.
+The same write-transaction admission fence also applies whenever an
+**existing Attempt re-enters RUNNING**: operator Resume, autonomous
+`ResumeWaitingAttemptInTransaction` and
+`ContinueAfterVerification`. A deleted predecessor or revoked Workspace
+cannot be circumvented by pausing or retrying an existing Attempt.
+These paths preserve the current Attempt and Task state on denial,
+without claiming unknown external effects were undone.
 
 This is a control-plane integrity check, not proof that the underlying
 Worker ran or a physical Node completed work. Rootless physical tests

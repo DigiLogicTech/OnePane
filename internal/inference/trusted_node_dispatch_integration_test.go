@@ -28,7 +28,7 @@ func TestTrustedNodeGatewayEnforcesPersistedGrantsAndFreshPairing(t *testing.T){
   `INSERT INTO workspaces(id,name,status,revision,created_at,updated_at)
     VALUES('tenant','Tenant','active',1,1,1)`,
   `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at)
-    VALUES('agent','agent','Agent','active',1,1,1)`,
+    VALUES('agent','human','Operator','active',1,1,1)`,
   `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at)
     VALUES('tenant','agent','active',1,1)`,
  }{if _,err=db.SQL().ExecContext(ctx,q);err!=nil{t.Fatal(err)}}

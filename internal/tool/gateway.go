@@ -199,6 +199,16 @@ func (g *Gateway) Invoke(ctx context.Context, cmd InvokeCommand) (Invocation, er
 		return inv, err
 	}
 
+	// Re-evaluate revocable grants immediately before side effects. A policy
+	// change while consuming permits or an authority lease must not be bypassed.
+	if action := scopedFileAction(binding.Definition.CapabilityID, binding.Definition.ID); action != "" && cmd.TaskID != nil && g.scopes.DB != nil {
+		allowed, scopeErr := g.scopes.AuthorizeTask(ctx, cmd.WorkspaceID, *cmd.TaskID, action)
+		if scopeErr != nil || !allowed {
+			return g.failFrom(ctx, inv, meta, StatusRunning, "feature_policy_revoked",
+				"scoped file permission revoked before adapter invocation", ErrPolicyDenied)
+		}
+	}
+
 	result, callErr := callAdapter(ctx, binding.Adapter, AdapterRequest{
 		InvocationID: inv.ID, WorkspaceID: inv.WorkspaceID, TaskID: inv.TaskID, AttemptID: inv.AttemptID,
 		ToolID: inv.ToolID, ToolVersion: inv.ToolVersion, ResourceRef: resource, Input: canonicalInput,

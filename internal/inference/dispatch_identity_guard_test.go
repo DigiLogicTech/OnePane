@@ -60,7 +60,7 @@ func TestInferenceLastDispatchBlocksModelAndDeploymentSwaps(t *testing.T){
   {"new runtime endpoint",`UPDATE model_deployments SET runtime_config_json='{"base_url":"https://bad.example"}' WHERE id='d'`},
   {"runtime version",`UPDATE model_deployments SET runtime_version='2' WHERE id='d'`},
   {"fingerprint changed",`UPDATE model_deployments SET deployment_fingerprint='other' WHERE id='d'`},
-  {"revision changed",`UPDATE model_deployments SET revision=2 WHERE id='d'`},
+  {"revision rolled back",`UPDATE model_deployments SET revision=0 WHERE id='d'`},
   {"deployment disabled",`UPDATE model_deployments SET status='disabled' WHERE id='d'`},
  }
  for _,tc:=range cases{

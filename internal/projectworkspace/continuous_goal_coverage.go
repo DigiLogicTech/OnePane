@@ -48,8 +48,12 @@ func(s *Service)GoalEvidenceCoverage(ctx context.Context,projectID,goalID string
   WHERE g.id=? AND g.project_id=? AND p.status='active'`,
   goalID,projectID).Scan(&planRaw,&status,&health,&cadence,&revision)
  if err!=nil{return GoalEvidenceCoverage{},err}
+ // Stored source allowlists are security inputs, too: a legacy or
+ // tampered row must not bypass the same strict admission as a new goal.
+ canonical,err:=canonicalGoalPlan(json.RawMessage(planRaw))
+ if err!=nil{return GoalEvidenceCoverage{},fmt.Errorf("%w: invalid stored goal plan: %v",ErrInvalidCommand,err)}
  var plan goalMonitorPlan
- if err=json.Unmarshal([]byte(planRaw),&plan);err!=nil||plan.Version!=1||len(plan.SourceIDs)>32{
+ if err=json.Unmarshal(canonical,&plan);err!=nil||plan.Version!=1||len(plan.SourceIDs)>32{
   return GoalEvidenceCoverage{},fmt.Errorf("%w: unsupported stored goal plan",ErrInvalidCommand)
  }
  now:=s.clock.UnixMilli()

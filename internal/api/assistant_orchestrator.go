@@ -265,3 +265,43 @@ func (s *Server) listAgentSessions(w http.ResponseWriter,r *http.Request){
 	i,ok:=s.authenticate(w,r);if !ok{return};workspaceID:=strings.TrimSpace(r.URL.Query().Get("workspace_id"));if workspaceID==""{writeError(w,http.StatusBadRequest,"workspace_id is required");return}
 	if !s.authorize(w,r,i,workspaceID,"project.read"){return};rows,err:=s.agentProfiles.ListSessions(r.Context(),workspaceID,parseLimit(r,100));respondDomain(w,rows,err,http.StatusOK)
 }
+
+
+type agentPolicyRevisionService interface{
+ Policy(context.Context,string,string)(agentprofile.PolicyRevision,error)
+ UpdatePolicy(context.Context,agentprofile.UpdateAgentPolicyCommand)(agentprofile.PolicyRevision,error)
+}
+
+// Custom Agent policies are explicit, append-only restrictions independent
+// of profile prompt edits. API authorisation is necessary, not sufficient:
+// removing a previous denial requires an active human in the service.
+func(s *Server)getAgentPolicy(w http.ResponseWriter,r *http.Request){
+ identity,ok:=s.authenticate(w,r)
+ if !ok{return}
+ ws:=strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+ if ws==""{writeError(w,http.StatusBadRequest,"workspace_id is required");return}
+ if !s.authorize(w,r,identity,ws,"project.read"){return}
+ svc,ok:=s.agentProfiles.(agentPolicyRevisionService)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Agent policy service unavailable");return}
+ result,err:=svc.Policy(r.Context(),r.PathValue("profileID"),ws)
+ respondDomain(w,result,err,http.StatusOK)
+}
+func(s *Server)putAgentPolicy(w http.ResponseWriter,r *http.Request){
+ identity,ok:=s.authenticate(w,r)
+ if !ok{return}
+ var input struct{
+  WorkspaceID string `json:"workspace_id"`
+  ExpectedRevision int64 `json:"expected_revision"`
+  Policy json.RawMessage `json:"policy"`
+ }
+ if !decodeJSON(w,r,&input){return}
+ if !s.authorize(w,r,identity,input.WorkspaceID,"project.write"){return}
+ svc,ok:=s.agentProfiles.(agentPolicyRevisionService)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Agent policy service unavailable");return}
+ result,err:=svc.UpdatePolicy(r.Context(),agentprofile.UpdateAgentPolicyCommand{
+  ProfileID:r.PathValue("profileID"),WorkspaceID:input.WorkspaceID,
+  ExpectedRevision:input.ExpectedRevision,PolicyJSON:input.Policy,
+  ActorPrincipalID:identity.PrincipalID,
+ })
+ respondDomain(w,result,err,http.StatusOK)
+}

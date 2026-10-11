@@ -9,7 +9,8 @@ let a31AgentView="profiles";
 let a31SkillsView="installed";
 let a31SettingsView="overview";
 let a31OperationsView="overview";
-let a31ControlTab="assistant";
+let a31AssistantProjectID="";
+let a31AssistantWorkspaceID="";
 let a31AssistantThreadID="";
 let a31AssistantThreadWorkspace="";
 let a31InstallPoll=null;
@@ -559,21 +560,73 @@ renderSkills=async function(){
 function a31SetControlChatCollapsed(collapsed){
   state.controlChatCollapsed=!!collapsed;persist();const panel=$("#controlChatPanel"),toggle=$("#controlChatToggle");if(panel)panel.dataset.collapsed=state.controlChatCollapsed?"true":"false";if(toggle){toggle.setAttribute("aria-expanded",state.controlChatCollapsed?"false":"true");toggle.title=state.controlChatCollapsed?"Expand OnePane Chat":"Collapse OnePane Chat"}requestAnimationFrame(()=>a33ApplyControlChatPosition());
 }
-function a31OpenControlChat(tab=a31ControlTab){
-  a31ControlTab=tab;const panel=$("#controlChatPanel");if(!panel)return;panel.dataset.state="open";panel.removeAttribute("hidden");a31SetControlChatCollapsed(!!state.controlChatCollapsed);a31RenderControlChat();requestAnimationFrame(()=>a33ApplyControlChatPosition());
+function a31OpenControlChat(){const panel=$("#controlChatPanel");if(!panel)return;panel.dataset.state="open";panel.removeAttribute("hidden");a31SetControlChatCollapsed(!!state.controlChatCollapsed);a31RenderControlChat();requestAnimationFrame(()=>a33ApplyControlChatPosition());
 }
 function a31CloseControlChat(){const p=$("#controlChatPanel");if(p){p.dataset.state="closed";p.setAttribute("hidden","")}}
 async function a31EnsureAssistantThread(){
   const workspace=String(onepaneWorkspace||"");if(a31AssistantThreadID&&a31AssistantThreadWorkspace===workspace)return a31AssistantThreadID;
   a31AssistantThreadID="";a31AssistantThreadWorkspace="";
   const rows=await apiRequest(`/v1/assistant/threads?workspace_id=${encodeURIComponent(workspace)}&limit=20`);const t=a31Array(rows)[0]||await apiRequest("/v1/assistant/threads",{method:"POST",body:JSON.stringify({workspace_id:workspace,title:"OnePane Control Chat"})});
-  a31AssistantThreadID=t.id;a31AssistantThreadWorkspace=workspace;return t.id;
+  a31AssistantThreadID=t.id;a31AssistantThreadWorkspace=workspace;a31AssistantProjectID=String(t.active_project_id||"");a31AssistantWorkspaceID="";return t.id;
 }
+
 async function a31RenderControlChat(){
-  const body=$("#controlChatBody");if(!body)return;const projects=a31Array(qa4ProjectHub?.projects),current=a31CurrentProject();
-  $("#controlChatAssistantTab")?.classList.toggle("active",a31ControlTab==="assistant");$("#controlChatOrchestratorTab")?.classList.toggle("active",a31ControlTab==="orchestrator");
-  if(a31ControlTab==="assistant"){body.innerHTML='<div class="control-chat-loading">Loading Assistant…</div>';try{const id=await a31EnsureAssistantThread(),[turns,picker]=await Promise.all([apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/turns?limit=100`),a31AssistantModelPicker(id)]);body.innerHTML=`<div class="control-chat-scope">Global OnePane Assistant</div>${picker.ui}<div class="control-chat-history">${a31Array(turns).map(t=>`<div class="control-chat-message ${t.role||t.author_kind||''}"><strong>${escapeHtml(t.role||t.author_kind||"OnePane")}</strong><span>${escapeHtml(t.content||t.text||"")}</span></div>`).join("")}</div><form id="a31ControlChatForm" class="control-chat-form"><textarea rows="3" placeholder="Ask OnePane…"></textarea><div><button class="btn">Ask</button><button class="btn primary" name="run" value="1">Run</button></div></form>`;a31BindAssistantModelPicker(id,picker);$("#a31ControlChatForm").onsubmit=async e=>{e.preventDefault();const text=e.currentTarget.querySelector("textarea").value.trim();if(!text)return;const run=e.submitter?.value==="1";try{await apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/turns`,{method:"POST",body:JSON.stringify({content:text,allow_task_creation:run,force_task:false})});a31RenderControlChat()}catch(ex){notice(ex.message,"bad")}}}catch(ex){body.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`}}
-  else{const pid=$("#controlChatProject")?.value||current?.id||projects[0]?.id;if(!pid){body.innerHTML='<div class="empty-state compact">Create a Project before using Project Orchestrator.</div>';return}const p=projects.find(x=>x.id===pid),workspaces=p?qa4Workspaces(p):[];body.innerHTML=`<div class="control-chat-selectors"><label>Project<select id="controlChatProject">${projects.map(x=>`<option value="${escapeHtml(x.id)}" ${x.id===pid?'selected':''}>${escapeHtml(x.name)}</option>`).join("")}</select></label><label>Workspace<select id="controlChatWorkspace"><option value="">Project-wide</option>${workspaces.map(w=>`<option value="${escapeHtml(w.id)}">${escapeHtml(w.name)}</option>`).join("")}</select></label></div><div id="a31OrchestratorTurns" class="control-chat-history">Loading…</div><form id="a31OrchestratorForm" class="control-chat-form"><textarea rows="3" placeholder="Ask the Project Orchestrator…"></textarea><div><button class="btn">Ask</button><button class="btn primary" name="run" value="1">Run</button></div></form>`;$("#controlChatProject").onchange=()=>a31RenderControlChat();try{const turns=await apiRequest(`/v1/projects/${encodeURIComponent(pid)}/orchestrator/turns?limit=100`);$("#a31OrchestratorTurns").innerHTML=a31Array(turns).map(t=>`<div class="control-chat-message ${t.role||''}"><strong>${escapeHtml(t.role||"OnePane")}</strong><span>${escapeHtml(t.content||t.objective||t.response||"")}</span></div>`).join("");$("#a31OrchestratorForm").onsubmit=async e=>{e.preventDefault();const objective=e.currentTarget.querySelector("textarea").value.trim(),run=e.submitter?.value==="1",ws=$("#controlChatWorkspace").value;if(!objective)return;try{await apiRequest(`/v1/projects/${encodeURIComponent(pid)}/orchestrator/turns`,{method:"POST",body:JSON.stringify({objective,project_workspace_id:ws,allow_task_creation:run,force_task:false})});a31RenderControlChat()}catch(ex){notice(ex.message,"bad")}}}catch(ex){$("#a31OrchestratorTurns").innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`}}
+  const body=$("#controlChatBody");if(!body)return;
+  body.innerHTML='<div class="control-chat-loading">Loading Assistant…</div>';
+  try{
+    const id=await a31EnsureAssistantThread();
+    const [turns,picker,projectRows]=await Promise.all([
+      apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/turns?limit=100`),
+      a31AssistantModelPicker(id),
+      apiRequest(`/v1/projects?workspace_id=${encodeURIComponent(onepaneWorkspace)}`)
+    ]);
+    const projects=a31Array(projectRows).filter(p=>p.status==="active");
+    const project=projects.find(p=>p.id===a31AssistantProjectID)||null;
+    const workspaceRows=project?await apiRequest(`/v1/projects/${encodeURIComponent(project.id)}/workspaces`):[];
+    const workspaces=a31Array(workspaceRows).filter(w=>w.status==="active");
+    const selectedWorkspace=workspaces.find(w=>w.id===a31AssistantWorkspaceID)||null;
+    if(!selectedWorkspace)a31AssistantWorkspaceID="";
+    const selector=`<div class="control-chat-selectors">
+      <label>Context<select id="controlChatProject" aria-label="Assistant Project context">
+        <option value="" ${!project?'selected':''}>General conversation</option>
+        ${projects.map(p=>`<option value="${escapeHtml(p.id)}" ${project?.id===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join("")}
+      </select></label>
+      ${project?`<label>Workspace<select id="controlChatWorkspace" aria-label="Assistant Workspace context">
+        <option value="" ${!selectedWorkspace?'selected':''}>Project-wide</option>
+        ${workspaces.map(w=>`<option value="${escapeHtml(w.id)}" ${selectedWorkspace?.id===w.id?'selected':''}>${escapeHtml(w.name)}</option>`).join("")}
+      </select></label>`:""}
+    </div>`;
+    const scope=project?(selectedWorkspace?`Project · ${project.name} / ${selectedWorkspace.name}`:`Project · ${project.name} (Project-wide)`):"General OnePane Assistant";
+    const prompt=project?"Ask OnePane to plan or execute within the selected Project…":"Ask OnePane a general question…";
+    body.innerHTML=`${selector}<div class="control-chat-scope">${escapeHtml(scope)}</div>
+      ${project?'<div class="control-chat-model-status">Project execution uses the authorised Project Orchestrator and Workspace routing; conversation alone grants no tools.</div>':picker.ui}
+      <div class="control-chat-history">${a31Array(turns).map(t=>`<div class="control-chat-message ${escapeHtml(t.role||"")}"><strong>${escapeHtml(t.role||"OnePane")}</strong><span>${escapeHtml(t.content||t.text||"")}</span></div>`).join("")}</div>
+      <form id="a31ControlChatForm" class="control-chat-form"><textarea rows="3" placeholder="${escapeHtml(prompt)}"></textarea>
+        <div><button class="btn" type="submit">Ask</button><button class="btn primary" type="submit" name="run" value="1" ${project?'':'disabled title="Select a Project before running tasks"'}>Run</button></div>
+      </form>`;
+    if(!project)a31BindAssistantModelPicker(id,picker);
+    $("#controlChatProject").onchange=async e=>{
+      const next=String(e.target.value||"");e.target.disabled=true;
+      try{
+        const updated=await apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/scope`,{method:"POST",body:JSON.stringify({project_id:next||null})});
+        a31AssistantProjectID=String(updated.active_project_id||"");a31AssistantWorkspaceID="";
+        await a31RenderControlChat();
+      }catch(ex){notice("Assistant scope: "+ex.message,"bad");await a31RenderControlChat()}
+    };
+    if(project)$("#controlChatWorkspace").onchange=e=>{a31AssistantWorkspaceID=String(e.target.value||"");a31RenderControlChat()};
+    $("#a31ControlChatForm").onsubmit=async e=>{
+      e.preventDefault();
+      const content=e.currentTarget.querySelector("textarea").value.trim();
+      if(!content)return;
+      const run=e.submitter?.value==="1";
+      if(run&&!project){notice("Select a Project to run tasks.","bad");return}
+      try{
+        await apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/turns`,{method:"POST",
+          body:JSON.stringify({content,project_id:project?.id||"",project_workspace_id:selectedWorkspace?.id||"",allow_task_creation:run,force_task:false})});
+        await a31RenderControlChat();
+      }catch(ex){notice(ex.message,"bad")}
+    };
+  }catch(ex){body.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`}
 }
 
 /* Settings */
@@ -621,7 +674,7 @@ startProductTour=function({replay=false,welcome=false}={}){
   const steps=[
     {title:"Welcome to OnePane",body:"DigiLogic OnePane brings Projects, Workspaces, Tasks, Agents, local and cloud models, Nodes, Skills, Councils and observability into one control plane.",target:null},
     {title:"Navigation",body:"Use the left menu to navigate Projects, expandable Workspaces, Local/Cloud Models, Nodes, Agents, Skills, Tasks and Operations.",target:".sidebar",padding:0},
-    {title:"OnePane Chat",body:"Assistant and Project Orchestrator are two separate chat tabs. Select the Assistant model and change projects in the Orchestrator without leaving your page.",target:"#controlChatLauncher"},
+    {title:"OnePane Chat",body:"One unified Assistant can answer general questions or coordinate scoped Project and Workspace tasks. Select context inside the same chat; grants remain independently enforced.",target:"#controlChatLauncher"},
     {title:"Web Chat is a separate workspace",body:"Web Chat uses the provider's own website and subscription, with individual OnePane conversation tabs. You can keep several ChatGPT, Claude, Gemini and other manual consultations open independently.",target:"#webChatLauncher",prepare:()=>{if(typeof openRoute==="function")openRoute("webchat")}},
     {title:"Start Web-only Research Council",body:"Start a Council here: enter a research objective, choose 2–8 consultation seats (or 2–7 plus a Chair), models, roles and critique rounds. OnePane manages prompts, queues and immutable research evidence; cloud websites stay external.",target:"#a41StartCouncil",prepare:async()=>{openRoute("webchat");if(typeof renderWebChat==="function")await renderWebChat()}},
     {title:"AI Chair and human approvals",body:"Choose a separate manual AI Chair and your final synthesis participant. The Chair proposes an agenda and follow-up questions; you can review/edit/approve each before the next round. No AI Chair keeps deterministic orchestration.",target:"#a41StartCouncil"},
@@ -759,7 +812,7 @@ function a33ToggleControlChatCollapsed(){const handle=$("#controlChatToggle");if
 const a31BindShellBase=bindShell;
 bindShell=function(){
   a31BindShellBase();a32BindPanelToggleMovement();a33BindControlChatDrag();if(typeof a31StartDownloadMonitor==="function")a31StartDownloadMonitor();window.addEventListener("resize",a33ApplyControlChatPosition);
-  $("#controlChatLauncher")?.addEventListener("click",()=>a33ToggleControlChatPanel());$("#webChatLauncher")?.addEventListener("click",()=>openRoute("webchat"));$("#controlChatClose")?.addEventListener("click",e=>{e.stopPropagation();a31CloseControlChat()});$("#controlChatToggle")?.addEventListener("click",()=>a33ToggleControlChatCollapsed());$("#controlChatAssistantTab")?.addEventListener("click",()=>a31OpenControlChat("assistant"));$("#controlChatOrchestratorTab")?.addEventListener("click",()=>a31OpenControlChat("orchestrator"));
+  $("#controlChatLauncher")?.addEventListener("click",()=>a33ToggleControlChatPanel());$("#webChatLauncher")?.addEventListener("click",()=>openRoute("webchat"));$("#controlChatClose")?.addEventListener("click",e=>{e.stopPropagation();a31CloseControlChat()});$("#controlChatToggle")?.addEventListener("click",()=>a33ToggleControlChatCollapsed());
 };
 renderActiveView=async function(){
   const epoch=++qa31ViewEpoch,t=currentTab();if(!t)return;if(t.state==="suspended")t.state="active";const route=t.route;

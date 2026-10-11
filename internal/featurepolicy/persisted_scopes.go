@@ -19,6 +19,9 @@ type StoredScopes struct{ DB *sql.DB }
 type ScopedDecision struct {
 	Effective Policy
 	Configured bool
+	// A locally proposed DAG is bound to a revocable standing L4 grant.
+	// This marker comes ONLY from canonical Task completion_json.
+	AutonomousGraph bool
 }
 
 // feature_policy is opt-in for existing installations. Existing authority,
@@ -119,6 +122,14 @@ func forTaskWithReader(ctx context.Context, reader scopedRowReader, tenantID, ta
 		"SELECT project_id,project_workspace_id,COALESCE(completion_json,'{}') FROM tasks WHERE id=? AND workspace_id=?",
 		taskID,tenantID).Scan(&projectID,&workspaceID,&completion)
 	if err != nil { return ScopedDecision{}, fmt.Errorf("resolve canonical Task scope: %w",err) }
+	var source struct{ Source string `json:"source"` }
+	if err:=json.Unmarshal([]byte(completion),&source);err!=nil{
+		return ScopedDecision{},fmt.Errorf("invalid Task origin")
+	}
+	autoGraph:=source.Source=="project-orchestrator-autonomous-graph"
+	if autoGraph&&(!projectID.Valid||!workspaceID.Valid){
+		return ScopedDecision{},fmt.Errorf("autonomous graph Task requires a canonical Project Workspace")
+	}
 	if !projectID.Valid {
 		if workspaceID.Valid {
 			return ScopedDecision{}, fmt.Errorf("canonical Workspace requires a Project owner")
@@ -168,7 +179,8 @@ func forTaskWithReader(ctx context.Context, reader scopedRowReader, tenantID, ta
 	}
 	return ScopedDecision{
 		Effective:ResolvePolicyChain(project,workspace,agentOverride,taskOverride),
-		Configured:fromProject||fromWorkspace||fromAgent||fromTask,
+		Configured:fromProject||fromWorkspace||fromAgent||fromTask||autoGraph,
+		AutonomousGraph:autoGraph,
 	},nil
 }
 
@@ -177,6 +189,11 @@ func forTaskWithReader(ctx context.Context, reader scopedRowReader, tenantID, ta
 func (s StoredScopes) AuthorizeTask(ctx context.Context,tenantID,taskID,action string)(bool,error){
 	decision,err:=s.ForTask(ctx,tenantID,taskID)
 	if err!=nil{return false,err}
+	if decision.AutonomousGraph&&
+		(decision.Effective.AutonomousRoutines!=Enabled||
+		 decision.Effective.ProjectAI!=Enabled||decision.Effective.ModelRouting!=Enabled){
+		return false,nil // live parent/Workspace autonomy revocation
+	}
 	if !decision.Configured{return true,nil}
 	return decision.Effective.ValidateExecution(action),nil
 }
@@ -186,6 +203,11 @@ func (s StoredScopes) AuthorizeTask(ctx context.Context,tenantID,taskID,action s
 func (s StoredScopes) AuthorizeTaskTx(ctx context.Context, tx scopedRowReader, tenantID, taskID, action string) (bool, error) {
 	decision, err := s.ForTaskTx(ctx, tx, tenantID, taskID)
 	if err != nil { return false, err }
+	if decision.AutonomousGraph&&
+		(decision.Effective.AutonomousRoutines!=Enabled||
+		 decision.Effective.ProjectAI!=Enabled||decision.Effective.ModelRouting!=Enabled){
+		return false,nil
+	}
 	if !decision.Configured { return true, nil }
 	return decision.Effective.ValidateExecution(action), nil
 }

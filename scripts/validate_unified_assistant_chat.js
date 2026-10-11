@@ -39,3 +39,7 @@ for(const token of ["data-a31-profile-restrictions", "a31EditAgentRestrictions(p
  "expected_revision:Number(current.revision||0)"]){
  assert(agentScreen.includes(token),"versioned Agent restrictions UI missing "+token);
 }
+
+for(const token of ["a31AgentPolicyHistory","url+'/history?workspace_id='","immutable denial policy"]){
+ assert(agentScreen.includes(token),"Agent policy revision history UX missing "+token);
+}

@@ -103,7 +103,14 @@ func TestVersionedAgentRestrictionsAreLiveRevocableAndDoNotExpandProjectGrants(t
   ProfileID:p.ID,WorkspaceID:"other",ExpectedRevision:3,
   ActorPrincipalID:"robot",PolicyJSON:json.RawMessage(restrictFile),
  });err==nil{t.Fatal("cross-tenant Agent policy mutation admitted")}
- if _,err:=db.SQL().ExecContext(ctx,"UPDATE agent_policy_revisions SET revision=999 WHERE profile_id=?",p.ID);err==nil{
+ history,err:=agent.PolicyHistory(ctx,p.ID,"tenant",20)
+ if err!=nil||len(history)!=3||history[0].Revision!=3||history[2].Revision!=1{
+  t.Fatalf("Agent history is not ordered and bounded: %+v %v",history,err)
+ }
+ if _,err:=agent.PolicyHistory(ctx,p.ID,"other",20);err==nil{
+  t.Fatal("cross-tenant Agent revision history disclosed")
+ }
+  if _,err:=db.SQL().ExecContext(ctx,"UPDATE agent_policy_revisions SET revision=999 WHERE profile_id=?",p.ID);err==nil{
   t.Fatal("historical Agent revision is mutable")
  }
  if _,err:=db.SQL().ExecContext(ctx,"DELETE FROM agent_policy_revisions WHERE profile_id=?",p.ID);err==nil{

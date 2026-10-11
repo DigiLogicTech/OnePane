@@ -270,6 +270,7 @@ func (s *Server) listAgentSessions(w http.ResponseWriter,r *http.Request){
 type agentPolicyRevisionService interface{
  Policy(context.Context,string,string)(agentprofile.PolicyRevision,error)
  UpdatePolicy(context.Context,agentprofile.UpdateAgentPolicyCommand)(agentprofile.PolicyRevision,error)
+ PolicyHistory(context.Context,string,string,int)([]agentprofile.PolicyRevision,error)
 }
 
 // Custom Agent policies are explicit, append-only restrictions independent
@@ -303,5 +304,20 @@ func(s *Server)putAgentPolicy(w http.ResponseWriter,r *http.Request){
   ExpectedRevision:input.ExpectedRevision,PolicyJSON:input.Policy,
   ActorPrincipalID:identity.PrincipalID,
  })
+ respondDomain(w,result,err,http.StatusOK)
+}
+
+
+func(s *Server)listAgentPolicyHistory(w http.ResponseWriter,r *http.Request){
+ identity,ok:=s.authenticate(w,r)
+ if !ok{return}
+ ws:=strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+ if ws==""{writeError(w,http.StatusBadRequest,"workspace_id is required");return}
+ if !s.authorize(w,r,identity,ws,"project.read"){return}
+ svc,ok:=s.agentProfiles.(agentPolicyRevisionService)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Agent policy history unavailable");return}
+ limit:=parseLimit(r,20)
+ if limit>50{limit=50}
+ result,err:=svc.PolicyHistory(r.Context(),r.PathValue("profileID"),ws,limit)
  respondDomain(w,result,err,http.StatusOK)
 }

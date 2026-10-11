@@ -351,6 +351,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/agent-profiles/{profileID}", s.getAgentProfile)
 	s.mux.HandleFunc("PATCH /v1/agent-profiles/{profileID}", s.updateAgentProfile)
 	s.mux.HandleFunc("GET /v1/agent-profiles/{profileID}/policy", s.getAgentPolicy)
+	s.mux.HandleFunc("GET /v1/agent-profiles/{profileID}/policy/history", s.listAgentPolicyHistory)
 	s.mux.HandleFunc("PUT /v1/agent-profiles/{profileID}/policy", s.putAgentPolicy)
 	s.mux.HandleFunc("POST /v1/agent-profiles/{profileID}/archive", s.archiveAgentProfile)
 	s.mux.HandleFunc("GET /v1/agent-sessions", s.listAgentSessions)

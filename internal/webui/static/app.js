@@ -533,9 +533,26 @@ async function a31EditAgentRestrictions(profile){
       existing[key]==='disabled'||existing[key]==='unavailable'?'checked':''
     )+'> Deny '+escapeHtml(label)+'</label>').join('')+
     '<div class="error" id="a31AgentPolicyError" role="status"></div>'+
+    '<button type="button" class="btn" id="a31AgentPolicyHistory">View revision history</button>'+
+    '<div id="a31AgentPolicyHistoryResults" class="page-subtitle"></div>'+
     '<button type="submit" class="btn primary">Save Agent restrictions</button></form>');
   const form=$('#a31AgentPolicyForm');
   if(!form)return;
+  $('#a31AgentPolicyHistory')?.addEventListener('click',async()=>{
+    const holder=$('#a31AgentPolicyHistoryResults');
+    if(!holder)return;
+    holder.textContent='Loading scoped revision metadata…';
+    try{
+      const rows=await apiRequest(url+'/history?workspace_id='+encodeURIComponent(onepaneWorkspace)+'&limit=20');
+      if(!holder.isConnected)return;
+      holder.innerHTML=Array.isArray(rows)&&rows.length?
+        rows.map(r=>'<div class="list-row">Revision '+escapeHtml(r.revision)+
+          ' · '+escapeHtml(r.issued_by||'unknown operator')+
+          ' · '+escapeHtml(new Date(r.issued_at).toLocaleString())+
+          ' · immutable denial policy</div>').join(''):
+        '<div class="page-subtitle">No prior Agent policy revisions.</div>';
+    }catch(ex){if(holder.isConnected)holder.textContent='History unavailable: '+ex.message}
+  });
   form.onsubmit=async e=>{
     e.preventDefault();
     const save=form.querySelector('button[type="submit"]');

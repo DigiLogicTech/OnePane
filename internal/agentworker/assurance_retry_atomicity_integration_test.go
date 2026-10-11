@@ -46,8 +46,9 @@ func TestAssuranceRetryAtomicOriginalAttemptAndJournalRollback(t *testing.T){
  if err:=worker.finishRun(ctx,run.ID,RunBlocked,"independent verifier evaluating");err!=nil{t.Fatal(err)}
  verifier:=verification.NewService(db.SQL(),db,clock.Real{})
  v,err:=verifier.Create(ctx,verification.CreateCommand{
-  WorkspaceID:"tenant",TaskID:&created.ID,SubjectRef:"task:"+created.ID,
+  WorkspaceID:"tenant",TaskID:&created.ID,SubjectRef:"agent_worker_run:"+run.ID,
   RequiredLevel:policy.VerificationV1,
+  Spec:[]byte(`{"source":"agent_completion_proposal","worker_run_id":"`+run.ID+`"}`),
  })
  if err!=nil{t.Fatal(err)}
  if err:=worker.AssuranceRetry(ctx,run.ID,v.ID,[]byte(`{}`));!errors.Is(err,ErrInvalidWorkerState){
@@ -61,6 +62,16 @@ func TestAssuranceRetryAtomicOriginalAttemptAndJournalRollback(t *testing.T){
  if err:=worker.AssuranceRetry(ctx,run.ID,"unrelated-verification",[]byte(`{}`));!errors.Is(err,ErrInvalidWorkerState){
   t.Fatalf("unrelated verification resumed execution: %v",err)
  }
+ // The same Task's failed Verification is not sufficient: it must have
+ // been issued to the exact Agent Worker run being reactivated.
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE verifications
+  SET spec_json='{"source":"agent_completion_proposal","worker_run_id":"old-worker"}'
+  WHERE id=?`,v.ID);err!=nil{t.Fatal(err)}
+ if err:=worker.AssuranceRetry(ctx,run.ID,v.ID,[]byte(`{}`));!errors.Is(err,ErrInvalidWorkerState){
+  t.Fatalf("foreign Worker provenance resumed current Attempt: %v",err)
+ }
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE verifications SET spec_json=?
+  WHERE id=?`,`{"source":"agent_completion_proposal","worker_run_id":"`+run.ID+`"}`,v.ID);err!=nil{t.Fatal(err)}
  if _,err:=db.SQL().ExecContext(ctx,`CREATE TRIGGER refuse_assurance_retry
   BEFORE INSERT ON agent_worker_steps
   WHEN NEW.step_kind='verification' AND NEW.status='failed'

@@ -54,6 +54,7 @@ on:
       - 'docs/GENERAL_PURPOSE_WORKSPACE_SANDBOX.md'
       - 'internal/featurepolicy/**'
       - 'internal/webui/static/policy-diagnostic-review.js'
+      - 'internal/webui/policy_diagnostic_assets_test.go'
       - 'scripts/validate_policy_diagnostic_review.js'
       - 'internal/agentworker/**'
       - 'internal/team/**'
@@ -174,6 +175,7 @@ jobs:
       - name: Full Go regression and cross-platform compilation
         run: |
           go test ./internal/featurepolicy
+          go test ./internal/webui
           go test ./...
           # Exercise a real pre-config, pre-HTTP backend failure and the
           # offline-only reader without a running OnePane API or database.

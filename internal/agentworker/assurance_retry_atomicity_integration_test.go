@@ -46,8 +46,9 @@ func TestAssuranceRetryAtomicOriginalAttemptAndJournalRollback(t *testing.T){
  if err:=worker.finishRun(ctx,run.ID,RunBlocked,"independent verifier evaluating");err!=nil{t.Fatal(err)}
  verifier:=verification.NewService(db.SQL(),db,clock.Real{})
  v,err:=verifier.Create(ctx,verification.CreateCommand{
-  WorkspaceID:"tenant",TaskID:&created.ID,SubjectRef:"task:"+created.ID,
+  WorkspaceID:"tenant",TaskID:&created.ID,SubjectRef:"agent_worker_run:"+run.ID,
   RequiredLevel:policy.VerificationV1,
+  Spec:[]byte(`{"source":"agent_completion_proposal","worker_run_id":"`+run.ID+`"}`),
  })
  if err!=nil{t.Fatal(err)}
  if err:=worker.AssuranceRetry(ctx,run.ID,v.ID,[]byte(`{}`));!errors.Is(err,ErrInvalidWorkerState){

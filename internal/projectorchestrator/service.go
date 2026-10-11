@@ -214,7 +214,14 @@ func (s *Service) contextSnapshot(ctx context.Context, projectID, requestedPWS s
 			return nil, "", "", "", fmt.Errorf("read scoped Workspace runtime: %w", err)
 		}
 	}
-	pwss:=[]map[string]any{};for _,x:=range pwsRows{pwss=append(pwss,map[string]any{"id":x.ID,"name":x.Name,"ai_settings":json.RawMessage(x.Settings)})}
+	// Cross-Workspace orchestration needs names and canonical IDs, not the
+	// raw sibling AI configuration. Routing, access, tokens or future
+	// credential refs in ai_settings_json must not enter model context.
+	// The trusted service has already derived the selected execution_mode.
+	pwss:=[]map[string]any{}
+	for _,x:=range pwsRows{
+		pwss=append(pwss,map[string]any{"id":x.ID,"name":x.Name})
+	}
 	snapshot:=map[string]any{"project":map[string]any{"id":projectID,"name":projectName,"policy":json.RawMessage(projectPolicy)},"project_workspaces":pwss,"selected_project_workspace_id":selected.ID,"execution_mode":mode,"tasks":tasks,"recent_events":events,"runtime":runtime}
 	if selected.ID!=""{
 		readiness,err:=inspectWorkspaceToolchain(ctx,s.db,projectID,selected.ID)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/DigiLogicTech/OnePane/internal/featurepolicy"
 	"github.com/DigiLogicTech/OnePane/internal/event"
 	"github.com/DigiLogicTech/OnePane/internal/storage"
 )
@@ -195,6 +196,8 @@ func (s *Service) CreateWorkspaceView(ctx context.Context, cmd CreateWorkspaceVi
 	if err != nil {
 		return WorkspaceView{}, ErrInvalidCommand
 	}
+	expands,err:=featurepolicy.TrustedNodeGrantExpands([]byte("{}"),ai)
+	if err!=nil{return WorkspaceView{},ErrInvalidCommand}
 	scope, err := canonicalObjectOr(cmd.ResourceScopeJSON, `{}`)
 	if err != nil {
 		return WorkspaceView{}, ErrInvalidCommand
@@ -209,7 +212,9 @@ func (s *Service) CreateWorkspaceView(ctx context.Context, cmd CreateWorkspaceVi
 		// Workspace creation is never an authority-free side effect of UI layout
 		// reconciliation. Apply the Project tenancy membership check at the
 		// transaction boundary as well as API authorization.
-		if err := s.requireActor(ctx,tx,p.WorkspaceID,cmd.ActorPrincipalID);err!=nil{return err}
+		if expands {
+			if err:=s.requireHumanNodeApproval(ctx,tx,p.WorkspaceID,cmd.ActorPrincipalID);err!=nil{return err}
+		} else if err := s.requireActor(ctx,tx,p.WorkspaceID,cmd.ActorPrincipalID);err!=nil{return err}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO project_workspaces(id,project_id,name,description,status,layout_json,ai_settings_json,resource_scope_json,state_json,storage_root,revision,created_at,updated_at) VALUES(?,?,?,?,'active',?,?,?,?,?,1,?,?)`, idv, cmd.ProjectID, cmd.Name, cmd.Description, string(layout), string(ai), string(scope), string(state), cmd.StorageRoot, now, now); err != nil {
 			return err
 		}
@@ -252,14 +257,34 @@ func (s *Service) UpdateWorkspaceView(ctx context.Context, cmd UpdateWorkspaceVi
 		return WorkspaceView{}, ErrInvalidCommand
 	}
 	now := s.clock.UnixMilli()
-	res, err := s.db.ExecContext(ctx, `UPDATE project_workspaces SET name=?,description=?,layout_json=?,ai_settings_json=?,resource_scope_json=?,state_json=?,storage_root=?,revision=revision+1,updated_at=? WHERE id=? AND revision=? AND status='active'`, cmd.Name, cmd.Description, string(layout), string(ai), string(scope), string(state), cmd.StorageRoot, now, cmd.WorkspaceID, cmd.ExpectedRevision)
-	if err != nil {
-		return WorkspaceView{}, err
-	}
-	n, _ := res.RowsAffected()
-	if n != 1 {
-		return WorkspaceView{}, ErrRevisionConflict
-	}
+	// The transaction owns both the membership/approval check and the CAS,
+	// preventing a non-human Agent from promoting its own data-transfer scope.
+	err = s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+		var projectID,status string
+		var rev int64
+		if err:=tx.QueryRowContext(ctx,
+			"SELECT project_id,status,revision FROM project_workspaces WHERE id=?",
+			cmd.WorkspaceID).Scan(&projectID,&status,&rev);err!=nil{return err}
+		if rev!=cmd.ExpectedRevision||projectID!=current.ProjectID{return ErrRevisionConflict}
+		if status!="active"{return ErrProjectInactive}
+		project,err:=s.repo.ProjectTx(ctx,tx,projectID)
+		if err!=nil{return err}
+		if project.Status!="active"{return ErrProjectInactive}
+		expands,err:=featurepolicy.TrustedNodeGrantExpands(current.AISettingsJSON,ai)
+		if err!=nil{return ErrInvalidCommand}
+		if expands{
+			if err:=s.requireHumanNodeApproval(ctx,tx,project.WorkspaceID,cmd.ActorPrincipalID);err!=nil{return err}
+		} else if err:=s.requireActor(ctx,tx,project.WorkspaceID,cmd.ActorPrincipalID);err!=nil{return err}
+		res,err:=tx.ExecContext(ctx,`UPDATE project_workspaces SET name=?,description=?,layout_json=?,ai_settings_json=?,resource_scope_json=?,state_json=?,storage_root=?,revision=revision+1,updated_at=? WHERE id=? AND revision=? AND status='active'`,
+			cmd.Name,cmd.Description,string(layout),string(ai),string(scope),string(state),
+			cmd.StorageRoot,now,cmd.WorkspaceID,cmd.ExpectedRevision)
+		if err!=nil{return err}
+		n,err:=res.RowsAffected()
+		if err!=nil{return err}
+		if n!=1{return ErrRevisionConflict}
+		return nil
+	})
+	if err!=nil{return WorkspaceView{},err}
 	return s.WorkspaceView(ctx, cmd.WorkspaceID)
 }
 

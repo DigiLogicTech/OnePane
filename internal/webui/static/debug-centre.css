@@ -37,3 +37,8 @@
 .a61-api-controls button{min-height:34px}
 .a61-api-panel .a58-debug-preview{white-space:pre-wrap;max-height:340px}
 @media(max-width:620px){.a61-api-controls{align-items:stretch}.a61-api-controls label{width:100%}.a61-api-controls button{width:100%}}
+
+/* Offline policy evidence — bounded, theme-aware and responsive. */
+.a62-policy-panel{width:100%;min-width:0}
+.a62-policy-panel textarea{box-sizing:border-box;width:100%;min-width:0;max-width:100%;background:var(--panel-2);border:1px solid var(--border);border-radius:7px;color:inherit;padding:9px;resize:vertical}
+.a62-policy-panel label{font-size:13px}

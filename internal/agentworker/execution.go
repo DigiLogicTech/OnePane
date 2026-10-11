@@ -106,7 +106,14 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	if tokens < 1 {
 		tokens = 1
 	}
-	decision, err := s.scheduler.Route(ctx, scheduler.RouteRequest{WorkspaceID: run.WorkspaceID, CapabilityID: run.CapabilityID, RoleName: run.RoleName, ProtocolLevel: run.ProtocolLevel, ContextTokens: tokens, DataLabel: label, AllowUntested: rp.AllowUntested, AllowLimited: rp.AllowLimited, AllowMediated: rp.AllowMediated, AllowDegraded: rp.AllowDegraded, RequireZeroIncrementalCost: rp.RequireZeroIncrementalCost, PreferZeroIncrementalCost: rp.PreferZeroIncrementalCost, AllowSubscriptionUsage: rp.AllowSubscriptionUsage, AllowPotentialMonetarySpend: rp.AllowPotentialMonetarySpend, LocalOnly: !rp.AllowRemote, ComputePreference:rp.ComputePreference, IncludeCandidateIDs: rp.IncludeCandidateIDs, ExcludeCandidateIDs: rp.ExcludedCandidateIDs})
+	// Refresh the authorised Node allowlist from canonical persisted Project
+	// and Workspace policy on every Worker tick. Never trust Task JSON,
+	// model-created routing metadata or an old saved routePolicy grant.
+	trustedNodes, trustErr := (featurepolicy.StoredScopes{DB:s.db}).TrustedNodesForTask(ctx,run.WorkspaceID,run.TaskID)
+	if trustErr!=nil {
+		return s.blockRun(ctx,run,res,"canonical trusted Node policy unavailable")
+	}
+	decision, err := s.scheduler.Route(ctx, scheduler.RouteRequest{WorkspaceID: run.WorkspaceID, CapabilityID: run.CapabilityID, RoleName: run.RoleName, ProtocolLevel: run.ProtocolLevel, ContextTokens: tokens, DataLabel: label, AllowUntested: rp.AllowUntested, AllowLimited: rp.AllowLimited, AllowMediated: rp.AllowMediated, AllowDegraded: rp.AllowDegraded, RequireZeroIncrementalCost: rp.RequireZeroIncrementalCost, PreferZeroIncrementalCost: rp.PreferZeroIncrementalCost, AllowSubscriptionUsage: rp.AllowSubscriptionUsage, AllowPotentialMonetarySpend: rp.AllowPotentialMonetarySpend, LocalOnly: !rp.AllowRemote, AllowTrustedNodes:len(trustedNodes)>0, AllowedTrustedNodeIDs:trustedNodes, ComputePreference:rp.ComputePreference, IncludeCandidateIDs: rp.IncludeCandidateIDs, ExcludeCandidateIDs: rp.ExcludedCandidateIDs})
 	if err != nil || decision.Selected == nil {
 		if err == nil {
 			err = scheduler.ErrNoEligibleCandidate

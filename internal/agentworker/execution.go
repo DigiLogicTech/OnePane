@@ -645,15 +645,14 @@ func (s *Service) handleFail(ctx context.Context, run Run, t task.Task, resp age
 	if strings.TrimSpace(p.Reason) == "" {
 		p.Reason = "worker model proposed failure"
 	}
-	cur, _ := s.tasks.Get(ctx, t.ID)
-	actor := WorkerPrincipal
-	_, err := s.tasks.Fail(ctx, task.TransitionCommand{TaskID: cur.ID, ExpectedRevision: cur.Revision, ActorPrincipalID: &actor, Reason: boundedString(p.Reason, 1024)})
-	if err != nil {
-		return s.failRun(ctx, run, res, err)
+	// A model failure declaration carries no privilege to fail a different
+	// Attempt. Persist Task/Attempt/Worker failure and immutable audit in one
+	// trusted transaction, including accurate errors on storage failure.
+	if err:=s.transitionTerminalWorker(ctx,run,p.Reason,false);err!=nil{
+		return failedResult(res,fmt.Errorf("model failure not durably committed: %w",err))
 	}
-	_ = s.finishRun(ctx, run.ID, RunFailed, p.Reason)
-	res.Status = "failed"
-	res.Error = p.Reason
+	res.Status="failed"
+	res.Error=p.Reason
 	return res
 }
 

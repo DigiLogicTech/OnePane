@@ -201,27 +201,78 @@ func (s *Service) finishRun(ctx context.Context, id string, status RunStatus, la
 	return nil
 }
 
-func (s *Service) failRun(ctx context.Context, run Run, res TickResult, cause error) TickResult {
-	cur, err := s.tasks.Get(ctx, run.TaskID)
-	actor := WorkerPrincipal
-	if err == nil && (cur.State == task.StateRunning || cur.State == task.StateVerifying || cur.State == task.StateCompletionRequested) {
-		_, _ = s.tasks.Fail(ctx, task.TransitionCommand{TaskID: cur.ID, ExpectedRevision: cur.Revision, ActorPrincipalID: &actor, Reason: boundedString(cause.Error(), 1024)})
-	}
-	_ = s.finishRun(ctx, run.ID, RunFailed, cause.Error())
-	res.Status = "failed"
-	res.Error = cause.Error()
-	return res
+// transitionTerminalWorker commits Task, original Attempt, Worker, journal
+// and event in ONE transaction. A stale/foreign Worker may not terminalize a
+// different Task incarnation. Failure leaves the original states untouched
+// for explicit operator recovery, not an invented successful transition.
+func (s *Service) transitionTerminalWorker(
+ ctx context.Context,run Run,reason string,blocked bool,
+)error{
+ if s==nil||s.tx==nil||s.tasks==nil||run.ID==""||run.TaskID==""||
+  run.AttemptID==""||run.WorkspaceID==""||run.Revision<1||
+  run.WorkerPrincipalID!=WorkerPrincipal{return ErrInvalidWorkerState}
+ status:=RunFailed
+ stepStatus:="failed"
+ stepKind:="fail"
+ if blocked{status=RunBlocked;stepStatus="waiting";stepKind="wait"}
+ reason=boundedString(reason,1024)
+ return s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+  var taskRevision int64
+  var workerState RunStatus
+  err:=tx.QueryRowContext(ctx,`SELECT r.status,t.revision
+   FROM agent_worker_runs r
+   JOIN tasks t ON t.id=r.task_id AND t.workspace_id=r.workspace_id
+   WHERE r.id=? AND r.workspace_id=? AND r.task_id=? AND r.attempt_id=?
+    AND r.worker_principal_id=? AND r.revision=?`,
+   run.ID,run.WorkspaceID,run.TaskID,run.AttemptID,
+   WorkerPrincipal,run.Revision).Scan(&workerState,&taskRevision)
+  if err!=nil{return fmt.Errorf("%w: terminal Worker ownership unavailable: %v",ErrInvalidWorkerState,err)}
+  if workerState!=RunRunning{return ErrInvalidWorkerState}
+  actor:=WorkerPrincipal
+  err=s.tasks.TransitionWorkerTerminalInTransaction(ctx,tx,
+   task.TransitionCommand{
+    TaskID:run.TaskID,ExpectedRevision:taskRevision,
+    ActorPrincipalID:&actor,Reason:reason,
+   },run.AttemptID,WorkerPrincipal,blocked)
+  if err!=nil{return err}
+  now:=s.clock.UnixMilli()
+  var completed any=now
+  if blocked{completed=nil}
+  changed,err:=tx.ExecContext(ctx,`UPDATE agent_worker_runs
+   SET status=?,last_error=?,revision=revision+1,updated_at=?,completed_at=?
+   WHERE id=? AND workspace_id=? AND task_id=? AND attempt_id=?
+    AND worker_principal_id=? AND status='running' AND revision=?`,
+   status,reason,now,completed,run.ID,run.WorkspaceID,run.TaskID,
+   run.AttemptID,WorkerPrincipal,run.Revision)
+  if err!=nil{return err}
+  n,err:=changed.RowsAffected()
+  if err!=nil{return err}
+  if n!=1{return ErrInvalidWorkerState}
+  return s.journalInTransaction(ctx,tx,run.ID,stepKind,stepStatus,
+   nil,nil,nil,nil,map[string]any{
+    "action":"terminal_worker","reason":reason,
+    "task_id":run.TaskID,"attempt_id":run.AttemptID,
+   })
+ })
 }
-func (s *Service) blockRun(ctx context.Context, run Run, res TickResult, reason string) TickResult {
-	cur, err := s.tasks.Get(ctx, run.TaskID)
-	actor := WorkerPrincipal
-	if err == nil && cur.State == task.StateRunning {
-		_, _ = s.tasks.MarkBlocked(ctx, task.TransitionCommand{TaskID: cur.ID, ExpectedRevision: cur.Revision, ActorPrincipalID: &actor, Reason: boundedString(reason, 1024)})
-	}
-	_ = s.finishRun(ctx, run.ID, RunBlocked, reason)
-	res.Status = "blocked"
-	res.Error = reason
-	return res
+
+func (s *Service) failRun(ctx context.Context,run Run,res TickResult,cause error)TickResult{
+ if cause==nil{cause=ErrInvalidWorkerState}
+ if err:=s.transitionTerminalWorker(ctx,run,cause.Error(),false);err!=nil{
+  return failedResult(res,fmt.Errorf("Worker failure not committed (requires operator reconciliation): %w; original cause: %v",err,cause))
+ }
+ res.Status="failed"
+ res.Error=cause.Error()
+ return res
+}
+
+func (s *Service) blockRun(ctx context.Context,run Run,res TickResult,reason string)TickResult{
+ if err:=s.transitionTerminalWorker(ctx,run,reason,true);err!=nil{
+  return failedResult(res,fmt.Errorf("Worker block not committed (requires operator reconciliation): %w",err))
+ }
+ res.Status="blocked"
+ res.Error=reason
+ return res
 }
 
 func (s *Service) continueWithError(ctx context.Context, run Run, res TickResult, code string, cause error) TickResult {

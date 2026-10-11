@@ -253,6 +253,9 @@ func (s *Service) reason(ctx context.Context, workspaceID, projectID, projectWor
 	// and never use an untested deployment merely to satisfy a route.
 	decision,err:=s.scheduler.Route(ctx,scheduler.RouteRequest{WorkspaceID:workspaceID,CapabilityID:"inference.general",RoleName:"project-orchestrator",ProtocolLevel:"L1",ContextTokens:8192,DataLabel:label,AllowUntested:false,AllowLimited:true,AllowMediated:true,AllowDegraded:true,RequireZeroIncrementalCost:true,PreferZeroIncrementalCost:true,LocalOnly:true,AllowedKinds:[]scheduler.CandidateKind{scheduler.CandidateModel},ComputePreference:"auto"})
 	if err!=nil||decision.Selected==nil{return "",nil,nil,fmt.Errorf("route project orchestrator: %w",err)}
+	if !scheduler.VerifiedHostLocalZeroCost(decision.Selected.Candidate){
+		return "",nil,nil,fmt.Errorf("unverified remote or paid model refused for Project Orchestrator")
+	}
 	dep:=decision.Selected.Candidate.ID
 	system:=`You are the logical OnePane Project Orchestrator. Coordinate project work but never claim direct tool, filesystem, secret, node, or approval authority. Use only the supplied bounded Project context. Return one JSON object: {"answer":"...", "action":"answer|task", "objective":"...", "project_workspace_id":"..."}. You may suggest a Workspace for requests without an explicit Workspace choice, but execution mode and Team are locked to the selected Workspace's operator configuration. Use action=task only when the user is asking OnePane to perform work rather than explain or report state.`
 	req,_:=json.Marshal(map[string]any{"messages":[]map[string]string{{"role":"system","content":system},{"role":"user","content":"Project context:\n"+string(snapshot)+"\n\nUser objective:\n"+objective}},"max_tokens":1200,"temperature":0.2})

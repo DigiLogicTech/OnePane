@@ -221,6 +221,11 @@ func(s *Service) reasonGlobal(ctx context.Context,workspaceID,actor,content stri
   if selected!=""{return "",nil,fmt.Errorf("selected Assistant model is unavailable or disallowed (no substitution): %w",err)}
   return "",nil,fmt.Errorf("route OnePane Assistant: %w",err)
  }
+	// A malformed/stale scheduler result cannot override the host-local
+	// zero-cost restriction, even if its RouteRequest asked for LocalOnly.
+	if !scheduler.VerifiedHostLocalZeroCost(decision.Selected.Candidate){
+		return "",nil,fmt.Errorf("unverified remote or paid model refused for general Assistant")
+	}
 	dep:=decision.Selected.Candidate.ID;snapshot:=s.globalSnapshot(ctx,workspaceID)
 	system:=`You are the global OnePane Assistant. You may explain global OnePane state and help navigate. Do not claim direct tool, filesystem, secret, node, or approval authority. Project-specific work must be delegated to that Project's Orchestrator. Use only the supplied bounded global context.`
 	req,_:=json.Marshal(map[string]any{"messages":[]map[string]string{{"role":"system","content":system},{"role":"user","content":"Global context:\n"+string(snapshot)+"\n\nUser:\n"+content}},"max_tokens":1000,"temperature":0.2})

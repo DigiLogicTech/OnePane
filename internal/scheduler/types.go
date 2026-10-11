@@ -466,3 +466,13 @@ func Route(req RouteRequest, candidates []Candidate) (Decision, error) {
 	out.Selected = &sel
 	return out, nil
 }
+
+// VerifiedHostLocalZeroCost is a defence-in-depth check at the last
+// application-owned model selection boundary. A route request alone is not
+// evidence that a scheduler's returned candidate is safe for private,
+// non-spending Assistant/Orchestrator inference. Paired Nodes remain a
+// separate explicitly approved transfer class.
+func VerifiedHostLocalZeroCost(c Candidate) bool {
+	return c.Kind==CandidateModel && c.Local && c.HardZeroIncrementalCost &&
+		(c.CostClass==CostLocal||c.CostClass==CostFree)
+}

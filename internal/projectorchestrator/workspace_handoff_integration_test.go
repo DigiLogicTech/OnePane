@@ -21,7 +21,10 @@ import (
 type handoffRoute struct{}
 func (handoffRoute) Route(_ context.Context, _ scheduler.RouteRequest)(scheduler.Decision,error){
  return scheduler.Decision{Selected:&scheduler.RankedCandidate{
-  Candidate:scheduler.Candidate{ID:"test-qualified-local-model"},
+  Candidate:scheduler.Candidate{
+   ID:"test-qualified-local-model",Kind:scheduler.CandidateModel,
+   Local:true,HardZeroIncrementalCost:true,CostClass:scheduler.CostLocal,
+  },
  }},nil
 }
 type handoffInference struct{contexts []string}

@@ -1057,3 +1057,41 @@ and conflicting sequences remain rejected. SQLite regression tests
 cover expired duplicate rejection, revoked-pair denial, and recovery
 with a new sequence and restored model status. This does not assert
 physical mTLS acceptance or remote host uptime.
+
+## Crash recovery — stranded external observation and compensation phases
+
+The operation startup sweep previously guarded only EXECUTING and
+UNKNOWN_OUTCOME, but an abrupt harness restart can also strand an
+external mutation in OBSERVING (Tool returned but verification not
+finished), VERIFIED (commit not yet durable), or COMPENSATING (undo
+effect outcome unknown). These phases can imply irreversible external
+effects even after the worker process dies.
+
+Bootstrap now treats these persisted phases as interrupted external
+effects, transitions each to UNKNOWN_OUTCOME and then
+BLOCKED_UNKNOWN_OUTCOME with a reason and original phase in the audit
+event, and **does not replay, verify, commit, compensate, or renew an
+external action automatically**. The original receipts and historical
+verification records remain available for separately authorized,
+independently observed reconciliation. PREPARED and terminal COMMITTED
+operations stay unchanged. The added real SQLite integration test
+exercises all five interrupted/recoverable phase categories and proves
+a second startup recovery produces no additional transitions.
+
+This is startup-only recovery with no physical control-plane Node or
+process lease acceptance asserted. A pending manual reconciliation
+must still satisfy the existing verification and approval gates.
+
+### Storage decoding exposed by expanded recovery CI
+
+Enabling the previously omitted Operation SQLite integration suite
+exposed that the persisted JSON TEXT fields in Operation, Verification
+and Checkpoint repositories were scanned directly into named
+`json.RawMessage` values. The SQLite driver returns text as a string;
+these scans fail for durable records. The repositories now scan into
+temporary strings then copy to the raw JSON fields, preserving the
+stored bytes. The historical mutating-Tool test also supplies its
+explicit healthy test watchdog to satisfy the current fail-closed
+mutation policy; production watchdog requirements are unchanged.
+The complete Operation integration suite, including original
+mutation lifecycle and restart recovery tests, is now mandatory CI.

@@ -31,16 +31,23 @@ func scanOperation(row interface{ Scan(...any) error }) (Operation, error) {
 	var leaseRevision sql.NullInt64
 	var requiredVerification, requiredApproval sql.NullString
 	var state string
+	// SQLite TEXT columns arrive as driver strings. Scan them as strings
+	// before converting to json.RawMessage (a named []byte alias); scanning
+	// directly into *json.RawMessage fails on persisted production records.
+	var desiredJSON,preconditionJSON,reconciliationJSON string
 	err := row.Scan(&o.ID, &o.WorkspaceID, &taskID, &attemptID, &o.PrincipalID, &compensates,
 		&o.IdempotencyKey, &state, &o.CapabilityID, &o.ResourceRef, &o.ToolID, &o.ToolVersion,
-		&o.AdapterID, &o.AdapterVersion, &o.DesiredState, &o.Precondition,
-		&o.Reconciliation, &compensation, &o.PolicyRevision, &o.InputHash,
+		&o.AdapterID, &o.AdapterVersion, &desiredJSON, &preconditionJSON,
+		&reconciliationJSON, &compensation, &o.PolicyRevision, &o.InputHash,
 		&leaseID, &leaseRevision, &resourceLeaseID, &globalResourceLeaseID, &requiredVerification, &requiredApproval,
 		&o.Revision, &o.CreatedAt, &o.UpdatedAt)
 	if err != nil {
 		return Operation{}, err
 	}
 	o.State = State(state)
+	o.DesiredState=json.RawMessage(desiredJSON)
+	o.Precondition=json.RawMessage(preconditionJSON)
+	o.Reconciliation=json.RawMessage(reconciliationJSON)
 	if taskID.Valid {
 		x := taskID.String
 		o.TaskID = &x

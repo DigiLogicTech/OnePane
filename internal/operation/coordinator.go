@@ -681,35 +681,44 @@ func sameIntent(o Operation, cmd PrepareCommand, inputHash string) bool {
 	return o.WorkspaceID == cmd.WorkspaceID && o.PrincipalID == cmd.PrincipalID && o.ToolID == strings.TrimSpace(cmd.ToolID) && o.ToolVersion == strings.TrimSpace(cmd.ToolVersion) && o.ResourceRef == strings.TrimSpace(cmd.ResourceRef) && o.InputHash == inputHash && sameOptionalString(o.TaskID, cmd.TaskID) && sameOptionalString(o.AttemptID, cmd.AttemptID) && sameOptionalString(o.CompensatesOperationID, cmd.CompensatesOperationID)
 }
 
-// RecoverInterrupted converts operations that were EXECUTING when harnessd
-// stopped into BLOCKED_UNKNOWN_OUTCOME. It never retries them. A fresh direct
-// observation is required before either accepting the resulting state or
-// retrying the mutation.
+// RecoverInterrupted runs only when the control plane starts before workers
+// can dispatch new external effects. Any persisted in-flight state from the
+// previous incarnation is unsafe to resume automatically. Executing effects,
+// pending observation/commit, and compensation may all have changed external
+// state even if the process lost its last local acknowledgement. Preserve the
+// operation/receipt/verification data and require independent reconciliation;
+// never replay or silently commit/compensate a previously dispatched action.
 func (c *Coordinator) RecoverInterrupted(ctx context.Context, actor, requestID, traceID *string) (RecoverySweepResult, error) {
-	ops, err := c.repo.ListByStates(ctx, StateExecuting, StateUnknownOutcome)
-	if err != nil {
-		return RecoverySweepResult{}, err
-	}
-	var out RecoverySweepResult
-	for _, o := range ops {
-		if o.State == StateExecuting {
-			if err := c.transitionWithDetails(ctx, o.ID, o.Revision, StateExecuting, StateUnknownOutcome, actor, requestID, traceID, map[string]any{"reason": "process_restart", "retry": false}); err != nil {
-				return out, err
-			}
-			out.Interrupted = append(out.Interrupted, o.ID)
-			o, err = c.repo.Get(ctx, o.ID)
-			if err != nil {
-				return out, err
-			}
-		}
-		if o.State == StateUnknownOutcome {
-			if err := c.transitionWithDetails(ctx, o.ID, o.Revision, StateUnknownOutcome, StateBlockedUnknownOutcome, actor, requestID, traceID, map[string]any{"reason": "reconciliation_required"}); err != nil {
-				return out, err
-			}
-			out.Blocked = append(out.Blocked, o.ID)
-		}
-	}
-	return out, nil
+ ops,err:=c.repo.ListByStates(ctx,
+  StateExecuting,StateObserving,StateVerified,
+  StateCompensating,StateUnknownOutcome)
+ if err!=nil{return RecoverySweepResult{},err}
+ var out RecoverySweepResult
+ for _,o:=range ops{
+  switch o.State{
+  case StateExecuting,StateObserving,StateVerified,StateCompensating:
+   from:=o.State
+   if err:=c.transitionWithDetails(ctx,o.ID,o.Revision,from,
+    StateUnknownOutcome,actor,requestID,traceID,
+    map[string]any{"reason":"process_restart","interrupted_state":from,
+     "retry":false,"independent_reconciliation_required":true});err!=nil{
+    return out,err
+   }
+   out.Interrupted=append(out.Interrupted,o.ID)
+   o,err=c.repo.Get(ctx,o.ID)
+   if err!=nil{return out,err}
+  }
+  if o.State==StateUnknownOutcome{
+   if err:=c.transitionWithDetails(ctx,o.ID,o.Revision,
+    StateUnknownOutcome,StateBlockedUnknownOutcome,
+    actor,requestID,traceID,
+    map[string]any{"reason":"reconciliation_required","retry":false});err!=nil{
+    return out,err
+   }
+   out.Blocked=append(out.Blocked,o.ID)
+  }
+ }
+ return out,nil
 }
 
 func (c *Coordinator) BlockUnknown(ctx context.Context, cmd RecoveryCommand) (Operation, error) {

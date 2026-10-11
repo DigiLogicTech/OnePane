@@ -206,26 +206,26 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
 	if err := s.EnsureSystemPrincipals(ctx); err != nil {
 		return nil, err
 	}
-	if err := s.syncResumedRuns(ctx); err != nil {
-		return nil, err
-	}
+	// Continue independent work after a corrupt waiting continuation.
+	// Return the actionable per-run error with any completed tick results.
+	wakeErr:=s.syncResumedRuns(ctx)
 	if _, err := s.admitCreated(ctx, limit); err != nil {
-		return nil, err
+		return nil, errors.Join(wakeErr,err)
 	}
 	runs, err := s.activeRuns(ctx, limit)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(wakeErr,err)
 	}
 	out := make([]TickResult, 0, limit)
 	for _, r := range runs {
 		out = append(out, s.step(ctx, r))
 		if len(out) >= limit {
-			return out, nil
+			return out,wakeErr
 		}
 	}
 	ready, err := s.readyTasks(ctx, limit-len(out))
 	if err != nil {
-		return out, err
+		return out,errors.Join(wakeErr,err)
 	}
 	for _, t := range ready {
 		r, res := s.startRun(ctx, t)
@@ -235,7 +235,7 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
 		}
 		out = append(out, s.step(ctx, r))
 	}
-	return out, nil
+	return out,wakeErr
 }
 
 func (s *Service) admitCreated(ctx context.Context, limit int) (int, error) {
@@ -294,7 +294,11 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 		}
 		xs = append(xs, v)
 	}
+	var problems []error
 	for _, v := range xs {
+		// One corrupt Worker continuation must not prevent independent
+		// waiting Tasks from being reconciled on the same daemon tick.
+		if runErr:=func()error{
 		if v.state == string(task.StateWaitingDependency) {
 			var blocked int
 			if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_dependencies d JOIN tasks dep ON dep.id=d.depends_on_task_id WHERE d.task_id=? AND d.dependency_type='hard' AND (dep.state<>'complete' OR dep.archived_at IS NOT NULL)`, v.task).Scan(&blocked); err != nil {
@@ -378,8 +382,12 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
                AND a.task_id=agent_worker_runs.task_id AND a.status='running')`,
                s.clock.UnixMilli(),v.run,v.task);err!=nil{return err}
         }
+		return nil
+		}();runErr!=nil{
+			problems=append(problems,fmt.Errorf("reconcile waiting Worker %s Task %s: %w",v.run,v.task,runErr))
+		}
 	}
-	return rows.Err()
+	return errors.Join(append(problems,rows.Err())...)
 }
 
 // resumeWaitingWorkerAndAttempt is the atomic counterpart of

@@ -1,7 +1,5 @@
 package featurepolicy
 
-import "strings"
-
 type State string
 
 const (
@@ -81,7 +79,7 @@ func Resolve(parent, child State) State {
 	if parent == Unavailable || parent == Disabled {
 		return parent
 	}
-	if child == Inherited || strings.TrimSpace(string(child)) == "" {
+	if child == Inherited || child == "" {
 		return parent
 	}
 	if child == Unavailable || child == Disabled {

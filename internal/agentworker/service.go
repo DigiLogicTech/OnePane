@@ -98,10 +98,10 @@ func (s *Service) ensureWorkspaceAccess(ctx context.Context, workspaceID string)
 	}
 	var currentStatus string
 	if err := s.db.QueryRowContext(ctx, "SELECT status FROM workspaces WHERE id=?", workspaceID).Scan(&currentStatus); err != nil {
-	return err
+		return fmt.Errorf("load Workspace %s status: %w", workspaceID, err)
 	}
 	if currentStatus != "active" {
-	return fmt.Errorf("Workspace is not active")
+		return fmt.Errorf("Workspace %s is not active", workspaceID)
 	}
 	if err := s.EnsureSystemPrincipals(ctx); err != nil {
 		return err

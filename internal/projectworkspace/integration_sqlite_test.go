@@ -138,7 +138,7 @@ func TestVerifiedEndpointRouteSQLite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	route, err := svc.ApplyEndpointRoute(ctx, ApplyEndpointRouteCommand{EndpointID: ep.ID, ApplicationID: app.ID, ApplicationRevision: app.Revision, HostIP: "127.0.0.1", HostPort: 49152, TransportProtocol: "tcp", ContainerSpecHash: "spec123", ObservationID: "obs", VerificationID: "ver", ActorPrincipalID: "observer"})
+	route, err := svc.ApplyEndpointRoute(ctx, ApplyEndpointRouteCommand{EndpointID: ep.ID, ExpectedEndpointRevision: ep.Revision, ApplicationID: app.ID, ApplicationRevision: app.Revision, HostIP: "127.0.0.1", HostPort: 49152, TransportProtocol: "tcp", ContainerSpecHash: "spec123", ObservationID: "obs", VerificationID: "ver", ActorPrincipalID: "observer"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestVerifiedEndpointRouteSQLite(t *testing.T) {
 	if resolved.WorkspaceID != "ws" || resolved.Route.HostIP != "127.0.0.1" {
 		t.Fatalf("resolved=%+v", resolved)
 	}
-	if _, err := svc.ApplyEndpointRoute(ctx, ApplyEndpointRouteCommand{EndpointID: ep.ID, ApplicationID: app.ID, ApplicationRevision: app.Revision, HostIP: "127.0.0.1", HostPort: 49153, TransportProtocol: "tcp", ContainerSpecHash: "spec123", ObservationID: "obs", VerificationID: "ver", ActorPrincipalID: "observer"}); err == nil {
+	if _, err := svc.ApplyEndpointRoute(ctx, ApplyEndpointRouteCommand{EndpointID: ep.ID, ExpectedEndpointRevision: ep.Revision, ApplicationID: app.ID, ApplicationRevision: app.Revision, HostIP: "127.0.0.1", HostPort: 49153, TransportProtocol: "tcp", ContainerSpecHash: "spec123", ObservationID: "obs", VerificationID: "ver", ActorPrincipalID: "observer"}); err == nil {
 		t.Fatal("unobserved host port accepted")
 	}
 	if _, err := db.SQL().ExecContext(ctx, `UPDATE project_applications SET revision=revision+1 WHERE id=?`, app.ID); err != nil {

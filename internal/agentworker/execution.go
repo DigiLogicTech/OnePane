@@ -657,6 +657,65 @@ func (s *Service) handleFail(ctx context.Context, run Run, t task.Task, resp age
 	return res
 }
 
+
+// blockForIndependentAssurance atomically records the durable Worker
+// continuation and its schema-valid waiting journal. Task/Verification are
+// created separately before this handoff, so failure is reported explicitly
+// for reconciliation rather than silently declaring the Worker blocked.
+func (s *Service) blockForIndependentAssurance(ctx context.Context,run Run,
+ verificationID string,continuation json.RawMessage) error {
+ if s==nil||s.tx==nil||verificationID==""||run.ID==""||
+  run.AttemptID==""||!json.Valid(continuation){return ErrInvalidWorkerState}
+ return s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+  var authorized int
+  err:=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM agent_worker_runs r
+   JOIN tasks t ON t.id=r.task_id AND t.workspace_id=r.workspace_id
+   JOIN task_attempts a ON a.id=r.attempt_id AND a.task_id=t.id
+    AND a.status='waiting' AND a.worker_principal_id=r.worker_principal_id
+    AND json_valid(a.metadata_json)=1
+    AND json_extract(a.metadata_json,'$.agent_worker')='v1'
+   JOIN verifications v ON v.id=? AND v.task_id=t.id AND v.workspace_id=t.workspace_id
+    AND v.subject_ref='agent_worker_run:' || r.id
+    AND v.status='pending' AND v.required_level<>'V0'
+    AND json_valid(v.spec_json)=1
+    AND json_extract(v.spec_json,'$.source')='agent_completion_proposal'
+    AND json_extract(v.spec_json,'$.worker_run_id')=r.id
+   JOIN workspaces w ON w.id=t.workspace_id AND w.status='active'
+   LEFT JOIN projects p ON p.id=t.project_id
+   LEFT JOIN project_workspaces pw ON pw.id=t.project_workspace_id
+   WHERE r.id=? AND r.task_id=? AND r.workspace_id=?
+    AND r.attempt_id=? AND r.worker_principal_id=?
+    AND r.status='running' AND r.revision=?
+    AND t.state='verifying' AND t.archived_at IS NULL
+    AND (t.project_id IS NULL OR
+     (p.id=t.project_id AND p.workspace_id=t.workspace_id AND p.status='active'))
+    AND (t.project_workspace_id IS NULL OR
+     (t.project_id IS NOT NULL AND pw.id=t.project_workspace_id
+      AND pw.project_id=t.project_id AND pw.status='active'))`,
+   verificationID,run.ID,run.TaskID,run.WorkspaceID,run.AttemptID,
+   WorkerPrincipal,run.Revision).Scan(&authorized)
+  if err!=nil{return err}
+  if authorized!=1{return ErrInvalidWorkerState}
+  now:=s.clock.UnixMilli()
+  r,err:=tx.ExecContext(ctx,`UPDATE agent_worker_runs
+   SET status='blocked',continuation_json=?,last_error=?,
+    revision=revision+1,updated_at=?
+   WHERE id=? AND task_id=? AND workspace_id=? AND attempt_id=?
+    AND worker_principal_id=? AND status='running' AND revision=?`,
+   string(continuation),ErrHigherVerification.Error(),now,run.ID,
+   run.TaskID,run.WorkspaceID,run.AttemptID,WorkerPrincipal,run.Revision)
+  if err!=nil{return err}
+  affected,err:=r.RowsAffected()
+  if err!=nil{return err}
+  if affected!=1{return ErrInvalidWorkerState}
+  return s.journalInTransaction(ctx,tx,run.ID,"verification","waiting",
+   nil,nil,strPtr("complete"),strPtr(verificationID),
+   map[string]any{"verification_id":verificationID,
+    "action":"independent_assurance_handoff",
+    "state":"queued_for_assurance","independent":true})
+ })
+}
+
 func (s *Service) handleComplete(ctx context.Context, run Run, t task.Task, resp agentprotocol.Response, res TickResult) TickResult {
 	var p completeProposal
 	if err := json.Unmarshal(resp.Proposal, &p); err != nil {
@@ -702,8 +761,12 @@ func (s *Service) handleComplete(ctx context.Context, run Run, t task.Task, resp
 			return s.failRun(ctx, run, res, err)
 		}
 		cont, _ := json.Marshal(map[string]any{"completion_proposal": json.RawMessage(resp.Proposal), "required_verification": required, "verification_id": v.ID})
-		_ = s.updateRun(ctx, run.ID, run.Revision, RunBlocked, cont, nil, 0, 0, nil, nil, strPtr(ErrHigherVerification.Error()))
-		_ = s.journal(ctx, run.ID, "verification", "queued", nil, nil, strPtr("complete"), strPtr(v.ID), map[string]any{"verification_id": v.ID, "required_level": required})
+		if err:=s.blockForIndependentAssurance(ctx,run,v.ID,cont);err!=nil{
+			// The verification/Task is already persisted. Never claim a
+			// blocked Worker or silently ignore a failed audit; recovery
+			// must inspect this incomplete handoff without replaying tools.
+			return failedResult(res,err)
+		}
 		res.Status = "blocked_verification"
 		res.Error = fmt.Sprintf("completion requires %s; independent assurance queued", required)
 		return res

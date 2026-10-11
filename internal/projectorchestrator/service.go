@@ -65,6 +65,7 @@ type TurnResult struct {
 	Turn               Turn    `json:"turn"`
 	Disposition        string  `json:"disposition"`
 	TaskID             *string `json:"task_id,omitempty"`
+	TaskGraphID        *string `json:"task_graph_id,omitempty"`
 	ProjectWorkspaceID *string `json:"project_workspace_id,omitempty"`
 	Mode               *string `json:"mode,omitempty"`
 	TeamSessionID      *string `json:"team_session_id,omitempty"`
@@ -382,7 +383,32 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 			answer+="\n\nSelect a canonical Workspace before running this Task. OnePane will not guess between isolated Workspaces while planning is unavailable."
 		}
 	}
-	if action=="task" {
+	var taskGraphID *string
+	// A human-initiated Run may admit a local model's bounded DAG only
+	// through the separately revocable standing Level 4 grant. Never let
+	// a read-only Ask or a model-supplied action implicitly do this.
+	if action=="task"&&c.ForceTask&&planDraft!=nil&&pwsID!=""&&mode=="direct"{
+		graph,graphErr:=s.CreateTaskGraph(ctx,CreateTaskGraphCommand{
+			ProjectID:c.ProjectID,Name:"Autonomous Project plan",
+			IdempotencyKey:"auto-"+userTurnID,Nodes:planDraft.Nodes,
+			ActorPrincipalID:c.ActorPrincipalID,AutonomousModelDraft:true,
+			AuthorizedWorkspaceID:pwsID,UserObjective:c.Objective,
+		})
+		if graphErr==nil&&len(graph.Nodes)>0{
+			taskGraphID=&graph.ID
+			first:=graph.Nodes[0].TaskID
+			taskID=&first
+			disposition="task_graph_created"
+			answer+="\n\nStanding Level 4 autonomy authorised a bounded "+
+				fmt.Sprintf("%d-step",len(graph.Nodes))+
+				" local-first Task graph. Task dependencies are enforced by the Worker."
+		}else{
+			answer+="\n\nThe draft graph was not authorised by the current "+
+				"Level 4 policy. The original user objective remains eligible "+
+				"for an individually authorised Task."
+		}
+	}
+	if action=="task"&&taskID==nil {
 		// Use canonical relational ownership, not only model-supplied JSON.
 		// When an approved toolchain exists, pin its exact digest to this Task,
 		// so later approval changes cannot silently substitute a build image.
@@ -419,6 +445,7 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 	}
 	if deploymentID!=nil{prov["candidate_kind"]="model_deployment";prov["candidate_id"]=*deploymentID}
 	if taskID!=nil{prov["task_id"]=*taskID}
+	if taskGraphID!=nil{prov["task_graph_id"]=*taskGraphID;prov["plan_admission"]="standing_L4_autonomy_policy"}
 	if sessionID!=nil{prov["team_session_id"]=*sessionID}
 	provRaw,_:=json.Marshal(prov)
 	turnID,_:=s.ids.New("pturn");created:=s.clock.UnixMilli()
@@ -427,5 +454,5 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 	status:="ready";if disposition=="waiting"||disposition=="blocked"{status="waiting"};if reasonErr!=nil{status="degraded"}
 	_,_ = s.db.ExecContext(ctx,`UPDATE project_orchestrators SET status=?,revision=revision+1,updated_at=? WHERE id=?`,status,created,o.ID)
 	turn:=Turn{ID:turnID,OrchestratorID:o.ID,AssistantThreadID:c.AssistantThreadID,TaskID:taskID,Role:"orchestrator",Content:answer,ContextJSON:snapshot,ProvenanceJSON:provRaw,CreatedAt:created}
-	return TurnResult{Turn:turn,Disposition:disposition,TaskID:taskID,ProjectWorkspaceID:&pwsID,Mode:&mode,TeamSessionID:sessionID},nil
+	return TurnResult{Turn:turn,Disposition:disposition,TaskID:taskID,TaskGraphID:taskGraphID,ProjectWorkspaceID:&pwsID,Mode:&mode,TeamSessionID:sessionID},nil
 }

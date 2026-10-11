@@ -94,6 +94,9 @@ func (s StoredScopes) ForTask(ctx context.Context, tenantID, taskID string) (Sco
 		taskID,tenantID).Scan(&projectID,&workspaceID,&completion)
 	if err != nil { return ScopedDecision{}, fmt.Errorf("resolve canonical Task scope: %w",err) }
 	if !projectID.Valid {
+		if workspaceID.Valid {
+			return ScopedDecision{}, fmt.Errorf("canonical Workspace requires a Project owner")
+		}
 		return ScopedDecision{Configured:false},nil // legacy Task: existing authority still applies
 	}
 	var projectJSON,projectStatus string

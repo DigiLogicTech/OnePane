@@ -2,11 +2,13 @@
 
 This register follows the **first assistant code/security review** of draft
 [PR #227](https://github.com/DigiLogicTech/OnePane/pull/227).
-The core vision and Decisions 1–5 have been confirmed by the user:
-local-first execution, unified Assistant, L4/L5 operation, guarded
-remediation, universal Workspace permissions, versioned Agent policies,
-live revocation, and scoped live/historical diagnostics. Decision 6 remains
-open.
+All six vision decisions are confirmed by the user: local-first
+completion on constrained hardware; unified Assistant; Level 4 by default
+and Level 5 available; bounded automated remediation; universal Workspace
+permissions; versioned Agent policy with live revocation; live and historical
+diagnostics; and trusted paired Nodes as first-class local-first compute.
+Design alignment does not approve new runtime privileges, release merges or
+packaging. Complete implementation and second code/security audit remain.
 Approval of a design direction does not grant runtime privileges, authorise
 release packaging, or approve a merge.
 
@@ -283,16 +285,55 @@ collection and per-Agent tracing are already implemented.
 **Status:** CONFIRMED BY USER — both diagnostic modalities, lightweight
 defaults and scoped opt-in detailed tracing required.
 
-## Decision 6 — compute and provider trust categories
-**Question:** Can verified on-device OpenAI-compatible model runtimes and
-paired trusted LAN Nodes count as local-first when cloud permission is off?
+## Decision 6 — local, trusted Node and cloud compute boundaries
 
-**Proposed starting position:** Distinguish **origin-host local**, **trusted
-paired Node** and **external/cloud** by observed and verified network
-destination, node identity and data-flow policy, not model/provider labels.
-Require an explicit grant for off-host transfers even to trusted Nodes.
+**User decision (2026-10-11):** CONFIRMED. Trusted paired Nodes form part
+of OnePane's **local-first compute infrastructure** and may receive
+automatically routed work on authorised links. External/cloud models are
+a separate category with separately configurable consent and budgets.
+Off-host data movement remains subject to explicit scope and transfer grants.
 
-**Status:** AWAITING USER.
+**Confirmed implementation contract:**
+- Resolve compute into three meaningful classes: **host-local** runtime,
+  **trusted paired Node** (including the user's own machines and eligible
+  LAN/Tailscale-linked nodes), and **external/cloud** provider. Classify by
+  verified identity, endpoint address, transport trust and actual dispatch
+  target, not friendly model/provider labels.
+- A local OpenAI-compatible endpoint qualifies as host-local only when
+  its actual destination and host identity are established; a provider
+  connection record does not automatically imply cloud.
+- A paired Node must be authenticated, enrolled, health-checked and bound
+  to trusted scope. Routing a Task to the Node is permitted only if the
+  Project/Workspace allows the Node and authorises the information flow,
+  data transfer, tool use and destination.
+- Local-first routing should automatically consider eligible compute
+  across all authorised owned Nodes, accounting for RAM/VRAM, available
+  model runtimes, Colibri fit, hot-swap cost, queue length, transport cost,
+  model capability and task priority. Slow local completion is preferable
+  to unapproved cloud escalation.
+- Cloud inference requires an independent explicit grant, provider and
+  model eligibility, data-flow classification, cost/budget controls and
+  a current consent decision. An unavailable Node must never silently
+  trigger a cloud fallback.
+- Trust revocation or Node disconnect prevents new work, preserves queued
+  Task/Worker checkpoints and reports remote in-flight outcomes honestly.
+  Do not repeat unknown external side effects until reconciled.
+- Model swaps or route changes must not expand Workspace or Agent rights.
+  Sandboxes, secrets, filesystem mounts and remote tools remain
+  independently constrained.
+- Present a straightforward **Compute preference** selection such as
+  Local/Trusted Nodes first, Host only, Allowed Nodes, or Cloud when
+  explicitly enabled; offer advanced Node allowlists, placement caps,
+  model pinning, budgets and network restrictions.
+- Include mocked authenticated-host/Node/provider integration tests,
+  malicious provider labels, private-network endpoint misclassification,
+  Node revocation, transfer-denied decisions, unavailable hardware and
+  restart recovery.
+
+**Status:** CONFIRMED BY USER — trusted paired Nodes are first-class
+local-first resources; remote data transfer and cloud are separately
+permissioned. Full routing, trust verification and gateway integration
+remain implementation work.
 
 ## Unresolved release gates
 - [ ] User approval of first code review and this vision alignment.

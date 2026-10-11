@@ -299,17 +299,8 @@ func (s *Service) StartInTransaction(ctx context.Context, tx storage.Tx, cmd Sta
  // Revalidate hard predecessors inside the same write transaction as Task
  // and Attempt start. Ready is not a substitute for dependency completion:
  // external transitions, restarts or competing workers must not bypass DAG.
- satisfied,err:=s.repo.HardDependenciesSatisfied(ctx,tx,t.ID)
- if err!=nil{return Task{},Attempt{},err}
- if !satisfied{return Task{},Attempt{},ErrHardDependencyUnsatisfied}
- // Task graphs have an independent, operator-attested predecessor snapshot.
- // The mutable live dependency table alone is not authorization to execute.
- // Recheck that snapshot inside this same write transaction, after the
- // ordinary hard-dependency predicate and before opening an Attempt.
- if t.ProjectWorkspaceID!=nil||hasTaskGraphProvenance(t.Completion){
-  if err:=approvedTaskGraphDependenciesTx(ctx,tx,t);err!=nil{
-   return Task{},Attempt{},err
-  }
+ if err:=s.requireRuntimeDependencyIntegrityTx(ctx,tx,t);err!=nil{
+  return Task{},Attempt{},err
  }
  n,err:=s.repo.NextAttemptNumber(ctx,tx,t.ID)
  if err!=nil{return Task{},Attempt{},err}
@@ -400,6 +391,7 @@ func (s *Service) ResumeWaitingAttemptInTransaction(ctx context.Context, tx stor
  if active==nil||active.ID!=attemptID||active.State!=AttemptWaiting{
   return fmt.Errorf("%w: autonomous wake requires the original waiting Attempt",ErrInvalidAttempt)
  }
+ if err:=s.requireRuntimeDependencyIntegrityTx(ctx,tx,t);err!=nil{return err}
  now:=s.clock.UnixMilli()
  if err:=s.repo.TransitionAttempt(ctx,tx,active.ID,AttemptWaiting,AttemptRunning,now);err!=nil{return err}
  if err:=s.repo.Transition(ctx,tx,transitionRecord{
@@ -459,6 +451,7 @@ func (s *Service) Resume(ctx context.Context, cmd TransitionCommand) (Task, erro
 			if active.State != AttemptWaiting {
 				return ErrActiveAttempt
 			}
+			if err:=s.requireRuntimeDependencyIntegrityTx(ctx,tx,t);err!=nil{return err}
 			if err := s.repo.TransitionAttempt(ctx, tx, active.ID, active.State, AttemptRunning, now); err != nil {
 				return err
 			}
@@ -634,6 +627,11 @@ func (s *Service) transitionInternal(
 		}
 		if !CanTransition(t.State, next) {
 			return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, t.State, next)
+		}
+		// Verification retry also re-enters RUNNING; it cannot bypass
+		// the same persisted DAG approval as Start or Resume.
+		if next==StateRunning {
+			if err:=s.requireRuntimeDependencyIntegrityTx(ctx,tx,t);err!=nil{return err}
 		}
 		if attemptNext != "" {
 			active, err := s.repo.ActiveAttempt(ctx, tx, t.ID)

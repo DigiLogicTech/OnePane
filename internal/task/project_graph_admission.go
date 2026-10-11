@@ -10,6 +10,16 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/storage"
 )
 
+func hasTaskGraphProvenance(raw json.RawMessage) bool {
+	var provenance struct {
+		Source string `json:"source"`
+		GraphID string `json:"graph_id"`
+	}
+	return json.Unmarshal(raw,&provenance)==nil &&
+		(provenance.Source=="project-orchestrator-task-graph"||
+			strings.TrimSpace(provenance.GraphID)!="")
+}
+
 // approvedTaskGraphDependenciesTx enforces the graph's independently
 // operator-attested predecessor list at the actual Task/Attempt admission
 // boundary. Graph readiness/reporting is only advisory; deleted SQL edges
@@ -33,13 +43,7 @@ func approvedTaskGraphDependenciesTx(ctx context.Context, tx storage.Tx, t Task)
 	if errors.Is(err,sql.ErrNoRows){
 		// A Task created as part of an approved graph must not turn into
 		// an ordinary Task if its canonical graph-node row is missing.
-		var provenance struct {
-			Source string `json:"source"`
-			GraphID string `json:"graph_id"`
-		}
-		if json.Unmarshal(t.Completion,&provenance)==nil &&
-			(provenance.Source=="project-orchestrator-task-graph"||
-				strings.TrimSpace(provenance.GraphID)!="") {
+		if hasTaskGraphProvenance(t.Completion) {
 			return ErrHardDependencyUnsatisfied
 		}
 		return nil

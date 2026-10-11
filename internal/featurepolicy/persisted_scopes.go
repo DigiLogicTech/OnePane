@@ -79,12 +79,34 @@ func validatePolicyValues(p Policy) error {
 // ForTask loads the real source scopes, not permissions claimed by a Task or
 // model response. The tenant and canonical ownership checks are intentional:
 // a Task cannot name another Project's Workspace to obtain additional grants.
+// scopedRowReader allows the same canonical policy lookup to run against
+// either the database or the caller's admission transaction.
+type scopedRowReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 func (s StoredScopes) ForTask(ctx context.Context, tenantID, taskID string) (ScopedDecision, error) {
-	if s.DB == nil || strings.TrimSpace(tenantID) == "" || strings.TrimSpace(taskID) == "" {
+	if s.DB == nil {
+		return ScopedDecision{}, fmt.Errorf("scope resolver unavailable")
+	}
+	return forTaskWithReader(ctx, s.DB, tenantID, taskID)
+}
+
+// ForTaskTx resolves revocable permissions from the SAME transaction that
+// owns Worker admission. The caller must not use a separate DB read here.
+func (s StoredScopes) ForTaskTx(ctx context.Context, tx scopedRowReader, tenantID, taskID string) (ScopedDecision, error) {
+	if tx == nil {
+		return ScopedDecision{}, fmt.Errorf("transactional scope reader unavailable")
+	}
+	return forTaskWithReader(ctx, tx, tenantID, taskID)
+}
+
+func forTaskWithReader(ctx context.Context, reader scopedRowReader, tenantID, taskID string) (ScopedDecision, error) {
+	if strings.TrimSpace(tenantID) == "" || strings.TrimSpace(taskID) == "" {
 		return ScopedDecision{}, fmt.Errorf("scope resolver unavailable")
 	}
 	var topStatus string
-	if err := s.DB.QueryRowContext(ctx,"SELECT status FROM workspaces WHERE id=?",tenantID).Scan(&topStatus); err != nil {
+	if err := reader.QueryRowContext(ctx,"SELECT status FROM workspaces WHERE id=?",tenantID).Scan(&topStatus); err != nil {
 		return ScopedDecision{}, fmt.Errorf("execution Workspace unavailable")
 	}
 	if topStatus != "active" {
@@ -92,7 +114,7 @@ func (s StoredScopes) ForTask(ctx context.Context, tenantID, taskID string) (Sco
 	}
 	var projectID,workspaceID sql.NullString
 	var completion string
-	err := s.DB.QueryRowContext(ctx,
+	err := reader.QueryRowContext(ctx,
 		"SELECT project_id,project_workspace_id,COALESCE(completion_json,'{}') FROM tasks WHERE id=? AND workspace_id=?",
 		taskID,tenantID).Scan(&projectID,&workspaceID,&completion)
 	if err != nil { return ScopedDecision{}, fmt.Errorf("resolve canonical Task scope: %w",err) }
@@ -103,7 +125,7 @@ func (s StoredScopes) ForTask(ctx context.Context, tenantID, taskID string) (Sco
 		return ScopedDecision{Configured:false},nil // legacy Task: existing authority still applies
 	}
 	var projectJSON,projectStatus string
-	if err := s.DB.QueryRowContext(ctx,
+	if err := reader.QueryRowContext(ctx,
 		"SELECT project_policy_json,status FROM projects WHERE id=? AND workspace_id=?",
 		projectID.String,tenantID).Scan(&projectJSON,&projectStatus);err!=nil||projectStatus!="active"{
 		return ScopedDecision{},fmt.Errorf("Project scope unavailable or inactive")
@@ -114,7 +136,7 @@ func (s StoredScopes) ForTask(ctx context.Context, tenantID, taskID string) (Sco
 	fromWorkspace:=false
 	if workspaceID.Valid {
 		var settings,status string
-		if err:=s.DB.QueryRowContext(ctx,
+		if err:=reader.QueryRowContext(ctx,
 			"SELECT ai_settings_json,status FROM project_workspaces WHERE id=? AND project_id=?",
 			workspaceID.String,projectID.String).Scan(&settings,&status);err!=nil||status!="active"{
 			return ScopedDecision{},fmt.Errorf("canonical Workspace scope unavailable or inactive")
@@ -145,4 +167,13 @@ func (s StoredScopes) AuthorizeTask(ctx context.Context,tenantID,taskID,action s
 	if err!=nil{return false,err}
 	if !decision.Configured{return true,nil}
 	return decision.Effective.ValidateExecution(action),nil
+}
+
+// AuthorizeTaskTx performs canonical permission resolution inside the caller's
+// transaction; no preflight decision is sufficient for durable admission.
+func (s StoredScopes) AuthorizeTaskTx(ctx context.Context, tx scopedRowReader, tenantID, taskID, action string) (bool, error) {
+	decision, err := s.ForTaskTx(ctx, tx, tenantID, taskID)
+	if err != nil { return false, err }
+	if !decision.Configured { return true, nil }
+	return decision.Effective.ValidateExecution(action), nil
 }

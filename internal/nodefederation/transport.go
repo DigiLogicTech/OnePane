@@ -2,8 +2,10 @@ package nodefederation
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -436,61 +438,91 @@ func (s *Server) remoteInference(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 
-func (s *Service) executeInbound(ctx context.Context, peer string, in RemoteInferenceRequest, exec LocalInferenceExecutor) (RemoteInferenceResponse, error) {
-	var status string
-	var resp, usage, errorCode sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT status,response_json,usage_json,error_code FROM node_federated_inference_receipts WHERE peer_node_id=? AND remote_request_id=?`, peer, in.RequestID).Scan(&status, &resp, &usage, &errorCode)
-	if err == nil {
-		if status == "succeeded" && resp.Valid {
-			return RemoteInferenceResponse{ResponseJSON: json.RawMessage(resp.String), UsageJSON: json.RawMessage(usage.String), OutcomeKnown: true}, nil
-		}
-		if status == "executing" || status == "unknown" {
-			return RemoteInferenceResponse{ErrorCode: "duplicate_or_unknown_remote_request", OutcomeKnown: false}, nil
-		}
-		return RemoteInferenceResponse{ErrorCode: errorCode.String, OutcomeKnown: true}, nil
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return RemoteInferenceResponse{}, err
-	}
-	idv, err := s.ids.New("fedrecv")
-	if err != nil {
-		return RemoteInferenceResponse{}, err
-	}
-	now := s.clock.UnixMilli()
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO node_federated_inference_receipts(id,peer_node_id,remote_request_id,deployment_id,status,created_at) VALUES(?,?,?,?, 'executing',?)`, idv, peer, in.RequestID, in.DeploymentID, now); err != nil {
-		return RemoteInferenceResponse{}, err
-	}
-	result, dispatchErr := exec.DispatchFederatedLocal(ctx, in.DeploymentID, in.RequestID, in.RequestJSON)
-	completed := s.clock.UnixMilli()
-	if dispatchErr != nil {
-		known := true
-		code := "remote_inference_failed"
-		var te *inference.TransportError
-		if errors.As(dispatchErr, &te) {
-			known = te.OutcomeKnown
-			if te.Code != "" {
-				code = te.Code
-			}
-		}
-		st := "failed"
-		if !known {
-			st = "unknown"
-		}
-		_, _ = s.db.ExecContext(ctx, `UPDATE node_federated_inference_receipts SET status=?,error_code=?,completed_at=? WHERE id=?`, st, code, completed, idv)
-		return RemoteInferenceResponse{ErrorCode: code, OutcomeKnown: known}, nil
-	}
-	if !json.Valid(result.ResponseJSON) {
-		_, _ = s.db.ExecContext(ctx, `UPDATE node_federated_inference_receipts SET status='failed',error_code='invalid_remote_response',completed_at=? WHERE id=?`, completed, idv)
-		return RemoteInferenceResponse{ErrorCode: "invalid_remote_response", OutcomeKnown: true}, nil
-	}
-	usageJSON := result.UsageJSON
-	if len(usageJSON) == 0 {
-		usageJSON = json.RawMessage(`{}`)
-	}
-	_, err = s.db.ExecContext(ctx, `UPDATE node_federated_inference_receipts SET status='succeeded',response_json=?,usage_json=?,completed_at=? WHERE id=?`, string(result.ResponseJSON), string(usageJSON), completed, idv)
-	if err != nil {
-		return RemoteInferenceResponse{}, err
-	}
-	return RemoteInferenceResponse{ResponseJSON: result.ResponseJSON, UsageJSON: usageJSON, OutcomeKnown: true}, nil
+// inboundRequestHash includes the resolved model and all request context
+// fields. Only the digest is persisted; no raw prompt is added to receipts.
+// A historical receipt lacking this digest is deliberately non-replayable.
+func inboundRequestHash(in RemoteInferenceRequest)(string,error){
+ raw,err:=json.Marshal(struct{
+  DeploymentID string          `json:"deployment_id"`
+  Request json.RawMessage      `json:"request_json"`
+  Context json.RawMessage      `json:"context_manifest,omitempty"`
+  Classification json.RawMessage `json:"classification_json,omitempty"`
+ }{in.DeploymentID,in.RequestJSON,in.ContextManifest,in.ClassificationJSON})
+ if err!=nil||in.DeploymentID==""||!json.Valid(in.RequestJSON){
+  return "",fmt.Errorf("invalid federated request identity")
+ }
+ sum:=sha256.Sum256(raw)
+ return hex.EncodeToString(sum[:]),nil
+}
+
+func (s *Service) executeInbound(ctx context.Context,peer string,in RemoteInferenceRequest,exec LocalInferenceExecutor)(RemoteInferenceResponse,error){
+ digest,err:=inboundRequestHash(in)
+ if err!=nil{return RemoteInferenceResponse{},err}
+ // The unique (peer, request ID) constraint arbitrates even *concurrent*
+ // requests; no second caller may execute a different model/prompt under
+ // the same idempotency key.
+ idv,err:=s.ids.New("fedrecv")
+ if err!=nil{return RemoteInferenceResponse{},err}
+ now:=s.clock.UnixMilli()
+ inserted,err:=s.db.ExecContext(ctx,`INSERT OR IGNORE INTO node_federated_inference_receipts(
+  id,peer_node_id,remote_request_id,deployment_id,request_hash,status,created_at)
+  VALUES(?,?,?,?,?,'executing',?)`,idv,peer,in.RequestID,in.DeploymentID,digest,now)
+ if err!=nil{return RemoteInferenceResponse{},err}
+ n,err:=inserted.RowsAffected()
+ if err!=nil{return RemoteInferenceResponse{},err}
+ if n==0{
+  var status,recordedModel,recordedDigest string
+  var response,usage,errorCode sql.NullString
+  if err:=s.db.QueryRowContext(ctx,`SELECT status,deployment_id,request_hash,
+   response_json,usage_json,error_code FROM node_federated_inference_receipts
+   WHERE peer_node_id=? AND remote_request_id=?`,peer,in.RequestID).
+   Scan(&status,&recordedModel,&recordedDigest,&response,&usage,&errorCode);err!=nil{
+   return RemoteInferenceResponse{},err
+  }
+  if recordedDigest==""||recordedDigest!=digest||recordedModel!=in.DeploymentID{
+   return RemoteInferenceResponse{ErrorCode:"remote_request_identity_conflict",OutcomeKnown:true},nil
+  }
+  if status=="succeeded"&&response.Valid{
+   out:=RemoteInferenceResponse{ResponseJSON:json.RawMessage(response.String),OutcomeKnown:true}
+   if usage.Valid {out.UsageJSON=json.RawMessage(usage.String)}
+   return out,nil
+  }
+  if status=="executing"||status=="unknown"{
+   return RemoteInferenceResponse{ErrorCode:"duplicate_or_unknown_remote_request",OutcomeKnown:false},nil
+  }
+  return RemoteInferenceResponse{ErrorCode:errorCode.String,OutcomeKnown:true},nil
+ }
+ result,dispatchErr:=exec.DispatchFederatedLocal(ctx,in.DeploymentID,in.RequestID,in.RequestJSON)
+ completed:=s.clock.UnixMilli()
+ if dispatchErr!=nil{
+  known:=true
+  code:="remote_inference_failed"
+  var te *inference.TransportError
+  if errors.As(dispatchErr,&te){
+   known=te.OutcomeKnown
+   if te.Code!=""{code=te.Code}
+  }
+  st:="failed"
+  if !known{st="unknown"}
+  _,_ = s.db.ExecContext(ctx,`UPDATE node_federated_inference_receipts
+   SET status=?,error_code=?,completed_at=? WHERE id=? AND request_hash=?`,
+   st,code,completed,idv,digest)
+  return RemoteInferenceResponse{ErrorCode:code,OutcomeKnown:known},nil
+ }
+ if !json.Valid(result.ResponseJSON){
+  _,_ = s.db.ExecContext(ctx,`UPDATE node_federated_inference_receipts
+   SET status='failed',error_code='invalid_remote_response',completed_at=?
+   WHERE id=? AND request_hash=?`,completed,idv,digest)
+  return RemoteInferenceResponse{ErrorCode:"invalid_remote_response",OutcomeKnown:true},nil
+ }
+ usageJSON:=result.UsageJSON
+ if len(usageJSON)==0{usageJSON=json.RawMessage(`{}`)}
+ _,err=s.db.ExecContext(ctx,`UPDATE node_federated_inference_receipts
+  SET status='succeeded',response_json=?,usage_json=?,completed_at=?
+  WHERE id=? AND request_hash=?`,
+  string(result.ResponseJSON),string(usageJSON),completed,idv,digest)
+ if err!=nil{return RemoteInferenceResponse{},err}
+ return RemoteInferenceResponse{ResponseJSON:result.ResponseJSON,UsageJSON:usageJSON,OutcomeKnown:true},nil
 }
 
 func (s *Service) HeartbeatPeers(ctx context.Context) error {

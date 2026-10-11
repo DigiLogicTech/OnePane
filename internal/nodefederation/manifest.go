@@ -18,8 +18,33 @@ func stableID(prefix string, parts ...string) string {
 	return prefix + "_" + hex.EncodeToString(h[:12])
 }
 
+// reserveLocalManifestSequence is a single atomic SQLite UPSERT. The
+// counter persists through harnessd restarts, advances even when the host
+// wall clock moves backwards and is bound to the registered *origin* Node.
+// Gaps after a failed manifest build are safe; reuse is not.
+func (s *Service) reserveLocalManifestSequence(ctx context.Context)(int64,error){
+ if s==nil||s.db==nil||s.clock==nil||s.local.ID==""{
+  return 0,fmt.Errorf("local federation manifest sequencing unavailable")
+ }
+ now:=s.clock.UnixMilli()
+ if now<=0{now=1}
+ var seq int64
+ err:=s.db.QueryRowContext(ctx,`INSERT INTO local_node_manifest_sequences(
+  node_id,sequence,updated_at)
+  SELECT id,?,? FROM harness_nodes WHERE id=? AND local=1
+  ON CONFLICT(node_id) DO UPDATE SET
+   sequence=MAX(local_node_manifest_sequences.sequence+1,excluded.sequence),
+   updated_at=excluded.updated_at
+  RETURNING sequence`,now,now,s.local.ID).Scan(&seq)
+ if err!=nil{return 0,fmt.Errorf("reserve durable local Node manifest sequence: %w",err)}
+ if seq<=0{return 0,fmt.Errorf("invalid durable Node manifest sequence")}
+ return seq,nil
+}
+
 func (s *Service) BuildManifest(ctx context.Context) (CapabilityManifest, error) {
-	m := CapabilityManifest{Protocol: ProtocolVersion, NodeID: s.local.ID, Sequence: s.clock.UnixMilli(), Generated: s.clock.UnixMilli()}
+ seq,err:=s.reserveLocalManifestSequence(ctx)
+ if err!=nil{return CapabilityManifest{},err}
+ m := CapabilityManifest{Protocol: ProtocolVersion, NodeID: s.local.ID, Sequence: seq, Generated: s.clock.UnixMilli()}
 	m.Compute = s.localComputeState(ctx)
 	rows, err := s.db.QueryContext(ctx, `SELECT d.id,m.model_ref,m.provider_name,m.architecture,m.revision_ref,m.weights_hash,m.quantization,m.modalities_json,d.runtime_name,d.runtime_version,COALESCE(d.context_max_verified,d.context_max_reported,0),COALESCE(ms.admission_status,''),COALESCE(ms.restrictions_json,'{}'),d.runtime_config_json,COALESCE(d.residency_state,'')
 FROM model_deployments d JOIN models m ON m.id=d.model_id

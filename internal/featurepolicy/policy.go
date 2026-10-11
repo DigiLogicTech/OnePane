@@ -1,7 +1,5 @@
 package featurepolicy
 
-import "strings"
-
 type State string
 
 const (
@@ -75,24 +73,36 @@ func MinimalDefaults() Policy {
 // Resolve applies a child override without permitting a child to escape a
 // restrictive parent. Inherited preserves the parent's value.
 func Resolve(parent, child State) State {
+	if parent != Enabled && parent != Disabled && parent != Unavailable {
+		return Unavailable
+	}
 	if parent == Unavailable || parent == Disabled {
 		return parent
 	}
-	if child == Inherited || strings.TrimSpace(string(child)) == "" {
+	if child == Inherited || child == "" {
 		return parent
 	}
 	if child == Unavailable || child == Disabled {
 		return child
+	}
+	if child != Enabled {
+		// Unknown policy values must never grant a capability.
+		return Unavailable
 	}
 	return Enabled
 }
 
 func ResolveAuthority(parent, child Authority) Authority {
 	if child == "" {
-		return parent
+		child = parent
 	}
 	rank := map[Authority]int{AuthorityNever: 0, AuthorityRead: 1, AuthorityPropose: 2, AuthorityAuto: 3}
-	if rank[child] < rank[parent] {
+	parentRank, parentOK := rank[parent]
+	childRank, childOK := rank[child]
+	if !parentOK || !childOK {
+		return AuthorityNever
+	}
+	if childRank < parentRank {
 		return child
 	}
 	return parent
@@ -108,4 +118,129 @@ func (p Policy) PersistentMemoryActive() bool {
 
 func (p Policy) AutomaticRoutingActive() bool {
 	return p.ModelRouting == Enabled && p.CapabilityRouting == Enabled
+}
+
+// ResolveChain calculates the effective state across Project, Workspace,
+// Agent and execution overrides. Each descendant can restrict but never
+// expand its ancestor's effective capability.
+func ResolveChain(root State, descendants ...State) State {
+	effective := Resolve(root, Inherited)
+	for _, child := range descendants {
+		effective = Resolve(effective, child)
+	}
+	return effective
+}
+
+// ResolveAuthorityChain applies the same monotonic restriction to
+// configuration authority across the execution hierarchy.
+func ResolveAuthorityChain(root Authority, descendants ...Authority) Authority {
+	effective := ResolveAuthority(root, "")
+	for _, child := range descendants {
+		effective = ResolveAuthority(effective, child)
+	}
+	return effective
+}
+
+// ResolvePolicy computes an effective policy for a child scope. Every feature
+// must pass through the same fail-closed resolution; new fields must be added
+// here before they can be granted to an execution scope.
+func ResolvePolicy(parent, child Policy) Policy {
+	return Policy{
+		Assistant: Resolve(parent.Assistant, child.Assistant),
+		ProjectAI: Resolve(parent.ProjectAI, child.ProjectAI),
+		ProjectMemory: Resolve(parent.ProjectMemory, child.ProjectMemory),
+		TelemetryAccess: Resolve(parent.TelemetryAccess, child.TelemetryAccess),
+		TelemetryAutonomy: Resolve(parent.TelemetryAutonomy, child.TelemetryAutonomy),
+		ModelRouting: Resolve(parent.ModelRouting, child.ModelRouting),
+		AutomaticFallback: Resolve(parent.AutomaticFallback, child.AutomaticFallback),
+		CapabilityRouting: Resolve(parent.CapabilityRouting, child.CapabilityRouting),
+		CloudRouting: Resolve(parent.CloudRouting, child.CloudRouting),
+		Images: Resolve(parent.Images, child.Images),
+		Files: Resolve(parent.Files, child.Files),
+		AudioInput: Resolve(parent.AudioInput, child.AudioInput),
+		AudioOutput: Resolve(parent.AudioOutput, child.AudioOutput),
+		Camera: Resolve(parent.Camera, child.Camera),
+		Video: Resolve(parent.Video, child.Video),
+		Team: Resolve(parent.Team, child.Team),
+		Council: Resolve(parent.Council, child.Council),
+		CrossProjectShare: Resolve(parent.CrossProjectShare, child.CrossProjectShare),
+		AutonomousRoutines: Resolve(parent.AutonomousRoutines, child.AutonomousRoutines),
+		ConfigAuthority: ResolveAuthority(parent.ConfigAuthority, child.ConfigAuthority),
+	}
+}
+
+// ResolvePolicyChain applies successive Workspace, Agent and execution
+// overrides without allowing any descendant to restore a denied capability.
+func ResolvePolicyChain(project Policy, descendants ...Policy) Policy {
+	effective := ResolvePolicy(project, Policy{})
+	for _, child := range descendants {
+		effective = ResolvePolicy(effective, child)
+	}
+	return effective
+}
+
+// CanUseCloudModel requires both model routing and explicit cloud permission.
+// An inherited or malformed cloud state never authorises outbound inference.
+func (p Policy) CanUseCloudModel() bool {
+	return p.ProjectAI == Enabled && p.ModelRouting == Enabled &&
+		p.CloudRouting == Enabled
+}
+
+// CanUseAutomaticFallback is independent of model routing: research seats
+// that disable fallback must remain pinned to their selected provider/model.
+func (p Policy) CanUseAutomaticFallback() bool {
+	return p.ProjectAI == Enabled && p.ModelRouting == Enabled &&
+		p.AutomaticFallback == Enabled
+}
+
+// CanShareAcrossProjects requires an explicit grant; an inherited value
+// does not imply permission to publish Workspace artifacts.
+func (p Policy) CanShareAcrossProjects() bool {
+	return p.CrossProjectShare == Enabled
+}
+
+// ExecutionGrants is the small, explicit capability set that must be checked
+// at the point of use. Never infer cloud or cross-project authority from a
+// model candidate list, task payload or an Agent role alone.
+type ExecutionGrants struct {
+	LocalInference bool
+	CloudInference bool
+	AutomaticFallback bool
+	FileAccess bool
+	CrossProjectShare bool
+	AutonomousTasks bool
+}
+
+func (p Policy) ExecutionGrants() ExecutionGrants {
+	return ExecutionGrants{
+		LocalInference: p.ProjectAI == Enabled && p.ModelRouting == Enabled,
+		CloudInference: p.CanUseCloudModel(),
+		AutomaticFallback: p.CanUseAutomaticFallback(),
+		FileAccess: p.Files == Enabled,
+		CrossProjectShare: p.CanShareAcrossProjects(),
+		AutonomousTasks: p.ProjectAI == Enabled && p.AutonomousRoutines == Enabled,
+	}
+}
+
+// ValidateExecution refuses actions that are not explicitly authorised by
+// the effective Project/Workspace/Agent policy. The caller must resolve
+// the complete policy chain before invoking this boundary check.
+func (p Policy) ValidateExecution(action string) bool {
+	grants := p.ExecutionGrants()
+	switch action {
+	case "inference.local":
+		return grants.LocalInference
+	case "inference.cloud":
+		return grants.CloudInference
+	case "inference.fallback":
+		return grants.AutomaticFallback
+	case "files.read", "files.write":
+		return grants.FileAccess
+	case "projects.share":
+		return grants.CrossProjectShare
+	case "tasks.autonomous":
+		return grants.AutonomousTasks
+	default:
+		return false
+	}
 }

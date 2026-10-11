@@ -96,6 +96,13 @@ func (s *Service) ensureWorkspaceAccess(ctx context.Context, workspaceID string)
 	if strings.TrimSpace(workspaceID) == "" {
 		return fmt.Errorf("workspace id is required")
 	}
+	var currentStatus string
+	if err := s.db.QueryRowContext(ctx, "SELECT status FROM workspaces WHERE id=?", workspaceID).Scan(&currentStatus); err != nil {
+		return fmt.Errorf("load Workspace %s status: %w", workspaceID, err)
+	}
+	if currentStatus != "active" {
+		return fmt.Errorf("Workspace %s is not active", workspaceID)
+	}
 	if err := s.EnsureSystemPrincipals(ctx); err != nil {
 		return err
 	}
@@ -571,6 +578,9 @@ func (s *Service) startRun(ctx context.Context, t task.Task) (Run, TickResult) {
  // row; RecoverLostRuns could not discover the orphan. All admission writes
  // and both audit/outbox events must now commit together or not at all.
  err=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+  var workspaceStatus string
+  if err:=tx.QueryRowContext(ctx,`SELECT status FROM workspaces WHERE id=?`,t.WorkspaceID).Scan(&workspaceStatus);err!=nil{return fmt.Errorf("verify Worker Workspace state: %w",err)}
+  if workspaceStatus!="active"{return fmt.Errorf("Workspace %s is not active",t.WorkspaceID)}
   started,attempt,startErr:=s.tasks.StartInTransaction(ctx,tx,cmd)
   if startErr!=nil{return startErr}
   r=Run{

@@ -124,11 +124,13 @@ func TestSQLiteProviderBackedOriginNodeCannotMasqueradeAsFreeLocal(t *testing.T)
  checkDenied("no-spend default",base)
  noCost:=base;noCost.AllowPotentialMonetarySpend=true;noCost.RequireZeroIncrementalCost=true
  checkDenied("zero-cost",noCost)
+ cpuOnly:=base;cpuOnly.AllowPotentialMonetarySpend=true;cpuOnly.ComputePreference="cpu_only"
+ checkDenied("CPU-only mode cannot be spoofed",cpuOnly)
  paid:=base;paid.AllowPotentialMonetarySpend=true
  dec,err:=svc.Route(ctx,paid)
  if err!=nil||dec.Selected==nil{t.Fatalf("explicit paid provider route unavailable: %v",err)}
  c:=dec.Selected.Candidate
- if c.ID!="deployment"||c.Local||c.CostClass!=CostPaid||c.HardZeroIncrementalCost{
+ if c.ID!="deployment"||c.Local||c.CostClass!=CostPaid||c.HardZeroIncrementalCost||c.ComputeMode!="cloud"{
   t.Fatalf("unverified provider presented as local or free: %+v",c)
  }
 }

@@ -140,3 +140,39 @@ func TestCompletePolicyUnknownValueDenied(t *testing.T) {
 		t.Fatalf("malformed Workspace routing unexpectedly enabled: %+v", effective)
 	}
 }
+
+func TestCloudRoutingRequiresExplicitPermission(t *testing.T) {
+	p := AssistedDefaults()
+	if p.CanUseCloudModel() {
+		t.Fatal("inherited cloud permission allowed outbound inference")
+	}
+	p.CloudRouting = Enabled
+	if !p.CanUseCloudModel() {
+		t.Fatal("explicitly granted cloud routing was denied")
+	}
+	p.ProjectAI = Disabled
+	if p.CanUseCloudModel() {
+		t.Fatal("cloud inference bypassed disabled Project AI")
+	}
+}
+
+func TestResearchSeatFallbackRemainsDisabled(t *testing.T) {
+	project := AssistedDefaults()
+	workspace := Policy{AutomaticFallback: Disabled}
+	agent := Policy{AutomaticFallback: Enabled}
+	effective := ResolvePolicyChain(project, workspace, agent)
+	if effective.CanUseAutomaticFallback() {
+		t.Fatal("agent restored automatic fallback disabled by Workspace")
+	}
+}
+
+func TestCrossProjectSharingRequiresExplicitGrant(t *testing.T) {
+	p := AssistedDefaults()
+	if p.CanShareAcrossProjects() {
+		t.Fatal("default policy unexpectedly permits cross-project sharing")
+	}
+	p.CrossProjectShare = Enabled
+	if !p.CanShareAcrossProjects() {
+		t.Fatal("explicitly granted sharing denied")
+	}
+}

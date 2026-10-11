@@ -180,3 +180,23 @@ func ResolvePolicyChain(project Policy, descendants ...Policy) Policy {
 	}
 	return effective
 }
+
+// CanUseCloudModel requires both model routing and explicit cloud permission.
+// An inherited or malformed cloud state never authorises outbound inference.
+func (p Policy) CanUseCloudModel() bool {
+	return p.ProjectAI == Enabled && p.ModelRouting == Enabled &&
+		p.CloudRouting == Enabled
+}
+
+// CanUseAutomaticFallback is independent of model routing: research seats
+// that disable fallback must remain pinned to their selected provider/model.
+func (p Policy) CanUseAutomaticFallback() bool {
+	return p.ProjectAI == Enabled && p.ModelRouting == Enabled &&
+		p.AutomaticFallback == Enabled
+}
+
+// CanShareAcrossProjects requires an explicit grant; an inherited value
+// does not imply permission to publish Workspace artifacts.
+func (p Policy) CanShareAcrossProjects() bool {
+	return p.CrossProjectShare == Enabled
+}

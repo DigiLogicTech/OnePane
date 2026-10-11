@@ -102,3 +102,22 @@ func (s StoredScopes) AuthorizeNodeTransfer(ctx context.Context,tenantID,taskID,
     for _,id:=range nodes { if id==nodeID{return true,nil} }
     return false,nil
 }
+
+// TrustedNodeGrantExpands determines whether a proposed persisted
+// Project/Workspace policy adds any Node transfer authority. Agents can
+// narrow grants through normal scoped edits, but cannot self-approve an
+// expanded off-host transfer capability.
+func TrustedNodeGrantExpands(before, after []byte)(bool,error){
+    oldGrant,err:=decodeTrustedNodeGrant(string(before))
+    if err!=nil{return false,err}
+    newGrant,err:=decodeTrustedNodeGrant(string(after))
+    if err!=nil{return false,err}
+    if !newGrant.Enabled{return false,nil}
+    if !oldGrant.Enabled{return true,nil}
+    oldIDs:=map[string]bool{}
+    for _,id:=range oldGrant.AllowedNodeIDs{oldIDs[id]=true}
+    for _,id:=range newGrant.AllowedNodeIDs{
+        if !oldIDs[id]{return true,nil}
+    }
+    return false,nil
+}

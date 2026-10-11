@@ -155,8 +155,11 @@ func (s *Service) Turns(ctx context.Context, projectID string, limit int) ([]Tur
 
 func (s *Service) contextSnapshot(ctx context.Context, projectID, requestedPWS string) (json.RawMessage, string, string, string, error) {
 	requestedPWS = strings.TrimSpace(requestedPWS)
-	var projectName, workspaceID, projectPolicy string
-	if err := s.db.QueryRowContext(ctx, `SELECT name,workspace_id,project_policy_json FROM projects WHERE id=? AND status='active'`, projectID).Scan(&projectName, &workspaceID, &projectPolicy); err != nil { return nil,"","","",err }
+	var projectName, workspaceID string
+	// Project policy is authoritative service configuration. It may carry
+	// operator restrictions, provider rules or opaque credential references;
+	// none of it is implicitly approved as model context.
+	if err := s.db.QueryRowContext(ctx, `SELECT name,workspace_id FROM projects WHERE id=? AND status='active'`, projectID).Scan(&projectName, &workspaceID); err != nil { return nil,"","","",err }
 	type pwsRow struct{ ID, Name, Settings string }
 	pwsRows := []pwsRow{}
 	rows, err := s.db.QueryContext(ctx, `SELECT id,name,ai_settings_json FROM project_workspaces WHERE project_id=? AND status='active' ORDER BY updated_at DESC,id`, projectID)
@@ -210,7 +213,7 @@ func (s *Service) contextSnapshot(ctx context.Context, projectID, requestedPWS s
 	for _,x:=range pwsRows{
 		pwss=append(pwss,map[string]any{"id":x.ID,"name":x.Name})
 	}
-	snapshot:=map[string]any{"project":map[string]any{"id":projectID,"name":projectName,"policy":json.RawMessage(projectPolicy)},"project_workspaces":pwss,"selected_project_workspace_id":selected.ID,"execution_mode":mode,"tasks":tasks,"recent_events":events,"runtime":runtime}
+	snapshot:=map[string]any{"project":map[string]any{"id":projectID,"name":projectName},"project_workspaces":pwss,"selected_project_workspace_id":selected.ID,"execution_mode":mode,"tasks":tasks,"recent_events":events,"runtime":runtime}
 	if selected.ID!=""{
 		readiness,err:=inspectWorkspaceToolchain(ctx,s.db,projectID,selected.ID)
 		if err!=nil{return nil,"","","",fmt.Errorf("Project Workspace toolchain readiness: %w",err)}

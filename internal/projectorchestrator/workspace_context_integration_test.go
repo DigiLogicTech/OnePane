@@ -37,6 +37,16 @@ func TestOrchestratorRuntimeContextIsBoundToSelectedWorkspace(t *testing.T) {
   WorkspaceID:"tenant",Name:"Separated Worlds",CreatedBy:"operator",
  })
  if err!=nil {t.Fatal(err)}
+ // Operator Project policy is not an evidence attachment. Raw private
+ // policy and opaque credential references must never reach a reasoning
+ // prompt, its persisted context manifest, or Project turn history.
+ projectPolicyCanary:="PROJECT_PRIVATE_POLICY_NEVER_IN_MODEL_CONTEXT"
+ policyRaw,_:=json.Marshal(map[string]any{
+  "secret_connector_reference":projectPolicyCanary,
+  "routing":map[string]any{"local_first":true,"private_notes":projectPolicyCanary},
+ })
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE projects SET project_policy_json=?
+  WHERE id=?`,string(policyRaw),p.ID);err!=nil{t.Fatal(err)}
  world,err:=projects.CreateWorkspaceView(ctx,projectworkspace.CreateWorkspaceViewCommand{
   ProjectID:p.ID,Name:"World",ActorPrincipalID:"operator",
  })
@@ -145,6 +155,12 @@ func TestOrchestratorRuntimeContextIsBoundToSelectedWorkspace(t *testing.T) {
  for _,selectedID:=range []string{world.ID,story.ID}{
   raw,_,mode,_,err:=orchestrator.contextSnapshot(ctx,p.ID,selectedID)
   if err!=nil{t.Fatal(err)}
+  if strings.Contains(string(raw),projectPolicyCanary)||
+   strings.Contains(string(raw),"secret_connector_reference")||
+   strings.Contains(string(raw),"private_notes")||
+   strings.Contains(string(raw),"\"policy\""){
+   t.Fatalf("raw operator Project policy leaked to reasoning snapshot: %s",raw)
+  }
   if strings.Contains(string(raw),secretMarker)||strings.Contains(string(raw),"private_model_setting")||
    strings.Contains(string(raw),"\"ai_settings\""){
    t.Fatalf("raw Workspace AI settings leaked to reasoning snapshot: %s",raw)

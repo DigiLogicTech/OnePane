@@ -68,3 +68,48 @@ and **not** installed Windows/Ubuntu or physical Node QA.
   QA on Windows x64 and Ubuntu amd64, and validate physical Nodes.
 - **Prohibited until then:** release merge, installer publishing and
   claims of full production/security certification.
+
+
+## Additional implementation-level review (2026-10-11)
+
+This second technical inspection of the first-review candidate found two
+concrete, reproducible transaction-bound policy races and one privacy issue:
+
+1. **Fixed — Worker admission race.** The original `startRun` checked
+   `tasks.autonomous` and `inference.fallback` before entering its durable
+   Task/Attempt/Worker transaction. It now resolves both grants through the
+   *same* `storage.Tx` immediately before writing any admission rows.
+   Concurrent scope changes observed at admission fail closed.
+   Regression: `policy_admission_transaction_integration_test.go`
+   deterministically revokes each grant after preflight and verifies that
+   Task, Attempt, Worker and audit rows are not created.
+2. **Fixed — Worker resume race.** The original
+   `resumeWaitingWorkerAndAttempt` could mark a suspended Worker runnable
+   after autonomy had been revoked. It now checks the stored effective grant
+   inside its resume transaction before updating Task/Attempt/Worker state.
+   Regression verifies a revoked Workspace leaves the same waiting Attempt
+   and Task revision intact.
+3. **Fixed — Guessable diagnostics identifiers.** A simple truncated
+   SHA-256 digest of a typed correlation ID could be enumerated offline,
+   especially for low-entropy IDs. The exporter now uses a random,
+   process-local keyed HMAC-SHA-256 fingerprint and redacts identifiers if
+   its key cannot be generated. It does not persist or export its key.
+   Fingerprints deliberately change when the backend process restarts;
+   long-term correlation is not currently guaranteed. Tests reject
+   unkeyed SHA-256 output.
+
+These fixes preserve the earlier architecture gates. The direct inference
+and federated transport, interactive chat, non-file tools and Agent-profile
+paths still need a **user-approved scope contract**, not an implicit grant.
+Rechecking grants just before a side-effect narrows a race window but is
+not an atomic transaction with an external model provider or tool adapter.
+
+### Review boundary
+
+- Completed: assistant source-level review, documented defect fixes and
+  automatic CI execution of the affected Go/SQLite and JavaScript suites.
+- Not completed: **user's first approval of the code**, confirmation of
+  the six vision decisions above, post-alignment second audit, native
+  installer/upgrade testing and physical Node QA.
+- Keep [PR #227](https://github.com/DigiLogicTech/OnePane/pull/227) draft
+  until those gates are explicitly satisfied.

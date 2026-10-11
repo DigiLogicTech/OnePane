@@ -134,3 +134,58 @@ func TestOrchestratorHandoffRebindsReasoningToDestinationWorkspace(t *testing.T)
   t.Fatalf("persisted destination Turn contains source-only model context or response: %+v",result.Turn)
  }
 }
+
+
+func TestOrchestratorRejectsModelSelectedWorkspaceWithRevokedReasoningPolicy(t *testing.T){
+ ctx:=context.Background()
+ db,err:=sqlitestore.Open(t.TempDir()+"/denied-handoff.db")
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ if err:=db.Migrate(ctx);err!=nil{t.Fatal(err)}
+ now:=clock.Real{}.UnixMilli()
+ for _,stmt:=range []string{
+  `INSERT INTO workspaces(id,name,status,revision,created_at,updated_at) VALUES('tenant','Tenant','active',1,?,?)`,
+  `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at) VALUES('human','human','Human','active',1,?,?)`,
+  `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at) VALUES('tenant','human','active',?,?)`,
+ }{if _,err:=db.SQL().ExecContext(ctx,stmt,now,now);err!=nil{t.Fatal(err)}}
+ projectSvc:=projectworkspace.NewService(db.SQL(),db,clock.Real{})
+ p,err:=projectSvc.CreateProject(ctx,projectworkspace.CreateProjectCommand{
+  WorkspaceID:"tenant",Name:"Denied destination",CreatedBy:"human",
+ })
+ if err!=nil{t.Fatal(err)}
+ ids:=[]string{}
+ for _,name:=range []string{"Private files","Orchestration"}{
+  ws,err:=projectSvc.CreateWorkspaceView(ctx,projectworkspace.CreateWorkspaceViewCommand{
+   ProjectID:p.ID,Name:name,ActorPrincipalID:"human",
+  })
+  if err!=nil{t.Fatal(err)}
+  ids=append(ids,ws.ID)
+ }
+ taskSvc:=task.NewService(db.SQL(),db,clock.Real{})
+ preflight:=NewService(db.SQL(),db,clock.Real{},nil,nil,nil,taskSvc,nil)
+ _,source,_,_,err:=preflight.contextSnapshot(ctx,p.ID,"")
+ if err!=nil{t.Fatal(err)}
+ dest:=ids[0]
+ if dest==source{dest=ids[1]}
+ if dest==source{t.Fatal("destination equals source")}
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_workspaces
+ SET ai_settings_json='{"feature_policy":{"ProjectAI":"disabled"}}' WHERE id=?`,dest);err!=nil{t.Fatal(err)}
+ infer:=&handoffInference{}
+ svc:=NewService(db.SQL(),db,clock.Real{},handoffRoute{},infer,
+  handoffArtifacts{destination:dest,third:source},taskSvc,nil)
+ if _,err:=svc.Turn(ctx,TurnCommand{
+  ProjectID:p.ID,ActorPrincipalID:"human",Objective:"Run Project operation",
+  AllowTaskCreation:true,ForceTask:true,
+ });err==nil{
+  t.Fatal("model redirected Task into Workspace with revoked Project AI")
+ }
+ if len(infer.contexts)!=1{
+  t.Fatalf("blocked destination entered inference: %d calls",len(infer.contexts))
+ }
+ var count int
+ if err:=db.SQL().QueryRowContext(ctx,
+  "SELECT COUNT(*) FROM tasks WHERE project_id=?",p.ID).Scan(&count);err!=nil{
+  t.Fatal(err)
+ }
+ if count!=0{t.Fatalf("model redirected Task despite policy denial: count=%d",count)}
+}

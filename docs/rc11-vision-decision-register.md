@@ -275,7 +275,7 @@ debug tracing is optional to protect older hardware.
 - Include privacy, concurrency, retention, crash/restart, scope-denial,
   overload, stale-data and disabled-trace regression coverage.
 
-**Architecture and test backlog:** `docs/rc11-live-historical-diagnostics.md`.
+**Architecture and test backlog:** implement scoped trace settings, bounded live delivery, durable incident history, redaction, retention and overload/restart tests using the existing Debug Centre and QA event sources.
 Existing offline diagnostics review and QA APIs provide foundations only;
 this decision does not establish that comprehensive live/historical
 collection and per-Agent tracing are already implemented.

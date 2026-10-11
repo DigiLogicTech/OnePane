@@ -41,6 +41,14 @@ operator must possess the original plan; if it cannot be reconstructed,
 create a separately approved replacement graph through the existing API,
 and review the old Tasks independently.
 
+**Authoritative admission:** the Task service now repeats this check
+inside the same SQLite transaction as `Task.StartInTransaction`, before any
+Attempt or `task.started` event is inserted. A deleted edge, an unattested
+historical graph, a newly inserted unapproved predecessor, or an archived
+Workspace cannot make a Task runnable merely because a UI/Orchestrator
+snapshot is stale. Ordinary non-graph Tasks keep the existing Task lifecycle.
+A Task graph's read-only recovery checkpoint is not an admission lease.
+
 This is a control-plane integrity check, not proof that the underlying
 Worker ran or a physical Node completed work. Rootless physical tests
 and the two user-mandated release code reviews remain outstanding.

@@ -1,6 +1,8 @@
 package featurepolicy
 
 import (
+ "crypto/sha256"
+ "encoding/hex"
  "strings"
  "testing"
  "time"
@@ -18,6 +20,10 @@ func TestDiagnosticOpaqueCorrelationCannotExposeCredentialLikeSuffix(t *testing.
   again:=DecisionDiagnostic(time.Unix(5,0),id,"files.read",true)
   if d.CorrelationID!=again.CorrelationID{
    t.Fatal("identical authorized correlation lost deterministic fingerprint")
+  }
+  rawDigest:=sha256.Sum256([]byte(id))
+  if strings.HasSuffix(d.CorrelationID,hex.EncodeToString(rawDigest[:12])){
+   t.Fatal("diagnostic identifier uses a guessable unkeyed digest")
   }
  }
 }

@@ -85,3 +85,9 @@ Preserve current working Project/model data through any migration.
 **Continuation:** start with P0-A source inventory and smallest
 enforceable policy/migration increments; validate each, commit, update
 this manifest, and continue automatically where dependencies permit.
+
+## Incremental remediation after this review
+
+- [x] Trusted-node scheduler candidate proof added: pairing and capability-manifest freshness are checked by the catalogue, and a local-first route may admit such a candidate only with positive `AllowTrustedNodes` and a matching explicit Node allowlist. Unit and node-federation integration regressions added.
+- [ ] Wire the allowlist to **authoritative persisted Workspace/Agent transfer approval**, not to model output or an arbitrary request. Until then, legacy caller behaviour must remain conservative and no new off-host grant is issued.
+- [ ] Verify endpoint trust for provider-backed localhost and Node transports before reclassifying them as host-local or trusted rather than cloud.

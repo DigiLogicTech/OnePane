@@ -13,9 +13,10 @@ without merging any of them into main or packaging an installer.
 
 ## Acceptance gates
 - [x] Integrated code commit `8c2fdc429118e84850d92f6ff81a590f3e55d14d` passed [CI run #38118216676](https://github.com/DigiLogicTech/OnePane/actions/runs/38118216676), including Go/SQLite inference, tool and Worker tests, WebUI privacy scripts and Windows checks.
-- [ ] First code and security review on **combined** diff.
-- [ ] User vision alignment interview and recorded functional decisions.
-- [ ] Second audit against the updated vision, followed by any remediation.
+- [x] First assistant code/security review on combined diff, including transactional Worker and diagnostic hardening. User sign-off remains a separate gate.
+- [x] User vision alignment interview: all six decisions explicitly confirmed and recorded.
+- [x] Post-vision source-level gap review: `docs/rc11-second-review-gap-matrix.md`.
+- [ ] Implement all blocking gaps, then repeat the final security/code audit and remediate.
 - [ ] User-approved build, install/upgrade regression and manual Windows/Ubuntu QA.
 - [ ] Only then consider release merges and packaging.
 
@@ -36,3 +37,7 @@ The preliminary code audit and decision register are in `docs/rc11-integration-c
 
 ## Review checkpoint (2026-10-11)
 Assistant implementation audit and corrective tests are complete. Latest application-code CI passed (#38118997403). See docs/rc11-integration-code-audit.md and docs/rc11-vision-decision-register.md for remaining design approvals; no release merge has been performed.
+
+## Second-review checkpoint
+
+All six product decisions are user-confirmed; this is an approved design baseline, **not** release approval. See `docs/rc11-second-review-gap-matrix.md` for P0/P1 implementation and safety gaps. Provider-backed deployments cannot claim free local scheduling based on a local Node record or unverified deployment cost metadata (green CI #38122612493). Trusted-node scheduler opt-in and pairing verification are being tested, but the Worker/API authorization pipeline is not yet wired to issue the required verified transfer grants. No installers or release merge are approved.

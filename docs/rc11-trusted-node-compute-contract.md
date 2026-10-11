@@ -107,3 +107,7 @@ otherwise use the explicitly permitted external path.
 **Gate:** Complete the design-aligned second code review before any
 installer, merge or user acceptance sign-off. No claim of end-to-end
 implementation follows from recording this requirement.
+
+## Implementation checkpoint (2026-10-11)
+
+The routing catalogue now derives a `TrustedNodeVerified` signal only from an active paired Node and fresh capability manifest, and the scheduler accepts an explicit `AllowTrustedNodes` plus exact `AllowedTrustedNodeIDs` for `LocalOnly` requests. These parameters default to denied. **No Worker or API currently supplies a new positive transfer grant from persisted Workspace policy**; do not enable this automatically or infer data transfer approval from a Task JSON field. Completing that binding and destination verification remains NODE-03 through NODE-05. Provider-backed models remain conservatively classified as non-local pending verified endpoint implementation.

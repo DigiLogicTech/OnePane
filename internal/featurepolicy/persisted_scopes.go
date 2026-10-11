@@ -59,6 +59,7 @@ func validatePolicyValues(p Policy) error {
 		p.Assistant,p.ProjectAI,p.ProjectMemory,p.TelemetryAccess,
 		p.TelemetryAutonomy,p.ModelRouting,p.AutomaticFallback,
 		p.CapabilityRouting,p.CloudRouting,p.Images,p.Files,
+		p.FileRead,p.FileWrite,p.ProcessExecute,p.NetworkAccess,p.SecretsAccess,
 		p.AudioInput,p.AudioOutput,p.Camera,p.Video,p.Team,p.Council,
 		p.CrossProjectShare,p.AutonomousRoutines,
 	} {

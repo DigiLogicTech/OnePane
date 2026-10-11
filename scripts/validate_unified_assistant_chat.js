@@ -16,9 +16,10 @@ assert(!html.includes("controlChatAssistantTab"),"duplicate Assistant tab resurr
 for(const token of [
   'id="controlChatProject"','id="controlChatWorkspace"',
   "/v1/assistant/threads/","/scope","project_workspace_id:selectedWorkspace?.id||\"\"",
-  'project_id:project?.id||""',"allow_task_creation:run",
+  'project_id:project?.id||""',"allow_task_creation:run","force_task:run",
   "Select a Project before running tasks","a31AssistantModelPicker(id)"
 ])assert(render.includes(token),`unified chat contract missing: ${token}`);
+assert(!render.includes("allow_task_creation:run,force_task:false"),"Run still depends on a model choosing the Task action");
 assert(render.includes("const picker=project?null:await a31AssistantModelPicker(id)"),"Project chat may needlessly probe Assistant models");
 assert(assistant.includes("ProjectWorkspaceID:selectedWorkspace"),"Assistant did not forward Workspace scope");
 assert(assistant.includes("project_id=? AND status='active'"),"canonical Workspace membership check missing");

@@ -623,7 +623,7 @@ async function a31RenderControlChat(){
       if(run&&!project){notice("Select a Project to run tasks.","bad");return}
       try{
         await apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/turns`,{method:"POST",
-          body:JSON.stringify({content,project_id:project?.id||"",project_workspace_id:selectedWorkspace?.id||"",allow_task_creation:run,force_task:false})});
+          body:JSON.stringify({content,project_id:project?.id||"",project_workspace_id:selectedWorkspace?.id||"",allow_task_creation:run,force_task:run})});
         await a31RenderControlChat();
       }catch(ex){notice(ex.message,"bad")}
     };

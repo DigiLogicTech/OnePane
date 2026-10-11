@@ -249,6 +249,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			if e := r.requireApplicationRevision(ctx, app); e != nil {
 				return result, e
 			}
+			// Do not launch a container using Endpoint ports read before a
+			// concurrent operator edit or a newly approved endpoint.
+			if e := r.requireEndpointManifest(ctx, runtime.ID, endpoints); e != nil {
+				return result, e
+			}
 			ensure := appEnsurePlan(runtime, app, endpointSpecsForApp(endpoints, app.ID))
 			aev, e := r.applyAndVerify(ctx, project.WorkspaceID, cmd, ensure)
 			if e != nil {
@@ -262,6 +267,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 				return result, e
 			}
 			if e := r.requireApplicationRevision(ctx, app); e != nil {
+				return result, e
+			}
+			if e := r.requireEndpointManifest(ctx, runtime.ID, endpoints); e != nil {
 				return result, e
 			}
 			cur, e := r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: app.ID, ExpectedRevision: app.Revision, Status: projectworkspace.AppRunning, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
@@ -342,6 +350,11 @@ func (r *Reconciler) publishVerifiedEndpointRoutes(ctx context.Context, cmd Reco
 	}
 	out := []projectworkspace.EndpointRoute{}
 	for _, endpoint := range endpoints {
+		// A read-only comparison before each externally visible route
+		// complements the atomic Endpoint revision check in the service.
+		if err := r.requireEndpointManifest(ctx, app.ProjectRuntimeID, endpoints); err != nil {
+			return nil, err
+		}
 		if endpoint.ApplicationID == nil || *endpoint.ApplicationID != app.ID || endpoint.DesiredState != "enabled" {
 			continue
 		}
@@ -349,7 +362,7 @@ func (r *Reconciler) publishVerifiedEndpointRoutes(ctx context.Context, cmd Reco
 		if !ok {
 			return nil, fmt.Errorf("%w: verified container omitted endpoint %s port %d", ErrPostcondition, endpoint.ID, endpoint.InternalPort)
 		}
-		route, err := r.projects.ApplyEndpointRoute(ctx, projectworkspace.ApplyEndpointRouteCommand{EndpointID: endpoint.ID, ApplicationID: app.ID, ApplicationRevision: app.Revision, HostIP: p.HostIP, HostPort: p.HostPort, TransportProtocol: "tcp", ContainerSpecHash: inspected.Container.SpecHash, ObservationID: ev.observation.ID, VerificationID: ev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+		route, err := r.projects.ApplyEndpointRoute(ctx, projectworkspace.ApplyEndpointRouteCommand{EndpointID: endpoint.ID, ExpectedEndpointRevision: endpoint.Revision, ApplicationID: app.ID, ApplicationRevision: app.Revision, HostIP: p.HostIP, HostPort: p.HostPort, TransportProtocol: "tcp", ContainerSpecHash: inspected.Container.SpecHash, ObservationID: ev.observation.ID, VerificationID: ev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 		if err != nil {
 			return nil, err
 		}

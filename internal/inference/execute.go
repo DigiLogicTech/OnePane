@@ -212,6 +212,19 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 		return s.requests.Get(ctx, q.ID)
 	}
 
+	// Re-read revocable policy at the last local boundary before calling
+	// the transport. This rejects a Workspace suspension or permission
+	// restriction that occurred while scheduling or reserving resources.
+	if cmd.TaskID != nil {
+		action := "inference.local"
+		if p != nil { action = "inference.cloud" }
+		allowed, scopeErr := s.scopes.AuthorizeTask(ctx, cmd.WorkspaceID, *cmd.TaskID, action)
+		if scopeErr != nil || !allowed {
+			s.releaseBudgetBeforeDispatch(ctx, cmd)
+			return s.finishTransportError(ctx, q.ID, nil,
+				&TransportError{Code:"feature_policy_revoked", OutcomeKnown:true}, cmd)
+		}
+	}
 	result, dispatchErr := transport.Dispatch(ctx, DispatchRequest{RequestID: q.ID, Model: m, Deployment: d, Provider: p, RequestJSON: requestJSON}, s.secrets)
 	if dispatchErr != nil {
 		if cmd.BudgetReservationID != nil && s.budgets != nil {

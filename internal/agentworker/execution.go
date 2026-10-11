@@ -64,6 +64,12 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	if run.Status != RunRunning || t.State != task.StateRunning {
 		return failedResult(res, ErrInvalidWorkerState)
 	}
+	// Corrupt or stale active Attempts must not reach model routing or
+	// tool proposals, even if the Worker and Task still say RUNNING.
+	// The final dispatch CAS independently repeats this SQL invariant.
+	if err:=s.requireActiveWorkerExecutionBinding(ctx,run);err!=nil{
+		return failedResult(res,err)
+	}
 	active,scopeErr:=s.activeProjectTaskScope(ctx,t)
 	if scopeErr!=nil{
 		// A broken scope observation must not fall through to inference.

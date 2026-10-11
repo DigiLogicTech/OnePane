@@ -14,6 +14,7 @@ type Diagnostic struct {
 	Action string `json:"action"`
 	Allowed bool `json:"allowed"`
 	Category string `json:"category"`
+	Remediation string `json:"remediation"`
 }
 
 func safeCorrelationID(id string) string {
@@ -42,8 +43,10 @@ func safeCorrelationID(id string) string {
 // policy contents, prompts, credentials or arbitrary user-provided action names.
 func DecisionDiagnostic(at time.Time, correlationID, action string, allowed bool) Diagnostic {
 	category := "policy.denied"
+	remediation := "Review effective Project, Workspace and Agent policy; do not auto-escalate permissions."
 	if allowed {
 		category = "policy.allowed"
+		remediation = "No permission change required."
 	}
 	if !knownDiagnosticAction(action) {
 		action = "redacted"
@@ -51,7 +54,7 @@ func DecisionDiagnostic(at time.Time, correlationID, action string, allowed bool
 	return Diagnostic{
 		At: at.UTC(), Component: "featurepolicy",
 		CorrelationID: safeCorrelationID(correlationID), Action: action,
-		Allowed: allowed, Category: category,
+		Allowed: allowed, Category: category, Remediation: remediation,
 	}
 }
 

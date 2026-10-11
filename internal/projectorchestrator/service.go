@@ -257,7 +257,7 @@ func (s *Service) reason(ctx context.Context, workspaceID, projectID, projectWor
 		return "",nil,nil,fmt.Errorf("unverified remote or paid model refused for Project Orchestrator")
 	}
 	dep:=decision.Selected.Candidate.ID
-	system:=`You are the logical OnePane Project Orchestrator. Coordinate project work but never claim direct tool, filesystem, secret, node, or approval authority. Use only the supplied bounded Project context. Return one JSON object: {"answer":"...", "action":"answer|task", "project_workspace_id":"..."}. You may suggest a Workspace for requests without an explicit Workspace choice, but execution mode and Team are locked to the selected Workspace's operator configuration. Use action=task only when the user is asking OnePane to perform work rather than explain or report state.`
+	system:=`You are the logical OnePane Project Orchestrator. Coordinate project work but never claim direct tool, filesystem, secret, node, or approval authority. Use only the supplied bounded Project context. Return one JSON object: {"answer":"...", "action":"answer|task", "project_workspace_id":"...", "plan":{"version":1,"steps":[{"key":"step_a","objective":"A bounded subtask","depends_on":[]}]}}. The plan field is optional and is ONLY a draft; never include tools, credentials, filesystem paths, permission grants or Workspace IDs inside plan steps. You may suggest a Workspace for requests without an explicit Workspace choice, but execution mode and Team are locked to the selected Workspace's operator configuration. Use action=task only when the user is asking OnePane to perform work rather than explain or report state.`
 	req,_:=json.Marshal(map[string]any{"messages":[]map[string]string{{"role":"system","content":system},{"role":"user","content":"Project context:\n"+string(snapshot)+"\n\nUser objective:\n"+objective}},"max_tokens":1200,"temperature":0.2})
 	manifest,_:=json.Marshal(map[string]any{"project_context":json.RawMessage(snapshot),"logical_role":"project-orchestrator"})
 	// Recheck the canonical scopes after routing, immediately before this
@@ -336,7 +336,25 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 			revision=revision+1,updated_at=? WHERE id=?`,s.clock.UnixMilli(),o.ID)
 		return TurnResult{},err
 	}
+	// Treat the local model's optional multi-step proposal as untrusted
+	// review material, never as authorisation to create executable Tasks.
+	var planDraft *AutonomousPlanDraft
+	if reasonErr==nil&&pwsID!=""{
+		if proposed,ok:=plan["plan"];ok{
+			if raw,e:=json.Marshal(proposed);e==nil{
+				if draft,e:=ParseAutonomousPlanDraft(raw,c.ProjectID,pwsID,c.Objective);e==nil{
+					planDraft=&draft
+				}
+			}
+		}
+	}
 	if reasonErr!=nil { answer="Project Orchestrator is available, but no eligible reasoning model could complete this turn: "+reasonErr.Error(); action="answer" }
+	if planDraft!=nil&&!c.ForceTask{
+		answer+="\n\nProposed local plan (draft only; no new Tasks created from this proposal):"
+		for _,step:=range planDraft.Nodes{
+			answer+="\n- "+step.Key+": "+step.Objective
+		}
+	}
 	if c.ForceTask { action="task"; c.AllowTaskCreation=true }
 	if action=="task" && !c.AllowTaskCreation { action="answer"; answer=answer+"\n\nThis turn was read-only; no Task was created." }
 	var taskID,sessionID *string
@@ -395,6 +413,10 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 	}
 	if answer=="" { answer="Project context reviewed." }
 	prov:=map[string]any{"project_id":c.ProjectID,"orchestrator_id":o.ID,"project_workspace_id":pwsID,"execution_mode":mode}
+	if planDraft!=nil{
+		prov["bounded_local_plan"]=planDraft.Nodes
+		prov["plan_admission"]="draft_only_no_task_authority"
+	}
 	if deploymentID!=nil{prov["candidate_kind"]="model_deployment";prov["candidate_id"]=*deploymentID}
 	if taskID!=nil{prov["task_id"]=*taskID}
 	if sessionID!=nil{prov["team_session_id"]=*sessionID}

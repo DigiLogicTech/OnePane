@@ -217,10 +217,20 @@ func(s *Service) reasonGlobal(ctx context.Context,workspaceID,actor,content stri
 	rc,_,err:=s.artifacts.Open(ctx,*inf.ResponseArtifactID);if err!=nil{return "",&dep,err};defer rc.Close();b,err:=io.ReadAll(io.LimitReader(rc,4<<20));if err!=nil{return "",&dep,err};return extractText(b),&dep,nil
 }
 
-func (s *Service) resolveProject(ctx context.Context,t Thread,content string,explicit *string)(*string,error){
-	if explicit!=nil&&strings.TrimSpace(*explicit)!=""{var idv string;err:=s.db.QueryRowContext(ctx,`SELECT id FROM projects WHERE id=? AND workspace_id=? AND status='active'`,strings.TrimSpace(*explicit),t.WorkspaceID).Scan(&idv);if err!=nil{return nil,err};return &idv,nil}
-	if t.ActiveProjectID!=nil{return t.ActiveProjectID,nil}
-	rows,err:=s.db.QueryContext(ctx,`SELECT id,name FROM projects WHERE workspace_id=? AND status='active' ORDER BY length(name) DESC`,t.WorkspaceID);if err!=nil{return nil,err};defer rows.Close();low:=strings.ToLower(content);for rows.Next(){var idv,name string;if rows.Scan(&idv,&name)==nil&&strings.Contains(low,strings.ToLower(name)){return &idv,nil}};return nil,nil
+func (s *Service) resolveProject(ctx context.Context,t Thread,_ string,explicit *string)(*string,error){
+ var selected string
+ if explicit!=nil{selected=strings.TrimSpace(*explicit)}
+ if selected==""&&t.ActiveProjectID!=nil{selected=strings.TrimSpace(*t.ActiveProjectID)}
+ if selected==""{
+  // Mentioning a Project in ordinary chat does not grant execution context.
+  // A user must select the Project directly or via the thread scope.
+  return nil,nil
+ }
+ var canonical string
+ err:=s.db.QueryRowContext(ctx,`SELECT id FROM projects WHERE id=? AND workspace_id=? AND status='active'`,
+  selected,t.WorkspaceID).Scan(&canonical)
+ if err!=nil{return nil,err}
+ return &canonical,nil
 }
 
 func (s *Service) ProjectHandoffs(ctx context.Context, projectID string, limit int) ([]Handoff,error) {

@@ -213,6 +213,14 @@ WHERE id = ? AND revision = ?`, archivedAt, updatedAt, taskID, expectedRevision)
 }
 
 func (r *sqlRepository) Transition(ctx context.Context, tx storage.Tx, tr transitionRecord) error {
+	// tasks.result_json is STRICT TEXT. database/sql binds a []byte as a
+	// BLOB even when those bytes contain valid JSON; therefore pass the
+	// validated JSON as a string while preserving nil as SQL NULL/no update.
+	// This is required for real independently verified Task completion.
+	var resultJSON any
+	if tr.Result != nil {
+		resultJSON=string(tr.Result)
+	}
 	res, err := tx.ExecContext(ctx, `
 UPDATE tasks
 SET state = ?,
@@ -225,7 +233,7 @@ WHERE id = ? AND revision = ? AND state = ?`,
 		tr.To,
 		tr.ReadyAt, tr.ReadyAt,
 		tr.CancelRequestedAt, tr.CancelRequestedAt,
-		tr.Result, tr.Result,
+		resultJSON,resultJSON,
 		tr.UpdatedAt,
 		tr.TaskID, tr.ExpectedRevision, tr.From,
 	)

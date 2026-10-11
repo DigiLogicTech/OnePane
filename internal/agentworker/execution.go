@@ -17,6 +17,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/authority"
 	"github.com/DigiLogicTech/OnePane/internal/budget"
 	"github.com/DigiLogicTech/OnePane/internal/contextcompiler"
+	"github.com/DigiLogicTech/OnePane/internal/featurepolicy"
 	"github.com/DigiLogicTech/OnePane/internal/inference"
 	"github.com/DigiLogicTech/OnePane/internal/observation"
 	"github.com/DigiLogicTech/OnePane/internal/operation"
@@ -72,6 +73,13 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	if !active {
 		return s.blockRun(ctx,run,res,"Project or canonical Workspace is inactive; stop Worker execution and require operator review")
 	}
+	// Re-read autonomy on every Worker tick so a live policy revocation
+	// blocks reasoning before model/tool selection.
+	autonomyAllowed,policyErr:= (featurepolicy.StoredScopes{DB:s.db}).AuthorizeTask(ctx,t.WorkspaceID,t.ID,"tasks.autonomous")
+	if policyErr!=nil||!autonomyAllowed {
+		return s.blockRun(ctx,run,res,"effective feature policy no longer permits autonomous Worker execution")
+	}
+
 	// Archive handling stays operator-visible as BLOCKED. For otherwise
 	// active scopes, do not route a model or tool with a stale Attempt.
 	// The final dispatch CAS independently repeats this SQL invariant.
@@ -331,6 +339,11 @@ func (s *Service) handleDispatchFailure(ctx context.Context, run Run, res TickRe
 	if !rp.RoutingEnabled {
 		return s.blockRun(ctx, run, res, "single-path dispatch failed: "+cause.Error())
 	}
+	fallbackAllowed,fallbackErr:=(featurepolicy.StoredScopes{DB:s.db}).AuthorizeTask(ctx,run.WorkspaceID,run.TaskID,"inference.fallback")
+	if fallbackErr!=nil||!fallbackAllowed {
+		return s.blockRun(ctx,run,res,"automatic model fallback is not permitted by effective feature policy")
+	}
+
 	if run.EscalationCount < run.MaxEscalations {
 		if !contains(rp.ExcludedCandidateIDs, candidateID) {
 			rp.ExcludedCandidateIDs = append(rp.ExcludedCandidateIDs, candidateID)

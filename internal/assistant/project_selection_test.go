@@ -10,6 +10,7 @@ import(
 
  "github.com/DigiLogicTech/OnePane/internal/clock"
  "github.com/DigiLogicTech/OnePane/internal/projectworkspace"
+ "github.com/DigiLogicTech/OnePane/internal/task"
  sqliteStore "github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
 )
 
@@ -176,15 +177,14 @@ func TestUnifiedAssistantUnscopedRunDeniedBeforeHistoryWrite(t *testing.T){
 }
 
 
-type capturedAutonomousGraphHandoff struct{ graphID string }
+type capturedAutonomousGraphHandoff struct{ graphID,taskID string }
 func(f capturedAutonomousGraphHandoff)Ensure(_ context.Context,projectID string)(projectorchestrator.Orchestrator,error){
  return projectorchestrator.Orchestrator{ID:"graph-orchestrator",ProjectID:projectID},nil
 }
 func(f capturedAutonomousGraphHandoff)Turn(_ context.Context,c projectorchestrator.TurnCommand)(projectorchestrator.TurnResult,error){
- t:="first-graph-node"
  return projectorchestrator.TurnResult{
   Turn:projectorchestrator.Turn{ID:"orchestrator-turn",Content:"Bounded Task graph queued"},
-  TaskID:&t,TaskGraphID:&f.graphID,Disposition:"task_graph_created",
+  TaskID:&f.taskID,TaskGraphID:&f.graphID,Disposition:"task_graph_created",
  },nil
 }
 func TestUnifiedAssistantPersistsOnlyCanonicalOrchestratorGraphProvenance(t *testing.T){
@@ -208,7 +208,19 @@ func TestUnifiedAssistantPersistsOnlyCanonicalOrchestratorGraphProvenance(t *tes
  if _,err=db.SQL().ExecContext(ctx,`INSERT INTO project_orchestrators
   (id,project_id,workspace_id,status,configuration_json,last_event_sequence,revision,created_at,updated_at)
   VALUES('graph-orchestrator',?,?,'ready','{}',0,1,1,1)`,p.ID,"tenant");err!=nil{t.Fatal(err)}
- svc:=NewService(db.SQL(),clock.Real{},nil,nil,nil,capturedAutonomousGraphHandoff{graphID:"reviewed-graph"})
+ taskSvc:=task.NewService(db.SQL(),db,clock.Real{})
+ actor:="human"
+ persisted,err:=taskSvc.Create(ctx,task.CreateCommand{
+  WorkspaceID:"tenant",ProjectID:&p.ID,ProjectWorkspaceID:&ws.ID,
+  Objective:"Create a safe local deliverable",ActorPrincipalID:&actor,
+ })
+ if err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`INSERT INTO project_orchestrator_turns(
+  id,orchestrator_id,task_id,role,content,context_json,provenance_json,created_at)
+  VALUES('orchestrator-turn','graph-orchestrator',?,'orchestrator','Done','{}','{}',1)`,
+  persisted.ID);err!=nil{t.Fatal(err)}
+ svc:=NewService(db.SQL(),clock.Real{},nil,nil,nil,
+  capturedAutonomousGraphHandoff{graphID:"reviewed-graph",taskID:persisted.ID})
  thread,err:=svc.CreateThread(ctx,"tenant","Graph authority","human")
  if err!=nil{t.Fatal(err)}
  projectID:=p.ID

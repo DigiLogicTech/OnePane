@@ -63,7 +63,7 @@ func needsAttemptRecoveryReview(status string)bool{
  switch status{
  case "orphaned_agent_attempt","missing_active_attempt",
   "ambiguous_active_attempts","invalid_attempt_metadata",
-  "agent_worker_state_mismatch":
+  "agent_worker_state_mismatch","other_executor_unverified":
   return true
  }
  return false

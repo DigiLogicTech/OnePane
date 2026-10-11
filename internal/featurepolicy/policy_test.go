@@ -204,3 +204,13 @@ func TestExecutionActionUnknownAndDeniedAreRejected(t *testing.T) {
 		t.Fatal("explicitly enabled local inference unexpectedly denied")
 	}
 }
+
+func TestDeniedParentCannotBeOverridden(t *testing.T) {
+	for _, parent := range []State{Disabled, Unavailable} {
+		for _, child := range []State{Enabled, Inherited, Disabled} {
+			if got := Resolve(parent, child); got != parent {
+				t.Fatalf("parent=%q child=%q got=%q", parent, child, got)
+			}
+		}
+	}
+}

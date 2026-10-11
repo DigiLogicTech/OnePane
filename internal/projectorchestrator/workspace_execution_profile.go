@@ -51,8 +51,15 @@ func workspaceExecutionProfile(settings string) (mode, teamID string) {
 func resolveOrchestratorWorkspaceProfile(ctx context.Context, db *sql.DB,
 	projectID, operatorSelected, current string, proposed any,
 ) (workspaceID, mode, teamID string, err error) {
-	workspaceID = selectModelProposedWorkspace(ctx, db,
-		projectID, operatorSelected, current, proposed)
+	// An explicit operator selector must itself be revalidated here. The
+	// model-suggestion helper only ignores model proposals when explicitly
+	// pinned; it cannot substitute for validating the operator's chosen ID.
+	if requested := strings.TrimSpace(operatorSelected); requested != "" {
+		workspaceID = requested
+	} else {
+		workspaceID = selectModelProposedWorkspace(ctx, db,
+			projectID, "", current, proposed)
+	}
 	if workspaceID == "" {
 		return "", "direct", "", nil
 	}

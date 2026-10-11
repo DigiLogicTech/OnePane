@@ -51,6 +51,7 @@ func TestTaskStartFailsClosedOnDeletedOrUnattestedApprovedGraphDependencies(t *t
    {Key:"story",ProjectWorkspaceID:workspaces[1],Objective:"Write story",DependsOn:[]string{"world"}},
    {Key:"world",ProjectWorkspaceID:workspaces[0],Objective:"Create world"},
    {Key:"assets",ProjectWorkspaceID:workspaces[2],Objective:"Independent assets"},
+   {Key:"orphan",ProjectWorkspaceID:workspaces[0],Objective:"Preserve canonical graph membership"},
   },
  })
  if err!=nil{t.Fatal(err)}
@@ -112,6 +113,17 @@ func TestTaskStartFailsClosedOnDeletedOrUnattestedApprovedGraphDependencies(t *t
  if _,_,err:=tasks.Start(ctx,task.StartCommand{
   TaskID:asset.ID,ExpectedRevision:asset.Revision,
  });err!=nil{t.Fatalf("restored independent Workspace could not execute: %v",err)}
+ orphan,err:=tasks.Get(ctx,keys["orphan"])
+ if err!=nil{t.Fatal(err)}
+ orphan,err=tasks.MarkReady(ctx,task.TransitionCommand{TaskID:orphan.ID,ExpectedRevision:orphan.Revision})
+ if err!=nil{t.Fatal(err)}
+ if _,err:=db.SQL().ExecContext(ctx,`DELETE FROM project_orchestrator_task_graph_nodes
+  WHERE graph_id=? AND node_key='orphan'`,graph.ID);err!=nil{t.Fatal(err)}
+ if _,_,err:=tasks.Start(ctx,task.StartCommand{
+  TaskID:orphan.ID,ExpectedRevision:orphan.Revision,
+ });!errors.Is(err,task.ErrHardDependencyUnsatisfied){
+  t.Fatalf("orphaned graph Task bypassed Task start admission: %v",err)
+ }
  standalone,err:=tasks.Create(ctx,task.CreateCommand{
   WorkspaceID:"tenant",ProjectID:&p.ID,
   Objective:"Non-graph Task must keep its established admission path",

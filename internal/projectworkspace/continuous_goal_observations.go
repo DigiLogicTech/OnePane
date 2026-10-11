@@ -87,8 +87,13 @@ func (s *Service) AttachGoalObservation(ctx context.Context, cmd AttachGoalObser
   if err!=nil{return err}
   if revision!=cmd.ExpectedRevision{return ErrRevisionConflict}
   if status!="configured"{return ErrInvalidTransition}
+  // Enforce the same immutable-source allowlist parser at the final
+  // evidence-attachment transaction boundary; an inconsistent stored
+  // JSON row must not alter which sensor the operator authorised.
+  canonical,err:=canonicalGoalPlan(json.RawMessage(planRaw))
+  if err!=nil{return fmt.Errorf("%w: invalid stored monitoring plan: %v",ErrInvalidCommand,err)}
   var plan goalMonitorPlan
-  if err=json.Unmarshal([]byte(planRaw),&plan);err!=nil||plan.Version!=1{
+  if err=json.Unmarshal(canonical,&plan);err!=nil||plan.Version!=1{
    return fmt.Errorf("%w: invalid monitoring plan",ErrInvalidCommand)
   }
   permitted:=false

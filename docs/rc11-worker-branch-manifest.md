@@ -6,6 +6,8 @@ PR: #225
 - [x] Improved inactive Workspace diagnostic context
 - [x] Worker admission and recovery QA criteria documented
 
+- [x] Transactional admission errors now include Workspace identity and inactive status
+
 ## Remaining
 - [ ] Regression test for inactive Workspace with existing system memberships
 - [ ] Validate admission transaction rollback and concurrent status change

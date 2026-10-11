@@ -60,6 +60,9 @@ type Candidate struct {
 	ToolCallback            bool
 	Metadata                map[string]any
 	NodeID                  string
+	// TrustedNodeVerified comes only from an active, authenticated Node
+	// pairing and a fresh capability manifest in the scheduler catalogue.
+	TrustedNodeVerified     bool
 	ComputeMode             string // cpu | gpu | hybrid | cloud | remote
 	RuntimeBackend          string
 	Resident                bool
@@ -91,8 +94,12 @@ type RouteRequest struct {
 	// support will make this more granular.
 	AllowPotentialMonetarySpend bool
 	AllowedKinds                []CandidateKind
-	// LocalOnly excludes cloud/provider and remote-node candidates when workspace policy disallows remote reasoning.
+	// LocalOnly blocks remote/cloud routing by default. An explicitly
+	// verified paired Node can be admitted only with both the positive
+	// transfer grant and a matching narrow Node allowlist below.
 	LocalOnly bool
+	AllowTrustedNodes bool
+	AllowedTrustedNodeIDs []string
 	// IncludeCandidateIDs constrains routing to an explicit operator/project
 	// selection. An empty list preserves normal scheduler choice.
 	IncludeCandidateIDs []string
@@ -286,8 +293,15 @@ func Route(req RouteRequest, candidates []Candidate) (Decision, error) {
 			continue
 		}
 		if req.LocalOnly && !c.Local {
-			reject("remote candidate disallowed by workspace policy")
-			continue
+			pairedTransfer := req.AllowTrustedNodes &&
+				c.TrustedNodeVerified && c.Kind == CandidateModel &&
+				c.Provider == "" && c.NodeID != "" &&
+				c.Destination.Kind == policy.DestinationTrustedNode &&
+				containsString(req.AllowedTrustedNodeIDs, c.NodeID)
+			if !pairedTransfer {
+				reject("remote candidate disallowed by workspace policy")
+				continue
+			}
 		}
 		if strings.TrimSpace(c.ID) == "" || !kindAllowed(req.AllowedKinds, c.Kind) {
 			reject("candidate kind is not allowed")

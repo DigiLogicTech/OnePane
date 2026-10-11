@@ -94,13 +94,16 @@ func TestLevel5GoalObservationAttestationIsScopedAndDoesNotStartMonitoring(t *te
  // The scope preflight runs before fetching or integrity-checking
  // foreign observations. Denials are indistinguishable from an unknown
  // observation ID and cannot reveal a private observation value.
- for _,candidate:=range []struct{label,id,actor string}{
-  {"foreign observation",unrelated.ID,"owner"},
-  {"unprivileged agent",fresh.ID,"robot"},
-  {"unknown observation","absent-observation","owner"},
+ for _,candidate:=range []struct{
+  label,id,actor,reason string
+  want error
+ }{
+  {"foreign observation",unrelated.ID,"owner","scope unavailable",ErrInvalidCommand},
+  {"unprivileged agent",fresh.ID,"robot","human attestation required",ErrPrincipalIneligible},
+  {"unknown observation","absent-observation","owner","scope unavailable",ErrInvalidCommand},
  }{
   _,err:=attach(candidate.id,project.ID,candidate.actor,goal.Revision)
-  if !errors.Is(err,ErrInvalidCommand)||!strings.Contains(err.Error(),"scope unavailable")||
+  if !errors.Is(err,candidate.want)||!strings.Contains(err.Error(),candidate.reason)||
    strings.Contains(err.Error(),"NEVER_COPY_SENSOR_VALUE")||
    strings.Contains(err.Error(),"device://private"){
    t.Fatalf("%s escaped the early scope gate: %v",candidate.label,err)

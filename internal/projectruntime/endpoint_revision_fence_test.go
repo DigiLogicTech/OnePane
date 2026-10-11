@@ -112,4 +112,10 @@ func TestEndpointPlanDigestPinsIdempotentOCIEnsureToCurrentRouteIntent(t *testin
  if plans(original)!=plans([]projectworkspace.Endpoint{other,a}){
   t.Fatal("equivalent route plans have different OCI ensure operation keys")
  }
+ reconfiguredRuntime:=runtime
+ reconfiguredRuntime.Revision++
+ if plans(original)==appEnsurePlan(reconfiguredRuntime,application,
+  endpointSpecsForApp(original,app),endpointPlanDigest(original,app)).IdempotencyKey {
+  t.Fatal("updated runtime isolation/resource policy reused an earlier OCI mutation")
+ }
 }

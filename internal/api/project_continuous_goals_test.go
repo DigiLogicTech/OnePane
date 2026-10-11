@@ -18,11 +18,12 @@ func(goalAPIAuth)Authenticate(r *http.Request)(Identity,error){
  switch r.Header.Get("Authorization"){
  case "Bearer operator":return Identity{PrincipalID:"operator",PrincipalType:"human"},nil
  case "Bearer outsider":return Identity{PrincipalID:"outsider",PrincipalType:"human"},nil
+ case "Bearer robot":return Identity{PrincipalID:"robot",PrincipalType:"agent"},nil
  default:return Identity{},ErrUnauthenticated
  }
 }
 func(goalAPIAuth)AuthorizeWorkspace(_ context.Context,i Identity,ws,capability string)error{
- if i.PrincipalID!="operator"||ws!="tenant"||
+ if (i.PrincipalID!="operator"&&i.PrincipalID!="robot")||ws!="tenant"||
   (capability!="project.read"&&capability!="project.write"){return ErrForbidden}
  return nil
 }
@@ -40,6 +41,10 @@ func TestContinuousGoalsAPIRequiresProjectAuthorizationAndNeverActivatesMonitori
    VALUES('operator','human','Operator','active',1,1,1)`,
   `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at)
    VALUES('tenant','operator','active',1,1)`,
+  `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at)
+   VALUES('robot','agent','Agent','active',1,1,1)`,
+  `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at)
+   VALUES('tenant','robot','active',1,1)`,
  }{if _,err:=db.SQL().ExecContext(ctx,q);err!=nil{t.Fatal(err)}}
  svc:=projectworkspace.NewService(db.SQL(),db,clock.Real{})
  p,err:=svc.CreateProject(ctx,projectworkspace.CreateProjectCommand{
@@ -104,6 +109,9 @@ func TestContinuousGoalsAPIRequiresProjectAuthorizationAndNeverActivatesMonitori
  if pg.Status!="paused"||pg.Revision!=2||pg.NextDueAt!=0{t.Fatalf("pause state invalid %+v",pg)}
  if got:=transition(g.ID,"retired","operator",pauseBody);got.Code!=409{
   t.Fatalf("stale revision was accepted: %d %s",got.Code,got.Body.String())
+ }
+ if got:=transition(g.ID,"retired","robot",`{"expected_revision":2}`);got.Code!=403{
+  t.Fatalf("Agent could retire continuous goal: %d %s",got.Code,got.Body.String())
  }
  retired:=transition(g.ID,"retired","operator",`{"expected_revision":2}`)
  if retired.Code!=200||!strings.Contains(retired.Body.String(),`"status":"retired"`){

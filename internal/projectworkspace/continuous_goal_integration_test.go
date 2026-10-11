@@ -24,6 +24,10 @@ func TestContinuousGoalRegistrationRequiresL5AndCanonicalWorkspace(t *testing.T)
    VALUES('owner','human','Owner','active',1,1,1)`,
   `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at)
    VALUES('tenant','owner','active',1,1)`,
+  `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at)
+   VALUES('robot','agent','Background agent','active',1,1,1)`,
+  `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at)
+   VALUES('tenant','robot','active',1,1)`,
  }{if _,err:=db.SQL().ExecContext(ctx,q);err!=nil{t.Fatal(err)}}
  svc:=NewService(db.SQL(),db,clock.Real{})
  p,err:=svc.CreateProject(ctx,CreateProjectCommand{
@@ -103,6 +107,10 @@ func TestContinuousGoalRegistrationRequiresL5AndCanonicalWorkspace(t *testing.T)
    ProjectID:p.ID,GoalID:g.ID,TargetStatus:"active",
    ExpectedRevision:paused.Revision,ActorPrincipalID:"owner",
  });err==nil{t.Fatal("goal activation bypassed monitor readiness")}
+ if _,err=svc.TransitionContinuousGoal(ctx,TransitionContinuousGoalCommand{
+   ProjectID:p.ID,GoalID:g.ID,TargetStatus:"retired",
+   ExpectedRevision:paused.Revision,ActorPrincipalID:"robot",
+ });err!=ErrPrincipalIneligible{t.Fatalf("Agent could retire a goal: %v",err)}
  retired,err:=svc.TransitionContinuousGoal(ctx,TransitionContinuousGoalCommand{
    ProjectID:p.ID,GoalID:g.ID,TargetStatus:"retired",
    ExpectedRevision:paused.Revision,ActorPrincipalID:"owner",

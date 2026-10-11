@@ -84,7 +84,7 @@ func TestScopedWorkspaceServiceApprovalsCannotEscapeOrOutliveVerifiedRoute(t *te
   '{"observation_id":"service-obs"}','operator',?,?,1)`,
   "project_app:"+app.ID,now,now);err!=nil{t.Fatal(err)}
  if _,err=svc.ApplyEndpointRoute(ctx,ApplyEndpointRouteCommand{
-  EndpointID:endpoint.ID,ApplicationID:app.ID,
+  EndpointID:endpoint.ID,ExpectedEndpointRevision:endpoint.Revision,ApplicationID:app.ID,
   ApplicationRevision:app.Revision,HostIP:"127.0.0.1",HostPort:49152,
   TransportProtocol:"tcp",ContainerSpecHash:"approved-spec",
   ObservationID:"service-obs",VerificationID:"service-ver",

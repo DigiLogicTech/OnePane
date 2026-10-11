@@ -232,6 +232,7 @@ type ApplyApplicationObservationCommand struct {
 
 type ApplyEndpointRouteCommand struct {
 	EndpointID          string
+	ExpectedEndpointRevision int64
 	ApplicationID       string
 	ApplicationRevision int64
 	HostIP              string

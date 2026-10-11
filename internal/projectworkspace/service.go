@@ -655,7 +655,7 @@ func (s *Service) ApplyApplicationObservation(ctx context.Context, cmd ApplyAppl
 }
 
 func (s *Service) ApplyEndpointRoute(ctx context.Context, cmd ApplyEndpointRouteCommand) (EndpointRoute, error) {
-	if strings.TrimSpace(cmd.EndpointID) == "" || strings.TrimSpace(cmd.ApplicationID) == "" || cmd.ApplicationRevision < 1 || cmd.HostIP != "127.0.0.1" || cmd.HostPort < 1 || cmd.HostPort > 65535 || strings.ToLower(strings.TrimSpace(cmd.TransportProtocol)) != "tcp" || strings.TrimSpace(cmd.ContainerSpecHash) == "" || strings.TrimSpace(cmd.ObservationID) == "" || strings.TrimSpace(cmd.VerificationID) == "" || strings.TrimSpace(cmd.ActorPrincipalID) == "" {
+	if strings.TrimSpace(cmd.EndpointID) == "" || strings.TrimSpace(cmd.ApplicationID) == "" || cmd.ExpectedEndpointRevision < 1 || cmd.ApplicationRevision < 1 || cmd.HostIP != "127.0.0.1" || cmd.HostPort < 1 || cmd.HostPort > 65535 || strings.ToLower(strings.TrimSpace(cmd.TransportProtocol)) != "tcp" || strings.TrimSpace(cmd.ContainerSpecHash) == "" || strings.TrimSpace(cmd.ObservationID) == "" || strings.TrimSpace(cmd.VerificationID) == "" || strings.TrimSpace(cmd.ActorPrincipalID) == "" {
 		return EndpointRoute{}, ErrInvalidCommand
 	}
 	now := s.clock.UnixMilli()
@@ -664,6 +664,9 @@ func (s *Service) ApplyEndpointRoute(ctx context.Context, cmd ApplyEndpointRoute
 		e, err := s.repo.EndpointTx(ctx, tx, cmd.EndpointID)
 		if err != nil {
 			return err
+		}
+		if e.Revision != cmd.ExpectedEndpointRevision {
+			return ErrRevisionConflict
 		}
 		if e.ApplicationID == nil || *e.ApplicationID != cmd.ApplicationID || e.DesiredState != "enabled" {
 			return ErrInvalidTransition

@@ -249,7 +249,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			if e := r.requireApplicationRevision(ctx, app); e != nil {
 				return result, e
 			}
-			ensure := appEnsurePlan(runtime, app, endpointSpecsForApp(endpoints, app.ID))
+			// Do not launch a container using Endpoint ports read before a
+			// concurrent operator edit or a newly approved endpoint.
+			if e := r.requireEndpointManifest(ctx, runtime.ID, endpoints); e != nil {
+				return result, e
+			}
+			ensure := appEnsurePlan(runtime, app, endpointSpecsForApp(endpoints, app.ID), endpointPlanDigest(endpoints, app.ID))
 			aev, e := r.applyAndVerify(ctx, project.WorkspaceID, cmd, ensure)
 			if e != nil {
 				return result, e
@@ -264,11 +269,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 			if e := r.requireApplicationRevision(ctx, app); e != nil {
 				return result, e
 			}
+			if e := r.requireEndpointManifest(ctx, runtime.ID, endpoints); e != nil {
+				return result, e
+			}
 			cur, e := r.projects.ApplyApplicationObservation(ctx, projectworkspace.ApplyApplicationObservationCommand{ApplicationID: app.ID, ExpectedRevision: app.Revision, Status: projectworkspace.AppRunning, ObservationID: aev.observation.ID, VerificationID: aev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 			if e != nil {
 				return result, e
 			}
-			routes, e := r.publishVerifiedEndpointRoutes(ctx, cmd, cur, endpoints, aev)
+			routes, e := r.publishVerifiedEndpointRoutes(ctx, cmd, runtime, cur, endpoints, aev)
 			if e != nil {
 				return result, e
 			}
@@ -323,7 +331,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, cmd ReconcileCommand) (Resul
 	return result, nil
 }
 
-func (r *Reconciler) publishVerifiedEndpointRoutes(ctx context.Context, cmd ReconcileCommand, app projectworkspace.Application, endpoints []projectworkspace.Endpoint, ev evidence) ([]projectworkspace.EndpointRoute, error) {
+func (r *Reconciler) publishVerifiedEndpointRoutes(ctx context.Context, cmd ReconcileCommand, runtime projectworkspace.ProjectRuntime, app projectworkspace.Application, endpoints []projectworkspace.Endpoint, ev evidence) ([]projectworkspace.EndpointRoute, error) {
 	var inspected struct {
 		Container sandboxrunner.ContainerState `json:"container"`
 	}
@@ -342,6 +350,17 @@ func (r *Reconciler) publishVerifiedEndpointRoutes(ctx context.Context, cmd Reco
 	}
 	out := []projectworkspace.EndpointRoute{}
 	for _, endpoint := range endpoints {
+		// A read-only comparison before each externally visible route
+		// complements the atomic Endpoint revision check in the service.
+		if err := r.requireRuntimeRevision(ctx, runtime); err != nil {
+			return nil, err
+		}
+		if err := r.requireApplicationRevision(ctx, app); err != nil {
+			return nil, err
+		}
+		if err := r.requireEndpointManifest(ctx, app.ProjectRuntimeID, endpoints); err != nil {
+			return nil, err
+		}
 		if endpoint.ApplicationID == nil || *endpoint.ApplicationID != app.ID || endpoint.DesiredState != "enabled" {
 			continue
 		}
@@ -349,7 +368,7 @@ func (r *Reconciler) publishVerifiedEndpointRoutes(ctx context.Context, cmd Reco
 		if !ok {
 			return nil, fmt.Errorf("%w: verified container omitted endpoint %s port %d", ErrPostcondition, endpoint.ID, endpoint.InternalPort)
 		}
-		route, err := r.projects.ApplyEndpointRoute(ctx, projectworkspace.ApplyEndpointRouteCommand{EndpointID: endpoint.ID, ApplicationID: app.ID, ApplicationRevision: app.Revision, HostIP: p.HostIP, HostPort: p.HostPort, TransportProtocol: "tcp", ContainerSpecHash: inspected.Container.SpecHash, ObservationID: ev.observation.ID, VerificationID: ev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+		route, err := r.projects.ApplyEndpointRoute(ctx, projectworkspace.ApplyEndpointRouteCommand{EndpointID: endpoint.ID, ExpectedEndpointRevision: endpoint.Revision, ApplicationID: app.ID, ApplicationRevision: app.Revision, HostIP: p.HostIP, HostPort: p.HostPort, TransportProtocol: "tcp", ContainerSpecHash: inspected.Container.SpecHash, ObservationID: ev.observation.ID, VerificationID: ev.verification.ID, ActorPrincipalID: cmd.ObserverPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 		if err != nil {
 			return nil, err
 		}
@@ -456,9 +475,9 @@ func appPullPlan(r projectworkspace.ProjectRuntime, a projectworkspace.Applicati
 	inspect := mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID, "image": a.SourceRef})
 	return mutationPlan{ToolID: sandboxrunner.ToolAppPull, InspectToolID: sandboxrunner.ToolImageInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_app:" + a.ID, Input: input, InspectInput: inspect, DesiredState: mustJSON(map[string]any{"image_present": a.SourceRef}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolImageInspect}), IdempotencyKey: fmt.Sprintf("project-app:%s:rev:%d:pull", a.ID, a.Revision), ObservationType: "project_application_image", Postcondition: func(raw json.RawMessage) bool { return imagePresent(raw, a.SourceRef) }}
 }
-func appEnsurePlan(r projectworkspace.ProjectRuntime, a projectworkspace.Application, endpoints []sandboxrunner.PortSpec) mutationPlan {
+func appEnsurePlan(r projectworkspace.ProjectRuntime, a projectworkspace.Application, endpoints []sandboxrunner.PortSpec, endpointSHA256 string) mutationPlan {
 	input := mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID, "image": a.SourceRef, "runtime_spec": rawOrObject(a.RuntimeSpecJSON), "resource_limits": rawOrObject(r.ResourceLimitsJSON), "environment_bindings": rawOrObject(a.EnvironmentBindingsJSON), "network_policy": rawOrObject(r.NetworkPolicyJSON), "endpoints": endpoints, "action": "ensure"})
-	return mutationPlan{ToolID: sandboxrunner.ToolAppEnsure, InspectToolID: sandboxrunner.ToolAppInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_app:" + a.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID}), DesiredState: mustJSON(map[string]any{"status": "running", "isolation_verified": true}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppInspect}), Compensation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppStop, "runtime_id": r.ID, "application_id": a.ID}), IdempotencyKey: fmt.Sprintf("project-app:%s:rev:%d:ensure", a.ID, a.Revision), ObservationType: "project_application_state", Postcondition: func(raw json.RawMessage) bool { return appRunningIsolated(raw, r.ID, a.ID) }}
+	return mutationPlan{ToolID: sandboxrunner.ToolAppEnsure, InspectToolID: sandboxrunner.ToolAppInspect, ResourceRef: "project_runtime:" + r.ID, SubjectRef: "project_app:" + a.ID, Input: input, InspectInput: mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID}), DesiredState: mustJSON(map[string]any{"status": "running", "isolation_verified": true}), Reconciliation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppInspect}), Compensation: mustJSON(map[string]any{"tool": sandboxrunner.ToolAppStop, "runtime_id": r.ID, "application_id": a.ID}), IdempotencyKey: fmt.Sprintf("project-app:%s:rev:%d:runtime-rev:%d:routes:%s:ensure", a.ID, a.Revision, r.Revision, endpointSHA256), ObservationType: "project_application_state", Postcondition: func(raw json.RawMessage) bool { return appRunningIsolated(raw, r.ID, a.ID) }}
 }
 func appStopPlan(r projectworkspace.ProjectRuntime, a projectworkspace.Application) mutationPlan {
 	input := mustJSON(map[string]any{"runtime_id": r.ID, "application_id": a.ID, "action": "stop"})

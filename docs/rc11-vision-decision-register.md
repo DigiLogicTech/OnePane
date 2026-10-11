@@ -2,10 +2,11 @@
 
 This register follows the **first assistant code/security review** of draft
 [PR #227](https://github.com/DigiLogicTech/OnePane/pull/227).
-The core vision and Decisions 1–4 have been confirmed by the user,
-including default Level 4, selectable Level 5, safe preapproval rules,
-universal Workspace permissions, and versioned Agent policy with live
-revocation. Decisions 5–6 remain open.
+The core vision and Decisions 1–5 have been confirmed by the user:
+local-first execution, unified Assistant, L4/L5 operation, guarded
+remediation, universal Workspace permissions, versioned Agent policies,
+live revocation, and scoped live/historical diagnostics. Decision 6 remains
+open.
 Approval of a design direction does not grant runtime privileges, authorise
 release packaging, or approve a merge.
 
@@ -238,16 +239,49 @@ or cancellation paths are already implemented.
 **Status:** CONFIRMED BY USER — versioned provenance plus live revocation
 as OnePane's standard Agent behaviour.
 
-## Decision 5 — diagnostics visibility and privacy
-**Question:** Is operator-controlled, time-limited live policy tracing
-needed in addition to the offline support-bundle reviewer?
+## Decision 5 — live and historical diagnostics with scoped tracing
 
-**Proposed starting position:** Opt-in, time-limited local trace sessions
-with redacted evidence and explicit export, disabled by default. No raw
-prompts, tokens, credentials or persistent cross-process correlation key
-in support bundles.
+**User decision (2026-10-11):** CONFIRMED. OnePane must provide **both
+live diagnostics and durable historical diagnostics**, with detailed tracing
+configurable **per Project or Agent**. Lightweight operational health,
+errors, progress and recovery status are available by default; intensive
+debug tracing is optional to protect older hardware.
 
-**Status:** AWAITING USER.
+**Agreed product and enforcement contract:**
+- Standard, low-overhead health and error signals cover queued/executing/
+  waiting/paused/failed Workers and models, local resource pressure, model
+  loading/hot swaps, task retries, scheduler decisions and Level 5 health.
+- Historical evidence links Task/Attempt, Agent revision, Project/Workspace,
+  model/provider, tool/operation and policy-decision IDs to bounded,
+  persistent timelines without storing raw prompts, credentials or
+  unrestricted tool results.
+- Operator-selectable Project/Agent trace overrides offer off, errors,
+  standard or detailed intensity; the effective scope and consent state are
+  visible and enforced by the backend, not merely UI toggles.
+- Detailed trace sessions are opt-in, time-limited, resource-budgeted and
+  automatically expire; provide a manual stop, retention/deletion settings,
+  volume caps, backpressure and clear storage usage.
+- A foreground live view and historical history may share one authenticated,
+  permission-filtered evidence pipeline, but live transport must not
+  silently create unbounded retention or expose another Workspace.
+- Never record raw API keys, tokens, vault contents, confidential prompts,
+  sensitive inputs, complete environment dumps or raw tool outputs.
+  Correlation data is sanitized/keyed and access-scoped; explicitly
+  reviewed support exports contain only permitted fields.
+- Distinguish a genuinely healthy state from unavailable sensors or stale
+  evidence, and display unknown external execution outcomes for recovery.
+- Diagnostics must remain functional without a GPU, cloud model or loaded
+  LLM and must not hold the machine's scarce RAM/VRAM unnecessarily.
+- Include privacy, concurrency, retention, crash/restart, scope-denial,
+  overload, stale-data and disabled-trace regression coverage.
+
+**Architecture and test backlog:** `docs/rc11-live-historical-diagnostics.md`.
+Existing offline diagnostics review and QA APIs provide foundations only;
+this decision does not establish that comprehensive live/historical
+collection and per-Agent tracing are already implemented.
+
+**Status:** CONFIRMED BY USER — both diagnostic modalities, lightweight
+defaults and scoped opt-in detailed tracing required.
 
 ## Decision 6 — compute and provider trust categories
 **Question:** Can verified on-device OpenAI-compatible model runtimes and

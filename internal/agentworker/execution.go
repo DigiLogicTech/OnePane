@@ -73,6 +73,14 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	if !active {
 		return s.blockRun(ctx,run,res,"Project or canonical Workspace is inactive; stop Worker execution and require operator review")
 	}
+	// Archive handling stays operator-visible as BLOCKED. For otherwise
+	// active scopes, do not route a model or tool with a stale Attempt.
+	// The final dispatch CAS independently repeats this SQL invariant.
+	if err:=s.requireActiveWorkerExecutionBinding(ctx,run);err!=nil{
+		return failedResult(res,err)
+	}
+	// Preserve the Task/Attempt binding error before any policy revocation
+	// can mutate Worker state or consume a step.
 	// Re-read autonomy on every Worker tick so a live policy revocation
 	// blocks reasoning before model/tool selection.
 	autonomyAllowed,policyErr:= (featurepolicy.StoredScopes{DB:s.db}).AuthorizeTask(ctx,t.WorkspaceID,t.ID,"tasks.autonomous")
@@ -80,12 +88,6 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 		return s.blockRun(ctx,run,res,"effective feature policy no longer permits autonomous Worker execution")
 	}
 
-	// Archive handling stays operator-visible as BLOCKED. For otherwise
-	// active scopes, do not route a model or tool with a stale Attempt.
-	// The final dispatch CAS independently repeats this SQL invariant.
-	if err:=s.requireActiveWorkerExecutionBinding(ctx,run);err!=nil{
-		return failedResult(res,err)
-	}
 	if run.StepCount >= run.MaxSteps {
 		return s.failRun(ctx, run, res, ErrStepLimit)
 	}

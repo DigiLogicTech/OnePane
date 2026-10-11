@@ -296,7 +296,15 @@ func (s *Service) Submit(ctx context.Context,c SubmitCommand)(SubmitResult,error
 		o,err:=s.orchestrators.Ensure(ctx,*projectID);if err!=nil{return SubmitResult{},err}
 		hid,_:=s.ids.New("ahandoff");_,err=s.db.ExecContext(ctx,`INSERT INTO assistant_project_handoffs(id,assistant_thread_id,assistant_turn_id,project_id,orchestrator_id,orchestrator_turn_id,task_id,status,objective,created_at,updated_at) VALUES(?,?,?,?,?,NULL,NULL,'delegated',?,?,?)`,hid,thread.ID,userID,*projectID,o.ID,c.Content,now,now);if err!=nil{return SubmitResult{},err}
 		res,err:=s.orchestrators.Turn(ctx,projectorchestrator.TurnCommand{ProjectID:*projectID,AssistantThreadID:&thread.ID,Objective:c.Content,ActorPrincipalID:c.ActorPrincipalID,ProjectWorkspaceID:selectedWorkspace,ForceTask:c.ForceTask,AllowTaskCreation:c.AllowTaskCreation});if err!=nil{_,_=s.db.ExecContext(ctx,`UPDATE assistant_project_handoffs SET status='failed',updated_at=? WHERE id=?`,s.clock.UnixMilli(),hid);return SubmitResult{},err}
-		turnID,_:=s.ids.New("aturn");prov:=map[string]any{"assistant_thread_id":thread.ID,"assistant_turn_id":userID,"project_id":*projectID,"orchestrator_id":o.ID,"orchestrator_turn_id":res.Turn.ID};if res.TaskID!=nil{prov["task_id"]=*res.TaskID};provRaw,_:=json.Marshal(prov);created:=s.clock.UnixMilli()
+		turnID,_:=s.ids.New("aturn");prov:=map[string]any{"assistant_thread_id":thread.ID,"assistant_turn_id":userID,"project_id":*projectID,"orchestrator_id":o.ID,"orchestrator_turn_id":res.Turn.ID};if res.TaskID!=nil{prov["task_id"]=*res.TaskID}
+		if res.TaskGraphID!=nil{
+			// The unified Assistant must retain the canonical graph reference
+			// in its own persisted Turn, not only in Orchestrator history.
+			// No model-authored graph ID is accepted from the client.
+			prov["task_graph_id"]=*res.TaskGraphID
+			prov["task_origin"]="standing_L4_autonomy_policy"
+		}
+		provRaw,_:=json.Marshal(prov);created:=s.clock.UnixMilli()
 		_,err=s.db.ExecContext(ctx,`INSERT INTO assistant_turns(id,thread_id,role,content,project_id,task_id,provenance_json,created_at) VALUES(?,?,'assistant',?,?,?,?,?)`,turnID,thread.ID,res.Turn.Content,*projectID,res.TaskID,string(provRaw),created);if err!=nil{return SubmitResult{},err}
 		status:="completed";if res.Disposition=="waiting"||res.Disposition=="blocked"{status="waiting"};_,_=s.db.ExecContext(ctx,`UPDATE assistant_project_handoffs SET orchestrator_turn_id=?,task_id=?,status=?,updated_at=? WHERE id=?`,res.Turn.ID,res.TaskID,status,created,hid)
 		_,_=s.db.ExecContext(ctx,`UPDATE assistant_threads SET active_project_id=?,revision=revision+1,updated_at=? WHERE id=?`,*projectID,created,thread.ID)

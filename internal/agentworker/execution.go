@@ -171,6 +171,12 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 		_ = s.journal(ctx, run.ID, stepKind, "failed", &kind, &cid, nil, &ref, map[string]any{"error": dispatchErr.Error()})
 		return s.handleDispatchFailure(ctx, run, res, cid, dispatchErr)
 	}
+	// A running inference may finish after its Agent's instructions have
+	// changed or the profile has been archived. Discard its proposal before
+	// any tool, file, network or delegation effect is interpreted.
+	if err:=enforceTaskAgentProfileBinding(ctx,s.db,run.WorkspaceID,agentBinding);err!=nil{
+		return s.blockRun(ctx,run,res,"pinned Agent profile revoked before proposal application: "+err.Error())
+	}
 	pt := string(response.ProposalType)
 	res.Proposal = pt
 	_ = s.journal(ctx, run.ID, stepKind, "succeeded", &kind, &cid, &pt, &ref, map[string]any{"message": boundedString(response.Message, 1024)})

@@ -65,6 +65,16 @@ func (s *Service) AttachGoalObservation(ctx context.Context, cmd AttachGoalObser
    LIMIT 1`,cmd.ProjectID,cmd.GoalID,cmd.ActorPrincipalID,cmd.ObservationID).Scan(&visible)
  if err!=nil{
   if errors.Is(err,sql.ErrNoRows){
+   // Keep non-human attestation a permission denial (HTTP 403), not a
+   // malformed request (400). This second lookup discloses only the
+   // caller's own principal type, never another tenant's observation.
+   var principalType string
+   e:=s.db.QueryRowContext(ctx,
+    "SELECT principal_type FROM principals WHERE id=? AND status='active'",
+    cmd.ActorPrincipalID).Scan(&principalType)
+   if e!=nil||principalType!="human"{
+    return GoalObservationReceipt{},fmt.Errorf("%w: human attestation required",ErrPrincipalIneligible)
+   }
    return GoalObservationReceipt{},fmt.Errorf("%w: observation or goal scope unavailable",ErrInvalidCommand)
   }
   return GoalObservationReceipt{},err

@@ -2,8 +2,7 @@ package featurepolicy
 
 import (
 	"regexp"
-	"strings"
-	"time"
+		"time"
 )
 
 // Diagnostic records a bounded policy decision without persisting credentials.
@@ -27,12 +26,21 @@ func DecisionDiagnostic(at time.Time, correlationID, action string, allowed bool
 	if !safeDiagnosticToken.MatchString(correlationID) {
 		correlationID = "redacted"
 	}
-	if !safeDiagnosticToken.MatchString(action) || strings.Contains(strings.ToLower(action), "token") {
+	if !safeDiagnosticToken.MatchString(action) || !knownDiagnosticAction(action) {
 		action = "redacted"
 	}
 	return Diagnostic{
 		At: at.UTC(), Component: "featurepolicy",
 		CorrelationID: correlationID, Action: action,
 		Allowed: allowed, Category: category,
+	}
+}
+
+func knownDiagnosticAction(action string) bool {
+	switch action {
+	case "inference.local", "inference.cloud", "inference.fallback", "files.read", "files.write", "projects.share", "tasks.autonomous":
+		return true
+	default:
+		return false
 	}
 }

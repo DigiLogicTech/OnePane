@@ -52,6 +52,9 @@ on:
       - 'cmd/onepane-node-preflight/**'
       - '.github/workflows/rc11-rootless-physical.yml'
       - 'docs/GENERAL_PURPOSE_WORKSPACE_SANDBOX.md'
+      - 'internal/featurepolicy/**'
+      - 'internal/inference/**'
+      - 'internal/tool/**'
       - 'internal/agentworker/**'
       - 'internal/team/**'
       - 'internal/teamworker/**'
@@ -168,6 +171,7 @@ jobs:
           go test -tags integration ./internal/projectworkspace ./internal/sandboxrunner ./internal/agentworker ./internal/task ./internal/workspacepublisher ./internal/projectorchestrator ./internal/workspacebroker ./internal/nodefederation ./internal/scheduler ./internal/operation
       - name: Full Go regression and cross-platform compilation
         run: |
+          go test ./internal/featurepolicy ./internal/inference ./internal/tool
           go test ./...
           # Exercise a real pre-config, pre-HTTP backend failure and the
           # offline-only reader without a running OnePane API or database.

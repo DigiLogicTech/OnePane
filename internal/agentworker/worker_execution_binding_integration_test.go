@@ -66,7 +66,7 @@ func TestAgentWorkerDispatchRejectsStaleOrForeignActiveAttempt(t *testing.T) {
 			if actual.StepCount!=before.StepCount||actual.Status!=RunRunning{
 				t.Fatalf("failed preflight wrote Worker state: before=%+v after=%+v",before,actual)
 			}
-			if err:=worker.markReasoningDispatch(ctx,&before,"local","candidate");!errors.Is(err,ErrInvalidWorkerState){
+			if err:=worker.markReasoningDispatch(ctx,&before,"model_deployment","candidate");!errors.Is(err,ErrInvalidWorkerState){
 				t.Fatalf("dispatch CAS admitted invalid Attempt: %v",err)
 			}
 			after,err:=worker.getRun(ctx,victim.ID)
@@ -107,13 +107,13 @@ func TestAgentWorkerDispatchRejectsStaleOrForeignActiveAttempt(t *testing.T) {
 	}
 	good,err:=worker.getRun(ctx,victim.ID)
 	if err!=nil{t.Fatal(err)}
-	if err:=worker.markReasoningDispatch(ctx,&good,"local","approved");err!=nil{
+	if err:=worker.markReasoningDispatch(ctx,&good,"model_deployment","approved");err!=nil{
 		t.Fatalf("legitimate first dispatch denied: %v",err)
 	}
 	if good.StepCount!=1{t.Fatalf("healthy binding did not record exactly one dispatch: %+v",good)}
 	otherGood,err:=worker.getRun(ctx,other.ID)
 	if err!=nil{t.Fatal(err)}
-	if err:=worker.markReasoningDispatch(ctx,&otherGood,"local","independent");err!=nil{
+	if err:=worker.markReasoningDispatch(ctx,&otherGood,"model_deployment","independent");err!=nil{
 		t.Fatalf("unaffected sibling cannot dispatch: %v",err)
 	}
 	if otherGood.StepCount!=1{t.Fatalf("independent Worker unexpectedly counted steps: %+v",otherGood)}

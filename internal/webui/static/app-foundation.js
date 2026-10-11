@@ -1785,7 +1785,16 @@ async function qa4BindL5GoalConfigurator(project){
     const goals=await apiRequest(base+'/continuous-goals');
     if(!list.isConnected)return;
     const rows=Array.isArray(goals)?goals:[];
-    list.innerHTML=rows.length?rows.map(g=>`<div class="list-row"><strong>${escapeHtml(g.objective||'Objective')}</strong> <span class="pill">${escapeHtml(g.status||'configured')}</span><div class="page-subtitle">Health: ${escapeHtml(g.health||'unobserved')} · next check not scheduled unless monitoring is separately enabled</div></div>`).join(''):'<p class="page-subtitle">No ongoing objectives configured.</p>';
+    list.innerHTML=rows.length?rows.map(g=>{
+      const stopped=g.status==='paused'||g.status==='retired';
+      const actions=g.status==='retired'?'':`<div class="toolbar">
+        ${g.status!=='paused'?`<button class="btn" type="button" data-goal-transition="paused" data-goal-id="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">Pause</button>`:''}
+        <button class="btn" type="button" data-goal-transition="retired" data-goal-id="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">Retire…</button>
+      </div>`;
+      return `<div class="list-row"><strong>${escapeHtml(g.objective||'Objective')}</strong> <span class="pill">${escapeHtml(g.status||'configured')}</span>
+        <div class="page-subtitle">Health: ${escapeHtml(g.health||'unobserved')} · ${stopped?'No future monitoring due':'Monitoring not activated; no check scheduled'}</div>
+        ${actions}</div>`;
+    }).join(''):'<p class="page-subtitle">No ongoing objectives configured.</p>';
   };
   try{
     const views=await apiRequest(base+'/workspaces');
@@ -1795,6 +1804,32 @@ async function qa4BindL5GoalConfigurator(project){
     if(!rows.length){form.querySelector('button[type="submit"]').disabled=true;$('#qa4L5GoalStatus').textContent='Create an active canonical Workspace before configuring an objective.';}
     await refresh();
   }catch(ex){if(list.isConnected)list.textContent='Unable to load goal configuration: '+ex.message;return}
+  // A two-click confirmation is required for terminal retirement. The
+  // backend independently requires human authority and a current revision.
+  list.onclick=async event=>{
+    const button=event.target.closest('button[data-goal-transition]');
+    if(!button||!list.contains(button))return;
+    event.preventDefault();event.stopPropagation();
+    const action=String(button.dataset.goalTransition||'');
+    if(action==='retired'&&button.dataset.confirmed!=='yes'){
+      button.dataset.confirmed='yes';
+      button.textContent='Confirm retirement';
+      return;
+    }
+    button.disabled=true;
+    try{
+      await apiRequest(base+'/continuous-goals/'+encodeURIComponent(button.dataset.goalId)+'/'+encodeURIComponent(action),{
+        method:'POST',body:JSON.stringify({expected_revision:Number(button.dataset.goalRevision)})
+      });
+      const status=$('#qa4L5GoalStatus');
+      if(status)status.textContent=action==='paused'?'Goal paused; no future checks scheduled.':'Goal retired; this objective cannot be reactivated.';
+      await refresh();
+    }catch(ex){
+      const status=$('#qa4L5GoalStatus');
+      if(status)status.textContent='Unable to change goal: '+ex.message;
+      await refresh();
+    }
+  };
   form.onsubmit=async event=>{
     event.preventDefault();
     const button=form.querySelector('button[type="submit"]'),status=$('#qa4L5GoalStatus');

@@ -159,6 +159,7 @@ jobs:
           node --check internal/webui/static/app-foundation.js
           node --check internal/webui/static/app.js
           node scripts/validate_unified_assistant_chat.js
+          node scripts/validate_l5_goal_lifecycle.js
           node --check internal/webui/static/settings-redesign.js
           node --check internal/webui/static/qa-execution-provenance.js
           node scripts/validate_qa_execution_provenance.js

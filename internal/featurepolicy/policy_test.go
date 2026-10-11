@@ -229,3 +229,15 @@ func TestExecutionGrantsCannotExpandAcrossScopes(t *testing.T) {
 		}
 	}
 }
+
+func TestInvalidPolicyValuesNeverAuthoriseExecution(t *testing.T) {
+	p := AssistedDefaults()
+	p.CloudRouting = State("unexpected")
+	p.CrossProjectShare = State("unexpected")
+	p.AutonomousRoutines = State("unexpected")
+	for _, action := range []string{"inference.cloud", "projects.share", "tasks.autonomous", "unknown.action"} {
+		if p.ValidateExecution(action) {
+			t.Fatalf("invalid policy granted %q", action)
+		}
+	}
+}

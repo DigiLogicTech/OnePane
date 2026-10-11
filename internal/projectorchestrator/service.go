@@ -275,9 +275,9 @@ func (s *Service) reason(ctx context.Context, workspaceID, projectID, projectWor
 	text:=extractText(body)
 	plan:=map[string]any{}
  trim:=strings.TrimSpace(text)
- trim=strings.TrimPrefix(trim,"\`\`\`json")
- trim=strings.TrimPrefix(trim,"\`\`\`")
- trim=strings.TrimSuffix(trim,"\`\`\`")
+ trim=strings.TrimPrefix(trim,"```json")
+ trim=strings.TrimPrefix(trim,"```")
+ trim=strings.TrimSuffix(trim,"```")
  // A model response is untrusted. Ambiguous duplicate fields must not be
  // allowed to change the action, destination Workspace or Task graph.
  // If its directive is invalid, retain the answer as text but grant no

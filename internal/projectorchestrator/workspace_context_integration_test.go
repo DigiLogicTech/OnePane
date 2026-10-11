@@ -94,6 +94,16 @@ func TestOrchestratorRuntimeContextIsBoundToSelectedWorkspace(t *testing.T) {
   Objective:"WORLD_PRIVATE_OBJECTIVE_NEVER_SHARED_WITH_STORY",
  })
  if err!=nil{t.Fatal(err)}
+ longObjective:=strings.Repeat("🧪",257)+"PRIVATE_FULL_OBJECTIVE_TAIL"
+ longTask,err:=taskSvc.Create(ctx,task.CreateCommand{
+  WorkspaceID:"tenant",ProjectID:&p.ID,ProjectWorkspaceID:&world.ID,
+  Objective:longObjective,
+ })
+ if err!=nil{t.Fatal(err)}
+ fullStoredTask,err:=taskSvc.Get(ctx,longTask.ID)
+ if err!=nil||fullStoredTask.Objective!=longObjective{
+  t.Fatalf("Task persistence truncated the real objective: %v",err)
+ }
  storyTask,err:=taskSvc.Create(ctx,task.CreateCommand{
   WorkspaceID:"tenant",ProjectID:&p.ID,ProjectWorkspaceID:&story.ID,
   Objective:"STORY_PRIVATE_OBJECTIVE_NEVER_SHARED_WITH_WORLD",
@@ -130,6 +140,11 @@ func TestOrchestratorRuntimeContextIsBoundToSelectedWorkspace(t *testing.T) {
  check(assets.ID,"","not_provisioned")
  worldSnapshot,_,_,_,err:=orchestrator.contextSnapshot(ctx,p.ID,world.ID)
  if err!=nil{t.Fatal(err)}
+ if !strings.Contains(string(worldSnapshot),"\"objective_truncated\":true")||
+  !strings.Contains(string(worldSnapshot),strings.Repeat("🧪",256))||
+  strings.Contains(string(worldSnapshot),"PRIVATE_FULL_OBJECTIVE_TAIL"){
+  t.Fatalf("Orchestrator context leaked full oversized Task objective or hid truncation status: %s",worldSnapshot)
+ }
  storySnapshot,_,_,_,err:=orchestrator.contextSnapshot(ctx,p.ID,story.ID)
  if err!=nil{t.Fatal(err)}
  for _,tc:=range []struct{name string;raw json.RawMessage;allowed,denied,deniedID string}{

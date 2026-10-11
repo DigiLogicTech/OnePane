@@ -6,6 +6,18 @@ import (
 	"fmt"
 )
 
+// Task objectives remain complete and durable in SQLite. The reasoning
+// snapshot is only a bounded hint, not a replacement for source evidence.
+const maxOrchestratorObjectiveRunes = 256
+
+func boundedOrchestratorObjective(objective string) (string, bool) {
+	runes := []rune(objective)
+	if len(runes) <= maxOrchestratorObjectiveRunes {
+		return objective, false
+	}
+	return string(runes[:maxOrchestratorObjectiveRunes]), true
+}
+
 // workspaceOrchestratorActivity is the only Task/event projection shared with
 // a Project Orchestrator reasoning model. Cross-Workspace collaboration uses
 // explicitly published and granted artifacts; membership in the same Project
@@ -33,9 +45,12 @@ func workspaceOrchestratorActivity(ctx context.Context, db *sql.DB,
 				rows.Close()
 				return nil,nil,err
 			}
+			// Never place an unbounded backlog of full Task objectives into
+			// an 8K-context local model prompt. The stored Task stays untouched.
+			preview, truncated := boundedOrchestratorObjective(objective)
 			tasks=append(tasks,map[string]any{
-				"id":id,"objective":objective,"state":state,
-				"scheduling_class":schedule,"priority":priority,
+				"id":id,"objective":preview,"objective_truncated":truncated,
+				"state":state,"scheduling_class":schedule,"priority":priority,
 				"created_at":created,"updated_at":updated,
 			})
 		}

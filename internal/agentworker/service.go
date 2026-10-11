@@ -14,6 +14,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/budget"
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/event"
+	"github.com/DigiLogicTech/OnePane/internal/featurepolicy"
 	"github.com/DigiLogicTech/OnePane/internal/id"
 	"github.com/DigiLogicTech/OnePane/internal/inference"
 	"github.com/DigiLogicTech/OnePane/internal/observation"
@@ -529,6 +530,16 @@ func scanRun(row rowScanner) (Run, error) {
 
 func (s *Service) startRun(ctx context.Context, t task.Task) (Run, TickResult) {
  res:=TickResult{TaskID:t.ID,Status:"failed"}
+ // Agent Worker admission must not turn a disabled autonomy policy into
+ // a new Task/Attempt or a model dispatch.
+ scopes:=featurepolicy.StoredScopes{DB:s.db}
+ allowed,scopeErr:=scopes.AuthorizeTask(ctx,t.WorkspaceID,t.ID,"tasks.autonomous")
+ if scopeErr!=nil||!allowed{
+  res.Error="stored Project or Workspace feature policy denied autonomous Worker admission"
+  return Run{},res
+ }
+ fallbackAllowed,fbErr:=scopes.AuthorizeTask(ctx,t.WorkspaceID,t.ID,"inference.fallback")
+ if fbErr!=nil{res.Error="stored feature policy fallback scope unavailable";return Run{},res}
  if err:=s.ensureWorkspaceAccess(ctx,t.WorkspaceID);err!=nil{
   res.Error=err.Error();return Run{},res
  }
@@ -562,14 +573,14 @@ func (s *Service) startRun(ctx context.Context, t task.Task) (Run, TickResult) {
  if v:=strings.TrimSpace(workspaceRouting.CandidateID);v!=""{
   ids=append(ids,v)
  }
- if route.RoutingEnabled{
+ if route.RoutingEnabled && fallbackAllowed{
   for _,id:=range workspaceRouting.FallbackCandidateIDs{
    if id=strings.TrimSpace(id);id!=""&&!contains(ids,id){ids=append(ids,id)}
   }
  }
  route.IncludeCandidateIDs=ids
  maxEscalations:=s.cfg.MaxEscalations
- if !route.RoutingEnabled{maxEscalations=0}
+ if !route.RoutingEnabled || !fallbackAllowed{maxEscalations=0}
  rp,err:=json.Marshal(route)
  if err!=nil{res.Error=err.Error();return Run{},res}
  var r Run

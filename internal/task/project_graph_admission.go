@@ -20,6 +20,19 @@ func hasTaskGraphProvenance(raw json.RawMessage) bool {
 			strings.TrimSpace(provenance.GraphID)!="")
 }
 
+// requireRuntimeDependencyIntegrityTx protects Task execution and all
+// existing-Attempt wake paths. Live SQL edges cannot silently loosen the
+// original Task graph, and stopped/archived Workspaces cannot resume work.
+func (s *Service) requireRuntimeDependencyIntegrityTx(ctx context.Context,tx storage.Tx,t Task) error {
+	satisfied,err:=s.repo.HardDependenciesSatisfied(ctx,tx,t.ID)
+	if err!=nil{return err}
+	if !satisfied{return ErrHardDependencyUnsatisfied}
+	if t.ProjectWorkspaceID!=nil||hasTaskGraphProvenance(t.Completion){
+		return approvedTaskGraphDependenciesTx(ctx,tx,t)
+	}
+	return nil
+}
+
 // approvedTaskGraphDependenciesTx enforces the graph's independently
 // operator-attested predecessor list at the actual Task/Attempt admission
 // boundary. Graph readiness/reporting is only advisory; deleted SQL edges

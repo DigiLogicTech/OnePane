@@ -46,8 +46,8 @@ An Endpoint declaration can change without incrementing the owning
 application's revision. An OCI ensure keyed only to that application
 revision would reuse a previously committed external Operation even
 when the requested ports have changed. The ensure idempotency key
-therefore also includes the SHA-256 of a canonical, application-scoped
-declarative Endpoint plan. Ordering differences and unrelated
+therefore also includes the parent Runtime policy revision and the SHA-256 of a canonical,
+application-scoped declarative Endpoint plan. Ordering differences and unrelated
 applications do not cause reexecution; a changed/added/removed Endpoint,
 port, revision, desired state or exposure produces a distinct
 operation. Tool mutation remains subject to normal authority,

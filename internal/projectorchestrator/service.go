@@ -266,8 +266,19 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 	o,err:=s.Ensure(ctx,c.ProjectID);if err!=nil{return TurnResult{},err}
 	snapshot,pwsID,mode,teamID,err:=s.contextSnapshot(ctx,c.ProjectID,c.ProjectWorkspaceID);if err!=nil{return TurnResult{},err}
 	userTurnID,_:=s.ids.New("pturn");now:=s.clock.UnixMilli()
-	_,_ = s.db.ExecContext(ctx,`INSERT INTO project_orchestrator_turns(id,orchestrator_id,assistant_thread_id,task_id,role,content,context_json,provenance_json,created_at) VALUES(?,?,?,NULL,'user',?,'{}','{}',?)`,userTurnID,o.ID,c.AssistantThreadID,c.Objective,now)
-	_,_ = s.db.ExecContext(ctx,`UPDATE project_orchestrators SET status='working',revision=revision+1,updated_at=? WHERE id=?`,now,o.ID)
+	// Audit admission must be durable before any model inference or Task
+	// creation. Never suppress a failed turn insert or state transition.
+	// Recording both changes atomically also prevents orphan user turns
+	// when an Orchestrator status write is rejected by SQLite.
+	if err:=s.tx.Within(ctx,func(ctx context.Context, tx storage.Tx) error{
+		if _,e:=tx.ExecContext(ctx,`INSERT INTO project_orchestrator_turns(id,orchestrator_id,assistant_thread_id,task_id,role,content,context_json,provenance_json,created_at) VALUES(?,?,?,NULL,'user',?,'{}','{}',?)`,userTurnID,o.ID,c.AssistantThreadID,c.Objective,now);e!=nil{return e}
+		result,e:=tx.ExecContext(ctx,`UPDATE project_orchestrators SET status='working',revision=revision+1,updated_at=? WHERE id=?`,now,o.ID)
+		if e!=nil{return e}
+		changed,e:=result.RowsAffected()
+		if e!=nil{return e}
+		if changed!=1{return fmt.Errorf("Project Orchestrator status changed unexpectedly")}
+		return nil
+	});err!=nil{return TurnResult{},fmt.Errorf("persist Project Orchestrator user turn: %w",err)}
 	text,plan,deploymentID,reasonErr:=s.reason(ctx,o.WorkspaceID,c.ActorPrincipalID,c.Objective,snapshot)
 	answer:=strings.TrimSpace(text);action:="answer";objective:=c.Objective
 	if v,ok:=plan["answer"].(string);ok&&strings.TrimSpace(v)!=""{answer=strings.TrimSpace(v)}

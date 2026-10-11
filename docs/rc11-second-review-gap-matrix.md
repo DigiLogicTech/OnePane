@@ -127,3 +127,5 @@ Completed in this integration branch, with source and regression tests:
 - [x] **Assistant pin admission:** direct model-selection API rejects remote, paid or unverifiably zero-cost deployments before storing a general Assistant pin. The scheduler still rechecks local-only zero-cost at inference time. Regression protects against bypassing frontend disabled options with an API request.
 
 - [x] **General Assistant model-picker parity:** scheduler candidate API exposes the verified hard-zero-cost indicator and the Assistant selector disables cloud/unknown-cost/unverified candidates, matching server-side pin admission. A static UI/API contract check ensures future revisions cannot silently relabel paid or remote compute as selectable.
+
+- [x] **Unscoped Run API deny:** a direct Assistant API request to create or force Tasks without a canonical selected Project now fails before any user turn or handoff is persisted. Covers stale client replay and the explicit general-chat override, not just the disabled UI Run button.

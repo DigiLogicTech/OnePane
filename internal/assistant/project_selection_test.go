@@ -138,3 +138,38 @@ func TestUnifiedAssistantWorkspaceHandoffIsExplicitAndProjectBound(t *testing.T)
   t.Fatalf("selected Workspace was not delegated exactly: calls=%d got=%q err=%v",handoff.calls,handoff.selected,err)
  }
 }
+
+func TestUnifiedAssistantUnscopedRunDeniedBeforeHistoryWrite(t *testing.T){
+ ctx:=context.Background()
+ db,err:=sqliteStore.Open(t.TempDir()+"/assistant-run-denial.db")
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ if err=db.Migrate(ctx);err!=nil{t.Fatal(err)}
+ for _,sqlStmt:=range []string{
+  `INSERT INTO workspaces(id,name,status,revision,created_at,updated_at) VALUES('tenant','Tenant','active',1,1,1)`,
+  `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at) VALUES('human','human','Human','active',1,1,1)`,
+  `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at) VALUES('tenant','human','active',1,1)`,
+ }{if _,err:=db.SQL().ExecContext(ctx,sqlStmt);err!=nil{t.Fatal(err)}}
+ service:=NewService(db.SQL(),clock.Real{},nil,nil,nil,nil)
+ thread,err:=service.CreateThread(ctx,"tenant","General chat","human")
+ if err!=nil{t.Fatal(err)}
+ for _,tc:=range []struct{force,allow bool}{
+  {false,true},{true,false},{true,true},
+ }{
+  _,err=service.Submit(ctx,SubmitCommand{
+    ThreadID:thread.ID,ActorPrincipalID:"human",Content:"Execute an operation",
+    ForceTask:tc.force,AllowTaskCreation:tc.allow,
+  })
+  if !errors.Is(err,ErrInvalid){t.Fatalf("unscoped Run accepted force=%t allow=%t: %v",tc.force,tc.allow,err)}
+ }
+ empty:=""
+ _,err=service.Submit(ctx,SubmitCommand{
+  ThreadID:thread.ID,ActorPrincipalID:"human",Content:"Run against my previous project",
+  ProjectID:&empty,AllowTaskCreation:true,
+ })
+ if !errors.Is(err,ErrInvalid){t.Fatalf("explicit general scope Run admitted: %v",err)}
+ var turns,handoffs int
+ if err:=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM assistant_turns WHERE thread_id=?",thread.ID).Scan(&turns);err!=nil{t.Fatal(err)}
+ if err:=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM assistant_project_handoffs WHERE assistant_thread_id=?",thread.ID).Scan(&handoffs);err!=nil{t.Fatal(err)}
+ if turns!=0||handoffs!=0{t.Fatalf("denied Run persisted state: turns=%d handoffs=%d",turns,handoffs)}
+}

@@ -269,6 +269,12 @@ func (s *Service) Submit(ctx context.Context,c SubmitCommand)(SubmitResult,error
 	c.ThreadID,c.Content,c.ActorPrincipalID=strings.TrimSpace(c.ThreadID),strings.TrimSpace(c.Content),strings.TrimSpace(c.ActorPrincipalID);if c.ThreadID==""||c.Content==""||c.ActorPrincipalID==""{return SubmitResult{},ErrInvalid}
 	thread,err:=s.Thread(ctx,c.ThreadID);if err!=nil{return SubmitResult{},err}
 	projectID,err:=s.resolveProject(ctx,thread,c.Content,c.ProjectID);if err!=nil{return SubmitResult{},err}
+	// The UI's disabled Run button is not an authorization boundary.
+	// Explicit Task requests require a canonical selected Project even when
+	// they arrive via a direct API call or a stale/replayed Assistant client.
+	if projectID==nil&&(c.ForceTask||c.AllowTaskCreation){
+		return SubmitResult{},fmt.Errorf("%w: select a Project before running Tasks",ErrInvalid)
+	}
 	selectedWorkspace:=strings.TrimSpace(c.ProjectWorkspaceID)
 	if selectedWorkspace!="" {
 		if projectID==nil {

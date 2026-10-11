@@ -3,7 +3,11 @@ package projectorchestrator
 import (
  "context"
  "encoding/json"
+ "database/sql"
+ "path/filepath"
  "testing"
+
+ _ "modernc.org/sqlite"
 
  "github.com/DigiLogicTech/OnePane/internal/policy"
  "github.com/DigiLogicTech/OnePane/internal/scheduler"
@@ -20,9 +24,10 @@ func (m *orchestratorRouteCapture) Route(_ context.Context,req scheduler.RouteRe
 }
 
 func TestProjectOrchestratorNeverSendsProjectSnapshotToUnapprovedRemoteOrUntestedModel(t *testing.T){
+ db:=testReasoningPolicyDB(t)
  recorder:=&orchestratorRouteCapture{}
- svc:=&Service{scheduler:recorder}
- _,_,_,err:=svc.reason(context.Background(),"tenant","operator",
+ svc:=&Service{db:db,scheduler:recorder}
+ _,_,_,err:=svc.reason(context.Background(),"tenant","project","world","operator",
   "inspect my Project",json.RawMessage(`{"private":"project-context"}`))
  if err==nil{t.Fatal("missing local qualified model should block reasoning")}
  if recorder.calls!=1 {t.Fatalf("unexpected route count %d",recorder.calls)}
@@ -40,5 +45,47 @@ func TestProjectOrchestratorNeverSendsProjectSnapshotToUnapprovedRemoteOrUnteste
   req.CapabilityID!="inference.general"||req.RoleName!="project-orchestrator"||
   req.ProtocolLevel!="L1"{
   t.Fatalf("unexpected Project reasoning route: %+v",req)
+ }
+}
+
+
+func testReasoningPolicyDB(t *testing.T)*sql.DB {
+ t.Helper()
+ db,err:=sql.Open("sqlite",filepath.Join(t.TempDir(),"reasoning-policy.db"))
+ if err!=nil{t.Fatal(err)}
+ t.Cleanup(func(){db.Close()})
+ for _,q:=range []string{
+  `CREATE TABLE workspaces(id TEXT PRIMARY KEY,status TEXT NOT NULL)`,
+  `CREATE TABLE projects(id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,status TEXT NOT NULL,project_policy_json TEXT NOT NULL)`,
+  `CREATE TABLE project_workspaces(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,status TEXT NOT NULL,ai_settings_json TEXT NOT NULL)`,
+  `INSERT INTO workspaces VALUES('tenant','active'),('foreign','active')`,
+  `INSERT INTO projects VALUES('project','tenant','active','{}')`,
+  `INSERT INTO project_workspaces VALUES('world','project','active','{}')`,
+  `INSERT INTO project_workspaces VALUES('story','project','active','{"feature_policy":{"ProjectAI":"disabled"}}')`,
+ }{if _,err=db.Exec(q);err!=nil{t.Fatal(err)}}
+ return db
+}
+
+func TestProjectReasoningRejectsDeniedProjectAndSiblingScopeBeforeRouting(t *testing.T){
+ db:=testReasoningPolicyDB(t)
+ capture:=&orchestratorRouteCapture{}
+ svc:=&Service{db:db,scheduler:capture}
+ snapshot:=json.RawMessage(`{"project":{"id":"project"},"selected_project_workspace_id":"world"}`)
+ for _,caseID:=range []struct{tenant,project,ws string}{
+  {"tenant","project","story"},{"foreign","project","world"},
+  {"tenant","missing","world"},{"tenant","project","unknown"},
+ }{
+  if _,_,_,err:=svc.reason(context.Background(),caseID.tenant,caseID.project,caseID.ws,"operator","inspect",snapshot);err==nil{
+   t.Fatalf("invalid Project reasoning scope admitted: %+v",caseID)
+  }
+ }
+ if capture.calls!=0{t.Fatalf("unauthorised scope reached model router %d times",capture.calls)}
+ if _,err:=db.Exec(`UPDATE projects SET project_policy_json='{"feature_policy":{"Assistant":"disabled"}}' WHERE id='project'`);err!=nil{t.Fatal(err)}
+ if err:=svc.requireProjectReasoning(context.Background(),"tenant","project","world");err==nil{
+  t.Fatal("Project Assistant disabled flag ignored")
+ }
+ if _,err:=db.Exec(`UPDATE projects SET project_policy_json='{"feature_policy":null}' WHERE id='project'`);err!=nil{t.Fatal(err)}
+ if err:=svc.requireProjectReasoning(context.Background(),"tenant","project","world");err==nil{
+  t.Fatal("invalid policy object allowed")
  }
 }

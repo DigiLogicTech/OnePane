@@ -12,6 +12,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/artifact"
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/event"
+	"github.com/DigiLogicTech/OnePane/internal/featurepolicy"
 	"github.com/DigiLogicTech/OnePane/internal/id"
 	"github.com/DigiLogicTech/OnePane/internal/inference"
 	"github.com/DigiLogicTech/OnePane/internal/policy"
@@ -238,7 +239,14 @@ func extractText(raw []byte) string {
 	b,_:=json.Marshal(v);return string(b)
 }
 
-func (s *Service) reason(ctx context.Context, workspaceID, actor, objective string, snapshot json.RawMessage) (string, map[string]any, *string, error) {
+func(s *Service) requireProjectReasoning(ctx context.Context,tenantID,projectID,projectWorkspaceID string)error{
+ if s==nil||s.db==nil{return fmt.Errorf("taskless Project policy resolver unavailable")}
+ decision,err:=(featurepolicy.StoredScopes{DB:s.db}).ForProjectWorkspace(ctx,tenantID,projectID,projectWorkspaceID)
+ if err!=nil{return fmt.Errorf("Project reasoning scope unavailable: %w",err)}
+ return decision.RequireProjectReasoning()
+}
+func (s *Service) reason(ctx context.Context, workspaceID, projectID, projectWorkspaceID, actor, objective string, snapshot json.RawMessage) (string, map[string]any, *string, error) {
+ if err:=s.requireProjectReasoning(ctx,workspaceID,projectID,projectWorkspaceID);err!=nil{return "",nil,nil,err}
 	label:=policy.DataLabel{WorkspaceID:workspaceID,Confidentiality:policy.ConfidentialityInternal,Residency:policy.ResidencyAny,Trust:policy.TrustUserInstruction}
 	// No per-Project opt-in for external Orchestrator reasoning exists yet.
 	// Never send ungranted Project snapshots to free/remote/cloud providers,
@@ -249,7 +257,13 @@ func (s *Service) reason(ctx context.Context, workspaceID, actor, objective stri
 	system:=`You are the logical OnePane Project Orchestrator. Coordinate project work but never claim direct tool, filesystem, secret, node, or approval authority. Use only the supplied bounded Project context. Return one JSON object: {"answer":"...", "action":"answer|task", "objective":"...", "project_workspace_id":"..."}. You may suggest a Workspace for requests without an explicit Workspace choice, but execution mode and Team are locked to the selected Workspace's operator configuration. Use action=task only when the user is asking OnePane to perform work rather than explain or report state.`
 	req,_:=json.Marshal(map[string]any{"messages":[]map[string]string{{"role":"system","content":system},{"role":"user","content":"Project context:\n"+string(snapshot)+"\n\nUser objective:\n"+objective}},"max_tokens":1200,"temperature":0.2})
 	manifest,_:=json.Marshal(map[string]any{"project_context":json.RawMessage(snapshot),"logical_role":"project-orchestrator"})
-	inf,err:=s.inference.Execute(ctx,inference.ExecuteCommand{WorkspaceID:workspaceID,PrincipalID:actor,DeploymentID:dep,CapabilityJSON:json.RawMessage(`{"id":"inference.general"}`),ContextManifestJSON:manifest,ClassificationMetadata:json.RawMessage(`{"source":"project-orchestrator"}`),InputLabel:label,RequestJSON:req,ActorPrincipalID:&actor})
+	// Recheck the canonical scopes after routing, immediately before this
+ 	// controllable model-inference dispatch. Tool and transport policies
+ 	// still need their own live revocation guarantees.
+ 	if err:=s.requireProjectReasoning(ctx,workspaceID,projectID,projectWorkspaceID);err!=nil{
+ 		return "",nil,nil,err
+ 	}
+ 	inf,err:=s.inference.Execute(ctx,inference.ExecuteCommand{WorkspaceID:workspaceID,PrincipalID:actor,DeploymentID:dep,CapabilityJSON:json.RawMessage(`{"id":"inference.general"}`),ContextManifestJSON:manifest,ClassificationMetadata:json.RawMessage(`{"source":"project-orchestrator"}`),InputLabel:label,RequestJSON:req,ActorPrincipalID:&actor})
 	if err!=nil{return "",nil,&dep,err}
 	if inf.ResponseArtifactID==nil{return "",nil,&dep,fmt.Errorf("orchestrator inference returned no response artifact")}
 	rc,_,err:=s.artifacts.Open(ctx,*inf.ResponseArtifactID);if err!=nil{return "",nil,&dep,err};defer rc.Close()
@@ -265,6 +279,7 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 	if c.ProjectID==""||c.Objective==""||c.ActorPrincipalID==""{return TurnResult{},ErrInvalid}
 	o,err:=s.Ensure(ctx,c.ProjectID);if err!=nil{return TurnResult{},err}
 	snapshot,pwsID,mode,teamID,err:=s.contextSnapshot(ctx,c.ProjectID,c.ProjectWorkspaceID);if err!=nil{return TurnResult{},err}
+	if err:=s.requireProjectReasoning(ctx,o.WorkspaceID,c.ProjectID,pwsID);err!=nil{return TurnResult{},err}
 	userTurnID,_:=s.ids.New("pturn");now:=s.clock.UnixMilli()
 	// Audit admission must be durable before any model inference or Task
 	// creation. Never suppress a failed turn insert or state transition.
@@ -279,7 +294,7 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 		if changed!=1{return fmt.Errorf("Project Orchestrator status changed unexpectedly")}
 		return nil
 	});err!=nil{return TurnResult{},fmt.Errorf("persist Project Orchestrator user turn: %w",err)}
-	text,plan,deploymentID,reasonErr:=s.reason(ctx,o.WorkspaceID,c.ActorPrincipalID,c.Objective,snapshot)
+	text,plan,deploymentID,reasonErr:=s.reason(ctx,o.WorkspaceID,c.ProjectID,pwsID,c.ActorPrincipalID,c.Objective,snapshot)
 	// An unscoped initial turn may suggest a *different* active Workspace.
 	// The first reasoning pass was supplied the original Workspace's private
 	// Task context. Never persist that pass or use its proposed objective for
@@ -294,7 +309,7 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 			if snapshotErr!=nil{return TurnResult{},snapshotErr}
 			snapshot=boundSnapshot
 			resolvedPin=boundID
-			text,plan,deploymentID,reasonErr=s.reason(ctx,o.WorkspaceID,c.ActorPrincipalID,c.Objective,snapshot)
+			text,plan,deploymentID,reasonErr=s.reason(ctx,o.WorkspaceID,c.ProjectID,boundID,c.ActorPrincipalID,c.Objective,snapshot)
 		}
 	}
 	answer:=strings.TrimSpace(text);action:="answer";objective:=c.Objective

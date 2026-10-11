@@ -89,4 +89,22 @@ func TestTaskGraphSnapshotMarksOrphanAttemptAsOperatorReview(t *testing.T){
   changed.ObservationSHA256==snapshot.ObservationSHA256{
   t.Fatalf("stale checkpoint survived Attempt state change: %+v",changed)
  }
+ // A separate or pre-existing executor that cannot be bound to a verified
+ // Agent Worker run is not an invitation to replay the Task or its effects.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE task_attempts
+  SET status='running',metadata_json='{}' WHERE id=?`,attempt.ID);err!=nil{t.Fatal(err)}
+ foreign,err:=svc.TaskGraph(ctx,project.ID,graph.ID)
+ if err!=nil{t.Fatal(err)}
+ if foreign.Nodes[0].AttemptHealth!="other_executor_unverified"||
+  foreign.Nodes[0].Readiness!="needs_attention"||
+  foreign.Progress.NeedsAttention!=1{
+  t.Fatalf("unverified executor was shown as safely running: %+v",foreign)
+ }
+ checkpoint,err=svc.TaskGraphRecoveryCheckpoint(ctx,project.ID,graph.ID)
+ if err!=nil{t.Fatal(err)}
+ if !checkpoint.NeedsOperatorReview||checkpoint.AutomaticRetryAllowed||
+  checkpoint.Nodes[0].CanExistingWorkerAdmit||
+  checkpoint.Nodes[0].RecoveryClass!="operator_review"{
+  t.Fatalf("unverified executor was allowed to auto-resume: %+v",checkpoint)
+ }
 }

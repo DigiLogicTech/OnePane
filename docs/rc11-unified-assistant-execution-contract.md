@@ -81,11 +81,16 @@ remain available without obstructing routine usage.
 
 ## Not yet decided
 
-Autonomy defaults and consent (decision 2); generic shell, Git, OCI and MCP
-file-action policy (decision 3); Agent policy versioning and live revocation
-(decision 4); diagnostic live-stream defaults (decision 5); remote Node and
-provider trust classification (decision 6). Do not infer these solely from
-the local-first objective.
+Confirmed: L4 is the default, L5 is a first-class continuous-operations
+mode with safe-by-default remediation plus opt-in bounded higher-impact
+playbooks (decision 2). The user also approved distinct Read, Write,
+Execute, Network and Secrets controls enforced across all tools, with
+optional advanced scoping (decision 3). See the dedicated operating-mode
+and universal Workspace permissions specifications.
+
+Still undecided: Agent policy versioning and live revocation (decision 4),
+diagnostic live-stream defaults (decision 5), and remote Node/provider
+trust classification (decision 6). Do not infer those from local-first intent.
 
 ## Gate
 

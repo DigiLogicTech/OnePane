@@ -162,7 +162,7 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 		if err := rows.Scan(&id, &status, &node, &providerID, &reported, &verified, &runtimeCfg, &modelRef, &trust, &metadata, &pws, &provider, &pstatus, &pjson, &local, &nodeTrust, &pairingStatus, &manifestExpires); err != nil {
 			return nil, err
 		}
-		cand := Candidate{ID: id, Kind: CandidateModel, DisplayName: modelRef, Status: status, TrustState: trust, Local: local == 1, Qualification: QualUntested, ProtocolLevel: "L0", CostClass: CostUnknown, Schedulable: (status == "ready" || status == "degraded") && (trust == "trusted" || trust == "user_trusted"), CapabilityIDs: []string{}, RoleNames: []string{}, ToolCallback: true}
+		cand := Candidate{ID: id, Kind: CandidateModel, DisplayName: modelRef, Status: status, TrustState: trust, Local: local == 1 && !providerID.Valid, Qualification: QualUntested, ProtocolLevel: "L0", CostClass: CostUnknown, Schedulable: (status == "ready" || status == "degraded") && (trust == "trusted" || trust == "user_trusted"), CapabilityIDs: []string{}, RoleNames: []string{}, ToolCallback: true}
 		if node.Valid {
 			cand.NodeID = node.String
 		}
@@ -175,7 +175,7 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 			v := pws.String
 			cand.WorkspaceID = &v
 		}
-		if local == 1 {
+		if local == 1 && !providerID.Valid {
 			cand.ComputeMode = "cpu"
 			cand.CostClass = CostLocal
 			cand.HardZeroIncrementalCost = true
@@ -236,7 +236,10 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 			} `json:"placement"`
 		}
 		if json.Unmarshal([]byte(runtimeCfg), &dc) == nil {
-			if dc.Scheduling.CostClass != "" {
+			// A deployment may refine local scheduling metadata, but it cannot
+			// downgrade a provider-backed route to "free/local" or claim a
+			// zero-cost contract independently of its provider policy.
+			if !providerID.Valid && dc.Scheduling.CostClass != "" {
 				cand.CostClass = dc.Scheduling.CostClass
 				cand.HardZeroIncrementalCost = dc.Scheduling.HardZeroIncrementalCost
 			}

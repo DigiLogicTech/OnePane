@@ -11,6 +11,7 @@ import (
  "github.com/DigiLogicTech/OnePane/internal/projectworkspace"
  sqlitestore "github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
  "github.com/DigiLogicTech/OnePane/internal/task"
+ "github.com/DigiLogicTech/OnePane/internal/storage"
 )
 
 func TestTaskStartFailsClosedOnDeletedOrUnattestedApprovedGraphDependencies(t *testing.T){
@@ -102,6 +103,63 @@ func TestTaskStartFailsClosedOnDeletedOrUnattestedApprovedGraphDependencies(t *t
  })
  if err!=nil||started.State!=task.StateRunning||attempt.ID==""{
   t.Fatalf("exactly attested predecessor was not admissible: %+v %+v %v",started,attempt,err)
+ }
+ // A live original Attempt can enter an automatic dependency wait.
+ // Removing an approved predecessor must prohibit BOTH operator Resume and
+ // the trusted agent-worker's same-Attempt automatic wake.
+ waiting,err:=tasks.WaitDependency(ctx,task.TransitionCommand{
+  TaskID:story.ID,ExpectedRevision:started.Revision,
+ })
+ if err!=nil{t.Fatal(err)}
+ if _,err:=db.SQL().ExecContext(ctx,`DELETE FROM task_dependencies
+  WHERE task_id=? AND depends_on_task_id=?`,story.ID,keys["world"]);err!=nil{t.Fatal(err)}
+ if _,err:=tasks.Resume(ctx,task.TransitionCommand{
+  TaskID:story.ID,ExpectedRevision:waiting.Revision,
+ });!errors.Is(err,task.ErrHardDependencyUnsatisfied){
+  t.Fatalf("operator Resume bypassed deleted approved edge: %v",err)
+ }
+ err=db.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+  return tasks.ResumeWaitingAttemptInTransaction(ctx,tx,task.TransitionCommand{
+   TaskID:story.ID,ExpectedRevision:waiting.Revision,
+  },attempt.ID)
+ })
+ if !errors.Is(err,task.ErrHardDependencyUnsatisfied){
+  t.Fatalf("autonomous same-Attempt wake bypassed deleted edge: %v",err)
+ }
+ if _,err:=db.SQL().ExecContext(ctx,`INSERT INTO task_dependencies(
+  task_id,depends_on_task_id,dependency_type,dependency_mode,metadata_json)
+  VALUES(?,?,'hard','all','{}')`,story.ID,keys["world"]);err!=nil{t.Fatal(err)}
+ resumed,err:=tasks.Resume(ctx,task.TransitionCommand{
+  TaskID:story.ID,ExpectedRevision:waiting.Revision,
+ })
+ if err!=nil||resumed.State!=task.StateRunning{
+  t.Fatalf("restored approved edge prevented legitimate Attempt resume: %+v %v",resumed,err)
+ }
+ // Verification retry is a third legal RUNNING transition. Guard it too.
+ verifyingRequested,err:=tasks.RequestCompletion(ctx,task.TransitionCommand{
+  TaskID:story.ID,ExpectedRevision:resumed.Revision,
+ })
+ if err!=nil{t.Fatal(err)}
+ verifying,err:=tasks.BeginVerification(ctx,task.TransitionCommand{
+  TaskID:story.ID,ExpectedRevision:verifyingRequested.Revision,
+ })
+ if err!=nil{t.Fatal(err)}
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_orchestrator_task_graph_nodes
+  SET approved_dependencies_json='[]'
+  WHERE graph_id=? AND node_key='story'`,graph.ID);err!=nil{t.Fatal(err)}
+ if _,err:=tasks.ContinueAfterVerification(ctx,task.TransitionCommand{
+  TaskID:story.ID,ExpectedRevision:verifying.Revision,
+ });!errors.Is(err,task.ErrHardDependencyUnsatisfied){
+  t.Fatalf("verification retry bypassed approved graph integrity: %v",err)
+ }
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_orchestrator_task_graph_nodes
+  SET approved_dependencies_json='["world"]'
+  WHERE graph_id=? AND node_key='story'`,graph.ID);err!=nil{t.Fatal(err)}
+ continued,err:=tasks.ContinueAfterVerification(ctx,task.TransitionCommand{
+  TaskID:story.ID,ExpectedRevision:verifying.Revision,
+ })
+ if err!=nil||continued.State!=task.StateRunning{
+  t.Fatalf("verified retry failed after restoring original graph: %+v %v",continued,err)
  }
  if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_workspaces SET status='archived' WHERE id=?`,workspaces[2]);err!=nil{t.Fatal(err)}
  if _,_,err:=tasks.Start(ctx,task.StartCommand{

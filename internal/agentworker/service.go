@@ -212,30 +212,26 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
 	_,admissionErr:=s.admitCreated(ctx,limit)
 	// Per-Task admissions are independent. A corrupt CREATED Task cannot
 	// starve already running Workers or eligible siblings in this tick.
-	runs, err := s.activeRuns(ctx, limit)
-	if err != nil {
-		return nil, errors.Join(wakeErr,admissionErr,err)
+	runs,activeErr:=s.activeRuns(ctx,limit)
+	// Preserve the exact corrupt Worker IDs for operator recovery, but do
+	// not strand independent running/ready Tasks in the same tick.
+	tickErrors:=errors.Join(wakeErr,admissionErr,activeErr)
+	out:=make([]TickResult,0,limit)
+	for _,r:=range runs{
+		out=append(out,s.step(ctx,r))
+		if len(out)>=limit{return out,tickErrors}
 	}
-	out := make([]TickResult, 0, limit)
-	for _, r := range runs {
-		out = append(out, s.step(ctx, r))
-		if len(out) >= limit {
-			return out,errors.Join(wakeErr,admissionErr)
-		}
-	}
-	ready, err := s.readyTasks(ctx, limit-len(out))
-	if err != nil {
-		return out,errors.Join(wakeErr,admissionErr,err)
-	}
-	for _, t := range ready {
-		r, res := s.startRun(ctx, t)
-		if res.Error != "" {
-			out = append(out, res)
+	ready,err:=s.readyTasks(ctx,limit-len(out))
+	if err!=nil{return out,errors.Join(tickErrors,err)}
+	for _,t:=range ready{
+		r,res:=s.startRun(ctx,t)
+		if res.Error!=""{
+			out=append(out,res)
 			continue
 		}
-		out = append(out, s.step(ctx, r))
+		out=append(out,s.step(ctx,r))
 	}
-	return out,errors.Join(wakeErr,admissionErr)
+	return out,tickErrors
 }
 
 func (s *Service) admitCreated(ctx context.Context, limit int) (int, error) {
@@ -435,21 +431,72 @@ func (s *Service) resumeWaitingWorkerAndAttempt(
  })
 }
 
-func (s *Service) activeRuns(ctx context.Context, limit int) ([]Run, error) {
-	rows, err := s.db.QueryContext(ctx, runSelect+` WHERE r.status='running' ORDER BY r.updated_at,r.id LIMIT ?`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Run
-	for rows.Next() {
-		r, err := scanRun(rows)
-		if err != nil {
-			return nil, err
+// activeRuns pages by a stable (updated_at,id) cursor instead of applying
+// LIMIT before decoding. One corrupt early JSON row previously discarded
+// every healthy row and starved other Tasks on every subsequent tick.
+// Bounded-size pages preserve local-first memory use; a bad run is never
+// executed or silently replaced, and its exact ID is retained as an error.
+func (s *Service) activeRuns(ctx context.Context,limit int)([]Run,error){
+	if limit<=0||limit>100{limit=10}
+	const pageSize=64
+	lastTime:=int64(0)
+	lastID:=""
+	first:=true
+	out:=make([]Run,0,limit)
+	var problems []error
+	var moreFailures int
+	for len(out)<limit{
+		var rows *sql.Rows
+		var err error
+		if first{
+			rows,err=s.db.QueryContext(ctx,`SELECT r.id,r.updated_at
+			 FROM agent_worker_runs r WHERE r.status='running'
+			 ORDER BY r.updated_at,r.id LIMIT ?`,pageSize)
+			first=false
+		}else{
+			rows,err=s.db.QueryContext(ctx,`SELECT r.id,r.updated_at
+			 FROM agent_worker_runs r WHERE r.status='running'
+			 AND (r.updated_at>? OR (r.updated_at=? AND r.id>?))
+			 ORDER BY r.updated_at,r.id LIMIT ?`,
+			 lastTime,lastTime,lastID,pageSize)
 		}
-		out = append(out, r)
+		if err!=nil{return out,errors.Join(append(problems,err)...)}
+		type candidate struct{id string;timestamp int64}
+		page:=make([]candidate,0,pageSize)
+		for rows.Next(){
+			var row candidate
+			if scanErr:=rows.Scan(&row.id,&row.timestamp);scanErr!=nil{
+				err=scanErr
+				break
+			}
+			page=append(page,row)
+		}
+		if err==nil{err=rows.Err()}
+		closeErr:=rows.Close()
+		if err==nil{err=closeErr}
+		if err!=nil{return out,errors.Join(append(problems,err)...)}
+		if len(page)==0{break}
+		for _,candidate:=range page{
+			lastTime,lastID=candidate.timestamp,candidate.id
+			run,getErr:=s.getRun(ctx,candidate.id)
+			if getErr!=nil{
+				// Cap diagnostic allocation even with thousands of damaged
+				// rows; a count still flags additional failed identities.
+				if len(problems)<32{
+					problems=append(problems,fmt.Errorf("decode active Worker %s: %w",candidate.id,getErr))
+				}else{moreFailures++}
+				continue
+			}
+			if run.Status!=RunRunning{continue}
+			out=append(out,run)
+			if len(out)>=limit{break}
+		}
+		if len(page)<pageSize{break}
 	}
-	return out, rows.Err()
+	if moreFailures>0{
+		problems=append(problems,fmt.Errorf("%d additional corrupt active Workers require operator review",moreFailures))
+	}
+	return out,errors.Join(problems...)
 }
 
 func (s *Service) readyTasks(ctx context.Context, limit int) ([]task.Task, error) {

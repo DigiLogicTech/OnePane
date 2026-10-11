@@ -41,6 +41,7 @@ type TaskGraphNode struct {
  ComputePreference string `json:"compute_preference"`
  Archived bool `json:"archived"`
  ScopeDrift bool `json:"scope_drift,omitempty"`
+ DependencyDrift bool `json:"dependency_drift,omitempty"`
  AttemptHealth string `json:"attempt_health,omitempty"`
  ExternalEffectHealth string `json:"external_effect_health,omitempty"`
  BlockedBy []string `json:"blocked_by"`
@@ -192,6 +193,7 @@ func(s *Service) CreateTaskGraph(ctx context.Context,c CreateTaskGraphCommand)(T
   tasksByKey:=map[string]string{}
   for position,index:=range order{
    n:=c.Nodes[index]
+   approvedDependencies,_:=json.Marshal(append([]string{},n.DependsOn...))
    completion,_:=json.Marshal(map[string]any{
     "source":"project-orchestrator-task-graph",
     "graph_id":graphID,"node_key":n.Key,
@@ -209,8 +211,9 @@ func(s *Service) CreateTaskGraph(ctx context.Context,c CreateTaskGraphCommand)(T
    if createErr!=nil{return createErr}
    tasksByKey[n.Key]=created.ID
    _,err=tx.ExecContext(ctx,`INSERT INTO project_orchestrator_task_graph_nodes(
-    graph_id,node_key,task_id,project_workspace_id,position)
-    VALUES(?,?,?,?,?)`,graphID,n.Key,created.ID,n.ProjectWorkspaceID,position)
+    graph_id,node_key,task_id,project_workspace_id,position,
+    approved_dependencies_json,approved_dependencies_recorded)
+    VALUES(?,?,?,?,?,?,1)`,graphID,n.Key,created.ID,n.ProjectWorkspaceID,position,string(approvedDependencies))
    if err!=nil{return err}
   }
   for _,n:=range c.Nodes{
@@ -258,7 +261,7 @@ func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGra
  if err!=nil{return TaskGraph{},err}
  rows,err:=tx.QueryContext(ctx,`SELECT n.node_key,n.task_id,
   n.project_workspace_id,t.project_workspace_id,t.state,t.archived_at,t.completion_json,
-  pw.id
+  pw.id,n.approved_dependencies_json,n.approved_dependencies_recorded
   FROM project_orchestrator_task_graph_nodes n
   JOIN tasks t ON t.id=n.task_id AND t.project_id=?
   LEFT JOIN project_workspaces pw ON pw.id=n.project_workspace_id
@@ -266,18 +269,40 @@ func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGra
   WHERE n.graph_id=? ORDER BY n.position`,projectID,projectID,graphID)
  if err!=nil{return TaskGraph{},err}
  x.Nodes=[]TaskGraphNode{}
+ approvedByTask:=map[string][]string{}
  for rows.Next(){
   var n TaskGraphNode
   var archived sql.NullInt64
   var actualWorkspace,activeWorkspace sql.NullString
-  var completion string
-  if err=rows.Scan(&n.Key,&n.TaskID,&n.ProjectWorkspaceID,&actualWorkspace,&n.State,&archived,&completion,&activeWorkspace);err!=nil{break}
+  var completion,approvedJSON string
+  var approvedRecorded int
+  if err=rows.Scan(&n.Key,&n.TaskID,&n.ProjectWorkspaceID,&actualWorkspace,&n.State,&archived,&completion,&activeWorkspace,&approvedJSON,&approvedRecorded);err!=nil{break}
   var metadata struct{ OnePaneRouting struct{ ComputePreference string `json:"compute_preference"` } `json:"onepane_routing"` }
   if err=json.Unmarshal([]byte(completion),&metadata);err!=nil{return TaskGraph{},err}
   n.ComputePreference=metadata.OnePaneRouting.ComputePreference
   if n.ComputePreference==""{n.ComputePreference="auto"}
   n.Archived=archived.Valid
   n.ScopeDrift=!actualWorkspace.Valid||actualWorkspace.String!=n.ProjectWorkspaceID||!activeWorkspace.Valid
+  // Historical DAGs have no independently recorded approved predecessor
+  // set. Do not infer it from mutable Task edges during a migration.
+  if approvedRecorded!=1{
+   n.DependencyDrift=true
+  }else{
+   var expected []string
+   if json.Unmarshal([]byte(approvedJSON),&expected)!=nil||len(expected)>8{
+    n.DependencyDrift=true
+   }else{
+    seen:=map[string]bool{}
+    for _,key:=range expected{
+     if !graphKeyRE.MatchString(key)||key==n.Key||seen[key]{
+      n.DependencyDrift=true
+      break
+     }
+     seen[key]=true
+    }
+    if !n.DependencyDrift{approvedByTask[n.TaskID]=expected}
+   }
+  }
   n.DependsOn=[]string{}
   n.BlockedBy=[]string{}
   n.FailedOrIntervenedOn=[]string{}
@@ -320,6 +345,18 @@ func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGra
   if depErr==nil{depErr=depRows.Err()}
   _=depRows.Close()
   if depErr!=nil{return TaskGraph{},depErr}
+  expected,recorded:=approvedByTask[x.Nodes[i].TaskID]
+  if !recorded || len(expected)!=len(x.Nodes[i].DependsOn){
+   x.Nodes[i].DependencyDrift=true
+  }else{
+   checked:=make(map[string]bool,len(expected))
+   for _,key:=range expected{checked[key]=true}
+   for _,actual:=range x.Nodes[i].DependsOn{
+    if !checked[actual]{x.Nodes[i].DependencyDrift=true;break}
+    delete(checked,actual)
+   }
+   if len(checked)!=0{x.Nodes[i].DependencyDrift=true}
+  }
   // Capture Attempt/Worker ownership in the very same SQLite snapshot as
   // graph scope and hard dependency edges. Do not treat an orphan as running.
   health,healthErr:=taskAttemptHealthTx(ctx,tx,x.Nodes[i].TaskID,x.WorkspaceID,x.Nodes[i].State)

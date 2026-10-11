@@ -96,3 +96,74 @@ func TestToolGatewayRechecksPolicyImmediatelyBeforeAdapter(t *testing.T){
  }
  if auth.calls!=1||adapter.calls!=0{t.Fatalf("revoked file reached adapter: auth=%d adapter=%d",auth.calls,adapter.calls)}
 }
+
+// Generic command execution is never authorized by the Files master
+// switch alone: it requires positive Execute plus conservative file scope.
+func TestConfiguredWorkspaceToolEffectsBlockSandboxAndNetworkBypass(t *testing.T){
+ db:=featureScopeFixture(t)
+ for _,q:=range []string{
+  `UPDATE projects SET project_policy_json='{"feature_policy":{"Files":"enabled","ProcessExecute":"enabled","NetworkAccess":"enabled"}}' WHERE id='game'`,
+  `UPDATE project_workspaces SET ai_settings_json='{"feature_policy":{"FileWrite":"disabled","ProcessExecute":"enabled","NetworkAccess":"disabled"}}' WHERE id='world'`,
+ }{if _,err:=db.Exec(q);err!=nil{t.Fatal(err)}}
+ test:=func(toolID string,mode authority.ActionMode) (*Gateway,*countingAdapter,*fakeAuthority){
+  t.Helper()
+  ad:=&countingAdapter{id:"sandbox",version:"1",result:AdapterResult{Summary:"ok",Result:json.RawMessage(`{}`)}}
+  reg:=NewRegistry()
+  if err:=reg.Register(Definition{ID:toolID,Version:"1",CapabilityID:"project.app.execute",Mode:mode,
+   AdapterID:ad.id,AdapterVersion:ad.version,Risk:policy.RiskLow,
+   MinimumVerification:policy.VerificationV1,MinimumApproval:policy.ApprovalNone},ad);err!=nil{t.Fatal(err)}
+  auth:=&fakeAuthority{}
+  gateway:=newGateway(&fakeStore{},&fakePolicy{decision:policy.Decision{
+   Allowed:true,LeaseRevision:1,RequiredApproval:policy.ApprovalNone}},auth,reg,&fakeClock{now:1000})
+  gateway.scopes=featurepolicy.StoredScopes{DB:db}
+  gateway.EnableSandboxAdapter(ad.id,ad.version)
+  return gateway,ad,auth
+ }
+ for _,tc:=range []struct{tool string;mode authority.ActionMode}{
+  {"project.app.exec",authority.ActionExecuteSandboxed},
+  {"project.app.git.mutate",authority.ActionExecuteSandboxed},
+  {"project.app.files.edit",authority.ActionExecuteSandboxed},
+  {"project.app.pull",authority.ActionMutate},
+  {"unknown.mutate",authority.ActionMutate},
+ }{
+  g,ad,auth:=test(tc.tool,tc.mode)
+  cmd:=scopedReadCommand();cmd.ToolID=tc.tool
+  got,err:=g.Invoke(context.Background(),cmd)
+  if !errors.Is(err,ErrPolicyDenied)||got.Status!=StatusFailed||
+   auth.calls!=0||ad.calls!=0{
+   t.Fatalf("%s bypassed Workspace policy: %+v err=%v auth=%d adapter=%d",
+    tc.tool,got,err,auth.calls,ad.calls)
+  }
+ }
+}
+
+type revokeExecuteAuthority struct{db *sql.DB}
+func(a *revokeExecuteAuthority)Consume(ctx context.Context,_ authority.ConsumeCommand)(authority.Lease,error){
+ _,err:=a.db.ExecContext(ctx,
+  `UPDATE project_workspaces SET ai_settings_json='{"feature_policy":{"ProcessExecute":"disabled"}}' WHERE id='world'`)
+ return authority.Lease{},err
+}
+func TestToolGatewayRevokedSandboxExecuteNeverCallsAdapter(t *testing.T){
+ db:=featureScopeFixture(t)
+ if _,err:=db.Exec(`UPDATE projects SET project_policy_json='{"feature_policy":{"ProcessExecute":"enabled"}}' WHERE id='game'`);err!=nil{t.Fatal(err)}
+ if _,err:=db.Exec(`UPDATE project_workspaces SET ai_settings_json='{"feature_policy":{"ProcessExecute":"enabled"}}' WHERE id='world'`);err!=nil{t.Fatal(err)}
+ ad:=&countingAdapter{id:"sandbox",version:"1",result:AdapterResult{Summary:"ok",Result:json.RawMessage(`{}`)}}
+ reg:=NewRegistry()
+ if err:=reg.Register(Definition{
+  ID:"project.app.exec",Version:"1",CapabilityID:"project.app.execute",
+  Mode:authority.ActionExecuteSandboxed,AdapterID:ad.id,AdapterVersion:ad.version,
+  Risk:policy.RiskLow,MinimumVerification:policy.VerificationV1,
+  MinimumApproval:policy.ApprovalNone},ad);err!=nil{t.Fatal(err)}
+ gateway:=newGateway(&fakeStore{},&fakePolicy{decision:policy.Decision{
+  Allowed:true,LeaseRevision:1,RequiredApproval:policy.ApprovalNone}},
+  &revokeExecuteAuthority{db:db},reg,&fakeClock{now:1000})
+ gateway.scopes=featurepolicy.StoredScopes{DB:db}
+ gateway.EnableSandboxAdapter(ad.id,ad.version)
+ cmd:=scopedReadCommand();cmd.ToolID="project.app.exec"
+ got,err:=gateway.Invoke(context.Background(),cmd)
+ if !errors.Is(err,ErrPolicyDenied)||got.ErrorCode==nil||
+  *got.ErrorCode!="feature_policy_revoked"||ad.calls!=0{
+  t.Fatalf("revoked Execute permission reached sandbox: %+v err=%v adapter=%d",
+   got,err,ad.calls)
+ }
+}

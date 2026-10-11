@@ -114,9 +114,10 @@ func (s *Service) AssuranceRetry(ctx context.Context,runID,verificationID string
 		if status==RunRunning{
 			var receipts int
 			err:=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM agent_worker_steps
-			 WHERE run_id=? AND step_kind='verification' AND status='retry'
+			 WHERE run_id=? AND step_kind='verification' AND status='failed'
 			  AND result_ref=? AND json_valid(detail_json)=1
-			  AND json_extract(detail_json,'$.verification_id')=?`,
+			  AND json_extract(detail_json,'$.verification_id')=?
+			  AND json_extract(detail_json,'$.action')='retry'`,
 			  runID,verificationID,verificationID).Scan(&receipts)
 			if err!=nil{return err}
 			if receipts!=1{return ErrInvalidWorkerState}
@@ -152,8 +153,11 @@ func (s *Service) AssuranceRetry(ctx context.Context,runID,verificationID string
 		changed,err:=r.RowsAffected()
 		if err!=nil{return err}
 		if changed!=1{return ErrInvalidWorkerState}
-		return s.journalInTransaction(ctx,tx,runID,"verification","retry",
+		// Verification itself failed or was inconclusive. Journal that
+		// result honestly; the action=retry marker records recovery of the
+		// original Attempt without inventing an unsupported status value.
+		return s.journalInTransaction(ctx,tx,runID,"verification","failed",
 			nil,nil,strPtr("complete"),strPtr(verificationID),
-			map[string]any{"verification_id":verificationID})
+			map[string]any{"verification_id":verificationID,"action":"retry"})
 	})
 }

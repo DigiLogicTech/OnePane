@@ -2,6 +2,10 @@ package projectruntime
 
 import (
  "context"
+ "crypto/sha256"
+ "encoding/hex"
+ "encoding/json"
+ "sort"
 
  "github.com/DigiLogicTech/OnePane/internal/projectworkspace"
 )
@@ -43,4 +47,34 @@ func(r *Reconciler) requireEndpointManifest(ctx context.Context,runtimeID string
   return ErrReconciliationDrift
  }
  return nil
+}
+
+// endpointPlanDigest binds a prepared OCI ensure to the actual approved
+// application endpoint configuration, independent of DB result ordering.
+// An Endpoint-only edit need not increment the Application revision, but
+// must allocate a *new* operation identity instead of returning an old
+// committed OCI mutation created for a different published port plan.
+func endpointPlanDigest(endpoints []projectworkspace.Endpoint,appID string)string{
+ type routeIntent struct{
+  ID string `json:"id"`
+  Revision int64 `json:"revision"`
+  Protocol string `json:"protocol"`
+  InternalPort int `json:"internal_port"`
+  Exposure projectworkspace.EndpointExposure `json:"exposure"`
+  PathPrefix *string `json:"path_prefix,omitempty"`
+  DesiredState string `json:"desired_state"`
+ }
+ selected:=make([]routeIntent,0)
+ for _,e:=range endpoints{
+  if e.ApplicationID==nil||*e.ApplicationID!=appID{continue}
+  selected=append(selected,routeIntent{
+   ID:e.ID,Revision:e.Revision,Protocol:e.Protocol,
+   InternalPort:e.InternalPort,Exposure:e.Exposure,
+   PathPrefix:e.PathPrefix,DesiredState:e.DesiredState,
+  })
+ }
+ sort.Slice(selected,func(i,j int)bool{return selected[i].ID<selected[j].ID})
+ canonical,_:=json.Marshal(selected)
+ digest:=sha256.Sum256(canonical)
+ return hex.EncodeToString(digest[:])
 }

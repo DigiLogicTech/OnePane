@@ -3,7 +3,8 @@
 This register follows the **first assistant code/security review** of draft
 [PR #227](https://github.com/DigiLogicTech/OnePane/pull/227).
 Decision 1 and the core product vision have been confirmed by the user.
-Decisions 2–6 remain open. Approval of a design direction is not approval
+Decisions 1–2 have confirmed direction; autonomy authority details and
+Decisions 3–6 remain open. Approval of a design direction is not approval
 to merge, package, or grant new runtime privileges.
 
 ## Product purpose — confirmed by user (2026-10-11)
@@ -61,17 +62,54 @@ with isolated sandboxes. Do not require a distinct Home Workspace assistant.
 **Status:** CONFIRMED BY USER — design direction. Code implementation and
 acceptance tests are still outstanding.
 
-## Decision 2 — local-first autonomy defaults
-**Question:** Once the user approves an isolated local sandbox, should
-autonomous work be active by default, even on slower hardware, or require
-additional per-Project/Workspace consent?
+## Decision 2 — local-first autonomy and continuous operation modes
 
-**Proposed starting position:** Automatic action is available for
-explicitly approved Workspace sandboxes, subject to per-Workspace
-caps and revocable permissions. Never give implicit host, network, secrets
-or cross-Workspace authority; no cloud fallback without user grant.
+**User decision (2026-10-11):** LEVEL 4 AUTONOMOUS PROJECT ORCHESTRATION
+is the standard OnePane operating model; LEVEL 5 GOAL-DRIVEN CONTINUOUS
+OPERATIONS must ALSO BE IMPLEMENTED as a first-class selectable mode.
 
-**Status:** AWAITING USER.
+**User scenario:** "Stand up a project" is Level 4 (plan, create workspaces,
+deploy workers/models/tools, implement, test and deliver). A project whose
+objective is "protect my home network" is Level 5: deliver initial protection,
+then continuously monitor, evaluate, maintain and improve the approved
+defensive posture. Completion criteria for Level 5 are continuous compliance
+with an objective, not a single terminal deliverable.
+
+**Design contract:**
+- Default new Projects to Level 4. Expose a clear Project **Operating mode**
+  choice: Autonomous Project (L4) or Continuous Operations (L5), with an
+  ordinary UI selector and ability to promote an existing Project.
+- Both modes can create the necessary subordinate Agents, Workers, Tasks,
+  queues, Sandboxes and Workspaces *inside the approved Project authority*.
+  Neither mode silently grants new filesystem, host, secret, network, cloud
+  spending or cross-Workspace access.
+- L4 can decompose goals, iterate, validate and finish. It preserves Work
+  progress through model hot swaps, Colibri operations, resource starvation,
+  rate limits and resumable failures.
+- L5 does everything in L4 plus maintains durable objectives, risk thresholds,
+  evidence baselines, schedules or event-driven triggers, drift detection,
+  self-healing workflows, change history and recurring verification.
+- For home-network defence L5 may maintain an inventory of authorised network
+  devices and services, compare observable DNS/uptime/exposure/config signals
+  with baselines, detect meaningful anomalies, and propose or run **approved**
+  defensive remediation with backup, rollback and post-change verification.
+- Revocable permissions, scope, rate/budget limits, cooldowns, safe-change
+  classes, maintenance windows and explicit stop/pause/hand-off conditions
+  constrain L5. Unknown effects or risky changes pause/escalate rather than
+  retrying blindly or locking out the operator.
+- L5's observability must be truthful: "monitoring", "needs attention",
+  "remediation in progress", "validated" and "paused" are distinct states.
+  An empty queue does not mean the ongoing goal is complete.
+- All user workflows should be accessible through simple toggles, dropdowns
+  and descriptions, with advanced policy panels optional.
+
+**Still to align:** Exactly which security changes Level 5 may apply without
+asking (for example, reversible Pi-hole changes versus firewall rule changes,
+device quarantining or router reconfiguration). The user has approved the
+mode's existence and general autonomy, not unbounded action privileges.
+
+**Status:** CONFIRMED BY USER — default Level 4 + implemented Level 5
+capability are required. Operational authority thresholds are pending.
 
 ## Decision 3 — file permissions across all tools
 **Question:** Should disabling Files block all file-capable paths including

@@ -46,6 +46,16 @@ func TestTaskOperationHealthPreservesUnknownExternalOutcome(t *testing.T){
  if h,review:=check(task.StatePaused);h!="inflight_effect_outlived_task"||!review{
   t.Fatalf("orphaned tool mutation appeared safe: %s %t",h,review)
  }
+ // A compensating external effect is not normal forward progress even while
+ // the Task is otherwise running. Keep operator attention and digest change.
+ add("compensating","tenant","task-a","compensating")
+ if h,review:=check(task.StateRunning);h!="compensation_in_progress"||!review{
+  t.Fatalf("active compensation was mistaken for routine Tool progress: %s %t",h,review)
+ }
+ if h,review:=check(task.StatePaused);h!="inflight_effect_outlived_task"||!review{
+  t.Fatalf("paused Task with active compensation was treated as recoverable: %s %t",h,review)
+ }
+ if _,err=db.ExecContext(ctx,`DELETE FROM operations WHERE id='compensating'`);err!=nil{t.Fatal(err)}
  add("unknown","tenant","task-a","blocked_unknown_outcome")
  if h,review:=check(task.StateRunning);h!="unresolved_unknown_outcome"||!review{
   t.Fatalf("unknown external side effect escaped review: %s %t",h,review)
@@ -66,6 +76,14 @@ func TestUnknownToolMutationChangesDAGRecoveryCheckpointWithoutExecution(t *test
  if first.Nodes[0].RecoveryClass!="observe_existing_attempt"||
   first.NeedsOperatorReview||first.AutomaticRetryAllowed{
   t.Fatalf("live execution was misclassified: %+v",first)
+ }
+ graph.Nodes[0].ExternalEffectHealth="compensation_in_progress"
+ graph.Progress,graph.Status=evaluateTaskGraph(&graph)
+ compensation:=recoveryCheckpointForGraph(graph)
+ if compensation.Nodes[0].RecoveryClass!="operator_review"||
+  !compensation.NeedsOperatorReview||compensation.AutomaticRetryAllowed||
+  compensation.ObservationSHA256==first.ObservationSHA256{
+  t.Fatalf("active compensation omitted from safe recovery checkpoint: %+v",compensation)
  }
  graph.Nodes[0].ExternalEffectHealth="unresolved_unknown_outcome"
  graph.Progress,graph.Status=evaluateTaskGraph(&graph)

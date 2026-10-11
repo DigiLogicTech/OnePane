@@ -57,6 +57,28 @@ func (s *Service) PublishWorkspaceFileVersion(ctx context.Context,c PublishWorks
   if err:=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_workspaces
    WHERE id=? AND project_id=? AND status='active'`,c.SourceWorkspaceID,c.ProjectID).Scan(&activeCount);err!=nil{return err}
   if activeCount!=1{return ErrCrossWorkspace}
+  // The publisher preflights Task/Attempt authority before verifying and
+  // storing a blob. Those steps can take time (large OCI publication), so
+  // repeat the *entire* owner + content record check under this same write
+  // transaction that creates the immutable Project Library version.
+  // A Task interrupted, archived or moved during transfer cannot publish.
+  var authorized int
+  err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM tasks t
+   JOIN task_attempts a ON a.id=? AND a.task_id=t.id
+   JOIN artifacts artifact ON artifact.id=? AND artifact.project_id=t.project_id
+    AND artifact.workspace_id=t.workspace_id
+   JOIN workspaces tenant ON tenant.id=t.workspace_id AND tenant.status='active'
+   WHERE t.id=? AND t.workspace_id=? AND t.project_id=?
+    AND t.project_workspace_id=? AND t.state='running'
+    AND t.archived_at IS NULL AND a.status='running'
+    AND a.worker_principal_id=? AND artifact.status='active'
+    AND artifact.content_hash=? AND artifact.size_bytes=?
+    AND artifact.residency='origin_node'`,
+   c.AttemptID,c.ArtifactID,c.TaskID,p.WorkspaceID,c.ProjectID,
+   c.SourceWorkspaceID,c.ActorPrincipalID,"sha256:"+c.ContentHash,c.SizeBytes).
+   Scan(&authorized)
+  if err!=nil{return err}
+  if authorized!=1{return ErrCrossWorkspace}
 
   var assetID string
   err=tx.QueryRowContext(ctx,`SELECT asset_id FROM workspace_published_file_assets

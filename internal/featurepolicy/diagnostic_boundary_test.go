@@ -8,7 +8,7 @@ import (
 
 func TestDiagnosticBoundaryRejectsMalformedValues(t *testing.T) {
 	now := time.Unix(123, 0)
-	for _, id := range []string{"run:", "request:", "trace:has spaces", "task:\nsecret", strings.Repeat("a", 129)} {
+	for _, id := range []string{"run:", "request:", "run:token:value", "trace:has spaces", "task:\nsecret", strings.Repeat("a", 129)} {
 		record := DecisionDiagnostic(now, id, "inference.local", false)
 		if record.CorrelationID != "redacted" {
 			t.Errorf("invalid correlation identifier retained: %q", id)

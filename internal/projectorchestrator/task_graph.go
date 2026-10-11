@@ -257,24 +257,27 @@ func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGra
    &x.ManifestSHA256,&x.CreatedBy,&x.CreatedAt,&expectedNodeCount)
  if err!=nil{return TaskGraph{},err}
  rows,err:=tx.QueryContext(ctx,`SELECT n.node_key,n.task_id,
-  n.project_workspace_id,t.project_workspace_id,t.state,t.archived_at,t.completion_json
+  n.project_workspace_id,t.project_workspace_id,t.state,t.archived_at,t.completion_json,
+  pw.id
   FROM project_orchestrator_task_graph_nodes n
   JOIN tasks t ON t.id=n.task_id AND t.project_id=?
-  WHERE n.graph_id=? ORDER BY n.position`,projectID,graphID)
+  LEFT JOIN project_workspaces pw ON pw.id=n.project_workspace_id
+    AND pw.project_id=? AND pw.status='active'
+  WHERE n.graph_id=? ORDER BY n.position`,projectID,projectID,graphID)
  if err!=nil{return TaskGraph{},err}
  x.Nodes=[]TaskGraphNode{}
  for rows.Next(){
   var n TaskGraphNode
   var archived sql.NullInt64
-  var actualWorkspace sql.NullString
+  var actualWorkspace,activeWorkspace sql.NullString
   var completion string
-  if err=rows.Scan(&n.Key,&n.TaskID,&n.ProjectWorkspaceID,&actualWorkspace,&n.State,&archived,&completion);err!=nil{break}
+  if err=rows.Scan(&n.Key,&n.TaskID,&n.ProjectWorkspaceID,&actualWorkspace,&n.State,&archived,&completion,&activeWorkspace);err!=nil{break}
   var metadata struct{ OnePaneRouting struct{ ComputePreference string `json:"compute_preference"` } `json:"onepane_routing"` }
   if err=json.Unmarshal([]byte(completion),&metadata);err!=nil{return TaskGraph{},err}
   n.ComputePreference=metadata.OnePaneRouting.ComputePreference
   if n.ComputePreference==""{n.ComputePreference="auto"}
   n.Archived=archived.Valid
-  n.ScopeDrift=!actualWorkspace.Valid||actualWorkspace.String!=n.ProjectWorkspaceID
+  n.ScopeDrift=!actualWorkspace.Valid||actualWorkspace.String!=n.ProjectWorkspaceID||!activeWorkspace.Valid
   n.DependsOn=[]string{}
   n.BlockedBy=[]string{}
   n.FailedOrIntervenedOn=[]string{}

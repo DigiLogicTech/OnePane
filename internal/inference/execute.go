@@ -144,6 +144,17 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 	if err != nil {
 		return s.finishPreDispatchError(ctx, q.ID, err, cmd)
 	}
+	// Evaluate persisted Project, canonical Workspace and Task restrictions before
+	// provider recovery, runtime acquisition, budget usage or model dispatch.
+	// Legacy Tasks with no feature_policy retain existing authorization gates.
+	if cmd.TaskID != nil {
+		action := "inference.local"
+		if p != nil { action = "inference.cloud" }
+		allowed, scopeErr := s.scopes.AuthorizeTask(ctx, cmd.WorkspaceID, *cmd.TaskID, action)
+		if scopeErr != nil || !allowed {
+			return s.finishPreDispatchError(ctx, q.ID, fmt.Errorf("%w: effective feature policy rejected inference", ErrInformationFlow), cmd)
+		}
+	}
 	if p != nil && p.Status == ProviderRateLimited && p.RetryAfter != nil && *p.RetryAfter <= s.clock.UnixMilli() {
 		refreshed, refreshErr := s.SetProviderStatus(ctx, SetProviderStatusCommand{
 			ConnectionID: p.ID, ExpectedRevision: p.Revision, Status: ProviderConnected,

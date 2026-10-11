@@ -3,7 +3,7 @@
 This register follows the **first assistant code/security review** of draft
 [PR #227](https://github.com/DigiLogicTech/OnePane/pull/227).
 The core vision and Decisions 1–2 (including Level 5 remediation approval
-defaults) have been confirmed by the user. Decisions 3–6 remain open.
+defaults) have been confirmed by the user. Decisions 4–6 remain open.
 Approval of a design direction does not grant runtime privileges, authorise
 release packaging, or approve a merge.
 
@@ -137,16 +137,53 @@ actions to execute without asking again when all of their constraints match.
 remediation approval strategies supported; safer approval-gated mode is the
 default. Implementation and testing are outstanding.
 
-## Decision 3 — file permissions across all tools
-**Question:** Should disabling Files block all file-capable paths including
-shell, Git, MCP, artifacts and OCI execution, or only high-level File tools?
+## Decision 3 — universal Workspace permissions across tools
 
-**Proposed starting position:** All file-capable operations must be
-classified as read, write, publish or execute before execution. Denied
-read/write/publish cannot be bypassed via a generic shell or MCP adapter.
-Trusted toolchains use explicit scoped grants, never hidden exception lists.
+**User decision (2026-10-11):** CONFIRMED. Provide simple, separate
+Workspace permission controls for **Read files, Write files, Execute,
+Network, and Secrets**, with advanced scoping for users who need it.
+The same effective permissions must apply regardless of whether a
+Worker uses Python, shell, Git, MCP, an OCI container, a GUI tool, an
+artifact API or an internal tool adapter.
 
-**Status:** AWAITING USER.
+**Product and security contract:**
+- Present user-friendly checkboxes/dropdowns and appropriate presets.
+  Keep advanced settings for exact paths, mounts, targets, network
+  destinations, commands, secret IDs, limits and approval requirements.
+- Project permissions form the upper bound; a Workspace can narrow
+  them, and individual Agents/Tasks may only narrow them further.
+  Switching model, Agent or tool transport cannot broaden permissions.
+- Read and Write are distinct; Write includes create, modify, delete,
+  publish and mutations performed indirectly through Git, shell,
+  Python, toolchains and MCP, with finer action classes where needed.
+  Execute, network and secret access are independent permissions.
+- Separate sandbox file access from host file access. A Workspace
+  write grant must not imply access to the host, unrelated mounted
+  directories, another Workspace, host credentials or external services.
+- Evaluate **capabilities and actual effects**, not just a tool name.
+  Unclassified or opaque operations must be denied or require an
+  explicit narrowly scoped permit; a generic shell or MCP tool must
+  never bypass a denied file operation.
+- Enforce revocable policy at the last controllable side-effect
+  boundary and with runtime isolation where available. UI switches
+  alone are insufficient: direct API and background Worker paths
+  must enforce the same effective rules.
+- Keep explicit, auditable brokered sharing for cross-Workspace
+  artifacts and connectivity; authorization cannot be invented by
+  a prompt or inherited from a chat context change.
+- Preserve local-first functionality: a Workspace may be able to
+  read/write within its approved isolated directory and run its
+  approved tools without repeatedly requesting permission.
+  Extra privileges require transparent, revocable approval.
+- Never enable additional host, network, secret or cross-Workspace
+  privileges when upgrading existing installations without consent.
+
+**Implementation and verification:** See
+`docs/rc11-universal-workspace-permissions.md` for action taxonomy,
+enforcement adapters, UI behaviour and negative-path tests.
+
+**Status:** CONFIRMED BY USER — design and UX requirements approved.
+Complete end-to-end enforcement is still implementation work.
 
 ## Decision 4 — Agent policy and revocation
 **Question:** Should Agent policies use immutable versioned snapshots,

@@ -83,6 +83,21 @@ func TestL5TCPSourceRegistrationHTTPRequiresHumanAndExactAddress(t *testing.T){
   !strings.Contains(got.Body.String(),permit.ID){
   t.Fatalf("approved source missing from list: %d %s",got.Code,got.Body)
  }
+ // Never contact a real network target in API tests. Exercise
+ // authn/authz and input rejection BEFORE the any socket operation.
+ testRoute:=route+"/"+permit.ID+"/test"
+ for _,who:=range []string{"","outsider","robot"}{
+  got:=call("POST",who,testRoute,`{"expected_goal_revision":2,"expected_permit_revision":1}`)
+  want:=403
+  if who==""{want=401}
+  if got.Code!=want{
+   t.Fatalf("untrusted TCP test %q returned %d %s",who,got.Code,got.Body)
+  }
+ }
+ if got:=call("POST","operator",testRoute,
+  `{"expected_goal_revision":0,"expected_permit_revision":1}`);got.Code!=400{
+  t.Fatalf("invalid admission was executed: %d %s",got.Code,got.Body)
+ }
  stop:=route+"/"+permit.ID+"/revoke"
  revoke:=`{"expected_goal_revision":2,"expected_permit_revision":1}`
  if got:=call("POST","robot",stop,revoke);got.Code!=403{

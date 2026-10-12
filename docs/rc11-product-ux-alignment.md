@@ -62,3 +62,16 @@ UI/UX alignment is complete only after shared-component regression checks, a rev
 **Validation:** completed hosted regression `9205b60e` at [CI run #38195487992](https://github.com/DigiLogicTech/OnePane/actions/runs/38195487992) with successful frontend contract, Go/SQLite, integration and cross-platform compilation jobs. Earlier red runs came from test harness formatting/regex mistakes corrected in the final head. This is **source and unit/regression validation, not installed visual QA**.
 
 **Still open:** UX-03 full navigation/back/reload and state recovery; UX-04 through UX-07 page-by-page redesign; UX-08 true cross-theme/shell-resize/small-screen visual QA; UX-09 full keyboard/assistive-tech audit; UX-10 code/vision review and Windows/Ubuntu installed QA. No new release is authorised by the shared-layer work.
+
+
+## Delivery order — user decision 2026-10-12
+
+**The comprehensive UI/UX review is deferred until the LAST development gate before the next QA build.** This does not discard earlier UX fixes or shared-component regression checks; it changes when broad page-by-page redesign, visual inspection and user sign-off take place.
+
+1. Finish all approved functional development: local model orchestration, canonical Project/Workspace execution, Level 4 bounded automation, separately authorised Level 5 monitoring/defence, trusted Nodes, provenance and security controls.
+2. Complete integration, regression and failure remediation, including the code review and product-vision realignment already required before a new version.
+3. **Final pre-build workstream: UX-03–UX-09 and user-facing UI/UX review.** Reconcile every page with the delivered behaviour, apply the common design system, inspect themes, drawers, resizing, accessibility and responsive layouts; obtain user review decisions.
+4. Conduct the last post-UX code/security review and CI regression to confirm visual changes introduced no functional or authorization regressions.
+5. Only then package the next Windows/Ubuntu QA build; installed user QA follows the build. No release merge or build is authorised ahead of these gates.
+
+**Execution priority right now:** return to Level 5 consented network observation, trustworthy evidence, and defensive automation foundations. Do not interrupt that work to conduct the full UX review early.

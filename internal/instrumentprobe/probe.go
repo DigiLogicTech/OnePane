@@ -31,6 +31,7 @@ type Challenge struct{
  Nonce []byte `json:"nonce"`
  IssuedAt int64 `json:"issued_at"`
  ExpiresAt int64 `json:"expires_at"`
+ Status string `json:"status"`
  SigningPayload []byte `json:"signing_payload"`
 }
 type challengeEnvelope struct{
@@ -86,6 +87,7 @@ type PreparedMeasurement struct {
  ObservedAt int64 `json:"observed_at"`
  SigningPayload []byte `json:"signing_payload"`
  ExpiresAt int64 `json:"expires_at"`
+ ObserverVantageVerified bool `json:"observer_vantage_verified"`
 }
 type Acceptance struct{
  ChallengeID string `json:"challenge_id"`
@@ -97,7 +99,7 @@ type Acceptance struct{
 
 func ParseChallenge(ch Challenge,now time.Time)(string,error){
  if len(ch.SigningPayload)<128||len(ch.SigningPayload)>2048||
-  len(ch.Nonce)!=32||ch.ID==""||ch.ProjectID==""||ch.GoalID==""||
+  len(ch.Nonce)!=32||ch.Status!="issued"||ch.ID==""||ch.ProjectID==""||ch.GoalID==""||
   ch.KeyID==""{return "",errors.New("missing or oversized instrument challenge")}
  var env challengeEnvelope
  if err:=json.Unmarshal(ch.SigningPayload,&env);err!=nil{return "",errors.New("invalid signed challenge envelope")}
@@ -220,7 +222,8 @@ func SignPrepared(r LocalProbeReceipt,prepared PreparedMeasurement,
   prepared.ChallengeID!=r.Challenge.ID||
   prepared.MeasurementType!="endpoint_tcp_connect_claim"||
   prepared.Outcome!=r.Outcome||prepared.ObservedAt!=r.ObservedAt||
-  prepared.ExpiresAt!=r.Challenge.ExpiresAt{
+  prepared.ExpiresAt!=r.Challenge.ExpiresAt||
+  prepared.ObserverVantageVerified{
   return Acceptance{},errors.New("prepared bytes do not match local one-shot report")
  }
  sig:=ed25519.Sign(private,prepared.SigningPayload)

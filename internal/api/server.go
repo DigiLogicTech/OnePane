@@ -549,6 +549,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-baselines", s.setProjectGoalTCPBaseline)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-baselines", s.listProjectGoalTCPBaselines)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-assessment/{sourceID}", s.getProjectGoalTCPReachabilityAssessment)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-alerts", s.listProjectGoalTCPReachabilityAlerts)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-alerts/{alertID}/acknowledge", s.acknowledgeProjectGoalTCPReachabilityAlert)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/observations", s.attachProjectGoalObservation)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces", s.createCanonicalProjectWorkspace)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/library", s.listProjectLibrary)

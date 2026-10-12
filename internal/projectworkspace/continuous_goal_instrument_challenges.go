@@ -9,6 +9,7 @@ import(
  "database/sql"
  "encoding/hex"
  "encoding/json"
+ "fmt"
  "errors"
 
  "github.com/DigiLogicTech/OnePane/internal/event"
@@ -27,6 +28,9 @@ type GoalInstrumentKey struct{
  DeclaredTargetID string `json:"declared_target_id"`
  TLSPinID string `json:"tls_pin_id"`
  PlanHash string `json:"plan_hash"`
+ // Derived only from the LIVE human-approved permit when validating
+ // or issuing a challenge; never a caller-provided claim or database key.
+ ApprovedTargetEndpointSHA256 string `json:"-"`
  PublicKey []byte `json:"public_key"`
  Status string `json:"status"`
  EffectiveInstrumentState string `json:"effective_instrument_state,omitempty"`
@@ -91,6 +95,7 @@ type instrumentChallengeSigningEnvelope struct{
  TLSPinID string `json:"tls_pin_id"`
  PinnedCertificateSHA256 string `json:"pinned_certificate_sha256"`
  PlanHash string `json:"plan_hash"`
+ TargetEndpointSHA256 string `json:"target_endpoint_sha256,omitempty"`
  Nonce []byte `json:"nonce"`
  IssuedAt int64 `json:"issued_at"`
  ExpiresAt int64 `json:"expires_at"`
@@ -141,7 +146,19 @@ func(s *Service)activeInstrumentKeyTx(ctx context.Context,tx storage.Tx,
   scope.Permit.ID!=pin.PermitID||
   scope.Permit.Revision!=pin.PermitRevision||
   scope.Permit.PlanHash!=pin.PlanHash{return empty,noPin,ErrInvalidTransition}
+ k.ApprovedTargetEndpointSHA256=goalEndpointDigest(scope.Permit.TargetIPv4,
+  scope.Permit.TargetPort)
  return k,pin,nil
+}
+
+// goalEndpointDigest binds the exact HUMAN-authorised private IPv4/port
+// into the server-issued immutable challenge. Only the digest is included
+// in the instrument challenge payload; raw topology stays in an access-
+// controlled human-only plan and the original TCP permit.
+func goalEndpointDigest(ip string,port int)string{
+ raw:=sha256.Sum256([]byte(fmt.Sprintf(
+  "OnePane/target-endpoint/v1\\n%s:%d",ip,port)))
+ return "sha256:"+hex.EncodeToString(raw[:])
 }
 
 func instrumentSigningBytes(k GoalInstrumentKey,pin GoalTLSPin,
@@ -151,7 +168,8 @@ func instrumentSigningBytes(k GoalInstrumentKey,pin GoalTLSPin,
   ProjectID:k.ProjectID,GoalID:k.GoalID,InstrumentKeyID:k.ID,
   ChallengeID:c.ID,DeclaredTargetID:k.DeclaredTargetID,
   TLSPinID:k.TLSPinID,PinnedCertificateSHA256:pin.CertificateSHA256,
-  PlanHash:k.PlanHash,Nonce:c.Nonce,IssuedAt:c.IssuedAt,ExpiresAt:c.ExpiresAt,
+  PlanHash:k.PlanHash,TargetEndpointSHA256:k.ApprovedTargetEndpointSHA256,
+  Nonce:c.Nonce,IssuedAt:c.IssuedAt,ExpiresAt:c.ExpiresAt,
  })
 }
 

@@ -322,12 +322,17 @@ func(s *Service)AcceptSignedGoalObservation(ctx context.Context,
   if !allowed{return ErrInvalidTransition}
   // The source principal and its operator's approval must still be
   // active; an expired, demoted or removed principal cannot submit.
-  for _,principal:=range []string{signer.SourcePrincipalID,signer.ApprovedBy}{
+  for _,entry:=range []struct{id,kind string}{
+   {signer.SourcePrincipalID,"source"},{signer.ApprovedBy,"human"},
+  }{
    var active int
    err=tx.QueryRowContext(ctx,`SELECT 1 FROM principals p
     JOIN workspace_memberships m ON m.principal_id=p.id
       AND m.workspace_id=? AND m.status='active'
-    WHERE p.id=? AND p.status='active'`,project.WorkspaceID,principal).Scan(&active)
+    WHERE p.id=? AND p.status='active'
+      AND ((?='human' AND p.principal_type='human') OR
+       (?='source' AND p.principal_type IN ('service','agent')))`,
+    project.WorkspaceID,entry.id,entry.kind,entry.kind).Scan(&active)
    if errors.Is(err,sql.ErrNoRows){return ErrPrincipalIneligible}
    if err!=nil{return err}
   }

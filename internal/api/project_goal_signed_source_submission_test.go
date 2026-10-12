@@ -216,6 +216,13 @@ func TestGoalSignedSourceMachineCredentialAndHumanKeyAPIBoundaries(t *testing.T)
  if got:=request("POST",submit,"source-key",submitBody(second,2,priv));got.Code<400{
   t.Fatalf("revoked signer admitted new proof: %d",got.Code)
  }
+ // Revoking the bearer credential must cut off the machine transport even
+ // before the domain can inspect key/signature or any source data.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE api_credentials
+  SET revoked_at=? WHERE id='cred-source-key'`,time.Now().UnixMilli());err!=nil{t.Fatal(err)}
+ if got:=request("POST",submit,"source-key",submitBody(second,2,priv));got.Code!=401{
+  t.Fatalf("revoked bearer credential still reached proof admission: %d",got.Code)
+ }
  var count int
  if err=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM project_goal_signed_observation_proofs").Scan(&count);err!=nil||count!=1{
   t.Fatalf("invalid attempts persisted signed proofs: %d %v",count,err)

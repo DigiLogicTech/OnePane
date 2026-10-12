@@ -1898,7 +1898,7 @@ async function qa4BindL5GoalConfigurator(project){
       const timeout=Number(row?.querySelector('[data-goal-probe-timeout]')?.value);
       const hours=Number(row?.querySelector('[data-goal-probe-duration]')?.value);
       // No URL, DNS name, CIDR, alternate protocol, or broad port range.
-      const exact=/^(10\\.(?:\\d{1,3}\\.){2}\\d{1,3}|192\\.168\\.\\d{1,3}\\.\\d{1,3}|172\\.(?:1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3})$/.test(ip);
+      const exact=/^(10\.(?:\d{1,3}\.){2}\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})$/.test(ip);
       if(!exact||!Number.isInteger(port)||port<1||port>65535||
         ![300,500,1000].includes(timeout)||![1,12,24].includes(hours)){
         if(reviewStatus())reviewStatus().textContent='Enter one private IPv4 address, a single valid TCP port, and a bounded permit duration.';

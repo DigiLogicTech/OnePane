@@ -289,3 +289,21 @@ func TestSourceProofQuotaHTTPResponse(t *testing.T){
   t.Fatalf("signer quota not communicated as HTTP 429 with retry hint: %d %+v",w.Code,w.Header())
  }
 }
+
+func TestGoalSourceSubmissionRejectsSessionOrAnonymousMachine(t *testing.T){
+ path:="/v1/projects/p/continuous-goals/g/signed-observations/submit"
+ for _,id:=range []Identity{
+  {PrincipalID:"sensor",PrincipalType:"service",AuthMethod:"session",CredentialID:"browser"},
+  {PrincipalID:"sensor",PrincipalType:"service",AuthMethod:"bearer"},
+  {PrincipalID:"owner",PrincipalType:"human",AuthMethod:"bearer",CredentialID:"admin-key"},
+ }{
+  auth:=fakeAuth{id:id}
+  server:=NewServer(nil,nil,auth)
+  req:=httptest.NewRequest("POST",path,strings.NewReader(`{}`))
+  w:=httptest.NewRecorder()
+  server.Handler().ServeHTTP(w,req)
+  if w.Code!=403{
+   t.Fatalf("non-machine bearer identity %v crossed source-only boundary: %d",id,w.Code)
+  }
+ }
+}

@@ -9,11 +9,13 @@ import(
  "crypto/sha256"
  "encoding/hex"
  "encoding/json"
+ "fmt"
  "net/http/httptest"
  "strings"
  "testing"
 
  "github.com/DigiLogicTech/OnePane/internal/clock"
+ "github.com/DigiLogicTech/OnePane/internal/storage"
  sqliteStore "github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
 )
 
@@ -264,6 +266,73 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
  }
  if _,err=svc.IssueGoalInstrumentChallenge(ctx,issue);err==nil{
   t.Fatal("fifth instrument challenge bypassed 4 per 5-minute quota")
+ }
+ // Simulate a malicious or accidentally overactive human rotating signing
+ // keys to evade the per-key 4/5min budget. The Project's immutable
+ // challenge count must still bound all historical keys together.
+ budgetNow:=clock.Real{}.UnixMilli()
+ var recentCount int
+ if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*)
+  FROM project_goal_instrument_challenges
+  WHERE project_id=? AND issued_at>?`,
+  project.ID,budgetNow-5*60000).Scan(&recentCount);err!=nil{t.Fatal(err)}
+ if recentCount>=instrumentProjectChallengeFiveMinuteLimit{
+  t.Fatalf("fixture unexpectedly over Project budget: %d",recentCount)
+ }
+ batch,err:=db.SQL().BeginTx(ctx,nil)
+ if err!=nil{t.Fatal(err)}
+ for i:=0;i<instrumentProjectChallengeFiveMinuteLimit-recentCount;i++{
+  id:=fmt.Sprintf("fixture_project_rate_%d",i)
+  nonce:=sha256.Sum256([]byte(id))
+  _,err=batch.ExecContext(ctx,`INSERT INTO project_goal_instrument_challenges
+   (id,instrument_key_id,project_id,goal_id,nonce,signing_payload,
+    issued_at,expires_at,status,accepted_at)
+   VALUES(?,?,?,?,?,?,?,?,'issued',0)`,
+   id,key.ID,project.ID,goal.ID,nonce[:],
+   []byte(strings.Repeat("x",200)),budgetNow,budgetNow+120000)
+  if err!=nil{break}
+ }
+ if err==nil{err=batch.Commit()}else{_ =batch.Rollback()}
+ if err!=nil{t.Fatalf("failed to seed Project rate-budget regression: %v",err)}
+ checkProjectBudget:=func(checkAt int64)error{
+  return svc.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+   return checkInstrumentProjectChallengeBudgetTx(ctx,tx,project.ID,checkAt)
+  })
+ }
+ if got:=checkProjectBudget(budgetNow);got!=ErrInvalidTransition{
+  t.Fatalf("16 Project challenges/5min across keys was not blocked: %v",got)
+ }
+ if got:=svc.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+  return checkInstrumentProjectChallengeBudgetTx(ctx,tx,"different-project",budgetNow)
+ });got!=nil{
+  t.Fatalf("one Project exhausted another tenant's independent budget: %v",got)
+ }
+ // The rolling 24h ceiling also blocks repeated key rotation after the
+ // five-minute window has elapsed, without a perpetual lifetime lockout.
+ batch,err=db.SQL().BeginTx(ctx,nil)
+ if err!=nil{t.Fatal(err)}
+ var existingDay int
+ if err=batch.QueryRowContext(ctx,`SELECT COUNT(*)
+  FROM project_goal_instrument_challenges WHERE project_id=? AND issued_at>?`,
+  project.ID,budgetNow-24*60*60000).Scan(&existingDay);err!=nil{
+  _ =batch.Rollback();t.Fatal(err)
+ }
+ for i:=0;i<instrumentProjectChallengeDailyLimit-existingDay;i++{
+  id:=fmt.Sprintf("fixture_project_daily_%d",i)
+  nonce:=sha256.Sum256([]byte(id))
+  when:=budgetNow-20*60000
+  _,err=batch.ExecContext(ctx,`INSERT INTO project_goal_instrument_challenges
+   (id,instrument_key_id,project_id,goal_id,nonce,signing_payload,
+    issued_at,expires_at,status,accepted_at)
+   VALUES(?,?,?,?,?,?,?,?,'issued',0)`,
+   id,key.ID,project.ID,goal.ID,nonce[:],
+   []byte(strings.Repeat("x",200)),when,when+120000)
+  if err!=nil{break}
+ }
+ if err==nil{err=batch.Commit()}else{_ =batch.Rollback()}
+ if err!=nil{t.Fatalf("failed to seed daily budget ledger: %v",err)}
+ if got:=checkProjectBudget(budgetNow+6*60000);got!=ErrInvalidTransition{
+  t.Fatalf("256 Project challenges/24h across key rotations was not blocked: %v",got)
  }
  proofs,err:=svc.ListGoalInstrumentProofs(ctx,project.ID,goal.ID)
  if err!=nil||len(proofs)!=1||proofs[0].ID!=proof.ID{

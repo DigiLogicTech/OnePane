@@ -70,6 +70,7 @@ func TestRecurringTCPWorkerRequiresOptInAndPersistsCadenceAcrossRestart(t *testi
   fake.network!="tcp4"||fake.address!="192.168.9.23:443"||
   checked[0].Status!="connected"||
   checked[0].RequestedBy!=GoalTCPRecurringWorkerPrincipal||
+  checked[0].RecurringGrantID==nil||*checked[0].RecurringGrantID!=grant.ID||
   checked[0].MonitoringActive{
   t.Fatalf("consented source not scoped or status misleading: %+v %v dialer=%+v",checked,err,fake)
  }

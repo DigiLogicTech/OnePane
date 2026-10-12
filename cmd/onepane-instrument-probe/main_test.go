@@ -164,3 +164,36 @@ func TestCLIRequiresExplicitApprovedPlanOrDeliberateManualDowngrade(t *testing.T
   t.Fatal("malformed challenge passed even with explicit manual downgrade")
  }
 }
+
+func TestPrivatePlanAndReceiptRejectSharedFilesAndSymlinks(t *testing.T){
+ dir:=t.TempDir()
+ privatePlan:=filepath.Join(dir,"approved-plan.json")
+ if err:=os.WriteFile(privatePlan,[]byte("{}"),0600);err!=nil{t.Fatal(err)}
+ var out map[string]any
+ if err:=readPrivateJSON(privatePlan,&out);err!=nil{
+  t.Fatalf("private local one-shot evidence file unexpectedly denied: %v",err)
+ }
+ if runtime.GOOS!="windows"{
+  if err:=os.Chmod(privatePlan,0644);err!=nil{t.Fatal(err)}
+  if err:=readPrivateJSON(privatePlan,&out);err==nil{
+   t.Fatal("world-readable private target plan was accepted")
+  }
+  if err:=os.Chmod(privatePlan,0600);err!=nil{t.Fatal(err)}
+  link:=filepath.Join(dir,"private-plan-link.json")
+  if err:=os.Symlink(privatePlan,link);err==nil{
+   if err:=readPrivateJSON(link,&out);err==nil{
+    t.Fatal("symlinked private probe plan was accepted")
+   }
+  }
+  keyPath:=filepath.Join(dir,"private.key")
+  if err:=runKeygen([]string{"--private-key-out",keyPath});err!=nil{
+   t.Fatal(err)
+  }
+  linkKey:=filepath.Join(dir,"linked-key")
+  if err:=os.Symlink(keyPath,linkKey);err==nil{
+   if _,err:=readPrivateKey(linkKey);err==nil{
+    t.Fatal("symlinked Ed25519 private signing key was accepted")
+   }
+  }
+ }
+}

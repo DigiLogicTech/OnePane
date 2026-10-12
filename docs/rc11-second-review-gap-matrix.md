@@ -430,3 +430,44 @@ Completed in this integration branch, with source and regression tests:
   paired-Node end-to-end enforcement, resource pressure and offline QA,
   installed Windows/Ubuntu testing, then explicit packaging decision.
   This work remains on the unmerged RC11 draft integration branch.
+
+
+## RC11 TCP evidence baseline and drift comparison — 2026-10-12
+
+- [x] **P0-D partial trusted-baseline scope:** migration
+  `0063_goal_tcp_reachability_baselines.sql` stores immutable
+  human-authored revisions of an expected `connected` or
+  `not_connected` **TCP handshake** for a source and exact approved
+  network permit. Each update uses CAS on both the Goal and prior
+  baseline revision and advances an auditable baseline head. An Agent
+  cannot define its own desired baseline, nor widen TCP target scope.
+- [x] The new read-only comparison projects `missing_evidence`,
+  `stale_test`, `inconclusive`, `matches_last_tcp_test`,
+  `unexpected_tcp_reachability` and `permission_inactive`.
+  It rechecks canonical Project, active Workspace, approved source,
+  original plan hash and permit/approver validity. If the source is
+  unconfigured, revoked or stale, it cannot produce a positive match.
+  An interrupted/cancelled/timeout attempt is not a successful sample.
+- [x] New API endpoints and Project Inspector controls let an authorised
+  operator set/revise a baseline, browse immutable baseline history and
+  compare the last TCP sample. The result always reports
+  `device_health=unverified` and `monitoring_active=false`, never
+  mutating Goal health, scheduling more probes or executing remediation.
+  **Reachability equivalence is NOT proof of device security.**
+- [x] Go/SQLite and API regression tests cover human-only baselines,
+  stale revision denial, missing/changed expectation assessment,
+  revoked consent, immutable history and no false health state.
+  All runtime TCP tests in CI use a fake dialer (no external LAN access).
+- [ ] Combined baseline Go/SQLite/WebUI/cross-platform validation is
+  running at
+  [#38194555709](https://github.com/DigiLogicTech/OnePane/actions/runs/38194555709)
+  on code head `cac12b5a`. Earlier runs failed on a corrected Go
+  `err:=` redeclaration; inspect any new failures and remediate.
+- [ ] **Next tasks:** human-enabled recurring *real* reachability
+  dispatch with renewable, precisely scoped leases and live pause/revoke;
+  trustworthy source provenance and structured Observation admission;
+  multi-signal baseline confidence, alert severity, diagnostics and
+  bounded signed remediation/postcondition verification. Default
+  must remain no autonomous network probing or fixing without
+  independent consent. Cross-platform installed QA and release review
+  remain mandatory.

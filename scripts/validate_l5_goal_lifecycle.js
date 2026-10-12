@@ -31,7 +31,7 @@ for(const token of ["data-goal-review-source","data-goal-review-duration",
  "data-goal-review-approve=","data-goal-review-list=","data-goal-review-revoke=",
  "expected_goal_revision:Number(grant.dataset.goalRevision)",
  "expected_permit_revision:Number(revoke.dataset.permitRevision)",
- "Monitoring probes and fixes remain disabled."]){
+ "Device probes and fixes remain disabled."]){
  assert(ui.includes(token),"L5 scoped review UI missing "+token);
 }
 for(const token of ["humanGoalReviewer","expires_at>?","GoalEvidenceReviewAllowed",
@@ -70,4 +70,17 @@ for(const token of ["ReviewGoalEvidence","ListGoalEvidenceReviewRuns",
 for(const token of ["/evidence-reviews","/evidence-review-permits/{permitID}/review"]){
  assert(server.includes(token),"Level 5 evidence review route missing "+token);
 }
+// Automatic cadence reviews require an active human-granted permit and
+// must never load an LLM or invoke sensors, host/network tools or remediation.
+const worker=fs.readFileSync("internal/projectworkspace/continuous_goal_review_worker.go","utf8");
+const bootstrap=fs.readFileSync("internal/bootstrap/bootstrap.go","utf8");
+const harness=fs.readFileSync("cmd/harnessd/main.go","utf8");
+for(const token of ["TickDueGoalEvidenceReviews","GoalEvidenceReviewWorkerPrincipal",
+ "p.status='approved'","p.expires_at>?","NOT EXISTS","ReviewGoalEvidence"]){
+ assert(worker.includes(token),"bounded L5 review worker missing "+token);
+}
+assert(bootstrap.includes("EnsureGoalEvidenceReviewWorkerPrincipal(ctx)"),"review worker principal not bootstrapped");
+assert(harness.includes("TickDueGoalEvidenceReviews(ctx,8)"),"passive L5 review worker not scheduled");
+assert(ui.includes("Approve recurring receipt review"),"UI does not disclose recurring nature of review consent");
+assert(ui.includes("Device monitoring not activated"),"UI falsely presents receipt review as device monitoring");
 console.log("L5 pause/retire UI and fail-closed goal lifecycle: PASS");

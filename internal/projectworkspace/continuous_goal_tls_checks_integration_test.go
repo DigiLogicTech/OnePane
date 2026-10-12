@@ -4,6 +4,8 @@ package projectworkspace
 
 import(
  "context"
+ "crypto/ed25519"
+ "crypto/rand"
  "crypto/sha256"
  "encoding/hex"
  "encoding/json"
@@ -77,6 +79,94 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
  if err!=nil{t.Fatal(err)}
  if pin.PermitID!=permit.ID||pin.DeclaredTargetID!=target.ID{
   t.Fatalf("TLS pin did not capture exact permit: %+v",pin)
+ }
+ // A second independently enrolled instrument key is HUMAN-BOUND to
+ // this already pinned TLS target. Ed25519 possession does not attest a
+ // physical router or authenticate a measurement of that router.
+ public,private,err:=ed25519.GenerateKey(rand.Reader)
+ if err!=nil{t.Fatal(err)}
+ _,forger,err:=ed25519.GenerateKey(rand.Reader)
+ if err!=nil{t.Fatal(err)}
+ goal,err=svc.ContinuousGoal(ctx,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ key,err:=svc.ApproveGoalInstrumentKey(ctx,ApproveGoalInstrumentKeyCommand{
+  ProjectID:project.ID,GoalID:goal.ID,TLSPinID:pin.ID,
+  PublicKey:public,ActorPrincipalID:"owner",
+  ExpectedGoalRevision:goal.Revision,ExpectedPinRevision:pin.Revision,
+  ExpiresAt:now+8*60000,
+ })
+ if err!=nil{t.Fatalf("human out-of-band Ed25519 enrollment failed: %v",err)}
+ if key.TLSPinID!=pin.ID||key.DeclaredTargetID!=target.ID||
+  key.Status!="approved"{t.Fatalf("independent key escaped exact TLS scope: %+v",key)}
+ goal,err=svc.ContinuousGoal(ctx,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ issue:=IssueGoalInstrumentChallengeCommand{
+  ProjectID:project.ID,GoalID:goal.ID,KeyID:key.ID,ActorPrincipalID:"owner",
+  ExpectedGoalRevision:goal.Revision,ExpectedKeyRevision:key.Revision,
+ }
+ ch,err:=svc.IssueGoalInstrumentChallenge(ctx,issue)
+ if err!=nil{t.Fatalf("bounded one-time challenge issuance failed: %v",err)}
+ if len(ch.Nonce)!=32||len(ch.SigningPayload)==0||
+  ch.ProjectID!=project.ID||ch.GoalID!=goal.ID{
+  t.Fatalf("nonce not correctly bound to human approved Goal: %+v",ch)
+ }
+ accept:=AcceptGoalInstrumentChallengeCommand{
+  ProjectID:project.ID,GoalID:goal.ID,KeyID:key.ID,
+  ChallengeID:ch.ID,ActorPrincipalID:"owner",
+  ExpectedGoalRevision:goal.Revision,
+  Signature:ed25519.Sign(forger,ch.SigningPayload),
+ }
+ if _,err=svc.AcceptGoalInstrumentChallenge(ctx,accept);err==nil{
+  t.Fatal("wrong instrument private key forged a signed challenge")
+ }
+ accept.Signature=ed25519.Sign(private,ch.SigningPayload)
+ wrong:=accept;wrong.ProjectID="other-tenant"
+ if _,err=svc.AcceptGoalInstrumentChallenge(ctx,wrong);err==nil{
+  t.Fatal("signed instrument challenge crossed tenant Project boundary")
+ }
+ proof,err:=svc.AcceptGoalInstrumentChallenge(ctx,accept)
+ if err!=nil{t.Fatalf("real out-of-band signed response rejected: %v",err)}
+ if proof.ProofClass!="human_bound_instrument_key_possession"||
+  proof.DeclaredTargetID!=target.ID||proof.TLSPinID!=pin.ID||
+  proof.DeviceIdentityVerified||proof.RemediationAuthorized{
+  t.Fatalf("signed instrument proof promoted physical-device trust: %+v",proof)
+ }
+ if _,err=svc.AcceptGoalInstrumentChallenge(ctx,accept);err==nil{
+  t.Fatal("spent Ed25519 challenge was replayed successfully")
+ }
+ for i:=0;i<3;i++{
+  if _,err=svc.IssueGoalInstrumentChallenge(ctx,issue);err!=nil{
+   t.Fatalf("bounded instrument challenge %d unexpectedly failed: %v",i,err)
+  }
+ }
+ if _,err=svc.IssueGoalInstrumentChallenge(ctx,issue);err==nil{
+  t.Fatal("fifth instrument challenge bypassed 4 per 5-minute quota")
+ }
+ proofs,err:=svc.ListGoalInstrumentProofs(ctx,project.ID,goal.ID)
+ if err!=nil||len(proofs)!=1||proofs[0].ID!=proof.ID{
+  t.Fatalf("instrument proof history was not immutable/readable: %+v %v",proofs,err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,
+  `DELETE FROM project_goal_instrument_proofs WHERE id=?`,proof.ID);err==nil{
+  t.Fatal("signed instrument possession proof was deletable")
+ }
+ goal,err=svc.ContinuousGoal(ctx,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ revokedKey,err:=svc.RevokeGoalInstrumentKey(ctx,RevokeGoalInstrumentKeyCommand{
+  ProjectID:project.ID,GoalID:goal.ID,KeyID:key.ID,ActorPrincipalID:"owner",
+  ExpectedGoalRevision:goal.Revision,ExpectedKeyRevision:key.Revision,
+ })
+ if err!=nil||revokedKey.Status!="revoked"{
+  t.Fatalf("human could not revoke independent instrument identity: %+v %v",revokedKey,err)
+ }
+ goal,err=svc.ContinuousGoal(ctx,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ issue.ExpectedGoalRevision=goal.Revision
+ if _,err=svc.IssueGoalInstrumentChallenge(ctx,issue);err==nil{
+  t.Fatal("revoked instrument key minted a new challenge")
+ }
+ if _,err=svc.AcceptGoalInstrumentChallenge(ctx,accept);err==nil{
+  t.Fatal("revoked key admitted old signed response")
  }
  goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
  command:=RunGoalPinnedTLSCheckCommand{

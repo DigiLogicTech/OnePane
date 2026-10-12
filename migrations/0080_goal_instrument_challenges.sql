@@ -73,6 +73,7 @@ CREATE TABLE project_goal_instrument_proofs (
  declared_target_id TEXT NOT NULL REFERENCES project_goal_tcp_declared_target_bindings(id) ON DELETE RESTRICT,
  tls_pin_id TEXT NOT NULL REFERENCES project_goal_tls_endpoint_pins(id) ON DELETE RESTRICT,
  signature_sha256 TEXT NOT NULL CHECK(length(signature_sha256)=71),
+ signature BLOB NOT NULL CHECK(length(signature)=64),
  accepted_at INTEGER NOT NULL CHECK(accepted_at>0),
  proof_class TEXT NOT NULL DEFAULT 'human_bound_instrument_key_possession'
   CHECK(proof_class='human_bound_instrument_key_possession')

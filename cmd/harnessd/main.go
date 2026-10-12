@@ -314,6 +314,32 @@ func main() {
 		}
 	}()
 
+	// Independent Level 5 LAN observation: this loop is inert unless a
+	// human specifically approved a short-lived recurring TCP grant that
+	// references an exact-IP manual probe permit for a canonical Workspace.
+	// Never infer network authority from source names or receipt review.
+	// At most ONE 100–1500ms handshake per minute tick; SQLite deduplicates
+	// each source/cadence window across restarts and competing workers.
+	go func(){
+		run:=func(){
+			results,err:=runtime.ProjectWorkspaces.TickDueTCPRecurringProbes(ctx,1)
+			if err!=nil&&ctx.Err()==nil{
+				log.Printf("consented tcp observation tick: %v",err)
+			}else if len(results)>0{
+				log.Printf("consented tcp observation tick: %d source handshake attempt(s); security health UNVERIFIED",len(results))
+			}
+		}
+		run()
+		ticker:=time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for{
+			select{
+			case <-ctx.Done():return
+			case <-ticker.C:run()
+			}
+		}
+	}()
+
 	// Budget reservations are durable but time-bounded. Expiring abandoned
 	// reservations returns capacity without relying on a caller to clean up.
 	go func() {

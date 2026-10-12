@@ -106,6 +106,55 @@ func TestGoalSignedSourceMachineCredentialAndHumanKeyAPIBoundaries(t *testing.T)
  if key.SourceID!="gateway"||key.SourcePrincipalID!="sensor"||key.Status!="approved"{
   t.Fatalf("unscoped key %+v",key)
  }
+ // Legacy test fixture created this machine bearer credential directly.
+ // Bind it to the approved signer as the new production API requires.
+ _,err=db.SQL().ExecContext(ctx,`INSERT INTO project_goal_source_credential_grants(
+  credential_id,project_id,goal_id,project_workspace_id,workspace_id,
+  signer_id,source_principal_id,approved_by,approved_at,expires_at)
+  VALUES(?,?,?,?,?,?,?,?,?,?)`,
+  "cred-source-key",p.ID,g.ID,ws.ID,"tenant",key.ID,"sensor",
+  "operator",key.ApprovedAt,key.ExpiresAt)
+ if err!=nil{t.Fatal(err)}
+ // The operator can mint an actual random one-time bearer credential,
+ // revoke it without affecting the separate test credential, and never
+ // recover its secret from listings, audit events or subsequent requests.
+ credentialRoute:=route+"/source-signers/"+key.ID+"/credentials"
+ mintBody:=fmt.Sprintf(`{"expires_at":%d}`,time.Now().Add(30*time.Minute).UnixMilli())
+ for _,who:=range []string{"source-key","write-only-key","read-only-key"}{
+  got:=request("POST",credentialRoute,who,mintBody)
+  if got.Code!=403{t.Fatalf("%s issued machine credential: %d",who,got.Code)}
+ }
+ mintedResponse:=request("POST",credentialRoute,"operator-key",mintBody)
+ if mintedResponse.Code!=201{t.Fatalf("operator issuance failed: %d %s",mintedResponse.Code,mintedResponse.Body)}
+ var minted projectworkspace.MintedGoalSourceCredential
+ if err=json.Unmarshal(mintedResponse.Body.Bytes(),&minted);err!=nil{t.Fatal(err)}
+ if minted.Credential.SignerID!=key.ID||!strings.HasPrefix(minted.BearerToken,"op_src_"){
+  t.Fatalf("unexpected one-time credential metadata: %+v",minted.Credential)
+ }
+ if got:=request("GET",credentialRoute,minted.BearerToken,"");got.Code!=403{
+  t.Fatalf("machine credential enumerated credential metadata: %d",got.Code)
+ }
+ credentialList:=request("GET",credentialRoute,"operator-key","")
+ if credentialList.Code!=200||!strings.Contains(credentialList.Body.String(),minted.Credential.CredentialID)||
+  strings.Contains(credentialList.Body.String(),minted.BearerToken){
+  t.Fatalf("credential list missing or exposed token: %d %s",credentialList.Code,credentialList.Body)
+ }
+ revokeMintedURL:=credentialRoute+"/"+minted.Credential.CredentialID+"/revoke"
+ if got:=request("POST",revokeMintedURL,"source-key","{}");got.Code!=403{
+  t.Fatalf("machine token revoked credential: %d",got.Code)
+ }
+ if got:=request("POST",revokeMintedURL,"operator-key","{}");got.Code!=200||
+  strings.Contains(got.Body.String(),minted.BearerToken){
+  t.Fatalf("operator token revocation failed or leaked: %d %s",got.Code,got.Body)
+ }
+ if got:=request("POST",route+"/signed-observations/record",minted.BearerToken,"{}");got.Code!=401{
+  t.Fatalf("revoked issued credential remained valid: %d",got.Code)
+ }
+ var eventTokens int
+ if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
+  WHERE CAST(payload_json AS TEXT) LIKE ?`,"%"+minted.BearerToken+"%").Scan(&eventTokens);err!=nil||eventTokens!=0{
+  t.Fatalf("bearer credential leaked into audit events: count=%d err=%v",eventTokens,err)
+ }
  keyList:=request("GET",signers,"operator-key","")
  if keyList.Code!=200||!strings.Contains(keyList.Body.String(),key.ID)||
   !strings.Contains(keyList.Body.String(),"\"approved\""){

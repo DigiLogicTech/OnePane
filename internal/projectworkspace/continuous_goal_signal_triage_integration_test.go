@@ -186,4 +186,21 @@ func TestGoalSignalTriageRequiresLiveIndependentEvidenceAndNeverPromotesHealth(t
  if _,err=svc.GoalSignalTriage(ctx,"other-tenant",goal.ID);err==nil{
   t.Fatal("foreign Project retrieved triage of another tenant")
  }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships
+  SET status='active' WHERE workspace_id='tenant' AND principal_id='owner'`);
+  err!=nil{t.Fatal(err)}
+ persisted,err=svc.ContinuousGoal(ctx,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ paused,err:=svc.TransitionContinuousGoal(ctx,TransitionContinuousGoalCommand{
+  ProjectID:p.ID,GoalID:goal.ID,TargetStatus:"paused",
+  ExpectedRevision:persisted.Revision,ActorPrincipalID:"owner",
+ })
+ if err!=nil{t.Fatal(err)}
+ if paused.Status!="paused"{t.Fatalf("pause did not persist: %+v",paused)}
+ nonactive,err:=svc.GoalSignalTriage(ctx,p.ID,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ if nonactive.State!="goal_not_configured"||nonactive.GoalStatus!="paused"||
+  nonactive.MonitoringActive||nonactive.RecentNegativeSources!=0{
+  t.Fatalf("paused Goal appeared to have operational triage: %+v",nonactive)
+ }
 }

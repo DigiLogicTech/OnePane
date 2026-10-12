@@ -226,3 +226,11 @@ func TestGoalSignedSourceMachineCredentialAndHumanKeyAPIBoundaries(t *testing.T)
   t.Fatalf("signed API activated goal monitoring: %+v",state)
  }
 }
+
+func TestSourceProofQuotaHTTPResponse(t *testing.T){
+ w:=httptest.NewRecorder()
+ respondDomain(w,nil,projectworkspace.ErrSourceProofRateLimited,0)
+ if w.Code!=429||w.Header().Get("Retry-After")!="60"{
+  t.Fatalf("signer quota not communicated as HTTP 429 with retry hint: %d %+v",w.Code,w.Header())
+ }
+}

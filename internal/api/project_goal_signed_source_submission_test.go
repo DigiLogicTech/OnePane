@@ -144,6 +144,16 @@ func TestGoalSignedSourceMachineCredentialAndHumanKeyAPIBoundaries(t *testing.T)
   strings.Contains(credentialList.Body.String(),minted.BearerToken){
   t.Fatalf("credential list missing or exposed token: %d %s",credentialList.Code,credentialList.Body)
  }
+ // The freshly minted bearer must be able to stage precisely this
+ // source's unverified local reading, before operator revocation.
+ shortRead:=fmt.Sprintf(`{"signer_id":"%s","observation_type":"gateway.sample",
+  "value":{"sample":"unverified"}}`,key.ID)
+ mintedUse:=request("POST",route+"/signed-observations/record",minted.BearerToken,shortRead)
+ if mintedUse.Code!=201||!strings.Contains(mintedUse.Body.String(),
+  "unverified_awaiting_source_signature"){
+  t.Fatalf("new one-time token unusable before revocation: %d %s",
+   mintedUse.Code,mintedUse.Body.String())
+ }
  revokeMintedURL:=credentialRoute+"/"+minted.Credential.CredentialID+"/revoke"
  if got:=request("POST",revokeMintedURL,"source-key","{}");got.Code!=403{
   t.Fatalf("machine token revoked credential: %d",got.Code)
@@ -293,7 +303,7 @@ func TestGoalSignedSourceMachineCredentialAndHumanKeyAPIBoundaries(t *testing.T)
    "value":"%s"}`,key.ID,strings.Repeat("X",4096)));got.Code!=400{
   t.Fatalf("large raw reading admitted: %d",got.Code)
  }
- for i:=1;i<30;i++{
+ for i:=1;i<29;i++{
   got:=request("POST",recordRoute,"source-key",reading)
   if got.Code!=201{
    t.Fatalf("bounded unverified reading %d failed: %d %s",i,got.Code,got.Body)

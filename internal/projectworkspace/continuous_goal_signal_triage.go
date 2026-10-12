@@ -169,7 +169,7 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
      WHERE declared.project_id=? AND declared.goal_id=?
       AND declared.source_id=? AND declared.permit_id=?
       AND declared.status='approved' AND declared.expires_at>?
-      AND declared.approved_at<=?
+      AND declared.approved_at<?
       AND declared.plan_hash=? AND declared.plan_hash=p.plan_hash
       AND declared.permit_revision=p.revision
       AND declared.project_workspace_id=p.project_workspace_id

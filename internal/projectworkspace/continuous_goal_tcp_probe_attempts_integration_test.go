@@ -153,6 +153,17 @@ func TestManualGoalTCPProbeUsesOnlyExactPermittedSocketAndIsCrashIdempotent(t *t
  if tasks!=0||observations!=0{
   t.Fatalf("bounded TCP test invoked unrelated workflows: %d %d",tasks,observations)
  }
+ // An overloaded local host must not queue unbounded network Claims.
+ manualTCPProbeSlots<-struct{}{}
+ manualTCPProbeSlots<-struct{}{}
+ cancelled,cancel:=context.WithCancel(ctx)
+ cancel()
+ _,blockedErr:=svc.runManualGoalTCPProbe(cancelled,cmd,&fakeGoalTCPDialer{})
+ <-manualTCPProbeSlots
+ <-manualTCPProbeSlots
+ if !errors.Is(blockedErr,context.Canceled){
+  t.Fatalf("cancelled request blocked behind socket capacity: %v",blockedErr)
+ }
 }
 
 func TestManualTCPProbeRechecksRevocationAndNeverDialsAfterClaim(t *testing.T){

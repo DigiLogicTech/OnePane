@@ -24,6 +24,8 @@ type GoalTCPProbeAttempt struct {
  ProjectID string `json:"project_id"`
  GoalID string `json:"goal_id"`
  PermitID string `json:"permit_id"`
+ // Exact recurring human consent, absent from manually requested tests.
+ RecurringGrantID *string `json:"recurring_grant_id,omitempty"`
  ProjectWorkspaceID string `json:"project_workspace_id"`
  SourceID string `json:"source_id"`
  TargetIPv4 string `json:"target_ipv4"`
@@ -63,14 +65,16 @@ var manualTCPProbeSlots=make(chan struct{},2)
 
 const tcpAttemptColumns=`id,project_id,goal_id,permit_id,project_workspace_id,source_id,
 target_ipv4,target_port,timeout_ms,cadence_window,goal_revision,permit_revision,
-requested_by,status,claimed_at,completed_at`
+requested_by,status,claimed_at,completed_at,recurring_grant_id`
 
 func scanTCPAttempt(r scanner)(GoalTCPProbeAttempt,error){
  var a GoalTCPProbeAttempt
+ var grant sql.NullString
  err:=r.Scan(&a.ID,&a.ProjectID,&a.GoalID,&a.PermitID,&a.ProjectWorkspaceID,
   &a.SourceID,&a.TargetIPv4,&a.TargetPort,&a.TimeoutMS,
   &a.CadenceWindow,&a.GoalRevision,&a.PermitRevision,
-  &a.RequestedBy,&a.Status,&a.ClaimedAt,&a.CompletedAt)
+  &a.RequestedBy,&a.Status,&a.ClaimedAt,&a.CompletedAt,&grant)
+ if grant.Valid{a.RecurringGrantID=&grant.String}
  return a,err
 }
 
@@ -163,21 +167,32 @@ func(s *Service)claimGoalTCPAttempt(ctx context.Context,c RunGoalTCPProbeCommand
    PermitRevision:permit.Revision,RequestedBy:c.ActorPrincipalID,
    Status:"claimed",ClaimedAt:now,
   }
+  var recurringID any
+  if c.RecurringGrantID!=""{
+   attempt.RecurringGrantID=&c.RecurringGrantID
+   recurringID=c.RecurringGrantID
+  }
   _,err=tx.ExecContext(ctx,`INSERT INTO project_goal_tcp_probe_attempts(
     id,project_id,goal_id,permit_id,project_workspace_id,source_id,
     target_ipv4,target_port,timeout_ms,cadence_window,goal_revision,
-    permit_revision,requested_by,status,claimed_at,completed_at)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'claimed',?,0)`,
+    permit_revision,requested_by,status,claimed_at,completed_at,recurring_grant_id)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'claimed',?,0,?)`,
     attempt.ID,attempt.ProjectID,attempt.GoalID,attempt.PermitID,
     attempt.ProjectWorkspaceID,attempt.SourceID,attempt.TargetIPv4,
     attempt.TargetPort,attempt.TimeoutMS,attempt.CadenceWindow,
-    attempt.GoalRevision,attempt.PermitRevision,attempt.RequestedBy,now)
+    attempt.GoalRevision,attempt.PermitRevision,attempt.RequestedBy,now,recurringID)
   if err!=nil{return err}
   body,_:=json.Marshal(map[string]any{
    "goal_id":c.GoalID,"permit_id":permit.ID,"attempt_id":attempt.ID,
    "source_id":permit.SourceID,"target_ipv4":permit.TargetIPv4,
    "target_port":permit.TargetPort,"status":"claimed","goal_revision":revision,
   })
+  if c.RecurringGrantID!=""{body,_=json.Marshal(map[string]any{
+   "goal_id":c.GoalID,"permit_id":permit.ID,"attempt_id":attempt.ID,
+   "recurring_grant_id":c.RecurringGrantID,
+   "source_id":permit.SourceID,"target_ipv4":permit.TargetIPv4,
+   "target_port":permit.TargetPort,"status":"claimed","goal_revision":revision,
+  })}
   return s.events.Append(ctx,tx,event.Event{
    ID:eventID,WorkspaceID:&project.WorkspaceID,
    Type:"project.goal_tcp_probe_claimed",

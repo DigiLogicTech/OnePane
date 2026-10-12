@@ -92,19 +92,17 @@ func(s *Service)ApproveGoalNodeMeasurementGrant(ctx context.Context,
   if !allowed{return ErrInvalidCommand}
   var fingerprint,nodeTrust,pairStatus string
   var locallyConfirmed,peerConfirmed int
-  err=tx.QueryRowContext(ctx,`SELECT n.identity_fingerprint,n.trust_state,
-   p.status,p.local_confirmed,p.peer_confirmed
+  // One consistent read binds exact peer identity to its confirmed
+  // mTLS pairing; a mere discovery fingerprint is never sufficient.
+  err=tx.QueryRowContext(ctx,`SELECT n.trust_state,
+   p.status,p.local_confirmed,p.peer_confirmed,p.peer_tls_fingerprint
    FROM harness_nodes n JOIN node_pairings p ON p.peer_node_id=n.id
    WHERE n.id=? AND n.local=0 AND p.status='paired'
    AND p.local_confirmed=1 AND p.peer_confirmed=1`,c.PeerNodeID).
-   Scan(new(string),&nodeTrust,&pairStatus,&locallyConfirmed,&peerConfirmed)
+   Scan(&nodeTrust,&pairStatus,&locallyConfirmed,&peerConfirmed,&fingerprint)
   if err!=nil{return ErrInvalidTransition}
   if nodeTrust!="paired"||pairStatus!="paired"||
    locallyConfirmed!=1||peerConfirmed!=1{return ErrInvalidTransition}
-  // The transport fingerprint is the paired TLS cert, not discovery text.
-  err=tx.QueryRowContext(ctx,`SELECT peer_tls_fingerprint
-   FROM node_pairings WHERE peer_node_id=? AND status='paired'
-   AND local_confirmed=1 AND peer_confirmed=1`,c.PeerNodeID).Scan(&fingerprint)
   if err!=nil||!strings.HasPrefix(fingerprint,"sha256:")||
    len(fingerprint)!=71{return ErrInvalidTransition}
   var active int

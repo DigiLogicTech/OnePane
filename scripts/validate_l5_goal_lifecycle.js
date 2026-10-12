@@ -225,4 +225,17 @@ assert(bootstrap.includes("EnsureTCPRecurringWorkerPrincipal(ctx)"),
  "independent worker identity must be created before scheduler activity");
 assert(!harness.includes("RunManualGoalTCPProbe"),
  "a manual TCP permission is not background network authority");
+// Immutable baseline provenance: each TCP attempt must carry the exact
+// baseline revision at socket admission. Later operator changes cannot
+// retroactively transform an old handshake into a verified drift finding.
+const attemptSnapshotDDL=fs.readFileSync("migrations/0068_goal_tcp_attempt_baseline_snapshots.sql","utf8");
+for(const token of ["baseline_id_at_claim","baseline_revision_at_claim",
+ "goal_tcp_attempts_baseline_snapshot_immutable"]){
+ assert(attemptSnapshotDDL.includes(token),"TCP baseline snapshot migration missing "+token);
+ assert(tcpRun.includes(token),"TCP claim must persist baseline snapshot "+token);
+}
+for(const token of ["SampleBaselineRevision","no_baseline_at_test",
+ "baseline_updated_since_test","atClaimBaselineID!=baselineID"]){
+ assert(baselineService.includes(token),"baseline assessment must block retrospective evidence "+token);
+}
 console.log("L5 pause/retire UI and fail-closed goal lifecycle: PASS");

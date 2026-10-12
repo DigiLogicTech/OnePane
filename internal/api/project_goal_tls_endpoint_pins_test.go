@@ -248,6 +248,39 @@ func TestHumanPinnedTLSCertificateRequiresExactExistingTargetAndOneBoundedCheck(
  }
  var mch projectworkspace.GoalInstrumentChallenge
  if err=json.Unmarshal(measureChallengeResponse.Body.Bytes(),&mch);err!=nil{t.Fatal(err)}
+ targetPlanURL:=keyPath+"/probe-plan"
+ targetPlanBody,_:=json.Marshal(map[string]any{
+  "challenge_id":mch.ID,"expected_goal_revision":goal.Revision,
+ })
+ for _,who:=range []string{"","robot","outsider"}{
+  got:=request("POST",who,targetPlanURL,string(targetPlanBody))
+  if got.Code<400{
+   t.Fatalf("nonhuman %s obtained private endpoint plan: %d %s",
+    who,got.Code,got.Body)
+  }
+ }
+ if got:=request("POST","operator",targetPlanURL,
+  strings.TrimSuffix(string(targetPlanBody),"}")+`,"target_ipv4":"8.8.8.8"}`);
+  got.Code!=400{
+  t.Fatalf("operator injected target address into signed plan: %d %s",
+   got.Code,got.Body)
+ }
+ scoped:=request("POST","operator",targetPlanURL,string(targetPlanBody))
+ if scoped.Code!=200{
+  t.Fatalf("active human cannot export approved one-shot target: %d %s",
+   scoped.Code,scoped.Body)
+ }
+ var scopedPlan projectworkspace.GoalInstrumentProbePlan
+ if err=json.Unmarshal(scoped.Body.Bytes(),&scopedPlan);err!=nil{t.Fatal(err)}
+ if scopedPlan.ProjectID!=p.ID||scopedPlan.GoalID!=goal.ID||
+  scopedPlan.ChallengeID!=mch.ID||
+  scopedPlan.DeclaredTargetID!=declared.ID||
+  scopedPlan.TLSPinID!=pin.ID||scopedPlan.TargetIPv4!="192.168.42.247"||
+  scopedPlan.TargetPort!=443||scopedPlan.TimeoutMS!=100||
+  scopedPlan.ObserverVantageVerified||scopedPlan.TargetDeviceIdentityVerified||
+  scopedPlan.AttestationClass!="human_authorised_endpoint_snapshot_not_device_attestation"{
+  t.Fatalf("server-issued snapshot deviates from exact original permit: %+v",scopedPlan)
+ }
  observedAt:=clock.Real{}.UnixMilli()
  if observedAt<mch.IssuedAt{observedAt=mch.IssuedAt}
  preparation:=map[string]any{
@@ -291,6 +324,9 @@ func TestHumanPinnedTLSCertificateRequiresExactExistingTargetAndOneBoundedCheck(
  }
  if got:=request("POST","operator",acceptURL,string(acceptanceJSON));got.Code<400{
   t.Fatalf("instrument signed measurement replay passed HTTP: %d",got.Code)
+ }
+ if got:=request("POST","operator",targetPlanURL,string(targetPlanBody));got.Code<400{
+  t.Fatalf("spent instrument challenge still exported an executable one-shot plan: %d",got.Code)
  }
  mlistURL:=base+"/instrument-measurements"
  if got:=request("GET","robot",mlistURL,"");got.Code!=403{

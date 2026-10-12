@@ -77,6 +77,10 @@ func(s *Service)ReviewGoalEvidence(ctx context.Context,c ReviewGoalEvidenceComma
  eventID,err:=s.ids.New("evt");if err!=nil{return GoalEvidenceReviewRun{},err}
  var completed GoalEvidenceReviewRun
  err=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+  // Refresh the clock AFTER acquiring the writer transaction: an expiring
+  // permit cannot remain usable just because SQLite writer contention
+  // delayed its last controllable review-admission boundary.
+  now=s.clock.UnixMilli()
   project,err:=s.repo.ProjectTx(ctx,tx,c.ProjectID)
   if err!=nil{return err}
   if project.Status!="active"||project.OperatingMode!=OperatingContinuousOperations{

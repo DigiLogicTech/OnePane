@@ -95,8 +95,8 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
   // source. No target IP, port, raw receipt, socket or secret is returned.
   var tcpStatus string
   var tcpID string
-  var tcpAt int64
-  err=s.db.QueryRowContext(ctx,`SELECT a.id,a.status,a.completed_at
+  var tcpAt,tcpClaimedAt int64
+  err=s.db.QueryRowContext(ctx,`SELECT a.id,a.status,a.claimed_at,a.completed_at
    FROM project_goal_tcp_probe_attempts a
    JOIN project_goal_tcp_probe_permits p ON p.id=a.permit_id
      AND p.goal_id=a.goal_id AND p.project_id=a.project_id
@@ -122,17 +122,27 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
    JOIN workspace_memberships member ON member.principal_id=human.id
     AND member.workspace_id=tenant.id AND member.status='active'
    WHERE a.project_id=? AND a.goal_id=? AND a.source_id=?
-    AND a.status IN ('connected','not_connected','timed_out')
-    AND a.completed_at BETWEEN ? AND ?
-   ORDER BY a.completed_at DESC,a.id DESC LIMIT 1`,
+    AND a.claimed_at BETWEEN ? AND ?
+   ORDER BY a.claimed_at DESC,a.id DESC LIMIT 1`,
    now,planHash,projectID,goalID,source.SourceID,now-freshnessMS,now).
-   Scan(&tcpID,&tcpStatus,&tcpAt)
+   Scan(&tcpID,&tcpStatus,&tcpClaimedAt,&tcpAt)
   if err!=nil&&!errors.Is(err,sql.ErrNoRows){return GoalSignalTriage{},err}
   if err==nil{
-   item.TCPState=tcpStatus;item.TCPAttemptID=tcpID
-   item.TCPObservedAt=tcpAt;seenTCP=true
-   if tcpStatus=="not_connected"||tcpStatus=="timed_out"{
-    item.NegativeIndicator=true;out.RecentTCPNegativeSources++
+   item.TCPAttemptID=tcpID
+   switch {
+   case tcpStatus=="claimed"||tcpStatus=="cancelled":
+    // A newer interrupted probe invalidates any older impression of
+    // current reachability. It is not a negative TCP measurement.
+    item.TCPState="unknown_after_interruption"
+   case tcpAt<tcpClaimedAt||tcpAt>now||tcpAt==0:
+    item.TCPState="unknown_after_interruption"
+   case tcpStatus=="connected"||tcpStatus=="not_connected"||tcpStatus=="timed_out":
+    item.TCPState=tcpStatus;item.TCPObservedAt=tcpAt;seenTCP=true
+    if tcpStatus=="not_connected"||tcpStatus=="timed_out"{
+     item.NegativeIndicator=true;out.RecentTCPNegativeSources++
+    }
+   default:
+    item.TCPState="unknown_after_interruption"
    }
   }
   // Only report a live, correctly pinned TLS source with a human

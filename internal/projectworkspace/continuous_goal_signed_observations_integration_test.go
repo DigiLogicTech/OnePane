@@ -216,4 +216,40 @@ func TestLevel5SignedObservationEnrollmentAntiReplayAndLiveRevocation(t *testing
   current.LastVerifiedAt!=0||current.NextDueAt!=0{
   t.Fatalf("signed source keys falsely activated monitoring %+v",current)
  }
+ // Emergency rotation creates a NEW signer identity and a fresh sequence
+ // namespace; the revoked signer remains immutable and cannot regain
+ // rights by replaying an old key or by registering its prior proof.
+ newPub,newPriv,err:=ed25519.GenerateKey(rand.Reader)
+ if err!=nil{t.Fatal(err)}
+ rotated,err:=svc.ApproveGoalObservationSigner(ctx,ApproveGoalObservationSignerCommand{
+  ProjectID:p.ID,GoalID:g.ID,SourceID:"router",SourcePrincipalID:"source",
+  ActorPrincipalID:"owner",PublicKey:newPub,ExpiresAt:expiry,
+  ExpectedGoalRevision:current.Revision,
+ })
+ if err!=nil{t.Fatalf("source key rotation failed: %v",err)}
+ if rotated.ID==signer.ID||rotated.LastSequence!=0{
+  t.Fatalf("rotated key reused revoked identity %+v",rotated)
+ }
+ g,err=svc.ContinuousGoal(ctx,g.ID);if err!=nil{t.Fatal(err)}
+ rotatedObservation:=record("router")
+ rotatedMessage,err:=SignedGoalObservationMessage(p.ID,g.ID,rotated.ID,
+  rotatedObservation.ID,rotatedObservation.IntegrityHash,1)
+ if err!=nil{t.Fatal(err)}
+ rotatedProof,err:=svc.AcceptSignedGoalObservation(ctx,AcceptSignedGoalObservationCommand{
+  ProjectID:p.ID,GoalID:g.ID,SignerID:rotated.ID,
+  ObservationID:rotatedObservation.ID,ActorPrincipalID:"source",
+  Sequence:1,ExpectedGoalRevision:g.Revision,
+  Signature:ed25519.Sign(newPriv,rotatedMessage),
+ })
+ if err!=nil||rotatedProof.SignerID!=rotated.ID{
+  t.Fatalf("new key did not admit independently signed proof: %+v %v",rotatedProof,err)
+ }
+ oldSigner,err:=scanGoalObservationSigner(db.SQL().QueryRowContext(ctx,
+  `SELECT `+goalObservationSignerColumns+` FROM project_goal_observation_signers
+   WHERE id=?`,signer.ID))
+ if err!=nil||oldSigner.Status!="revoked"||oldSigner.LastSequence!=2{
+  t.Fatalf("rotation corrupted previous immutable signer state %+v %v",oldSigner,err)
+ }
+ history,err=svc.ListGoalSignedObservationProofs(ctx,p.ID,g.ID)
+ if err!=nil||len(history)!=3{t.Fatalf("rotation discarded history: %+v %v",history,err)}
 }

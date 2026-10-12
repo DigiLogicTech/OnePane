@@ -343,11 +343,20 @@ func TestGoalSignedSourceMachineCredentialAndHumanKeyAPIBoundaries(t *testing.T)
  if _,err=db.SQL().ExecContext(ctx,`UPDATE api_credentials
   SET revoked_at=? WHERE id='cred-source-key'`,time.Now().UnixMilli());err!=nil{t.Fatal(err)}
  credentialList=request("GET",credentialRoute,"operator-key","")
- if credentialList.Code!=200||!strings.Contains(credentialList.Body.String(),
-  "\"credential_id\":\"cred-source-key\"")||
-  !strings.Contains(credentialList.Body.String(),"\"revoked_at\""){
-  t.Fatalf("external bearer revocation not reflected in human inventory: %d %s",
+ var inventory []projectworkspace.GoalSourceCredential
+ if credentialList.Code!=200||
+  json.Unmarshal(credentialList.Body.Bytes(),&inventory)!=nil{
+  t.Fatalf("external bearer revocation inventory unreadable: %d %s",
    credentialList.Code,credentialList.Body)
+ }
+ recordedRevoke:=false
+ for _,item:=range inventory{
+  if item.CredentialID=="cred-source-key"&&item.RevokedAt>0{
+   recordedRevoke=true
+  }
+ }
+ if !recordedRevoke{
+  t.Fatalf("externally revoked source token still presented as active: %+v",inventory)
  }
  if got:=request("POST",submit,"source-key",submitBody(second,2,priv));got.Code!=401{
   t.Fatalf("revoked bearer credential still reached proof admission: %d",got.Code)

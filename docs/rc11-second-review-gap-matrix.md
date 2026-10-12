@@ -1001,3 +1001,11 @@ More detail: `docs/rc11-one-shot-instrument-runner.md` and `docs/rc11-independen
 - [ ] **Still not complete:** physically authenticated paired-Node/instrument execution/vantage, trusted original challenge/plan transfer, approved same-target physical asset correlation and evidence independence, calibrated false-positive incident confidence, reversible human-approved Level 5 recovery with rollback/postconditions, low-RAM endurance/long-term bounded audit archival and full security/code audit. Human-focused UI/UX/customisation pass remains LAST before QA installer and installed Windows/Ubuntu hardware QA. Draft PR stays unmerged; no active autonomous home-network defence claim.
 
 Contract: `docs/rc11-instrument-project-challenge-budget.md`, `docs/rc11-tls-certificate-possession.md`.
+
+
+## RC11 P0-S v2 manual endpoint parity and per-host nonce anti-rerun — 2026-10-13
+
+- [x] Full hosted CI [#38322732883](https://github.com/DigiLogicTech/OnePane/actions/runs/38322732883) PASSED on source/test/doc head `52da423c4ae685589cc0f95db45151015ee0546e`. One atomic Git tree commit replaced the prior high-latency one-file/one-CI pattern.
+- [x] v2 challenge endpoint SHA-256 digest now enforced before manual TCP socket AND before post-hoc signed admission; a different RFC1918 IPv4 or port cannot inherit an exact approved v2 target ID. Legitimate historic v1 proof bundles retain historical readability, not present-day attested endpoint or trusted-sensor authority.
+- [ ] Follow-on local per-key anti-rerun CLI nonce ledger, private key self-check and invalid-directory handling are part of the current batched source regression. Verify full CI and record its commit before calling this line complete. The ledger is only accidental-retry protection on the chosen host and is not tamper-resistant, global, or independent hardware attestation.
+- [ ] Remaining P0: trusted paired-Node source execution witness + real instrument/target provenance, consented and calibrated cross-source incident decisions, reversible human-approved Level 5 actions with rollback/postconditions, bounded small-hardware soak, initial code/security audit, and LAST comprehensive human-centred UI/UX/customisation pass before Windows/Ubuntu QA installers. Draft unmerged, no autonomous protection claim.

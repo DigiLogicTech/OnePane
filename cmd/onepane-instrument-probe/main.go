@@ -24,6 +24,7 @@ import(
  "io"
  "net"
  "os"
+ "path/filepath"
  "runtime"
  "time"
 
@@ -73,7 +74,15 @@ func readPrivateKey(path string)(ed25519.PrivateKey,error){
  if err!=nil||len(bytes)!=ed25519.PrivateKeySize{
   return nil,errors.New("expected base64 Ed25519 64-byte private key")
  }
- return ed25519.PrivateKey(bytes),nil
+ key:=ed25519.PrivateKey(bytes)
+ // The 64-byte encoding includes an embedded public key. Reject a
+ // damaged/inconsistent file before any network socket is opened.
+ msg:=[]byte("OnePane/instrument-key-self-test/v1")
+ if !ed25519.Verify(key.Public().(ed25519.PublicKey),msg,
+  ed25519.Sign(key,msg)){
+  return nil,errors.New("instrument key material failed local integrity verification")
+ }
+ return key,nil
 }
 func trimSpace(s []byte)[]byte{
  begin,end:=0,len(s)
@@ -141,6 +150,40 @@ func runKeygen(args []string)error{
  return nil
 }
 
+// claimLocalProbeOnce is a crash-persistent, best-effort anti-duplicate
+// *local execution* fence. The remote proof ledger remains authoritative.
+// This intentionally spends a challenge on a failed dial or crash rather
+// than silently performing additional network effects after a retry.
+// A malicious operator with filesystem control can remove these files:
+// the fence is NOT hardware-backed attestation or global replay defence.
+func claimLocalProbeOnce(keyFile string,ch instrumentprobe.Challenge)error{
+ if keyFile==""||len(ch.SigningPayload)==0{
+  return errors.New("instrument key path or challenge missing")
+ }
+ dirname:=keyFile+".onepane-probe-claims"
+ if err:=os.Mkdir(dirname,0700);err!=nil&&!os.IsExist(err){return err}
+ info,err:=os.Lstat(dirname)
+ if err!=nil{return err}
+ if !info.IsDir()||info.Mode()&os.ModeSymlink!=0{
+  return errors.New("nonce ledger must be a real directory, not a symlink")
+ }
+ if runtime.GOOS!="windows"&&info.Mode().Perm()&0077!=0{
+  return errors.New("nonce ledger directory must be owner-only (chmod 700)")
+ }
+ digest:=sha256.Sum256(ch.SigningPayload)
+ path:=filepath.Join(dirname,fmt.Sprintf("%x.claim",digest[:]))
+ file,err:=os.OpenFile(path,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
+ if err!=nil{return fmt.Errorf("one-shot nonce already claimed or ledger unavailable: %w",err)}
+ // No target IP, private key, output filename or instrument response
+ // appears in the marker; one marker per original challenge bytes.
+ if _,err=file.Write([]byte("attempt-reserved\n"));err!=nil{
+  _=file.Close()
+  return err
+ }
+ if err=file.Sync();err!=nil{_=file.Close();return err}
+ return file.Close()
+}
+
 func runProbe(args []string)error{
  fs:=flag.NewFlagSet("probe",flag.ContinueOnError)
  challenge:=fs.String("challenge","","human-issued JSON challenge file")
@@ -168,6 +211,8 @@ func runProbe(args []string)error{
   }
   var plan instrumentprobe.ProbePlan
   if err=readPrivateJSON(*planFile,&plan);err!=nil{return err}
+  if _,err=instrumentprobe.ValidateProbePlan(ch,plan,time.Now());err!=nil{return err}
+  if err=claimLocalProbeOnce(*keyFile,ch);err!=nil{return err}
   receipt,err=instrumentprobe.ProbeApprovedPlan(context.Background(),ch,plan,
    pk,&net.Dialer{},time.Now)
  }else{
@@ -180,6 +225,8 @@ func runProbe(args []string)error{
   // that these manually selected bytes match the server's original permit.
   target:=instrumentprobe.Target{IPv4:*addr,Port:*port,TimeoutMS:*timeout,
    ConfirmedDeclaredTargetID:*declared}
+  if err=instrumentprobe.ValidateOneShotTarget(ch,target,time.Now());err!=nil{return err}
+  if err=claimLocalProbeOnce(*keyFile,ch);err!=nil{return err}
   receipt,err=instrumentprobe.ProbeOnce(context.Background(),ch,target,
    pk,&net.Dialer{},time.Now)
  }

@@ -3,6 +3,7 @@ package main
 import(
  "bytes"
  "crypto/ed25519"
+ "crypto/rand"
  "encoding/base64"
  "encoding/json"
  "os"
@@ -219,5 +220,62 @@ func TestInstrumentPrivateInputsRemainStrictlyBounded(t *testing.T){
  if err:=os.Mkdir(notAFile,0700);err!=nil{t.Fatal(err)}
  if err:=readPrivateJSON(notAFile,&v);err==nil{
   t.Fatal("directory was admitted as a private instrument receipt")
+ }
+}
+
+func TestLocalInstrumentOneShotNonceLedgerSurvivesRetryAndUsesKeyPath(t *testing.T){
+ keyPath:=filepath.Join(t.TempDir(),"instrument.secret")
+ ch:=instrumentprobe.Challenge{SigningPayload:[]byte("distinct human issued nonce bytes")}
+ if err:=claimLocalProbeOnce(keyPath,ch);err!=nil{
+  t.Fatalf("first authorized local nonce reservation failed: %v",err)
+ }
+ if err:=claimLocalProbeOnce(keyPath,ch);err==nil{
+  t.Fatal("second invocation reused a locally spent nonce")
+ }
+ // An alternate receipt output name or a restarted CLI still chooses
+ // the same ledger key path and cannot reopen the socket.
+ sibling:=instrumentprobe.Challenge{SigningPayload:[]byte("a separately issued nonce")}
+ if err:=claimLocalProbeOnce(keyPath,sibling);err!=nil{
+  t.Fatalf("a new authorized challenge was blocked: %v",err)
+ }
+ dir:=keyPath+".onepane-probe-claims"
+ entries,err:=os.ReadDir(dir)
+ if err!=nil||len(entries)!=2{
+  t.Fatalf("local immutable nonce claims missing: %v, %d",err,len(entries))
+ }
+ if runtime.GOOS!="windows"{
+  info,err:=os.Stat(dir);if err!=nil{t.Fatal(err)}
+  if info.Mode().Perm()!=0700{t.Fatalf("nonce ledger not private: %v",info.Mode())}
+  if err=os.Chmod(dir,0755);err!=nil{t.Fatal(err)}
+  if err=claimLocalProbeOnce(keyPath,instrumentprobe.Challenge{
+   SigningPayload:[]byte("new human challenge after unsafe permission")});err==nil{
+   t.Fatal("unsafe world-readable local nonce ledger was accepted")
+  }
+ }
+}
+func TestLocalInstrumentOneShotLedgerRejectsSymlink(t *testing.T){
+ dir:=t.TempDir()
+ path:=filepath.Join(dir,"instrument.secret")
+ real:=filepath.Join(dir,"another-dir")
+ if err:=os.Mkdir(real,0700);err!=nil{t.Fatal(err)}
+ if err:=os.Symlink(real,path+".onepane-probe-claims");err!=nil{
+  if runtime.GOOS=="windows"{t.Skip("Windows symlink privilege unavailable")}
+  t.Fatal(err)
+ }
+ if err:=claimLocalProbeOnce(path,instrumentprobe.Challenge{
+  SigningPayload:[]byte("scope-bound fresh challenge")});err==nil{
+  t.Fatal("untrusted symlink masqueraded as private nonce ledger")
+ }
+}
+func TestLocalInstrumentPrivateKeyRejectsIncorrectEmbeddedPublicPart(t *testing.T){
+ dir:=t.TempDir()
+ path:=filepath.Join(dir,"key.txt")
+ _,key,err:=ed25519.GenerateKey(rand.Reader)
+ if err!=nil{t.Fatal(err)}
+ tampered:=append([]byte(nil),key...)
+ tampered[len(tampered)-1]^=1
+ if err=os.WriteFile(path,[]byte(base64.StdEncoding.EncodeToString(tampered)),0600);err!=nil{t.Fatal(err)}
+ if _,err=readPrivateKey(path);err==nil{
+  t.Fatal("corrupt private instrument file passed self-check before probe")
  }
 }

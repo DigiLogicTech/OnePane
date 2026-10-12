@@ -248,6 +248,16 @@ func validateManualChallengeTarget(ch Challenge,target Target)error{
  return nil
 }
 
+// ValidateOneShotTarget performs ALL consent-bound checks without opening
+// any connection. The CLI calls it before durably reserving a local nonce;
+// ProbeOnce repeats it immediately before the actual network effect.
+func ValidateOneShotTarget(ch Challenge,target Target,now time.Time)error{
+ id,err:=ParseChallenge(ch,now)
+ if err!=nil{return err}
+ if err=ValidateTarget(target,id);err!=nil{return err}
+ return validateManualChallengeTarget(ch,target)
+}
+
 // ProbeOnce opens AT MOST ONE TCP4 connection to one operator-selected private
 // IPv4 socket. It does not perform DNS, a scan, TLS identity check, HTTP,
 // redirects, application writes, retries, Tasks or automatic monitoring.
@@ -257,10 +267,9 @@ func ProbeOnce(ctx context.Context,ch Challenge,target Target,
  if dialer==nil||len(private)!=ed25519.PrivateKeySize{
   return LocalProbeReceipt{},errors.New("instrument or private signing key unavailable")
  }
- id,err:=ParseChallenge(ch,now())
- if err!=nil{return LocalProbeReceipt{},err}
- if err=ValidateTarget(target,id);err!=nil{return LocalProbeReceipt{},err}
- if err=validateManualChallengeTarget(ch,target);err!=nil{return LocalProbeReceipt{},err}
+ if err:=ValidateOneShotTarget(ch,target,now());err!=nil{
+  return LocalProbeReceipt{},err
+ }
  if ctx.Err()!=nil{return LocalProbeReceipt{},ctx.Err()}
  start:=now()
  deadline:=time.Duration(target.TimeoutMS)*time.Millisecond

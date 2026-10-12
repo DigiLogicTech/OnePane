@@ -133,7 +133,8 @@ func TestGoalSignedSourceMachineCredentialAndHumanKeyAPIBoundaries(t *testing.T)
  if mintedResponse.Code!=201{t.Fatalf("operator issuance failed: %d %s",mintedResponse.Code,mintedResponse.Body)}
  var minted projectworkspace.MintedGoalSourceCredential
  if err=json.Unmarshal(mintedResponse.Body.Bytes(),&minted);err!=nil{t.Fatal(err)}
- if minted.Credential.SignerID!=key.ID||!strings.HasPrefix(minted.BearerToken,"op_src_"){
+ if minted.Credential.SignerID!=key.ID||minted.Credential.Status!="active"||
+  !strings.HasPrefix(minted.BearerToken,"op_src_"){
   t.Fatalf("unexpected one-time credential metadata: %+v",minted.Credential)
  }
  if got:=request("GET",credentialRoute,minted.BearerToken,"");got.Code!=403{
@@ -329,6 +330,11 @@ func TestGoalSignedSourceMachineCredentialAndHumanKeyAPIBoundaries(t *testing.T)
  }
  revoked:=request("POST",revokeRoute,"operator-key",revoke)
  if revoked.Code!=200{t.Fatalf("human key revocation: %d %s",revoked.Code,revoked.Body.String())}
+ credentialList=request("GET",credentialRoute,"operator-key","")
+ if credentialList.Code!=200||!strings.Contains(credentialList.Body.String(),"\"signer_inactive\""){
+  t.Fatalf("signer key revoked but remaining token shown as active: %d %s",
+   credentialList.Code,credentialList.Body)
+ }
  keyList=request("GET",signers,"operator-key","")
  if keyList.Code!=200||!strings.Contains(keyList.Body.String(),"\"revoked\""){
   t.Fatalf("revoked signing key hidden from operator audit: %d %s",keyList.Code,keyList.Body)

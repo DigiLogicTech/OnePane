@@ -97,3 +97,10 @@ Issue body: `{"expires_at":<epoch_milliseconds>}`. Revocation body: `{}`. Signer
 The `record` and `submit` domain writer transactions now verify that the active API credential and immutable source-credential binding match the **exact** Goal, signer, original service principal, tenant Workspace, current grant and finite expiry; only `["goal.source.submit"]` and the exact tenant Workspace array are accepted. A generic bearer token with project.write, wildcard permissions, unbounded expiry or no explicit binder record cannot enter the source-only proof lane. Historic internal Go-only service methods are not public bearer endpoints.
 
 **Status:** This is source credential provisioning, not first-time physical sensor principal enrollment or paired-Node authenticated transport. It cannot by itself prove device origin, enable network remediation, or mark a Goal healthy. Integration/CI status is recorded in the RC11 task manifest.
+
+
+### Failed-request abuse budget
+
+In addition to the separate 30-per-minute **successful** source reading and signed proof budgets, migration `0074_goal_source_request_attempt_budget.sql` introduces one **durable shared 60-attempt fixed 60-second window per machine credential**, used by both `record` and `submit`. Every authenticated, signer-bound request consumes a reservation **before JSON decoding, signature verification or Observation access**. Invalid JSON and forged/expired signatures consume attempts rather than bypassing success-only limits. The 61st attempt returns HTTP 429 with `Retry-After: 60`; clock rollback cannot reset the window. The per-credential budget is independent of each signer’s accepted-proof/reading quotas.
+
+This is a low-resource fail-closed guard against a malfunctioning authorised sensor, not a general Internet-facing denial-of-service solution. Authentication/proxy limits, per-Project aggregate budgets, backpressure and trusted-Node transport throughput still require operational hardening. A token without a live exact-signer binding is denied before request-body processing and does not qualify for this credential-specific budget.

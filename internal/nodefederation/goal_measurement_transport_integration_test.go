@@ -245,3 +245,63 @@ func TestNodeGoalTransportRejectsUnconfiguredGrant(t *testing.T){
   t.Fatal("missing fail-closed admission sentinel")
  }
 }
+
+func TestPairedNodeMalformedTelemetryConsumesPerPeerBudget(t *testing.T){
+ ctx:=context.Background()
+ db,now:=seedNodeDB(t,"origin","origin-id")
+ defer db.Close()
+ peer,err:=EnsureIdentity(t.TempDir(),"peer")
+ if err!=nil{t.Fatal(err)}
+ _,err=db.SQL().ExecContext(ctx,`INSERT INTO harness_nodes(
+  id,name,local,identity_fingerprint,trust_state,trust_zone,
+  protocol_json,capabilities_json,revision,created_at,updated_at)
+  VALUES('peer','Peer',0,'peer-identity','paired','PAIRED_MTLS',
+   '{}','{}',1,?,?)`,now,now)
+ if err!=nil{t.Fatal(err)}
+ _,err=db.SQL().ExecContext(ctx,`INSERT INTO node_pairings(
+  id,peer_node_id,direction,status,pairing_token,pairing_token_hash,
+  pairing_code,pairing_code_hash,local_confirmed,peer_confirmed,
+  peer_tls_fingerprint,peer_certificate_pem,expires_at,paired_at,
+  revision,created_at,updated_at)
+  VALUES('pair-peer','peer','inbound','paired','token','hash',
+   '000000','hash',1,1,?,?,?, ?,1,?,?)`,
+  peer.Fingerprint,string(peer.CertPEM),now+3600000,now,now,now)
+ if err!=nil{t.Fatal(err)}
+ cert,err:=x509.ParseCertificate(peer.Certificate.Certificate[0])
+ if err!=nil{t.Fatal(err)}
+ svc:=NewService(db.SQL(),db,clock.Real{},
+  NodeView{ID:"origin",Local:true},Identity{},"",30*time.Second)
+ handler:=NewServer(svc,nil).Handler()
+ submit:=func()*httptest.ResponseRecorder{
+  req:=httptest.NewRequest("POST","/federation/v1/measurements",
+   strings.NewReader(`{"missing":`))
+  req.TLS=&tls.ConnectionState{PeerCertificates:[]*x509.Certificate{cert}}
+  w:=httptest.NewRecorder();handler.ServeHTTP(w,req)
+  return w
+ }
+ for i:=0;i<60;i++{
+  got:=submit()
+  if got.Code!=400{t.Fatalf("attempt %d escaped strict JSON or quota: %d",
+   i,got.Code)}
+ }
+ got:=submit()
+ if got.Code!=429||got.Header().Get("Retry-After")!="60"{
+  t.Fatalf("61st malformed peer telemetry bypassed budget: %d %s",
+   got.Code,got.Body)
+ }
+ var n int
+ if err=db.SQL().QueryRowContext(ctx,`SELECT attempts FROM
+  node_measurement_request_budgets WHERE peer_node_id='peer'`).Scan(&n);
+  err!=nil||n!=60{t.Fatalf("rate-denied peer consumed extra slot: %d %v",n,err)}
+ var records int
+ if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM
+  project_goal_node_measurement_receipts`).Scan(&records);
+  err!=nil||records!=0{t.Fatalf("invalid peer data entered receipt ledger: %d %v",records,err)}
+ // A pairing trust downgrade must take precedence over quota status.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE harness_nodes
+  SET trust_state='unavailable' WHERE id='peer'`);err!=nil{t.Fatal(err)}
+ got=submit()
+ if got.Code!=403{
+  t.Fatalf("unavailable Node still authorised despite live withdrawal: %d",got.Code)
+ }
+}

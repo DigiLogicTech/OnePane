@@ -12,7 +12,7 @@ func TestObservationJSONStrictlyRejectsDuplicateAndAmbiguousFields(t *testing.T)
   {"array of objects",`[{"id":1},{"id":2}]`,true},
   {"scalar",`false`,true},
   {"duplicate root",`{"status":"ok","status":"spoof"}`,false},
-  {"unicode equivalent duplicate",`{"source_id":"ok","source\\u005fid":"spoof"}`,false},
+  {"unicode equivalent duplicate",`{"source_id":"ok","source\u005fid":"spoof"}`,false},
   {"nested duplicate",`{"data":[{"ok":true,"ok":false}]}`,false},
   {"multiple roots",`{"ok":true}{"ok":false}`,false},
   {"empty",``,false},

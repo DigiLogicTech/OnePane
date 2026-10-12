@@ -284,6 +284,13 @@ func(s *Service)completeTCPAttempt(ctx context.Context,a GoalTCPProbeAttempt,sta
  err=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
   now:=s.clock.UnixMilli()
   if now<a.ClaimedAt{now=a.ClaimedAt}
+  // Both the completion and any derived drift notice belong to the
+  // canonical tenant Workspace. Omitting this scope hides the event from
+  // Workspace readers and leaves target-specific metadata unscoped.
+  var tenantWorkspaceID string
+  if err:=tx.QueryRowContext(ctx,
+   "SELECT workspace_id FROM projects WHERE id=?",a.ProjectID).
+   Scan(&tenantWorkspaceID);err!=nil{return err}
   change,err:=tx.ExecContext(ctx,`UPDATE project_goal_tcp_probe_attempts
     SET status=?,completed_at=? WHERE id=? AND status='claimed'`,status,now,a.ID)
   if err!=nil{return err}
@@ -292,14 +299,15 @@ func(s *Service)completeTCPAttempt(ctx context.Context,a GoalTCPProbeAttempt,sta
   // A mismatching, current operator-approved TCP baseline creates one
   // immutable drift notice in the same transaction as the test outcome.
   // This never changes Goal health or authorises host remediation.
-  if err=s.recordTCPReachabilityAlertTx(ctx,tx,a,status,now);err!=nil{return err}
+  if err=s.recordTCPReachabilityAlertTx(ctx,tx,a,status,now,tenantWorkspaceID);err!=nil{return err}
   body,_:=json.Marshal(map[string]any{
    "attempt_id":a.ID,"goal_id":a.GoalID,"permit_id":a.PermitID,
    "source_id":a.SourceID,"status":status,"reachability_only":true,
    "verified_device_health":false,
   })
   return s.events.Append(ctx,tx,event.Event{
-   ID:evt,Type:"project.goal_tcp_probe_finished",
+   ID:evt,WorkspaceID:&tenantWorkspaceID,
+   Type:"project.goal_tcp_probe_finished",
    AggregateType:"project_goal_tcp_probe_attempt",AggregateID:a.ID,
    ActorPrincipalID:&a.RequestedBy,Payload:body,OccurredAt:now,
   })

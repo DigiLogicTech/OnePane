@@ -154,6 +154,18 @@ func TestLevel5SignedObservationEnrollmentAntiReplayAndLiveRevocation(t *testing
   coverage.Sources[0].SignatureEvidenceState!="recent_source_signature"{
   t.Fatalf("signed source was conflated with manually attached receipts or device health: %+v %v",coverage,err)
  }
+ history,err:=svc.ListGoalSignedObservationProofs(ctx,p.ID,g.ID)
+ if err!=nil||len(history)!=2||history[0].SourceID!="router"{
+  t.Fatalf("signed evidence metadata readback unavailable: %+v %v",history,err)
+ }
+ listed,_:=json.Marshal(history)
+ if bytes.Contains(listed,[]byte("NEVER_COPY_RAW_VALUE"))||
+  bytes.Contains(listed,[]byte("sensor://private")){
+  t.Fatal("signed evidence metadata readback leaked sensor values")
+ }
+ if _,err=svc.ListGoalSignedObservationProofs(ctx,"another-project",g.ID);err==nil{
+  t.Fatal("cross-Project signed proof history disclosed")
+ }
  // Revocation is allowed at the current signer revision after sequence use.
  revoked,err:=svc.RevokeGoalObservationSigner(ctx,RevokeGoalObservationSignerCommand{
   ProjectID:p.ID,GoalID:g.ID,SignerID:signer.ID,ActorPrincipalID:"owner",

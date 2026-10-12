@@ -80,3 +80,20 @@ A second, serialized SQLite reservation independently enforces at most **30 stag
 Source and integration tests use real persisted bearer credentials and workspace/capability scopes, verify a human-only registration, machine-only signed admission, project.write-only denial, source impersonation denial, replay/tampered sequence rejection, duplicate JSON denial, key audit visibility/revocation, no raw-secret readback and no auto-monitoring. CI details are maintained in `docs/rc11-second-review-gap-matrix.md`.
 
 **User sequencing remains binding:** finish the functional/security integration and first code review before the full human-focused UI/UX/customisation pass, which is the LAST development workstream before the next QA build. Then final CI/code audit and authorised Windows/Ubuntu packaging. No merge/release at this checkpoint.
+
+
+## Operator-managed machine bearer credentials (P0-D)
+
+Source evidence HTTP bearer tokens are no longer intended to be provisioned as unconstrained generic project credentials. A human operator must first enrol an exact Ed25519 signer ID, then mint a **separate single-purpose bearer token** for that signer:
+
+| Method and endpoint | Authority | Result |
+| --- | --- | --- |
+| `POST /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers/{signerID}/credentials` | Human `project.write` plus live Goal/signer/source checks | Creates random bearer token; only this response contains `bearer_token`, alongside safe credential metadata |
+| `GET /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers/{signerID}/credentials` | Human `project.write` | Bounded metadata including expiry/revocation; no secrets |
+| `POST /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers/{signerID}/credentials/{credentialID}/revoke` | Human `project.write` | Atomically revokes the binding and underlying API credential; no token in response |
+
+Issue body: `{"expires_at":<epoch_milliseconds>}`. Revocation body: `{}`. Signer credentials expire after 5 minutes to 7 days and no later than the approved signing key. No more than two active credentials per signer. A new token is generated using 32 bytes from the CSPRNG and is stored only as a SHA-256 token digest; no plaintext token is stored in either database or audit events. Browser UI must show/copy a newly minted token once, then never rehydrate it; protecting the clipboard/browser local state remains a later UI/UX design task.
+
+The `record` and `submit` domain writer transactions now verify that the active API credential and immutable source-credential binding match the **exact** Goal, signer, original service principal, tenant Workspace, current grant and finite expiry; only `["goal.source.submit"]` and the exact tenant Workspace array are accepted. A generic bearer token with project.write, wildcard permissions, unbounded expiry or no explicit binder record cannot enter the source-only proof lane. Historic internal Go-only service methods are not public bearer endpoints.
+
+**Status:** This is source credential provisioning, not first-time physical sensor principal enrollment or paired-Node authenticated transport. It cannot by itself prove device origin, enable network remediation, or mark a Goal healthy. Integration/CI status is recorded in the RC11 task manifest.

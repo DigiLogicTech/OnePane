@@ -2218,7 +2218,10 @@ async function qa4BindL5GoalConfigurator(project){
         const entries=Array.isArray(result.sources)?result.sources:[];
         holder.innerHTML='<div class="page-subtitle"><strong>Evidence coverage only — not verified health.</strong> No monitoring is activated by this check.</div>'+
           (entries.length?entries.map(x=>`<div class="page-subtitle">${escapeHtml(x.source_id||'Source')}: ${escapeHtml(x.evidence_state||'missing')}
-            ${x.last_observed_at?' · observed '+escapeHtml(new Date(x.last_observed_at).toLocaleString()):''}</div>`).join(''):
+            ${x.last_observed_at?' · observed '+escapeHtml(new Date(x.last_observed_at).toLocaleString()):''}
+            ${x.tcp_reachability?' · separate TCP test: '+escapeHtml(x.tcp_reachability):''}
+            ${x.last_tcp_test_at?' at '+escapeHtml(new Date(x.last_tcp_test_at).toLocaleString()):''}
+            ${x.tcp_reachability?' (not verified health)':''}</div>`).join(''):
           '<div class="page-subtitle">No approved observation sources configured.</div>');
       }catch(ex){if(holder.isConnected)holder.textContent='Coverage unavailable: '+ex.message}
       return;

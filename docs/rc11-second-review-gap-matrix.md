@@ -744,10 +744,14 @@ never treat either one as blanket recurring network consent.
   adapter dispatch. A streaming-token single decode avoids a second
   full-sized payload decode, retaining support for legitimate
   large base64 file content without a 64KiB limit.
-- [ ] Latest combined JSON and Tool-gateway checks are running at
+- [x] **Combined application/test CI passed** at
   [#38198334048](https://github.com/DigiLogicTech/OnePane/actions/runs/38198334048)
-  on the application/test head `42cc4e298206`; the final branch CI
-  must be rechecked and any failures remediated.
+  on `42cc4e298206` (Go/SQLite integration, WebUI contracts and
+  cross-platform checks). The consolidated manifest checkpoint also
+  passed at
+  [#38198372329](https://github.com/DigiLogicTech/OnePane/actions/runs/38198372329)
+  on `f19d444620ea`. No installer, release merge or device QA is
+  implied by these source-level results.
 - [ ] These changes are **not** evidence that every direct shell,
   MCP, Node, adapter and GUI side effect has universal independent
   Write/Execute/Network/Secrets enforcement. Complete adapter

@@ -1,0 +1,169 @@
+package api
+
+import(
+ "context"
+ "encoding/json"
+ "fmt"
+ "net/http/httptest"
+ "strings"
+ "testing"
+ "time"
+
+ "github.com/DigiLogicTech/OnePane/internal/clock"
+ "github.com/DigiLogicTech/OnePane/internal/projectworkspace"
+ sqliteStore "github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
+)
+
+func TestHumanPinnedTLSCertificateRequiresExactExistingTargetAndOneBoundedCheck(t *testing.T){
+ ctx:=context.Background()
+ db,err:=sqliteStore.Open(t.TempDir()+"/tls-pin-api.db")
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ if err=db.Migrate(ctx);err!=nil{t.Fatal(err)}
+ for _,q:=range []string{
+  `INSERT INTO workspaces(id,name,status,revision,created_at,updated_at)
+   VALUES('tenant','Tenant','active',1,1,1)`,
+  `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at)
+   VALUES('operator','human','Operator','active',1,1,1)`,
+  `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at)
+   VALUES('robot','agent','Robot','active',1,1,1)`,
+  `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at)
+   VALUES('tenant','operator','active',1,1)`,
+  `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at)
+   VALUES('tenant','robot','active',1,1)`,
+ }{if _,err=db.SQL().ExecContext(ctx,q);err!=nil{t.Fatal(err)}}
+ svc:=projectworkspace.NewService(db.SQL(),db,clock.Real{})
+ p,err:=svc.CreateProject(ctx,projectworkspace.CreateProjectCommand{
+  WorkspaceID:"tenant",Name:"Explicit out-of-band TLS pin",CreatedBy:"operator",
+  ProjectPolicyJSON:json.RawMessage(`{"onepane_operations":{"version":1,"mode":"continuous_operations"}}`),
+ })
+ if err!=nil{t.Fatal(err)}
+ w,err:=svc.CreateWorkspaceView(ctx,projectworkspace.CreateWorkspaceViewCommand{
+  ProjectID:p.ID,Name:"Pin",ActorPrincipalID:"operator",
+ })
+ if err!=nil{t.Fatal(err)}
+ goal,err:=svc.ConfigureContinuousGoal(ctx,projectworkspace.ConfigureContinuousGoalCommand{
+  ProjectID:p.ID,ProjectWorkspaceID:w.ID,
+  Objective:"Certificate possession, not device security",
+  ActorPrincipalID:"operator",
+  MonitoringPlanJSON:json.RawMessage(`{"version":1,"source_ids":["router"]}`),
+ })
+ if err!=nil{t.Fatal(err)}
+ now:=clock.Real{}.UnixMilli()
+ permit,err:=svc.ApproveGoalTCPProbe(ctx,projectworkspace.ApproveGoalTCPProbeCommand{
+  ProjectID:p.ID,GoalID:goal.ID,SourceID:"router",ActorPrincipalID:"operator",
+  TargetIPv4:"192.168.42.247",TargetPort:443,TimeoutMS:100,
+  ExpiresAt:now+30*60000,ExpectedGoalRevision:goal.Revision,
+ })
+ if err!=nil{t.Fatal(err)}
+ goal,err=svc.ContinuousGoal(ctx,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ declared,err:=svc.DeclareGoalTCPTarget(ctx,projectworkspace.DeclareGoalTCPTargetCommand{
+  ProjectID:p.ID,GoalID:goal.ID,PermitID:permit.ID,
+  DisplayLabel:"Known router TLS endpoint",ActorPrincipalID:"operator",
+  ExpectedGoalRevision:goal.Revision,ExpectedPermitRevision:permit.Revision,
+  ExpiresAt:now+20*60000,
+ })
+ if err!=nil{t.Fatal(err)}
+ goal,err=svc.ContinuousGoal(ctx,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ handler:=NewServer(svc,nil,goalAPIAuth{}).Handler()
+ base:="/v1/projects/"+p.ID+"/continuous-goals/"+goal.ID
+ pins:=base+"/tls-pins"
+ request:=func(method,who,path,body string)*httptest.ResponseRecorder{
+  req:=httptest.NewRequest(method,path,strings.NewReader(body))
+  if who!=""{req.Header.Set("Authorization","Bearer "+who)}
+  if body!=""{req.Header.Set("Content-Type","application/json")}
+  rec:=httptest.NewRecorder();handler.ServeHTTP(rec,req)
+  return rec
+ }
+ fingerprint:="sha256:"+strings.Repeat("a",64)
+ body:=fmt.Sprintf(`{"declared_target_id":"%s",
+  "certificate_sha256":"%s","expected_goal_revision":%d,
+  "expected_target_revision":1,"expires_at":%d}`,
+  declared.ID,fingerprint,goal.Revision,now+10*60000)
+ for _,tc:=range []struct{who string;code int}{
+  {"",401},{"outsider",403},{"robot",403},
+ }{
+  got:=request("POST",tc.who,pins,body)
+  if got.Code!=tc.code{t.Fatalf("unapproved %s pin %d %s",
+   tc.who,got.Code,got.Body)}
+ }
+ if got:=request("POST","operator",pins,
+  strings.Replace(body,fingerprint,"sha256:INVALID",1));got.Code<400{
+  t.Fatalf("malformed out-of-band certificate fingerprint accepted: %d",got.Code)
+ }
+ if got:=request("POST","operator",pins,
+  strings.Replace(body,declared.ID,"foreign-declared-target",1));got.Code<400{
+  t.Fatalf("pin accepted a foreign target: %d",got.Code)
+ }
+ approved:=request("POST","operator",pins,body)
+ if approved.Code!=201{t.Fatalf("human TLS pin approval failed: %d %s",
+  approved.Code,approved.Body)}
+ var pin projectworkspace.GoalTLSPin
+ if err=json.Unmarshal(approved.Body.Bytes(),&pin);err!=nil{t.Fatal(err)}
+ if pin.CertificateSHA256!=fingerprint||pin.Status!="approved"||
+  pin.DeclaredTargetID!=declared.ID||pin.PermitID!=permit.ID{
+  t.Fatalf("TLS approval drifted off exact target: %+v",pin)
+ }
+ if got:=request("POST","operator",pins,body);got.Code<400{
+  t.Fatalf("same Goal revision reissued pin: %d",got.Code)
+ }
+ if got:=request("GET","robot",pins,"");got.Code!=403{
+  t.Fatalf("agent retrieved TLS pin history: %d",got.Code)
+ }
+ list:=request("GET","operator",pins,"")
+ if list.Code!=200||!strings.Contains(list.Body.String(),pin.ID){
+  t.Fatalf("human cannot inspect bounded pin inventory: %d %s",list.Code,list.Body)
+ }
+ goal,err=svc.ContinuousGoal(ctx,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ verify:=pins+"/"+pin.ID+"/verify"
+ verifyBody:=fmt.Sprintf(`{"expected_goal_revision":%d,
+  "expected_pin_revision":1}`,goal.Revision)
+ if got:=request("POST","robot",verify,verifyBody);got.Code!=403{
+  t.Fatalf("agent initiated TLS connection: %d",got.Code)
+ }
+ if got:=request("POST","operator",verify,
+  strings.TrimSuffix(verifyBody,"}")+`,"target_ipv4":"8.8.8.8"}`);
+  got.Code!=400{
+  t.Fatalf("target injection was accepted: %d",got.Code)
+ }
+ // One bounded connect toward an explicit private test address without a
+ // server. No response may claim possession, trusted device or health.
+ result:=request("POST","operator",verify,verifyBody)
+ if result.Code!=201{t.Fatalf("one manual TLS check was denied: %d %s",
+  result.Code,result.Body)}
+ var checked projectworkspace.GoalPinnedTLSCheck
+ if err=json.Unmarshal(result.Body.Bytes(),&checked);err!=nil{t.Fatal(err)}
+ if checked.Status=="matched"||checked.DeviceIdentityVerified||
+  checked.CertificatePossessionMatched||checked.MonitoringActive{
+  t.Fatalf("unavailable TLS connection was counted as attested: %+v",checked)
+ }
+ if got:=request("POST","operator",verify,verifyBody);got.Code<400{
+  t.Fatalf("same 5-minute TLS claim was allowed twice: %d",got.Code)
+ }
+ checks:=request("GET","operator",base+"/tls-checks","")
+ if checks.Code!=200||!strings.Contains(checks.Body.String(),checked.ID)||
+  strings.Contains(checks.Body.String(),"192.168.42.247"){
+  t.Fatalf("bounded check history missing or leaked private target: %d %s",
+   checks.Code,checks.Body)
+ }
+ goal,err=svc.ContinuousGoal(ctx,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ revokeBody:=fmt.Sprintf(`{"expected_goal_revision":%d,
+  "expected_pin_revision":1}`,goal.Revision)
+ if got:=request("POST","operator",pins+"/"+pin.ID+"/revoke",revokeBody);
+  got.Code!=200{t.Fatalf("human could not revoke TLS pin: %d %s",got.Code,got.Body)}
+ if _,err=db.SQL().ExecContext(ctx,`DELETE FROM project_goal_tls_endpoint_pins
+  WHERE id=?`,pin.ID);err==nil{t.Fatal("TLS pin audit could be deleted")}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_goal_tls_endpoint_pins
+  SET certificate_sha256=? WHERE id=?`,fingerprint,pin.ID);err==nil{
+  t.Fatal("TLS approval fingerprint could be changed")
+ }
+ goal,err=svc.ContinuousGoal(ctx,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ if goal.Health!="unobserved"||goal.Status!="configured"||
+  goal.LastVerifiedAt!=0{t.Fatalf("TLS check activated Goal: %+v",goal)}
+ _=time.Second
+}

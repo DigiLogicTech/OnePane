@@ -70,6 +70,21 @@ func TestL5EvidenceHTTPIsAuthorisedMetadataOnlyAndDoesNotActivateMonitoring(t *t
  if got:=call("GET","operator",route,"");got.Code!=200||!strings.Contains(got.Body.String(),"[]"){
   t.Fatalf("initial evidence list mismatch %d %s",got.Code,got.Body)
  }
+ signedRoute:="/v1/projects/"+p.ID+"/continuous-goals/"+goal.ID+"/signed-observations"
+ if got:=call("GET","",signedRoute,"");got.Code!=401{
+  t.Fatalf("signed provenance without auth: %d",got.Code)
+ }
+ if got:=call("GET","outsider",signedRoute,"");got.Code!=403{
+  t.Fatalf("foreign principal read signed provenance: %d",got.Code)
+ }
+ if got:=call("GET","operator",signedRoute,"");got.Code!=200||
+  !strings.Contains(got.Body.String(),"[]")||
+  strings.Contains(got.Body.String(),"RAW_VALUE_MUST_NOT_LEAK"){
+  t.Fatalf("signed metadata-only endpoint not correctly scoped: %d %s",got.Code,got.Body)
+ }
+ if got:=call("POST","operator",signedRoute,"{}");got.Code!=405{
+  t.Fatalf("read-only signed provenance endpoint accepted a write: %d",got.Code)
+ }
  coverageRoute:="/v1/projects/"+p.ID+"/continuous-goals/"+goal.ID+"/coverage"
  if got:=call("GET","outsider",coverageRoute,"");got.Code!=403{
   t.Fatalf("unauthorised evidence coverage read %d",got.Code)

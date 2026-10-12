@@ -239,4 +239,26 @@ for(const token of ["SampleBaselineRevision","no_baseline_at_test",
  "baseline_updated_since_test","atClaimBaselineID!=baselineID"]){
  assert(baselineService.includes(token),"baseline assessment must block retrospective evidence "+token);
 }
+// Baseline drift only creates an immutable, human-acknowledgeable NOTICE,
+// never a verified compromise claim or authority to run a remediation.
+const driftAlerts=fs.readFileSync("internal/projectworkspace/continuous_goal_tcp_reachability_alerts.go","utf8");
+const driftAPI=fs.readFileSync("internal/api/project_goal_tcp_reachability_alerts.go","utf8");
+const driftDDL=fs.readFileSync("migrations/0069_goal_tcp_reachability_alerts.sql","utf8");
+for(const token of ["recordTCPReachabilityAlertTx",
+ "BaselineIDAtClaim","BaselineRevisionAtClaim",
+ "unexpected_reachable","unexpected_unreachable",
+ "DeviceHealth=\"unverified\"","AcknowledgeTCPReachabilityAlert",
+ "humanGoalReviewer"]){
+ assert(driftAlerts.includes(token),"baseline alert admission missing "+token);
+}
+for(const token of ["project.read","project.write",
+ "ListTCPReachabilityAlerts","AcknowledgeTCPReachabilityAlert"]){
+ assert(driftAPI.includes(token),"human-alert API missing "+token);
+}
+assert(tcpRun.includes("recordTCPReachabilityAlertTx(ctx,tx,a,status,now)"),
+ "drift should be detected only in the immutable TCP completion transaction");
+assert(driftDDL.includes("goal_tcp_reachability_alerts_no_rewrite"),
+ "human notice provenance must be immutable");
+assert(!harness.includes("AcknowledgeTCPReachabilityAlert"),
+ "background operations must not silently acknowledge security warnings");
 console.log("L5 pause/retire UI and fail-closed goal lifecycle: PASS");

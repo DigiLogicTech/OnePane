@@ -596,20 +596,25 @@ func(s *Service)GetGoalInstrumentVerificationBundle(ctx context.Context,
    &certHash,&nonce,&out.SigningPayload,&issuedAt,&expiresAt)
  if errors.Is(err,sql.ErrNoRows){return GoalInstrumentVerificationBundle{},ErrInvalidTransition}
  if err!=nil{return GoalInstrumentVerificationBundle{},err}
- key:=GoalInstrumentKey{ID:out.Proof.KeyID,ProjectID:projectID,GoalID:goalID,
-  DeclaredTargetID:out.Proof.DeclaredTargetID,TLSPinID:out.Proof.TLSPinID,
-  PlanHash:planHash}
- pin:=GoalTLSPin{CertificateSHA256:certHash}
- challenge:=GoalInstrumentChallenge{
-  ID:out.Proof.ChallengeID,Nonce:nonce,IssuedAt:issuedAt,ExpiresAt:expiresAt,
+ // Validate all historically signed context fields against their
+ // immutable database entries, WITHOUT reserialising and losing the
+ // original bytes that the instrument actually signed in v1.
+ var envelope instrumentChallengeSigningEnvelope
+ if err=json.Unmarshal(out.SigningPayload,&envelope);err!=nil{
+  return GoalInstrumentVerificationBundle{},ErrInvalidTransition
  }
- // Preserve the original immutable signing bytes rather than relying
- // on a later Go version to reconstruct a bit-identical old JSON format.
- // The response includes the original key, pin and challenge identifiers
- // in those bytes; independent Ed25519 verification is authoritative.
- _=key
- _=pin
- _=challenge
+ if envelope.Domain!="OnePane/instrument-challenge/ed25519/v1"||
+  envelope.ProjectID!=projectID||envelope.GoalID!=goalID||
+  envelope.InstrumentKeyID!=out.Proof.KeyID||
+  envelope.ChallengeID!=out.Proof.ChallengeID||
+  envelope.DeclaredTargetID!=out.Proof.DeclaredTargetID||
+  envelope.TLSPinID!=out.Proof.TLSPinID||
+  envelope.PinnedCertificateSHA256!=certHash||
+  envelope.PlanHash!=planHash||
+  !bytes.Equal(envelope.Nonce,nonce)||
+  envelope.IssuedAt!=issuedAt||envelope.ExpiresAt!=expiresAt{
+  return GoalInstrumentVerificationBundle{},ErrInvalidTransition
+ }
  actual:=sha256.Sum256(out.Signature)
  if len(out.Signature)!=ed25519.SignatureSize||
   len(out.PublicKey)!=ed25519.PublicKeySize||

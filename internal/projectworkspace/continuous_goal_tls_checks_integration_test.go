@@ -149,8 +149,18 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
   t.Fatal("spent Ed25519 challenge was replayed successfully")
  }
  for i:=0;i<3;i++{
-  if _,err=svc.IssueGoalInstrumentChallenge(ctx,issue);err!=nil{
-   t.Fatalf("bounded instrument challenge %d unexpectedly failed: %v",i,err)
+  another,issueErr:=svc.IssueGoalInstrumentChallenge(ctx,issue)
+  if issueErr!=nil{
+   t.Fatalf("bounded instrument challenge %d unexpectedly failed: %v",i,issueErr)
+  }
+  if i==0{
+   // A valid signature over the FIRST challenge is not transferable to
+   // the second nonce, even for the same human-approved instrument key.
+   crossed:=accept
+   crossed.ChallengeID=another.ID
+   if _,err=svc.AcceptGoalInstrumentChallenge(ctx,crossed);err==nil{
+    t.Fatal("signed response for one nonce was accepted for another challenge")
+   }
   }
  }
  if _,err=svc.IssueGoalInstrumentChallenge(ctx,issue);err==nil{

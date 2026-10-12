@@ -2,6 +2,8 @@ package api
 
 import(
  "context"
+ "crypto/ed25519"
+ "crypto/rand"
  "encoding/json"
  "fmt"
  "net/http/httptest"
@@ -131,6 +133,81 @@ func TestHumanPinnedTLSCertificateRequiresExactExistingTargetAndOneBoundedCheck(
  if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
   SET monitoring_plan_json=?,revision=revision+1 WHERE id=?`,
   `{"version":1,"source_ids":["router"]}`,goal.ID);err!=nil{t.Fatal(err)}
+ // The private instrument key is generated independently. Only its
+ // public counterpart is human enrolled and bound to the existing pin.
+ public,private,err:=ed25519.GenerateKey(rand.Reader)
+ if err!=nil{t.Fatal(err)}
+ goal,err=svc.ContinuousGoal(ctx,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ enrollPath:=base+"/instrument-keys"
+ enrollBody,_:=json.Marshal(map[string]any{
+  "tls_pin_id":pin.ID,"public_key":public,
+  "expected_goal_revision":goal.Revision,
+  "expected_pin_revision":pin.Revision,
+  "expires_at":now+8*60000,
+ })
+ for _,who:=range []string{"","robot","outsider"}{
+  got:=request("POST",who,enrollPath,string(enrollBody))
+  if got.Code<400{
+   t.Fatalf("%q principal enrolled an independent instrument key: %d",who,got.Code)
+  }
+ }
+ issued:=request("POST","operator",enrollPath,string(enrollBody))
+ if issued.Code!=201{
+  t.Fatalf("human could not enroll independent instrument: %d %s",issued.Code,issued.Body)
+ }
+ var instrument projectworkspace.GoalInstrumentKey
+ if err=json.Unmarshal(issued.Body.Bytes(),&instrument);err!=nil{t.Fatal(err)}
+ if instrument.TLSPinID!=pin.ID||instrument.DeclaredTargetID!=declared.ID{
+  t.Fatalf("instrument key escaped human pinned endpoint: %+v",instrument)
+ }
+ goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
+ keyPath:=enrollPath+"/"+instrument.ID
+ challengeBody,_:=json.Marshal(map[string]any{
+  "expected_goal_revision":goal.Revision,
+  "expected_key_revision":instrument.Revision,
+ })
+ if got:=request("POST","robot",keyPath+"/challenge",string(challengeBody));
+  got.Code!=403{t.Fatalf("Agent minted human-only signing challenge: %d",got.Code)}
+ chResult:=request("POST","operator",keyPath+"/challenge",string(challengeBody))
+ if chResult.Code!=201{t.Fatalf("instrument challenge endpoint rejected: %d %s",
+  chResult.Code,chResult.Body)}
+ var challenge projectworkspace.GoalInstrumentChallenge
+ if err=json.Unmarshal(chResult.Body.Bytes(),&challenge);err!=nil{t.Fatal(err)}
+ if len(challenge.Nonce)!=32||len(challenge.SigningPayload)==0{
+  t.Fatalf("server did not issue securely bound signing bytes: %+v",challenge)
+ }
+ proveBody,_:=json.Marshal(map[string]any{
+  "challenge_id":challenge.ID,"expected_goal_revision":goal.Revision,
+  "signature":ed25519.Sign(private,challenge.SigningPayload),
+ })
+ if got:=request("POST","robot",keyPath+"/prove",string(proveBody));
+  got.Code!=403{t.Fatalf("Agent admitted a signed proof: %d",got.Code)}
+ proofHTTP:=request("POST","operator",keyPath+"/prove",string(proveBody))
+ if proofHTTP.Code!=201{t.Fatalf("real Ed25519 proof rejected at human API: %d %s",
+  proofHTTP.Code,proofHTTP.Body)}
+ var proof projectworkspace.GoalInstrumentProof
+ if err=json.Unmarshal(proofHTTP.Body.Bytes(),&proof);err!=nil{t.Fatal(err)}
+ if proof.ProofClass!="human_bound_instrument_key_possession"||
+  proof.DeviceIdentityVerified||proof.RemediationAuthorized{
+  t.Fatalf("source key possession became physical device verification: %+v",proof)
+ }
+ if got:=request("POST","operator",keyPath+"/prove",string(proveBody));
+  got.Code<400{t.Fatalf("same signed challenge replayed over HTTP: %d",got.Code)}
+ if got:=request("GET","robot",base+"/instrument-proofs","");got.Code!=403{
+  t.Fatalf("Agent listed security evidence: %d",got.Code)
+ }
+ if got:=request("GET","operator",base+"/instrument-proofs","");
+  got.Code!=200||!strings.Contains(got.Body.String(),proof.ID){
+  t.Fatalf("human could not audit accepted instrument proof: %d %s",got.Code,got.Body)
+ }
+ goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
+ revokeKeyBody,_:=json.Marshal(map[string]any{
+  "expected_goal_revision":goal.Revision,
+  "expected_key_revision":instrument.Revision,
+ })
+ if got:=request("POST","operator",keyPath+"/revoke",string(revokeKeyBody));
+  got.Code!=200{t.Fatalf("human could not revoke instrument key: %d %s",got.Code,got.Body)}
  goal,err=svc.ContinuousGoal(ctx,goal.ID)
  if err!=nil{t.Fatal(err)}
  verify:=pins+"/"+pin.ID+"/verify"

@@ -38,7 +38,7 @@ func fixtureChallengeForEndpoint(t *testing.T,now time.Time,
   ExpiresAt:now.Add(time.Minute).UnixMilli(),Status:"issued"}
  for i:=range ch.Nonce{ch.Nonce[i]=byte(i+1)}
  env:=challengeEnvelope{
-  Domain:challengeDomain,ProjectID:ch.ProjectID,GoalID:ch.GoalID,
+  Domain:challengeDomainV2,ProjectID:ch.ProjectID,GoalID:ch.GoalID,
   InstrumentKeyID:ch.KeyID,ChallengeID:ch.ID,
   DeclaredTargetID:"target1",TLSPinID:"pin1",
   PinnedCertificateSHA256:"sha256:"+"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -286,5 +286,36 @@ func TestApprovedPlanUsesRealTCPConnectWithoutScanning(t *testing.T){
  if err!=nil{t.Fatal(err)}
  if !ed25519.Verify(keyPublic,signed,receipt.LocalReportSignature){
   t.Fatal("real TCP handshake receipt lacks independently valid signature")
+ }
+}
+
+func TestHistoricalV1ChallengeOnlyAllowedAsExplicitManualFallback(t *testing.T){
+ now:=time.Now()
+ ch:=fixtureChallengeForEndpoint(t,now,"192.168.7.12",443)
+ var env challengeEnvelope
+ if err:=json.Unmarshal(ch.SigningPayload,&env);err!=nil{t.Fatal(err)}
+ env.Domain=challengeDomainV1
+ env.TargetEndpointSHA256=""
+ var err error
+ ch.SigningPayload,err=json.Marshal(env)
+ if err!=nil{t.Fatal(err)}
+ if _,err=ParseChallenge(ch,now);err!=nil{
+  t.Fatalf("historical signed v1 challenge wrongly unreadable: %v",err)
+ }
+ sum:=sha256.Sum256(ch.SigningPayload)
+ plan:=ProbePlan{ProjectID:ch.ProjectID,GoalID:ch.GoalID,
+  InstrumentKeyID:ch.KeyID,ChallengeID:ch.ID,
+  DeclaredTargetID:env.DeclaredTargetID,TLSPinID:env.TLSPinID,
+  SourceID:"router",TargetIPv4:"192.168.7.12",TargetPort:443,
+  TimeoutMS:500,OriginalChallengeSHA256:fmt.Sprintf("sha256:%x",sum[:]),
+  ExpiresAt:ch.ExpiresAt,
+  AttestationClass:"human_authorised_endpoint_snapshot_not_device_attestation",
+ }
+ _,key,err:=ed25519.GenerateKey(rand.Reader)
+ if err!=nil{t.Fatal(err)}
+ dial:=&recordingDialer{}
+ if _,err=ProbeApprovedPlan(context.Background(),ch,plan,key,dial,
+  func()time.Time{return now});err==nil||dial.calls!=0{
+  t.Fatal("legacy v1 nonce lacking endpoint hash gained authenticated plan authority")
  }
 }

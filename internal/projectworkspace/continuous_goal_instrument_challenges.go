@@ -157,7 +157,7 @@ func(s *Service)activeInstrumentKeyTx(ctx context.Context,tx storage.Tx,
 // controlled human-only plan and the original TCP permit.
 func goalEndpointDigest(ip string,port int)string{
  raw:=sha256.Sum256([]byte(fmt.Sprintf(
-  "OnePane/target-endpoint/v1\\n%s:%d",ip,port)))
+  "OnePane/target-endpoint/v1|%s:%d",ip,port)))
  return "sha256:"+hex.EncodeToString(raw[:])
 }
 

@@ -17,6 +17,8 @@ type goalNodeMeasurementGrantsService interface{
    projectworkspace.GoalNodeMeasurementGrant,error)
  ListGoalNodeMeasurementGrants(context.Context,string,string)(
   []projectworkspace.GoalNodeMeasurementGrant,error)
+ ListGoalNodeMeasurementReceipts(context.Context,string,string)(
+  []projectworkspace.GoalNodeMeasurementReceipt,error)
 }
 
 func(s *Server)nodeMeasurementOperator(w http.ResponseWriter,r *http.Request,
@@ -84,4 +86,12 @@ func(s *Server)revokeProjectGoalNodeMeasurement(w http.ResponseWriter,r *http.Re
    ActorPrincipalID:i.PrincipalID,
   })
  respondDomain(w,out,err,http.StatusOK)
+}
+
+func(s *Server)listProjectGoalNodeMeasurementReceipts(w http.ResponseWriter,r *http.Request){
+ p,svc,_,ok:=s.nodeMeasurementOperator(w,r,"project.read")
+ if !ok{return}
+ results,err:=svc.ListGoalNodeMeasurementReceipts(r.Context(),p.ID,
+  r.PathValue("goalID"))
+ respondDomain(w,results,err,http.StatusOK)
 }

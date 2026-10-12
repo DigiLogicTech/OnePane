@@ -86,6 +86,23 @@ func TestManualGoalTCPProbeUsesOnlyExactPermittedSocketAndIsCrashIdempotent(t *t
   t.Fatalf("network dispatch escaped source grant: calls=%d network=%s address=%s receipt=%+v",
    dialer.calls,dialer.network,dialer.address,first)
  }
+ // A claim and its completed outcome must both be scoped to the
+ // owning tenant. An unscoped final event disappears from Workspace
+ // subscriptions even though it may carry security-sensitive metadata.
+ var scopedEvents,unscopedEvents int
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
+  WHERE aggregate_id=? AND event_type IN(
+   'project.goal_tcp_probe_claimed','project.goal_tcp_probe_finished')
+   AND workspace_id='tenant'`,first.ID).Scan(&scopedEvents);err!=nil{t.Fatal(err)}
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
+  WHERE aggregate_id=? AND event_type IN(
+   'project.goal_tcp_probe_claimed','project.goal_tcp_probe_finished')
+   AND (workspace_id IS NULL OR workspace_id<>'tenant')`,first.ID).
+  Scan(&unscopedEvents);err!=nil{t.Fatal(err)}
+ if scopedEvents!=2||unscopedEvents!=0{
+  t.Fatalf("TCP audit events escaped tenant scope: scoped=%d unscoped=%d",
+   scopedEvents,unscopedEvents)
+ }
  // A real TCP handshake never masquerades as an integrity-verified,
  // attached Observation receipt. Both evidence classes are displayed.
  coverage,err:=svc.GoalEvidenceCoverage(ctx,project.ID,g.ID)

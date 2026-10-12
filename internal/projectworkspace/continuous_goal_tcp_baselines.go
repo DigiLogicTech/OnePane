@@ -202,7 +202,7 @@ func(s *Service)GoalTCPReachabilityAssessment(ctx context.Context,projectID,goal
  }
  var goalStatus,planRaw,workspaceID string
  var cadence int64
- err:=s.db.QueryRowContext(ctx,`SELECT g.status,g.monitoring_plan_json,
+ err=s.db.QueryRowContext(ctx,`SELECT g.status,g.monitoring_plan_json,
    g.project_workspace_id,g.cadence_minutes FROM project_continuous_goals g
    JOIN projects p ON p.id=g.project_id AND p.status='active'
    JOIN workspaces tenant ON tenant.id=p.workspace_id AND tenant.status='active'

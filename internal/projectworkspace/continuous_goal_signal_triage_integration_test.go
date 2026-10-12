@@ -137,7 +137,7 @@ func TestGoalSignalTriageRequiresLiveIndependentEvidenceAndNeverPromotesHealth(t
   multiple.RecentNegativeSources!=2||
   multiple.RecentTCPNegativeSources!=1||
   multiple.RecentNodeNegativeSources!=1||
-  len(multiple.Limitations)!=4||
+  len(multiple.Limitations)!=5||
   multiple.DeviceIdentityVerified||multiple.MonitoringActive||
   multiple.RemediationAuthorized||
   multiple.CrossClassTargetCorrelation!="not_established"{

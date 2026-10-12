@@ -17,7 +17,8 @@ import (
  "time"
 )
 
-const challengeDomain="OnePane/instrument-challenge/ed25519/v1"
+const challengeDomainV1="OnePane/instrument-challenge/ed25519/v1"
+const challengeDomainV2="OnePane/instrument-challenge/ed25519/v2"
 const measurementDomain="OnePane/instrument-measurement/ed25519/v1"
 
 // A Challenge is issued by OnePane's human-authorized challenge API.
@@ -131,10 +132,12 @@ func ParseChallenge(ch Challenge,now time.Time)(string,error){
   ch.KeyID==""{return "",errors.New("missing or oversized instrument challenge")}
  var env challengeEnvelope
  if err:=json.Unmarshal(ch.SigningPayload,&env);err!=nil{return "",errors.New("invalid signed challenge envelope")}
- if env.TargetEndpointSHA256!=""&&!canonicalSHA256(env.TargetEndpointSHA256){
-  return "",errors.New("noncanonical approved endpoint digest")
+ if (env.Domain!=challengeDomainV1&&env.Domain!=challengeDomainV2)||
+  (env.Domain==challengeDomainV2&&!canonicalSHA256(env.TargetEndpointSHA256))||
+  (env.Domain==challengeDomainV1&&env.TargetEndpointSHA256!=""){
+  return "",errors.New("invalid instrument challenge version or endpoint digest")
  }
- if env.Domain!=challengeDomain||env.ChallengeID!=ch.ID||
+ if env.ChallengeID!=ch.ID||
   env.InstrumentKeyID!=ch.KeyID||env.ProjectID!=ch.ProjectID||
   env.GoalID!=ch.GoalID||env.TLSPinID==""||env.DeclaredTargetID==""||
   !bytes.Equal(env.Nonce,ch.Nonce)||env.IssuedAt!=ch.IssuedAt||
@@ -177,6 +180,7 @@ func ValidateProbePlan(ch Challenge,p ProbePlan,now time.Time)(Target,error){
   p.DeclaredTargetID!=id||p.TLSPinID!=challengeScope.TLSPinID||
   p.SourceID==""||p.ExpiresAt!=ch.ExpiresAt||
   p.OriginalChallengeSHA256!=expected||
+  challengeScope.Domain!=challengeDomainV2||
   challengeScope.TargetEndpointSHA256==""||
   challengeScope.TargetEndpointSHA256!=endpointDigest(p.TargetIPv4,p.TargetPort)||
   p.AttestationClass!="human_authorised_endpoint_snapshot_not_device_attestation"||

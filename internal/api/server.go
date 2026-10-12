@@ -536,6 +536,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers", s.listProjectGoalSourceSigners)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers", s.approveProjectGoalSourceSigner)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers/{signerID}/revoke", s.revokeProjectGoalSourceSigner)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers/{signerID}/credentials", s.issueProjectGoalSourceCredential)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers/{signerID}/credentials", s.listProjectGoalSourceCredentials)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers/{signerID}/credentials/{credentialID}/revoke", s.revokeProjectGoalSourceCredential)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations/submit", s.submitProjectGoalSignedObservation)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations/record", s.recordProjectGoalSourceReading)
 	// Override the generic /{transition} POST route: this read-only

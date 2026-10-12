@@ -64,6 +64,27 @@ type measurementEnvelope struct{
 type Dialer interface{
  DialContext(context.Context,string,string)(net.Conn,error)
 }
+// ProbePlan is a HUMAN-authorised, live permit snapshot obtained via
+// authenticated OnePane API, then transferred over a separately trusted
+// operator channel to the instrument. SHA-256 binds the original challenge
+// bytes; it is NOT a server signature or physical-device attestation.
+type ProbePlan struct {
+ ProjectID string `json:"project_id"`
+ GoalID string `json:"goal_id"`
+ InstrumentKeyID string `json:"instrument_key_id"`
+ ChallengeID string `json:"challenge_id"`
+ DeclaredTargetID string `json:"declared_target_id"`
+ TLSPinID string `json:"tls_pin_id"`
+ SourceID string `json:"source_id"`
+ TargetIPv4 string `json:"target_ipv4"`
+ TargetPort int `json:"target_port"`
+ TimeoutMS int `json:"timeout_ms"`
+ OriginalChallengeSHA256 string `json:"original_challenge_sha256"`
+ ExpiresAt int64 `json:"expires_at"`
+ ObserverVantageVerified bool `json:"observer_vantage_verified"`
+ TargetDeviceIdentityVerified bool `json:"target_device_identity_verified"`
+ AttestationClass string `json:"attestation_class"`
+}
 type Target struct {
  IPv4 string `json:"target_ipv4"`
  Port int `json:"target_port"`
@@ -128,6 +149,43 @@ func ParseChallenge(ch Challenge,now time.Time)(string,error){
  return env.DeclaredTargetID,nil
 }
 
+// ValidateProbePlan binds the plan to exactly the live human-issued nonce
+// and canonical v1 challenge envelope before any network effect.
+func ValidateProbePlan(ch Challenge,p ProbePlan,now time.Time)(Target,error){
+ id,err:=ParseChallenge(ch,now)
+ if err!=nil{return Target{},err}
+ var challengeScope challengeEnvelope
+ if err=json.Unmarshal(ch.SigningPayload,&challengeScope);err!=nil{
+  return Target{},errors.New("invalid original TLS scope")
+ }
+ digest:=sha256.Sum256(ch.SigningPayload)
+ expected:="sha256:"+fmt.Sprintf("%x",digest[:])
+ if p.ProjectID!=ch.ProjectID||p.GoalID!=ch.GoalID||
+  p.InstrumentKeyID!=ch.KeyID||p.ChallengeID!=ch.ID||
+  p.DeclaredTargetID!=id||p.TLSPinID!=challengeScope.TLSPinID||
+  p.SourceID==""||p.ExpiresAt!=ch.ExpiresAt||
+  p.OriginalChallengeSHA256!=expected||
+  p.AttestationClass!="human_authorised_endpoint_snapshot_not_device_attestation"||
+  p.ObserverVantageVerified||p.TargetDeviceIdentityVerified{
+  return Target{},errors.New("one-shot target plan diverges from approved challenge")
+ }
+ target:=Target{IPv4:p.TargetIPv4,Port:p.TargetPort,
+  TimeoutMS:p.TimeoutMS,ConfirmedDeclaredTargetID:id}
+ if err=ValidateTarget(target,id);err!=nil{return Target{},err}
+ return target,nil
+}
+
+// ProbeApprovedPlan reduces mistyped/supplied target ambiguity by using
+// the live human-only OnePane permit snapshot rather than free-form CLI
+// address flags. This only authenticates endpoint consent when the plan
+// was transferred over a separately trusted authenticated human channel.
+func ProbeApprovedPlan(ctx context.Context,ch Challenge,plan ProbePlan,
+ private ed25519.PrivateKey,dialer Dialer,now func()time.Time)(LocalProbeReceipt,error){
+ if now==nil{now=time.Now}
+ target,err:=ValidateProbePlan(ch,plan,now())
+ if err!=nil{return LocalProbeReceipt{},err}
+ return ProbeOnce(ctx,ch,target,private,dialer,now)
+}
 func ValidateTarget(t Target,expectedTargetID string)error{
  ip,err:=netip.ParseAddr(t.IPv4)
  if err!=nil||!ip.Is4()||!ip.IsPrivate()||ip.String()!=t.IPv4{

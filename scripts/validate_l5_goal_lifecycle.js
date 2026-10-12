@@ -175,4 +175,16 @@ for(const token of ["SetGoalTCPBaseline","ListGoalTCPBaselines",
 for(const token of ["/tcp-baselines","/tcp-assessment/{sourceID}"]){
  assert(server.includes(token),"baseline route missing "+token);
 }
+// A TCP connect sample must never be counted as a trusted Observation,
+// but it must still appear as a separate read-only coverage signal.
+const coverage=fs.readFileSync("internal/projectworkspace/continuous_goal_coverage.go","utf8");
+for(const token of ["LastTCPTestAt","TCPReachability",
+ "project_goal_tcp_probe_attempts","unknown_after_interruption",
+ "EvidenceState=\"missing\"","MonitoringActive:false"]){
+ assert(coverage.includes(token),"TCP/evidence class separation missing "+token);
+}
+for(const token of ["x.tcp_reachability","x.last_tcp_test_at",
+ "(not verified health)"]){
+ assert(ui.includes(token),"read-only TCP coverage UI missing "+token);
+}
 console.log("L5 pause/retire UI and fail-closed goal lifecycle: PASS");

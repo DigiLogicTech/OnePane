@@ -124,6 +124,12 @@ func TestLevel5SignedObservationEnrollmentAntiReplayAndLiveRevocation(t *testing
  secondSig:=sign(second,priv,2)
  proof2,err:=accept(second,2,secondSig)
  if err!=nil||proof2.Sequence!=2{t.Fatalf("new ordered proof: %+v %v",proof2,err)}
+ coverage,err:=svc.GoalEvidenceCoverage(ctx,p.ID,g.ID)
+ if err!=nil||coverage.MonitoringActive||coverage.RecentSourceSignedSources!=1||
+  len(coverage.Sources)!=1||coverage.Sources[0].EvidenceState!="missing"||
+  coverage.Sources[0].SignatureEvidenceState!="recent_source_signature"{
+  t.Fatalf("signed source was conflated with manually attached receipts or device health: %+v %v",coverage,err)
+ }
  // Revocation is allowed at the current signer revision after sequence use.
  revoked,err:=svc.RevokeGoalObservationSigner(ctx,RevokeGoalObservationSignerCommand{
   ProjectID:p.ID,GoalID:g.ID,SignerID:signer.ID,ActorPrincipalID:"owner",
@@ -133,6 +139,12 @@ func TestLevel5SignedObservationEnrollmentAntiReplayAndLiveRevocation(t *testing
   t.Fatalf("revocation failed: %+v %v",revoked,err)
  }
  g,err=svc.ContinuousGoal(ctx,g.ID);if err!=nil{t.Fatal(err)}
+ coverage,err=svc.GoalEvidenceCoverage(ctx,p.ID,g.ID)
+ if err!=nil||coverage.RecentSourceSignedSources!=0||
+  len(coverage.Sources)!=1||
+  coverage.Sources[0].SignatureEvidenceState!="historical_key_inactive"{
+  t.Fatalf("revoked source still presented as currently approved: %+v %v",coverage,err)
+ }
  third:=record("router")
  if _,err=accept(third,3,sign(third,priv,3));!errors.Is(err,ErrInvalidTransition){
   t.Fatalf("revoked key accepted new signed proof: %v",err)

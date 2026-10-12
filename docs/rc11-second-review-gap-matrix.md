@@ -532,3 +532,15 @@ Completed in this integration branch, with source and regression tests:
   separately consented recurring probes with durable cancellation
   leases, source integrity and health evaluation, precisely bounded
   remediation/rollback. No release merge/build is authorised.
+
+
+## RC11 UI/UX convergence — mandatory pre-release review (2026-10-12)
+
+**New release gate:** [RC11 UI/UX alignment plan](rc11-product-ux-alignment.md), requested before the next packaged QA build. A source/CI pass alone does not approve the interface. The design and application behaviour must express the present OnePane vision, not the original Alpha menu layout.
+
+- [x] **UX-01 design brief and actionable inventory recorded:** canonical Project/Workspace hierarchy and isolated tool environments; local-first models and queues; Colibri / OmniRoute; unified assistant and task orchestration; Level 4 bounded automation by default versus separately consented Level 5 observation and remediation; honest evidence and access scope; themes, responsiveness, Inspector/Logs drawer, keyboard controls, Diagnostics and release-review sequence.
+- [x] **UX-02 first shared-component increment committed:** `internal/webui/static/ux-alignment.css`, loaded after specialist page styles, aligns page headings, toolbar/button placement, theme-token surfaces and focus rings, responsive wrapping, reduced motion and independent Level 5 authority groups. It deliberately does not override shell height, widget drag/resize geometry or custom modal controls.
+- [x] **Automated regression gate added:** `scripts/validate_product_ux_alignment.js` verifies token reuse, CSS precedence, responsive/reduced-motion styles, nav/source scope, L5 separation and the complete UX task manifest; it runs under the Project/Workspace development CI and is included in workflow path triggers.
+- [ ] **UX-03–09:** inspect and fix each major page/route, one canonical nav state, controls/IA, model/offload lifecycle and authority state, theme/readability, drawer-aware responsiveness, keyboard/screen-reader semantics and connected visual QA. Screenshots and actual UI interactions are still required.
+- [ ] **UX-10:** complete user-led code/vision realignment and second code review, fully green CI, then Windows/Ubuntu installed QA prior to any release approval. Keep PR draft until all gates are complete.
+- [ ] **Latest CI:** validate combined UX source and contract at the branch head after workflow commit `19e317b9`. Prior migration/probe/test work is separate and should not be interpreted as visual QA.

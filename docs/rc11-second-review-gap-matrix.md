@@ -374,3 +374,59 @@ Completed in this integration branch, with source and regression tests:
 - [ ] No release approval is implied. Active sensor permits, safe external
   probe dispatch, tenant data-transfer enforcement, verified baseline
   evaluation and Level 5 postcondition/remediation remain separate P0 gates.
+
+
+## RC11 Level 5 explicit network observation — 2026-10-12
+
+- [x] **Separate network authority:** additive migration
+  `0060_goal_tcp_probe_permits.sql` stores human-granted, CAS-fenced,
+  auditable permits to test ONE exact RFC1918 IPv4 literal and TCP port per
+  approved Goal source. The exact canonical Project/Workspace, original
+  monitoring-source plan hash, port, timeout (100–1500ms), approved human and
+  ≤24h expiry are bound to each permit. No existing Project, Goal or source
+  is activated by migration. Receipt-review permission is not network
+  permission.
+- [x] Source-registration API and Project Inspector offer explicit two-step,
+  exact-target confirmation, list and revocation. The confirmation binds
+  source, target, port, timeout, goal revision and expiry; a changed
+  selection requires a fresh second click. DNS, CIDR, public, loopback,
+  link-local, IPv6, metadata and unspecified targets are refused by backend
+  `netip.ParseAddr` checks; no DNS resolution is possible.
+- [x] **Manual real read-only probe subset:** migration
+  `0061_goal_tcp_probe_attempts.sql` and `RunManualGoalTCPProbe`
+  implement a human-initiated, one-shot outbound `tcp4` handshake.
+  The service first records an immutable `claimed` attempt under a live
+  tenant/Workspace/Goal/permit/membership check inside SQLite, then
+  revalidates that permit immediately before dialing; the connection is
+  bounded at 1500 ms and closed immediately without transmitting a request
+  payload. The recorded outcome is `connected`, `not_connected`,
+  `timed_out` or `cancelled`, explicitly NOT security posture, TLS trust,
+  endpoint health, compliance or verified service operation. An interrupted
+  claim is shown as unknown; it cannot silently auto-retry the same window.
+- [x] **Abuse/replay fencing:** migration `0062_goal_tcp_probe_source_rate_fence.sql`
+  prevents duplicate socket claims for the same `(goal_id, source_id,
+  cadence_window)`, even if a permit is revoked and replaced. Database
+  uniqueness and admission checks guard restarts and competing clients.
+  The UI requires another confirmation before an actual connect; no
+  daemon scheduling of TCP tests has been introduced.
+- [x] Domain/API tests use a fake TCP dialer to verify exact target,
+  fixed `tcp4` protocol, human-only authority, revoked/paused denial,
+  idempotence after restarts, no second dial on replay, and zero effect
+  on Task, raw Observation or verified Goal health. API tests never
+  contact a real network target.
+- [ ] **Verify final network increment CI** at
+  [run #38194015501](https://github.com/DigiLogicTech/OnePane/actions/runs/38194015501)
+  after the final source-level rate and exact UI-confirmation changes.
+  Earlier partial-source Go builds failed on a corrected duplicate `err:=`
+  binding; later pre-rate-check implementation checks passed at
+  [#38193873006](https://github.com/DigiLogicTech/OnePane/actions/runs/38193873006).
+- [ ] **Remaining P0-D:** authorise and implement recurring *real* probes
+  with durable leasing, in-flight stop/cancel semantics, explicit
+  target/network/Node scope and secure observation intake; add baseline
+  comparison, trusted-sensor quality, graded health alerts, approved
+  remediation/postcondition checks. A TCP handshake by itself is a very
+  limited signal and is not protection of the user's home network.
+- [ ] **Release gates:** independent code/security review, sandbox and
+  paired-Node end-to-end enforcement, resource pressure and offline QA,
+  installed Windows/Ubuntu testing, then explicit packaging decision.
+  This work remains on the unmerged RC11 draft integration branch.

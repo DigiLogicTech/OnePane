@@ -49,6 +49,8 @@ The `sign` mode verifies the original locally signed report using that key and c
 
 None of these steps marks a Goal healthy, verifies a physical device, proves an independently trusted measurement vantage, establishes correlation with a paired Node, counts as a security incident, initiates background Tasks or authorises protective remediation.
 
+**Operational limitation:** the current challenge lifetime is only two minutes. The manual copy/prepare/sign/accept sequence is intentionally a QA/developer reference workflow and can be awkward to complete within that period. The later UI/UX and instrument integration must support a carefully scoped, authenticated one-shot handoff without exposing a broad human Project.write token to an unmanaged instrument or storing instrument private keys in OnePane. Do not extend nonce lifetime, silently retry, or automate account-authorised effects merely to make a demo appear successful.
+
 ## Source verification and remaining P0
 
 The hermetic `internal/instrumentprobe` tests cover the exact single TCP4 address/no retries; unsafe IPv4, DNS/IPv6/loopback/public/link-local/CGNAT denial before dial; expiry, cancelled context and consumed challenge denial; immediate locally signed receipt; prepared server payload validation; changed outcome, altered canonical signature bytes, wrong key and false vantage rejection. CLI tests cover exclusive private-key creation, no replacement, POSIX owner-only bits and invalid-key rejection. CI cross-compilation includes Windows and Ubuntu but is **not proof** the runner was installed and performed a real external network check.

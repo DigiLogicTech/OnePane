@@ -51,6 +51,13 @@ assert(canonical.includes('parentActive=route===r&&!expandable'),
  'canonical navigation must not double-highlight expandable parents');
 assert(workspace.includes("legacyWorkspace.remove()"),
  'nested Projects navigation must not keep the redundant legacy Workspace entry');
+assert(workspace.includes("isWorkspace?workspaceID===qa4ProjectHub.activeWorkspaceID:!qa4ProjectHub.activeWorkspaceID"),
+ 'active Project ancestor must not be highlighted alongside a Workspace child');
+for(const marker of ["aria-current","route==='workspaces'&&!activeWorkspaceLeaf",
+ "route==='models'&&!activeModelLeaf","[data-mobile-route]"]){
+ assert(workspace.includes(marker),'missing nested and accessible navigation invariant '+marker);
+}
+
 for(const id of Array.from({length:10},(_,n)=>'UX-'+String(n+1).padStart(2,'0'))){
  assert(document.includes(id),'UI/UX review manifest missing '+id);
 }

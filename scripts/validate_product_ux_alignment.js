@@ -45,10 +45,10 @@ function contrast(hexA,hexB){
  return (Math.max(a,b)+0.05)/(Math.min(a,b)+0.05);
 }
 for(const theme of ['dark','graphite','midnight','ocean','forest','violet','ember']){
- const block=shared.match(new RegExp(':root\\\\[data-theme="'+theme+'"\\\\]\\\\{([^}]+)\\\\}'));
+ const block=shared.match(new RegExp(':root\\[data-theme="'+theme+'"\\]\\{([^}]+)\\}'));
  assert(block,'theme tokens unavailable for '+theme);
  const fields=Object.fromEntries(
-  [...block[1].matchAll(/--([a-z-]+):\\s*(#[a-f0-9]{6})/gi)].map(m=>[m[1],m[2]]));
+  [...block[1].matchAll(/--([a-z-]+):\s*(#[a-f0-9]{6})/gi)].map(m=>[m[1],m[2]]));
  const contrastBody=contrast(fields.text,fields.panel);
  const contrastButton=contrast(fields.accent,fields['on-accent']);
  assert(contrastBody>=4.5,theme+' panel body text contrast below WCAG AA');

@@ -537,6 +537,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers", s.approveProjectGoalSourceSigner)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers/{signerID}/revoke", s.revokeProjectGoalSourceSigner)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations/submit", s.submitProjectGoalSignedObservation)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations/record", s.recordProjectGoalSourceReading)
 	// Override the generic /{transition} POST route: this read-only
 	// evidence metadata endpoint must never be interpreted as a Goal action.
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations", func(w http.ResponseWriter,r *http.Request){
@@ -1295,6 +1296,9 @@ func respondDomain(w http.ResponseWriter, v any, err error, success int) {
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		writeError(w, http.StatusNotFound, "not found")
+	case errors.Is(err, projectworkspace.ErrSourceReadingRateLimited):
+		w.Header().Set("Retry-After", "60")
+		writeError(w, http.StatusTooManyRequests, "source reading rate limit reached")
 	case errors.Is(err, projectworkspace.ErrSourceProofRateLimited):
 		w.Header().Set("Retry-After", "60")
 		writeError(w, http.StatusTooManyRequests, "source proof rate limit reached")

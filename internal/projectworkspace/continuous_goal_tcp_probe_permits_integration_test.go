@@ -100,6 +100,19 @@ func TestTCPProbePermitIsSeparatelyApprovedHumanOnlyAndRevocable(t *testing.T){
     pmt.PlanHash==""||pmt.ProjectWorkspaceID!=ws.ID{
   t.Fatalf("network permit lost exact scope: %+v",pmt)
  }
+ // Network approval must NEVER be editable into a different endpoint
+ // or longer expiry after the human has approved the original address.
+ for _,stmt:=range []string{
+  "UPDATE project_goal_tcp_probe_permits SET target_ipv4='192.168.1.2' WHERE id=?",
+  "UPDATE project_goal_tcp_probe_permits SET target_port=22 WHERE id=?",
+  "UPDATE project_goal_tcp_probe_permits SET expires_at=expires_at+86400000 WHERE id=?",
+  "UPDATE project_goal_tcp_probe_permits SET source_id='dns' WHERE id=?",
+  "UPDATE project_goal_tcp_probe_permits SET plan_hash='sha256:0000000000000000000000000000000000000000000000000000000000000000' WHERE id=?",
+ }{
+  if _,err:=db.SQL().ExecContext(ctx,stmt,pmt.ID);err==nil{
+   t.Fatalf("approved TCP scope was modified by %s",stmt)
+  }
+ }
  updated,err:=svc.ContinuousGoal(ctx,goal.ID)
  if err!=nil{t.Fatal(err)}
  if updated.Status!="configured"||updated.Health!="unobserved"||

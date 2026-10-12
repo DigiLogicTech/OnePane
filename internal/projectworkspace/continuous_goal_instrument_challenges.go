@@ -317,7 +317,12 @@ func(s *Service)IssueGoalInstrumentChallenge(ctx context.Context,
   if revision!=c.ExpectedGoalRevision{return ErrRevisionConflict}
   var count int
   if err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_goal_instrument_challenges
-   WHERE instrument_key_id=? AND issued_at>? `,
+   WHERE instrument_key_id=?`,key.ID).Scan(&count);err!=nil{return err}
+  // An immutable replay ledger on old or small disks must have a fixed
+  // lifetime ceiling; 4/5-minute throttling by itself is not enough.
+  if count>=128{return ErrInvalidTransition}
+  if err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_goal_instrument_challenges
+   WHERE instrument_key_id=? AND issued_at>?`,
    key.ID,now-5*60000).Scan(&count);err!=nil{return err}
   if count>=4{return ErrInvalidTransition}
   expires:=now+2*60000

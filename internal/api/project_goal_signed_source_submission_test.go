@@ -168,6 +168,23 @@ func TestGoalSignedSourceMachineCredentialAndHumanKeyAPIBoundaries(t *testing.T)
  }
  replacement:=request("POST",credentialRoute,"operator-key",mintBody)
  if replacement.Code!=201{t.Fatalf("reissue after revocation denied: %d %s",replacement.Code,replacement.Body)}
+ var replacementKey projectworkspace.MintedGoalSourceCredential
+ if err=json.Unmarshal(replacement.Body.Bytes(),&replacementKey);err!=nil{t.Fatal(err)}
+ // All failed source requests consume the same durable per-credential
+ // budget before expensive signature validation or JSON decoding.
+ malformed:=`{"signature":]`
+ for i:=0;i<60;i++{
+  got:=request("POST",route+"/signed-observations/submit",
+   replacementKey.BearerToken,malformed)
+  if got.Code!=400{t.Fatalf("failed attempt %d was not counted: %d %s",
+   i,got.Code,got.Body)}
+ }
+ exhausted:=request("POST",route+"/signed-observations/record",
+  replacementKey.BearerToken,malformed)
+ if exhausted.Code!=429||exhausted.Header().Get("Retry-After")!="60"{
+  t.Fatalf("cross-route 61st failed request escaped budget: %d %s",
+   exhausted.Code,exhausted.Body)
+ }
  if got:=request("POST",credentialRoute,"operator-key",mintBody);got.Code<400{
   t.Fatalf("third active credential exceeded two-key signer limit: %d",got.Code)
  }

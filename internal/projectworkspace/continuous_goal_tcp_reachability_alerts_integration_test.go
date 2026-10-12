@@ -76,6 +76,21 @@ func TestTCPReachabilityDriftNoticeIsEvidenceBoundHumanAckOnly(t *testing.T){
  if _,err:=svc.ListTCPReachabilityAlerts(ctx,"other",goal.ID);err==nil{
   t.Fatal("foreign Project listed drift history")
  }
+ // The notice must be observable only in the canonical tenant
+ // Workspace event stream, not as a global/unscoped event.
+ var scopedNotice,unscopedNotice int
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
+  WHERE aggregate_id=? AND event_type='project.goal_tcp_reachability_notice'
+   AND workspace_id='tenant'`,a.ID).Scan(&scopedNotice);err!=nil{t.Fatal(err)}
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
+  WHERE aggregate_id=? AND event_type='project.goal_tcp_reachability_notice'
+   AND (workspace_id IS NULL OR workspace_id<>'tenant')`,a.ID).
+  Scan(&unscopedNotice);err!=nil{t.Fatal(err)}
+ if scopedNotice!=1||unscopedNotice!=0{
+  t.Fatalf("drift notice escaped tenant scope: scoped=%d unscoped=%d",
+   scopedNotice,unscopedNotice)
+ }
+
  robot:=AcknowledgeTCPReachabilityAlertCommand{
   ProjectID:project.ID,GoalID:goal.ID,AlertID:a.ID,
   ExpectedRevision:1,ActorPrincipalID:"robot"}

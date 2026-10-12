@@ -21,6 +21,7 @@ import(
  "errors"
  "flag"
  "fmt"
+ "io"
  "net"
  "os"
  "runtime"
@@ -29,26 +30,50 @@ import(
  "github.com/DigiLogicTech/OnePane/internal/instrumentprobe"
 )
 
+// Read the SAME opened regular file that passed the permission and inode
+// checks. The previous Lstat -> ReadFile path allowed a symlink swap
+// between checking a private file's mode and following its path.
+func readBoundedFile(path string,maxBytes int64,private bool)([]byte,error){
+ if path==""{return nil,errors.New("input file required")}
+ before,err:=os.Lstat(path)
+ if err!=nil{return nil,err}
+ if !before.Mode().IsRegular()||before.Mode()&os.ModeSymlink!=0||
+  before.Size()>maxBytes{
+  return nil,errors.New("input must be an ordinary bounded non-symlink file")
+ }
+ if private&&runtime.GOOS!="windows"&&before.Mode().Perm()&0077!=0{
+  return nil,errors.New("private file must be owner-only (chmod 600)")
+ }
+ file,err:=os.Open(path)
+ if err!=nil{return nil,err}
+ defer file.Close()
+ after,err:=file.Stat()
+ if err!=nil{return nil,err}
+ if !after.Mode().IsRegular()||after.Size()>maxBytes||
+  !os.SameFile(before,after){
+  return nil,errors.New("input file identity changed before read")
+ }
+ if private&&runtime.GOOS!="windows"&&after.Mode().Perm()&0077!=0{
+  return nil,errors.New("private file must be owner-only (chmod 600)")
+ }
+ contents,err:=io.ReadAll(io.LimitReader(file,maxBytes+1))
+ if err!=nil{return nil,err}
+ if int64(len(contents))>maxBytes{
+  return nil,errors.New("input exceeded configured byte cap")
+ }
+ return contents,nil
+}
+
 func readPrivateKey(path string)(ed25519.PrivateKey,error){
- if path==""{return nil,errors.New("private key file required")}
- stat,err:=os.Lstat(path)
+ contents,err:=readBoundedFile(path,256,true)
  if err!=nil{return nil,err}
- if !stat.Mode().IsRegular()||stat.Mode()&os.ModeSymlink!=0{
-  return nil,errors.New("private key must be a regular non-symlink file")
- }
- if runtime.GOOS!="windows"&&stat.Mode().Perm()&0077!=0{
-  return nil,errors.New("private key file must be owner-only (chmod 600)")
- }
- if stat.Size()>256{return nil,errors.New("private key file too large")}
- contents,err:=os.ReadFile(path)
- if err!=nil{return nil,err}
- // Supply private 64-byte Go Ed25519 key as base64 in a local 0600 file.
- // Never show, upload or put that key on the command line.
- keyBytes,err:=base64.StdEncoding.DecodeString(string(trimSpace(contents)))
- if err!=nil||len(keyBytes)!=ed25519.PrivateKeySize{
+ // 64-byte Go Ed25519 key in a local, owner-only base64 file.
+ // Never upload this file or pass its contents on a command line.
+ bytes,err:=base64.StdEncoding.DecodeString(string(trimSpace(contents)))
+ if err!=nil||len(bytes)!=ed25519.PrivateKeySize{
   return nil,errors.New("expected base64 Ed25519 64-byte private key")
  }
- return ed25519.PrivateKey(keyBytes),nil
+ return ed25519.PrivateKey(bytes),nil
 }
 func trimSpace(s []byte)[]byte{
  begin,end:=0,len(s)
@@ -56,17 +81,11 @@ func trimSpace(s []byte)[]byte{
  for end>begin&&(s[end-1]=='\n'||s[end-1]=='\r'||s[end-1]=='\t'||s[end-1]==' '){end--}
  return s[begin:end]
 }
-func readJSON(path string,v any)error{
- if path==""{return errors.New("input file required")}
- info,err:=os.Stat(path)
+func decodeInputJSON(path string,v any,private bool)error{
+ bytes,err:=readBoundedFile(path,8192,private)
  if err!=nil{return err}
- if !info.Mode().IsRegular()||info.Size()>8192{
-  return errors.New("input must be a regular JSON file at most 8 KiB")
- }
- bytes,err:=os.ReadFile(path)
- if err!=nil{return err}
- // Canonical files produced by OnePane or this CLI. Unknown/duplicate
- // top-level values cannot silently rewrite the signed object.
+ // Canonical files produced by OnePane or this CLI. Duplicate, unknown
+ // or inconsistent fields cannot rewrite the signed object silently.
  if err=json.Unmarshal(bytes,v);err!=nil{return err}
  canonical,err:=json.Marshal(v)
  if err!=nil{return err}
@@ -75,19 +94,13 @@ func readJSON(path string,v any)error{
  }
  return nil
 }
-// A plan discloses a private network address, and a local receipt includes
-// both that address and a detached signature. Never accept a shared or
-// symlinked input file on POSIX; key and receipt custody remain local.
+func readJSON(path string,v any)error{
+ return decodeInputJSON(path,v,false)
+}
+// A plan contains private network topology and a local receipt has a
+// detached signature. Require a private, non-symlink regular file.
 func readPrivateJSON(path string,v any)error{
- info,err:=os.Lstat(path)
- if err!=nil{return err}
- if !info.Mode().IsRegular()||info.Mode()&os.ModeSymlink!=0{
-  return errors.New("private evidence input must be a regular non-symlink file")
- }
- if runtime.GOOS!="windows"&&info.Mode().Perm()&0077!=0{
-  return errors.New("private evidence file must be owner-only (chmod 600)")
- }
- return readJSON(path,v)
+ return decodeInputJSON(path,v,true)
 }
 
 func writeExclusive(path string,record any)error{

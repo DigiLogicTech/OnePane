@@ -14,6 +14,8 @@ package main
 import(
  "context"
  "crypto/ed25519"
+ "crypto/rand"
+ "crypto/sha256"
  "encoding/base64"
  "encoding/json"
  "errors"
@@ -81,6 +83,34 @@ func writeExclusive(path string,record any)error{
  if _,err=f.Write(append(b,'\n'));err!=nil{return err}
  return f.Sync()
 }
+// Key generation happens exclusively on the instrument host. The private
+// key stays in a new local file (never printed, overwritten or uploaded).
+func runKeygen(args []string)error{
+ fs:=flag.NewFlagSet("keygen",flag.ContinueOnError)
+ dest:=fs.String("private-key-out","","new, exclusive private key path")
+ if err:=fs.Parse(args);err!=nil{return err}
+ if fs.NArg()!=0||*dest==""{return errors.New("keygen needs --private-key-out")}
+ pub,private,err:=ed25519.GenerateKey(rand.Reader)
+ if err!=nil{return err}
+ fd,err:=os.OpenFile(*dest,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
+ if err!=nil{return err}
+ // Keep the key on disk in base64 form for local reads. No cloud sync,
+ // command-line argument, clipboard or standard output carries it.
+ _,writeErr:=fd.Write([]byte(base64.StdEncoding.EncodeToString(private)+"\n"))
+ if writeErr==nil{writeErr=fd.Sync()}
+ closeErr:=fd.Close()
+ if writeErr!=nil{return writeErr}
+ if closeErr!=nil{return closeErr}
+ digest:=sha256.Sum256(pub)
+ fmt.Println("Ed25519 public key (base64, for human OnePane enrollment):")
+ fmt.Println(base64.StdEncoding.EncodeToString(pub))
+ fmt.Printf("Public key SHA256 fingerprint: sha256:%x\n",digest[:])
+ if runtime.GOOS=="windows"{
+  fmt.Println("Windows: restrict the private key's NTFS ACL to the intended instrument account.")
+ }
+ return nil
+}
+
 func runProbe(args []string)error{
  fs:=flag.NewFlagSet("probe",flag.ContinueOnError)
  challenge:=fs.String("challenge","","human-issued JSON challenge file")
@@ -131,9 +161,10 @@ func runSign(args []string)error{
 func main(){
  var err error
  if len(os.Args)<2{
-  err=errors.New("usage: onepane-instrument-probe probe|sign [flags]")
+  err=errors.New("usage: onepane-instrument-probe keygen|probe|sign [flags]")
  }else{
   switch os.Args[1]{
+  case "keygen":err=runKeygen(os.Args[2:])
   case "probe":err=runProbe(os.Args[2:])
   case "sign":err=runSign(os.Args[2:])
   default:err=fmt.Errorf("unsupported instrument operation: %s",os.Args[1])

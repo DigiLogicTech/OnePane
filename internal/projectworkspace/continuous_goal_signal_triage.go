@@ -46,6 +46,10 @@ type GoalSignalTriageSource struct {
  InstrumentKeyID string `json:"instrument_key_id,omitempty"`
  InstrumentProofClass string `json:"instrument_proof_class,omitempty"`
  InstrumentKeyPossessionProven bool `json:"instrument_key_possession_proven"`
+ SignedMeasurementClaimState string `json:"signed_measurement_claim_state"`
+ SignedMeasurementClaimID string `json:"signed_measurement_claim_id,omitempty"`
+ SignedMeasurementClaimOutcome string `json:"signed_measurement_claim_outcome,omitempty"`
+ SignedMeasurementClaimProofClass string `json:"signed_measurement_claim_proof_class,omitempty"`
  NodeState string `json:"node_state"`
  NodeObservedAt int64 `json:"node_observed_at,omitempty"`
  NodeReceiptID string `json:"node_receipt_id,omitempty"`
@@ -92,6 +96,7 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
    "node_peer_connectivity_is_self_report_not_physical_device_attestation",
    "pinned_tls_certificate_proves_key_possession_not_physical_device_integrity",
    "instrument_signed_challenge_proves_key_possession_not_physical_device_or_measurement_accuracy",
+   "instrument_signed_tcp_outcome_is_self_report_without_independent_observer_vantage_attestation",
    "different_sources_may_not_measure_same_target",
    "read_only_no_automated_monitoring_or_remediation",
   },
@@ -108,6 +113,7 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
    SourceID:source.SourceID,TCPState:"no_current_approved_measurement",
    TLSCheckState:"no_current_approved_check",
    InstrumentProofState:"no_current_authenticated_proof",
+   SignedMeasurementClaimState:"no_current_signed_claim",
    NodeState:"no_current_approved_measurement",
   }
   // Bound each query to ONE last completed TCP result for this exact Goal
@@ -330,6 +336,75 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
    item.InstrumentProofClass=instrumentProofClass
    item.InstrumentProofState="recent_signed_challenge"
    item.InstrumentKeyPossessionProven=true
+  }
+  // The signed measurement is a SOURCE SELF-REPORT. A valid signature
+  // authenticates one enrolled key, not whether a device was observed.
+  // Preserve it independently: no incident vote, verified health or
+  // physical-target correlation can be created by this projection.
+  var claimID,claimKeyID,claimClass,claimOutcome string
+  err=s.db.QueryRowContext(ctx,`SELECT claim.id,claim.instrument_key_id,claim.proof_class,claim.outcome
+   FROM project_goal_instrument_measurement_claims claim
+   JOIN project_goal_instrument_keys ik ON ik.id=claim.instrument_key_id
+    AND ik.project_id=claim.project_id AND ik.goal_id=claim.goal_id
+    AND ik.status='approved' AND ik.expires_at>?
+   JOIN project_goal_tls_endpoint_pins pin ON pin.id=ik.tls_pin_id
+    AND pin.project_id=ik.project_id AND pin.goal_id=ik.goal_id
+    AND pin.status='approved' AND pin.expires_at>?
+    AND pin.declared_target_id=ik.declared_target_id
+    AND pin.plan_hash=ik.plan_hash
+   JOIN project_goal_tcp_declared_target_bindings target
+    ON target.id=ik.declared_target_id AND target.project_id=ik.project_id
+    AND target.goal_id=ik.goal_id AND target.status='approved'
+    AND target.expires_at>? AND target.permit_id=pin.permit_id
+    AND target.plan_hash=ik.plan_hash
+    AND target.permit_revision=pin.permit_revision
+   JOIN project_goal_tcp_probe_permits permit
+    ON permit.id=target.permit_id AND permit.project_id=ik.project_id
+    AND permit.goal_id=ik.goal_id AND permit.status='approved'
+    AND permit.expires_at>? AND permit.revision=target.permit_revision
+    AND permit.plan_hash=? AND permit.target_ipv4=target.target_ipv4
+    AND permit.target_port=target.target_port
+    AND permit.source_id=target.source_id
+   JOIN project_continuous_goals goal ON goal.id=ik.goal_id
+    AND goal.project_id=ik.project_id AND goal.status='configured'
+    AND goal.project_workspace_id=ik.project_workspace_id
+    AND goal.project_workspace_id=target.project_workspace_id
+    AND goal.project_workspace_id=pin.project_workspace_id
+   JOIN projects p ON p.id=ik.project_id AND p.status='active'
+   JOIN workspaces tenant ON tenant.id=p.workspace_id AND tenant.status='active'
+   JOIN project_workspaces pw ON pw.id=goal.project_workspace_id
+    AND pw.project_id=p.id AND pw.status='active'
+   JOIN principals ki ON ki.id=ik.approved_by
+    AND ki.principal_type='human' AND ki.status='active'
+   JOIN workspace_memberships km ON km.principal_id=ki.id
+    AND km.workspace_id=p.workspace_id AND km.status='active'
+   JOIN principals pi ON pi.id=pin.approved_by
+    AND pi.principal_type='human' AND pi.status='active'
+   JOIN workspace_memberships pm ON pm.principal_id=pi.id
+    AND pm.workspace_id=p.workspace_id AND pm.status='active'
+   JOIN principals ti ON ti.id=target.approved_by
+    AND ti.principal_type='human' AND ti.status='active'
+   JOIN workspace_memberships tm ON tm.principal_id=ti.id
+    AND tm.workspace_id=p.workspace_id AND tm.status='active'
+   JOIN principals ri ON ri.id=permit.approved_by
+    AND ri.principal_type='human' AND ri.status='active'
+   JOIN workspace_memberships rm ON rm.principal_id=ri.id
+    AND rm.workspace_id=p.workspace_id AND rm.status='active'
+   WHERE claim.project_id=? AND claim.goal_id=?
+    AND claim.source_id=target.source_id
+    AND claim.declared_target_id=target.id AND claim.tls_pin_id=pin.id
+    AND target.source_id=? AND claim.accepted_at BETWEEN ? AND ?
+   ORDER BY claim.accepted_at DESC,claim.id DESC LIMIT 1`,
+   now,now,now,now,planHash,
+   projectID,goalID,source.SourceID,now-freshnessMS,now).
+   Scan(&claimID,&claimKeyID,&claimClass,&claimOutcome)
+  if err!=nil&&!errors.Is(err,sql.ErrNoRows){return GoalSignalTriage{},err}
+  if err==nil{
+   item.SignedMeasurementClaimID=claimID
+   item.SignedMeasurementClaimOutcome=claimOutcome
+   item.SignedMeasurementClaimProofClass=claimClass
+   item.SignedMeasurementClaimState="recent_instrument_self_report_unverified"
+   _=claimKeyID
   }
   // Only report a live, correctly pinned TLS source with a human
   // approver whose membership remains active. Historical receipts

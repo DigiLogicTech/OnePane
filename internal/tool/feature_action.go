@@ -67,18 +67,33 @@ func scopedToolActions(capabilityID, toolID string, mode authority.ActionMode)([
     // alone must not bypass an explicitly read-only Workspace.
     return []string{"files.write","process.execute","network.connect"},true
   }
+  // Unknown adapter identities must be classified by their *actual
+  // execution mode first*. A custom sandbox command declaring
+  // filesystem.read may still write/execute; a network-sending adapter
+  // declaring vault.read may still exfiltrate its secret.
+  // Only the explicit, audited tool IDs above have narrowed effects.
+  switch mode {
+  case authority.ActionExecuteSandboxed:
+    actions:=[]string{"files.read","files.write","process.execute"}
+    switch cap{
+    case "secrets.use","vault.read","vault.use":
+      actions=append(actions,"secrets.use")
+    case "network.send","network.external","http.send":
+      actions=append(actions,"network.connect")
+    }
+    return actions,true
+  case authority.ActionExternalSend:
+    actions:=[]string{"network.connect"}
+    if cap=="secrets.use"||cap=="vault.read"||cap=="vault.use"{
+      actions=append(actions,"secrets.use")
+    }
+    return actions,true
+  }
   switch cap {
   case "filesystem.read","file.read":return []string{"files.read"},true
   case "filesystem.write","file.write":return []string{"files.read","files.write"},true
   case "network.send","network.external","http.send":return []string{"network.connect"},true
   case "secrets.use","vault.read","vault.use":return []string{"secrets.use"},true
-  }
-  switch mode {
-  case authority.ActionExecuteSandboxed:
-    // Only the authorised sandbox adapter can bound arbitrary side effects.
-    return []string{"files.read","files.write","process.execute"},true
-  case authority.ActionExternalSend:
-    return []string{"network.connect"},true
   }
   return nil,false
 }

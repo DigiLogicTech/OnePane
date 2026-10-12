@@ -9,7 +9,9 @@ OnePane now has two distinct, permission-controlled evidence channels:
 - A **human-approved, narrowly scoped TCP connect** to one literal RFC1918 IPv4/port. Its already-recorded `connected`, `not_connected` or `timed_out` outcome indicates only whether that socket connection was established from the probing environment. It does not prove that a device is authentic, secure or serving the expected application.
 - A **human-approved paired-Node mTLS receipt** with `peer_connectivity` outcome `reachable`, `unreachable` or `unknown`. Its pinned client certificate proves which registered Node connection submitted the self-reported signal. The remote Node has not demonstrated physical measurement or identity of any outside network device.
 
-These two signals are not automatically measurements of the same target. They are never merged into a verified device-health score. Additional independently authenticated device/instrument provenance and human-approved target correlation are necessary before incident-confidence decisions are possible.
+A third, separately human-authorised evidence type is an **out-of-band pinned TLS certificate possession check**. Only when a human first declares an exact TCP endpoint and then deliberately pins its server leaf-certificate fingerprint can OnePane perform a short TLS handshake. It can show current `tls_check_state`, `tls_check_id`, `tls_pin_id`, `tls_identity_class=operator_pinned_tls_certificate` and `tls_certificate_possession_matched` alongside that TCP source. A recent verification is filtered by live pin, target, permit, Goal plan and original approving humans; a new unfinished check masks an older match, and revocation removes it from CURRENT triage. **This certificate possession is not a security-health signal and contributes no incident votes.** See [pinned TLS contract](rc11-tls-certificate-possession.md).
+
+These signals are not automatically measurements of the same physical target. They are never merged into a verified device-health score. Additional independently authenticated device/instrument provenance and human-approved target correlation are necessary before incident-confidence decisions are possible.
 
 ## Endpoint and permissions
 
@@ -31,6 +33,8 @@ Evidence is current only when the latest qualified observation is no more than *
 | `mixed_classes_no_adverse_indicator` | Both classes have recent records, neither currently adverse |
 | `adverse_indicator_needs_review` | At least one adverse signal, but the strict multi-class/independent-source threshold is not reached |
 | `multiple_adverse_indicators_investigate` | At least two distinct allowlisted source IDs have adverse indicators, **including at least one failed TCP connect and one peer-reported unavailable connection**; investigation is warranted, but this is NOT corroboration of the same target or a security incident |
+
+The response explicitly marks `cross_class_target_correlation=not_established` regardless of positive or negative TCP, Node or pinned-TLS evidence. TLS certificate possession is a distinct limited-origin class; it does not establish that the paired Node and locally pinned endpoint describe the same physical asset.
 
 The response also retains the canonical stored Goal `goal_status` and `goal_health` without promoting either from these diagnostic signals. A paused, retired or otherwise nonconfigured Goal short-circuits current triage with `goal_not_configured`.
 

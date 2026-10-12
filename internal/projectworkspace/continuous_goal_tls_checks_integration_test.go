@@ -162,7 +162,79 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
  if _,err=svc.AcceptGoalInstrumentChallenge(ctx,accept);err==nil{
   t.Fatal("spent Ed25519 challenge was replayed successfully")
  }
- for i:=0;i<3;i++{
+ // A FRESH nonce can be used for exactly one endpoint-scoped, instrument-
+ // signed SELF-REPORT. It proves neither the observer's vantage nor the
+ // physical identity of the target; the existing TCP/TLS probes remain
+ // distinct evidence channels and incident classification is unchanged.
+ mch,err:=svc.IssueGoalInstrumentChallenge(ctx,issue)
+ if err!=nil{t.Fatalf("could not issue measurement nonce: %v",err)}
+ observed:=clock.Real{}.UnixMilli()
+ if observed<mch.IssuedAt{observed=mch.IssuedAt}
+ mc:=SignedMeasurementCommand{
+  ProjectID:project.ID,GoalID:goal.ID,KeyID:key.ID,
+  ChallengeID:mch.ID,ActorPrincipalID:"owner",
+  ExpectedGoalRevision:goal.Revision,ObservedAt:observed,
+  Outcome:"not_connected",
+ }
+ prepared,err:=svc.PrepareGoalInstrumentMeasurement(ctx,mc)
+ if err!=nil{t.Fatalf("human measurement signing preparation failed: %v",err)}
+ if len(prepared.SigningPayload)==0||prepared.MeasurementType!="endpoint_tcp_connect_claim"||
+  prepared.ObserverVantageVerified{
+  t.Fatalf("untrusted instrument output promoted to trusted measurement: %+v",prepared)
+ }
+ mc.Signature=ed25519.Sign(forger,prepared.SigningPayload)
+ if _,err=svc.AcceptGoalInstrumentMeasurement(ctx,mc);err==nil{
+  t.Fatal("measurement signed by wrong key was accepted")
+ }
+ mc.Signature=ed25519.Sign(private,prepared.SigningPayload)
+ altered:=mc;altered.Outcome="connected"
+ if _,err=svc.AcceptGoalInstrumentMeasurement(ctx,altered);err==nil{
+  t.Fatal("a signed negative self-report could be silently changed to connected")
+ }
+ old:=mc;old.ObservedAt=mch.IssuedAt-1
+ if _,err=svc.AcceptGoalInstrumentMeasurement(ctx,old);err==nil{
+  t.Fatal("pre-challenge instrument reading acquired later nonce authority")
+ }
+ wrongTenant:=mc;wrongTenant.ProjectID="unrelated-project"
+ if _,err=svc.AcceptGoalInstrumentMeasurement(ctx,wrongTenant);err==nil{
+  t.Fatal("signed measurement escaped Project/tenant scope")
+ }
+ measure,err:=svc.AcceptGoalInstrumentMeasurement(ctx,mc)
+ if err!=nil{t.Fatalf("instrument-signed scoped claim rejected: %v",err)}
+ if measure.Outcome!="not_connected"||
+  measure.ProofClass!="instrument_self_report_signed_not_attested"||
+  measure.DeviceIdentityVerified||measure.ObserverVantageVerified||
+  measure.TargetCorrelationEstablished||measure.RemediationAuthorized{
+  t.Fatalf("source self-report became physical verified telemetry: %+v",measure)
+ }
+ if _,err=svc.AcceptGoalInstrumentMeasurement(ctx,mc);err==nil{
+  t.Fatal("spent instrument measurement nonce replay succeeded")
+ }
+ if _,err=svc.AcceptGoalInstrumentChallenge(ctx,
+  AcceptGoalInstrumentChallengeCommand{
+   ProjectID:project.ID,GoalID:goal.ID,KeyID:key.ID,
+   ChallengeID:mch.ID,ActorPrincipalID:"owner",
+   ExpectedGoalRevision:goal.Revision,
+   Signature:ed25519.Sign(private,mch.SigningPayload),
+  });err==nil{
+  t.Fatal("measurement challenge was reused for an independent possession proof")
+ }
+ mbundle,err:=svc.GetGoalInstrumentMeasurementBundle(ctx,project.ID,goal.ID,measure.ID)
+ if err!=nil||!mbundle.DetachedSignatureVerified||
+  !ed25519.Verify(ed25519.PublicKey(mbundle.PublicKey),
+   mbundle.SigningPayload,mbundle.Signature){
+  t.Fatalf("measurement claim failed independent cryptographic audit: %+v %v",
+   mbundle,err)
+ }
+ mlist,err:=svc.ListGoalInstrumentMeasurements(ctx,project.ID,goal.ID)
+ if err!=nil||len(mlist)!=1||mlist[0].ID!=measure.ID{
+  t.Fatalf("signed measurement metadata history missing: %+v %v",mlist,err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`DELETE FROM
+  project_goal_instrument_measurement_claims WHERE id=?`,measure.ID);err==nil{
+  t.Fatal("signed measurement history was deletable")
+ }
+ for i:=0;i<2;i++{
   another,issueErr:=svc.IssueGoalInstrumentChallenge(ctx,issue)
   if issueErr!=nil{
    t.Fatalf("bounded instrument challenge %d unexpectedly failed: %v",i,issueErr)
@@ -195,8 +267,8 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
  var instrumentEvents int
  if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
   WHERE event_type LIKE 'project.goal_instrument_%'`).Scan(&instrumentEvents);
-  err!=nil||instrumentEvents!=6{
-  t.Fatalf("pre-revocation instrument key/proof audit incomplete: %d %v",
+  err!=nil||instrumentEvents!=8{
+  t.Fatalf("pre-revocation instrument key/proof/measurement audit incomplete: %d %v",
    instrumentEvents,err)
  }
  var leaked int
@@ -218,7 +290,7 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
  }
  if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
   WHERE event_type LIKE 'project.goal_instrument_%'`).Scan(&instrumentEvents);
-  err!=nil||instrumentEvents!=7{
+  err!=nil||instrumentEvents!=9{
   t.Fatalf("instrument key revocation was missing from tenant audit: %d %v",
    instrumentEvents,err)
  }

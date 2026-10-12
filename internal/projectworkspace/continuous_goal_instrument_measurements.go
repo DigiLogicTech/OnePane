@@ -320,9 +320,16 @@ func(s *Service)GetGoalInstrumentMeasurementBundle(ctx context.Context,
    AND k.tls_pin_id=m.tls_pin_id
   JOIN project_goal_instrument_challenges ch ON ch.id=m.challenge_id
    AND ch.instrument_key_id=m.instrument_key_id
+   AND ch.project_id=m.project_id AND ch.goal_id=m.goal_id
    AND ch.status='accepted'
   JOIN project_goal_tls_endpoint_pins pin ON pin.id=m.tls_pin_id
    AND pin.project_id=m.project_id AND pin.goal_id=m.goal_id
+   AND pin.declared_target_id=m.declared_target_id
+  JOIN project_goal_tcp_declared_target_bindings target
+   ON target.id=m.declared_target_id
+   AND target.project_id=m.project_id AND target.goal_id=m.goal_id
+   AND target.source_id=m.source_id AND target.permit_id=pin.permit_id
+   AND target.plan_hash=k.plan_hash
   JOIN project_continuous_goals g ON g.id=m.goal_id AND g.project_id=m.project_id
   JOIN projects p ON p.id=m.project_id AND p.status='active'
   JOIN workspaces tenant ON tenant.id=p.workspace_id AND tenant.status='active'

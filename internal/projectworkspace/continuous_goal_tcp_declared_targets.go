@@ -26,6 +26,7 @@ type GoalTCPDeclaredTarget struct{
  DisplayLabel string `json:"display_label"`
  IdentityClass string `json:"identity_class"`
  Status string `json:"status"`
+ EffectiveIdentityState string `json:"effective_identity_state,omitempty"`
  Revision int64 `json:"revision"`
  ApprovedBy string `json:"approved_by"`
  ApprovedAt int64 `json:"approved_at"`
@@ -150,7 +151,7 @@ func(s *Service)DeclareGoalTCPTarget(ctx context.Context,
    PermitID:permit.ID,PermitRevision:permit.Revision,PlanHash:hash,
    TargetIPv4:permit.TargetIPv4,TargetPort:permit.TargetPort,
    DisplayLabel:c.DisplayLabel,IdentityClass:"operator_declared_tcp_endpoint",
-   Status:"approved",Revision:1,ApprovedBy:c.ActorPrincipalID,
+   Status:"approved",EffectiveIdentityState:"active",Revision:1,ApprovedBy:c.ActorPrincipalID,
    ApprovedAt:now,ExpiresAt:c.ExpiresAt,
   }
   _,err=tx.ExecContext(ctx,`INSERT INTO project_goal_tcp_declared_target_bindings(
@@ -230,7 +231,7 @@ func(s *Service)RevokeGoalTCPTarget(ctx context.Context,
   if err!=nil{return err}
   n,err=update.RowsAffected();if err!=nil{return err}
   if n!=1{return ErrRevisionConflict}
-  out.Status="revoked";out.Revision++;out.RevokedAt=now
+  out.Status="revoked";out.EffectiveIdentityState="revoked";out.Revision++;out.RevokedAt=now
   body,_:=json.Marshal(map[string]any{
    "goal_id":c.GoalID,"target_id":c.TargetID,"revoked":true,
    "device_identity_verified":false,"monitoring_active":false,
@@ -257,15 +258,58 @@ func(s *Service)ListGoalTCPTargets(ctx context.Context,
    AND w.project_id=p.id AND w.status='active'
   WHERE g.id=? AND g.project_id=?`,goalID,projectID).Scan(&exists)
  if err!=nil{return nil,err}
- rows,err:=s.db.QueryContext(ctx,`SELECT `+declaredTargetColumns+`
+ rows,err:=s.db.QueryContext(ctx,`SELECT `+declaredTargetColumns+`,
+  CASE
+   WHEN status='revoked' THEN 'revoked'
+   WHEN expires_at<=? THEN 'expired'
+   WHEN NOT EXISTS(SELECT 1 FROM principals reviewer
+    JOIN projects project ON project.id=project_goal_tcp_declared_target_bindings.project_id
+    JOIN workspace_memberships m ON m.workspace_id=project.workspace_id
+     AND m.principal_id=reviewer.id AND m.status='active'
+    WHERE reviewer.id=project_goal_tcp_declared_target_bindings.approved_by
+     AND reviewer.principal_type='human' AND reviewer.status='active')
+    THEN 'approver_inactive'
+   WHEN NOT EXISTS(SELECT 1 FROM project_goal_tcp_probe_permits permit
+    JOIN principals manual_review ON manual_review.id=permit.approved_by
+     AND manual_review.principal_type='human' AND manual_review.status='active'
+    JOIN projects project ON project.id=permit.project_id AND project.status='active'
+    JOIN workspace_memberships manual_m ON manual_m.workspace_id=project.workspace_id
+     AND manual_m.principal_id=manual_review.id AND manual_m.status='active'
+    JOIN project_continuous_goals g ON g.id=permit.goal_id
+     AND g.project_id=project.id AND g.status='configured'
+    JOIN project_workspaces ws ON ws.id=g.project_workspace_id
+     AND ws.project_id=project.id AND ws.status='active'
+    WHERE permit.id=project_goal_tcp_declared_target_bindings.permit_id
+     AND permit.project_id=project_goal_tcp_declared_target_bindings.project_id
+     AND permit.goal_id=project_goal_tcp_declared_target_bindings.goal_id
+     AND permit.project_workspace_id=project_goal_tcp_declared_target_bindings.project_workspace_id
+     AND permit.status='approved' AND permit.expires_at>?
+     AND permit.revision=project_goal_tcp_declared_target_bindings.permit_revision
+     AND permit.plan_hash=project_goal_tcp_declared_target_bindings.plan_hash
+     AND permit.target_ipv4=project_goal_tcp_declared_target_bindings.target_ipv4
+     AND permit.target_port=project_goal_tcp_declared_target_bindings.target_port
+     AND permit.source_id=project_goal_tcp_declared_target_bindings.source_id
+     AND g.project_workspace_id=project_goal_tcp_declared_target_bindings.project_workspace_id
+     AND EXISTS(SELECT 1 FROM json_each(g.monitoring_plan_json,'$.source_ids') source
+      WHERE source.type='text'
+       AND source.value=project_goal_tcp_declared_target_bindings.source_id))
+    THEN 'permit_inactive'
+   ELSE 'active'
+  END
   FROM project_goal_tcp_declared_target_bindings
   WHERE project_id=? AND goal_id=?
-  ORDER BY approved_at DESC,id DESC LIMIT 100`,projectID,goalID)
+  ORDER BY approved_at DESC,id DESC LIMIT 100`,
+  s.clock.UnixMilli(),s.clock.UnixMilli(),projectID,goalID)
  if err!=nil{return nil,err}
  defer rows.Close()
  out:=[]GoalTCPDeclaredTarget{}
  for rows.Next(){
-  item,err:=scanDeclaredTCPTarget(rows)
+  var item GoalTCPDeclaredTarget
+  err=rows.Scan(&item.ID,&item.ProjectID,&item.GoalID,&item.ProjectWorkspaceID,
+   &item.SourceID,&item.PermitID,&item.PermitRevision,&item.PlanHash,
+   &item.TargetIPv4,&item.TargetPort,&item.DisplayLabel,&item.IdentityClass,
+   &item.Status,&item.Revision,&item.ApprovedBy,&item.ApprovedAt,
+   &item.ExpiresAt,&item.RevokedAt,&item.EffectiveIdentityState)
   if err!=nil{return nil,err}
   out=append(out,item)
  }

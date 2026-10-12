@@ -124,6 +124,20 @@ func TestHumanOnlyNodeMeasurementGrantsDoNotActivateMonitoring(t *testing.T){
  }
  if _,err=db.SQL().ExecContext(ctx,`UPDATE harness_nodes
   SET trust_state='paired' WHERE id='peer'`);err!=nil{t.Fatal(err)}
+ // A historical approval must not remain "effective=active" when the
+ // Goal monitoring plan no longer includes its permitted source.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
+  SET monitoring_plan_json=?,revision=revision+1 WHERE id=?`,
+  `{"version":1,"source_ids":["removed-source"]}`,goal.ID);err!=nil{t.Fatal(err)}
+ metadata=call("GET","operator",grants,"")
+ if metadata.Code!=200||!strings.Contains(metadata.Body.String(),
+  "\"effective_transport_state\":\"scope_inactive\""){
+  t.Fatalf("removed Goal source still displayed as active: %d %s",
+   metadata.Code,metadata.Body)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
+  SET monitoring_plan_json=?,revision=revision+1 WHERE id=?`,
+  `{"version":1,"source_ids":["peer-link"]}`,goal.ID);err!=nil{t.Fatal(err)}
  if got:=call("GET","outsider",grants,"");got.Code!=403{
   t.Fatalf("cross-tenant grant list permitted: %d",got.Code)
  }

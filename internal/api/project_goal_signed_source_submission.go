@@ -22,6 +22,7 @@ type goalSignedSourceCommandService interface {
  ApproveGoalObservationSigner(context.Context,projectworkspace.ApproveGoalObservationSignerCommand)(projectworkspace.GoalObservationSigner,error)
  RevokeGoalObservationSigner(context.Context,projectworkspace.RevokeGoalObservationSignerCommand)(projectworkspace.GoalObservationSigner,error)
  AcceptSignedGoalObservation(context.Context,projectworkspace.AcceptSignedGoalObservationCommand)(projectworkspace.SignedGoalObservationProof,error)
+ RecordGoalSourceReading(context.Context,projectworkspace.RecordGoalSourceReadingCommand)(projectworkspace.SourceReadingReceipt,error)
 }
 
 // Signed-source mutations are security sensitive. Unlike legacy general
@@ -159,4 +160,36 @@ func(s *Server)submitProjectGoalSignedObservation(w http.ResponseWriter,r *http.
    Signature:input.Signature,ActorPrincipalID:identity.PrincipalID,
   })
  respondDomain(w,proof,err,http.StatusCreated)
+}
+
+// Record an *unverified* local source reading with one-time source budget.
+// The response is only the Observation ID/hash needed for a subsequent
+// Ed25519 signature; raw values never leave the service in the response.
+func(s *Server)recordProjectGoalSourceReading(w http.ResponseWriter,r *http.Request){
+ identity,ok:=s.authenticate(w,r)
+ if !ok{return}
+ if identity.AuthMethod!="bearer"||identity.CredentialID==""||
+  (identity.PrincipalType!="service"&&identity.PrincipalType!="agent"){
+  writeError(w,http.StatusForbidden,"machine bearer identity required")
+  return
+ }
+ if s.projects==nil{writeError(w,http.StatusServiceUnavailable,"Project service unavailable");return}
+ p,err:=s.projects.Project(r.Context(),strings.TrimSpace(r.PathValue("projectID")))
+ if err!=nil{respondDomain(w,nil,err,0);return}
+ if !s.authorize(w,r,identity,p.WorkspaceID,"goal.source.submit"){return}
+ svc,ok:=s.projects.(goalSignedSourceCommandService)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"source reading staging unavailable");return}
+ var in struct{
+  SignerID string `json:"signer_id"`
+  ObservationType string `json:"observation_type"`
+  Value json.RawMessage `json:"value"`
+ }
+ if !decodeSignedSourceJSON(w,r,&in){return}
+ result,err:=svc.RecordGoalSourceReading(r.Context(),
+  projectworkspace.RecordGoalSourceReadingCommand{
+   ProjectID:p.ID,GoalID:r.PathValue("goalID"),SignerID:in.SignerID,
+   ObservationType:in.ObservationType,Value:in.Value,
+   ActorPrincipalID:identity.PrincipalID,
+  })
+ respondDomain(w,result,err,http.StatusCreated)
 }

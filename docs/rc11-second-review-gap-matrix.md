@@ -345,10 +345,15 @@ Completed in this integration branch, with source and regression tests:
   bounded/read-only adapter execution and observation intake; establish
   verified baselines, truthful health, privacy-filtered incident history,
   signed evidence and approved remediation/postcondition checks.
-- [ ] **Operational performance follow-up:** durable fairness/cursor for
-  large sets of invalid source permits, full retention/compaction policy
-  for historical review ledgers, resource-pressure prioritisation and
-  installed Windows/Ubuntu CPU-only and paired-Node QA. Current source
-  candidate prefetch is capped at 256 and can starve a healthy source
-  beyond that prefix if the earlier candidates repeatedly fail; do not
-  claim starvation-free recurring delivery.
+- [x] **Crash-safe review starvation remediation:** migration 0059 adds a
+  non-authoritative persisted worker cursor. Each tick examines at most 64
+  candidates, visits up to 8 successful reviews by default, persists the
+  last attempted permit even on denial, and wraps from the final source
+  on later ticks. A healthy source beyond a malformed 64-row prefix is
+  no longer permanently hidden by that prefix after restart. Integration
+  regression includes 65 corrupt permits plus a healthy source.
+- [ ] **Operational performance follow-up:** full retention/compaction
+  policy for historical review ledgers, resource-pressure prioritisation,
+  fairness under concurrent host instances and installed Windows/Ubuntu
+  CPU-only and paired-Node QA. These remain outside the currently tested
+  read-only receipt reviewer.

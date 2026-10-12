@@ -533,6 +533,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/{transition}", s.transitionProjectContinuousGoal)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/observations", s.listProjectGoalObservations)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations", s.listProjectGoalSignedObservations)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers", s.approveProjectGoalSourceSigner)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers/{signerID}/revoke", s.revokeProjectGoalSourceSigner)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations/submit", s.submitProjectGoalSignedObservation)
 	// Override the generic /{transition} POST route: this read-only
 	// evidence metadata endpoint must never be interpreted as a Goal action.
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations", func(w http.ResponseWriter,r *http.Request){

@@ -109,9 +109,21 @@ func TestHumanOnlyNodeMeasurementGrantsDoNotActivateMonitoring(t *testing.T){
   t.Fatalf("stale Goal revision permitted grant duplicate: %d",got.Code)
  }
  metadata:=call("GET","operator",grants,"")
- if metadata.Code!=200||!strings.Contains(metadata.Body.String(),grant.ID){
-  t.Fatalf("operator cannot audit approved grant: %d %s",metadata.Code,metadata.Body)
+ if metadata.Code!=200||!strings.Contains(metadata.Body.String(),grant.ID)||
+  !strings.Contains(metadata.Body.String(),"\"effective_transport_state\":\"active\""){
+  t.Fatalf("operator cannot audit currently active grant: %d %s",
+   metadata.Code,metadata.Body)
  }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE harness_nodes
+  SET trust_state='unavailable' WHERE id='peer'`);err!=nil{t.Fatal(err)}
+ metadata=call("GET","operator",grants,"")
+ if metadata.Code!=200||!strings.Contains(metadata.Body.String(),
+  "\"effective_transport_state\":\"peer_unavailable\""){
+  t.Fatalf("Node trust loss is concealed by historical approval: %d %s",
+   metadata.Code,metadata.Body)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE harness_nodes
+  SET trust_state='paired' WHERE id='peer'`);err!=nil{t.Fatal(err)}
  if got:=call("GET","outsider",grants,"");got.Code!=403{
   t.Fatalf("cross-tenant grant list permitted: %d",got.Code)
  }
@@ -134,6 +146,12 @@ func TestHumanOnlyNodeMeasurementGrantsDoNotActivateMonitoring(t *testing.T){
  revoked:=call("POST","operator",revokeURL,revokedBody)
  if revoked.Code!=200||!strings.Contains(revoked.Body.String(),"\"revoked\""){
   t.Fatalf("human revocation failed: %d %s",revoked.Code,revoked.Body)
+ }
+ metadata=call("GET","operator",grants,"")
+ if metadata.Code!=200||!strings.Contains(metadata.Body.String(),
+  "\"effective_transport_state\":\"revoked\""){
+  t.Fatalf("historically revoked Node grant was shown as active: %d %s",
+   metadata.Code,metadata.Body)
  }
  goal,err=svc.ContinuousGoal(ctx,goal.ID)
  if err!=nil{t.Fatal(err)}

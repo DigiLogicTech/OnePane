@@ -136,10 +136,10 @@ func(s *Service)RecordGoalSourceReading(ctx context.Context,
   ProbeToolID:sourceID,ProbeToolVersion:"1",
   SourcePrincipalID:&actor,ActorPrincipalID:&actor,
   Value:append(json.RawMessage(nil),c.Value...),
-  // Do not accept self-reported device trust or Node provenance.
+  // Do not accept self-reported device trust or Node provenance.\n  // Default sensor payload residency to trusted local Nodes, never cloud.
   Label:policy.DataLabel{
    WorkspaceID:tenantID,Confidentiality:policy.ConfidentialityInternal,
-   Residency:policy.ResidencyAny,Trust:policy.TrustUnverifiedDerived,
+   Residency:policy.ResidencyTrustedNodes,Trust:policy.TrustUnverifiedDerived,
   },
  })
  if err!=nil{return SourceReadingReceipt{},err}

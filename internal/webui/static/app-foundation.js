@@ -1940,8 +1940,17 @@ async function qa4BindL5GoalConfigurator(project){
       if(!holder)return;
       holder.textContent='Reading approved network targets…';
       try{
-        const permits=await apiRequest(reviewBase+encodeURIComponent(listTCP.dataset.goalProbeList)+'/tcp-probe-permits');
+        const goalURL=reviewBase+encodeURIComponent(listTCP.dataset.goalProbeList);
+        const [permits,baselines]=await Promise.all([
+          apiRequest(goalURL+'/tcp-probe-permits'),
+          apiRequest(goalURL+'/tcp-baselines')
+        ]);
         if(!holder.isConnected)return;
+        const latestBaseline={};
+        for(const b of Array.isArray(baselines)?baselines:[]){
+          if(!latestBaseline[b.source_id]||Number(b.revision)>Number(latestBaseline[b.source_id].revision))
+            latestBaseline[b.source_id]=b;
+        }
         holder.innerHTML=Array.isArray(permits)&&permits.length?
           permits.map(p=>`<div class="page-subtitle">
             <strong>${escapeHtml(p.source_id||'Source')}</strong> ·
@@ -1949,6 +1958,17 @@ async function qa4BindL5GoalConfigurator(project){
             · ${escapeHtml(p.status==='approved'&&Number(p.expires_at)<=Date.now()?'expired':p.status||'unknown')}
             · expires ${escapeHtml(new Date(p.expires_at).toLocaleString())}
             · not active monitoring
+            ${p.status==='approved'&&Number(p.expires_at)>Date.now()?`<select aria-label="Expected TCP state" data-goal-tcp-expected>
+               <option value="connected">Expected reachable</option>
+               <option value="not_connected">Expected not reachable</option>
+             </select><button type="button" class="btn"
+               data-goal-tcp-baseline-save="${escapeHtml(p.id)}"
+               data-goal-id="${escapeHtml(listTCP.dataset.goalProbeList)}"
+               data-goal-revision="${Number(listTCP.dataset.goalRevision)||0}"
+               data-baseline-revision="${Number(latestBaseline[p.source_id]?.revision)||0}">Save TCP expectation</button>`:''}
+            ${latestBaseline[p.source_id]?`<button type="button" class="btn"
+              data-goal-tcp-assess="${escapeHtml(p.source_id)}"
+              data-goal-id="${escapeHtml(listTCP.dataset.goalProbeList)}">Compare last test</button>`:''}
             ${p.status==='approved'&&Number(p.expires_at)>Date.now()?`<button type="button" class="btn"
               data-goal-probe-test="${escapeHtml(p.id)}"
               data-goal-id="${escapeHtml(listTCP.dataset.goalProbeList)}"
@@ -1961,6 +1981,47 @@ async function qa4BindL5GoalConfigurator(project){
           </div>`).join(''):
           '<div class="page-subtitle">No approved network sources.</div>';
       }catch(ex){if(holder.isConnected)holder.textContent='Network source list unavailable: '+ex.message}
+      return;
+    }
+    const saveTCPBaseline=event.target.closest('button[data-goal-tcp-baseline-save]');
+    if(saveTCPBaseline&&list.contains(saveTCPBaseline)){
+      event.preventDefault();saveTCPBaseline.disabled=true;
+      const wanted=String(saveTCPBaseline.closest('.page-subtitle')?.
+        querySelector('[data-goal-tcp-expected]')?.value||'');
+      try{
+        await apiRequest(reviewBase+encodeURIComponent(saveTCPBaseline.dataset.goalId)+'/tcp-baselines',{
+          method:'POST',body:JSON.stringify({
+            permit_id:String(saveTCPBaseline.dataset.goalTcpBaselineSave),
+            expected_tcp:wanted,
+            expected_goal_revision:Number(saveTCPBaseline.dataset.goalRevision),
+            expected_baseline_revision:Number(saveTCPBaseline.dataset.baselineRevision)
+          })
+        });
+        if(reviewStatus())reviewStatus().textContent='TCP reachability expectation saved. This does not verify device health.';
+        await refresh();
+      }catch(ex){
+        if(reviewStatus())reviewStatus().textContent='Unable to save TCP expectation: '+ex.message;
+        saveTCPBaseline.disabled=false;
+      }
+      return;
+    }
+    const assessTCP=event.target.closest('button[data-goal-tcp-assess]');
+    if(assessTCP&&list.contains(assessTCP)){
+      event.preventDefault();
+      const holder=assessTCP.closest('.list-row')?.querySelector('[data-goal-probe-results]');
+      if(!holder)return;
+      holder.textContent='Comparing last TCP handshake to operator expectation…';
+      try{
+        const outcome=await apiRequest(reviewBase+encodeURIComponent(assessTCP.dataset.goalId)+
+          '/tcp-assessment/'+encodeURIComponent(assessTCP.dataset.goalTcpAssess));
+        if(holder.isConnected){
+          holder.textContent='Source '+String(outcome.source_id||'')+
+            ' · expected '+String(outcome.expected_tcp||'unset')+
+            ' · last result '+String(outcome.observed_tcp||'none')+
+            ' · '+String(outcome.assessment||'unknown')+
+            ' · Device health remains UNVERIFIED. No remediation executed.';
+        }
+      }catch(ex){if(holder.isConnected)holder.textContent='TCP assessment unavailable: '+ex.message}
       return;
     }
     const testTCP=event.target.closest('button[data-goal-probe-test]');

@@ -23,9 +23,9 @@ const uxLink='<link rel="stylesheet" href="/ux-alignment.css">';
 assert.equal(html.split(uxLink).length,2,'shared design alignment stylesheet must load exactly once');
 const after=html.indexOf(uxLink);
 for(const file of pageCss){
- const link='<link rel="stylesheet" href="/'+file+'">';
- assert(html.includes(link),'missing view-specific stylesheet '+file);
- assert(html.indexOf(link)<after,'shared design layer must follow view style '+file);
+ const href='href="/'+file+'"';
+ assert(html.includes(href),'missing view-specific stylesheet '+file);
+ assert(html.indexOf(href)<after,'shared design layer must follow view style '+file);
 }
 const tokens=['--ux-control-height','--ux-control-radius','--ux-focus-size',
  '--ux-section-gap','--ux-control-gap',

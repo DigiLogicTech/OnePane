@@ -110,6 +110,16 @@ func(s *Service)claimGoalTCPAttempt(ctx context.Context,c RunGoalTCPProbeCommand
     ` FROM project_goal_tcp_probe_permits WHERE id=? AND project_id=? AND goal_id=?`,
     c.PermitID,c.ProjectID,c.GoalID))
   if err!=nil{return err}
+  // A grant from a human whose tenant membership has since been revoked
+  // is no longer live network authority, even before its expiry time.
+  var activeApprover int
+  err=tx.QueryRowContext(ctx,`SELECT 1 FROM principals approver
+    JOIN workspace_memberships membership ON
+      membership.principal_id=approver.id AND membership.workspace_id=?
+      AND membership.status='active'
+    WHERE approver.id=? AND approver.principal_type='human'
+      AND approver.status='active'`,project.WorkspaceID,permit.ApprovedBy).Scan(&activeApprover)
+  if err!=nil{return fmt.Errorf("%w: network approver no longer active",ErrPrincipalIneligible)}
   if permit.Revision!=c.ExpectedPermitRevision{return ErrRevisionConflict}
   if permit.Status!="approved"||permit.ExpiresAt<=now||
     permit.ProjectWorkspaceID!=wsID||permit.PlanHash!=hash||
@@ -186,6 +196,12 @@ func(s *Service)tcpAttemptStillAuthorised(ctx context.Context,a GoalTCPProbeAtte
    JOIN workspaces tenant ON tenant.id=pr.workspace_id AND tenant.status='active'
    JOIN project_workspaces w ON w.id=g.project_workspace_id
     AND w.project_id=pr.id AND w.status='active'
+   JOIN principals approver ON approver.id=p.approved_by
+     AND approver.principal_type='human' AND approver.status='active'
+   JOIN workspace_memberships approver_member ON
+     approver_member.workspace_id=pr.workspace_id
+     AND approver_member.principal_id=approver.id
+     AND approver_member.status='active'
    JOIN principals human ON human.id=? AND human.principal_type='human'
     AND human.status='active'
    JOIN workspace_memberships membership ON membership.workspace_id=pr.workspace_id

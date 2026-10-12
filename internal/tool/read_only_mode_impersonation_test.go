@@ -75,3 +75,68 @@ func TestMutatingReadOnlyImpersonationDeniedBeforeOperationPermit(t *testing.T){
   t.Fatalf("denied impostor reached authority or adapter: %d/%d",auth.calls,adapter.calls)
  }
 }
+
+
+func TestUnknownAdapterCannotDowngradeEffectsWithCapabilityLabel(t *testing.T){
+ cases:=[]struct{id,cap string;mode authority.ActionMode;want []string}{
+  {"custom.read","filesystem.read",authority.ActionExecuteSandboxed,
+   []string{"files.read","files.write","process.execute"}},
+  {"custom.write","file.write",authority.ActionExecuteSandboxed,
+   []string{"files.read","files.write","process.execute"}},
+  {"custom.read.secrets","vault.read",authority.ActionExecuteSandboxed,
+   []string{"files.read","files.write","process.execute","secrets.use"}},
+  {"custom.http","http.send",authority.ActionExecuteSandboxed,
+   []string{"files.read","files.write","process.execute","network.connect"}},
+  {"custom.secrets.send","vault.read",authority.ActionExternalSend,
+   []string{"network.connect","secrets.use"}},
+ }
+ for _,tc:=range cases{
+  effects,ok:=scopedToolActions(tc.cap,tc.id,tc.mode)
+  if !ok||len(effects)!=len(tc.want){
+   t.Errorf("%s effects=%v want=%v classified=%t",tc.id,effects,tc.want,ok)
+   continue
+  }
+  for i,want:=range tc.want{
+   if effects[i]!=want{t.Errorf("%s effect %d=%s want %s",tc.id,i,effects[i],want)}
+  }
+ }
+}
+
+func TestGenericSandboxReaderRequiresWriteAndExecuteBeforeAdapter(t *testing.T){
+ db:=featureScopeFixture(t)
+ for _,q:=range []string{
+  `UPDATE projects SET project_policy_json=
+   '{"feature_policy":{"Files":"enabled","FileRead":"enabled",
+    "FileWrite":"enabled","ProcessExecute":"enabled"}}' WHERE id='game'`,
+  `UPDATE project_workspaces SET ai_settings_json=
+   '{"feature_policy":{"Files":"enabled","FileRead":"enabled",
+    "FileWrite":"disabled","ProcessExecute":"disabled"}}' WHERE id='world'`,
+ }{
+  if _,err:=db.Exec(q);err!=nil{t.Fatal(err)}
+ }
+ adapter:=&countingAdapter{id:"trusted-sandbox",version:"1",
+  result:AdapterResult{Summary:"unexpected execution",Result:json.RawMessage(`{}`)}}
+ registry:=NewRegistry()
+ if err:=registry.Register(Definition{
+  ID:"custom.read",Version:"1",CapabilityID:"filesystem.read",
+  Mode:authority.ActionExecuteSandboxed,AdapterID:adapter.id,
+  AdapterVersion:adapter.version,Risk:policy.RiskLow,
+  MinimumVerification:policy.VerificationV1,MinimumApproval:policy.ApprovalNone,
+ },adapter);err!=nil{t.Fatal(err)}
+ auth:=&fakeAuthority{}
+ gateway:=newGateway(&fakeStore{},&fakePolicy{decision:policy.Decision{
+  Allowed:true,LeaseRevision:1,RequiredApproval:policy.ApprovalNone,
+ }},auth,registry,&fakeClock{now:1000})
+ gateway.scopes=featurepolicy.StoredScopes{DB:db}
+ gateway.EnableSandboxAdapter(adapter.id,adapter.version)
+ cmd:=scopedReadCommand()
+ cmd.ToolID="custom.read"
+ got,err:=gateway.Invoke(context.Background(),cmd)
+ if !errors.Is(err,ErrPolicyDenied)||got.ErrorCode==nil||
+  *got.ErrorCode!="feature_policy_denied"{
+  t.Fatalf("sandbox command bypassed denied Execute/Write using Reader label: %+v err=%v",got,err)
+ }
+ if auth.calls!=0||adapter.calls!=0{
+  t.Fatalf("mislabelled sandbox reached authority or execution: %d/%d",auth.calls,adapter.calls)
+ }
+}

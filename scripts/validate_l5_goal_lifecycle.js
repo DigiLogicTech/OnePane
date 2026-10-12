@@ -135,6 +135,13 @@ for(const token of ["RunManualGoalTCPProbe","ListGoalTCPProbeAttempts","project.
 for(const token of ["/tcp-probe-permits/{permitID}/test","/tcp-probe-attempts"]){
  assert(server.includes(token),"manual TCP test route missing "+token);
 }
+const tcpRateMigration=fs.readFileSync("migrations/0062_goal_tcp_probe_source_rate_fence.sql","utf8");
+assert(tcpRateMigration.includes("(goal_id,source_id,cadence_window)"),
+ "TCP source grant rotation must not reset the per-source cadence rate limit");
+assert(tcpRun.includes("WHERE goal_id=? AND source_id=? AND cadence_window=?"),
+ "manual TCP admission must enforce source-level rate budget");
+assert(ui.includes("approveTCP.dataset.confirmedTarget!==requestedTarget"),
+ "TCP consent confirmation must bind the exact source and target");
 assert(tcpRunMigration.includes("UNIQUE(permit_id,cadence_window)"),
  "TCP test retries must have an immutable admission fence");
 assert(!harness.includes("RunManualGoalTCPProbe"),"manual network test unexpectedly wired to scheduler");

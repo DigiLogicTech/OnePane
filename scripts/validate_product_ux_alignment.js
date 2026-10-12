@@ -33,6 +33,28 @@ const tokens=['--ux-control-height','--ux-control-radius','--ux-focus-size',
  'var(--on-accent)','var(--panel)','var(--panel-2)','var(--focus-ring)'];
 for(const token of tokens)assert(css.includes(token),'missing design token '+token);
 assert(!/#[0-9a-f]{3,8}\b/i.test(css),'shared alignment layer must not hardcode theme colours');
+/* Palette contrast is enforced on the existing seven explicit dark themes.
+   Custom themes and the system/light OS branches still need visual QA. */
+function luminance(hex){
+ const channels=hex.slice(1).match(/.{2}/g).map(part=>parseInt(part,16)/255);
+ const linear=channels.map(value=>value<=0.04045?value/12.92:((value+0.055)/1.055)**2.4);
+ return 0.2126*linear[0]+0.7152*linear[1]+0.0722*linear[2];
+}
+function contrast(hexA,hexB){
+ const a=luminance(hexA),b=luminance(hexB);
+ return (Math.max(a,b)+0.05)/(Math.min(a,b)+0.05);
+}
+for(const theme of ['dark','graphite','midnight','ocean','forest','violet','ember']){
+ const block=shared.match(new RegExp(':root\\\\[data-theme="'+theme+'"\\\\]\\\\{([^}]+)\\\\}'));
+ assert(block,'theme tokens unavailable for '+theme);
+ const fields=Object.fromEntries(
+  [...block[1].matchAll(/--([a-z-]+):\\s*(#[a-f0-9]{6})/gi)].map(m=>[m[1],m[2]]));
+ const contrastBody=contrast(fields.text,fields.panel);
+ const contrastButton=contrast(fields.accent,fields['on-accent']);
+ assert(contrastBody>=4.5,theme+' panel body text contrast below WCAG AA');
+ assert(contrastButton>=4.5,theme+' primary action text contrast below WCAG AA');
+}
+
 const primitives=['.page-heading','.page-actions','.toolbar','.panel-card',
  '.page-subtitle','.btn.primary',':focus-visible','@media (max-width: 900px)',
  '@media (max-width: 520px)','@media (prefers-reduced-motion: reduce)'];

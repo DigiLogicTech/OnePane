@@ -222,3 +222,62 @@ func TestApprovedProbePlanBindsCurrentOneShotEndpointAndRejectsTampering(t *test
   })
  }
 }
+
+type exactMappedDialer struct{
+ target string
+ listenerAddress string
+ called int
+}
+func(d *exactMappedDialer)DialContext(ctx context.Context,network,address string)(net.Conn,error){
+ d.called++
+ if network!="tcp4"||address!=d.target{
+  return nil,errors.New("client attempted an unapproved destination")
+ }
+ return (&net.Dialer{}).DialContext(ctx,"tcp4",d.listenerAddress)
+}
+
+func TestApprovedPlanUsesRealTCPConnectWithoutScanning(t *testing.T){
+ l,err:=net.Listen("tcp4","127.0.0.1:0")
+ if err!=nil{t.Fatal(err)}
+ defer l.Close()
+ accepted:=make(chan struct{},1)
+ go func(){
+  conn,err:=l.Accept()
+  if err==nil{_ = conn.Close();accepted<-struct{}{}}
+ }()
+ now:=time.Now()
+ ch:=fixtureChallenge(t,now)
+ keyPublic,key,err:=ed25519.GenerateKey(rand.Reader)
+ if err!=nil{t.Fatal(err)}
+ sum:=sha256.Sum256(ch.SigningPayload)
+ plan:=ProbePlan{
+  ProjectID:ch.ProjectID,GoalID:ch.GoalID,
+  InstrumentKeyID:ch.KeyID,ChallengeID:ch.ID,
+  DeclaredTargetID:"target1",TLSPinID:"pin1",SourceID:"router",
+  TargetIPv4:"10.16.5.19",TargetPort:443,TimeoutMS:900,
+  OriginalChallengeSHA256:fmt.Sprintf("sha256:%x",sum[:]),
+  ExpiresAt:ch.ExpiresAt,
+  AttestationClass:"human_authorised_endpoint_snapshot_not_device_attestation",
+ }
+ dialer:=&exactMappedDialer{
+  target:"10.16.5.19:443",listenerAddress:l.Addr().String(),
+ }
+ receipt,err:=ProbeApprovedPlan(context.Background(),ch,plan,key,dialer,
+  func()time.Time{return now})
+ if err!=nil{t.Fatalf("approved single TCP handshake failed: %v",err)}
+ if dialer.called!=1||receipt.Outcome!="connected"||
+  receipt.Target.IPv4!="10.16.5.19"||
+  receipt.Target.Port!=443{
+  t.Fatalf("one-shot actual TCP connect not bound to approved endpoint: %+v",receipt)
+ }
+ select{
+ case <-accepted:
+ case <-time.After(2*time.Second):
+  t.Fatal("real local test server did not receive the bounded TCP connect")
+ }
+ signed,err:=localReceiptSigningBytes(receipt)
+ if err!=nil{t.Fatal(err)}
+ if !ed25519.Verify(keyPublic,signed,receipt.LocalReportSignature){
+  t.Fatal("real TCP handshake receipt lacks independently valid signature")
+ }
+}

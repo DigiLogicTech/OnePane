@@ -87,4 +87,32 @@ for(const token of ["goal_review_worker_cursors","after_permit_id","ORDER BY p.i
 }
 assert(ui.includes("Approve recurring receipt review"),"UI does not disclose recurring nature of review consent");
 assert(ui.includes("Device monitoring not activated"),"UI falsely presents receipt review as device monitoring");
+// Network targets require a completely separate human permit. A plan
+// source name or a receipt-review grant never implies TCP/network authority.
+const tcpService=fs.readFileSync("internal/projectworkspace/continuous_goal_tcp_probe_permits.go","utf8");
+const tcpAPI=fs.readFileSync("internal/api/project_goal_tcp_probe_permits.go","utf8");
+const tcpMigration=fs.readFileSync("migrations/0060_goal_tcp_probe_permits.sql","utf8");
+for(const token of ["netip.ParseAddr(input)","addr.IsPrivate()","addr.IsLoopback()",
+ "addr.IsLinkLocalUnicast()","addr.String()!=input",
+ "TargetPort<1","TargetPort>65535","TimeoutMS<100","TimeoutMS>1500",
+ "humanGoalReviewer","goalReviewPlan","status='revoked'",
+ "network_tcp_connect","ExpectedPermitRevision"]){
+ assert(tcpService.includes(token),"private TCP grant authorization missing "+token);
+}
+for(const token of ["ApproveGoalTCPProbe","RevokeGoalTCPProbe",
+ "project.read","project.write","ActorPrincipalID:identity.PrincipalID"]){
+ assert(tcpAPI.includes(token),"private TCP source API missing "+token);
+}
+for(const token of ["data-goal-probe-source","data-goal-probe-ipv4",
+ "data-goal-probe-port","data-goal-probe-timeout","data-goal-probe-duration",
+ "data-goal-probe-approve=","data-goal-probe-list=","data-goal-probe-revoke=",
+ "Confirm network target ","No network probe has executed or been scheduled."]){
+ assert(ui.includes(token),"explicit TCP source consent UI missing "+token);
+}
+for(const token of ["/tcp-probe-permits","/tcp-probe-permits/{permitID}/revoke"]){
+ assert(server.includes(token),"TCP probe grant route missing "+token);
+}
+assert(tcpMigration.includes("CREATE UNIQUE INDEX idx_goal_tcp_probe_active_source"),
+ "same source could be rebound without revocation");
+assert(!harness.includes("TickDueGoalTCPProbe"),"network execution must not start by migration or consent");
 console.log("L5 pause/retire UI and fail-closed goal lifecycle: PASS");

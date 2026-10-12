@@ -171,7 +171,7 @@ func TestL5EvidenceReviewExpirationAndWorkspaceRevocationFailClosed(t *testing.T
   ExpiresAt:clock.Real{}.UnixMilli()+60*60*1000,ActorPrincipalID:"h"})
  if err!=nil{t.Fatal(err)}
  if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_goal_evidence_review_permits
- SET expires_at=? WHERE id=?`,clock.Real{}.UnixMilli()-1,permit.ID);err==nil{
+ SET expires_at=? WHERE id=?`,permit.ApprovedAt-1,permit.ID);err==nil{
   // Schema enforces expiry after approval. A real clock advance is needed.
   t.Fatal("database accepted expiry predating grant issuance")
  }

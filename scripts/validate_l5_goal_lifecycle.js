@@ -150,6 +150,10 @@ assert(ui.includes("approveTCP.dataset.confirmedTarget!==requestedTarget"),
  "TCP consent confirmation must bind the exact source and target");
 assert(tcpRunMigration.includes("UNIQUE(permit_id,cadence_window)"),
  "TCP test retries must have an immutable admission fence");
+assert(tcpRun.includes("manualTCPProbeSlots=make(chan struct{},2)"),
+ "constrained-hardware TCP handshake concurrency must be bounded");
+assert(tcpRun.includes("case <-ctx.Done()"),
+ "queued network handshakes must respect cancelled requests");
 assert(!harness.includes("RunManualGoalTCPProbe"),"manual network test unexpectedly wired to scheduler");
 
 // Expected TCP reachability is a revisioned human-authored BASELINE,

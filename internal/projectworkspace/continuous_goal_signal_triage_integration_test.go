@@ -58,14 +58,33 @@ func TestGoalSignalTriageRequiresLiveIndependentEvidenceAndNeverPromotesHealth(t
   ActorPrincipalID:"owner",
  })
  if err!=nil{t.Fatal(err)}
- // Seed a TEST-ONLY metadata receipt. No network socket is created.
+ // A synthetic pre-approval receipt is NOT an authorised historical
+ // measurement even if its source name and TCP target happen to match.
+ _,err=db.SQL().ExecContext(ctx,`INSERT INTO project_goal_tcp_probe_attempts(
+  id,project_id,goal_id,permit_id,project_workspace_id,source_id,
+  target_ipv4,target_port,timeout_ms,cadence_window,goal_revision,
+  permit_revision,requested_by,status,claimed_at,completed_at)
+  VALUES('attempt-preapproval',?,?,?,?,?,?,?,?,?,?,?,'owner','not_connected',?,?)`,
+  p.ID,goal.ID,permit.ID,view.ID,"tcp-link",permit.TargetIPv4,
+  permit.TargetPort,permit.TimeoutMS,1,goal.Revision,permit.Revision,
+  permit.ApprovedAt-1,permit.ApprovedAt-1)
+ if err!=nil{t.Fatal(err)}
+ preapproval,err:=svc.GoalSignalTriage(ctx,p.ID,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ if preapproval.RecentNegativeSources!=0||preapproval.State!="no_recent_measurements"{
+  t.Fatalf("TCP receipt dated before human approval gained trust: %+v",preapproval)
+ }
+ // Seed a TEST-ONLY post-approval metadata receipt. No network socket.
+ tcpAfterApproval:=clock.Real{}.UnixMilli()
+ if tcpAfterApproval<permit.ApprovedAt{tcpAfterApproval=permit.ApprovedAt}
  _,err=db.SQL().ExecContext(ctx,`INSERT INTO project_goal_tcp_probe_attempts(
   id,project_id,goal_id,permit_id,project_workspace_id,source_id,
   target_ipv4,target_port,timeout_ms,cadence_window,goal_revision,
   permit_revision,requested_by,status,claimed_at,completed_at)
   VALUES('attempt-adverse',?,?,?,?,?,?,?,?,?,?,?,'owner','not_connected',?,?)`,
   p.ID,goal.ID,permit.ID,view.ID,"tcp-link",permit.TargetIPv4,
-  permit.TargetPort,permit.TimeoutMS,1,goal.Revision,permit.Revision,now,now)
+  permit.TargetPort,permit.TimeoutMS,1,goal.Revision,permit.Revision,
+  tcpAfterApproval,tcpAfterApproval)
  if err!=nil{t.Fatal(err)}
  tcpOnly,err:=svc.GoalSignalTriage(ctx,p.ID,goal.ID)
  if err!=nil{t.Fatal(err)}

@@ -152,9 +152,10 @@ func(s *Service)activeInstrumentKeyTx(ctx context.Context,tx storage.Tx,
 }
 
 // goalEndpointDigest binds the exact HUMAN-authorised private IPv4/port
-// into the server-issued immutable challenge. Only the digest is included
-// in the instrument challenge payload; raw topology stays in an access-
-// controlled human-only plan and the original TCP permit.
+// into the server-issued immutable challenge. The digest is not a secrecy
+// boundary: private IPv4/port has low entropy and can be brute-forced from
+// a disclosed challenge fingerprint. Treat challenges as sensitive scope
+// metadata; the raw address stays in the human-only plan and TCP permit.
 func goalEndpointDigest(ip string,port int)string{
  raw:=sha256.Sum256([]byte(fmt.Sprintf(
   "OnePane/target-endpoint/v1|%s:%d",ip,port)))

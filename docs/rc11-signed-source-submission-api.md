@@ -51,7 +51,8 @@ All mutation JSON bodies are strictly decoded (unknown/duplicate fields, Unicode
 - A source submits proof for an **already-recorded**, immutable local Observation. The API does not provide a route for sensor raw readings, Node pairing, authenticated measurement transport, programmatic source principal creation, key provisioning, credential issuance or remote probe execution. Key distribution must be separately secured.
 - A machine API credential must already have been provisioned with the narrowly scoped `goal.source.submit` capability and exact Workspace. No broad `project.write` fallback or automatic issuance was added.
 - Submission does not activate a L5 Goal, schedule monitoring, apply remediation or turn health into a green/verified state. Signature coverage is a separate informational projection.
-- Operational hardening before production: source credential provisioning/revocation UX, per-principal/key rate and payload budgets, device/source-sensor measurement identity, paired-Node mutually authenticated transport, backlog strategy, high-volume historical retention pagination, and incident signal confidence.
+- A signer can commit no more than **30 successful immutable proofs in any rolling 60-second window**, enforced under the same SQLite writer transaction with an indexed bounded query; denied admission does not advance the signing sequence. The API reports HTTP **429** with a conservative `Retry-After: 60` header. Source admission remains capped at **8 KiB** of JSON request body.
+- Operational hardening before production: source credential provisioning/revocation UX, denial/invalid-signature request throttling and aggregate per-Project budget, device/source-sensor measurement identity, paired-Node mutually authenticated transport, backlog strategy, high-volume historical retention pagination, and incident signal confidence.
 
 ## Validation and release sequencing
 

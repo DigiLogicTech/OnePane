@@ -175,7 +175,7 @@ func(s *Service)tcpAttemptStillAuthorised(ctx context.Context,a GoalTCPProbeAtte
  var status,permitStatus,hash,goalPlan,source,ip,effect,kind string
  var permitRevision,goalRevision,expiresAt int64
  var port,timeout int
- err:=s.db.QueryRowContext(ctx,`SELECT g.status,p.status,p.plan_hash,g.monitoring_plan_json,
+ err=s.db.QueryRowContext(ctx,`SELECT g.status,p.status,p.plan_hash,g.monitoring_plan_json,
     p.source_id,p.target_ipv4,p.effect_class,p.probe_kind,
     p.revision,g.revision,p.expires_at,p.target_port,p.timeout_ms
    FROM project_goal_tcp_probe_permits p

@@ -255,8 +255,11 @@ for(const token of ["project.read","project.write",
  "ListTCPReachabilityAlerts","AcknowledgeTCPReachabilityAlert"]){
  assert(driftAPI.includes(token),"human-alert API missing "+token);
 }
-assert(tcpRun.includes("recordTCPReachabilityAlertTx(ctx,tx,a,status,now)"),
- "drift should be detected only in the immutable TCP completion transaction");
+assert(tcpRun.includes("recordTCPReachabilityAlertTx(ctx,tx,a,status,now,tenantWorkspaceID)"),
+ "drift should be detected only in the immutable tenant-scoped TCP completion transaction");
+assert(tcpRun.includes("WorkspaceID:&tenantWorkspaceID") &&
+ driftAlerts.includes("WorkspaceID:&tenantWorkspaceID"),
+ "completed probes and derived notices must carry the canonical tenant Workspace scope");
 assert(driftDDL.includes("goal_tcp_reachability_alerts_no_rewrite"),
  "human notice provenance must be immutable");
 assert(!harness.includes("AcknowledgeTCPReachabilityAlert"),

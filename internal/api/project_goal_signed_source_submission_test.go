@@ -161,6 +161,7 @@ func TestGoalSignedSourceMachineCredentialAndHumanKeyAPIBoundaries(t *testing.T)
  if err!=nil{t.Fatal(err)}
  if first.IntegrityHash!=staging.IntegrityHash||
   first.Label.Trust!=policy.TrustUnverifiedDerived||
+  first.Label.Residency!=policy.ResidencyTrustedNodes||
   first.Label.OriginNodeID!=""||
   first.SubjectRef!="signed-source://"+key.ID{
   t.Fatalf("client was allowed to forge origin/trust of staged reading: %+v",first)

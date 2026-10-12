@@ -238,3 +238,54 @@ func(s *Service)ListGoalNodeMeasurementGrants(ctx context.Context,
  }
  return out,rows.Err()
 }
+
+type GoalNodeMeasurementReceipt struct{
+ ID string `json:"id"`
+ GrantID string `json:"grant_id"`
+ ProjectID string `json:"project_id"`
+ GoalID string `json:"goal_id"`
+ ProjectWorkspaceID string `json:"project_workspace_id"`
+ PeerNodeID string `json:"peer_node_id"`
+ SourceID string `json:"source_id"`
+ Sequence int64 `json:"sequence"`
+ SignalType string `json:"signal_type"`
+ Outcome string `json:"outcome"`
+ ObservedAt int64 `json:"observed_at"`
+ ReceivedAt int64 `json:"received_at"`
+ TransportKind string `json:"transport_kind"`
+}
+
+// Operator view is deliberately limited to 100 recent immutable metadata
+// receipts; no sender-provided raw values, hostnames or body bytes can leave.
+func(s *Service)ListGoalNodeMeasurementReceipts(ctx context.Context,
+ projectID,goalID string)([]GoalNodeMeasurementReceipt,error){
+ if strings.TrimSpace(projectID)==""||strings.TrimSpace(goalID)==""{
+  return nil,ErrInvalidCommand
+ }
+ var exists int
+ err:=s.db.QueryRowContext(ctx,`SELECT 1 FROM project_continuous_goals g
+  JOIN projects p ON p.id=g.project_id AND p.status='active'
+  JOIN workspaces t ON t.id=p.workspace_id AND t.status='active'
+  JOIN project_workspaces w ON w.id=g.project_workspace_id
+    AND w.project_id=p.id AND w.status='active'
+  WHERE g.id=? AND g.project_id=?`,goalID,projectID).Scan(&exists)
+ if err!=nil{return nil,err}
+ rows,err:=s.db.QueryContext(ctx,`SELECT id,grant_id,project_id,goal_id,
+  project_workspace_id,peer_node_id,source_id,sequence,signal_type,outcome,
+  observed_at,received_at,transport_kind
+  FROM project_goal_node_measurement_receipts
+  WHERE project_id=? AND goal_id=?
+  ORDER BY received_at DESC,id DESC LIMIT 100`,projectID,goalID)
+ if err!=nil{return nil,err}
+ defer rows.Close()
+ results:=[]GoalNodeMeasurementReceipt{}
+ for rows.Next(){
+  var item GoalNodeMeasurementReceipt
+  if err=rows.Scan(&item.ID,&item.GrantID,&item.ProjectID,&item.GoalID,
+   &item.ProjectWorkspaceID,&item.PeerNodeID,&item.SourceID,&item.Sequence,
+   &item.SignalType,&item.Outcome,&item.ObservedAt,&item.ReceivedAt,
+   &item.TransportKind);err!=nil{return nil,err}
+  results=append(results,item)
+ }
+ return results,rows.Err()
+}

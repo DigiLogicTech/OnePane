@@ -342,6 +342,13 @@ func TestGoalSignedSourceMachineCredentialAndHumanKeyAPIBoundaries(t *testing.T)
  // before the domain can inspect key/signature or any source data.
  if _,err=db.SQL().ExecContext(ctx,`UPDATE api_credentials
   SET revoked_at=? WHERE id='cred-source-key'`,time.Now().UnixMilli());err!=nil{t.Fatal(err)}
+ credentialList=request("GET",credentialRoute,"operator-key","")
+ if credentialList.Code!=200||!strings.Contains(credentialList.Body.String(),
+  "\"credential_id\":\"cred-source-key\"")||
+  !strings.Contains(credentialList.Body.String(),"\"revoked_at\""){
+  t.Fatalf("external bearer revocation not reflected in human inventory: %d %s",
+   credentialList.Code,credentialList.Body)
+ }
  if got:=request("POST",submit,"source-key",submitBody(second,2,priv));got.Code!=401{
   t.Fatalf("revoked bearer credential still reached proof admission: %d",got.Code)
  }

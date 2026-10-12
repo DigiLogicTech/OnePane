@@ -18,6 +18,7 @@ import (
 // alternative. A current, manually enrolled Goal source and valid Ed25519
 // signature are also required at the domain transaction boundary.
 type goalSignedSourceCommandService interface {
+ ListGoalObservationSigners(context.Context,string,string)([]projectworkspace.GoalObservationSigner,error)
  ApproveGoalObservationSigner(context.Context,projectworkspace.ApproveGoalObservationSignerCommand)(projectworkspace.GoalObservationSigner,error)
  RevokeGoalObservationSigner(context.Context,projectworkspace.RevokeGoalObservationSignerCommand)(projectworkspace.GoalObservationSigner,error)
  AcceptSignedGoalObservation(context.Context,projectworkspace.AcceptSignedGoalObservationCommand)(projectworkspace.SignedGoalObservationProof,error)
@@ -43,6 +44,26 @@ func decodeSignedSourceJSON(w http.ResponseWriter,r *http.Request,out any)bool{
   return false
  }
  return true
+}
+
+// Operator-only signing key history. Source-submit credentials never grant
+// the ability to discover or administer enrolled signing identities.
+func(s *Server)listProjectGoalSourceSigners(w http.ResponseWriter,r *http.Request){
+ identity,ok:=s.authenticate(w,r)
+ if !ok{return}
+ if identity.PrincipalType!="human"{
+  writeError(w,http.StatusForbidden,"human operator required")
+  return
+ }
+ if s.projects==nil{writeError(w,http.StatusServiceUnavailable,"Project service unavailable");return}
+ p,err:=s.projects.Project(r.Context(),strings.TrimSpace(r.PathValue("projectID")))
+ if err!=nil{respondDomain(w,nil,err,0);return}
+ if !s.authorize(w,r,identity,p.WorkspaceID,"project.read"){return}
+ svc,ok:=s.projects.(goalSignedSourceCommandService)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"source signer listing unavailable");return}
+ signers,err:=svc.ListGoalObservationSigners(r.Context(),p.ID,
+  strings.TrimSpace(r.PathValue("goalID")))
+ respondDomain(w,signers,err,http.StatusOK)
 }
 
 func(s *Server)approveProjectGoalSourceSigner(w http.ResponseWriter,r *http.Request){

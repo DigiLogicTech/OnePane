@@ -63,7 +63,7 @@ func scanTCPReachabilityAlert(r scanner)(TCPReachabilityAlert,error){
 // TCP attempt. A baseline revised after the socket was claimed cannot
 // retroactively generate a drift notice against a different expectation.
 func(s *Service)recordTCPReachabilityAlertTx(ctx context.Context,tx storage.Tx,
- attempt GoalTCPProbeAttempt,status string,now int64)error{
+ attempt GoalTCPProbeAttempt,status string,now int64,tenantWorkspaceID string)error{
  if status!="connected"&&status!="not_connected"{return nil}
  if attempt.BaselineIDAtClaim==""||attempt.BaselineRevisionAtClaim<1{return nil}
  var expected string
@@ -103,7 +103,8 @@ func(s *Service)recordTCPReachabilityAlertTx(ctx context.Context,tx storage.Tx,
   "device_health":"unverified","remediation_executed":false,
  })
  return s.events.Append(ctx,tx,event.Event{
-  ID:evtID,Type:"project.goal_tcp_reachability_notice",
+  ID:evtID,WorkspaceID:&tenantWorkspaceID,
+  Type:"project.goal_tcp_reachability_notice",
   AggregateType:"project_goal_tcp_reachability_alert",
   AggregateID:alertID,ActorPrincipalID:&attempt.RequestedBy,
   Payload:payload,OccurredAt:now,

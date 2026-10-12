@@ -112,6 +112,12 @@ for(const token of ["data-goal-probe-source","data-goal-probe-ipv4",
 for(const token of ["/tcp-probe-permits","/tcp-probe-permits/{permitID}/revoke"]){
  assert(server.includes(token),"TCP probe grant route missing "+token);
 }
+const permitImmutability=fs.readFileSync("migrations/0064_goal_tcp_probe_permit_immutability.sql","utf8");
+for(const token of ["target_ipv4!=OLD.target_ipv4","target_port!=OLD.target_port",
+ "expires_at!=OLD.expires_at","plan_hash!=OLD.plan_hash",
+ "NEW.status!='revoked'"]){
+ assert(permitImmutability.includes(token),"post-approval network grant mutation gate missing "+token);
+}
 assert(tcpMigration.includes("CREATE UNIQUE INDEX idx_goal_tcp_probe_active_source"),
  "same source could be rebound without revocation");
 assert(!harness.includes("TickDueGoalTCPProbe"),"network execution must not start by migration or consent");

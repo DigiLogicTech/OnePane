@@ -267,3 +267,45 @@ Completed in this integration branch, with source and regression tests:
   evidence-baseline comparison, graded defensive playbooks and postcondition
   verification. Do not activate monitors, call a Project healthy, package
   an installer or merge a release merely because intake tests pass.
+
+
+## RC11 Level 5 evidence-review authority and cadence-ledger checkpoint — 2026-10-12
+
+- [x] **OPM-03 permit subset:** additive migration `0057_goal_evidence_review_permits.sql`
+  records a human-granted, source-specific, expiring receipt-review permit.
+  An exact canonical Project, Workspace, Goal, allowlisted source, plan hash,
+  effect class and expiry bind each grant. No old goal gains a grant during
+  migration. Permit expansion requires a fresh human Project member; Agent
+  self-approval fails. One active grant per source prevents silent reuse,
+  even if an older grant has expired. Reapproval follows explicit revocation.
+- [x] Permits are CAS/revision fenced; revocation atomically advances goal
+  revision and retains a nondeletable audit row. Expired, revoked, paused,
+  foreign, non-L5, tampered-plan and archived-Workspace scopes deny a future
+  receipt review. The only effect class is `existing_receipt_metadata`:
+  **no host/network probe, raw observation read, LLM, tool or remediation**.
+- [x] **OPM-04/05 metadata assessment subset:** additive migration
+  `0058_goal_evidence_review_runs.sql` stores immutable, bounded
+  per-permit/cadence-window evaluations of already-attached observation
+  timestamps. A duplicate request in the same cadence window returns the
+  original record; no second Task or new sensor invocation is created.
+  Source freshness is `missing`, `stale_attached` or `recent_attached`,
+  never inferred device health/compliance. Historical review results contain
+  only source, timestamp, scope and provenance metadata.
+- [x] API and Project Inspector permit grant/revoke, manual metadata
+  review and history controls are available with explicit "not monitoring"
+  language; backend independently enforces scope. UI review never changes
+  `status`, `health`, `next_due_at`, `last_checked_at` or
+  `last_verified_at`.
+- [ ] Verify final combined Go/SQLite/WebUI/cross-platform CI. Latest
+  application and contract-script validation for this batch is
+  [workflow #38191508741](https://github.com/DigiLogicTech/OnePane/actions/runs/38191508741);
+  if failure occurs inspect and remediate instead of treating a prior green
+  run as latest. A test-only expiry-fixture bug was corrected in
+  `7d71406c`; it did not relax runtime constraints.
+- [ ] **Still required for actual continuous monitoring:** separately
+  consented probe identities/targets/transports and live network/host/secret
+  gates; a durable restart-safe active schedule/claim loop; baseline
+  definition, trusted sensor integrity, truthful health verification;
+  bounded remediation approval/rollback; installed hardware QA and final
+  independent security audit. Current evidence reviews are manually
+  triggered, not autonomous recurring sensor monitoring.

@@ -101,6 +101,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /federation/v1/pair/request", s.pairRequest)
 	s.mux.HandleFunc("POST /federation/v1/pair/confirm", s.pairConfirm)
 	s.mux.HandleFunc("POST /federation/v1/heartbeat", s.heartbeat)
+	s.mux.HandleFunc("POST /federation/v1/measurements", s.receiveNodeMeasurement)
 	s.mux.HandleFunc("POST /federation/v1/inference", s.remoteInference)
 	s.mux.HandleFunc("POST /federation/v1/models/management-status", s.remoteModelManagementStatus)
 	s.mux.HandleFunc("POST /federation/v1/models/recommend", s.remoteModelRecommend)

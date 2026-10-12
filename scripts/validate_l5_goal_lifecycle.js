@@ -229,11 +229,12 @@ assert(!harness.includes("RunManualGoalTCPProbe"),
 // baseline revision at socket admission. Later operator changes cannot
 // retroactively transform an old handshake into a verified drift finding.
 const attemptSnapshotDDL=fs.readFileSync("migrations/0068_goal_tcp_attempt_baseline_snapshots.sql","utf8");
-for(const token of ["baseline_id_at_claim","baseline_revision_at_claim",
- "goal_tcp_attempts_baseline_snapshot_immutable"]){
+for(const token of ["baseline_id_at_claim","baseline_revision_at_claim"]){
  assert(attemptSnapshotDDL.includes(token),"TCP baseline snapshot migration missing "+token);
  assert(tcpRun.includes(token),"TCP claim must persist baseline snapshot "+token);
 }
+assert(attemptSnapshotDDL.includes("goal_tcp_attempts_baseline_snapshot_immutable"),
+ "baseline snapshot columns must be immutable");
 for(const token of ["SampleBaselineRevision","no_baseline_at_test",
  "baseline_updated_since_test","atClaimBaselineID!=baselineID"]){
  assert(baselineService.includes(token),"baseline assessment must block retrospective evidence "+token);

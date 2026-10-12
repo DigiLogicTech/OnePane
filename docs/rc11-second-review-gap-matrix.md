@@ -544,3 +544,27 @@ Completed in this integration branch, with source and regression tests:
 - [ ] **UX-03–09:** inspect and fix each major page/route, one canonical nav state, controls/IA, model/offload lifecycle and authority state, theme/readability, drawer-aware responsiveness, keyboard/screen-reader semantics and connected visual QA. Screenshots and actual UI interactions are still required.
 - [ ] **UX-10:** complete user-led code/vision realignment and second code review, fully green CI, then Windows/Ubuntu installed QA prior to any release approval. Keep PR draft until all gates are complete.
 - [ ] **Latest CI:** validate combined UX source and contract at the branch head after workflow commit `19e317b9`. Prior migration/probe/test work is separate and should not be interpreted as visual QA.
+
+
+## RC11 execution order clarified — 2026-10-12 (user decision)
+
+**Order is mandatory:** (1) finish remaining OnePane feature and integration work
+including actual L5 monitoring gates, autonomous project/runtime recovery,
+isolated Workspaces, model/Node lifecycle and diagnostics; (2) complete
+functional regression and first implementation/security review; **(3) as the
+LAST product development pass before the next version/build**, conduct the
+comprehensive user-centred UI/UX review, design realignment, appearance/
+customisation implementation and responsive visual acceptance; (4) repeat
+code/security review and full CI; (5) only then prepare an explicit Windows/
+Ubuntu QA build for operator installation. No build or PR merge is authorised.
+
+Earlier UX design notes and shared-style work are preserved as draft input;
+**UX-03–UX-10 are deliberately deferred**, not considered complete. The
+experimental presentation-preferences script was removed before wiring it
+into Settings, to avoid shipping unfinished controls. There is no continued
+active UI work until preceding functional/implementation gates are met.
+
+**Resuming now:** Level 5 externally-consented observation pipeline and
+trustworthy evidence handling. The existing manually approved bounded TCP
+reachability check and passive receipt-review worker are different rights;
+never treat either one as blanket recurring network consent.

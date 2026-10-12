@@ -185,13 +185,21 @@ func TestManualTCPProbeRechecksRevocationAndNeverDialsAfterClaim(t *testing.T){
   ActorPrincipalID:"human",
  })
  if err!=nil{t.Fatal(err)}
+ // Even an unexpired permit must stop authorising a queued socket
+ // if its human approver loses the tenant Workspace membership.
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships
+  SET status='revoked' WHERE workspace_id='tenant' AND principal_id='human'`);err!=nil{t.Fatal(err)}
+ allowed,err:=svc.tcpAttemptStillAuthorised(ctx,claim)
+ if err!=nil||allowed{t.Fatalf("removed approver still authorised TCP: %t %v",allowed,err)}
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships
+  SET status='active' WHERE workspace_id='tenant' AND principal_id='human'`);err!=nil{t.Fatal(err)}
  revoked,err:=svc.RevokeGoalTCPProbe(ctx,RevokeGoalTCPProbeCommand{
   ProjectID:p.ID,GoalID:g.ID,PermitID:permit.ID,
   ExpectedGoalRevision:g.Revision,ExpectedPermitRevision:permit.Revision,
   ActorPrincipalID:"human",
  })
  if err!=nil||revoked.Status!="revoked"{t.Fatalf("permit revoke: %+v %v",revoked,err)}
- allowed,err:=svc.tcpAttemptStillAuthorised(ctx,claim)
+ allowed,err=svc.tcpAttemptStillAuthorised(ctx,claim)
  if err!=nil||allowed{t.Fatalf("stale claim still valid after revoke: %t %v",allowed,err)}
  cancelled,err:=svc.completeTCPAttempt(ctx,claim,"cancelled")
  if err!=nil||cancelled.Status!="cancelled"{

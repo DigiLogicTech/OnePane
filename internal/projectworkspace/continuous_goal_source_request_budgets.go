@@ -28,7 +28,6 @@ func(s *Service)ReserveGoalSourceRequest(ctx context.Context,
   err:=tx.QueryRowContext(ctx,`SELECT p.workspace_id,b.signer_id
    FROM project_goal_source_credential_grants b
    JOIN projects p ON p.id=b.project_id AND p.status='active'
-     AND p.operating_mode='continuous_operations'
    JOIN workspaces t ON t.id=p.workspace_id AND t.status='active'
    JOIN project_goal_observation_signers k ON k.id=b.signer_id
      AND k.goal_id=b.goal_id AND k.project_id=b.project_id

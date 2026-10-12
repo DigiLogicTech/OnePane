@@ -619,3 +619,15 @@ never treat either one as blanket recurring network consent.
   security review first; broad, human-focused UI/UX/customisation review
   **last before the next version/build**; then final CI and QA packaging
   after explicit operator approval. No release has been merged or built.
+
+
+## RC11 complete TCP provenance and truthful reachability assessment checkpoint — 2026-10-12
+
+- [x] Added schema `0067_goal_tcp_attempt_recurring_provenance.sql`: every automatic TCP attempt must reference its exact, human-authorised recurring grant. A manual TCP attempt cannot be retroactively promoted to an automatic one. Database triggers bind provenance immutably and deny inserting a system-origin attempt without its recurring consent.
+- [x] TCP attempt records, API history and admission events now retain the originating recurring grant ID. The final pre-dial check requires the exact grant ID to match the durable claim; tests verify manual null provenance, claimed scheduled grant identity and rejection of post-hoc rewriting.
+- [x] `GoalEvidenceCoverage` separately reports how many TCP sources are **currently authorized for recurring checks**, after checking current Project/Workspace status, grant, underlying exact target and active human approvers. This does **not** increase attested Observation coverage or mark Goal health verified.
+- [x] Subsequent TCP baseline admission/assessment changes preserve the exact approved baseline revision that existed when the probe was claimed, so a baseline revised later cannot retroactively create a “matched” verdict. Regression records that distinction without network access.
+- [x] Green hosted CI for recurring grant, fake-socket worker and daemon integration at [#38196551825](https://github.com/DigiLogicTech/OnePane/actions/runs/38196551825), authorization coverage at [#38196672387](https://github.com/DigiLogicTech/OnePane/actions/runs/38196672387), and immutable recurring attempt provenance at [#38196892436](https://github.com/DigiLogicTech/OnePane/actions/runs/38196892436). 
+- [ ] Latest baseline-snapshot/drift-regression head `7f9ffa9d9ef` is under [#38197011353](https://github.com/DigiLogicTech/OnePane/actions/runs/38197011353) and requires final CI result before a completion claim. Any failure must be investigated and remediated.
+- [ ] Next functional work: signed source integrity and structured observation lineage, defensible multi-signal incident criteria and alerting, bounded remediation authority/rollback/postconditions, Node/sandbox isolation and real hardware QA. TCP reachability is **not** proof of security or complete home-network protection.
+- [ ] **Sequencing remains mandatory:** complete these functional/integration tasks and code/vision review first; perform the comprehensive UI/UX review and alignment as the **last pre-build product workstream**; rerun code/security CI; only then prepare the next Windows/Ubuntu QA version. No release merge or installer approval at this checkpoint.

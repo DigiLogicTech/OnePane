@@ -92,6 +92,13 @@ func(s *Service)MintGoalSourceCredential(ctx context.Context,
    WHERE p.id=? AND p.status='active' AND p.principal_type IN ('service','agent')`,
    project.WorkspaceID,signer.SourcePrincipalID).Scan(&sourceActive)
   if err!=nil{return ErrPrincipalIneligible}
+  var approverActive int
+  err=tx.QueryRowContext(ctx,`SELECT 1 FROM principals p
+   JOIN workspace_memberships m ON m.principal_id=p.id
+    AND m.workspace_id=? AND m.status='active'
+   WHERE p.id=? AND p.status='active' AND p.principal_type='human'`,
+   project.WorkspaceID,signer.ApprovedBy).Scan(&approverActive)
+  if err!=nil{return ErrPrincipalIneligible}
   var active int
   err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_goal_source_credential_grants b
    JOIN api_credentials a ON a.id=b.credential_id
@@ -150,8 +157,11 @@ func(s *Service)ListGoalSourceCredentials(ctx context.Context,
  if err!=nil{return nil,err}
  rows,err:=s.db.QueryContext(ctx,`SELECT b.credential_id,b.project_id,b.goal_id,b.project_workspace_id,
   b.workspace_id,b.signer_id,b.source_principal_id,b.approved_by,b.approved_at,
-  b.expires_at,b.revoked_at
+  b.expires_at,
+  CASE WHEN b.revoked_at>COALESCE(a.revoked_at,0)
+    THEN b.revoked_at ELSE COALESCE(a.revoked_at,0) END
   FROM project_goal_source_credential_grants b
+  JOIN api_credentials a ON a.id=b.credential_id
   WHERE b.project_id=? AND b.goal_id=? AND b.signer_id=?
   ORDER BY b.approved_at DESC,b.credential_id DESC LIMIT 100`,projectID,goalID,signerID)
  if err!=nil{return nil,err}

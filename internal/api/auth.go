@@ -70,6 +70,7 @@ func (a *BearerAuthorizer) Authenticate(r *http.Request) (Identity, error) {
 	}
 	i.WorkspaceScope = json.RawMessage(ws)
 	i.CapabilityScope = json.RawMessage(cap)
+	i.AuthMethod = "bearer"
 	return i, nil
 }
 

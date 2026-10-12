@@ -165,6 +165,15 @@ func TestGoalSignedSourceMachineCredentialAndHumanKeyAPIBoundaries(t *testing.T)
  if got:=request("POST",route+"/signed-observations/record",minted.BearerToken,"{}");got.Code!=401{
   t.Fatalf("revoked issued credential remained valid: %d",got.Code)
  }
+ replacement:=request("POST",credentialRoute,"operator-key",mintBody)
+ if replacement.Code!=201{t.Fatalf("reissue after revocation denied: %d %s",replacement.Code,replacement.Body)}
+ if got:=request("POST",credentialRoute,"operator-key",mintBody);got.Code<400{
+  t.Fatalf("third active credential exceeded two-key signer limit: %d",got.Code)
+ }
+ credentialList=request("GET",credentialRoute,"operator-key","")
+ if credentialList.Code!=200||strings.Contains(credentialList.Body.String(),minted.BearerToken){
+  t.Fatalf("human credential history leaked one-time token: %d",credentialList.Code)
+ }
  var eventTokens int
  if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
   WHERE CAST(payload_json AS TEXT) LIKE ?`,"%"+minted.BearerToken+"%").Scan(&eventTokens);err!=nil||eventTokens!=0{

@@ -33,18 +33,25 @@ func scopedFileAction(capabilityID, toolID string) string {
 func scopedToolActions(capabilityID, toolID string, mode authority.ActionMode)([]string,bool){
   cap:=strings.ToLower(strings.TrimSpace(capabilityID))
   id:=strings.ToLower(strings.TrimSpace(toolID))
-  // A tool's registered authority mode must agree with its supposedly
-  // read-only identity. Otherwise a mutating adapter can impersonate a
-  // passive tool and bypass independent Write/Network privileges.
-  if mode==authority.ActionMutate||mode==authority.ActionExternalSend{
-    switch id{
-    case "project.app.files.inspect","project.app.git.inspect",
-      "project.runtime.inspect","project.app.inspect","project.image.inspect":
-      return nil,false
-    }
-    if cap=="filesystem.read"||cap=="file.read"{
-      return nil,false
-    }
+  // The built-in Project tool IDs are trusted only with their exact
+  // registered authority mode. A plugin cannot use a familiar read-only
+  // ID but execute with sandbox/mutate/send semantics instead.
+  switch id{
+  case "project.runtime.inspect","project.app.inspect","project.image.inspect":
+    if mode!=authority.ActionObserve{return nil,false}
+  case "project.app.files.inspect","project.app.files.edit",
+    "project.app.files.publish","project.app.git.inspect",
+    "project.app.git.mutate","project.app.exec","project.app.godot.build",
+    "project.app.tools.discover","project.app.toolchain.preflight",
+    "project.app.unreal.mcp.probe":
+    if mode!=authority.ActionExecuteSandboxed{return nil,false}
+  case "project.runtime.ensure","project.runtime.stop","project.app.ensure",
+    "project.app.stop","project.app.pull":
+    if mode!=authority.ActionMutate{return nil,false}
+  }
+  if (mode==authority.ActionMutate||mode==authority.ActionExternalSend)&&
+    (cap=="filesystem.read"||cap=="file.read"){
+    return nil,false
   }
   switch id{
   case "project.app.files.inspect":return []string{"files.read"},true

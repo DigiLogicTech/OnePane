@@ -568,3 +568,14 @@ active UI work until preceding functional/implementation gates are met.
 trustworthy evidence handling. The existing manually approved bounded TCP
 reachability check and passive receipt-review worker are different rights;
 never treat either one as blanket recurring network consent.
+
+
+## RC11 Level 5 recurring network observation — consolidation checkpoint (2026-10-12)
+
+- [x] User-mandated development order retained: functional implementation and security review, **full UI/UX review last before next QA build**, post-UX code/CI verification, then Windows/Ubuntu packaging. The detailed UX plan is retained but no comprehensive UI review is being performed during the Level 5 implementation phase.
+- [x] **Distinct recurring network consent:** a human explicitly approves a new, immutable, source- and exact-target-bound `TCPRecurringGrant` (schema `0065_goal_tcp_recurring_grants.sql`) in addition to the underlying manual permit. Revocation, short expiry, plan hash, original permit revision, operator membership and L5 mode independently constrain unattended use. Neither initial L5 goal registration nor a successful manual TCP test grants recurring access.
+- [x] **Integration cleanup:** independently developed overlapping `0065_goal_tcp_recurring_consents.sql` and duplicate `tcp-recurring-consents` handlers were consolidated; the canonical `project_goal_tcp_recurring_grants` permission model is the sole recurring authorization path. Red CI from transient duplicate source references is not treated as current.
+- [x] **Bounded implementation, pending final CI:** source `continuous_goal_tcp_recurring_worker.go` includes a dedicated system principal, SQLite cursor `0066_goal_tcp_recurring_worker_cursor.sql`, exactly bound `tcp4` target, ≤1500ms deadline, per-Goal/source/cadence idempotence, restart-safe claims and permit revocation checks at atomic claim and immediately before dialing. Integration tests use a fake dialer, not real network targets.
+- [ ] **Activation gate:** until runtime bootstrap actually registers the dedicated system identity and `harnessd` schedules the worker *after all tests pass*, this capability is source-level only. No actual unattended device probe can be inferred from the mere presence of an approved grant record or source code.
+- [ ] **Latest tests:** integrated recurring worker test head `bedb824800f` under [CI run #38196405337](https://github.com/DigiLogicTech/OnePane/actions/runs/38196405337) was running at checkpoint; a syntax-only test fixture error in older runs was corrected in `20248ddf`. Independently confirm latest success and remediate any new failures before enabling the worker.
+- [ ] **Still required:** sensor provenance and trusted structured Observation admission, bounded baseline/alert handling with no false security-health claims, scoped remediation and postconditions, unattended resource-pressure QA, independent code review and final UI/UX review gate.

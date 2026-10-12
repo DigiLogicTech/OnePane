@@ -36,6 +36,11 @@ type GoalSignalTriageSource struct {
  TCPAttemptID string `json:"tcp_attempt_id,omitempty"`
  TCPDeclaredTargetID string `json:"tcp_declared_target_id,omitempty"`
  TCPIdentityClass string `json:"tcp_identity_class,omitempty"`
+ TLSCheckState string `json:"tls_check_state"`
+ TLSCheckID string `json:"tls_check_id,omitempty"`
+ TLSPinID string `json:"tls_pin_id,omitempty"`
+ TLSIdentityClass string `json:"tls_identity_class,omitempty"`
+ TLSCertificatePossessionMatched bool `json:"tls_certificate_possession_matched"`
  NodeState string `json:"node_state"`
  NodeObservedAt int64 `json:"node_observed_at,omitempty"`
  NodeReceiptID string `json:"node_receipt_id,omitempty"`
@@ -80,6 +85,7 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
   Limitations:[]string{
    "tcp_connect_tests_reachability_not_device_security",
    "node_peer_connectivity_is_self_report_not_physical_device_attestation",
+   "pinned_tls_certificate_proves_key_possession_not_physical_device_integrity",
    "different_sources_may_not_measure_same_target",
    "read_only_no_automated_monitoring_or_remediation",
   },
@@ -94,6 +100,7 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
  for _,source:=range coverage.Sources{
   item:=GoalSignalTriageSource{
    SourceID:source.SourceID,TCPState:"no_current_approved_measurement",
+   TLSCheckState:"no_current_approved_check",
    NodeState:"no_current_approved_measurement",
   }
   // Bound each query to ONE last completed TCP result for this exact Goal
@@ -184,6 +191,70 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
      item.TCPDeclaredTargetID=targetID
      item.TCPIdentityClass=targetClass
     }
+   }
+  }
+  // Separately approved certificate possession is not evidence of a
+  // physical device's identity and never casts an incident "vote". Use
+  // exactly the current PIN/target/permit/Goal plan and all live reviewers.
+  // The most recent check includes a claimed/incomplete attempt so an
+  // earlier matched handshake cannot appear current during a newer probe.
+  var tlsCheckID,tlsPinID,tlsStatus string
+  var tlsClaimedAt,tlsCompletedAt int64
+  err=s.db.QueryRowContext(ctx,`SELECT check.id,check.pin_id,
+   check.status,check.claimed_at,check.completed_at
+   FROM project_goal_tls_endpoint_checks check
+   JOIN project_goal_tls_endpoint_pins pin ON pin.id=check.pin_id
+    AND pin.project_id=check.project_id AND pin.goal_id=check.goal_id
+    AND pin.status='approved' AND pin.expires_at>?
+   JOIN project_goal_tcp_declared_target_bindings declared
+    ON declared.id=pin.declared_target_id AND declared.project_id=pin.project_id
+     AND declared.goal_id=pin.goal_id AND declared.permit_id=pin.permit_id
+     AND declared.status='approved' AND declared.expires_at>?
+     AND declared.permit_revision=pin.permit_revision
+     AND declared.plan_hash=pin.plan_hash
+   JOIN project_goal_tcp_probe_permits permit ON permit.id=pin.permit_id
+    AND permit.project_id=pin.project_id AND permit.goal_id=pin.goal_id
+    AND permit.status='approved' AND permit.expires_at>?
+    AND permit.revision=pin.permit_revision AND permit.plan_hash=?
+    AND permit.source_id=declared.source_id
+    AND permit.target_ipv4=declared.target_ipv4
+    AND permit.target_port=declared.target_port
+    AND permit.project_workspace_id=declared.project_workspace_id
+   JOIN projects p ON p.id=pin.project_id AND p.status='active'
+   JOIN workspaces tenant ON tenant.id=p.workspace_id AND tenant.status='active'
+   JOIN project_continuous_goals goal ON goal.id=pin.goal_id
+    AND goal.project_id=p.id AND goal.status='configured'
+    AND goal.project_workspace_id=pin.project_workspace_id
+   JOIN project_workspaces workspace ON workspace.id=goal.project_workspace_id
+    AND workspace.project_id=p.id AND workspace.status='active'
+   JOIN principals pin_review ON pin_review.id=pin.approved_by
+    AND pin_review.status='active' AND pin_review.principal_type='human'
+   JOIN workspace_memberships pin_member ON pin_member.principal_id=pin_review.id
+    AND pin_member.workspace_id=p.workspace_id AND pin_member.status='active'
+   JOIN principals target_review ON target_review.id=declared.approved_by
+    AND target_review.status='active' AND target_review.principal_type='human'
+   JOIN workspace_memberships target_member ON target_member.principal_id=target_review.id
+    AND target_member.workspace_id=p.workspace_id AND target_member.status='active'
+   JOIN principals permit_review ON permit_review.id=permit.approved_by
+    AND permit_review.status='active' AND permit_review.principal_type='human'
+   JOIN workspace_memberships permit_member ON permit_member.principal_id=permit_review.id
+    AND permit_member.workspace_id=p.workspace_id AND permit_member.status='active'
+   WHERE check.project_id=? AND check.goal_id=?
+    AND declared.source_id=? AND check.claimed_at>=pin.approved_at
+    AND check.claimed_at BETWEEN ? AND ?
+   ORDER BY check.claimed_at DESC,check.id DESC LIMIT 1`,
+   now,now,now,planHash,projectID,goalID,source.SourceID,
+   now-freshnessMS,now).
+   Scan(&tlsCheckID,&tlsPinID,&tlsStatus,&tlsClaimedAt,&tlsCompletedAt)
+  if err!=nil&&!errors.Is(err,sql.ErrNoRows){return GoalSignalTriage{},err}
+  if err==nil{
+   item.TLSCheckID=tlsCheckID;item.TLSPinID=tlsPinID
+   item.TLSIdentityClass="operator_pinned_tls_certificate"
+   if tlsStatus=="claimed"||tlsCompletedAt<tlsClaimedAt||tlsCompletedAt>now{
+    item.TLSCheckState="unknown_after_interruption"
+   }else{
+    item.TLSCheckState=tlsStatus
+    item.TLSCertificatePossessionMatched=(tlsStatus=="matched")
    }
   }
   // Only report a live, correctly pinned TLS source with a human

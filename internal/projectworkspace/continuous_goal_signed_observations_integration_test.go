@@ -101,6 +101,20 @@ func TestLevel5SignedObservationEnrollmentAntiReplayAndLiveRevocation(t *testing
  if _,err=accept(incorrect,1,sign(incorrect,priv,1));err==nil{
   t.Fatal("signed unapproved source was accepted")
  }
+ outsider:="outsider"
+ foreign,err:=obsService.Record(ctx,observation.RecordCommand{
+  WorkspaceID:"foreign",SubjectRef:"sensor://foreign",
+  ObservationType:"system.sample",ProbeToolID:"router",ProbeToolVersion:"1",
+  SourcePrincipalID:&outsider,ActorPrincipalID:&outsider,
+  Value:json.RawMessage(`{"status":"ok"}`),
+  Label:policy.DataLabel{WorkspaceID:"foreign",
+   Confidentiality:policy.ConfidentialityInternal,
+   Residency:policy.ResidencyAny,Trust:policy.TrustUnverifiedDerived},
+ })
+ if err!=nil{t.Fatal(err)}
+ if _,err=accept(foreign,1,sign(foreign,priv,1));err==nil{
+  t.Fatal("valid cryptographic signature upgraded foreign Workspace evidence")
+ }
  accepted,err:=accept(first,1,firstSig)
  if err!=nil{t.Fatal(err)}
  if accepted.Sequence!=1||accepted.SourceID!="router"||accepted.IntegrityHash!=first.IntegrityHash{

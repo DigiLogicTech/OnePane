@@ -193,6 +193,8 @@ func(s *Service)GoalTCPReachabilityAssessment(ctx context.Context,projectID,goal
   return GoalTCPReachabilityAssessment{},ErrInvalidCommand
  }
  now:=s.clock.UnixMilli()
+ project,err:=s.repo.Project(ctx,projectID)
+ if err!=nil{return GoalTCPReachabilityAssessment{},err}
  out:=GoalTCPReachabilityAssessment{
   ProjectID:projectID,GoalID:goalID,SourceID:sourceID,
   AssessedAt:now,Assessment:"unconfigured_baseline",
@@ -224,15 +226,22 @@ func(s *Service)GoalTCPReachabilityAssessment(ctx context.Context,projectID,goal
  if errors.Is(err,sql.ErrNoRows){return out,nil}
  if err!=nil{return GoalTCPReachabilityAssessment{},err}
  out.ExpectedTCP=expected
- if baselineWorkspace!=workspaceID||planHash!=hash||goalStatus!="configured"{
+ if project.Status!="active"||project.OperatingMode!=OperatingContinuousOperations||
+    baselineWorkspace!=workspaceID||planHash!=hash||goalStatus!="configured"{
   out.Assessment="baseline_scope_inactive";return out,nil
  }
  var permitStatus string
  var permitExpiry int64
- err=s.db.QueryRowContext(ctx,`SELECT status,expires_at FROM
-  project_goal_tcp_probe_permits WHERE id=? AND project_id=? AND goal_id=?
-  AND source_id=? AND project_workspace_id=? AND plan_hash=?
-  AND effect_class='network_tcp_connect'`,
+ err=s.db.QueryRowContext(ctx,`SELECT permit.status,permit.expires_at
+  FROM project_goal_tcp_probe_permits permit
+  JOIN projects p ON p.id=permit.project_id AND p.status='active'
+  JOIN principals approver ON approver.id=permit.approved_by
+   AND approver.principal_type='human' AND approver.status='active'
+  JOIN workspace_memberships membership ON membership.workspace_id=p.workspace_id
+   AND membership.principal_id=approver.id AND membership.status='active'
+  WHERE permit.id=? AND permit.project_id=? AND permit.goal_id=?
+   AND permit.source_id=? AND permit.project_workspace_id=? AND permit.plan_hash=?
+   AND permit.effect_class='network_tcp_connect'`,
   permitID,projectID,goalID,sourceID,workspaceID,hash).
   Scan(&permitStatus,&permitExpiry)
  if errors.Is(err,sql.ErrNoRows){out.Assessment="permission_inactive";return out,nil}

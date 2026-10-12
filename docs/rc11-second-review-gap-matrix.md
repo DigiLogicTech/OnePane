@@ -631,3 +631,45 @@ never treat either one as blanket recurring network consent.
 - [ ] Latest baseline-snapshot/drift-regression head `7f9ffa9d9ef` is under [#38197011353](https://github.com/DigiLogicTech/OnePane/actions/runs/38197011353) and requires final CI result before a completion claim. Any failure must be investigated and remediated.
 - [ ] Next functional work: signed source integrity and structured observation lineage, defensible multi-signal incident criteria and alerting, bounded remediation authority/rollback/postconditions, Node/sandbox isolation and real hardware QA. TCP reachability is **not** proof of security or complete home-network protection.
 - [ ] **Sequencing remains mandatory:** complete these functional/integration tasks and code/vision review first; perform the comprehensive UI/UX review and alignment as the **last pre-build product workstream**; rerun code/security CI; only then prepare the next Windows/Ubuntu QA version. No release merge or installer approval at this checkpoint.
+
+
+## RC11 trustworthy TCP evidence chronology and drift notices — 2026-10-12
+
+- [x] **Baseline cannot be applied retrospectively:** migration
+  `0068_goal_tcp_attempt_baseline_snapshots.sql` records the exact
+  human-approved baseline ID/revision **at the atomic TCP claim**. Old
+  attempts retain revision 0; no forged backfill is performed. An
+  operator changing a baseline after a handshake gets
+  `baseline_updated_since_test` or `no_baseline_at_test`, not a new
+  drift/health conclusion. Immutable snapshot trigger and first-test/
+  revised-baseline/fresh-test integration regressions added.
+- [x] **Consent provenance on the same attempt:** migration 0067 and
+  its tests distinguish manual test receipts from unattended tests,
+  which carry the exact independent recurring human grant ID.
+  Tests cannot silently rebind this permission after a claim.
+- [x] **Audited notice only:** migration
+  `0069_goal_tcp_reachability_alerts.sql` records an immutable,
+  deduplicated notice only when the completed TCP handshake disagrees
+  with the **same baseline revision captured at admission**.
+  It classifies only `unexpected_reachable` or
+  `unexpected_unreachable`; it does not claim device compromise,
+  verified health, or compliance, and never invokes remediation.
+- [x] Human Project members can acknowledge notices via an
+  independently authorised, CAS-fenced API; Agents cannot self-ack
+  and acknowledgements do not resolve the underlying availability
+  or authorise another network effect. Domain tests confirm no
+  Tasks, no health state transition and an immutable notice history.
+- [x] Baseline chronology + domain alert integration passed hosted CI
+  at [#38197167929](https://github.com/DigiLogicTech/OnePane/actions/runs/38197167929)
+  and [#38197425333](https://github.com/DigiLogicTech/OnePane/actions/runs/38197425333).
+- [ ] Last combined API/contract checks are still running at
+  [#38197483351](https://github.com/DigiLogicTech/OnePane/actions/runs/38197483351)
+  and [#38197529356](https://github.com/DigiLogicTech/OnePane/actions/runs/38197529356).
+  Do not claim branch complete until the final head passes.
+- [ ] **Remaining functional P0:** trusted multi-signal Observation
+  identity and integrity, in-flight revocation/Node-scope enforcement,
+  alert confidence/severity/retention, human-authorised reversible
+  remediation with postcondition checks, isolated Workspace sandbox
+  and agent/model/Node runtime hardening. UI/UX review remains **last**
+  before the next build, followed by full CI, installer QA and
+  explicit release approval. No build or merge is approved.

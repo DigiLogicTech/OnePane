@@ -28,6 +28,7 @@ type SourceReadingReceipt struct{
 
 type RecordGoalSourceReadingCommand struct{
  ProjectID,GoalID,SignerID,ObservationType,ActorPrincipalID string
+ CredentialID string
  Value json.RawMessage
 }
 
@@ -87,6 +88,8 @@ func(s *Service)RecordGoalSourceReading(ctx context.Context,
    `SELECT `+goalObservationSignerColumns+` FROM project_goal_observation_signers
     WHERE id=? AND project_id=? AND goal_id=?`,c.SignerID,c.ProjectID,c.GoalID))
   if err!=nil{return err}
+  if err=checkGoalSourceCredentialTx(ctx,tx,c.CredentialID,c.ProjectID,
+   c.GoalID,c.SignerID,p.WorkspaceID,c.ActorPrincipalID,now);err!=nil{return err}
   if signer.Status!="approved"||signer.ExpiresAt<=now||
    signer.SourcePrincipalID!=c.ActorPrincipalID||
    signer.ProjectWorkspaceID!=goalWS||signer.PlanHash!=hash{

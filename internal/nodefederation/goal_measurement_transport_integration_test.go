@@ -183,6 +183,25 @@ func TestGoalNodeMeasurementsRequireHumanScopeRealPeerTLSAndMonotonicReceipt(t *
   got.Header().Get("Retry-After")!="60"{
   t.Fatalf("31st sample bypassed bounded Node receipt storage: %d %s",got.Code,got.Body)
  }
+ // Approval is live and not a one-time historical authorisation. Both
+ // trust loss and human membership suspension must deny a sample BEFORE
+ // the per-grant quota can make it look merely rate limited.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships
+  SET status='suspended' WHERE workspace_id='tenant' AND principal_id='operator'`);
+  err!=nil{t.Fatal(err)}
+ if got:=send(makeBody(31),cert);got.Code!=403{
+  t.Fatalf("revoked human approver still authorised mTLS telemetry: %d",got.Code)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships
+  SET status='active' WHERE workspace_id='tenant' AND principal_id='operator'`);
+  err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE harness_nodes
+  SET trust_state='unavailable' WHERE id='peer'`);err!=nil{t.Fatal(err)}
+ if got:=send(makeBody(31),cert);got.Code!=403{
+  t.Fatalf("unavailable peer continued to produce admitted telemetry: %d",got.Code)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE harness_nodes
+  SET trust_state='paired' WHERE id='peer'`);err!=nil{t.Fatal(err)}
  var persisted int
  if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*)
   FROM project_goal_node_measurement_receipts

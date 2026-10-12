@@ -48,3 +48,17 @@ OnePane is a **local-first execution harness**, not merely a monitoring dashboar
 ## Completion criterion
 
 UI/UX alignment is complete only after shared-component regression checks, a reviewed page-by-page task matrix, themed/resized visual QA, and the already-agreed code/vision review gate. A single stylesheet, a green Go CI run, or an uninstalled preview is **not** completion.
+
+
+## First implementation checkpoint — 2026-10-12
+
+**Completed implementation subsets (not full UX review):**
+
+- **UX-02:** Added `internal/webui/static/ux-alignment.css`, loaded after view styles. Shared theme-token controls, page-heading hierarchy, toolbar wrapping, reduced-motion support, keyboard focus, dense L5 authority rows and narrow-viewport action sizing. Preserved Logs/Inspector shell space and persisted widget resize geometry.
+- **UX-03 subset:** Patched the final Project/Workspace navigation renderer in `project-workspace-page.js` to avoid double-active Project/Workspace leaves, show the collapsed parent when a selected child is hidden, and expose `aria-current="page"` for the active desktop and mobile route.
+- **UX-08 subset:** Added automated WCAG AA (4.5:1) static palette-contrast checks for the seven explicit dark themes (Dark, Graphite, Midnight, Ocean, Forest, Violet and Ember). These pass from existing palette values. Light/System, custom themes and actual screen-level accessibility still require inspection.
+- **UX-09 subset:** Added a shared-source contract at `scripts/validate_product_ux_alignment.js` and wired it into `.github/workflows/project-workspace-development-checks.yml`. This asserts final stylesheet precedence, canonical theme tokens, keyboard focus, no shell viewport overrides, nav selection semantics and L4/L5 design intent.
+
+**Validation:** completed hosted regression `9205b60e` at [CI run #38195487992](https://github.com/DigiLogicTech/OnePane/actions/runs/38195487992) with successful frontend contract, Go/SQLite, integration and cross-platform compilation jobs. Earlier red runs came from test harness formatting/regex mistakes corrected in the final head. This is **source and unit/regression validation, not installed visual QA**.
+
+**Still open:** UX-03 full navigation/back/reload and state recovery; UX-04 through UX-07 page-by-page redesign; UX-08 true cross-theme/shell-resize/small-screen visual QA; UX-09 full keyboard/assistive-tech audit; UX-10 code/vision review and Windows/Ubuntu installed QA. No new release is authorised by the shared-layer work.

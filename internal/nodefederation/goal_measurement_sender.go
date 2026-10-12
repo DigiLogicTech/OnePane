@@ -5,6 +5,8 @@ import (
  "database/sql"
  "errors"
  "strings"
+
+ "github.com/DigiLogicTech/OnePane/internal/storage"
 )
 
 // The caller must provide the exact human-approved remote Goal grant ID.
@@ -26,11 +28,7 @@ func(s *Service)reserveOutboundMeasurementSequence(ctx context.Context,
   return 0,ErrNodeMeasurementNotAdmitted
  }
  var sequence int64
- err:=s.tx.Within(ctx,func(ctx context.Context,tx interface{
-  ExecContext(context.Context,string,...any)(sql.Result,error)
-  QueryRowContext(context.Context,string,...any)*sql.Row
-  QueryContext(context.Context,string,...any)(*sql.Rows,error)
- })error{
+ err:=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
   var trust,pair string
   var localConfirmed,remoteConfirmed int
   err:=tx.QueryRowContext(ctx,`SELECT h.trust_state,

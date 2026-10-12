@@ -97,6 +97,17 @@ func tlsPinnedHandshake(parent context.Context,dialer tcpConnectDialer,
  return "tls_failed"
 }
 
+// The rolling interval is evaluated against the immutable claim instant,
+// not bucket numbers. A new bucket is not a fresh permission to reconnect.
+func tlsPinHasRecentCheckTx(ctx context.Context,tx storage.Tx,
+ pinID string,now int64)(bool,error){
+ var used int
+ err:=tx.QueryRowContext(ctx,`SELECT COUNT(*)
+  FROM project_goal_tls_endpoint_checks
+  WHERE pin_id=? AND claimed_at>?`,pinID,now-5*60000).Scan(&used)
+ return used>0,err
+}
+
 var manualTLSPinCheckSlots=make(chan struct{},2)
 
 // runGoalPinnedTLSCheck has an internal-only dialer injection for hermetic TLS
@@ -149,11 +160,9 @@ func(s *Service)runGoalPinnedTLSCheck(ctx context.Context,
   // ALSO check a true rolling five-minute window: otherwise a claim
   // immediately before a bucket boundary and another immediately after
   // could dispatch two TCP handshakes within milliseconds.
-  var used int
-  err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_goal_tls_endpoint_checks
-   WHERE pin_id=? AND claimed_at>?`,pin.ID,now-5*60000).Scan(&used)
+  recent,err:=tlsPinHasRecentCheckTx(ctx,tx,pin.ID,now)
   if err!=nil{return err}
-  if used!=0{return ErrInvalidTransition}
+  if recent{return ErrInvalidTransition}
   check=GoalPinnedTLSCheck{ID:checkID,PinID:pin.ID,ProjectID:c.ProjectID,
    GoalID:c.GoalID,ClaimedAt:now,CadenceWindow:window,Status:"claimed"}
   _,err=tx.ExecContext(ctx,`INSERT INTO project_goal_tls_endpoint_checks(

@@ -9,7 +9,6 @@ import(
  "encoding/hex"
  "encoding/json"
  "errors"
- "fmt"
  "net"
  "strconv"
  "time"
@@ -211,8 +210,16 @@ func(s *Service)runGoalPinnedTLSCheck(ctx context.Context,
    if err!=nil||status!="approved"||revision!=pin.Revision||expires<=now{
     outcome="cancelled"
    }else{
-    _,err=s.activePinnedTargetTx(ctx,tx,c.ProjectID,c.GoalID,pin.DeclaredTargetID,now)
-    if err!=nil{outcome="cancelled"}
+    p,projectErr:=s.repo.ProjectTx(ctx,tx,c.ProjectID)
+    if projectErr!=nil{
+     outcome="cancelled"
+    }else if humanGoalMemberTx(ctx,tx,p.WorkspaceID,c.ActorPrincipalID)!=nil||
+     humanGoalMemberTx(ctx,tx,p.WorkspaceID,pin.ApprovedBy)!=nil{
+     outcome="cancelled"
+    }else{
+     _,scopeErr:=s.activePinnedTargetTx(ctx,tx,c.ProjectID,c.GoalID,pin.DeclaredTargetID,now)
+     if scopeErr!=nil{outcome="cancelled"}
+    }
    }
   }
   updated,err:=tx.ExecContext(ctx,`UPDATE project_goal_tls_endpoint_checks
@@ -275,4 +282,3 @@ func(s *Service)ListGoalPinnedTLSChecks(ctx context.Context,
  return out,rows.Err()
 }
 
-var _=fmt.Sprintf

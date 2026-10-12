@@ -6,6 +6,8 @@
 
 Existing Node federation uses pinned Ed25519-backed TLS certificates, two-sided user-approved pairing and a separate federation HTTP service. This implementation adds a distinct **off by default** narrowly approved transport path: a human first binds one exact active Level 5 Project/Goal, allowed monitoring-plan `source_id`, paired peer Node ID and its current TLS certificate fingerprint, with a time-limited grant. Remote peers cannot create this grant through their federation authority.
 
+The operator's grant inventory has two independent concepts: immutable `status` (`approved` or `revoked`) for historical approval, and a live `effective_transport_state` (`active`, `expired`, `scope_inactive`, `approver_inactive`, `peer_unavailable` or `revoked`). A previously approved grant is **not currently usable** merely because its historical approval remains intact. This state is transport authority only, never an indicator of device or network health.
+
 The local OnePane operator API now supports:
 
 | Method and endpoint | Authority | Outcome |

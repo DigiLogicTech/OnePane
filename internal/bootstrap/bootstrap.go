@@ -357,6 +357,10 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("configure Project storage root: %w", err)
 	}
+	if err:=projectWorkspaceService.EnsureGoalEvidenceReviewWorkerPrincipal(ctx);err!=nil{
+		_ = db.Close()
+		return nil,fmt.Errorf("bootstrap metadata-only goal reviewer: %w",err)
+	}
 	sandboxAdapter.SetPublisher(workspacepublisher.New(db.SQL(),artifactService,projectWorkspaceService,localNode.ID))
 	agentProfileService := agentprofile.NewService(db.SQL(), db, clk)
 	skillCatalogService := skillcatalog.NewService(db.SQL(), db, clk, cfg.Storage.DataDir)

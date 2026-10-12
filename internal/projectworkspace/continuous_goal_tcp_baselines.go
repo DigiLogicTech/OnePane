@@ -181,6 +181,7 @@ type GoalTCPReachabilityAssessment struct {
  AssessedAt int64 `json:"assessed_at"`
  Assessment string `json:"assessment"`
  BaselineRevision int64 `json:"baseline_revision"`
+ SampleBaselineRevision int64 `json:"sample_baseline_revision"`
  MonitoringActive bool `json:"monitoring_active"`
  DeviceHealth string `json:"device_health"`
 }
@@ -216,13 +217,13 @@ func(s *Service)GoalTCPReachabilityAssessment(ctx context.Context,projectID,goal
  planSource:=false
  for _,id:=range plan.SourceIDs{if id==sourceID{planSource=true;break}}
  if !planSource{return out,nil}
- var expected,permitID,planHash,baselineWorkspace string
+ var expected,permitID,planHash,baselineWorkspace,baselineID string
  err=s.db.QueryRowContext(ctx,`SELECT b.expected_tcp,b.permit_id,b.plan_hash,b.project_workspace_id,
-  h.revision FROM project_goal_tcp_baseline_heads h
+  h.revision,h.baseline_id FROM project_goal_tcp_baseline_heads h
   JOIN project_goal_tcp_baseline_revisions b ON b.id=h.baseline_id
   WHERE h.goal_id=? AND h.source_id=? AND b.project_id=?`,
   goalID,sourceID,projectID).Scan(&expected,&permitID,&planHash,
-  &baselineWorkspace,&out.BaselineRevision)
+  &baselineWorkspace,&out.BaselineRevision,&baselineID)
  if errors.Is(err,sql.ErrNoRows){return out,nil}
  if err!=nil{return GoalTCPReachabilityAssessment{},err}
  out.ExpectedTCP=expected
@@ -249,13 +250,15 @@ func(s *Service)GoalTCPReachabilityAssessment(ctx context.Context,projectID,goal
  if permitStatus!="approved"||permitExpiry<=now{
   out.Assessment="permission_inactive";return out,nil
  }
- var outcome string
+ var outcome,atClaimBaselineID string
  var last int64
- err=s.db.QueryRowContext(ctx,`SELECT status,claimed_at FROM
-  project_goal_tcp_probe_attempts WHERE goal_id=? AND project_id=?
-  AND source_id=? AND permit_id=?
-  ORDER BY claimed_at DESC,id DESC LIMIT 1`,
-  goalID,projectID,sourceID,permitID).Scan(&outcome,&last)
+ err=s.db.QueryRowContext(ctx,`SELECT status,claimed_at,
+    baseline_id_at_claim,baseline_revision_at_claim
+   FROM project_goal_tcp_probe_attempts WHERE goal_id=? AND project_id=?
+   AND source_id=? AND permit_id=?
+   ORDER BY claimed_at DESC,id DESC LIMIT 1`,
+  goalID,projectID,sourceID,permitID).
+  Scan(&outcome,&last,&atClaimBaselineID,&out.SampleBaselineRevision)
  if errors.Is(err,sql.ErrNoRows){
   out.Assessment="missing_evidence";return out,nil
  }
@@ -267,6 +270,12 @@ func(s *Service)GoalTCPReachabilityAssessment(ctx context.Context,projectID,goal
  }
  if outcome=="claimed"||outcome=="cancelled"||outcome=="timed_out"{
   out.Assessment="inconclusive";return out,nil
+ }
+ if atClaimBaselineID==""||out.SampleBaselineRevision==0{
+  out.Assessment="no_baseline_at_test";return out,nil
+ }
+ if atClaimBaselineID!=baselineID||out.SampleBaselineRevision!=out.BaselineRevision{
+  out.Assessment="baseline_updated_since_test";return out,nil
  }
  if outcome!=expected{
   out.Assessment="unexpected_tcp_reachability"

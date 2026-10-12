@@ -64,6 +64,7 @@ type SignedGoalObservationProof struct {
 }
 type AcceptSignedGoalObservationCommand struct {
  ProjectID,GoalID,SignerID,ObservationID,ActorPrincipalID string
+ CredentialID string
  Sequence,ExpectedGoalRevision int64
  Signature []byte
 }
@@ -317,6 +318,8 @@ func(s *Service)AcceptSignedGoalObservation(ctx context.Context,
    `SELECT `+goalObservationSignerColumns+` FROM project_goal_observation_signers
     WHERE id=? AND project_id=? AND goal_id=?`,c.SignerID,c.ProjectID,c.GoalID))
   if err!=nil{return err}
+  if err=checkGoalSourceCredentialTx(ctx,tx,c.CredentialID,c.ProjectID,
+   c.GoalID,c.SignerID,project.WorkspaceID,c.ActorPrincipalID,now);err!=nil{return err}
   if signer.Status!="approved"||signer.ExpiresAt<=now||
    signer.ProjectWorkspaceID!=wsID||signer.PlanHash!=hash||
    signer.SourcePrincipalID!=c.ActorPrincipalID||

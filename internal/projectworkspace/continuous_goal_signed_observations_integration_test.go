@@ -252,4 +252,37 @@ func TestLevel5SignedObservationEnrollmentAntiReplayAndLiveRevocation(t *testing
  }
  history,err=svc.ListGoalSignedObservationProofs(ctx,p.ID,g.ID)
  if err!=nil||len(history)!=3{t.Fatalf("rotation discarded history: %+v %v",history,err)}
+ // A malfunctioning credential/key may have authority to create signed
+ // proofs but must not exhaust a low-resource local audit ledger.
+ for seq:=int64(2);seq<=30;seq++{
+  sample:=record("router")
+  msg,err:=SignedGoalObservationMessage(p.ID,g.ID,rotated.ID,
+   sample.ID,sample.IntegrityHash,seq)
+  if err!=nil{t.Fatal(err)}
+  _,err=svc.AcceptSignedGoalObservation(ctx,AcceptSignedGoalObservationCommand{
+   ProjectID:p.ID,GoalID:g.ID,SignerID:rotated.ID,ObservationID:sample.ID,
+   ActorPrincipalID:"source",Sequence:seq,
+   ExpectedGoalRevision:g.Revision,Signature:ed25519.Sign(newPriv,msg),
+  })
+  if err!=nil{t.Fatalf("bounded signer receipt %d rejected: %v",seq,err)}
+ }
+ overQuota:=record("router")
+ overMsg,err:=SignedGoalObservationMessage(p.ID,g.ID,rotated.ID,
+  overQuota.ID,overQuota.IntegrityHash,31)
+ if err!=nil{t.Fatal(err)}
+ _,err=svc.AcceptSignedGoalObservation(ctx,AcceptSignedGoalObservationCommand{
+  ProjectID:p.ID,GoalID:g.ID,SignerID:rotated.ID,
+  ObservationID:overQuota.ID,ActorPrincipalID:"source",
+  Sequence:31,ExpectedGoalRevision:g.Revision,
+  Signature:ed25519.Sign(newPriv,overMsg),
+ })
+ if !errors.Is(err,ErrInvalidTransition){
+  t.Fatalf("31st same-minute signer proof ignored persisted budget: %v",err)
+ }
+ saved,err:=scanGoalObservationSigner(db.SQL().QueryRowContext(ctx,
+  `SELECT `+goalObservationSignerColumns+` FROM project_goal_observation_signers
+   WHERE id=?`,rotated.ID))
+ if err!=nil||saved.LastSequence!=30{
+  t.Fatalf("rate-denied proof consumed signer sequence: %+v %v",saved,err)
+ }
 }

@@ -23,6 +23,7 @@ type GoalNodeMeasurementGrant struct {
  PeerNodeID string `json:"peer_node_id"`
  PeerTLSFingerprint string `json:"peer_tls_fingerprint"`
  Status string `json:"status"`
+ EffectiveTransportState string `json:"effective_transport_state,omitempty"`
  Revision int64 `json:"revision"`
  LastSequence int64 `json:"last_sequence"`
  ApprovedBy string `json:"approved_by"`
@@ -115,7 +116,7 @@ func(s *Service)ApproveGoalNodeMeasurementGrant(ctx context.Context,
    ID:idv,ProjectID:c.ProjectID,GoalID:c.GoalID,
    ProjectWorkspaceID:workspaceID,SourceID:c.SourceID,
    PeerNodeID:c.PeerNodeID,PeerTLSFingerprint:fingerprint,
-   Status:"approved",Revision:1,ApprovedBy:c.ActorPrincipalID,
+   Status:"approved",EffectiveTransportState:"active",Revision:1,ApprovedBy:c.ActorPrincipalID,
    ApprovedAt:now,ExpiresAt:c.ExpiresAt,
   }
   _,err=tx.ExecContext(ctx,`INSERT INTO project_goal_node_measurement_grants(
@@ -192,7 +193,7 @@ func(s *Service)RevokeGoalNodeMeasurementGrant(ctx context.Context,
   if err!=nil{return err}
   n,err=affected.RowsAffected();if err!=nil{return err}
   if n!=1{return ErrRevisionConflict}
-  out.Status="revoked";out.Revision++;out.RevokedAt=now
+  out.Status="revoked";out.EffectiveTransportState="revoked";out.Revision++;out.RevokedAt=now
   body,_:=json.Marshal(map[string]any{
    "goal_id":c.GoalID,"grant_id":c.GrantID,
    "peer_node_id":out.PeerNodeID,"revoked":true,
@@ -222,15 +223,49 @@ func(s *Service)ListGoalNodeMeasurementGrants(ctx context.Context,
    AND w.project_id=p.id AND w.status='active'
   WHERE g.id=? AND g.project_id=?`,goalID,projectID).Scan(&found)
  if err!=nil{return nil,err}
- rows,err:=s.db.QueryContext(ctx,`SELECT `+goalNodeMeasurementGrantColumns+`
+ rows,err:=s.db.QueryContext(ctx,`SELECT `+goalNodeMeasurementGrantColumns+`,
+  CASE
+   WHEN status='revoked' THEN 'revoked'
+   WHEN expires_at<=? THEN 'expired'
+   WHEN NOT EXISTS(SELECT 1 FROM projects p
+    JOIN workspaces tenant ON tenant.id=p.workspace_id AND tenant.status='active'
+    JOIN project_continuous_goals goal ON goal.id=project_goal_node_measurement_grants.goal_id
+     AND goal.project_id=p.id AND goal.status='configured'
+    JOIN project_workspaces pw ON pw.id=project_goal_node_measurement_grants.project_workspace_id
+     AND pw.project_id=p.id AND pw.status='active'
+    WHERE p.id=project_goal_node_measurement_grants.project_id AND p.status='active')
+    THEN 'scope_inactive'
+   WHEN NOT EXISTS(SELECT 1 FROM principals pr
+    JOIN projects p ON p.id=project_goal_node_measurement_grants.project_id
+    JOIN workspace_memberships mem ON mem.workspace_id=p.workspace_id
+     AND mem.principal_id=pr.id AND mem.status='active'
+    WHERE pr.id=project_goal_node_measurement_grants.approved_by
+     AND pr.status='active' AND pr.principal_type='human')
+    THEN 'approver_inactive'
+   WHEN NOT EXISTS(SELECT 1 FROM harness_nodes n
+    JOIN node_pairings pairing ON pairing.peer_node_id=n.id
+    WHERE n.id=project_goal_node_measurement_grants.peer_node_id
+     AND n.local=0 AND n.trust_state='paired'
+     AND pairing.status='paired' AND pairing.local_confirmed=1
+     AND pairing.peer_confirmed=1
+     AND pairing.peer_tls_fingerprint=project_goal_node_measurement_grants.peer_tls_fingerprint)
+    THEN 'peer_unavailable'
+   ELSE 'active'
+  END
   FROM project_goal_node_measurement_grants
   WHERE project_id=? AND goal_id=?
-  ORDER BY approved_at DESC,id DESC LIMIT 100`,projectID,goalID)
+  ORDER BY approved_at DESC,id DESC LIMIT 100`,
+  s.clock.UnixMilli(),projectID,goalID)
  if err!=nil{return nil,err}
  defer rows.Close()
  out:=[]GoalNodeMeasurementGrant{}
  for rows.Next(){
-  item,err:=scanGoalNodeMeasurementGrant(rows)
+  var item GoalNodeMeasurementGrant
+  err=rows.Scan(&item.ID,&item.ProjectID,&item.GoalID,
+   &item.ProjectWorkspaceID,&item.SourceID,&item.PeerNodeID,
+   &item.PeerTLSFingerprint,&item.Status,&item.Revision,
+   &item.LastSequence,&item.ApprovedBy,&item.ApprovedAt,
+   &item.ExpiresAt,&item.RevokedAt,&item.EffectiveTransportState)
   if err!=nil{return nil,err}
   out=append(out,item)
  }

@@ -66,7 +66,7 @@ func TestGoalSignalTriageRequiresLiveIndependentEvidenceAndNeverPromotesHealth(t
   permit_revision,requested_by,status,claimed_at,completed_at)
   VALUES('attempt-preapproval',?,?,?,?,?,?,?,?,?,?,?,'owner','not_connected',?,?)`,
   p.ID,goal.ID,permit.ID,view.ID,"tcp-link",permit.TargetIPv4,
-  permit.TargetPort,permit.TimeoutMS,1,goal.Revision,permit.Revision,
+  permit.TargetPort,permit.TimeoutMS,0,goal.Revision,permit.Revision,
   permit.ApprovedAt-1,permit.ApprovedAt-1)
  if err!=nil{t.Fatal(err)}
  preapproval,err:=svc.GoalSignalTriage(ctx,p.ID,goal.ID)

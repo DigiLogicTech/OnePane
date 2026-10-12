@@ -24,6 +24,7 @@ type GoalTLSPin struct{
  PlanHash string `json:"plan_hash"`
  CertificateSHA256 string `json:"certificate_sha256"`
  Status string `json:"status"`
+ EffectivePinState string `json:"effective_pin_state,omitempty"`
  Revision int64 `json:"revision"`
  ApprovedBy string `json:"approved_by"`
  ApprovedAt int64 `json:"approved_at"`
@@ -167,7 +168,7 @@ func(s *Service)ApproveGoalTLSPin(ctx context.Context,c ApproveGoalTLSPinCommand
    ProjectWorkspaceID:scope.Target.ProjectWorkspaceID,
    DeclaredTargetID:scope.Target.ID,PermitID:scope.Permit.ID,
    PermitRevision:scope.Permit.Revision,PlanHash:scope.Permit.PlanHash,
-   CertificateSHA256:c.CertificateSHA256,Status:"approved",Revision:1,
+   CertificateSHA256:c.CertificateSHA256,Status:"approved",EffectivePinState:"active",Revision:1,
    ApprovedBy:c.ActorPrincipalID,ApprovedAt:now,ExpiresAt:c.ExpiresAt,
   }
   _,err=tx.ExecContext(ctx,`INSERT INTO project_goal_tls_endpoint_pins(
@@ -241,7 +242,7 @@ func(s *Service)RevokeGoalTLSPin(ctx context.Context,c RevokeGoalTLSPinCommand)(
   if err!=nil{return err}
   n,err=result.RowsAffected();if err!=nil{return err}
   if n!=1{return ErrRevisionConflict}
-  out.Status="revoked";out.Revision++;out.RevokedAt=now
+  out.Status="revoked";out.EffectivePinState="revoked";out.Revision++;out.RevokedAt=now
   body,_:=json.Marshal(map[string]any{"goal_id":out.GoalID,
    "pin_id":out.ID,"revoked":true,"device_identity_verified":false})
   return s.events.Append(ctx,tx,event.Event{
@@ -264,17 +265,51 @@ func(s *Service)ListGoalTLSPins(ctx context.Context,projectID,goalID string)([]G
     AND w.project_id=p.id AND w.status='active'
   WHERE g.id=? AND g.project_id=?`,goalID,projectID).Scan(&exists)
  if err!=nil{return nil,err}
- rows,err:=s.db.QueryContext(ctx,`SELECT `+goalTLSPinColumns+`
+ rows,err:=s.db.QueryContext(ctx,`SELECT `+goalTLSPinColumns+`,
+  CASE WHEN status='revoked' THEN 'revoked'
+   WHEN expires_at<=? THEN 'expired'
+   WHEN NOT EXISTS(SELECT 1 FROM principals reviewer
+    JOIN projects p ON p.id=project_goal_tls_endpoint_pins.project_id
+    JOIN workspace_memberships m ON m.workspace_id=p.workspace_id
+     AND m.principal_id=reviewer.id AND m.status='active'
+    WHERE reviewer.id=project_goal_tls_endpoint_pins.approved_by
+     AND reviewer.principal_type='human' AND reviewer.status='active')
+    THEN 'approver_inactive'
+   ELSE 'active'
+  END
   FROM project_goal_tls_endpoint_pins
   WHERE project_id=? AND goal_id=?
-  ORDER BY approved_at DESC,id DESC LIMIT 100`,projectID,goalID)
+  ORDER BY approved_at DESC,id DESC LIMIT 100`,
+  s.clock.UnixMilli(),projectID,goalID)
  if err!=nil{return nil,err}
- defer rows.Close()
  out:=[]GoalTLSPin{}
  for rows.Next(){
-  item,err:=scanGoalTLSPin(rows)
-  if err!=nil{return nil,err}
-  out=append(out,item)
+  var pin GoalTLSPin
+  err=rows.Scan(&pin.ID,&pin.ProjectID,&pin.GoalID,&pin.ProjectWorkspaceID,
+   &pin.DeclaredTargetID,&pin.PermitID,&pin.PermitRevision,&pin.PlanHash,
+   &pin.CertificateSHA256,&pin.Status,&pin.Revision,&pin.ApprovedBy,
+   &pin.ApprovedAt,&pin.ExpiresAt,&pin.RevokedAt,&pin.EffectivePinState)
+  if err!=nil{rows.Close();return nil,err}
+  out=append(out,pin)
  }
- return out,rows.Err()
+ if err=rows.Err();err!=nil{rows.Close();return nil,err}
+ // Close before making the second bounded query: low-memory SQLite may
+ // allow only one read connection, and leaving rows open risks deadlock.
+ if err=rows.Close();err!=nil{return nil,err}
+ targets,err:=s.ListGoalTCPTargets(ctx,projectID,goalID)
+ if err!=nil{return nil,err}
+ byID:=make(map[string]GoalTCPDeclaredTarget,len(targets))
+ for _,target:=range targets{byID[target.ID]=target}
+ for i:=range out{
+  if out[i].EffectivePinState!="active"{continue}
+  target,ok:=byID[out[i].DeclaredTargetID]
+  if !ok||target.EffectiveIdentityState!="active"||
+   target.PermitID!=out[i].PermitID||
+   target.PermitRevision!=out[i].PermitRevision||
+   target.ProjectWorkspaceID!=out[i].ProjectWorkspaceID||
+   target.PlanHash!=out[i].PlanHash{
+   out[i].EffectivePinState="target_inactive"
+  }
+ }
+ return out,nil
 }

@@ -23,4 +23,27 @@ assert(server.includes("/continuous-goals/{goalID}/coverage"),"goal evidence cov
 for(const token of ["data-goal-coverage=","Evidence coverage only — not verified health.","No monitoring is activated by this check."]){
  assert(ui.includes(token),"L5 read-only coverage UI missing: "+token);
 }
+// Receipt-only review grants are independent, expiring and human-approved.
+// A mere source identifier must never be treated as active monitoring.
+const grants=fs.readFileSync("internal/projectworkspace/continuous_goal_review_permits.go","utf8");
+const grantAPI=fs.readFileSync("internal/api/project_goal_evidence_review_permits.go","utf8");
+for(const token of ["data-goal-review-source","data-goal-review-duration",
+ "data-goal-review-approve=","data-goal-review-list=","data-goal-review-revoke=",
+ "expected_goal_revision:Number(grant.dataset.goalRevision)",
+ "expected_permit_revision:Number(revoke.dataset.permitRevision)",
+ "Monitoring probes and fixes remain disabled."]){
+ assert(ui.includes(token),"L5 scoped review UI missing "+token);
+}
+for(const token of ["humanGoalReviewer","expires_at>?","GoalEvidenceReviewAllowed",
+ "project_workspace_id=?","plan_hash=?","existing_receipt_metadata",
+ "status='revoked'","ExpectedPermitRevision"]){
+ assert(grants.includes(token),"L5 grant enforcement missing "+token);
+}
+for(const token of ["project.write","project.read","ActorPrincipalID:identity.PrincipalID",
+ "ApproveGoalEvidenceReview","RevokeGoalEvidenceReview"]){
+ assert(grantAPI.includes(token),"L5 grant API authority missing "+token);
+}
+for(const token of ["/evidence-review-permits", "/evidence-review-permits/{permitID}/revoke"]){
+ assert(server.includes(token),"L5 review permit route missing "+token);
+}
 console.log("L5 pause/retire UI and fail-closed goal lifecycle: PASS");

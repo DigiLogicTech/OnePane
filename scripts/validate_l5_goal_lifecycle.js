@@ -46,4 +46,28 @@ for(const token of ["project.write","project.read","ActorPrincipalID:identity.Pr
 for(const token of ["/evidence-review-permits", "/evidence-review-permits/{permitID}/revoke"]){
  assert(server.includes(token),"L5 review permit route missing "+token);
 }
+const reviewService=fs.readFileSync("internal/projectworkspace/continuous_goal_evidence_reviews.go","utf8");
+const reviewAPI=fs.readFileSync("internal/api/project_goal_evidence_reviews.go","utf8");
+for(const token of ["data-goal-review-run=","data-goal-review-history=",
+ "expected_goal_revision:Number(runReview.dataset.goalRevision)",
+ "expected_permit_revision:Number(runReview.dataset.permitRevision)",
+ "Historical receipt assessments — not verified device health.",
+ "No probes, device health verification, or fixes were performed."]){
+ assert(ui.includes(token),"Level 5 evidence review UI missing "+token);
+}
+for(const token of ["ReviewGoalEvidence","GoalEvidenceReviewRun",
+ "status!=\"configured\"&&status!=\"active\"","cadence_window",
+ "existing_receipt_metadata","expires_at"]){
+ // expiry is held in the permit object; this checks the review service
+ // uses that field before emitting an immutable receipt assessment.
+ const actual=token==="expires_at"?"permit.ExpiresAt<=now":token;
+ assert(reviewService.includes(actual),"Level 5 review admission missing "+actual);
+}
+for(const token of ["ReviewGoalEvidence","ListGoalEvidenceReviewRuns",
+ "project.read","project.write"]){
+ assert(reviewAPI.includes(token),"Level 5 evidence review API missing "+token);
+}
+for(const token of ["/evidence-reviews","/evidence-review-permits/{permitID}/review"]){
+ assert(server.includes(token),"Level 5 evidence review route missing "+token);
+}
 console.log("L5 pause/retire UI and fail-closed goal lifecycle: PASS");

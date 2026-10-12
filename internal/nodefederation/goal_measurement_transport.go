@@ -63,11 +63,11 @@ func(s *Service)AcceptPairedNodeMeasurement(ctx context.Context,
   if c.ObservedAt>now||now-c.ObservedAt>5*60*1000{
    return ErrNodeMeasurementNotAdmitted
   }
-  var grantStatus,planRaw,nodeTrust,pairStatus,storedFingerprint,approverStatus string
+  var tenantID,grantStatus,planRaw,nodeTrust,pairStatus,storedFingerprint,approverStatus string
   var grantRevision,lastSeq,approvedAt,expiresAt int64
   var confirmedLocal,confirmedPeer int
   err:=tx.QueryRowContext(ctx,`SELECT
-   g.project_id,g.goal_id,g.project_workspace_id,g.source_id,g.status,
+   p.workspace_id,g.project_id,g.goal_id,g.project_workspace_id,g.source_id,g.status,
    g.revision,g.last_sequence,g.approved_at,g.expires_at,
    goal.monitoring_plan_json,n.trust_state,pair.status,pair.peer_tls_fingerprint,
    pair.local_confirmed,pair.peer_confirmed,approver.status
@@ -86,7 +86,7 @@ func(s *Service)AcceptPairedNodeMeasurement(ctx context.Context,
      AND mem.workspace_id=p.workspace_id AND mem.status='active'
    WHERE g.id=? AND g.peer_node_id=? AND g.peer_tls_fingerprint=?`,
    c.GrantID,peerID,peerFingerprint).
-   Scan(&receipt.ProjectID,&receipt.GoalID,&receipt.ProjectWorkspaceID,
+   Scan(&tenantID,&receipt.ProjectID,&receipt.GoalID,&receipt.ProjectWorkspaceID,
     &receipt.SourceID,&grantStatus,&grantRevision,&lastSeq,&approvedAt,&expiresAt,
     &planRaw,&nodeTrust,&pairStatus,&storedFingerprint,
     &confirmedLocal,&confirmedPeer,&approverStatus)
@@ -147,7 +147,7 @@ func(s *Service)AcceptPairedNodeMeasurement(ctx context.Context,
    "monitoring_active":false,
   })
   return s.events.Append(ctx,tx,event.Event{
-   ID:eventID,Type:"project.goal_node_measurement_received",
+   ID:eventID,WorkspaceID:&tenantID,Type:"project.goal_node_measurement_received",
    AggregateType:"project_goal_node_measurement_receipt",
    AggregateID:receipt.ID,Payload:payload,OccurredAt:now,
   })

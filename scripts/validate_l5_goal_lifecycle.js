@@ -115,4 +115,28 @@ for(const token of ["/tcp-probe-permits","/tcp-probe-permits/{permitID}/revoke"]
 assert(tcpMigration.includes("CREATE UNIQUE INDEX idx_goal_tcp_probe_active_source"),
  "same source could be rebound without revocation");
 assert(!harness.includes("TickDueGoalTCPProbe"),"network execution must not start by migration or consent");
+const tcpRun=fs.readFileSync("internal/projectworkspace/continuous_goal_tcp_probe_attempts.go","utf8");
+const tcpRunAPI=fs.readFileSync("internal/api/project_goal_tcp_probe_attempts.go","utf8");
+const tcpRunMigration=fs.readFileSync("migrations/0061_goal_tcp_probe_attempts.sql","utf8");
+for(const token of ["runManualGoalTCPProbe","claimGoalTCPAttempt",
+ "tcpAttemptStillAuthorised","net.JoinHostPort",
+ "context.WithTimeout","DialContext(connectCtx,\"tcp4\"",
+ "not_connected","timed_out","completeTCPAttempt"]){
+ assert(tcpRun.includes(token),"bounded TCP executor missing "+token);
+}
+for(const token of ["data-goal-probe-test=","data-goal-probe-history=",
+ "Confirm one TCP connect","TCP handshakes only — not verified device health.",
+ "This does NOT establish service security, health or trust."]){
+ assert(ui.includes(token),"manual and transparent TCP test UI missing "+token);
+}
+for(const token of ["RunManualGoalTCPProbe","ListGoalTCPProbeAttempts","project.read","project.write"]){
+ assert(tcpRunAPI.includes(token),"TCP source test API missing "+token);
+}
+for(const token of ["/tcp-probe-permits/{permitID}/test","/tcp-probe-attempts"]){
+ assert(server.includes(token),"manual TCP test route missing "+token);
+}
+assert(tcpRunMigration.includes("UNIQUE(permit_id,cadence_window)"),
+ "TCP test retries must have an immutable admission fence");
+assert(!harness.includes("RunManualGoalTCPProbe"),"manual network test unexpectedly wired to scheduler");
+
 console.log("L5 pause/retire UI and fail-closed goal lifecycle: PASS");

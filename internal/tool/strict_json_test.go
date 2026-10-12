@@ -1,9 +1,14 @@
 package tool
 
 import (
+ "context"
  "encoding/json"
+ "errors"
  "strings"
  "testing"
+
+ "github.com/DigiLogicTech/OnePane/internal/authority"
+ "github.com/DigiLogicTech/OnePane/internal/policy"
 )
 
 func TestToolCanonicalJSONRejectsConflictingKeysBeforeAuthority(t *testing.T){
@@ -48,5 +53,24 @@ func TestToolCanonicalJSONRetainsLargeSingleValue(t *testing.T){
  canonical,err:=canonicalJSON(raw)
  if err!=nil||len(canonical)!=len(raw){
   t.Fatalf("legitimate large Tool payload denied: bytes=%d error=%v",len(canonical),err)
+ }
+}
+
+
+func TestGatewayRejectsConflictingJSONBeforeLeaseOrAdapter(t *testing.T){
+ adapter:=&countingAdapter{id:"untrusted",version:"1",result:AdapterResult{
+  Summary:"must not run",Result:json.RawMessage("{}")}}
+ gateway,_,_,auth:=testGateway(t,authority.ActionRead,policy.Decision{
+  Allowed:true,LeaseRevision:1,RequiredApproval:policy.ApprovalNone,
+ },adapter)
+ cmd:=command()
+ cmd.Input=json.RawMessage("{\"resource_ref\":\"safe\",\"resource_ref\":\"other\"}")
+ _,err:=gateway.Invoke(context.Background(),cmd)
+ if !errors.Is(err,ErrInvalidCommand){
+  t.Fatalf("ambiguous Tool input passed initial admission: %v",err)
+ }
+ if auth.calls!=0||adapter.calls!=0{
+  t.Fatalf("duplicate Tool JSON reached authority or adapter: %d/%d",
+   auth.calls,adapter.calls)
  }
 }

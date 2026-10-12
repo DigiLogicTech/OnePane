@@ -11,6 +11,7 @@ The API requires authentication before any write. Project-based key management i
 | `GET /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers` | human | `project.read` | Up to 100 key metadata records, no private key |
 | `POST /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers` | human | `project.write` | Stores human-approved public signer key; updates configured Goal revision and audit event |
 | `POST /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers/{signerID}/revoke` | human | `project.write` | Revokes current key, increments revisions, retains immutable signed proofs |
+| `POST /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations/record` | service/agent holding real bearer API credential; no session/cookie substitutes | **`goal.source.submit`** for canonical tenant Workspace, plus live approved signer and source key | Conservatively reserves one of 30 source-reading slots per rolling minute and records strictly unverified local Observation; returns only ID/hash for separate signing |
 | `POST /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations/submit` | service/agent holding real bearer API credential; no session/cookie substitutes | **`goal.source.submit`** for canonical tenant Workspace, plus active registered signer for the exact Goal/source and Ed25519 proof | Atomically consumes monotonically increasing source signature sequence and persists metadata-only proof |
 | `GET /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations` | authorised Project reader | `project.read` | Up to 100 immutable signed proof metadata records |
 | `POST /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations` | any | **never permitted** | Explicit HTTP 405, read-only endpoint |
@@ -32,6 +33,26 @@ All mutation JSON bodies are strictly decoded (unknown/duplicate fields, Unicode
 }
 ```
 
+### Step 1: Stage one unverified reading
+
+```json
+{
+  "signer_id": "approved-signer-id",
+  "observation_type": "gateway.sample",
+  "value": {
+    "reachable": true
+  }
+}
+```
+
+Requires an exact approved signer and a service/Agent bearer credential with `goal.source.submit`. Only this narrowly authorised source can stage new readings. The server chooses canonical tenant Workspace, the authenticated source principal, `signed-source://<signer-id>` opaque subject, local timestamp, fixed probe version, `INTERNAL` confidentiality, `ANY` residency, and `UNVERIFIED_DERIVED` trust. Caller-supplied Node origin, provenance, trust, subject, actor or Workspace fields are unknown and refused. Request bodies are limited to 8 KiB, raw `value` to 4 KiB and must be valid, unambiguous JSON.
+
+The response returns `observation_id`, `integrity_hash`, `source_id`, `observed_at` and `status: unverified_awaiting_source_signature` only. Sensitive reading `value` is stored in the isolated immutable Observation record and **never** echoed in the response or Goal event metadata. Its `SubjectRef` is an opaque source signer ID rather than an arbitrary device hostname.
+
+A second, serialized SQLite reservation independently enforces at most **30 staged readings per source key per 60-second time window**. This quota is conservatively spent before the Observation append; if a subsequent append fails or human revocation races with it, an unverified row may remain, but **no signed proof, verified health, monitoring or remediation is inferred**. Source credential revocation and key revocation prevent future authenticated proof admission.
+
+### Step 2: Sign and submit the returned Observation ID/hash
+
 ### Source proof submission body
 ```json
 {
@@ -48,7 +69,7 @@ All mutation JSON bodies are strictly decoded (unknown/duplicate fields, Unicode
 ## Security and functionality limitations
 
 - A source-signed Observation establishes approval of a signing key and possession of its private key; it does not prove that the source's measurements are accurate, an originating remote Node is paired, that a particular physical device is healthy, or that network protection is running.
-- A source submits proof for an **already-recorded**, immutable local Observation. The API does not provide a route for sensor raw readings, Node pairing, authenticated measurement transport, programmatic source principal creation, key provisioning, credential issuance or remote probe execution. Key distribution must be separately secured.
+- A source stages a **new, unverified local Observation** and subsequently submits its separate Ed25519 proof using that immutable Observation ID/hash. This does **not** certify origin Node/device identity. The API does not provide Node pairing, authenticated measurement transport, programmatic source principal creation, key provisioning, credential issuance or remote probe execution. Key distribution must be separately secured.
 - A machine API credential must already have been provisioned with the narrowly scoped `goal.source.submit` capability and exact Workspace. No broad `project.write` fallback or automatic issuance was added.
 - Submission does not activate a L5 Goal, schedule monitoring, apply remediation or turn health into a green/verified state. Signature coverage is a separate informational projection.
 - A signer can commit no more than **30 successful immutable proofs in any rolling 60-second window**, enforced under the same SQLite writer transaction with an indexed bounded query; denied admission does not advance the signing sequence. The API reports HTTP **429** with a conservative `Retry-After: 60` header. Source admission remains capped at **8 KiB** of JSON request body.

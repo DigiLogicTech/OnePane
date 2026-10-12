@@ -146,4 +146,27 @@ assert(tcpRunMigration.includes("UNIQUE(permit_id,cadence_window)"),
  "TCP test retries must have an immutable admission fence");
 assert(!harness.includes("RunManualGoalTCPProbe"),"manual network test unexpectedly wired to scheduler");
 
+// Expected TCP reachability is a revisioned human-authored BASELINE,
+// never evidence of security health or a network action by itself.
+const baselineService=fs.readFileSync("internal/projectworkspace/continuous_goal_tcp_baselines.go","utf8");
+const baselineAPI=fs.readFileSync("internal/api/project_goal_tcp_baselines.go","utf8");
+const baselineMigration=fs.readFileSync("migrations/0063_goal_tcp_reachability_baselines.sql","utf8");
+for(const token of ["SetGoalTCPBaseline","GoalTCPReachabilityAssessment",
+ "GoalTCPBaselineRevision","humanGoalReviewer","monitoring_plan_json",
+ "expected_tcp","missing_evidence","stale_test","permission_inactive",
+ "unexpected_tcp_reachability","matches_last_tcp_test","DeviceHealth:\"unverified\""]){
+ assert(baselineService.includes(token),"L5 baseline safety contract missing "+token);
+}
+assert(baselineMigration.includes("goal_tcp_baselines_immutable_update"),"prior baseline must be immutable");
+for(const token of ["data-goal-tcp-baseline-save=","data-goal-tcp-assess=",
+ "TCP reachability expectation saved.","Device health remains UNVERIFIED."]){
+ assert(ui.includes(token),"baseline UX missing "+token);
+}
+for(const token of ["SetGoalTCPBaseline","ListGoalTCPBaselines",
+ "GoalTCPReachabilityAssessment","project.read","project.write"]){
+ assert(baselineAPI.includes(token),"baseline API contract missing "+token);
+}
+for(const token of ["/tcp-baselines","/tcp-assessment/{sourceID}"]){
+ assert(server.includes(token),"baseline route missing "+token);
+}
 console.log("L5 pause/retire UI and fail-closed goal lifecycle: PASS");

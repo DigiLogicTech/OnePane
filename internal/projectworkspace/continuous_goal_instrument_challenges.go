@@ -319,6 +319,10 @@ const (
  instrumentProjectChallengeFiveMinuteLimit = 16
  instrumentProjectChallengeDailyLimit = 256
 )
+var (
+ ErrInstrumentProjectFiveMinuteRateLimited=errors.New("instrument Project five-minute challenge budget exhausted")
+ ErrInstrumentProjectDailyRateLimited=errors.New("instrument Project daily challenge budget exhausted")
+)
 func checkInstrumentProjectChallengeBudgetTx(ctx context.Context,
  tx storage.Tx,projectID string,now int64)error{
  if projectID==""||now<1{return ErrInvalidCommand}
@@ -328,14 +332,14 @@ func checkInstrumentProjectChallengeBudgetTx(ctx context.Context,
   WHERE project_id=? AND issued_at>?`,
   projectID,now-5*60*1000).Scan(&count);err!=nil{return err}
  if count>=instrumentProjectChallengeFiveMinuteLimit{
-  return ErrInvalidTransition
+  return ErrInstrumentProjectFiveMinuteRateLimited
  }
  if err:=tx.QueryRowContext(ctx,`SELECT COUNT(*)
   FROM project_goal_instrument_challenges
   WHERE project_id=? AND issued_at>?`,
   projectID,now-24*60*60*1000).Scan(&count);err!=nil{return err}
  if count>=instrumentProjectChallengeDailyLimit{
-  return ErrInvalidTransition
+  return ErrInstrumentProjectDailyRateLimited
  }
  return nil
 }

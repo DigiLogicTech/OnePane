@@ -164,7 +164,7 @@ func goalEndpointDigest(ip string,port int)string{
 func instrumentSigningBytes(k GoalInstrumentKey,pin GoalTLSPin,
  c GoalInstrumentChallenge)([]byte,error){
  return json.Marshal(instrumentChallengeSigningEnvelope{
-  Domain:"OnePane/instrument-challenge/ed25519/v1",
+  Domain:"OnePane/instrument-challenge/ed25519/v2",
   ProjectID:k.ProjectID,GoalID:k.GoalID,InstrumentKeyID:k.ID,
   ChallengeID:c.ID,DeclaredTargetID:k.DeclaredTargetID,
   TLSPinID:k.TLSPinID,PinnedCertificateSHA256:pin.CertificateSHA256,
@@ -621,7 +621,8 @@ func(s *Service)GetGoalInstrumentVerificationBundle(ctx context.Context,
  if err=json.Unmarshal(out.SigningPayload,&envelope);err!=nil{
   return GoalInstrumentVerificationBundle{},ErrInvalidTransition
  }
- if envelope.Domain!="OnePane/instrument-challenge/ed25519/v1"||
+ if (envelope.Domain!="OnePane/instrument-challenge/ed25519/v1"&&
+  envelope.Domain!="OnePane/instrument-challenge/ed25519/v2")||
   envelope.ProjectID!=projectID||envelope.GoalID!=goalID||
   envelope.InstrumentKeyID!=out.Proof.KeyID||
   envelope.ChallengeID!=out.Proof.ChallengeID||
@@ -632,6 +633,20 @@ func(s *Service)GetGoalInstrumentVerificationBundle(ctx context.Context,
   !bytes.Equal(envelope.Nonce,nonce)||
   envelope.IssuedAt!=issuedAt||envelope.ExpiresAt!=expiresAt{
   return GoalInstrumentVerificationBundle{},ErrInvalidTransition
+ }
+ if envelope.Domain=="OnePane/instrument-challenge/ed25519/v2"{
+  // A v2 proof also seals the original human-approved private endpoint
+  // digest; compare against the immutable target scope rather than a
+  // currently mutable Project setting or client-controlled claim.
+  var ip string
+  var port int
+  err=s.db.QueryRowContext(ctx,`SELECT target_ipv4,target_port
+   FROM project_goal_tcp_declared_target_bindings
+   WHERE id=? AND project_id=? AND goal_id=?`,
+   out.Proof.DeclaredTargetID,projectID,goalID).Scan(&ip,&port)
+  if err!=nil||envelope.TargetEndpointSHA256!=goalEndpointDigest(ip,port){
+   return GoalInstrumentVerificationBundle{},ErrInvalidTransition
+  }
  }
  actual:=sha256.Sum256(out.Signature)
  if len(out.Signature)!=ed25519.SignatureSize||

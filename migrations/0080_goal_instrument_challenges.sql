@@ -46,6 +46,7 @@ CREATE TABLE project_goal_instrument_challenges (
  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
  goal_id TEXT NOT NULL REFERENCES project_continuous_goals(id) ON DELETE RESTRICT,
  nonce BLOB NOT NULL UNIQUE CHECK(length(nonce)=32),
+ signing_payload BLOB NOT NULL CHECK(length(signing_payload) BETWEEN 128 AND 2048),
  issued_at INTEGER NOT NULL CHECK(issued_at>0),
  expires_at INTEGER NOT NULL CHECK(expires_at>issued_at),
  status TEXT NOT NULL CHECK(status IN ('issued','accepted')),
@@ -60,7 +61,8 @@ CREATE TRIGGER instrument_challenge_no_delete BEFORE DELETE ON project_goal_inst
 CREATE TRIGGER instrument_challenge_once BEFORE UPDATE ON project_goal_instrument_challenges
  WHEN NEW.id!=OLD.id OR NEW.instrument_key_id!=OLD.instrument_key_id OR
   NEW.project_id!=OLD.project_id OR NEW.goal_id!=OLD.goal_id OR
-  NEW.nonce!=OLD.nonce OR NEW.issued_at!=OLD.issued_at OR
+  NEW.nonce!=OLD.nonce OR NEW.signing_payload!=OLD.signing_payload OR
+  NEW.issued_at!=OLD.issued_at OR
   NEW.expires_at!=OLD.expires_at OR OLD.status!='issued' OR NEW.status!='accepted'
  BEGIN SELECT RAISE(ABORT,'instrument challenge is single-use'); END;
 

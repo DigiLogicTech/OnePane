@@ -107,7 +107,6 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
      AND a.target_port=p.target_port
      AND a.timeout_ms=p.timeout_ms
      AND a.claimed_at>=p.approved_at
-     AND a.completed_at>=a.claimed_at
    JOIN project_continuous_goals g ON g.id=a.goal_id
     AND g.project_id=a.project_id AND g.status='configured'
     AND g.project_workspace_id=a.project_workspace_id

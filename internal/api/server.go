@@ -552,6 +552,7 @@ func (s *Server) routes() {
 		writeError(w,http.StatusMethodNotAllowed,"signed Observation proofs are read-only")
 	})
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/coverage", s.getProjectGoalEvidenceCoverage)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/signal-triage", s.getProjectGoalSignalTriage)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/evidence-review-permits", s.listProjectGoalReviewPermits)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/evidence-review-permits", s.approveProjectGoalReviewPermit)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/evidence-review-permits/{permitID}/revoke", s.revokeProjectGoalReviewPermit)

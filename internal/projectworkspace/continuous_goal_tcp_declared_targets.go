@@ -250,18 +250,22 @@ func(s *Service)RevokeGoalTCPTarget(ctx context.Context,
 func(s *Service)ListGoalTCPTargets(ctx context.Context,
  projectID,goalID string)([]GoalTCPDeclaredTarget,error){
  if projectID==""||goalID==""{return nil,ErrInvalidCommand}
- var exists int
- err:=s.db.QueryRowContext(ctx,`SELECT 1 FROM project_continuous_goals g
+ var planRaw string
+ err:=s.db.QueryRowContext(ctx,`SELECT g.monitoring_plan_json
+  FROM project_continuous_goals g
   JOIN projects p ON p.id=g.project_id AND p.status='active'
   JOIN workspaces t ON t.id=p.workspace_id AND t.status='active'
   JOIN project_workspaces w ON w.id=g.project_workspace_id
    AND w.project_id=p.id AND w.status='active'
-  WHERE g.id=? AND g.project_id=?`,goalID,projectID).Scan(&exists)
+  WHERE g.id=? AND g.project_id=?`,goalID,projectID).Scan(&planRaw)
  if err!=nil{return nil,err}
+ _,currentPlanHash,err:=goalReviewPlan(planRaw)
+ if err!=nil{return nil,ErrInvalidCommand}
  rows,err:=s.db.QueryContext(ctx,`SELECT `+declaredTargetColumns+`,
   CASE
    WHEN status='revoked' THEN 'revoked'
    WHEN expires_at<=? THEN 'expired'
+   WHEN plan_hash!=? THEN 'permit_inactive'
    WHEN NOT EXISTS(SELECT 1 FROM principals reviewer
     JOIN projects project ON project.id=project_goal_tcp_declared_target_bindings.project_id
     JOIN workspace_memberships m ON m.workspace_id=project.workspace_id
@@ -299,7 +303,7 @@ func(s *Service)ListGoalTCPTargets(ctx context.Context,
   FROM project_goal_tcp_declared_target_bindings
   WHERE project_id=? AND goal_id=?
   ORDER BY approved_at DESC,id DESC LIMIT 100`,
-  s.clock.UnixMilli(),s.clock.UnixMilli(),projectID,goalID)
+  s.clock.UnixMilli(),currentPlanHash,s.clock.UnixMilli(),projectID,goalID)
  if err!=nil{return nil,err}
  defer rows.Close()
  out:=[]GoalTCPDeclaredTarget{}

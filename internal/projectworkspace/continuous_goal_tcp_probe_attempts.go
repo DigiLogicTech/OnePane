@@ -289,6 +289,10 @@ func(s *Service)completeTCPAttempt(ctx context.Context,a GoalTCPProbeAttempt,sta
   if err!=nil{return err}
   n,err:=change.RowsAffected();if err!=nil{return err}
   if n!=1{return ErrInvalidTransition}
+  // A mismatching, current operator-approved TCP baseline creates one
+  // immutable drift notice in the same transaction as the test outcome.
+  // This never changes Goal health or authorises host remediation.
+  if err=s.recordTCPReachabilityAlertTx(ctx,tx,a,status,now);err!=nil{return err}
   body,_:=json.Marshal(map[string]any{
    "attempt_id":a.ID,"goal_id":a.GoalID,"permit_id":a.PermitID,
    "source_id":a.SourceID,"status":status,"reachability_only":true,

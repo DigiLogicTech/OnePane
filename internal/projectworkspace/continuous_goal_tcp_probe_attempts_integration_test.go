@@ -81,7 +81,7 @@ func TestManualGoalTCPProbeUsesOnlyExactPermittedSocketAndIsCrashIdempotent(t *t
  first,err:=svc.runManualGoalTCPProbe(ctx,cmd,dialer)
  if err!=nil{t.Fatal(err)}
  if dialer.calls!=1||dialer.network!="tcp4"||dialer.address!="192.168.14.21:443"||
-  first.Status!="connected"||first.TargetIPv4!=permit.TargetIPv4||
+  first.Status!="connected"||first.RecurringGrantID!=nil||first.TargetIPv4!=permit.TargetIPv4||
   first.TargetPort!=443||first.MonitoringActive||first.CompletedAt<first.ClaimedAt{
   t.Fatalf("network dispatch escaped source grant: calls=%d network=%s address=%s receipt=%+v",
    dialer.calls,dialer.network,dialer.address,first)
@@ -114,6 +114,10 @@ func TestManualGoalTCPProbeUsesOnlyExactPermittedSocketAndIsCrashIdempotent(t *t
  if _,err:=db.SQL().ExecContext(ctx,
   "UPDATE project_goal_tcp_probe_attempts SET status='connected' WHERE id=?",first.ID);err==nil{
   t.Fatal("finalised TCP receipt was rewritten")
+ }
+ if _,err:=db.SQL().ExecContext(ctx,
+  "UPDATE project_goal_tcp_probe_attempts SET recurring_grant_id='forged' WHERE id=?",first.ID);err==nil{
+  t.Fatal("manual TCP receipt was rebound to a recurring consent")
  }
  // Reissuing consent cannot reset this source's cadence rate budget.
  // Otherwise a malicious caller could revoke/reapprove repeatedly and

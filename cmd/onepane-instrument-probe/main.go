@@ -31,9 +31,11 @@ import(
 
 func readPrivateKey(path string)(ed25519.PrivateKey,error){
  if path==""{return nil,errors.New("private key file required")}
- stat,err:=os.Stat(path)
+ stat,err:=os.Lstat(path)
  if err!=nil{return nil,err}
- if !stat.Mode().IsRegular(){return nil,errors.New("private key must be a regular file")}
+ if !stat.Mode().IsRegular()||stat.Mode()&os.ModeSymlink!=0{
+  return nil,errors.New("private key must be a regular non-symlink file")
+ }
  if runtime.GOOS!="windows"&&stat.Mode().Perm()&0077!=0{
   return nil,errors.New("private key file must be owner-only (chmod 600)")
  }
@@ -73,6 +75,21 @@ func readJSON(path string,v any)error{
  }
  return nil
 }
+// A plan discloses a private network address, and a local receipt includes
+// both that address and a detached signature. Never accept a shared or
+// symlinked input file on POSIX; key and receipt custody remain local.
+func readPrivateJSON(path string,v any)error{
+ info,err:=os.Lstat(path)
+ if err!=nil{return err}
+ if !info.Mode().IsRegular()||info.Mode()&os.ModeSymlink!=0{
+  return errors.New("private evidence input must be a regular non-symlink file")
+ }
+ if runtime.GOOS!="windows"&&info.Mode().Perm()&0077!=0{
+  return errors.New("private evidence file must be owner-only (chmod 600)")
+ }
+ return readJSON(path,v)
+}
+
 func writeExclusive(path string,record any)error{
  if path==""{return errors.New("explicit output file required")}
  b,err:=json.Marshal(record)
@@ -137,7 +154,7 @@ func runProbe(args []string)error{
    return errors.New("approved --plan cannot be combined with manual endpoint flags")
   }
   var plan instrumentprobe.ProbePlan
-  if err=readJSON(*planFile,&plan);err!=nil{return err}
+  if err=readPrivateJSON(*planFile,&plan);err!=nil{return err}
   receipt,err=instrumentprobe.ProbeApprovedPlan(context.Background(),ch,plan,
    pk,&net.Dialer{},time.Now)
  }else{
@@ -171,7 +188,7 @@ func runSign(args []string)error{
  pk,err:=readPrivateKey(*keyFile)
  if err!=nil{return err}
  var local instrumentprobe.LocalProbeReceipt
- if err=readJSON(*report,&local);err!=nil{return err}
+ if err=readPrivateJSON(*report,&local);err!=nil{return err}
  var preparedDoc instrumentprobe.PreparedMeasurement
  if err=readJSON(*prepared,&preparedDoc);err!=nil{return err}
  body,err:=instrumentprobe.SignPrepared(local,preparedDoc,pk,*revision,time.Now())

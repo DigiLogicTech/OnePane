@@ -46,6 +46,9 @@ type RunGoalTCPProbeCommand struct {
  ExpectedGoalRevision int64
  ExpectedPermitRevision int64
  ActorPrincipalID string
+ // Only a service-internal scheduled path may supply this. The public
+ // one-shot HTTP request has no corresponding JSON field.
+ RecurringGrantID string
 }
 
 type tcpConnectDialer interface {
@@ -96,7 +99,11 @@ func(s *Service)claimGoalTCPAttempt(ctx context.Context,c RunGoalTCPProbeCommand
    return ErrInvalidTransition
   }
   if err=s.requireActor(ctx,tx,project.WorkspaceID,c.ActorPrincipalID);err!=nil{return err}
-  if err=humanGoalReviewer(ctx,tx,c.ActorPrincipalID);err!=nil{return err}
+  if c.RecurringGrantID==""{
+   if err=humanGoalReviewer(ctx,tx,c.ActorPrincipalID);err!=nil{return err}
+  }else if c.ActorPrincipalID!=GoalTCPRecurringWorkerPrincipal{
+   return ErrPrincipalIneligible
+  }
   var wsID,status,planRaw string
   var revision int64
   var cadence int64
@@ -135,6 +142,10 @@ func(s *Service)claimGoalTCPAttempt(ctx context.Context,c RunGoalTCPProbeCommand
    return ErrInvalidTransition
   }
   if _,err=canonicalPrivateProbeIPv4(permit.TargetIPv4);err!=nil{return ErrInvalidTransition}
+  if c.RecurringGrantID!=""{
+   if err=s.authorizeRecurringTCPClaimTx(ctx,tx,c.RecurringGrantID,c.ProjectID,c.GoalID,
+       wsID,permit,hash,cadence,now);err!=nil{return err}
+  }
   allowed:=false
   for _,source:=range plan.SourceIDs{if source==permit.SourceID{allowed=true;break}}
   if !allowed{return ErrInvalidTransition}

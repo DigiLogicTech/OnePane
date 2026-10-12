@@ -10,6 +10,18 @@ This stage allows the operator to approve an **independent instrument public key
 
 The code never generates, uploads, stores, searches for or handles the instrument's private key. OnePane only generates unpredictable signing challenges and verifies externally supplied detached signatures with the human-approved public key.
 
+## Endpoint-bound v2 challenge extension (RC11 P0-P)
+
+New instrument challenges use `OnePane/instrument-challenge/ed25519/v2` rather than the original v1 domain. The versioned immutable challenge includes `target_endpoint_sha256`, computed by the server from the **current approved permit's** canonical private IPv4 literal and exact port using:
+
+```text
+SHA256(UTF8("OnePane/target-endpoint/v1|<approved_ipv4>:<approved_port>"))
+```
+
+The raw network address stays in the permit and the human-only one-shot probe plan; it is not newly exposed in generic signed-proof metadata or Goal triage. The approved local runner refuses a v1 challenge on its stronger `--plan` path, and compares the exact v2 endpoint fingerprint with the plan before opening a socket. Historical v1 Ed25519 proofs and measurement bundles remain externally verifiable, but a live v1 challenge cannot be promoted to an endpoint-bound v2 authorisation. Cross-version cutover can invalidate old **unconsumed two-minute** challenges; the human must re-issue one after updating rather than silently downgrade.
+
+This ties the claimed endpoint to the server's historical human-approved scope but is **still not server certificate/host attestation**: operators must obtain the original challenge and plan over a trusted authenticated OnePane channel. An attacker who controls both transferred files may induce an off-target *local* connection before signature admission fails, and there is no independent evidence of physical host execution or network vantage. The measurement stays `instrument_self_report_signed_not_attested` and contributes no incident votes.
+
 ## Human-only API and lifecycle
 
 Prefix: `/v1/projects/{projectID}/continuous-goals/{goalID}`

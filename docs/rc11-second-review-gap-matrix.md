@@ -579,3 +579,43 @@ never treat either one as blanket recurring network consent.
 - [ ] **Activation gate:** until runtime bootstrap actually registers the dedicated system identity and `harnessd` schedules the worker *after all tests pass*, this capability is source-level only. No actual unattended device probe can be inferred from the mere presence of an approved grant record or source code.
 - [ ] **Latest tests:** integrated recurring worker test head `bedb824800f` under [CI run #38196405337](https://github.com/DigiLogicTech/OnePane/actions/runs/38196405337) was running at checkpoint; a syntax-only test fixture error in older runs was corrected in `20248ddf`. Independently confirm latest success and remediate any new failures before enabling the worker.
 - [ ] **Still required:** sensor provenance and trusted structured Observation admission, bounded baseline/alert handling with no false security-health claims, scoped remediation and postconditions, unattended resource-pressure QA, independent code review and final UI/UX review gate.
+
+
+## RC11 L5 recurring TCP execution activated behind separate consent — 2026-10-12
+
+- [x] The `system:tcp-recurring-observer` identity is now bootstrapped
+  on daemon startup. A separate once-per-minute background loop calls
+  `TickDueTCPRecurringProbes(ctx,1)`. It is **inert without an explicitly
+  human-approved, currently valid `recurring_tcp_connect` grant** linked
+  to an unchanged manual exact-IPv4/port permit. Manual permission alone
+  never enables unattended connections.
+- [x] An admitted check uses a bounded global two-slot TCP semaphore,
+  at most one source per minute tick, a 100–1500ms TCP-only deadline,
+  a durable source/cadence rate fence, persisted cursor and immutable
+  claimed/final outcome. It revalidates canonical Project/Workspace,
+  both active human approvals, system identity, plan hash, grant,
+  precise target and revocation at the transaction and pre-dial boundary.
+  A probe from a revoked/paused goal cannot be admitted; in-flight
+  handshakes are bounded and cannot be retroactively unsent.
+- [x] Fake-dialer integration verifies zero sockets before separate
+  consent, exact target, repeated tick/restart deduplication, cadence
+  continuation and revocation suppression. Go + WebUI + cross-platform
+  source CI passed at
+  [run #38196551825](https://github.com/DigiLogicTech/OnePane/actions/runs/38196551825);
+  follow-up static safety contract passed
+  [#38196619211](https://github.com/DigiLogicTech/OnePane/actions/runs/38196619211).
+- [x] Coverage now separately exposes `tcp_recurring_authorized` and
+  `recurring_tcp_authorized_sources`; it does **not** transform TCP
+  handshakes into trusted Observation receipts or verified device health.
+  A corrected shutdown/cancel classification is committed under
+  `9d2e8d8e` and awaits final integration CI at
+  [#38196741560](https://github.com/DigiLogicTech/OnePane/actions/runs/38196741560).
+- [ ] Next functional gates: trustworthy sensor/Node provenance and
+  authenticated structured observation intake; explicit baseline
+  evaluation and risk/alert handling; multi-signal evidence verification;
+  safe remediation/rollback and response approval; in-flight cancellation
+  and resource-pressure QA.
+- [ ] **Product review order remains unchanged:** full development and
+  security review first; broad, human-focused UI/UX/customisation review
+  **last before the next version/build**; then final CI and QA packaging
+  after explicit operator approval. No release has been merged or built.

@@ -234,7 +234,12 @@ func(s *Service)RevokeGoalSourceCredential(ctx context.Context,
 // Checked inside each source writer transaction, not just API authentication:
 // token expiry, revocation and exact signer scope remain fail-closed during
 // concurrent revocation. Internal non-HTTP callers may omit credentialID.
-func checkGoalSourceCredentialTx(ctx context.Context,tx storage.Tx,
+// Both DB preflight reads and serialized writer transactions use this
+// narrow query contract. The latter is always authoritative for admission.
+type goalSourceCredentialQuery interface{
+ QueryRowContext(context.Context,string,...any)*sql.Row
+}
+func checkGoalSourceCredentialTx(ctx context.Context,tx goalSourceCredentialQuery,
  credentialID,projectID,goalID,signerID,workspaceID,principalID string,now int64)error{
  if credentialID==""{return nil}
  var found int

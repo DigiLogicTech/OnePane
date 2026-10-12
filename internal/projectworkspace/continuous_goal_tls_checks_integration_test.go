@@ -131,6 +131,19 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
   proof.DeviceIdentityVerified||proof.RemediationAuthorized{
   t.Fatalf("signed instrument proof promoted physical-device trust: %+v",proof)
  }
+ bundle,err:=svc.GetGoalInstrumentVerificationBundle(ctx,project.ID,goal.ID,proof.ID)
+ if err!=nil{t.Fatalf("accepted proof lost independent verification material: %v",err)}
+ if !bundle.DetachedSignatureVerified||bundle.DeviceIdentityVerified||
+  bundle.RemediationAuthorized||
+  !ed25519.Verify(ed25519.PublicKey(bundle.PublicKey),
+   bundle.SigningPayload,bundle.Signature){
+  t.Fatalf("human proof bundle cannot be verified offline: %+v",bundle)
+ }
+ changed:=append([]byte(nil),bundle.SigningPayload...)
+ changed[0]^=1
+ if ed25519.Verify(ed25519.PublicKey(bundle.PublicKey),changed,bundle.Signature){
+  t.Fatal("tampered instrument signing payload passed independent Ed25519 check")
+ }
  signedTriage,err:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
  if err!=nil{t.Fatal(err)}
  if len(signedTriage.Sources)!=1||
@@ -191,6 +204,13 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
  }
  if _,err=svc.AcceptGoalInstrumentChallenge(ctx,accept);err==nil{
   t.Fatal("revoked key admitted old signed response")
+ }
+ historical,err:=svc.GetGoalInstrumentVerificationBundle(ctx,project.ID,goal.ID,proof.ID)
+ if err!=nil||!historical.DetachedSignatureVerified||
+  !ed25519.Verify(ed25519.PublicKey(historical.PublicKey),
+   historical.SigningPayload,historical.Signature){
+  t.Fatalf("revocation destroyed independently auditable signed proof: %+v %v",
+   historical,err)
  }
  removedTriage,err:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
  if err!=nil{t.Fatal(err)}

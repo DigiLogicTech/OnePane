@@ -28,6 +28,10 @@ type GoalEvidenceSource struct {
  SourceID string `json:"source_id"`
  EvidenceState string `json:"evidence_state"`
  LastObservedAt int64 `json:"last_observed_at"`
+ // A TCP handshake is a different evidence class, never an attested
+ // Observation or proof that the source is healthy or secure.
+ LastTCPTestAt int64 `json:"last_tcp_test_at,omitempty"`
+ TCPReachability string `json:"tcp_reachability,omitempty"`
 }
 
 func(s *Service)GoalEvidenceCoverage(ctx context.Context,projectID,goalID string)(GoalEvidenceCoverage,error){
@@ -43,6 +47,7 @@ func(s *Service)GoalEvidenceCoverage(ctx context.Context,projectID,goalID string
  err:=s.db.QueryRowContext(ctx,`SELECT g.monitoring_plan_json,g.status,g.health,g.cadence_minutes,g.revision
   FROM project_continuous_goals g
   JOIN projects p ON p.id=g.project_id
+  JOIN workspaces tenant ON tenant.id=p.workspace_id AND tenant.status='active'
   JOIN project_workspaces w ON w.id=g.project_workspace_id
       AND w.project_id=p.id AND w.status='active'
   WHERE g.id=? AND g.project_id=? AND p.status='active'`,
@@ -74,11 +79,44 @@ func(s *Service)GoalEvidenceCoverage(ctx context.Context,projectID,goalID string
  }
  if err:=rows.Err();err!=nil{rows.Close();return GoalEvidenceCoverage{},err}
  rows.Close()
+ // TCP handshake attempts are never counted as attached, integrity-verified
+ // Observation receipts. Present their most recent outcome separately.
+ // Read only a bounded one-per-source metadata projection; no raw values,
+ // target addresses or network sockets are accessed by this endpoint.
+ type lastTCP struct{outcome string;at int64}
+ tcp:=map[string]lastTCP{}
+ tcpRows,err:=s.db.QueryContext(ctx,`SELECT a.source_id,a.status,a.claimed_at
+  FROM project_goal_tcp_probe_attempts a
+  WHERE a.project_id=? AND a.goal_id=? AND a.id=(
+    SELECT b.id FROM project_goal_tcp_probe_attempts b
+    WHERE b.project_id=a.project_id AND b.goal_id=a.goal_id
+      AND b.source_id=a.source_id
+    ORDER BY b.claimed_at DESC,b.id DESC LIMIT 1)
+  ORDER BY a.source_id LIMIT 32`,projectID,goalID)
+ if err!=nil{return GoalEvidenceCoverage{},err}
+ for tcpRows.Next(){
+  var id,state string
+  var stamp int64
+  if err=tcpRows.Scan(&id,&state,&stamp);err!=nil{
+   tcpRows.Close();return GoalEvidenceCoverage{},err
+  }
+  tcp[id]=lastTCP{outcome:state,at:stamp}
+ }
+ if err=tcpRows.Err();err!=nil{tcpRows.Close();return GoalEvidenceCoverage{},err}
+ tcpRows.Close()
  sources:=make([]GoalEvidenceSource,0,len(plan.SourceIDs))
  fresh,stale,missing:=0,0,0
  for _,id:=range plan.SourceIDs{
   seen:=last[id]
   item:=GoalEvidenceSource{SourceID:id,LastObservedAt:seen}
+  if latest,ok:=tcp[id];ok{
+   item.LastTCPTestAt=latest.at
+   if latest.outcome=="claimed"{
+    item.TCPReachability="unknown_after_interruption"
+   }else{
+    item.TCPReachability=latest.outcome
+   }
+  }
   switch{
   case seen==0:
    item.EvidenceState="missing"

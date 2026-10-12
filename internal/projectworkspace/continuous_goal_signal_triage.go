@@ -33,6 +33,8 @@ type GoalSignalTriageSource struct {
  TCPState string `json:"tcp_state"`
  TCPObservedAt int64 `json:"tcp_observed_at,omitempty"`
  TCPAttemptID string `json:"tcp_attempt_id,omitempty"`
+ TCPDeclaredTargetID string `json:"tcp_declared_target_id,omitempty"`
+ TCPIdentityClass string `json:"tcp_identity_class,omitempty"`
  NodeState string `json:"node_state"`
  NodeObservedAt int64 `json:"node_observed_at,omitempty"`
  NodeReceiptID string `json:"node_receipt_id,omitempty"`
@@ -94,9 +96,9 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
   // Bound each query to ONE last completed TCP result for this exact Goal
   // source. No target IP, port, raw receipt, socket or secret is returned.
   var tcpStatus string
-  var tcpID string
+  var tcpID,tcpPermitID string
   var tcpAt,tcpClaimedAt int64
-  err=s.db.QueryRowContext(ctx,`SELECT a.id,a.status,a.claimed_at,a.completed_at
+  err=s.db.QueryRowContext(ctx,`SELECT a.id,a.permit_id,a.status,a.claimed_at,a.completed_at
    FROM project_goal_tcp_probe_attempts a
    JOIN project_goal_tcp_probe_permits p ON p.id=a.permit_id
      AND p.goal_id=a.goal_id AND p.project_id=a.project_id
@@ -124,7 +126,7 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
     AND a.claimed_at BETWEEN ? AND ?
    ORDER BY a.claimed_at DESC,a.id DESC LIMIT 1`,
    now,planHash,projectID,goalID,source.SourceID,now-freshnessMS,now).
-   Scan(&tcpID,&tcpStatus,&tcpClaimedAt,&tcpAt)
+   Scan(&tcpID,&tcpPermitID,&tcpStatus,&tcpClaimedAt,&tcpAt)
   if err!=nil&&!errors.Is(err,sql.ErrNoRows){return GoalSignalTriage{},err}
   if err==nil{
    item.TCPAttemptID=tcpID
@@ -142,6 +144,43 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
     }
    default:
     item.TCPState="unknown_after_interruption"
+   }
+   // Identity is an OPERATOR-DECLARED endpoint association, not a
+   // physical-device attestation. A pre-binding probe must never inherit
+   // the identity retroactively even if its IP and port happen to match.
+   if item.TCPObservedAt>0{
+    var targetID,targetClass string
+    bindErr:=s.db.QueryRowContext(ctx,`SELECT declared.id,declared.identity_class
+     FROM project_goal_tcp_declared_target_bindings declared
+     JOIN project_goal_tcp_probe_permits p ON p.id=declared.permit_id
+      AND p.project_id=declared.project_id AND p.goal_id=declared.goal_id
+      AND p.source_id=declared.source_id AND p.status='approved'
+      AND p.expires_at>?
+     JOIN projects project ON project.id=declared.project_id
+      AND project.status='active'
+     JOIN principals reviewer ON reviewer.id=declared.approved_by
+      AND reviewer.status='active' AND reviewer.principal_type='human'
+     JOIN workspace_memberships membership
+      ON membership.workspace_id=project.workspace_id
+      AND membership.principal_id=reviewer.id AND membership.status='active'
+     WHERE declared.project_id=? AND declared.goal_id=?
+      AND declared.source_id=? AND declared.permit_id=?
+      AND declared.status='approved' AND declared.expires_at>?
+      AND declared.approved_at<=?
+      AND declared.plan_hash=? AND declared.plan_hash=p.plan_hash
+      AND declared.permit_revision=p.revision
+      AND declared.project_workspace_id=p.project_workspace_id
+      AND declared.target_ipv4=p.target_ipv4 AND declared.target_port=p.target_port
+     ORDER BY declared.approved_at DESC LIMIT 1`,
+     now,projectID,goalID,source.SourceID,tcpPermitID,now,
+     tcpClaimedAt,planHash).Scan(&targetID,&targetClass)
+    if bindErr!=nil&&!errors.Is(bindErr,sql.ErrNoRows){
+     return GoalSignalTriage{},bindErr
+    }
+    if bindErr==nil{
+     item.TCPDeclaredTargetID=targetID
+     item.TCPIdentityClass=targetClass
+    }
    }
   }
   // Only report a live, correctly pinned TLS source with a human

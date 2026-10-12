@@ -230,7 +230,25 @@ func TestGoalSignedSourceMachineCredentialAndHumanKeyAPIBoundaries(t *testing.T)
  if strings.Contains(list.Body.String(),"SENSITIVE_SENSOR_PAYLOAD"){
   t.Fatal("raw Observation leaked via history")
  }
- revoke:=fmt.Sprintf(`{"expected_goal_revision":%d,"expected_signer_revision":3}`,g.Revision)
+ // Durable staging quota: 30 successful unverified readings per key per
+ // minute. The denied 31st reading must not mint an Observation or turn
+ // staging metadata into a trusted device-health claim.
+ if got:=request("POST",recordRoute,"source-key",
+  fmt.Sprintf(`{"signer_id":"%s","observation_type":"gateway.sample",
+   "value":"%s"}`,key.ID,strings.Repeat("X",4096)));got.Code!=400{
+  t.Fatalf("large raw reading admitted: %d",got.Code)
+ }
+ for i:=1;i<30;i++{
+  got:=request("POST",recordRoute,"source-key",reading)
+  if got.Code!=201{
+   t.Fatalf("bounded unverified reading %d failed: %d %s",i,got.Code,got.Body)
+  }
+ }
+ over:=request("POST",recordRoute,"source-key",reading)
+ if over.Code!=429||over.Header().Get("Retry-After")!="60"{
+  t.Fatalf("31st reading ignored conservative rate budget: %d %s",over.Code,over.Body)
+ }
+ revoke:=fmt.Sprintf(`{"expected_goal_revision":%d,"expected_signer_revision":32}`,g.Revision)
  revokeRoute:=route+"/source-signers/"+key.ID+"/revoke"
  if got:=request("POST",revokeRoute,"source-key",revoke);got.Code!=403{
   t.Fatalf("sensor revoked own source identity: %d",got.Code)

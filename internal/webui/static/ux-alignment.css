@@ -1,0 +1,201 @@
+/* RC11 UX-02: shared OnePane control and information hierarchy.
+   Loaded after view-specific styles. All declarations use the existing
+   theme tokens; this is an incremental convergence layer, not a new theme.
+
+   Intentional exclusions: shell grid row sizes, Workspace drag/resize
+   geometry, platform-native checks/radios, widget positioning and drawer
+   heights. Those have separate persisted sizing contracts. */
+
+:root {
+  --ux-control-height: 36px;
+  --ux-control-radius: 8px;
+  --ux-focus-size: 2px;
+  --ux-section-gap: 14px;
+  --ux-control-gap: 8px;
+}
+
+/* A Logs/Inspector resize changes available content width. A heading's
+   buttons must wrap inside that width instead of widening the page. */
+.view-host :is(.page-heading,.page-actions,.toolbar,.card-header) {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.view-host .page-heading {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.view-host .page-heading > :first-child {
+  min-width: 0;
+  flex: 1 1 280px;
+}
+.view-host .page-heading h1 {
+  color: var(--text);
+  line-height: 1.18;
+  font-weight: 680;
+  letter-spacing: -.025em;
+  overflow-wrap: anywhere;
+}
+.view-host .page-heading .page-subtitle {
+  max-width: 72ch;
+  line-height: 1.48;
+}
+.view-host :is(.page-actions,.toolbar) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ux-control-gap);
+}
+.view-host .page-actions {
+  justify-content: flex-end;
+  margin-left: auto;
+}
+.view-host .toolbar > :is(input,select,textarea) {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+}
+.view-host .toolbar > input:not([type="checkbox"]):not([type="radio"]) {
+  flex: 0 1 190px;
+}
+.view-host .toolbar > button,
+.view-host .page-actions > button {
+  flex: 0 0 auto;
+}
+
+/* All standard app actions use one neutral/primary token hierarchy.
+   These selectors intentionally exclude icon-only shell toggles,
+   dashboard drag handles and modal custom buttons. */
+:where(.view-host,.inspector,.bottom-drawer,.control-chat-panel) .btn {
+  min-height: var(--ux-control-height);
+  height: auto;
+  padding: 7px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: var(--ux-control-radius);
+  border-color: var(--border);
+  color: var(--text);
+  background: var(--panel-2);
+  text-align: center;
+  line-height: 1.25;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: normal;
+}
+:where(.view-host,.inspector,.bottom-drawer,.control-chat-panel) .btn.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+}
+:where(.view-host,.inspector,.bottom-drawer,.control-chat-panel) .btn:not(.primary):hover:not(:disabled) {
+  background: var(--panel-3);
+  border-color: color-mix(in srgb,var(--accent) 40%,var(--border));
+}
+:where(.view-host,.inspector,.bottom-drawer,.control-chat-panel) .btn:disabled {
+  opacity: .58;
+  cursor: not-allowed;
+}
+/* Do not remove native checkbox/radio appearance or rely on hue alone. */
+:where(.view-host,.inspector,.bottom-drawer,.control-chat-panel)
+  :is(button,input,select,textarea,summary,[role="tab"]):focus-visible {
+  outline: var(--ux-focus-size) solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+:where(.view-host,.inspector,.bottom-drawer,.control-chat-panel)
+  :is(input:not([type="checkbox"]):not([type="radio"]),select,textarea) {
+  color: var(--text);
+  border-color: var(--border);
+  border-radius: var(--ux-control-radius);
+  background: var(--panel-2);
+}
+:where(.view-host,.inspector,.bottom-drawer,.control-chat-panel) :is(input,textarea)::placeholder {
+  color: var(--muted);
+  opacity: .9;
+}
+.view-host .panel-card {
+  min-width: 0;
+  max-width: 100%;
+  border-color: var(--border);
+  background: var(--panel);
+}
+.view-host .panel-card > :is(.card-header,.widget-body,.a44-environment-note) {
+  min-width: 0;
+}
+.view-host .page-subtitle,
+.view-host :is(.list-meta,.empty-state) {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* A Level 5 goal contains two independent types of permission: passive
+   review of existing receipts and actual one-shot TCP network consent.
+   Present each dense control cluster as a separate subregion. */
+.view-host .list-row:has([data-goal-review-approve]),
+.view-host .list-row:has([data-goal-probe-approve]) {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  padding: 12px 14px;
+}
+.view-host .list-row:has([data-goal-review-approve]) > strong {
+  display: inline-block;
+  max-width: 100%;
+  line-height: 1.45;
+}
+.view-host .list-row:has([data-goal-probe-approve]) > .pill {
+  vertical-align: middle;
+  margin-inline-start: 6px;
+}
+.view-host .list-row:has([data-goal-probe-approve]) > .page-subtitle {
+  margin-top: 8px;
+}
+.view-host .list-row :is([data-goal-review-results],[data-goal-probe-results],[data-goal-evidence-results]) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.view-host .list-row :is([data-goal-review-source],[data-goal-probe-source],
+  [data-goal-review-duration],[data-goal-probe-duration],[data-goal-probe-timeout]) {
+  min-height: var(--ux-control-height);
+}
+.view-host .list-row :is([data-goal-probe-ipv4],[data-goal-probe-port]) {
+  min-height: var(--ux-control-height);
+  width: clamp(116px,15vw,190px);
+}
+.view-host .list-row :is([data-goal-probe-results],[data-goal-review-results]) > .page-subtitle {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  border-top: 1px solid var(--border);
+  padding-top: 9px;
+  margin-top: 9px;
+}
+
+/* Retain a usable tab strip and readable evidence state at reduced widths.
+   Never change shell drawer/Inspector ownership here. */
+@media (max-width: 900px) {
+  .view-host .page-heading > :first-child { flex-basis: 100%; }
+  .view-host .page-actions { margin-left: 0; justify-content: flex-start; }
+  .view-host :is(.page-actions,.toolbar) { align-items: stretch; }
+  .view-host :is(.page-actions,.toolbar) > :is(button,.btn) { min-height: 40px; }
+}
+@media (max-width: 520px) {
+  .view-host .toolbar > input:not([type="checkbox"]):not([type="radio"]),
+  .view-host .toolbar > select {
+    flex: 1 1 145px;
+    width: auto;
+  }
+  .view-host .page-actions > button { flex: 1 1 auto; }
+  .view-host .list-row:has([data-goal-probe-approve]) { padding: 12px 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :where(.view-host,.inspector,.bottom-drawer,.control-chat-panel) .btn {
+    transition: none;
+    animation: none;
+  }
+}

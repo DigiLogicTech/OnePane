@@ -1854,9 +1854,25 @@ async function qa4BindL5GoalConfigurator(project){
            <button type="button" class="btn" data-goal-review-history="${escapeHtml(g.id)}">Review history</button>
          </div>
          <div data-goal-review-results></div>`:'';
+      // TCP permissions have a separate, explicit network effect class.
+      // Target registration does not execute a TCP connect or start sensors.
+      const probe=g.status==='configured'&&sourceIDs.length?
+        `<div class="page-subtitle"><strong>Network source permission (advanced)</strong> · One exact private IPv4 address and TCP port. Registration does not run a probe, claim health or grant remediation.</div>
+         <div class="toolbar">
+           <select aria-label="Network observation source" data-goal-probe-source>
+             ${sourceIDs.map(id=>`<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`).join('')}
+           </select>
+           <input data-goal-probe-ipv4 aria-label="Approved private IPv4 address" placeholder="192.168.1.1" maxlength="15" autocomplete="off">
+           <input type="number" data-goal-probe-port aria-label="Approved TCP port" placeholder="443" min="1" max="65535">
+           <select aria-label="TCP timeout" data-goal-probe-timeout><option value="300">300 ms</option><option value="500" selected>500 ms</option><option value="1000">1000 ms</option></select>
+           <select aria-label="Network source permit expiry" data-goal-probe-duration><option value="1">1 hour</option><option value="12" selected>12 hours</option><option value="24">24 hours</option></select>
+           <button class="btn" type="button" data-goal-probe-approve="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">Approve exact TCP target…</button>
+           <button class="btn" type="button" data-goal-probe-list="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">View / revoke network grants</button>
+         </div>
+         <div data-goal-probe-results></div>`:'';
       return `<div class="list-row"><strong>${escapeHtml(g.objective||'Objective')}</strong> <span class="pill">${escapeHtml(g.status||'configured')}</span>
         <div class="page-subtitle">Health: ${escapeHtml(g.health||'unobserved')} · ${stopped?'No future monitoring due':'Device monitoring not activated; automatic receipt review only where separately approved'}</div>
-        ${evidence}${review}${actions}</div>`;
+        ${evidence}${review}${probe}${actions}</div>`;
     }).join(''):'<p class="page-subtitle">No ongoing objectives configured.</p>';
   };
   try{
@@ -1872,6 +1888,91 @@ async function qa4BindL5GoalConfigurator(project){
   list.onclick=async event=>{
     const reviewBase=base+'/continuous-goals/';
     const reviewStatus=()=>$('#qa4L5GoalStatus');
+    const approveTCP=event.target.closest('button[data-goal-probe-approve]');
+    if(approveTCP&&list.contains(approveTCP)){
+      event.preventDefault();
+      const row=approveTCP.closest('.list-row');
+      const sourceID=String(row?.querySelector('[data-goal-probe-source]')?.value||'');
+      const ip=String(row?.querySelector('[data-goal-probe-ipv4]')?.value||'');
+      const port=Number(row?.querySelector('[data-goal-probe-port]')?.value);
+      const timeout=Number(row?.querySelector('[data-goal-probe-timeout]')?.value);
+      const hours=Number(row?.querySelector('[data-goal-probe-duration]')?.value);
+      // No URL, DNS name, CIDR, alternate protocol, or broad port range.
+      const exact=/^(10\\.(?:\\d{1,3}\\.){2}\\d{1,3}|192\\.168\\.\\d{1,3}\\.\\d{1,3}|172\\.(?:1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3})$/.test(ip);
+      if(!exact||!Number.isInteger(port)||port<1||port>65535||
+        ![300,500,1000].includes(timeout)||![1,12,24].includes(hours)){
+        if(reviewStatus())reviewStatus().textContent='Enter one private IPv4 address, a single valid TCP port, and a bounded permit duration.';
+        return;
+      }
+      if(approveTCP.dataset.confirmed!=='yes'){
+        approveTCP.dataset.confirmed='yes';
+        approveTCP.textContent='Confirm network target '+ip+':'+port;
+        return;
+      }
+      approveTCP.disabled=true;
+      try{
+        await apiRequest(reviewBase+encodeURIComponent(approveTCP.dataset.goalProbeApprove)+'/tcp-probe-permits',{
+          method:'POST',body:JSON.stringify({
+            source_id:sourceID,target_ipv4:ip,target_port:port,
+            timeout_ms:timeout,expires_at:Date.now()+hours*60*60*1000,
+            expected_goal_revision:Number(approveTCP.dataset.goalRevision)
+          })
+        });
+        if(reviewStatus())reviewStatus().textContent='Exact-target TCP grant registered. No network probe has executed or been scheduled.';
+        await refresh();
+      }catch(ex){
+        if(reviewStatus())reviewStatus().textContent='Network source grant denied: '+ex.message;
+        approveTCP.disabled=false;
+        approveTCP.dataset.confirmed='';
+        approveTCP.textContent='Approve exact TCP target…';
+      }
+      return;
+    }
+    const listTCP=event.target.closest('button[data-goal-probe-list]');
+    if(listTCP&&list.contains(listTCP)){
+      event.preventDefault();
+      const holder=listTCP.closest('.list-row')?.querySelector('[data-goal-probe-results]');
+      if(!holder)return;
+      holder.textContent='Reading approved network targets…';
+      try{
+        const permits=await apiRequest(reviewBase+encodeURIComponent(listTCP.dataset.goalProbeList)+'/tcp-probe-permits');
+        if(!holder.isConnected)return;
+        holder.innerHTML=Array.isArray(permits)&&permits.length?
+          permits.map(p=>`<div class="page-subtitle">
+            <strong>${escapeHtml(p.source_id||'Source')}</strong> ·
+            ${escapeHtml(p.target_ipv4||'')}:${Number(p.target_port)||0}
+            · ${escapeHtml(p.status==='approved'&&Number(p.expires_at)<=Date.now()?'expired':p.status||'unknown')}
+            · expires ${escapeHtml(new Date(p.expires_at).toLocaleString())}
+            · not active monitoring
+            ${p.status==='approved'?`<button type="button" class="btn" data-goal-probe-revoke="${escapeHtml(p.id)}"
+              data-goal-id="${escapeHtml(listTCP.dataset.goalProbeList)}"
+              data-goal-revision="${Number(listTCP.dataset.goalRevision)||0}"
+              data-permit-revision="${Number(p.revision)||0}">Revoke network permission</button>`:''}
+          </div>`).join(''):
+          '<div class="page-subtitle">No approved network sources.</div>';
+      }catch(ex){if(holder.isConnected)holder.textContent='Network source list unavailable: '+ex.message}
+      return;
+    }
+    const revokeTCP=event.target.closest('button[data-goal-probe-revoke]');
+    if(revokeTCP&&list.contains(revokeTCP)){
+      event.preventDefault();
+      revokeTCP.disabled=true;
+      try{
+        await apiRequest(reviewBase+encodeURIComponent(revokeTCP.dataset.goalId)+
+          '/tcp-probe-permits/'+encodeURIComponent(revokeTCP.dataset.goalProbeRevoke)+'/revoke',{
+          method:'POST',body:JSON.stringify({
+            expected_goal_revision:Number(revokeTCP.dataset.goalRevision),
+            expected_permit_revision:Number(revokeTCP.dataset.permitRevision)
+          })
+        });
+        if(reviewStatus())reviewStatus().textContent='Exact-target TCP network permission revoked.';
+        await refresh();
+      }catch(ex){
+        if(reviewStatus())reviewStatus().textContent='Network grant revocation denied: '+ex.message;
+        revokeTCP.disabled=false;
+      }
+      return;
+    }
     const grant=event.target.closest('button[data-goal-review-approve]');
     if(grant&&list.contains(grant)){
       event.preventDefault();

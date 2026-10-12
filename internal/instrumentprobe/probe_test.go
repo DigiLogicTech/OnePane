@@ -88,6 +88,14 @@ func TestProbeOnceOnePrivateIPv4ConnectionAndLocalSignature(t *testing.T){
  if _,err=SignPrepared(receipt,badPrep,key,7,now);err==nil{
   t.Fatal("client admitted a forged validated hardware vantage flag")
  }
+ wrongPin:=preparedMsg
+ wrongPin.TLSPinID="different-pinned-endpoint"
+ mismatchedPinPayload,err:=json.Marshal(wrongPin)
+ if err!=nil{t.Fatal(err)}
+ badPrep=prep;badPrep.SigningPayload=mismatchedPinPayload
+ if _,err=SignPrepared(receipt,badPrep,key,7,now);err==nil{
+  t.Fatal("client signed a different pinned TLS endpoint than its original challenge")
+ }
  badPrep=prep;badPrep.SigningPayload=append([]byte(nil),prep.SigningPayload...)
  badPrep.SigningPayload[5]^=1
  if _,err=SignPrepared(receipt,badPrep,key,7,now);err==nil{

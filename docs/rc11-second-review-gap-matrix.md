@@ -471,3 +471,39 @@ Completed in this integration branch, with source and regression tests:
   must remain no autonomous network probing or fixing without
   independent consent. Cross-platform installed QA and release review
   remain mandatory.
+
+
+## RC11 network permit integrity and evidence-class separation — 2026-10-12
+
+- [x] **Security audit remediation:** migration
+  `0064_goal_tcp_probe_permit_immutability.sql` rejects changing an
+  approved permit's exact target IP, port, timeout, source, Plan hash,
+  Project/Workspace/Goal, expiry or approver. Only a revisioned transition
+  from approved to revoked is permitted. Any wider/new target requires
+  a new human-approved permit. Regression explicitly attempts mutable
+  retargets, port swap, source replacement and expiry extension.
+- [x] **Authority liveness:** a TCP probe claim and its final pre-dial
+  admission independently require the approving human to retain active
+  tenant membership, in addition to a live operator, unchanged Goal,
+  strict allowlist and currently approved exact target. Removal of
+  human membership blocks a still-unexpired permit. Domain regression
+  exercises revocation between claim and the socket boundary.
+- [x] **Evidence visibility without evidence conflation:**
+  `GoalEvidenceCoverage` projects most recent TCP handshake metadata
+  separately from attached, integrity-verified Observation receipts.
+  The presence of `tcp_reachability=connected` does not turn
+  `evidence_state=missing` into `recent_attached`, and does not
+  change `monitoring_active` or verified Goal health. Inspector labels
+  this distinction explicitly. Source test fixture verifies separation.
+- [ ] Verify the combined coverage source and script contract in
+  [run #38194815212](https://github.com/DigiLogicTech/OnePane/actions/runs/38194815212).
+  Earlier grant immutability and baseline increments passed hosted CI at
+  [#38194688599](https://github.com/DigiLogicTech/OnePane/actions/runs/38194688599)
+  and [#38194555709](https://github.com/DigiLogicTech/OnePane/actions/runs/38194555709).
+- [ ] **Not yet delivered:** recurring real network probes (distinct
+  opt-in consent and target-bound live leases), hardened external Node
+  network boundaries, trusted Observation intake, security-health
+  baselines beyond TCP reachability, autonomous incident policy and
+  verified remediation. None of these may be inferred from a successful
+  TCP connect. Pre-release second independent code/security audit,
+  Windows/Ubuntu installed QA and packaging approval remain open.

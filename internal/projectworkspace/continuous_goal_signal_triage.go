@@ -14,6 +14,8 @@ type GoalSignalTriage struct {
  ProjectID string `json:"project_id"`
  GoalID string `json:"goal_id"`
  GoalRevision int64 `json:"goal_revision"`
+ GoalStatus string `json:"goal_status"`
+ GoalHealth string `json:"goal_health"`
  AssessedAt int64 `json:"assessed_at"`
  SignalFreshnessMinutes int64 `json:"signal_freshness_minutes"`
  State string `json:"state"`
@@ -66,6 +68,7 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
  const freshnessMS int64=15*60*1000
  out:=GoalSignalTriage{
   ProjectID:projectID,GoalID:goalID,GoalRevision:coverage.GoalRevision,
+  GoalStatus:coverage.GoalStatus,GoalHealth:coverage.GoalHealth,
   AssessedAt:now,SignalFreshnessMinutes:15,
   State:"no_recent_measurements",
   Sources:make([]GoalSignalTriageSource,0,len(coverage.Sources)),
@@ -75,6 +78,12 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
    "different_sources_may_not_measure_same_target",
    "read_only_no_automated_monitoring_or_remediation",
   },
+ }
+ // A paused or retired Goal must not be represented as an active
+ // current-signal evaluation even if it retains historical receipts.
+ if coverage.GoalStatus!="configured"{
+  out.State="goal_not_configured"
+  return out,nil
  }
  seenTCP,seenNode:=false,false
  for _,source:=range coverage.Sources{

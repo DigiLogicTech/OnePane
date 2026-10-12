@@ -276,7 +276,7 @@ func TestLevel5SignedObservationEnrollmentAntiReplayAndLiveRevocation(t *testing
   Sequence:31,ExpectedGoalRevision:g.Revision,
   Signature:ed25519.Sign(newPriv,overMsg),
  })
- if !errors.Is(err,ErrInvalidTransition){
+ if !errors.Is(err,ErrSourceProofRateLimited){
   t.Fatalf("31st same-minute signer proof ignored persisted budget: %v",err)
  }
  saved,err:=scanGoalObservationSigner(db.SQL().QueryRowContext(ctx,

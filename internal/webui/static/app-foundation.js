@@ -1851,6 +1851,7 @@ async function qa4BindL5GoalConfigurator(project){
            </select>
            <button type="button" class="btn" data-goal-review-approve="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">Approve receipt review</button>
            <button type="button" class="btn" data-goal-review-list="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">Review / revoke permits</button>
+           <button type="button" class="btn" data-goal-review-history="${escapeHtml(g.id)}">Review history</button>
          </div>
          <div data-goal-review-results></div>`:'';
       return `<div class="list-row"><strong>${escapeHtml(g.objective||'Objective')}</strong> <span class="pill">${escapeHtml(g.status||'configured')}</span>
@@ -1908,6 +1909,11 @@ async function qa4BindL5GoalConfigurator(project){
             ${escapeHtml(p.status||'unknown')} ·
             expires ${escapeHtml(new Date(p.expires_at).toLocaleString())} ·
             existing receipt metadata only
+            ${p.status==='approved' && Number(p.expires_at)>Date.now()?`<button type="button" class="btn"
+              data-goal-review-run="${escapeHtml(p.id)}"
+              data-goal-id="${escapeHtml(showPermits.dataset.goalReviewList)}"
+              data-goal-revision="${Number(showPermits.dataset.goalRevision)||0}"
+              data-permit-revision="${Number(p.revision)||0}">Review existing receipts</button>`:''}
             ${p.status==='approved'?`<button type="button" class="btn" data-goal-review-revoke="${escapeHtml(p.id)}"
               data-goal-id="${escapeHtml(showPermits.dataset.goalReviewList)}"
               data-goal-revision="${Number(showPermits.dataset.goalRevision)||0}"
@@ -1915,6 +1921,48 @@ async function qa4BindL5GoalConfigurator(project){
           </div>`).join(''):
           '<div class="page-subtitle">No receipt-review permits. Monitoring is not activated.</div>';
       }catch(ex){if(holder.isConnected)holder.textContent='Unable to list review permits: '+ex.message}
+      return;
+    }
+    const runReview=event.target.closest('button[data-goal-review-run]');
+    if(runReview&&list.contains(runReview)){
+      event.preventDefault();runReview.disabled=true;
+      try{
+        const reviewed=await apiRequest(reviewBase+encodeURIComponent(runReview.dataset.goalId)+
+          '/evidence-review-permits/'+encodeURIComponent(runReview.dataset.goalReviewRun)+'/review',{
+          method:'POST',body:JSON.stringify({
+            expected_goal_revision:Number(runReview.dataset.goalRevision),
+            expected_permit_revision:Number(runReview.dataset.permitRevision)
+          })
+        });
+        const holder=runReview.closest('[data-goal-review-results]');
+        if(holder&&holder.isConnected){
+          holder.textContent='Receipt metadata reviewed: '+String(reviewed.source_id||'Source')+
+            ' · '+String(reviewed.evidence_state||'unknown')+
+            '. No probes, device health verification, or fixes were performed.';
+        }
+      }catch(ex){
+        if(reviewStatus())reviewStatus().textContent='Receipt review denied: '+ex.message;
+        runReview.disabled=false;
+      }
+      return;
+    }
+    const historyButton=event.target.closest('button[data-goal-review-history]');
+    if(historyButton&&list.contains(historyButton)){
+      event.preventDefault();
+      const holder=historyButton.closest('.list-row')?.querySelector('[data-goal-review-results]');
+      if(!holder)return;
+      holder.textContent='Reading retained metadata-only review history…';
+      try{
+        const reviews=await apiRequest(reviewBase+encodeURIComponent(historyButton.dataset.goalReviewHistory)+'/evidence-reviews');
+        if(!holder.isConnected)return;
+        holder.innerHTML=Array.isArray(reviews)&&reviews.length?
+          '<div class="page-subtitle"><strong>Historical receipt assessments — not verified device health.</strong></div>'+
+          reviews.map(item=>`<div class="page-subtitle">${escapeHtml(item.source_id||'Source')}
+             · ${escapeHtml(item.evidence_state||'unknown')}
+             · ${escapeHtml(new Date(item.reviewed_at).toLocaleString())}
+             · no monitoring activated</div>`).join(''):
+          '<div class="page-subtitle">No receipt reviews recorded.</div>';
+      }catch(ex){if(holder.isConnected)holder.textContent='Review history unavailable: '+ex.message}
       return;
     }
     const revoke=event.target.closest('button[data-goal-review-revoke]');

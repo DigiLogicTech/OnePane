@@ -1836,9 +1836,26 @@ async function qa4BindL5GoalConfigurator(project){
          <button type="button" class="btn" data-goal-list-evidence="${escapeHtml(g.id)}">View evidence</button>
          <button type="button" class="btn" data-goal-coverage="${escapeHtml(g.id)}">Evidence coverage</button></div>
          <div data-goal-evidence-results></div>`: '';
+      // Permits approve only repeatable review of PREEXISTING receipt metadata.
+      // No selection enables a sensor, external probe or remediation action.
+      const review=g.status==='configured'&&sourceIDs.length?
+        `<div class="page-subtitle"><strong>Evidence review permission</strong> · Existing receipts only, no probes or device changes.</div>
+         <div class="toolbar">
+           <select aria-label="Evidence source for review" data-goal-review-source>
+             ${sourceIDs.map(id=>`<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`).join('')}
+           </select>
+           <select aria-label="Review permit expiry" data-goal-review-duration>
+             <option value="1">1 hour</option>
+             <option value="24" selected>24 hours</option>
+             <option value="168">7 days</option>
+           </select>
+           <button type="button" class="btn" data-goal-review-approve="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">Approve receipt review</button>
+           <button type="button" class="btn" data-goal-review-list="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">Review / revoke permits</button>
+         </div>
+         <div data-goal-review-results></div>`:'';
       return `<div class="list-row"><strong>${escapeHtml(g.objective||'Objective')}</strong> <span class="pill">${escapeHtml(g.status||'configured')}</span>
         <div class="page-subtitle">Health: ${escapeHtml(g.health||'unobserved')} · ${stopped?'No future monitoring due':'Monitoring not activated; no check scheduled'}</div>
-        ${evidence}${actions}</div>`;
+        ${evidence}${review}${actions}</div>`;
     }).join(''):'<p class="page-subtitle">No ongoing objectives configured.</p>';
   };
   try{
@@ -1852,6 +1869,73 @@ async function qa4BindL5GoalConfigurator(project){
   // A two-click confirmation is required for terminal retirement. The
   // backend independently requires human authority and a current revision.
   list.onclick=async event=>{
+    const reviewBase=base+'/continuous-goals/';
+    const reviewStatus=()=>$('#qa4L5GoalStatus');
+    const grant=event.target.closest('button[data-goal-review-approve]');
+    if(grant&&list.contains(grant)){
+      event.preventDefault();
+      const row=grant.closest('.list-row');
+      const sourceID=String(row?.querySelector('[data-goal-review-source]')?.value||'');
+      const hours=Number(row?.querySelector('[data-goal-review-duration]')?.value||0);
+      if(!sourceID||![1,24,168].includes(hours))return;
+      grant.disabled=true;
+      try{
+        await apiRequest(reviewBase+encodeURIComponent(grant.dataset.goalReviewApprove)+'/evidence-review-permits',{
+          method:'POST',
+          body:JSON.stringify({source_id:sourceID,expected_goal_revision:Number(grant.dataset.goalRevision),
+            expires_at:Date.now()+hours*60*60*1000})
+        });
+        if(reviewStatus())reviewStatus().textContent='Receipt-metadata review approved for '+hours+' hour(s). Monitoring probes and fixes remain disabled.';
+        await refresh();
+      }catch(ex){
+        if(reviewStatus())reviewStatus().textContent='Receipt review approval denied: '+ex.message;
+        grant.disabled=false;
+      }
+      return;
+    }
+    const showPermits=event.target.closest('button[data-goal-review-list]');
+    if(showPermits&&list.contains(showPermits)){
+      event.preventDefault();
+      const holder=showPermits.closest('.list-row')?.querySelector('[data-goal-review-results]');
+      if(!holder)return;
+      holder.textContent='Loading scoped receipt-review permissions…';
+      try{
+        const permits=await apiRequest(reviewBase+encodeURIComponent(showPermits.dataset.goalReviewList)+'/evidence-review-permits');
+        if(!holder.isConnected)return;
+        holder.innerHTML=Array.isArray(permits)&&permits.length?
+          permits.map(p=>`<div class="page-subtitle">
+            <strong>${escapeHtml(p.source_id||'Source')}</strong> ·
+            ${escapeHtml(p.status||'unknown')} ·
+            expires ${escapeHtml(new Date(p.expires_at).toLocaleString())} ·
+            existing receipt metadata only
+            ${p.status==='approved'?`<button type="button" class="btn" data-goal-review-revoke="${escapeHtml(p.id)}"
+              data-goal-id="${escapeHtml(showPermits.dataset.goalReviewList)}"
+              data-goal-revision="${Number(showPermits.dataset.goalRevision)||0}"
+              data-permit-revision="${Number(p.revision)||0}">Revoke</button>`:''}
+          </div>`).join(''):
+          '<div class="page-subtitle">No receipt-review permits. Monitoring is not activated.</div>';
+      }catch(ex){if(holder.isConnected)holder.textContent='Unable to list review permits: '+ex.message}
+      return;
+    }
+    const revoke=event.target.closest('button[data-goal-review-revoke]');
+    if(revoke&&list.contains(revoke)){
+      event.preventDefault();
+      revoke.disabled=true;
+      try{
+        await apiRequest(reviewBase+encodeURIComponent(revoke.dataset.goalId)+'/evidence-review-permits/'+
+          encodeURIComponent(revoke.dataset.goalReviewRevoke)+'/revoke',{
+          method:'POST',
+          body:JSON.stringify({expected_goal_revision:Number(revoke.dataset.goalRevision),
+            expected_permit_revision:Number(revoke.dataset.permitRevision)})
+        });
+        if(reviewStatus())reviewStatus().textContent='Receipt-review permission revoked. No sensors or remediations were started.';
+        await refresh();
+      }catch(ex){
+        if(reviewStatus())reviewStatus().textContent='Unable to revoke review permit: '+ex.message;
+        revoke.disabled=false;
+      }
+      return;
+    }
     const coverageButton=event.target.closest('button[data-goal-coverage]');
     if(coverageButton&&list.contains(coverageButton)){
       event.preventDefault();

@@ -105,6 +105,32 @@ func TestManualGoalTCPProbeUsesOnlyExactPermittedSocketAndIsCrashIdempotent(t *t
   "UPDATE project_goal_tcp_probe_attempts SET status='connected' WHERE id=?",first.ID);err==nil{
   t.Fatal("finalised TCP receipt was rewritten")
  }
+ // Reissuing consent cannot reset this source's cadence rate budget.
+ // Otherwise a malicious caller could revoke/reapprove repeatedly and
+ // perform a rapid multi-port scan with distinct permit IDs.
+ if _,err:=svc.RevokeGoalTCPProbe(ctx,RevokeGoalTCPProbeCommand{
+  ProjectID:project.ID,GoalID:g.ID,PermitID:permit.ID,
+  ExpectedGoalRevision:g.Revision,ExpectedPermitRevision:permit.Revision,
+  ActorPrincipalID:"human",
+ });err!=nil{t.Fatal(err)}
+ renewedGoal,err:=svc.ContinuousGoal(ctx,g.ID)
+ if err!=nil{t.Fatal(err)}
+ secondPermit,err:=svc.ApproveGoalTCPProbe(ctx,ApproveGoalTCPProbeCommand{
+  ProjectID:project.ID,GoalID:g.ID,SourceID:"router",
+  TargetIPv4:"192.168.14.22",TargetPort:80,TimeoutMS:300,
+  ExpiresAt:clock.Real{}.UnixMilli()+60*60*1000,
+  ExpectedGoalRevision:renewedGoal.Revision,ActorPrincipalID:"human",
+ })
+ if err!=nil{t.Fatal(err)}
+ renewedGoal,err=svc.ContinuousGoal(ctx,g.ID)
+ if err!=nil{t.Fatal(err)}
+ regrant:=cmd
+ regrant.PermitID=secondPermit.ID
+ regrant.ExpectedGoalRevision=renewedGoal.Revision
+ if _,err:=svc.runManualGoalTCPProbe(ctx,regrant,dialer);
+  !errors.Is(err,ErrInvalidTransition)||dialer.calls!=1{
+  t.Fatalf("regrant multiplied same-source TCP test in cadence: calls=%d %v",dialer.calls,err)
+ }
  current,err:=svc.ContinuousGoal(ctx,g.ID)
  if err!=nil{t.Fatal(err)}
  if current.Status!="configured"||current.Health!="unobserved"||

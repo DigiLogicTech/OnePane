@@ -175,18 +175,26 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
  }
  // Distinct source IDs prevent the same registered source from
  // manufacturing independent votes. These remain investigatory only.
- switch {
- case out.RecentNegativeSources>=2&&out.RecentTCPNegativeSources>0&&
-  out.RecentNodeNegativeSources>0:
-  // A positive TCP sample cannot corroborate a negative Node sample (or
-  // vice versa). Require an adverse indicator from EACH distinct class.
-  out.State="multiple_adverse_indicators_investigate"
- case out.RecentNegativeSources>0:
-  out.State="adverse_indicator_needs_review"
- case seenNode&&seenTCP:
-  out.State="mixed_classes_no_adverse_indicator"
- case seenNode||seenTCP:
-  out.State="single_measurement_class"
- }
+ out.State=classifyGoalSignalTriage(out.RecentNegativeSources,
+  out.RecentTCPNegativeSources,out.RecentNodeNegativeSources,
+  seenTCP,seenNode)
  return out,nil
+}
+
+// Pure, narrow classifier: never infer a shared target, device trust or
+// remediation permission from merely co-occurring connection reports.
+func classifyGoalSignalTriage(negativeSources,tcpNeg,nodeNeg int,
+ seenTCP,seenNode bool)string{
+ switch{
+ case negativeSources>=2&&tcpNeg>0&&nodeNeg>0:
+  return "multiple_adverse_indicators_investigate"
+ case negativeSources>0:
+  return "adverse_indicator_needs_review"
+ case seenTCP&&seenNode:
+  return "mixed_classes_no_adverse_indicator"
+ case seenTCP||seenNode:
+  return "single_measurement_class"
+ default:
+  return "no_recent_measurements"
+ }
 }

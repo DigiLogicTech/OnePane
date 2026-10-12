@@ -161,6 +161,26 @@ func TestHumanPinnedTLSCertificateRequiresExactExistingTargetAndOneBoundedCheck(
  if instrument.TLSPinID!=pin.ID||instrument.DeclaredTargetID!=declared.ID{
   t.Fatalf("instrument key escaped human pinned endpoint: %+v",instrument)
  }
+ listedKeys:=request("GET","operator",enrollPath,"")
+ if listedKeys.Code!=200||!strings.Contains(listedKeys.Body.String(),
+  "\"effective_instrument_state\":\"active\""){
+  t.Fatalf("active instrument key status was not available: %d %s",
+   listedKeys.Code,listedKeys.Body)
+ }
+ // A changed Goal plan preserving the original source must still
+ // invalidate the pin and all independently enrolled instrument keys.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
+  SET monitoring_plan_json=?,revision=revision+1 WHERE id=?`,
+  `{"version":1,"source_ids":["router","other"]}`,goal.ID);err!=nil{t.Fatal(err)}
+ listedKeys=request("GET","operator",enrollPath,"")
+ if listedKeys.Code!=200||!strings.Contains(listedKeys.Body.String(),
+  "\"effective_instrument_state\":\"pin_inactive\""){
+  t.Fatalf("changed plan left human instrument key live: %d %s",
+   listedKeys.Code,listedKeys.Body)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
+  SET monitoring_plan_json=?,revision=revision+1 WHERE id=?`,
+  `{"version":1,"source_ids":["router"]}`,goal.ID);err!=nil{t.Fatal(err)}
  goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
  keyPath:=enrollPath+"/"+instrument.ID
  challengeBody,_:=json.Marshal(map[string]any{
@@ -208,6 +228,12 @@ func TestHumanPinnedTLSCertificateRequiresExactExistingTargetAndOneBoundedCheck(
  })
  if got:=request("POST","operator",keyPath+"/revoke",string(revokeKeyBody));
   got.Code!=200{t.Fatalf("human could not revoke instrument key: %d %s",got.Code,got.Body)}
+ listedKeys=request("GET","operator",enrollPath,"")
+ if listedKeys.Code!=200||!strings.Contains(listedKeys.Body.String(),
+  "\"effective_instrument_state\":\"revoked\""){
+  t.Fatalf("revoked instrument identity remained active: %d %s",
+   listedKeys.Code,listedKeys.Body)
+ }
  goal,err=svc.ContinuousGoal(ctx,goal.ID)
  if err!=nil{t.Fatal(err)}
  verify:=pins+"/"+pin.ID+"/verify"

@@ -89,7 +89,8 @@ func TestTCPBaselineComparisonsAreVersionedReadOnlyAndNeverVerifyHealth(t *testi
  if err!=nil||result.Status!="connected"{t.Fatalf("fake test setup failed: %+v %v",result,err)}
  matching,err:=svc.GoalTCPReachabilityAssessment(ctx,project.ID,goal.ID,"router")
  if err!=nil||matching.Assessment!="matches_last_tcp_test"||
-    matching.ObservedTCP!="connected"||matching.DeviceHealth!="unverified"||
+    matching.ObservedTCP!="connected"||matching.SampleBaselineRevision!=1||
+    matching.DeviceHealth!="unverified"||
     matching.MonitoringActive{
   t.Fatalf("TCP handshake comparison incorrectly verified security: %+v %v",matching,err)
  }
@@ -102,9 +103,14 @@ func TestTCPBaselineComparisonsAreVersionedReadOnlyAndNeverVerifyHealth(t *testi
   t.Fatalf("revised baseline was not retained: %+v %v",baseline2,err)
  }
  mismatch,err:=svc.GoalTCPReachabilityAssessment(ctx,project.ID,goal.ID,"router")
- if err!=nil||mismatch.Assessment!="unexpected_tcp_reachability"||
-   mismatch.BaselineRevision!=2||mismatch.DeviceHealth!="unverified"{
-  t.Fatalf("changed baseline not compared to same test: %+v %v",mismatch,err)
+ if err!=nil||mismatch.Assessment!="baseline_updated_since_test"||
+   mismatch.BaselineRevision!=2||mismatch.SampleBaselineRevision!=1||
+   mismatch.DeviceHealth!="unverified"{
+  t.Fatalf("new baseline retroactively reclassified an old TCP test: %+v %v",mismatch,err)
+ }
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_goal_tcp_probe_attempts
+    SET baseline_revision_at_claim=999 WHERE id=?`,result.ID);err==nil{
+  t.Fatal("TCP attempt baseline provenance could be rewritten")
  }
  revisions,err:=svc.ListGoalTCPBaselines(ctx,project.ID,goal.ID)
  if err!=nil||len(revisions)!=2||revisions[0].ID==revisions[1].ID{

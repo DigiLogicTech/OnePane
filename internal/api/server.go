@@ -533,6 +533,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/{transition}", s.transitionProjectContinuousGoal)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/observations", s.listProjectGoalObservations)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations", s.listProjectGoalSignedObservations)
+	// Override the generic /{transition} POST route: this read-only
+	// evidence metadata endpoint must never be interpreted as a Goal action.
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations", func(w http.ResponseWriter,r *http.Request){
+		w.Header().Set("Allow","GET")
+		writeError(w,http.StatusMethodNotAllowed,"signed Observation proofs are read-only")
+	})
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/coverage", s.getProjectGoalEvidenceCoverage)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/evidence-review-permits", s.listProjectGoalReviewPermits)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/evidence-review-permits", s.approveProjectGoalReviewPermit)

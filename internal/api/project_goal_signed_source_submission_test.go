@@ -134,7 +134,37 @@ func TestGoalSignedSourceMachineCredentialAndHumanKeyAPIBoundaries(t *testing.T)
   if err!=nil{t.Fatal(err)}
   return o
  }
- first:=makeObservation()
+ // A real machine credential can stage bounded UNVERIFIED local data.
+ // The caller cannot set the canonical Workspace, actor, subject, trust
+ // label, origin Node or observation timestamp via this endpoint.
+ recordRoute:=route+"/signed-observations/record"
+ reading:=fmt.Sprintf(`{"signer_id":"%s","observation_type":"gateway.sample",
+ "value":{"credential":"SENSITIVE_SENSOR_PAYLOAD","reachable":true}}`,key.ID)
+ for _,token:=range []string{"operator-key","write-only-key","read-only-key","foreign-workspace-key","impostor-key"}{
+  got:=request("POST",recordRoute,token,reading)
+  if got.Code<400{t.Fatalf("unauthorised %s staged sensor data: %d",token,got.Code)}
+ }
+ if got:=request("POST",recordRoute,"source-key",
+  strings.TrimSuffix(reading,"}")+`,"origin_node_id":"claimed-paired"}`);got.Code!=400{
+  t.Fatalf("untrusted device/Node provenance accepted: %d",got.Code)
+ }
+ staged:=request("POST",recordRoute,"source-key",reading)
+ if staged.Code!=201{t.Fatalf("valid sensor data staging denied: %d %s",staged.Code,staged.Body.String())}
+ var staging projectworkspace.SourceReadingReceipt
+ if err=json.Unmarshal(staged.Body.Bytes(),&staging);err!=nil{t.Fatal(err)}
+ if staging.Status!="unverified_awaiting_source_signature"||
+  staging.SourceID!="gateway"||
+  strings.Contains(staged.Body.String(),"SENSITIVE_SENSOR_PAYLOAD"){
+  t.Fatalf("source staged a falsely trusted or leaky receipt: %+v %s",staging,staged.Body)
+ }
+ first,err:=obsSvc.Get(ctx,staging.ObservationID)
+ if err!=nil{t.Fatal(err)}
+ if first.IntegrityHash!=staging.IntegrityHash||
+  first.Label.Trust!=policy.TrustUnverifiedDerived||
+  first.Label.OriginNodeID!=""||
+  first.SubjectRef!="signed-source://"+key.ID{
+  t.Fatalf("client was allowed to forge origin/trust of staged reading: %+v",first)
+ }
  submitBody:=func(o observation.Observation,seq int64,private ed25519.PrivateKey)string{
   t.Helper()
   signed,err:=projectworkspace.SignedGoalObservationMessage(p.ID,g.ID,key.ID,
@@ -200,7 +230,7 @@ func TestGoalSignedSourceMachineCredentialAndHumanKeyAPIBoundaries(t *testing.T)
  if strings.Contains(list.Body.String(),"SENSITIVE_SENSOR_PAYLOAD"){
   t.Fatal("raw Observation leaked via history")
  }
- revoke:=fmt.Sprintf(`{"expected_goal_revision":%d,"expected_signer_revision":2}`,g.Revision)
+ revoke:=fmt.Sprintf(`{"expected_goal_revision":%d,"expected_signer_revision":3}`,g.Revision)
  revokeRoute:=route+"/source-signers/"+key.ID+"/revoke"
  if got:=request("POST",revokeRoute,"source-key",revoke);got.Code!=403{
   t.Fatalf("sensor revoked own source identity: %d",got.Code)

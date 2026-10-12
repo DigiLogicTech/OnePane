@@ -197,3 +197,27 @@ func TestPrivatePlanAndReceiptRejectSharedFilesAndSymlinks(t *testing.T){
   }
  }
 }
+
+func TestInstrumentPrivateInputsRemainStrictlyBounded(t *testing.T){
+ dir:=t.TempDir()
+ path:=filepath.Join(dir,"oversized-plan.json")
+ if err:=os.WriteFile(path,bytes.Repeat([]byte("x"),8193),0600);err!=nil{
+  t.Fatal(err)
+ }
+ var v map[string]any
+ if err:=readPrivateJSON(path,&v);err==nil{
+  t.Fatal("unbounded private network probe-plan input was accepted")
+ }
+ oversizedKey:=filepath.Join(dir,"oversized-private.key")
+ if err:=os.WriteFile(oversizedKey,bytes.Repeat([]byte("A"),257),0600);err!=nil{
+  t.Fatal(err)
+ }
+ if _,err:=readPrivateKey(oversizedKey);err==nil{
+  t.Fatal("oversized instrument private key was read into memory")
+ }
+ notAFile:=filepath.Join(dir,"evidence-directory")
+ if err:=os.Mkdir(notAFile,0700);err!=nil{t.Fatal(err)}
+ if err:=readPrivateJSON(notAFile,&v);err==nil{
+  t.Fatal("directory was admitted as a private instrument receipt")
+ }
+}

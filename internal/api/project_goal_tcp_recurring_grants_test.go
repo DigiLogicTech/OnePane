@@ -22,21 +22,21 @@ func TestTCPRecurringGrantAPIRequiresSeparateHumanConsent(t *testing.T){
  if err=db.Migrate(ctx);err!=nil{t.Fatal(err)}
  for _,query:=range []string{
   `INSERT INTO workspaces(id,name,status,revision,created_at,updated_at) VALUES('tenant','Tenant','active',1,1,1)`,
-  `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at) VALUES('human','human','Human','active',1,1,1)`,
+  `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at) VALUES('operator','human','Human','active',1,1,1)`,
   `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at) VALUES('agent','agent','Agent','active',1,1,1)`,
-  `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at) VALUES('tenant','human','active',1,1)`,
+  `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at) VALUES('tenant','operator','active',1,1)`,
   `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at) VALUES('tenant','agent','active',1,1)`,
  }{if _,err:=db.SQL().ExecContext(ctx,query);err!=nil{t.Fatal(err)}}
  svc:=projectworkspace.NewService(db.SQL(),db,clock.Real{})
  project,err:=svc.CreateProject(ctx,projectworkspace.CreateProjectCommand{
-  WorkspaceID:"tenant",Name:"Recurring network",CreatedBy:"human",
+  WorkspaceID:"tenant",Name:"Recurring network",CreatedBy:"operator",
   ProjectPolicyJSON:json.RawMessage(`{"onepane_operations":{"version":1,"mode":"continuous_operations"}}`)})
  if err!=nil{t.Fatal(err)}
  ws,err:=svc.CreateWorkspaceView(ctx,projectworkspace.CreateWorkspaceViewCommand{
-  ProjectID:project.ID,Name:"Local",ActorPrincipalID:"human"})
+  ProjectID:project.ID,Name:"Local",ActorPrincipalID:"operator"})
  if err!=nil{t.Fatal(err)}
  goal,err:=svc.ConfigureContinuousGoal(ctx,projectworkspace.ConfigureContinuousGoalCommand{
-  ProjectID:project.ID,ProjectWorkspaceID:ws.ID,ActorPrincipalID:"human",
+  ProjectID:project.ID,ProjectWorkspaceID:ws.ID,ActorPrincipalID:"operator",
   CadenceMinutes:30,Objective:"Review service availability",
   MonitoringPlanJSON:json.RawMessage(`{"version":1,"source_ids":["lan"]}`)})
  if err!=nil{t.Fatal(err)}
@@ -45,7 +45,7 @@ func TestTCPRecurringGrantAPIRequiresSeparateHumanConsent(t *testing.T){
   ProjectID:project.ID,GoalID:goal.ID,SourceID:"lan",
   TargetIPv4:"192.168.25.9",TargetPort:443,TimeoutMS:350,
   ExpectedGoalRevision:goal.Revision,ExpiresAt:expiry,
-  ActorPrincipalID:"human",
+  ActorPrincipalID:"operator",
  })
  if err!=nil{t.Fatal(err)}
  h:=NewServer(svc,nil,goalAPIAuth{}).Handler()
@@ -56,7 +56,7 @@ func TestTCPRecurringGrantAPIRequiresSeparateHumanConsent(t *testing.T){
   if body!=""{req.Header.Set("Content-Type","application/json")}
   w:=httptest.NewRecorder();h.ServeHTTP(w,req);return w
  }
- listing:=call("GET","human",route,"")
+ listing:=call("GET","operator",route,"")
  if listing.Code!=200||strings.Contains(listing.Body.String(),manual.ID){
   t.Fatalf("manual source permit secretly authorised recurring network: %d %s",listing.Code,listing.Body)
  }
@@ -68,7 +68,7 @@ func TestTCPRecurringGrantAPIRequiresSeparateHumanConsent(t *testing.T){
   expect:=403;if who==""{expect=401}
   if got.Code!=expect{t.Fatalf("unauthorised recurring consent %q: %d %s",who,got.Code,got.Body)}
  }
- approved:=call("POST","human",route,body)
+ approved:=call("POST","operator",route,body)
  if approved.Code!=201{t.Fatalf("separate recurring grant rejected: %d %s",approved.Code,approved.Body)}
  var grant projectworkspace.TCPRecurringGrant
  if err:=json.Unmarshal(approved.Body.Bytes(),&grant);err!=nil{t.Fatal(err)}
@@ -76,13 +76,13 @@ func TestTCPRecurringGrantAPIRequiresSeparateHumanConsent(t *testing.T){
   grant.CadenceMinutes!=30||grant.ManualPermitID!=manual.ID{
   t.Fatalf("recurring scope not tied to manual grant: %+v",grant)
  }
- if got:=call("POST","human",route,body);got.Code!=409{
+ if got:=call("POST","operator",route,body);got.Code!=409{
   t.Fatalf("stale recurring consent accepted: %d %s",got.Code,got.Body)
  }
  if got:=call("GET","outsider",route,"");got.Code!=403{
   t.Fatalf("foreign principal learned network targets: %d",got.Code)
  }
- if got:=call("GET","human",route,"");got.Code!=200||
+ if got:=call("GET","operator",route,"");got.Code!=200||
    !strings.Contains(got.Body.String(),grant.ID){
   t.Fatalf("recurring grant invisible to owner: %d %s",got.Code,got.Body)
  }
@@ -91,10 +91,10 @@ func TestTCPRecurringGrantAPIRequiresSeparateHumanConsent(t *testing.T){
  if got:=call("POST","agent",stop,revoke);got.Code!=403{
   t.Fatalf("Agent removed human recurring grant: %d %s",got.Code,got.Body)
  }
- if got:=call("POST","human",stop,revoke);got.Code!=200{
+ if got:=call("POST","operator",stop,revoke);got.Code!=200{
   t.Fatalf("human revoke rejected: %d %s",got.Code,got.Body)
  }
- if got:=call("POST","human",stop,revoke);got.Code!=409{
+ if got:=call("POST","operator",stop,revoke);got.Code!=409{
   t.Fatalf("replayed revocation accepted: %d %s",got.Code,got.Body)
  }
  var tcpCalls int

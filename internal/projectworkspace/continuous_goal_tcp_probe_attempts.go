@@ -26,6 +26,10 @@ type GoalTCPProbeAttempt struct {
  PermitID string `json:"permit_id"`
  // Exact recurring human consent, absent from manually requested tests.
  RecurringGrantID *string `json:"recurring_grant_id,omitempty"`
+ // Captured transactionally when this socket was admitted. Never
+ // reinterpret an older handshake against a later human baseline.
+ BaselineIDAtClaim string `json:"baseline_id_at_claim,omitempty"`
+ BaselineRevisionAtClaim int64 `json:"baseline_revision_at_claim"`
  ProjectWorkspaceID string `json:"project_workspace_id"`
  SourceID string `json:"source_id"`
  TargetIPv4 string `json:"target_ipv4"`
@@ -65,7 +69,7 @@ var manualTCPProbeSlots=make(chan struct{},2)
 
 const tcpAttemptColumns=`id,project_id,goal_id,permit_id,project_workspace_id,source_id,
 target_ipv4,target_port,timeout_ms,cadence_window,goal_revision,permit_revision,
-requested_by,status,claimed_at,completed_at,recurring_grant_id`
+requested_by,status,claimed_at,completed_at,recurring_grant_id,baseline_id_at_claim,baseline_revision_at_claim`
 
 func scanTCPAttempt(r scanner)(GoalTCPProbeAttempt,error){
  var a GoalTCPProbeAttempt
@@ -73,7 +77,7 @@ func scanTCPAttempt(r scanner)(GoalTCPProbeAttempt,error){
  err:=r.Scan(&a.ID,&a.ProjectID,&a.GoalID,&a.PermitID,&a.ProjectWorkspaceID,
   &a.SourceID,&a.TargetIPv4,&a.TargetPort,&a.TimeoutMS,
   &a.CadenceWindow,&a.GoalRevision,&a.PermitRevision,
-  &a.RequestedBy,&a.Status,&a.ClaimedAt,&a.CompletedAt,&grant)
+  &a.RequestedBy,&a.Status,&a.ClaimedAt,&a.CompletedAt,&grant,&a.BaselineIDAtClaim,&a.BaselineRevisionAtClaim)
  if grant.Valid{a.RecurringGrantID=&grant.String}
  return a,err
 }
@@ -159,12 +163,27 @@ func(s *Service)claimGoalTCPAttempt(ctx context.Context,c RunGoalTCPProbeCommand
    WHERE goal_id=? AND source_id=? AND cadence_window=?`,
    c.GoalID,permit.SourceID,window).Scan(&exists);err!=nil{return err}
   if exists!=0{return ErrInvalidTransition}
+  // Snapshot the human-approved baseline at admission, not on reporting.
+  // The next baseline revision cannot retroactively classify this test.
+  var baselineID string
+  var baselineRevision int64
+  err=tx.QueryRowContext(ctx,`SELECT h.baseline_id,h.revision
+    FROM project_goal_tcp_baseline_heads h
+    JOIN project_goal_tcp_baseline_revisions b ON b.id=h.baseline_id
+    WHERE h.goal_id=? AND h.source_id=? AND b.project_id=?
+      AND b.project_workspace_id=? AND b.permit_id=? AND b.plan_hash=?`,
+    c.GoalID,permit.SourceID,c.ProjectID,wsID,permit.ID,hash).
+    Scan(&baselineID,&baselineRevision)
+  if errors.Is(err,sql.ErrNoRows){
+   baselineID="";baselineRevision=0
+  }else if err!=nil{return err}
   attempt=GoalTCPProbeAttempt{
    ID:attemptID,ProjectID:c.ProjectID,GoalID:c.GoalID,
    PermitID:permit.ID,ProjectWorkspaceID:wsID,SourceID:permit.SourceID,
    TargetIPv4:permit.TargetIPv4,TargetPort:permit.TargetPort,
    TimeoutMS:permit.TimeoutMS,CadenceWindow:window,GoalRevision:revision,
    PermitRevision:permit.Revision,RequestedBy:c.ActorPrincipalID,
+   BaselineIDAtClaim:baselineID,BaselineRevisionAtClaim:baselineRevision,
    Status:"claimed",ClaimedAt:now,
   }
   var recurringID any
@@ -175,12 +194,14 @@ func(s *Service)claimGoalTCPAttempt(ctx context.Context,c RunGoalTCPProbeCommand
   _,err=tx.ExecContext(ctx,`INSERT INTO project_goal_tcp_probe_attempts(
     id,project_id,goal_id,permit_id,project_workspace_id,source_id,
     target_ipv4,target_port,timeout_ms,cadence_window,goal_revision,
-    permit_revision,requested_by,status,claimed_at,completed_at,recurring_grant_id)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'claimed',?,0,?)`,
+    permit_revision,requested_by,status,claimed_at,completed_at,recurring_grant_id,
+    baseline_id_at_claim,baseline_revision_at_claim)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'claimed',?,0,?,?,?)`,
     attempt.ID,attempt.ProjectID,attempt.GoalID,attempt.PermitID,
     attempt.ProjectWorkspaceID,attempt.SourceID,attempt.TargetIPv4,
     attempt.TargetPort,attempt.TimeoutMS,attempt.CadenceWindow,
-    attempt.GoalRevision,attempt.PermitRevision,attempt.RequestedBy,now,recurringID)
+    attempt.GoalRevision,attempt.PermitRevision,attempt.RequestedBy,now,recurringID,
+    baselineID,baselineRevision)
   if err!=nil{return err}
   body,_:=json.Marshal(map[string]any{
    "goal_id":c.GoalID,"permit_id":permit.ID,"attempt_id":attempt.ID,

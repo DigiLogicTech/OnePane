@@ -120,7 +120,7 @@ func(s *Service)MintGoalSourceCredential(ctx context.Context,
    CredentialID:idv,ProjectID:c.ProjectID,GoalID:c.GoalID,
    ProjectWorkspaceID:goalWS,WorkspaceID:project.WorkspaceID,
    SignerID:signer.ID,SourcePrincipalID:signer.SourcePrincipalID,
-   ApprovedBy:c.ActorPrincipalID,ApprovedAt:now,ExpiresAt:c.ExpiresAt,
+   ApprovedBy:c.ActorPrincipalID,ApprovedAt:now,ExpiresAt:c.ExpiresAt,Status:"active",
   }
   _,err=tx.ExecContext(ctx,`INSERT INTO project_goal_source_credential_grants(
    credential_id,project_id,goal_id,project_workspace_id,workspace_id,
@@ -234,6 +234,7 @@ func(s *Service)RevokeGoalSourceCredential(ctx context.Context,
   n,err=changed.RowsAffected();if err!=nil{return err}
   if n!=1{return ErrRevisionConflict}
   out.RevokedAt=now
+  out.Status="revoked"
   payload,_:=json.Marshal(map[string]any{
    "goal_id":c.GoalID,"signer_id":c.SignerID,
    "credential_id":c.CredentialID,"revoked":true,"monitoring_active":false,

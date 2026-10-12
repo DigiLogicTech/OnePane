@@ -23,6 +23,9 @@ type goalSignedSourceCommandService interface {
  RevokeGoalObservationSigner(context.Context,projectworkspace.RevokeGoalObservationSignerCommand)(projectworkspace.GoalObservationSigner,error)
  AcceptSignedGoalObservation(context.Context,projectworkspace.AcceptSignedGoalObservationCommand)(projectworkspace.SignedGoalObservationProof,error)
  RecordGoalSourceReading(context.Context,projectworkspace.RecordGoalSourceReadingCommand)(projectworkspace.SourceReadingReceipt,error)
+ MintGoalSourceCredential(context.Context,projectworkspace.MintGoalSourceCredentialCommand)(projectworkspace.MintedGoalSourceCredential,error)
+ ListGoalSourceCredentials(context.Context,string,string,string)([]projectworkspace.GoalSourceCredential,error)
+ RevokeGoalSourceCredential(context.Context,projectworkspace.RevokeGoalSourceCredentialCommand)(projectworkspace.GoalSourceCredential,error)
 }
 
 // Signed-source mutations are security sensitive. Unlike legacy general
@@ -158,6 +161,7 @@ func(s *Server)submitProjectGoalSignedObservation(w http.ResponseWriter,r *http.
    SignerID:input.SignerID,ObservationID:input.ObservationID,
    Sequence:input.Sequence,ExpectedGoalRevision:input.ExpectedGoalRevision,
    Signature:input.Signature,ActorPrincipalID:identity.PrincipalID,
+   CredentialID:identity.CredentialID,
   })
  respondDomain(w,proof,err,http.StatusCreated)
 }
@@ -189,7 +193,64 @@ func(s *Server)recordProjectGoalSourceReading(w http.ResponseWriter,r *http.Requ
   projectworkspace.RecordGoalSourceReadingCommand{
    ProjectID:p.ID,GoalID:r.PathValue("goalID"),SignerID:in.SignerID,
    ObservationType:in.ObservationType,Value:in.Value,
-   ActorPrincipalID:identity.PrincipalID,
+   ActorPrincipalID:identity.PrincipalID,CredentialID:identity.CredentialID,
   })
  respondDomain(w,result,err,http.StatusCreated)
+}
+
+// Token management requires a live human Project operator, independently of
+// the machine goal.source.submit permission. The minted token is returned
+// exactly once; lists, audit events and revoke responses expose metadata only.
+func(s *Server)goalSourceCredentialOperator(w http.ResponseWriter,r *http.Request)(
+ projectworkspace.Project,goalSignedSourceCommandService,Identity,bool){
+ i,ok:=s.authenticate(w,r)
+ if !ok{return projectworkspace.Project{},nil,Identity{},false}
+ if i.PrincipalType!="human"{
+  writeError(w,http.StatusForbidden,"human operator required")
+  return projectworkspace.Project{},nil,Identity{},false
+ }
+ if s.projects==nil{
+  writeError(w,http.StatusServiceUnavailable,"Project service unavailable")
+  return projectworkspace.Project{},nil,Identity{},false
+ }
+ p,err:=s.projects.Project(r.Context(),strings.TrimSpace(r.PathValue("projectID")))
+ if err!=nil{respondDomain(w,nil,err,0);return projectworkspace.Project{},nil,Identity{},false}
+ if !s.authorize(w,r,i,p.WorkspaceID,"project.write"){
+  return projectworkspace.Project{},nil,Identity{},false
+ }
+ svc,ok:=s.projects.(goalSignedSourceCommandService)
+ if !ok{
+  writeError(w,http.StatusServiceUnavailable,"source credential management unavailable")
+  return projectworkspace.Project{},nil,Identity{},false
+ }
+ return p,svc,i,true
+}
+func(s *Server)issueProjectGoalSourceCredential(w http.ResponseWriter,r *http.Request){
+ p,svc,i,ok:=s.goalSourceCredentialOperator(w,r)
+ if !ok{return}
+ var in struct{ExpiresAt int64 `json:"expires_at"`}
+ if !decodeSignedSourceJSON(w,r,&in){return}
+ result,err:=svc.MintGoalSourceCredential(r.Context(),projectworkspace.MintGoalSourceCredentialCommand{
+  ProjectID:p.ID,GoalID:r.PathValue("goalID"),SignerID:r.PathValue("signerID"),
+  ActorPrincipalID:i.PrincipalID,ExpiresAt:in.ExpiresAt,
+ })
+ respondDomain(w,result,err,http.StatusCreated)
+}
+func(s *Server)listProjectGoalSourceCredentials(w http.ResponseWriter,r *http.Request){
+ p,svc,_,ok:=s.goalSourceCredentialOperator(w,r)
+ if !ok{return}
+ out,err:=svc.ListGoalSourceCredentials(r.Context(),p.ID,
+  r.PathValue("goalID"),r.PathValue("signerID"))
+ respondDomain(w,out,err,http.StatusOK)
+}
+func(s *Server)revokeProjectGoalSourceCredential(w http.ResponseWriter,r *http.Request){
+ p,svc,i,ok:=s.goalSourceCredentialOperator(w,r)
+ if !ok{return}
+ var in struct{}
+ if !decodeSignedSourceJSON(w,r,&in){return}
+ out,err:=svc.RevokeGoalSourceCredential(r.Context(),projectworkspace.RevokeGoalSourceCredentialCommand{
+  ProjectID:p.ID,GoalID:r.PathValue("goalID"),SignerID:r.PathValue("signerID"),
+  CredentialID:r.PathValue("credentialID"),ActorPrincipalID:i.PrincipalID,
+ })
+ respondDomain(w,out,err,http.StatusOK)
 }

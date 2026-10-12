@@ -507,3 +507,28 @@ Completed in this integration branch, with source and regression tests:
   verified remediation. None of these may be inferred from a successful
   TCP connect. Pre-release second independent code/security audit,
   Windows/Ubuntu installed QA and packaging approval remain open.
+
+
+## RC11 local-resource guard on manual network probes — 2026-10-12
+
+- [x] A process-wide two-slot TCP-handshake admission limit now bounds
+  concurrently open connections from human-triggered reachability tests.
+  Waiting requests must respect cancellation and do not create a
+  persisted claimed attempt, consume a source cadence window or open
+  sockets until admitted. The subsequent network connect remains
+  limited to 100–1500 ms and one approved private literal IP/port.
+- [x] Tests verify cancellation under saturated slots; static UI/source
+  contracts prevent wiring this manual network action into the daemon's
+  existing unattended receipt-review scheduler.
+- [x] The integrated goal coverage view shows TCP test status beside,
+  but not instead of, attested immutable observations; final relevant
+  combined source/contract head passed full CI in
+  [#38194815212](https://github.com/DigiLogicTech/OnePane/actions/runs/38194815212).
+- [ ] Final resource-pressure validation is pending at
+  [#38194932570](https://github.com/DigiLogicTech/OnePane/actions/runs/38194932570)
+  on test head `a0a68a4d`, then the eventual final manifest head.
+- [ ] The distinction between manually initiated TCP tests and
+  continuous device protection remains explicit. P0 future:
+  separately consented recurring probes with durable cancellation
+  leases, source integrity and health evaluation, precisely bounded
+  remediation/rollback. No release merge/build is authorised.

@@ -7,6 +7,7 @@ import (
  "encoding/json"
  "strings"
  "testing"
+ "time"
 
  "github.com/DigiLogicTech/OnePane/internal/clock"
  sqliteStore "github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
@@ -191,6 +192,33 @@ func TestGoalSignalTriageRequiresLiveIndependentEvidenceAndNeverPromotesHealth(t
  if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships
   SET status='active' WHERE workspace_id='tenant' AND principal_id='owner'`);
   err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE harness_nodes
+  SET trust_state='paired' WHERE id='peer'`);err!=nil{t.Fatal(err)}
+ // An INTERRUPTED newest probe overrides an earlier disconnected TCP
+ // receipt. Its state is unknown; it must never create a second adverse
+ // class by itself or promote a peer-only report into multi-class proof.
+ time.Sleep(3*time.Millisecond)
+ after:=clock.Real{}.UnixMilli()
+ _,err=db.SQL().ExecContext(ctx,`INSERT INTO project_goal_tcp_probe_attempts(
+  id,project_id,goal_id,permit_id,project_workspace_id,source_id,
+  target_ipv4,target_port,timeout_ms,cadence_window,goal_revision,
+  permit_revision,requested_by,status,claimed_at,completed_at)
+  VALUES('attempt-interrupted',?,?,?,?,?,?,?,?,?,?,?,'owner','claimed',?,0)`,
+  p.ID,goal.ID,permit.ID,view.ID,"tcp-link",permit.TargetIPv4,
+  permit.TargetPort,permit.TimeoutMS,2,goal.Revision,permit.Revision,after)
+ if err!=nil{t.Fatal(err)}
+ interrupted,err:=svc.GoalSignalTriage(ctx,p.ID,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ if interrupted.RecentTCPNegativeSources!=0||
+  interrupted.RecentNodeNegativeSources!=1||
+  interrupted.State!="adverse_indicator_needs_review"{
+  t.Fatalf("older TCP outcome survived a newer interrupted claim: %+v",interrupted)
+ }
+ for _,entry:=range interrupted.Sources{
+  if entry.SourceID=="tcp-link"&&entry.TCPState!="unknown_after_interruption"{
+   t.Fatalf("newer in-flight probe was treated as completed: %+v",entry)
+  }
+ }
  persisted,err=svc.ContinuousGoal(ctx,goal.ID)
  if err!=nil{t.Fatal(err)}
  paused,err:=svc.TransitionContinuousGoal(ctx,TransitionContinuousGoalCommand{

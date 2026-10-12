@@ -1905,8 +1905,12 @@ async function qa4BindL5GoalConfigurator(project){
         if(reviewStatus())reviewStatus().textContent='Enter one private IPv4 address, a single valid TCP port, and a bounded permit duration.';
         return;
       }
-      if(approveTCP.dataset.confirmed!=='yes'){
-        approveTCP.dataset.confirmed='yes';
+      const requestedTarget=JSON.stringify([sourceID,ip,port,timeout,hours,
+        Number(approveTCP.dataset.goalRevision)]);
+      if(approveTCP.dataset.confirmedTarget!==requestedTarget){
+        // A changed source/target/port/expiry must receive a fresh second
+        // click; never carry a prior confirmation to a different endpoint.
+        approveTCP.dataset.confirmedTarget=requestedTarget;
         approveTCP.textContent='Confirm network target '+ip+':'+port;
         return;
       }
@@ -1924,7 +1928,7 @@ async function qa4BindL5GoalConfigurator(project){
       }catch(ex){
         if(reviewStatus())reviewStatus().textContent='Network source grant denied: '+ex.message;
         approveTCP.disabled=false;
-        approveTCP.dataset.confirmed='';
+        approveTCP.dataset.confirmedTarget='';
         approveTCP.textContent='Approve exact TCP target…';
       }
       return;

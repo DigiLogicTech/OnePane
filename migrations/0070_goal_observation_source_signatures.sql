@@ -23,6 +23,8 @@ CREATE TABLE project_goal_observation_signers (
  CHECK((status='approved' AND revoked_by IS NULL AND revoked_at=0)
   OR(status='revoked' AND revoked_by IS NOT NULL AND revoked_at>=approved_at))
 ) STRICT;
+CREATE UNIQUE INDEX idx_goal_observation_one_approved_key
+ ON project_goal_observation_signers(goal_id,source_id) WHERE status='approved';
 CREATE INDEX idx_goal_observation_signer_lookup
  ON project_goal_observation_signers(project_id,goal_id,source_id,status);
 CREATE TRIGGER goal_observation_signer_no_delete

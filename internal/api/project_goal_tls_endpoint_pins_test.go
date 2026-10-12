@@ -212,6 +212,23 @@ func TestHumanPinnedTLSCertificateRequiresExactExistingTargetAndOneBoundedCheck(
   proof.DeviceIdentityVerified||proof.RemediationAuthorized{
   t.Fatalf("source key possession became physical device verification: %+v",proof)
  }
+ bundlePath:=base+"/instrument-proofs/"+proof.ID+"/verification-bundle"
+ for _,who:=range []string{"","robot","outsider"}{
+  if got:=request("GET",who,bundlePath,"");got.Code<400{
+   t.Fatalf("%q accessed another actor's historical instrument proof: %d",who,got.Code)
+  }
+ }
+ exported:=request("GET","operator",bundlePath,"")
+ if exported.Code!=200{t.Fatalf("human cannot export proof for independent review: %d %s",
+  exported.Code,exported.Body)}
+ var bundle projectworkspace.GoalInstrumentVerificationBundle
+ if err=json.Unmarshal(exported.Body.Bytes(),&bundle);err!=nil{t.Fatal(err)}
+ if !bundle.DetachedSignatureVerified||bundle.DeviceIdentityVerified||
+  bundle.RemediationAuthorized||bundle.Proof.ID!=proof.ID||
+  !ed25519.Verify(ed25519.PublicKey(bundle.PublicKey),
+   bundle.SigningPayload,bundle.Signature){
+  t.Fatalf("operator proof export is not independently verifiable: %+v",bundle)
+ }
  if got:=request("POST","operator",keyPath+"/prove",string(proveBody));
   got.Code<400{t.Fatalf("same signed challenge replayed over HTTP: %d",got.Code)}
  if got:=request("GET","robot",base+"/instrument-proofs","");got.Code!=403{
@@ -233,6 +250,10 @@ func TestHumanPinnedTLSCertificateRequiresExactExistingTargetAndOneBoundedCheck(
   "\"effective_instrument_state\":\"revoked\""){
   t.Fatalf("revoked instrument identity remained active: %d %s",
    listedKeys.Code,listedKeys.Body)
+ }
+ if got:=request("GET","operator",bundlePath,"");got.Code!=200{
+  t.Fatalf("human cannot inspect immutable instrument proof after key revoke: %d %s",
+   got.Code,got.Body)
  }
  goal,err=svc.ContinuousGoal(ctx,goal.ID)
  if err!=nil{t.Fatal(err)}

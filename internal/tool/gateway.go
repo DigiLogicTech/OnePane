@@ -281,12 +281,14 @@ func canonicalJSON(raw json.RawMessage) (json.RawMessage, error) {
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
-	var v any
-	if err := dec.Decode(&v); err != nil {
+	// Enforce one unambiguous interpretation before hashing, authorising
+	// and dispatching Tool inputs or persisting adapter result payloads.
+	// Unicode-escaped duplicate object keys must not silently overwrite.
+	v, err := decodeUniqueJSONValue(dec, 0)
+	if err != nil {
 		return nil, err
 	}
-	var extra any
-	if err := dec.Decode(&extra); err != io.EOF {
+	if _, err := dec.Token(); err != io.EOF {
 		if err == nil {
 			return nil, fmt.Errorf("multiple JSON values")
 		}

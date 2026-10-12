@@ -310,6 +310,36 @@ func(s *Service)RevokeGoalInstrumentKey(ctx context.Context,
  return k,nil
 }
 
+// The immutable nonce ledger needs a Project-level rate budget in addition
+// to the 4/5-minute and 128-lifetime per-key quotas. Otherwise a human
+// operator rotating/enrolling keys could unintentionally saturate SQLite
+// on a small local host. This is a bounded count against one Project's
+// original tenant-scoped ledger, not a global process or background queue.
+const (
+ instrumentProjectChallengeFiveMinuteLimit = 16
+ instrumentProjectChallengeDailyLimit = 256
+)
+func checkInstrumentProjectChallengeBudgetTx(ctx context.Context,
+ tx storage.Tx,projectID string,now int64)error{
+ if projectID==""||now<1{return ErrInvalidCommand}
+ var count int
+ if err:=tx.QueryRowContext(ctx,`SELECT COUNT(*)
+  FROM project_goal_instrument_challenges
+  WHERE project_id=? AND issued_at>?`,
+  projectID,now-5*60*1000).Scan(&count);err!=nil{return err}
+ if count>=instrumentProjectChallengeFiveMinuteLimit{
+  return ErrInvalidTransition
+ }
+ if err:=tx.QueryRowContext(ctx,`SELECT COUNT(*)
+  FROM project_goal_instrument_challenges
+  WHERE project_id=? AND issued_at>?`,
+  projectID,now-24*60*60*1000).Scan(&count);err!=nil{return err}
+ if count>=instrumentProjectChallengeDailyLimit{
+  return ErrInvalidTransition
+ }
+ return nil
+}
+
 func(s *Service)IssueGoalInstrumentChallenge(ctx context.Context,
  c IssueGoalInstrumentChallengeCommand)(GoalInstrumentChallenge,error){
  if c.ProjectID==""||c.GoalID==""||c.KeyID==""||c.ActorPrincipalID==""||
@@ -346,6 +376,9 @@ func(s *Service)IssueGoalInstrumentChallenge(ctx context.Context,
    WHERE instrument_key_id=? AND issued_at>?`,
    key.ID,now-5*60000).Scan(&count);err!=nil{return err}
   if count>=4{return ErrInvalidTransition}
+  if err=checkInstrumentProjectChallengeBudgetTx(ctx,tx,c.ProjectID,now);err!=nil{
+   return err
+  }
   expires:=now+2*60000
   if key.ExpiresAt<expires{expires=key.ExpiresAt}
   if pin.ExpiresAt<expires{expires=pin.ExpiresAt}

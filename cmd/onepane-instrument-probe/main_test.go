@@ -140,7 +140,9 @@ func TestCLIRequiresExplicitApprovedPlanOrDeliberateManualDowngrade(t *testing.T
  keyPath:=filepath.Join(dir,"instrument.key")
  if err:=runKeygen([]string{"--private-key-out",keyPath});err!=nil{t.Fatal(err)}
  challengePath:=filepath.Join(dir,"challenge.json")
- if err:=os.WriteFile(challengePath,[]byte("{}"),0600);err!=nil{t.Fatal(err)}
+ canonicalChallenge,err:=json.Marshal(instrumentprobe.Challenge{})
+ if err!=nil{t.Fatal(err)}
+ if err=os.WriteFile(challengePath,canonicalChallenge,0600);err!=nil{t.Fatal(err)}
  // No plan, even with a plausible RFC1918 address, must NOT silently
  // fall back to a caller-chosen target.
  args:=[]string{"--challenge",challengePath,"--private-key",keyPath,

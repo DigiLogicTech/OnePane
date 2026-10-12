@@ -207,6 +207,19 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
   measure.TargetCorrelationEstablished||measure.RemediationAuthorized{
   t.Fatalf("source self-report became physical verified telemetry: %+v",measure)
  }
+ measuredTriage,err:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ if len(measuredTriage.Sources)!=1||
+  measuredTriage.Sources[0].SignedMeasurementClaimID!=measure.ID||
+  measuredTriage.Sources[0].SignedMeasurementClaimOutcome!="not_connected"||
+  measuredTriage.Sources[0].SignedMeasurementClaimState!="recent_instrument_self_report_unverified"||
+  measuredTriage.Sources[0].SignedMeasurementClaimProofClass!="instrument_self_report_signed_not_attested"||
+  measuredTriage.RecentNegativeSources!=0||
+  measuredTriage.CrossClassTargetCorrelation!="not_established"||
+  measuredTriage.DeviceIdentityVerified||measuredTriage.MonitoringActive||
+  measuredTriage.RemediationAuthorized{
+  t.Fatalf("nonvoting instrument self-report promoted to network incident: %+v",measuredTriage)
+ }
  if _,err=svc.AcceptGoalInstrumentMeasurement(ctx,mc);err==nil{
   t.Fatal("spent instrument measurement nonce replay succeeded")
  }
@@ -302,6 +315,21 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
  }
  if _,err=svc.AcceptGoalInstrumentChallenge(ctx,accept);err==nil{
   t.Fatal("revoked key admitted old signed response")
+ }
+ afterRevokeMeasure,err:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ if len(afterRevokeMeasure.Sources)!=1||
+  afterRevokeMeasure.Sources[0].SignedMeasurementClaimID!=""||
+  afterRevokeMeasure.Sources[0].SignedMeasurementClaimState!="no_current_signed_claim"{
+  t.Fatalf("revoked instrument still counted as current signed evidence: %+v",
+   afterRevokeMeasure)
+ }
+ historicMeasurement,err:=svc.GetGoalInstrumentMeasurementBundle(ctx,project.ID,goal.ID,measure.ID)
+ if err!=nil||!historicMeasurement.DetachedSignatureVerified||
+  !ed25519.Verify(ed25519.PublicKey(historicMeasurement.PublicKey),
+   historicMeasurement.SigningPayload,historicMeasurement.Signature){
+  t.Fatalf("revocation erased immutable externally verifiable measurement: %+v %v",
+   historicMeasurement,err)
  }
  historical,err:=svc.GetGoalInstrumentVerificationBundle(ctx,project.ID,goal.ID,proof.ID)
  if err!=nil||!historical.DetachedSignatureVerified||

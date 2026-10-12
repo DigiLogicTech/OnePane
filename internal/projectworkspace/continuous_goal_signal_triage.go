@@ -200,11 +200,11 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
   // earlier matched handshake cannot appear current during a newer probe.
   var tlsCheckID,tlsPinID,tlsStatus string
   var tlsClaimedAt,tlsCompletedAt int64
-  err=s.db.QueryRowContext(ctx,`SELECT check.id,check.pin_id,
-   check.status,check.claimed_at,check.completed_at
-   FROM project_goal_tls_endpoint_checks check
-   JOIN project_goal_tls_endpoint_pins pin ON pin.id=check.pin_id
-    AND pin.project_id=check.project_id AND pin.goal_id=check.goal_id
+  err=s.db.QueryRowContext(ctx,`SELECT attempt.id,attempt.pin_id,
+   attempt.status,attempt.claimed_at,attempt.completed_at
+   FROM project_goal_tls_endpoint_checks attempt
+   JOIN project_goal_tls_endpoint_pins pin ON pin.id=attempt.pin_id
+    AND pin.project_id=attempt.project_id AND pin.goal_id=attempt.goal_id
     AND pin.status='approved' AND pin.expires_at>?
    JOIN project_goal_tcp_declared_target_bindings declared
     ON declared.id=pin.declared_target_id AND declared.project_id=pin.project_id
@@ -239,10 +239,10 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
     AND permit_review.status='active' AND permit_review.principal_type='human'
    JOIN workspace_memberships permit_member ON permit_member.principal_id=permit_review.id
     AND permit_member.workspace_id=p.workspace_id AND permit_member.status='active'
-   WHERE check.project_id=? AND check.goal_id=?
-    AND declared.source_id=? AND check.claimed_at>=pin.approved_at
-    AND check.claimed_at BETWEEN ? AND ?
-   ORDER BY check.claimed_at DESC,check.id DESC LIMIT 1`,
+   WHERE attempt.project_id=? AND attempt.goal_id=?
+    AND declared.source_id=? AND attempt.claimed_at>=pin.approved_at
+    AND attempt.claimed_at BETWEEN ? AND ?
+   ORDER BY attempt.claimed_at DESC,attempt.id DESC LIMIT 1`,
    now,now,now,planHash,projectID,goalID,source.SourceID,
    now-freshnessMS,now).
    Scan(&tlsCheckID,&tlsPinID,&tlsStatus,&tlsClaimedAt,&tlsCompletedAt)

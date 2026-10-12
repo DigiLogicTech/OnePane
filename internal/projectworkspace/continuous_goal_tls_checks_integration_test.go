@@ -192,6 +192,21 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
   SET signing_payload=? WHERE id=?`,[]byte("{}"),ch.ID);err==nil{
   t.Fatal("original signed challenge bytes were mutable")
  }
+ var instrumentEvents int
+ if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
+  WHERE event_type LIKE 'project.goal_instrument_%'`).Scan(&instrumentEvents);
+  err!=nil||instrumentEvents!=7{
+  t.Fatalf("instrument key/proof audit lifecycle incomplete: %d %v",
+   instrumentEvents,err)
+ }
+ var leaked int
+ if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
+  WHERE event_type LIKE 'project.goal_instrument_%'
+   AND CAST(payload_json AS TEXT) LIKE '%192.168.42.71%'`).Scan(&leaked);
+  err!=nil||leaked!=0{
+  t.Fatalf("instrument challenge audit exposed private endpoint: %d %v",
+   leaked,err)
+ }
  goal,err=svc.ContinuousGoal(ctx,goal.ID)
  if err!=nil{t.Fatal(err)}
  revokedKey,err:=svc.RevokeGoalInstrumentKey(ctx,RevokeGoalInstrumentKeyCommand{

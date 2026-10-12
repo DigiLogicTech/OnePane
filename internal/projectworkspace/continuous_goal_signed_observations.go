@@ -14,6 +14,10 @@ import (
  "github.com/DigiLogicTech/OnePane/internal/storage"
 )
 
+// ErrSourceProofRateLimited marks a bounded signer ledger quota, distinct
+// from malformed input or expired human authorisation.
+var ErrSourceProofRateLimited = errors.New("source proof rate limit reached")
+
 // GoalObservationSigner is a HUMAN-approved public identity for one source
 // in one Level 5 Goal. Possession of this key authenticates its payload,
 // never device integrity, compliance, live health or Node trust.
@@ -332,7 +336,7 @@ func(s *Service)AcceptSignedGoalObservation(ctx context.Context,
   )`,signer.ID,now-60*1000).Scan(&recentProofs)
   if err!=nil{return err}
   if recentProofs>=30{
-   return fmt.Errorf("%w: source proof rate limit reached",ErrInvalidTransition)
+   return ErrSourceProofRateLimited
   }
   // The source principal and its operator's approval must still be
   // active; an expired, demoted or removed principal cannot submit.

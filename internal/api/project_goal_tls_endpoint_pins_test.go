@@ -113,9 +113,24 @@ func TestHumanPinnedTLSCertificateRequiresExactExistingTargetAndOneBoundedCheck(
   t.Fatalf("agent retrieved TLS pin history: %d",got.Code)
  }
  list:=request("GET","operator",pins,"")
- if list.Code!=200||!strings.Contains(list.Body.String(),pin.ID){
-  t.Fatalf("human cannot inspect bounded pin inventory: %d %s",list.Code,list.Body)
+ if list.Code!=200||!strings.Contains(list.Body.String(),pin.ID)||
+  !strings.Contains(list.Body.String(),"\"effective_pin_state\":\"active\""){
+  t.Fatalf("human cannot inspect active bounded pin inventory: %d %s",list.Code,list.Body)
  }
+ // A change to the Goal plan, even retaining the approved source name,
+ // invalidates the pin's effective network authority.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
+  SET monitoring_plan_json=?,revision=revision+1 WHERE id=?`,
+  `{"version":1,"source_ids":["router","other"]}`,goal.ID);err!=nil{t.Fatal(err)}
+ list=request("GET","operator",pins,"")
+ if list.Code!=200||!strings.Contains(list.Body.String(),
+  "\"effective_pin_state\":\"target_inactive\""){
+  t.Fatalf("modified Goal plan left previous TLS pin active: %d %s",
+   list.Code,list.Body)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
+  SET monitoring_plan_json=?,revision=revision+1 WHERE id=?`,
+  `{"version":1,"source_ids":["router"]}`,goal.ID);err!=nil{t.Fatal(err)}
  goal,err=svc.ContinuousGoal(ctx,goal.ID)
  if err!=nil{t.Fatal(err)}
  verify:=pins+"/"+pin.ID+"/verify"
@@ -155,6 +170,11 @@ func TestHumanPinnedTLSCertificateRequiresExactExistingTargetAndOneBoundedCheck(
   "expected_pin_revision":1}`,goal.Revision)
  if got:=request("POST","operator",pins+"/"+pin.ID+"/revoke",revokeBody);
   got.Code!=200{t.Fatalf("human could not revoke TLS pin: %d %s",got.Code,got.Body)}
+ list=request("GET","operator",pins,"")
+ if list.Code!=200||!strings.Contains(list.Body.String(),
+  "\"effective_pin_state\":\"revoked\""){
+  t.Fatalf("revoked TLS cert remained effective in inventory: %d %s",list.Code,list.Body)
+ }
  if _,err=db.SQL().ExecContext(ctx,`DELETE FROM project_goal_tls_endpoint_pins
   WHERE id=?`,pin.ID);err==nil{t.Fatal("TLS pin audit could be deleted")}
  if _,err=db.SQL().ExecContext(ctx,`UPDATE project_goal_tls_endpoint_pins

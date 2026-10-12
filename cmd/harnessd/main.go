@@ -290,6 +290,30 @@ func main() {
 		}
 	}()
 
+	// Level 5 receipt-only review is deliberately cheaper than inference:
+	// one bounded SQLite cadence pass each minute, with no external probes,
+	// model residency, device changes or automatic remediation. A human must
+	// approve exact source permits before this loop has any eligible work.
+	go func(){
+		run:=func(){
+			results,err:=runtime.ProjectWorkspaces.TickDueGoalEvidenceReviews(ctx,8)
+			if err!=nil&&ctx.Err()==nil{
+				log.Printf("goal receipt-review tick: %v",err)
+			}else if len(results)>0{
+				log.Printf("goal receipt-review tick: recorded %d metadata assessments (not monitored health)",len(results))
+			}
+		}
+		run()
+		ticker:=time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for{
+			select{
+			case <-ctx.Done():return
+			case <-ticker.C:run()
+			}
+		}
+	}()
+
 	// Budget reservations are durable but time-bounded. Expiring abandoned
 	// reservations returns capacity without relying on a caller to clean up.
 	go func() {

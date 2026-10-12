@@ -23,9 +23,9 @@ func TestTCPRecurringGrantAPIRequiresSeparateHumanConsent(t *testing.T){
  for _,query:=range []string{
   `INSERT INTO workspaces(id,name,status,revision,created_at,updated_at) VALUES('tenant','Tenant','active',1,1,1)`,
   `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at) VALUES('operator','human','Human','active',1,1,1)`,
-  `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at) VALUES('agent','agent','Agent','active',1,1,1)`,
+  `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at) VALUES('robot','agent','Agent','active',1,1,1)`,
   `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at) VALUES('tenant','operator','active',1,1)`,
-  `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at) VALUES('tenant','agent','active',1,1)`,
+  `INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at) VALUES('tenant','robot','active',1,1)`,
  }{if _,err:=db.SQL().ExecContext(ctx,query);err!=nil{t.Fatal(err)}}
  svc:=projectworkspace.NewService(db.SQL(),db,clock.Real{})
  project,err:=svc.CreateProject(ctx,projectworkspace.CreateProjectCommand{
@@ -54,16 +54,21 @@ func TestTCPRecurringGrantAPIRequiresSeparateHumanConsent(t *testing.T){
   req:=httptest.NewRequest(method,url,strings.NewReader(body))
   if who!=""{req.Header.Set("Authorization","Bearer "+who)}
   if body!=""{req.Header.Set("Content-Type","application/json")}
+  if who=="operator"{
+   if id,e:=goalAPIAuth{}.Authenticate(req);e!=nil||id.PrincipalID!="operator"{
+    t.Fatalf("test auth fixture rejected operator header: %q %v",req.Header.Get("Authorization"),e)
+   }
+  }
   w:=httptest.NewRecorder();h.ServeHTTP(w,req);return w
  }
  listing:=call("GET","operator",route,"")
  if listing.Code!=200||strings.Contains(listing.Body.String(),manual.ID){
-  t.Fatalf("manual source permit secretly authorised recurring network: %d %s",listing.Code,listing.Body)
+  t.Fatalf("manual source permit secretly authorised recurring network: %d %s; path=%q",listing.Code,listing.Body,route)
  }
  body:=fmt.Sprintf(`{"manual_permit_id":"%s",
   "expected_goal_revision":2,"expected_manual_permit_revision":1,
   "expires_at":%d}`,manual.ID,expiry)
- for _,who:=range []string{"","outsider","agent"}{
+ for _,who:=range []string{"","outsider","robot"}{
   got:=call("POST",who,route,body)
   expect:=403;if who==""{expect=401}
   if got.Code!=expect{t.Fatalf("unauthorised recurring consent %q: %d %s",who,got.Code,got.Body)}
@@ -88,7 +93,7 @@ func TestTCPRecurringGrantAPIRequiresSeparateHumanConsent(t *testing.T){
  }
  stop:=route+"/"+grant.ID+"/revoke"
  revoke:=`{"expected_goal_revision":3,"expected_grant_revision":1}`
- if got:=call("POST","agent",stop,revoke);got.Code!=403{
+ if got:=call("POST","robot",stop,revoke);got.Code!=403{
   t.Fatalf("Agent removed human recurring grant: %d %s",got.Code,got.Body)
  }
  if got:=call("POST","operator",stop,revoke);got.Code!=200{

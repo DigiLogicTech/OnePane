@@ -1299,6 +1299,9 @@ func respondDomain(w http.ResponseWriter, v any, err error, success int) {
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		writeError(w, http.StatusNotFound, "not found")
+	case errors.Is(err, projectworkspace.ErrSourceRequestRateLimited):
+		w.Header().Set("Retry-After", "60")
+		writeError(w, http.StatusTooManyRequests, "source request attempt limit reached")
 	case errors.Is(err, projectworkspace.ErrSourceReadingRateLimited):
 		w.Header().Set("Retry-After", "60")
 		writeError(w, http.StatusTooManyRequests, "source reading rate limit reached")

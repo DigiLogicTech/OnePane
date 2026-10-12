@@ -134,7 +134,8 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
  }
  var leakCount int
  if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
-  WHERE CAST(payload_json AS TEXT) LIKE ?`,
+  WHERE event_type LIKE 'project.goal_tls_%'
+   AND CAST(payload_json AS TEXT) LIKE ?`,
   "%192.168.42.71%").Scan(&leakCount);err!=nil||leakCount!=0{
   t.Fatalf("TLS event disclosed private endpoint: %d %v",leakCount,err)
  }

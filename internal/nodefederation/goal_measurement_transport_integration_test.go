@@ -183,7 +183,7 @@ func TestGoalNodeMeasurementsRequireHumanScopeRealPeerTLSAndMonotonicReceipt(t *
  }
  var eventsLeak int
  err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
-  WHERE type='project.goal_node_measurement_received'
+  WHERE event_type='project.goal_node_measurement_received'
     AND CAST(payload_json AS TEXT) LIKE '%device_secret%'`).Scan(&eventsLeak)
  if err!=nil||eventsLeak!=0{t.Fatalf("Node measurement leaked raw secrets: %v %d",err,eventsLeak)}
 }

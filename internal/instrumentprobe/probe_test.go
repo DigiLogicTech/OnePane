@@ -4,6 +4,9 @@ import (
  "context"
  "crypto/ed25519"
  "crypto/rand"
+ "crypto/sha256"
+ "fmt"
+ "strings"
  "errors"
  "net"
  "testing"
@@ -168,5 +171,54 @@ func TestProbeNeverRetriesFailedConnection(t *testing.T){
  if err!=nil{t.Fatal(err)}
  if d.calls!=1||r.Outcome!="not_connected"{
   t.Fatalf("failed TCP handshake caused retry or success: %+v %+v",d,r)
+ }
+}
+
+func TestApprovedProbePlanBindsCurrentOneShotEndpointAndRejectsTampering(t *testing.T){
+ now:=time.Now()
+ ch:=fixtureChallenge(t,now)
+ digest:=sha256.Sum256(ch.SigningPayload)
+ plan:=ProbePlan{
+  ProjectID:ch.ProjectID,GoalID:ch.GoalID,
+  InstrumentKeyID:ch.KeyID,ChallengeID:ch.ID,
+  DeclaredTargetID:"target1",TLSPinID:"pin1",SourceID:"router",
+  TargetIPv4:"192.168.48.25",TargetPort:8443,TimeoutMS:500,
+  OriginalChallengeSHA256:fmt.Sprintf("sha256:%x",digest[:]),
+  ExpiresAt:ch.ExpiresAt,
+  AttestationClass:"human_authorised_endpoint_snapshot_not_device_attestation",
+ }
+ _,key,err:=ed25519.GenerateKey(rand.Reader)
+ if err!=nil{t.Fatal(err)}
+ dial:=&recordingDialer{}
+ r,err:=ProbeApprovedPlan(context.Background(),ch,plan,key,dial,func()time.Time{return now})
+ if err!=nil{t.Fatalf("correct approved probe plan was rejected: %v",err)}
+ if r.Outcome!="connected"||dial.calls!=1||dial.address!="192.168.48.25:8443"{
+  t.Fatalf("plan did not dictate exactly one approved socket: %+v %+v",dial,r)
+ }
+ cases:=map[string]func(*ProbePlan){
+  "different_project":func(p *ProbePlan){p.ProjectID="another"},
+  "different_key":func(p *ProbePlan){p.InstrumentKeyID="another"},
+  "other_nonce":func(p *ProbePlan){p.ChallengeID="other-challenge"},
+  "different_declared_target":func(p *ProbePlan){p.DeclaredTargetID="another"},
+  "different_tls_pin":func(p *ProbePlan){p.TLSPinID="other-pin"},
+  "different_challenge_digest":func(p *ProbePlan){p.OriginalChallengeSHA256="sha256:"+strings.Repeat("0",64)},
+  "extra_expiry":func(p *ProbePlan){p.ExpiresAt+=120000},
+  "false_vantage_attestation":func(p *ProbePlan){p.ObserverVantageVerified=true},
+  "false_device_identity":func(p *ProbePlan){p.TargetDeviceIdentityVerified=true},
+  "ambiguous_provenance":func(p *ProbePlan){p.AttestationClass="hardware_attested"},
+  "missing_source":func(p *ProbePlan){p.SourceID=""},
+  "public_ip":func(p *ProbePlan){p.TargetIPv4="8.8.8.8"},
+  "public_metadata":func(p *ProbePlan){p.TargetIPv4="169.254.169.254"},
+  "unbounded_timeout":func(p *ProbePlan){p.TimeoutMS=50000},
+ }
+ for name,mutate:=range cases{
+  t.Run(name,func(t *testing.T){
+   candidate:=plan;mutate(&candidate)
+   blocked:=&recordingDialer{}
+   if _,err=ProbeApprovedPlan(context.Background(),ch,candidate,
+    key,blocked,func()time.Time{return now});err==nil||blocked.calls!=0{
+    t.Fatalf("untrusted plan mutation opened socket: %v %+v",err,blocked)
+   }
+  })
  }
 }

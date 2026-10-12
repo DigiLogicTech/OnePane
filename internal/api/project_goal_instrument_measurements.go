@@ -8,6 +8,8 @@ import(
 )
 
 type goalInstrumentMeasurementService interface{
+ PrepareGoalInstrumentProbePlan(context.Context,string,string,string,string,string,int64)(
+  projectworkspace.GoalInstrumentProbePlan,error)
  PrepareGoalInstrumentMeasurement(context.Context,projectworkspace.SignedMeasurementCommand)(
   projectworkspace.InstrumentMeasurementSigningPayload,error)
  AcceptGoalInstrumentMeasurement(context.Context,projectworkspace.SignedMeasurementCommand)(
@@ -78,4 +80,18 @@ func(s *Server)getProjectGoalInstrumentMeasurementBundle(w http.ResponseWriter,r
  out,err:=svc.GetGoalInstrumentMeasurementBundle(r.Context(),
   p.ID,r.PathValue("goalID"),r.PathValue("claimID"))
  respondDomain(w,out,err,http.StatusOK)
+}
+
+func(s *Server)prepareProjectGoalInstrumentProbePlan(w http.ResponseWriter,r *http.Request){
+ p,svc,i,ok:=s.goalInstrumentMeasurementOperator(w,r,"project.read")
+ if !ok{return}
+ var in struct {
+  ChallengeID string `json:"challenge_id"`
+  ExpectedGoalRevision int64 `json:"expected_goal_revision"`
+ }
+ if !decodeSignedSourceJSON(w,r,&in){return}
+ result,err:=svc.PrepareGoalInstrumentProbePlan(r.Context(),
+  p.ID,r.PathValue("goalID"),r.PathValue("keyID"),in.ChallengeID,
+  i.PrincipalID,in.ExpectedGoalRevision)
+ respondDomain(w,result,err,http.StatusOK)
 }

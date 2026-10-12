@@ -135,6 +135,7 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
  if err!=nil{t.Fatalf("accepted proof lost independent verification material: %v",err)}
  if !bundle.DetachedSignatureVerified||bundle.DeviceIdentityVerified||
   bundle.RemediationAuthorized||
+  string(bundle.SigningPayload)!=string(ch.SigningPayload)||
   !ed25519.Verify(ed25519.PublicKey(bundle.PublicKey),
    bundle.SigningPayload,bundle.Signature){
   t.Fatalf("human proof bundle cannot be verified offline: %+v",bundle)
@@ -186,6 +187,10 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
  if _,err=db.SQL().ExecContext(ctx,
   `DELETE FROM project_goal_instrument_proofs WHERE id=?`,proof.ID);err==nil{
   t.Fatal("signed instrument possession proof was deletable")
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_goal_instrument_challenges
+  SET signing_payload=? WHERE id=?`,[]byte("{}"),ch.ID);err==nil{
+  t.Fatal("original signed challenge bytes were mutable")
  }
  goal,err=svc.ContinuousGoal(ctx,goal.ID)
  if err!=nil{t.Fatal(err)}

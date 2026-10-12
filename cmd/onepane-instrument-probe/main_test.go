@@ -8,6 +8,7 @@ import(
  "os"
  "path/filepath"
  "runtime"
+ "strings"
  "testing"
 
  "github.com/DigiLogicTech/OnePane/internal/instrumentprobe"
@@ -96,6 +97,28 @@ func TestProbeJSONIsCompatibleWithActualGoalInstrumentAPIResponses(t *testing.T)
  if parsed.Outcome!="not_connected"||parsed.ObserverVantageVerified{
   t.Fatalf("server measurement status changed during CLI JSON import: %+v",parsed)
  }
+ probePlan:=projectworkspace.GoalInstrumentProbePlan{
+  ProjectID:"project1",GoalID:"goal1",
+  InstrumentKeyID:"key1",ChallengeID:"challenge1",
+  DeclaredTargetID:"target1",TLSPinID:"pin1",SourceID:"router",
+  TargetIPv4:"192.168.42.77",TargetPort:443,TimeoutMS:500,
+  OriginalChallengeSHA256:"sha256:"+strings.Repeat("a",64),
+  ExpiresAt:challenge.ExpiresAt,
+  AttestationClass:"human_authorised_endpoint_snapshot_not_device_attestation",
+ }
+ b,err=json.Marshal(probePlan)
+ if err!=nil{t.Fatal(err)}
+ planPath:=filepath.Join(dir,"plan.json")
+ if err=os.WriteFile(planPath,b,0600);err!=nil{t.Fatal(err)}
+ var plan instrumentprobe.ProbePlan
+ if err=readJSON(planPath,&plan);err!=nil{
+  t.Fatalf("CLI cannot parse exact human-only scope plan: %v",err)
+ }
+ if plan.TargetIPv4!=probePlan.TargetIPv4||
+  plan.OriginalChallengeSHA256!=probePlan.OriginalChallengeSHA256||
+  plan.TLSPinID!=probePlan.TLSPinID{
+  t.Fatalf("plan lost server approved exact endpoint: %+v",plan)
+ }
  // The CLI's accepted detached-signature body must use field names
  // consumed by the existing strict OnePane admission endpoint.
  accept:=instrumentprobe.Acceptance{
@@ -109,5 +132,33 @@ func TestProbeJSONIsCompatibleWithActualGoalInstrumentAPIResponses(t *testing.T)
  for _,k:=range []string{"challenge_id","outcome","observed_at",
   "signature","expected_goal_revision"}{
   if _,ok:=got[k];!ok{t.Fatalf("missing strict API admission field %s",k)}
+ }
+}
+
+func TestCLIRequiresExplicitApprovedPlanOrDeliberateManualDowngrade(t *testing.T){
+ dir:=t.TempDir()
+ keyPath:=filepath.Join(dir,"instrument.key")
+ if err:=runKeygen([]string{"--private-key-out",keyPath});err!=nil{t.Fatal(err)}
+ challengePath:=filepath.Join(dir,"challenge.json")
+ if err:=os.WriteFile(challengePath,[]byte("{}"),0600);err!=nil{t.Fatal(err)}
+ // No plan, even with a plausible RFC1918 address, must NOT silently
+ // fall back to a caller-chosen target.
+ args:=[]string{"--challenge",challengePath,"--private-key",keyPath,
+  "--ipv4","192.168.20.4","--port","443","--timeout-ms","700",
+  "--confirm-target-id","target-1","--out",filepath.Join(dir,"receipt.json")}
+ if err:=runProbe(args);err==nil||
+  !strings.Contains(err.Error(),"approved --plan required"){
+  t.Fatalf("manual target silently used without explicit downgrade: %v",err)
+ }
+ // Passing a plan and an explicit manual address cannot select an
+ // arbitrary endpoint regardless of how the CLI flags were ordered.
+ planPath:=filepath.Join(dir,"plan.json")
+ if err:=os.WriteFile(planPath,[]byte("{}"),0600);err!=nil{t.Fatal(err)}
+ if err:=runProbe(append(args,"--plan",planPath));err==nil||
+  !strings.Contains(err.Error(),"cannot be combined"){
+  t.Fatalf("manual address flags combined with plan: %v",err)
+ }
+ if err:=runProbe(append(args,"--allow-manual-target"));err==nil{
+  t.Fatal("malformed challenge passed even with explicit manual downgrade")
  }
 }

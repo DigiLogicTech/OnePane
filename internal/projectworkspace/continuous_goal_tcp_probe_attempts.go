@@ -165,6 +165,13 @@ func(s *Service)claimGoalTCPAttempt(ctx context.Context,c RunGoalTCPProbeCommand
 // between claim and network dispatch. A revoke after a socket starts cannot
 // retroactively undo its handshake, but each attempt lasts at most 1500ms.
 func(s *Service)tcpAttemptStillAuthorised(ctx context.Context,a GoalTCPProbeAttempt)(bool,error){
+ // Project mode is canonicalised from policy_json by Project(); it is
+ // NOT a projects.operating_mode SQLite column.
+ project,err:=s.repo.Project(ctx,a.ProjectID)
+ if err!=nil{return false,err}
+ if project.Status!="active"||project.OperatingMode!=OperatingContinuousOperations{
+  return false,nil
+ }
  var status,permitStatus,hash,goalPlan,source,ip,effect,kind string
  var permitRevision,goalRevision,expiresAt int64
  var port,timeout int
@@ -175,7 +182,6 @@ func(s *Service)tcpAttemptStillAuthorised(ctx context.Context,a GoalTCPProbeAtte
    JOIN project_continuous_goals g ON g.id=p.goal_id
     AND g.project_id=p.project_id AND g.project_workspace_id=p.project_workspace_id
    JOIN projects pr ON pr.id=p.project_id AND pr.status='active'
-    AND pr.operating_mode='continuous_operations'
    JOIN workspaces tenant ON tenant.id=pr.workspace_id AND tenant.status='active'
    JOIN project_workspaces w ON w.id=g.project_workspace_id
     AND w.project_id=pr.id AND w.status='active'

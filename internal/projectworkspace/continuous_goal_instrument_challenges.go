@@ -526,3 +526,81 @@ func(s *Service)ListGoalInstrumentProofs(ctx context.Context,
  }
  return out,rows.Err()
 }
+
+ 
+// GoalInstrumentVerificationBundle contains the original public detached
+// signature and the EXACT bytes the instrument signed. A human can verify
+// it with any independent Ed25519 implementation, even after revocation.
+// It is NOT an instrument device-attestation, signed observation of a
+// physical asset, endpoint security verdict or automatic monitoring result.
+type GoalInstrumentVerificationBundle struct{
+ Proof GoalInstrumentProof `json:"proof"`
+ PublicKey []byte `json:"public_key"`
+ SigningPayload []byte `json:"signing_payload"`
+ Signature []byte `json:"signature"`
+ DetachedSignatureVerified bool `json:"detached_signature_verified"`
+ DeviceIdentityVerified bool `json:"device_identity_verified"`
+ RemediationAuthorized bool `json:"remediation_authorized"`
+}
+
+func(s *Service)GetGoalInstrumentVerificationBundle(ctx context.Context,
+ projectID,goalID,proofID string)(GoalInstrumentVerificationBundle,error){
+ if projectID==""||goalID==""||proofID==""{
+  return GoalInstrumentVerificationBundle{},ErrInvalidCommand
+ }
+ var out GoalInstrumentVerificationBundle
+ var certHash,planHash string
+ var nonce []byte
+ var issuedAt,expiresAt int64
+ err:=s.db.QueryRowContext(ctx,`SELECT
+  p.id,p.instrument_key_id,p.challenge_id,p.project_id,p.goal_id,
+  p.declared_target_id,p.tls_pin_id,p.signature_sha256,
+  p.accepted_at,p.proof_class,p.signature,
+  k.public_key,k.plan_hash,pin.certificate_sha256,
+  challenge.nonce,challenge.issued_at,challenge.expires_at
+  FROM project_goal_instrument_proofs p
+  JOIN project_goal_instrument_keys k ON k.id=p.instrument_key_id
+   AND k.project_id=p.project_id AND k.goal_id=p.goal_id
+   AND k.declared_target_id=p.declared_target_id AND k.tls_pin_id=p.tls_pin_id
+  JOIN project_goal_tls_endpoint_pins pin ON pin.id=k.tls_pin_id
+   AND pin.project_id=p.project_id AND pin.goal_id=p.goal_id
+  JOIN project_goal_instrument_challenges challenge
+   ON challenge.id=p.challenge_id
+   AND challenge.instrument_key_id=p.instrument_key_id
+   AND challenge.project_id=p.project_id AND challenge.goal_id=p.goal_id
+   AND challenge.status='accepted'
+  JOIN project_continuous_goals goal ON goal.id=p.goal_id
+   AND goal.project_id=p.project_id
+  JOIN projects project ON project.id=goal.project_id AND project.status='active'
+  JOIN workspaces tenant ON tenant.id=project.workspace_id AND tenant.status='active'
+  JOIN project_workspaces workspace ON workspace.id=goal.project_workspace_id
+   AND workspace.project_id=project.id AND workspace.status='active'
+  WHERE p.id=? AND p.project_id=? AND p.goal_id=?`,
+  proofID,projectID,goalID).
+  Scan(&out.Proof.ID,&out.Proof.KeyID,&out.Proof.ChallengeID,
+   &out.Proof.ProjectID,&out.Proof.GoalID,&out.Proof.DeclaredTargetID,
+   &out.Proof.TLSPinID,&out.Proof.SignatureSHA256,&out.Proof.AcceptedAt,
+   &out.Proof.ProofClass,&out.Signature,&out.PublicKey,&planHash,
+   &certHash,&nonce,&issuedAt,&expiresAt)
+ if errors.Is(err,sql.ErrNoRows){return GoalInstrumentVerificationBundle{},ErrInvalidTransition}
+ if err!=nil{return GoalInstrumentVerificationBundle{},err}
+ key:=GoalInstrumentKey{ID:out.Proof.KeyID,ProjectID:projectID,GoalID:goalID,
+  DeclaredTargetID:out.Proof.DeclaredTargetID,TLSPinID:out.Proof.TLSPinID,
+  PlanHash:planHash}
+ pin:=GoalTLSPin{CertificateSHA256:certHash}
+ challenge:=GoalInstrumentChallenge{
+  ID:out.Proof.ChallengeID,Nonce:nonce,IssuedAt:issuedAt,ExpiresAt:expiresAt,
+ }
+ out.SigningPayload,err=instrumentSigningBytes(key,pin,challenge)
+ if err!=nil{return GoalInstrumentVerificationBundle{},err}
+ actual:=sha256.Sum256(out.Signature)
+ if len(out.Signature)!=ed25519.SignatureSize||
+  len(out.PublicKey)!=ed25519.PublicKeySize||
+  "sha256:"+hex.EncodeToString(actual[:])!=out.Proof.SignatureSHA256||
+  !ed25519.Verify(ed25519.PublicKey(out.PublicKey),out.SigningPayload,out.Signature){
+  // Corrupted or tampered audit rows never produce a verified output.
+  return GoalInstrumentVerificationBundle{},ErrInvalidTransition
+ }
+ out.DetachedSignatureVerified=true
+ return out,nil
+}

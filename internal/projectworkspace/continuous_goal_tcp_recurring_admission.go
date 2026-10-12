@@ -62,7 +62,8 @@ func(s *Service)authorizeRecurringTCPClaimTx(ctx context.Context,tx storage.Tx,
 // admission boundary before DialContext. This is not an active health proof.
 func(s *Service)tcpRecurringClaimStillAuthorised(ctx context.Context,
  a GoalTCPProbeAttempt,grantID string)(bool,error){
- if a.RequestedBy!=GoalTCPRecurringWorkerPrincipal{return false,nil}
+ if a.RequestedBy!=GoalTCPRecurringWorkerPrincipal||a.RecurringGrantID==nil||
+  *a.RecurringGrantID!=grantID{return false,nil}
  valid,err:=s.TCPRecurringGrantAllowed(ctx,grantID)
  if err!=nil||!valid{return false,err}
  grant,err:=scanRecurringGrant(s.db.QueryRowContext(ctx,`SELECT `+recurringGrantColumns+

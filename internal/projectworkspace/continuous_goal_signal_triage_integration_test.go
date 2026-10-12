@@ -98,12 +98,18 @@ func TestGoalSignalTriageRequiresLiveIndependentEvidenceAndNeverPromotesHealth(t
    ExpectedGoalRevision:goal.Revision,ExpiresAt:now+30*60*1000,
   })
  if err!=nil{t.Fatal(err)}
+ // A trusted receiver never treats pre-approval timestamps as live
+ // evidence. The synthetic receipt must follow human grant approval.
+ observedAfterApproval:=clock.Real{}.UnixMilli()
+ if observedAfterApproval<grant.ApprovedAt{
+  observedAfterApproval=grant.ApprovedAt
+ }
  _,err=db.SQL().ExecContext(ctx,`INSERT INTO project_goal_node_measurement_receipts(
   id,grant_id,project_id,goal_id,project_workspace_id,peer_node_id,
   source_id,sequence,signal_type,outcome,observed_at,received_at,transport_kind)
   VALUES('node-adverse',?,?,?,?,'peer','peer-link',1,
    'peer_connectivity','unreachable',?,?,'pinned_peer_mtls')`,
-  grant.ID,p.ID,goal.ID,view.ID,now,now)
+  grant.ID,p.ID,goal.ID,view.ID,observedAfterApproval,observedAfterApproval)
  if err!=nil{t.Fatal(err)}
  multiple,err:=svc.GoalSignalTriage(ctx,p.ID,goal.ID)
  if err!=nil{t.Fatal(err)}

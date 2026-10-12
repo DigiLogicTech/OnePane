@@ -433,6 +433,24 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
   t.Fatalf("matched certificate became trusted device or did not dial: %+v calls=%d",
    check,dialer.called)
  }
+ // A fixed time bucket is not an independent consent for a second
+ // socket. The reader must enforce the full rolling five minutes across
+ // the NEXT bucket boundary, then release it after the interval expires.
+ boundary:=((check.ClaimedAt/(5*60000))+1)*(5*60000)
+ expectedAtBoundary:=boundary-check.ClaimedAt<5*60000
+ err=svc.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+  recent,readErr:=tlsPinHasRecentCheckTx(ctx,tx,pin.ID,boundary)
+  if readErr!=nil{return readErr}
+  if recent!=expectedAtBoundary{
+   t.Fatalf("TLS permit claim crossed bucket boundary incorrectly: claim=%d next=%d recent=%v",
+    check.ClaimedAt,boundary,recent)
+  }
+  expired,readErr:=tlsPinHasRecentCheckTx(ctx,tx,pin.ID,check.ClaimedAt+5*60000+1)
+  if readErr!=nil{return readErr}
+  if expired{t.Fatal("TLS pin remained throttled after a full five-minute interval")}
+  return nil
+ })
+ if err!=nil{t.Fatal(err)}
  history,err:=svc.ListGoalPinnedTLSChecks(ctx,project.ID,goal.ID)
  if err!=nil||len(history)!=1||history[0].ID!=check.ID||
   history[0].Status!="matched"{t.Fatalf("pin proof not durably listed: %+v %v",history,err)}

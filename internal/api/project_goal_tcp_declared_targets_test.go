@@ -123,9 +123,24 @@ func TestDeclaredTCPTargetIsHumanOnlyAndNeverRetroactiveDeviceAttestation(t *tes
   t.Fatalf("stale Goal version approved second target: %d",got.Code)
  }
  listed:=call("GET","operator",route,"")
- if listed.Code!=200||!strings.Contains(listed.Body.String(),target.ID){
-  t.Fatalf("human cannot view declared target: %d %s",listed.Code,listed.Body)
+ if listed.Code!=200||!strings.Contains(listed.Body.String(),target.ID)||
+  !strings.Contains(listed.Body.String(),"\"effective_identity_state\":\"active\""){
+  t.Fatalf("human cannot view current declared target: %d %s",listed.Code,listed.Body)
  }
+ // A plan no longer allowing this TCP source makes its operator label
+ // unusable even though original human approval remains in audit.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
+  SET monitoring_plan_json=?,revision=revision+1 WHERE id=?`,
+  `{"version":1,"source_ids":["different-source"]}`,goal.ID);err!=nil{t.Fatal(err)}
+ listed=call("GET","operator",route,"")
+ if listed.Code!=200||!strings.Contains(listed.Body.String(),
+  "\"effective_identity_state\":\"permit_inactive\""){
+  t.Fatalf("removed Goal source still shown as current identity: %d %s",
+   listed.Code,listed.Body)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
+  SET monitoring_plan_json=?,revision=revision+1 WHERE id=?`,
+  `{"version":1,"source_ids":["router"]}`,goal.ID);err!=nil{t.Fatal(err)}
  if got:=call("GET","outsider",route,"");got.Code!=403{
   t.Fatalf("foreign tenant listed target: %d",got.Code)
  }
@@ -163,6 +178,12 @@ func TestDeclaredTCPTargetIsHumanOnlyAndNeverRetroactiveDeviceAttestation(t *tes
  revoked:=call("POST","operator",revoke,revokeBody)
  if revoked.Code!=200{t.Fatalf("human cannot revoke target: %d %s",
   revoked.Code,revoked.Body)}
+ listed=call("GET","operator",route,"")
+ if listed.Code!=200||!strings.Contains(listed.Body.String(),
+  "\"effective_identity_state\":\"revoked\""){
+  t.Fatalf("revoked human target still displayed as current: %d %s",
+   listed.Code,listed.Body)
+ }
  after,err:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
  if err!=nil{t.Fatal(err)}
  if after.Sources[0].TCPDeclaredTargetID!=""||

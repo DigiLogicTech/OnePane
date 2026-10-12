@@ -106,6 +106,17 @@ func TestGoalSignedSourceMachineCredentialAndHumanKeyAPIBoundaries(t *testing.T)
  if key.SourceID!="gateway"||key.SourcePrincipalID!="sensor"||key.Status!="approved"{
   t.Fatalf("unscoped key %+v",key)
  }
+ keyList:=request("GET",signers,"operator-key","")
+ if keyList.Code!=200||!strings.Contains(keyList.Body.String(),key.ID)||
+  !strings.Contains(keyList.Body.String(),"\"approved\""){
+  t.Fatalf("human operator cannot inspect active signing keys: %d %s",keyList.Code,keyList.Body)
+ }
+ for _,token:=range []string{"source-key","write-only-key","read-only-key","impostor-key"}{
+  got:=request("GET",signers,token,"")
+  if got.Code!=403{
+   t.Fatalf("machine key %s enumerated source signing identities: %d",token,got.Code)
+  }
+ }
  g,err=svc.ContinuousGoal(ctx,g.ID);if err!=nil{t.Fatal(err)}
  source:="sensor"
  obsSvc:=observation.NewService(db.SQL(),db,clock.Real{})
@@ -196,6 +207,10 @@ func TestGoalSignedSourceMachineCredentialAndHumanKeyAPIBoundaries(t *testing.T)
  }
  revoked:=request("POST",revokeRoute,"operator-key",revoke)
  if revoked.Code!=200{t.Fatalf("human key revocation: %d %s",revoked.Code,revoked.Body.String())}
+ keyList=request("GET",signers,"operator-key","")
+ if keyList.Code!=200||!strings.Contains(keyList.Body.String(),"\"revoked\""){
+  t.Fatalf("revoked signing key hidden from operator audit: %d %s",keyList.Code,keyList.Body)
+ }
  g,err=svc.ContinuousGoal(ctx,g.ID);if err!=nil{t.Fatal(err)}
  second:=makeObservation()
  if got:=request("POST",submit,"source-key",submitBody(second,2,priv));got.Code<400{

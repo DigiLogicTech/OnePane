@@ -299,7 +299,7 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
    return checkInstrumentProjectChallengeBudgetTx(ctx,tx,project.ID,checkAt)
   })
  }
- if got:=checkProjectBudget(budgetNow);got!=ErrInvalidTransition{
+ if got:=checkProjectBudget(budgetNow);got!=ErrInstrumentProjectFiveMinuteRateLimited{
   t.Fatalf("16 Project challenges/5min across keys was not blocked: %v",got)
  }
  if got:=svc.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
@@ -331,8 +331,11 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
  }
  if err==nil{err=batch.Commit()}else{_ =batch.Rollback()}
  if err!=nil{t.Fatalf("failed to seed daily budget ledger: %v",err)}
- if got:=checkProjectBudget(budgetNow+6*60000);got!=ErrInvalidTransition{
+ if got:=checkProjectBudget(budgetNow+6*60000);got!=ErrInstrumentProjectDailyRateLimited{
   t.Fatalf("256 Project challenges/24h across key rotations was not blocked: %v",got)
+ }
+ if got:=checkProjectBudget(budgetNow+25*60*60000);got!=nil{
+  t.Fatalf("expired Project budget must not permanently disable new challenges: %v",got)
  }
  proofs,err:=svc.ListGoalInstrumentProofs(ctx,project.ID,goal.ID)
  if err!=nil||len(proofs)!=1||proofs[0].ID!=proof.ID{

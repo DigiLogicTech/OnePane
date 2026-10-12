@@ -8,7 +8,6 @@ import (
  "context"
  "crypto/ed25519"
  "crypto/sha256"
- "crypto/subtle"
  "encoding/json"
  "errors"
  "fmt"
@@ -191,6 +190,9 @@ func ProbeOnce(ctx context.Context,ch Challenge,target Target,
  signed,err:=localReceiptSigningBytes(receipt)
  if err!=nil{return LocalProbeReceipt{},err}
  receipt.LocalReportSignature=ed25519.Sign(private,signed)
+ if !ed25519.Verify(private.Public().(ed25519.PublicKey),signed,receipt.LocalReportSignature){
+  return LocalProbeReceipt{},errors.New("instrument private key failed self-check")
+ }
  return receipt,nil
 }
 
@@ -239,10 +241,10 @@ func SignPrepared(r LocalProbeReceipt,prepared PreparedMeasurement,
   return Acceptance{},errors.New("prepared bytes do not match local one-shot report")
  }
  sig:=ed25519.Sign(private,prepared.SigningPayload)
- // An invalid local signed report must not lead to an apparently
- // successfully signed imported measurement.
- if subtle.ConstantTimeCompare(private[32:],pub)!=1{
-  return Acceptance{},errors.New("private key public section invalid")
+ // Check the resulting detached signature with the claimed approved
+ // public key. A corrupt private-key file must not yield a false success.
+ if !ed25519.Verify(pub,prepared.SigningPayload,sig){
+  return Acceptance{},errors.New("instrument private key failed signing self-check")
  }
  return Acceptance{
   ChallengeID:r.Challenge.ID,Outcome:r.Outcome,ObservedAt:r.ObservedAt,

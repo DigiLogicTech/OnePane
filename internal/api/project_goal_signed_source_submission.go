@@ -23,6 +23,7 @@ type goalSignedSourceCommandService interface {
  RevokeGoalObservationSigner(context.Context,projectworkspace.RevokeGoalObservationSignerCommand)(projectworkspace.GoalObservationSigner,error)
  AcceptSignedGoalObservation(context.Context,projectworkspace.AcceptSignedGoalObservationCommand)(projectworkspace.SignedGoalObservationProof,error)
  RecordGoalSourceReading(context.Context,projectworkspace.RecordGoalSourceReadingCommand)(projectworkspace.SourceReadingReceipt,error)
+ ReserveGoalSourceRequest(context.Context,string,string,string,string)error
  MintGoalSourceCredential(context.Context,projectworkspace.MintGoalSourceCredentialCommand)(projectworkspace.MintedGoalSourceCredential,error)
  ListGoalSourceCredentials(context.Context,string,string,string)([]projectworkspace.GoalSourceCredential,error)
  RevokeGoalSourceCredential(context.Context,projectworkspace.RevokeGoalSourceCredentialCommand)(projectworkspace.GoalSourceCredential,error)
@@ -145,6 +146,10 @@ func(s *Server)submitProjectGoalSignedObservation(w http.ResponseWriter,r *http.
  if !s.authorize(w,r,identity,p.WorkspaceID,"goal.source.submit"){return}
  svc,ok:=s.projects.(goalSignedSourceCommandService)
  if !ok{writeError(w,http.StatusServiceUnavailable,"signed evidence unavailable");return}
+ if err=svc.ReserveGoalSourceRequest(r.Context(),p.ID,r.PathValue("goalID"),
+  identity.CredentialID,identity.PrincipalID);err!=nil{
+  respondDomain(w,nil,err,0);return
+ }
  // The caller can supply identifiers only; the authenticated principal
  // always comes from the bearer credential, never from request JSON.
  var input struct{
@@ -183,6 +188,10 @@ func(s *Server)recordProjectGoalSourceReading(w http.ResponseWriter,r *http.Requ
  if !s.authorize(w,r,identity,p.WorkspaceID,"goal.source.submit"){return}
  svc,ok:=s.projects.(goalSignedSourceCommandService)
  if !ok{writeError(w,http.StatusServiceUnavailable,"source reading staging unavailable");return}
+ if err=svc.ReserveGoalSourceRequest(r.Context(),p.ID,r.PathValue("goalID"),
+  identity.CredentialID,identity.PrincipalID);err!=nil{
+  respondDomain(w,nil,err,0);return
+ }
  var in struct{
   SignerID string `json:"signer_id"`
   ObservationType string `json:"observation_type"`

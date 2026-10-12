@@ -164,7 +164,8 @@ func TestDeclaredTCPTargetIsHumanOnlyAndNeverRetroactiveDeviceAttestation(t *tes
   matched.Sources[0].TCPDeclaredTargetID!=target.ID||
   matched.Sources[0].TCPIdentityClass!="operator_declared_tcp_endpoint"||
   matched.DeviceIdentityVerified||matched.MonitoringActive||
-  matched.RemediationAuthorized{
+  matched.RemediationAuthorized||
+  matched.CrossClassTargetCorrelation!="not_established"{
   t.Fatalf("operator-labelled evidence incorrectly attested device: %+v",matched)
  }
  goal,err=svc.ContinuousGoal(ctx,goal.ID)

@@ -56,10 +56,25 @@ func(s *Server)receiveNodeMeasurement(w http.ResponseWriter,r *http.Request){
   writeJSON(w,401,map[string]string{"error":"paired Node certificate required"})
   return
  }
+ // Rate-limit every authenticated peer attempt BEFORE parsing even
+ // malformed JSON. An active peer cannot bypass this by varying grant IDs.
+ fingerprint:=CertificateFingerprint(cert.Raw)
+ if err=s.svc.ReservePairedNodeMeasurementRequest(r.Context(),
+  peer,fingerprint);err!=nil{
+  if errors.Is(err,ErrNodeMeasurementBudget){
+   w.Header().Set("Retry-After","60")
+   writeJSON(w,429,map[string]string{"error":"Node telemetry request rate limit"})
+  }else if errors.Is(err,ErrNodeMeasurementNotAdmitted){
+   writeJSON(w,403,map[string]string{"error":"Node telemetry not authorised"})
+  }else{
+   writeJSON(w,500,map[string]string{"error":"Node telemetry admission unavailable"})
+  }
+  return
+ }
  var input PeerNodeMeasurement
  if !decodeNodeMeasurement(w,r,&input){return}
  receipt,err:=s.svc.AcceptPairedNodeMeasurement(r.Context(),peer,
-  CertificateFingerprint(cert.Raw),input)
+  fingerprint,input)
  if err!=nil{
   switch{
   case errors.Is(err,ErrNodeMeasurementBudget):

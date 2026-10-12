@@ -277,6 +277,15 @@ func(s *Service)AcceptSignedGoalObservation(ctx context.Context,
    k.source_principal_id=?`,c.SignerID,c.ProjectID,c.GoalID,
   c.ActorPrincipalID).Scan(&signerWorkspaceID)
  if err!=nil{return SignedGoalObservationProof{},ErrInvalidTransition}
+ // Reject revoked, foreign or unbound bearer credentials BEFORE touching
+ // Observation storage. The later serialized writer check remains decisive.
+ if c.CredentialID!=""{
+  if err=checkGoalSourceCredentialTx(ctx,s.db,c.CredentialID,c.ProjectID,
+   c.GoalID,c.SignerID,signerWorkspaceID,c.ActorPrincipalID,
+   s.clock.UnixMilli());err!=nil{
+   return SignedGoalObservationProof{},ErrPrincipalIneligible
+  }
+ }
  var owns int
  err=s.db.QueryRowContext(ctx,`SELECT 1 FROM observations
   WHERE id=? AND workspace_id=?`,c.ObservationID,signerWorkspaceID).Scan(&owns)

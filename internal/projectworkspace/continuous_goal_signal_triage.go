@@ -160,7 +160,10 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
  // Distinct source IDs prevent the same registered source from
  // manufacturing independent votes. These remain investigatory only.
  switch {
- case out.RecentNegativeSources>=2&&seenNode&&seenTCP:
+ case out.RecentNegativeSources>=2&&out.RecentTCPNegativeSources>0&&
+  out.RecentNodeNegativeSources>0:
+  // A positive TCP sample cannot corroborate a negative Node sample (or
+  // vice versa). Require an adverse indicator from EACH distinct class.
   out.State="multiple_adverse_indicators_investigate"
  case out.RecentNegativeSources>0:
   out.State="adverse_indicator_needs_review"

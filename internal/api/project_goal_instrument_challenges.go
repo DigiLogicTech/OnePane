@@ -14,6 +14,8 @@ type goalInstrumentChallengeService interface{
  AcceptGoalInstrumentChallenge(context.Context,projectworkspace.AcceptGoalInstrumentChallengeCommand)(projectworkspace.GoalInstrumentProof,error)
  ListGoalInstrumentKeys(context.Context,string,string)([]projectworkspace.GoalInstrumentKey,error)
  ListGoalInstrumentProofs(context.Context,string,string)([]projectworkspace.GoalInstrumentProof,error)
+ GetGoalInstrumentVerificationBundle(context.Context,string,string,string)(
+  projectworkspace.GoalInstrumentVerificationBundle,error)
 }
 
 func(s *Server)goalInstrumentOperator(w http.ResponseWriter,r *http.Request,
@@ -107,4 +109,12 @@ func(s *Server)listProjectGoalInstrumentProofs(w http.ResponseWriter,r *http.Req
  if !ok{return}
  result,err:=svc.ListGoalInstrumentProofs(r.Context(),p.ID,r.PathValue("goalID"))
  respondDomain(w,result,err,http.StatusOK)
+}
+
+func(s *Server)getProjectGoalInstrumentVerificationBundle(w http.ResponseWriter,r *http.Request){
+ p,svc,_,ok:=s.goalInstrumentOperator(w,r,"project.read")
+ if !ok{return}
+ bundle,err:=svc.GetGoalInstrumentVerificationBundle(r.Context(),
+  p.ID,r.PathValue("goalID"),r.PathValue("proofID"))
+ respondDomain(w,bundle,err,http.StatusOK)
 }

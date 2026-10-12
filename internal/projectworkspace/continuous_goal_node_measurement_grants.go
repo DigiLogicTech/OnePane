@@ -233,7 +233,10 @@ func(s *Service)ListGoalNodeMeasurementGrants(ctx context.Context,
      AND goal.project_id=p.id AND goal.status='configured'
     JOIN project_workspaces pw ON pw.id=project_goal_node_measurement_grants.project_workspace_id
      AND pw.project_id=p.id AND pw.status='active'
-    WHERE p.id=project_goal_node_measurement_grants.project_id AND p.status='active')
+    WHERE p.id=project_goal_node_measurement_grants.project_id AND p.status='active'
+     AND goal.project_workspace_id=project_goal_node_measurement_grants.project_workspace_id
+     AND EXISTS(SELECT 1 FROM json_each(goal.monitoring_plan_json,'$.source_ids') source
+      WHERE source.type='text' AND source.value=project_goal_node_measurement_grants.source_id))
     THEN 'scope_inactive'
    WHEN NOT EXISTS(SELECT 1 FROM principals pr
     JOIN projects p ON p.id=project_goal_node_measurement_grants.project_id

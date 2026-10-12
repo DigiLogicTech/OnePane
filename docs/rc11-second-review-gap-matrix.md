@@ -718,3 +718,43 @@ never treat either one as blanket recurring network consent.
   UI/UX and customisation pass LAST before building the next QA
   version; only then final CI, explicit packaging decision and
   Windows/Ubuntu installation/upgrade QA. No release approved.
+
+
+## RC11 P0-B final Project Tool identity and Tool JSON admission checks — 2026-10-12
+
+- [x] **Fixed built-in Tool mode integrity:** the allowlist binds all
+  rootless OCI, Git, file, runtime and inspection Tool IDs to their
+  actual registered action modes. An adapter may not advertise
+  `project.runtime.inspect` with mutating or sandboxed execution,
+  or `project.app.files.inspect` with unsandboxed read-only execution
+  and bypass its actual adapter security boundary.
+- [x] **Reserved Project adapter namespaces:** newly registered
+  `project.app.*`, `project.runtime.*` and `project.image.*` IDs
+  are denied until explicitly classified. This applies to legacy
+  Tasks with no feature-policy migration, not just modern configured
+  Tasks. The legacy exception does NOT allow Tool ID/mode spoofing.
+  Tests cover real versus forged registration modes, legacy Tasks
+  and unscoped attempts. CI
+  [#38198111927](https://github.com/DigiLogicTech/OnePane/actions/runs/38198111927)
+  passed the namespace and legacy-policy regression suite.
+- [x] **Single-pass strict JSON Tool admission:** Tool inputs and
+  adapter results now reject duplicate object keys at any depth
+  (including Unicode-escaped equivalent names), multiple roots and
+  excessive nesting before canonical hashing, lease consumption or
+  adapter dispatch. A streaming-token single decode avoids a second
+  full-sized payload decode, retaining support for legitimate
+  large base64 file content without a 64KiB limit.
+- [ ] Latest combined JSON and Tool-gateway checks are running at
+  [#38198334048](https://github.com/DigiLogicTech/OnePane/actions/runs/38198334048)
+  on the application/test head `42cc4e298206`; the final branch CI
+  must be rechecked and any failures remediated.
+- [ ] These changes are **not** evidence that every direct shell,
+  MCP, Node, adapter and GUI side effect has universal independent
+  Write/Execute/Network/Secrets enforcement. Complete adapter
+  inventory, caller/Principal/Task-scoped transport verification,
+  recovery and hardware tests remain mandatory.
+- [ ] User-ordered product gate remains: finish all functional work
+  and first code/security review, then perform the comprehensive
+  human-focused UI/UX and customisation pass LAST before the next
+  release build, then rerun code/CI and seek explicit packaging/QA
+  approval. PR #227 remains draft; no installer produced.

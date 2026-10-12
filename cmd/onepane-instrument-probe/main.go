@@ -115,6 +115,8 @@ func runProbe(args []string)error{
  fs:=flag.NewFlagSet("probe",flag.ContinueOnError)
  challenge:=fs.String("challenge","","human-issued JSON challenge file")
  planFile:=fs.String("plan","","human-only current OnePane approved probe-plan JSON")
+ allowManual:=fs.Bool("allow-manual-target",false,
+  "explicit less-protected fallback; operator must independently verify the approved IP/port")
  keyFile:=fs.String("private-key","","base64 Ed25519 private key 0600 file")
  addr:=fs.String("ipv4","","operator-verified exact private IPv4 literal")
  port:=fs.Int("port",0,"operator-approved TCP port")
@@ -131,7 +133,7 @@ func runProbe(args []string)error{
  if *planFile!=""{
   // Fail closed: a plan must be the sole source of the endpoint; mixing
   // legacy manually selected flags could silently change approved scope.
-  if *addr!=""||*port!=0||*timeout!=0||*declared!=""{
+  if *allowManual||*addr!=""||*port!=0||*timeout!=0||*declared!=""{
    return errors.New("approved --plan cannot be combined with manual endpoint flags")
   }
   var plan instrumentprobe.ProbePlan
@@ -139,6 +141,11 @@ func runProbe(args []string)error{
   receipt,err=instrumentprobe.ProbeApprovedPlan(context.Background(),ch,plan,
    pk,&net.Dialer{},time.Now)
  }else{
+  // Do not silently downgrade a missing or misplaced authenticated
+  // plan to a manually chosen endpoint.
+  if !*allowManual{
+   return errors.New("approved --plan required; explicit --allow-manual-target is a less-protected fallback")
+  }
   // Explicit legacy manual operator workflow. OnePane cannot establish
   // that these manually selected bytes match the server's original permit.
   target:=instrumentprobe.Target{IPv4:*addr,Port:*port,TimeoutMS:*timeout,

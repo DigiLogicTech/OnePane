@@ -401,3 +401,40 @@ func(s *Service)AcceptSignedGoalObservation(ctx context.Context,
  if err!=nil{return SignedGoalObservationProof{},err}
  return receipt,nil
 }
+
+
+// ListGoalSignedObservationProofs returns only immutable source-signature
+// receipt metadata for an active Project and canonical Workspace. It never
+// returns Observation values, credentials, private keys or signatures.
+func(s *Service)ListGoalSignedObservationProofs(ctx context.Context,
+ projectID,goalID string)([]SignedGoalObservationProof,error){
+ if strings.TrimSpace(projectID)==""||strings.TrimSpace(goalID)==""{
+  return nil,ErrInvalidCommand
+ }
+ var exists int
+ err:=s.db.QueryRowContext(ctx,`SELECT 1 FROM project_continuous_goals g
+  JOIN projects p ON p.id=g.project_id AND p.status='active'
+  JOIN workspaces tenant ON tenant.id=p.workspace_id AND tenant.status='active'
+  JOIN project_workspaces w ON w.id=g.project_workspace_id
+   AND w.project_id=p.id AND w.status='active'
+  WHERE g.id=? AND g.project_id=?`,goalID,projectID).Scan(&exists)
+ if err!=nil{return nil,err}
+ rows,err:=s.db.QueryContext(ctx,`SELECT id,project_id,goal_id,
+  project_workspace_id,signer_id,observation_id,source_id,
+  integrity_hash,sequence,observed_at,accepted_at
+  FROM project_goal_signed_observation_proofs
+  WHERE goal_id=? AND project_id=?
+  ORDER BY accepted_at DESC,id DESC LIMIT 100`,goalID,projectID)
+ if err!=nil{return nil,err}
+ defer rows.Close()
+ results:=[]SignedGoalObservationProof{}
+ for rows.Next(){
+  var item SignedGoalObservationProof
+  if err=rows.Scan(&item.ID,&item.ProjectID,&item.GoalID,
+   &item.ProjectWorkspaceID,&item.SignerID,&item.ObservationID,
+   &item.SourceID,&item.IntegrityHash,&item.Sequence,
+   &item.ObservedAt,&item.AcceptedAt);err!=nil{return nil,err}
+  results=append(results,item)
+ }
+ return results,rows.Err()
+}

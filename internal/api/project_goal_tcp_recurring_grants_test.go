@@ -55,7 +55,7 @@ func TestTCPRecurringGrantAPIRequiresSeparateHumanConsent(t *testing.T){
   if who!=""{req.Header.Set("Authorization","Bearer "+who)}
   if body!=""{req.Header.Set("Content-Type","application/json")}
   if who=="operator"{
-   if id,e:=goalAPIAuth{}.Authenticate(req);e!=nil||id.PrincipalID!="operator"{
+   if id,e:=(goalAPIAuth{}).Authenticate(req);e!=nil||id.PrincipalID!="operator"{
     t.Fatalf("test auth fixture rejected operator header: %q %v",req.Header.Get("Authorization"),e)
    }
   }

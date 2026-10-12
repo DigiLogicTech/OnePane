@@ -309,6 +309,25 @@ func(s *Service)completeTCPAttempt(ctx context.Context,a GoalTCPProbeAttempt,sta
   ` FROM project_goal_tcp_probe_attempts WHERE id=?`,a.ID))
 }
 
+// tcpDialOutcome is shared by the manual and separately consented recurring
+// TCP paths. A cancelled or timed-out caller never makes an endpoint appear
+// unreachable, and a broken adapter returning (nil, nil) cannot forge a
+// successful connection. Only possession of a real dialled connection with
+// no error is evidence of TCP reachability (not security or health).
+func tcpDialOutcome(parentCtx, dialCtx context.Context, conn net.Conn, dialErr error) string {
+ if parentCtx.Err()!=nil||errors.Is(dialErr,context.Canceled)||
+  errors.Is(dialCtx.Err(),context.Canceled) {
+  return "cancelled"
+ }
+ if errors.Is(dialErr,context.DeadlineExceeded)||
+  errors.Is(dialErr,os.ErrDeadlineExceeded)||
+  errors.Is(dialCtx.Err(),context.DeadlineExceeded){
+  return "timed_out"
+ }
+ if dialErr!=nil||conn==nil{return "not_connected"}
+ return "connected"
+}
+
 // Only a direct human-requested one-shot test is implemented. No recurring
 // scheduler invokes this method. The net.Dialer cannot resolve hostnames
 // because the target was stored and revalidated as an exact IPv4 literal.
@@ -338,14 +357,7 @@ func(s *Service)runManualGoalTCPProbe(ctx context.Context,c RunGoalTCPProbeComma
  conn,dialErr:=dialer.DialContext(connectCtx,"tcp4",
   net.JoinHostPort(attempt.TargetIPv4,strconv.Itoa(attempt.TargetPort)))
  if conn!=nil{_ = conn.Close()}
- outcome:="connected"
- if dialErr!=nil{
-  outcome="not_connected"
-  if errors.Is(dialErr,context.DeadlineExceeded)||
-    errors.Is(dialErr,os.ErrDeadlineExceeded)||connectCtx.Err()==context.DeadlineExceeded{
-   outcome="timed_out"
-  }
- }
+ outcome:=tcpDialOutcome(ctx,connectCtx,conn,dialErr)
  // A failing outcome is not retried within this cadence window.
  return s.completeTCPAttempt(ctx,attempt,outcome)
 }

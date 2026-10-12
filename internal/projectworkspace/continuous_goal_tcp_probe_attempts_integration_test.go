@@ -86,6 +86,16 @@ func TestManualGoalTCPProbeUsesOnlyExactPermittedSocketAndIsCrashIdempotent(t *t
   t.Fatalf("network dispatch escaped source grant: calls=%d network=%s address=%s receipt=%+v",
    dialer.calls,dialer.network,dialer.address,first)
  }
+ // A real TCP handshake never masquerades as an integrity-verified,
+ // attached Observation receipt. Both evidence classes are displayed.
+ coverage,err:=svc.GoalEvidenceCoverage(ctx,project.ID,g.ID)
+ if err!=nil||len(coverage.Sources)!=1||
+  coverage.Sources[0].EvidenceState!="missing"||
+  coverage.Sources[0].TCPReachability!="connected"||
+  coverage.Sources[0].LastTCPTestAt!=first.ClaimedAt||
+  coverage.MonitoringActive{
+  t.Fatalf("TCP test was misrepresented as verified evidence: %+v %v",coverage,err)
+ }
  if _,err:=svc.runManualGoalTCPProbe(ctx,cmd,dialer);!errors.Is(err,ErrInvalidTransition)||dialer.calls!=1{
   t.Fatalf("same-window duplicate dial permitted: calls=%d %v",dialer.calls,err)
  }

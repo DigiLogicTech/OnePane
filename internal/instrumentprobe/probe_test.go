@@ -27,6 +27,10 @@ func(d *recordingDialer)DialContext(_ context.Context,n,a string)(net.Conn,error
  return client,nil
 }
 func fixtureChallenge(t *testing.T,now time.Time)Challenge{
+ return fixtureChallengeForEndpoint(t,now,"192.168.5.9",443)
+}
+func fixtureChallengeForEndpoint(t *testing.T,now time.Time,
+ ip string,port int)Challenge{
  t.Helper()
  ch:=Challenge{ID:"challenge1",KeyID:"instrument1",
   ProjectID:"project1",GoalID:"goal1",
@@ -39,6 +43,7 @@ func fixtureChallenge(t *testing.T,now time.Time)Challenge{
   DeclaredTargetID:"target1",TLSPinID:"pin1",
   PinnedCertificateSHA256:"sha256:"+"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   PlanHash:"sha256:"+"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  TargetEndpointSHA256:endpointDigest(ip,port),
   Nonce:ch.Nonce,IssuedAt:ch.IssuedAt,ExpiresAt:ch.ExpiresAt,
  }
  var err error
@@ -176,7 +181,7 @@ func TestProbeNeverRetriesFailedConnection(t *testing.T){
 
 func TestApprovedProbePlanBindsCurrentOneShotEndpointAndRejectsTampering(t *testing.T){
  now:=time.Now()
- ch:=fixtureChallenge(t,now)
+ ch:=fixtureChallengeForEndpoint(t,now,"192.168.48.25",8443)
  digest:=sha256.Sum256(ch.SigningPayload)
  plan:=ProbePlan{
   ProjectID:ch.ProjectID,GoalID:ch.GoalID,
@@ -210,6 +215,8 @@ func TestApprovedProbePlanBindsCurrentOneShotEndpointAndRejectsTampering(t *test
   "public_ip":func(p *ProbePlan){p.TargetIPv4="8.8.8.8"},
   "public_metadata":func(p *ProbePlan){p.TargetIPv4="169.254.169.254"},
   "unbounded_timeout":func(p *ProbePlan){p.TimeoutMS=50000},
+  "other_private_ip":func(p *ProbePlan){p.TargetIPv4="192.168.48.26"},
+  "other_approved_port":func(p *ProbePlan){p.TargetPort=443},
  }
  for name,mutate:=range cases{
   t.Run(name,func(t *testing.T){
@@ -246,7 +253,7 @@ func TestApprovedPlanUsesRealTCPConnectWithoutScanning(t *testing.T){
   if err==nil{_ = conn.Close();accepted<-struct{}{}}
  }()
  now:=time.Now()
- ch:=fixtureChallenge(t,now)
+ ch:=fixtureChallengeForEndpoint(t,now,"10.16.5.19",443)
  keyPublic,key,err:=ed25519.GenerateKey(rand.Reader)
  if err!=nil{t.Fatal(err)}
  sum:=sha256.Sum256(ch.SigningPayload)

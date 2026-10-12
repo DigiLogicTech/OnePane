@@ -50,6 +50,16 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
  if projectID==""||goalID==""{return GoalSignalTriage{},ErrInvalidCommand}
  coverage,err:=s.GoalEvidenceCoverage(ctx,projectID,goalID)
  if err!=nil{return GoalSignalTriage{},err}
+ // The Goal plan is a security input. An old TCP permit from a
+ // different plan revision may not inherit authority solely because its
+ // human-readable source ID still exists in the new plan.
+ var planRaw string
+ err=s.db.QueryRowContext(ctx,`SELECT monitoring_plan_json FROM
+  project_continuous_goals WHERE id=? AND project_id=?`,
+  goalID,projectID).Scan(&planRaw)
+ if err!=nil{return GoalSignalTriage{},err}
+ _,planHash,err:=goalReviewPlan(planRaw)
+ if err!=nil{return GoalSignalTriage{},ErrInvalidCommand}
  now:=s.clock.UnixMilli()
  // Conservative bounded freshness even if a Goal is configured to
  // run weekly. Older telemetry must not trigger a contemporary alert.
@@ -82,7 +92,13 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
    JOIN project_goal_tcp_probe_permits p ON p.id=a.permit_id
      AND p.goal_id=a.goal_id AND p.project_id=a.project_id
      AND p.source_id=a.source_id AND p.status='approved'
-     AND p.expires_at>?
+     AND p.expires_at>? AND p.plan_hash=?
+     AND a.permit_revision=p.revision
+     AND a.target_ipv4=p.target_ipv4
+     AND a.target_port=p.target_port
+     AND a.timeout_ms=p.timeout_ms
+     AND a.claimed_at>=p.approved_at
+     AND a.completed_at>=a.claimed_at
    JOIN project_continuous_goals g ON g.id=a.goal_id
     AND g.project_id=a.project_id AND g.status='configured'
     AND g.project_workspace_id=a.project_workspace_id
@@ -100,7 +116,7 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
     AND a.status IN ('connected','not_connected','timed_out')
     AND a.completed_at BETWEEN ? AND ?
    ORDER BY a.completed_at DESC,a.id DESC LIMIT 1`,
-   now,projectID,goalID,source.SourceID,now-freshnessMS,now).
+   now,planHash,projectID,goalID,source.SourceID,now-freshnessMS,now).
    Scan(&tcpID,&tcpStatus,&tcpAt)
   if err!=nil&&!errors.Is(err,sql.ErrNoRows){return GoalSignalTriage{},err}
   if err==nil{

@@ -320,6 +320,20 @@ func(s *Service)AcceptSignedGoalObservation(ctx context.Context,
   allowed:=false
   for _,source:=range plan.SourceIDs{if source==signer.SourceID{allowed=true;break}}
   if !allowed{return ErrInvalidTransition}
+  // At most 30 accepted immutable proof records per signer in any sliding
+  // minute. SQLite's signer_id/accepted_at index bounds this query to 30
+  // recent entries regardless of lifetime audit history. Rate pressure
+  // cannot activate other Goals, Nodes, probes, or emergency capabilities.
+  var recentProofs int
+  err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM (
+   SELECT 1 FROM project_goal_signed_observation_proofs
+   WHERE signer_id=? AND accepted_at>?
+   ORDER BY accepted_at DESC LIMIT 30
+  )`,signer.ID,now-60*1000).Scan(&recentProofs)
+  if err!=nil{return err}
+  if recentProofs>=30{
+   return fmt.Errorf("%w: source proof rate limit reached",ErrInvalidTransition)
+  }
   // The source principal and its operator's approval must still be
   // active; an expired, demoted or removed principal cannot submit.
   for _,entry:=range []struct{id,kind string}{

@@ -27,10 +27,22 @@ func (g *Gateway) authorizeToolFeatureActions(ctx context.Context,cmd InvokeComm
  if g.scopes.DB==nil{
   return fmt.Errorf("Project tool scope store is unavailable")
  }
+ // Even an unmigrated Task cannot impersonate the *identity* of a
+ // built-in Project operation with a different authority mode. The
+ // legacy unconfigured-feature-policy exception only preserves already
+ // registered, correctly classified operations; it is not a registry
+ // spoofing exemption.
+ id:=strings.ToLower(strings.TrimSpace(def.ID))
+ projectTool:=strings.HasPrefix(id,"project.app.")||
+   strings.HasPrefix(id,"project.runtime.")||
+   strings.HasPrefix(id,"project.image.")
+ actions,classified:=scopedToolActions(def.CapabilityID,def.ID,def.Mode)
+ if projectTool&&!classified{
+  return fmt.Errorf("unrecognised Project Tool ID or execution mode")
+ }
  decision,err:=g.scopes.ForTask(ctx,cmd.WorkspaceID,*cmd.TaskID)
  if err!=nil{return fmt.Errorf("canonical Task scope unavailable: %w",err)}
  if !decision.Configured{return nil}
- actions,classified:=scopedToolActions(def.CapabilityID,def.ID,def.Mode)
  if !classified{
   return fmt.Errorf("tool effects have no permitted Workspace classification")
  }

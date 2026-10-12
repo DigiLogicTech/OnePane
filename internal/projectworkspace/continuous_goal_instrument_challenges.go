@@ -28,6 +28,7 @@ type GoalInstrumentKey struct{
  PlanHash string `json:"plan_hash"`
  PublicKey []byte `json:"public_key"`
  Status string `json:"status"`
+ EffectiveInstrumentState string `json:"effective_instrument_state,omitempty"`
  Revision int64 `json:"revision"`
  ApprovedBy string `json:"approved_by"`
  ApprovedAt int64 `json:"approved_at"`
@@ -197,7 +198,7 @@ func(s *Service)ApproveGoalInstrumentKey(ctx context.Context,
    ProjectWorkspaceID:pin.ProjectWorkspaceID,
    DeclaredTargetID:pin.DeclaredTargetID,TLSPinID:pin.ID,
    PlanHash:pin.PlanHash,PublicKey:append([]byte(nil),c.PublicKey...),
-   Status:"approved",Revision:1,ApprovedBy:c.ActorPrincipalID,
+   Status:"approved",EffectiveInstrumentState:"active",Revision:1,ApprovedBy:c.ActorPrincipalID,
    ApprovedAt:now,ExpiresAt:c.ExpiresAt,
   }
   _,err=tx.ExecContext(ctx,`INSERT INTO project_goal_instrument_keys(
@@ -274,7 +275,7 @@ func(s *Service)RevokeGoalInstrumentKey(ctx context.Context,
   if err!=nil{return err}
   n,err=result.RowsAffected();if err!=nil{return err}
   if n!=1{return ErrRevisionConflict}
-  k.Status="revoked";k.Revision++;k.RevokedAt=now
+  k.Status="revoked";k.EffectiveInstrumentState="revoked";k.Revision++;k.RevokedAt=now
   body,_:=json.Marshal(map[string]any{
    "goal_id":c.GoalID,"instrument_key_id":c.KeyID,"revoked":true,
    "device_identity_verified":false,
@@ -448,18 +449,52 @@ func(s *Service)ListGoalInstrumentKeys(ctx context.Context,
    AND ws.project_id=p.id AND ws.status='active'
   WHERE g.project_id=? AND g.id=?`,projectID,goalID).Scan(&exists)
  if err!=nil{return nil,err}
- rows,err:=s.db.QueryContext(ctx,`SELECT `+instrumentKeyColumns+`
+ rows,err:=s.db.QueryContext(ctx,`SELECT `+instrumentKeyColumns+`,
+  CASE WHEN status='revoked' THEN 'revoked'
+   WHEN expires_at<=? THEN 'expired'
+   WHEN NOT EXISTS(SELECT 1 FROM principals human
+    JOIN projects project ON project.id=project_goal_instrument_keys.project_id
+    JOIN workspace_memberships member ON member.workspace_id=project.workspace_id
+     AND member.principal_id=human.id AND member.status='active'
+    WHERE human.id=project_goal_instrument_keys.approved_by
+     AND human.principal_type='human' AND human.status='active')
+    THEN 'approver_inactive'
+   ELSE 'active'
+  END
   FROM project_goal_instrument_keys WHERE project_id=? AND goal_id=?
-  ORDER BY approved_at DESC,id DESC LIMIT 100`,projectID,goalID)
+  ORDER BY approved_at DESC,id DESC LIMIT 100`,
+  s.clock.UnixMilli(),projectID,goalID)
  if err!=nil{return nil,err}
- defer rows.Close()
  out:=[]GoalInstrumentKey{}
  for rows.Next(){
-  item,err:=scanGoalInstrumentKey(rows)
-  if err!=nil{return nil,err}
+  var item GoalInstrumentKey
+  err=rows.Scan(&item.ID,&item.ProjectID,&item.GoalID,
+   &item.ProjectWorkspaceID,&item.DeclaredTargetID,&item.TLSPinID,
+   &item.PlanHash,&item.PublicKey,&item.Status,&item.Revision,
+   &item.ApprovedBy,&item.ApprovedAt,&item.ExpiresAt,
+   &item.RevokedAt,&item.EffectiveInstrumentState)
+  if err!=nil{rows.Close();return nil,err}
   out=append(out,item)
  }
- return out,rows.Err()
+ if err=rows.Err();err!=nil{rows.Close();return nil,err}
+ // Close SQLite result before nested reads; single-connection low-RAM
+ // deployments cannot safely hold two active result sets concurrently.
+ if err=rows.Close();err!=nil{return nil,err}
+ pins,err:=s.ListGoalTLSPins(ctx,projectID,goalID)
+ if err!=nil{return nil,err}
+ byID:=make(map[string]GoalTLSPin,len(pins))
+ for _,p:=range pins{byID[p.ID]=p}
+ for i:=range out{
+  if out[i].EffectiveInstrumentState!="active"{continue}
+  pin,ok:=byID[out[i].TLSPinID]
+  if !ok||pin.EffectivePinState!="active"||
+   pin.DeclaredTargetID!=out[i].DeclaredTargetID||
+   pin.PlanHash!=out[i].PlanHash||
+   pin.ProjectWorkspaceID!=out[i].ProjectWorkspaceID{
+   out[i].EffectiveInstrumentState="pin_inactive"
+  }
+ }
+ return out,nil
 }
 
 func(s *Service)ListGoalInstrumentProofs(ctx context.Context,

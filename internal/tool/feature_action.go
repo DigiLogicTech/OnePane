@@ -50,7 +50,9 @@ func scopedToolActions(capabilityID, toolID string, mode authority.ActionMode)([
   case "project.runtime.ensure","project.runtime.stop","project.app.ensure","project.app.stop":
     return []string{"process.execute"},true
   case "project.app.pull":
-    return []string{"process.execute","network.connect"},true
+    // PullImage mutates the local OCI image store. Network + Execute
+    // alone must not bypass an explicitly read-only Workspace.
+    return []string{"files.write","process.execute","network.connect"},true
   }
   switch cap {
   case "filesystem.read","file.read":return []string{"files.read"},true

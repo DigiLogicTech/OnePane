@@ -131,6 +131,20 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
   proof.DeviceIdentityVerified||proof.RemediationAuthorized{
   t.Fatalf("signed instrument proof promoted physical-device trust: %+v",proof)
  }
+ signedTriage,err:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ if len(signedTriage.Sources)!=1||
+  signedTriage.Sources[0].InstrumentProofID!=proof.ID||
+  signedTriage.Sources[0].InstrumentKeyID!=key.ID||
+  signedTriage.Sources[0].InstrumentProofState!="recent_signed_challenge"||
+  !signedTriage.Sources[0].InstrumentKeyPossessionProven||
+  signedTriage.Sources[0].InstrumentProofClass!="human_bound_instrument_key_possession"||
+  signedTriage.RecentNegativeSources!=0||
+  signedTriage.CrossClassTargetCorrelation!="not_established"||
+  signedTriage.DeviceIdentityVerified||signedTriage.MonitoringActive||
+  signedTriage.RemediationAuthorized{
+  t.Fatalf("signer-key proof became physical-device identity or incident: %+v",signedTriage)
+ }
  if _,err=svc.AcceptGoalInstrumentChallenge(ctx,accept);err==nil{
   t.Fatal("spent Ed25519 challenge was replayed successfully")
  }
@@ -167,6 +181,13 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
  }
  if _,err=svc.AcceptGoalInstrumentChallenge(ctx,accept);err==nil{
   t.Fatal("revoked key admitted old signed response")
+ }
+ removedTriage,err:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ if len(removedTriage.Sources)!=1||
+  removedTriage.Sources[0].InstrumentKeyPossessionProven||
+  removedTriage.Sources[0].InstrumentProofID!=""{
+  t.Fatalf("revoked key still displayed as current possession: %+v",removedTriage)
  }
  goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
  command:=RunGoalPinnedTLSCheckCommand{

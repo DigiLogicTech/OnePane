@@ -8,7 +8,11 @@ Executable: `cmd/onepane-instrument-probe`, package `internal/instrumentprobe`. 
 
 **The private Ed25519 instrument key never goes to OnePane or is passed on the process command line.** Keygen creates a new file with exclusive creation and owner-only POSIX mode `0600`; the runner refuses group/world-readable private key files on POSIX and refuses to overwrite an existing key. On Windows the operator must also set a restrictive NTFS ACL for the intended instrument account; Go's POSIX file permission bits are not a Windows ACL. Only the public key (base64) and its SHA-256 fingerprint are shown for independent human enrollment via the existing OnePane instrument-key approval API.
 
-The `probe` mode accepts an existing unconsumed OnePane server challenge JSON, explicitly specified current human-approved target ID, **one** private IPv4 literal, port and 100–1500ms timeout from the original permit. The operator must cross-check the IP/port against the approved permit **out of band**; these values are not asserted by the server's challenge payload and OnePane CANNOT verify that a manually entered IP is the intended device from this receipt alone. The runner does not use arbitrary DNS, public/loopback/link-local/CGNAT targets, network ranges, UDP, HTTP, application data, redirects, subprocesses, remote shell commands, retries or scheduled jobs. It makes at most one `tcp4` dial, closes the socket immediately and signs a local receipt identifying the challenge, operator-selected target, observed outcome/time and confirmation ID.
+The `probe` mode now **requires a current, human-authorised probe plan by default**. An authenticated human with `project.read` calls `POST /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-keys/{keyID}/probe-plan` using only `challenge_id` and `expected_goal_revision`. The server derives the exact private IPv4 literal/port and 100–1500ms timeout from the original, live human TCP permit—not the client request—while rechecking active Project/Goal, instrument key, TLS pin, source/monitoring plan, declaring humans, expiration and unused challenge. No socket, nonce reservation or second challenge is created by exporting the plan.
+
+The exported JSON includes the Project/Goal/key/challenge/declared target/TLS pin/source IDs, exact target IPv4/port/timeout, original challenge-payload SHA-256 and expiry. It is restricted to authenticated human access **because it contains a private network address**; never place this file into a public project Library, Model prompt, machine webchat or logs. Transport and manual transfer of the plan must use an operator-trusted authenticated channel. **The plan is not digitally signed by OnePane**, and its SHA-256 binds only the original challenge bytes, not independent authority over a manually edited address. A compromised/untrusted plan file is not safe execution authority.
+
+The local CLI checks all ID/nonce/pin/expiry/digest and address/timeout constraints before opening one socket. `--plan` cannot be mixed with any manual IP/port/timeout flags. The legacy manual address flow is available **only** with explicit `--allow-manual-target` and should be considered a less-protected QA fallback, because OnePane cannot independently prove that typed IPv4/port matches the human-approved permit. The runner does not use arbitrary DNS, public/loopback/link-local/CGNAT targets, network ranges, UDP, HTTP, application data, redirects, subprocesses, remote shell commands, retries or scheduled jobs. It makes at most one `tcp4` dial, closes the socket immediately and signs a local receipt identifying the challenge, operator-selected target, observed outcome/time and confirmation ID.
 
 The signed local report contains the literal private IP and port **only on the operator's instrument computer**; it must be saved in a private local file and **not uploaded** to OnePane's measurement API, which stores only the constrained signed claim. The command cannot attest a trustworthy physical network vantage, actual hardware identity, absence of malicious code or independently validated observation. An operator with the instrument's signing key can still manufacture a valid-looking self-report without this official runner; neither a software signature nor a CLI printout is an attestation.
 
@@ -23,16 +27,17 @@ go build -o onepane-instrument-probe ./cmd/onepane-instrument-probe
 
 Take the displayed **public key** through a separately trusted enrollment channel to the existing human-only `POST /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-keys` API. OnePane keeps the key associated with the current TLS pin, declared target, canonical monitoring plan and human approval. Never send the private file as part of enrollment.
 
-An authenticated human issues `POST /instrument-keys/{keyID}/challenge` (expected Goal/key revisions). Save the unmodified, compact JSON server response to a local challenge file. The challenge is limited to **two minutes**; do not attempt to reuse an expired/consumed challenge. Run the one-shot probe against the literal private address and port already approved for that exact declared target:
+An authenticated human issues `POST /instrument-keys/{keyID}/challenge` (expected Goal/key revisions). Save the unmodified, compact JSON server response to a local challenge file, then call the human-only `POST /instrument-keys/{keyID}/probe-plan` with that `challenge_id` and the same current Goal revision; save its unmodified compact response as a **private** `probe-plan.json`. Both files must come from a trusted OnePane session and match the same unused, at-most-two-minute challenge. The preferred one-shot execution requires **no manually typed destination address**:
 
 ```bash
 ./onepane-instrument-probe probe \
   --challenge ./challenge.json \
+  --plan ./probe-plan.json \
   --private-key ./instrument-private.key \
-  --ipv4 192.168.42.71 --port 443 --timeout-ms 700 \
-  --confirm-target-id YOUR_APPROVED_DECLARED_TARGET_ID \
   --out ./local-probe-receipt.json
 ```
+
+For backward compatibility with operator-proven manual tests only, the deliberately less-protected path requires an explicit `--allow-manual-target` flag together with `--ipv4`, `--port`, `--timeout-ms`, and `--confirm-target-id`. Never pass those flags together with `--plan`.
 
 This private local report is itself Ed25519-signed immediately after the single TCP connect, with no user-provided outcome override. An authenticated human then calls the existing **`/instrument-keys/{keyID}/measurement/prepare`** API using `challenge_id`, `outcome`, `observed_at` copied from the report, and the current `expected_goal_revision`. Save the unmodified, compact server JSON response into `prepared.json`.
 

@@ -5,7 +5,6 @@ import (
  "database/sql"
  "encoding/json"
  "errors"
- "fmt"
  "strings"
 
  "github.com/DigiLogicTech/OnePane/internal/event"

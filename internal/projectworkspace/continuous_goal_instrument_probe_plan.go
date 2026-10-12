@@ -5,7 +5,9 @@ import (
  "context"
  "crypto/sha256"
  "encoding/hex"
+ "encoding/json"
 
+ "github.com/DigiLogicTech/OnePane/internal/event"
  "github.com/DigiLogicTech/OnePane/internal/storage"
 )
 
@@ -45,8 +47,12 @@ func(s *Service)PrepareGoalInstrumentProbePlan(ctx context.Context,
   actorID==""||expectedGoalRevision<1{
   return GoalInstrumentProbePlan{},ErrInvalidCommand
  }
+ exportID,err:=s.ids.New("gplanview")
+ if err!=nil{return GoalInstrumentProbePlan{},err}
+ eventID,err:=s.ids.New("evt")
+ if err!=nil{return GoalInstrumentProbePlan{},err}
  var plan GoalInstrumentProbePlan
- err:=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+ err=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
   now:=s.clock.UnixMilli()
   project,err:=s.repo.ProjectTx(ctx,tx,projectID)
   if err!=nil{return err}
@@ -102,7 +108,33 @@ func(s *Service)PrepareGoalInstrumentProbePlan(ctx context.Context,
    ExpiresAt:challenge.ExpiresAt,
    AttestationClass:"human_authorised_endpoint_snapshot_not_device_attestation",
   }
-  return nil
+  // Reading an approved private address is security-relevant. Audit its
+  // first disclosure to each human per nonce, with a UNIQUE key preventing
+  // repeated reads from growing an unbounded event/SQLite ledger. Never
+  // place the raw IPv4/port in this immutable event.
+  access,err:=tx.ExecContext(ctx,`INSERT INTO project_goal_instrument_probe_plan_exports(
+   id,project_id,goal_id,instrument_key_id,challenge_id,actor_principal_id,
+   challenge_sha256,first_exported_at)
+   VALUES(?,?,?,?,?,?,?,?)
+   ON CONFLICT(challenge_id,actor_principal_id) DO NOTHING`,
+   exportID,projectID,goalID,keyID,challengeID,actorID,
+   plan.OriginalChallengeSHA256,now)
+  if err!=nil{return err}
+  inserted,err:=access.RowsAffected()
+  if err!=nil{return err}
+  if inserted>1{return ErrInvalidTransition}
+  if inserted==0{return nil}
+  audit,_:=json.Marshal(map[string]any{
+   "goal_id":goalID,"instrument_key_id":keyID,"challenge_id":challengeID,
+   "source_id":scope.Target.SourceID,"private_endpoint_exported":true,
+   "device_identity_verified":false,"monitoring_active":false,
+  })
+  return s.events.Append(ctx,tx,event.Event{
+   ID:eventID,WorkspaceID:&project.WorkspaceID,
+   Type:"project.goal_instrument_probe_plan_first_exported",
+   AggregateType:"project_goal_instrument_probe_plan",AggregateID:challengeID,
+   ActorPrincipalID:&actorID,Payload:audit,OccurredAt:now,
+  })
  })
  if err!=nil{return GoalInstrumentProbePlan{},err}
  return plan,nil

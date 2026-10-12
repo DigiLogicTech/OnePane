@@ -1295,6 +1295,9 @@ func respondDomain(w http.ResponseWriter, v any, err error, success int) {
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		writeError(w, http.StatusNotFound, "not found")
+	case errors.Is(err, projectworkspace.ErrSourceProofRateLimited):
+		w.Header().Set("Retry-After", "60")
+		writeError(w, http.StatusTooManyRequests, "source proof rate limit reached")
 	case errors.Is(err, projectworkspace.ErrInvalidCommand), errors.Is(err, projectworkspace.ErrInvalidTransition):
 		writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, projectworkspace.ErrRevisionConflict):

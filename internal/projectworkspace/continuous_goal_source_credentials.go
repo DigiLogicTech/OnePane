@@ -29,6 +29,7 @@ type GoalSourceCredential struct{
  ApprovedAt int64 `json:"approved_at"`
  ExpiresAt int64 `json:"expires_at"`
  RevokedAt int64 `json:"revoked_at,omitempty"`
+ Status string `json:"status"`
 }
 type MintGoalSourceCredentialCommand struct{
  ProjectID,GoalID,SignerID,ActorPrincipalID string
@@ -159,11 +160,27 @@ func(s *Service)ListGoalSourceCredentials(ctx context.Context,
   b.workspace_id,b.signer_id,b.source_principal_id,b.approved_by,b.approved_at,
   b.expires_at,
   CASE WHEN b.revoked_at>COALESCE(a.revoked_at,0)
-    THEN b.revoked_at ELSE COALESCE(a.revoked_at,0) END
+    THEN b.revoked_at ELSE COALESCE(a.revoked_at,0) END,
+  CASE
+   WHEN b.revoked_by IS NOT NULL OR a.revoked_at IS NOT NULL THEN 'revoked'
+   WHEN b.expires_at<=? OR a.expires_at IS NULL OR a.expires_at<=? THEN 'expired'
+   WHEN k.status!='approved' OR k.expires_at<=? THEN 'signer_inactive'
+   WHEN p.status!='active' OR w.status!='active' THEN 'scope_inactive'
+   WHEN EXISTS(SELECT 1 FROM principals pr
+     LEFT JOIN workspace_memberships m ON m.workspace_id=b.workspace_id AND m.principal_id=pr.id
+     WHERE pr.id=b.source_principal_id
+      AND (pr.status!='active' OR pr.principal_type NOT IN ('service','agent')
+       OR m.status IS NULL OR m.status!='active')) THEN 'scope_inactive'
+   ELSE 'active'
+  END
   FROM project_goal_source_credential_grants b
   JOIN api_credentials a ON a.id=b.credential_id
+  JOIN project_goal_observation_signers k ON k.id=b.signer_id
+  JOIN projects p ON p.id=b.project_id
+  JOIN project_workspaces w ON w.id=b.project_workspace_id
   WHERE b.project_id=? AND b.goal_id=? AND b.signer_id=?
-  ORDER BY b.approved_at DESC,b.credential_id DESC LIMIT 100`,projectID,goalID,signerID)
+  ORDER BY b.approved_at DESC,b.credential_id DESC LIMIT 100`,
+  s.clock.UnixMilli(),s.clock.UnixMilli(),s.clock.UnixMilli(),projectID,goalID,signerID)
  if err!=nil{return nil,err}
  defer rows.Close()
  out:=[]GoalSourceCredential{}
@@ -171,7 +188,7 @@ func(s *Service)ListGoalSourceCredentials(ctx context.Context,
   var item GoalSourceCredential
   if err=rows.Scan(&item.CredentialID,&item.ProjectID,&item.GoalID,&item.ProjectWorkspaceID,
    &item.WorkspaceID,&item.SignerID,&item.SourcePrincipalID,&item.ApprovedBy,
-   &item.ApprovedAt,&item.ExpiresAt,&item.RevokedAt);err!=nil{return nil,err}
+   &item.ApprovedAt,&item.ExpiresAt,&item.RevokedAt,&item.Status);err!=nil{return nil,err}
   out=append(out,item)
  }
  return out,rows.Err()

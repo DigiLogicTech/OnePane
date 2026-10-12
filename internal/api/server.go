@@ -541,6 +541,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-probe-permits", s.listProjectGoalTCPProbePermits)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-probe-permits", s.approveProjectGoalTCPProbe)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-probe-permits/{permitID}/revoke", s.revokeProjectGoalTCPProbe)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-probe-permits/{permitID}/test", s.runProjectGoalTCPProbe)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-probe-attempts", s.listProjectGoalTCPProbeAttempts)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/observations", s.attachProjectGoalObservation)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces", s.createCanonicalProjectWorkspace)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/library", s.listProjectLibrary)

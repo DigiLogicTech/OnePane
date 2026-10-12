@@ -8,3 +8,13 @@ CREATE TABLE node_measurement_request_budgets(
 ) STRICT;
 CREATE INDEX idx_node_measurement_request_budget_updated
  ON node_measurement_request_budgets(updated_at);
+CREATE TRIGGER node_measurement_request_budget_no_delete
+ BEFORE DELETE ON node_measurement_request_budgets
+ BEGIN SELECT RAISE(ABORT,'Node attempt budget cannot be deleted'); END;
+CREATE TRIGGER node_measurement_request_budget_monotonic
+ BEFORE UPDATE ON node_measurement_request_budgets
+ WHEN NEW.peer_node_id!=OLD.peer_node_id OR
+  NEW.window_started_at<OLD.window_started_at OR
+  (NEW.window_started_at=OLD.window_started_at AND
+   NEW.attempts<=OLD.attempts)
+ BEGIN SELECT RAISE(ABORT,'Node attempt budget cannot move backward'); END;

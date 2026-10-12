@@ -183,9 +183,15 @@ func(s *Service)runGoalPinnedTLSCheck(ctx context.Context,
    Scan(&liveStatus,&pinRevision,&expires)
   if err!=nil{return err}
   if liveStatus!="approved"||expires<=now||pinRevision!=pin.Revision{return nil}
+  p,err:=s.repo.ProjectTx(ctx,tx,c.ProjectID)
+  if err!=nil{return nil}
+  if humanGoalMemberTx(ctx,tx,p.WorkspaceID,c.ActorPrincipalID)!=nil||
+   humanGoalMemberTx(ctx,tx,p.WorkspaceID,pin.ApprovedBy)!=nil{return nil}
   _,err=s.activePinnedTargetTx(ctx,tx,c.ProjectID,c.GoalID,pin.DeclaredTargetID,now)
   permitted=(err==nil)
-  if err==ErrInvalidTransition||err==ErrPrincipalIneligible{return nil}
+  if errors.Is(err,ErrInvalidTransition)||errors.Is(err,ErrPrincipalIneligible){
+   return nil
+  }
   return err
  })
  if err!=nil{return GoalPinnedTLSCheck{},err}

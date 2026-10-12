@@ -357,3 +357,20 @@ Completed in this integration branch, with source and regression tests:
   fairness under concurrent host instances and installed Windows/Ubuntu
   CPU-only and paired-Node QA. These remain outside the currently tested
   read-only receipt reviewer.
+
+
+## RC11 receipt-review admission race closure — 2026-10-12
+
+- [x] The last controllable metadata-review side-effect boundary now reads
+  the current clock **inside** the SQLite writer transaction. A permit that
+  expired while the request was waiting for the transaction lock cannot
+  be authorised by its earlier pre-transaction timestamp.
+- [x] An injected advancing-clock regression exercises the before-expiry
+  caller preflight versus after-expiry transaction admission, expecting
+  `ErrInvalidTransition` and no immutable review run.
+- [ ] Confirm the complete hosted regression on application/test head
+  `3afeb5c1` at
+  [run #38192373387](https://github.com/DigiLogicTech/OnePane/actions/runs/38192373387).
+- [ ] No release approval is implied. Active sensor permits, safe external
+  probe dispatch, tenant data-transfer enforcement, verified baseline
+  evaluation and Level 5 postcondition/remediation remain separate P0 gates.

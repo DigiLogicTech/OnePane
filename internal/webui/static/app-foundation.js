@@ -1868,6 +1868,7 @@ async function qa4BindL5GoalConfigurator(project){
            <select aria-label="Network source permit expiry" data-goal-probe-duration><option value="1">1 hour</option><option value="12" selected>12 hours</option><option value="24">24 hours</option></select>
            <button class="btn" type="button" data-goal-probe-approve="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">Approve exact TCP target…</button>
            <button class="btn" type="button" data-goal-probe-list="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">View / revoke network grants</button>
+           <button class="btn" type="button" data-goal-probe-history="${escapeHtml(g.id)}">Reachability history</button>
          </div>
          <div data-goal-probe-results></div>`:'';
       return `<div class="list-row"><strong>${escapeHtml(g.objective||'Objective')}</strong> <span class="pill">${escapeHtml(g.status||'configured')}</span>
@@ -1944,6 +1945,11 @@ async function qa4BindL5GoalConfigurator(project){
             · ${escapeHtml(p.status==='approved'&&Number(p.expires_at)<=Date.now()?'expired':p.status||'unknown')}
             · expires ${escapeHtml(new Date(p.expires_at).toLocaleString())}
             · not active monitoring
+            ${p.status==='approved'&&Number(p.expires_at)>Date.now()?`<button type="button" class="btn"
+              data-goal-probe-test="${escapeHtml(p.id)}"
+              data-goal-id="${escapeHtml(listTCP.dataset.goalProbeList)}"
+              data-goal-revision="${Number(listTCP.dataset.goalRevision)||0}"
+              data-permit-revision="${Number(p.revision)||0}">Test TCP connection…</button>`:''}
             ${p.status==='approved'?`<button type="button" class="btn" data-goal-probe-revoke="${escapeHtml(p.id)}"
               data-goal-id="${escapeHtml(listTCP.dataset.goalProbeList)}"
               data-goal-revision="${Number(listTCP.dataset.goalRevision)||0}"
@@ -1951,6 +1957,56 @@ async function qa4BindL5GoalConfigurator(project){
           </div>`).join(''):
           '<div class="page-subtitle">No approved network sources.</div>';
       }catch(ex){if(holder.isConnected)holder.textContent='Network source list unavailable: '+ex.message}
+      return;
+    }
+    const testTCP=event.target.closest('button[data-goal-probe-test]');
+    if(testTCP&&list.contains(testTCP)){
+      event.preventDefault();
+      if(testTCP.dataset.confirmed!=='yes'){
+        testTCP.dataset.confirmed='yes';
+        testTCP.textContent='Confirm one TCP connect';
+        return;
+      }
+      testTCP.disabled=true;
+      try{
+        const result=await apiRequest(reviewBase+encodeURIComponent(testTCP.dataset.goalId)+
+          '/tcp-probe-permits/'+encodeURIComponent(testTCP.dataset.goalProbeTest)+'/test',{
+            method:'POST',body:JSON.stringify({
+              expected_goal_revision:Number(testTCP.dataset.goalRevision),
+              expected_permit_revision:Number(testTCP.dataset.permitRevision)
+            })
+          });
+        if(reviewStatus())reviewStatus().textContent='TCP reachability: '+
+          String(result.status||'unknown')+' at '+String(result.target_ipv4||'')+
+          ':'+String(result.target_port||'')+
+          '. This does NOT establish service security, health or trust.';
+        await refresh();
+      }catch(ex){
+        if(reviewStatus())reviewStatus().textContent='TCP test denied or failed: '+ex.message;
+        testTCP.disabled=false;
+        testTCP.dataset.confirmed='';
+        testTCP.textContent='Test TCP connection…';
+      }
+      return;
+    }
+    const tcpHistory=event.target.closest('button[data-goal-probe-history]');
+    if(tcpHistory&&list.contains(tcpHistory)){
+      event.preventDefault();
+      const holder=tcpHistory.closest('.list-row')?.querySelector('[data-goal-probe-results]');
+      if(!holder)return;
+      holder.textContent='Reading bounded TCP reachability audit…';
+      try{
+        const runs=await apiRequest(reviewBase+encodeURIComponent(tcpHistory.dataset.goalProbeHistory)+
+          '/tcp-probe-attempts');
+        if(!holder.isConnected)return;
+        holder.innerHTML=Array.isArray(runs)&&runs.length?
+          '<div class="page-subtitle"><strong>TCP handshakes only — not verified device health.</strong></div>'+
+          runs.map(r=>`<div class="page-subtitle">${escapeHtml(r.source_id||'Source')}
+            · ${escapeHtml(r.target_ipv4||'')}:${Number(r.target_port)||0}
+            · ${escapeHtml(r.status==='claimed'?'unknown after interruption':r.status||'unknown')}
+            · ${escapeHtml(new Date(r.claimed_at).toLocaleString())}</div>`).join(''):
+          '<div class="page-subtitle">No TCP tests have been performed.</div>';
+      }catch(ex){if(holder.isConnected)holder.textContent='TCP test history unavailable: '+ex.message}
       return;
     }
     const revokeTCP=event.target.closest('button[data-goal-probe-revoke]');

@@ -673,3 +673,48 @@ never treat either one as blanket recurring network consent.
   and agent/model/Node runtime hardening. UI/UX review remains **last**
   before the next build, followed by full CI, installer QA and
   explicit release approval. No build or merge is approved.
+
+
+## RC11 P0-B Tool effect-classification and Task scope corrections — 2026-10-12
+
+- [x] **OCI image-store writes are Write effects:** the `project.app.pull`
+  action uses the rootless container engine's `PullImage`, which mutates
+  its local OCI image store. It now requires `files.write` in addition
+  to `process.execute` and `network.connect`; explicitly read-only
+  Workspaces reject the action even with valid Network/Execute grants.
+  A gateway denial regression verifies neither authority consumption
+  nor the adapter is reached. CI green:
+  [#38197473239](https://github.com/DigiLogicTech/OnePane/actions/runs/38197473239).
+- [x] **Capability-label impersonation denied:** a mutating or
+  external-sending adapter may not pass using read-only
+  `project.*.inspect` IDs or `filesystem.read` capability metadata.
+  All known Project OCI/builder/file/Git Tool IDs are now bound to their
+  exact registered authority modes; fake registrations with altered
+  modes are unclassified and denied before consuming a lease.
+- [x] **Unknown adapters are classified by mode before claimed capability:**
+  a generic sandbox-executing `filesystem.read` adapter needs
+  Read+Write+Execute, not merely Read; an external sender declaring
+  `vault.read` requires Network+Secrets. Explicit audited built-in
+  operations retain their narrower, fixed-command capability mappings.
+  Gateway regression denies adapter invocation when either independent
+  permission is absent.
+- [x] **Taskless Project effects are denied:** `project.app.*`,
+  `project.runtime.*` and `project.image.*` Tool IDs require an
+  attached canonical Task. A tenant lease without a Task lacks a
+  provable Project/Workspace/Agent permission chain. A present Task
+  also requires an available persisted policy store; silent bypass
+  when the scope database is nil has been closed. These are
+  conservative denials, not broad implicit grants to Assistant chat.
+- [ ] Final combined policy test head `52baadf50b30` is validating at
+  [#38197865758](https://github.com/DigiLogicTech/OnePane/actions/runs/38197865758).
+  Remediate any failure before considering this increment green.
+- [ ] **Still P0-B:** inventory every other shell, MCP, Git, OCI, tool and
+  direct GUI call site not using the Tool Gateway; verify attached Task
+  permission chains at each external transport and effect boundary,
+  safe standalone Assistant approval-to-Task conversion, and
+  enforcement against sandbox/Node bypasses.
+- [ ] **User-designated order unchanged:** functional development and
+  security/vision review first; the comprehensive human-focused
+  UI/UX and customisation pass LAST before building the next QA
+  version; only then final CI, explicit packaging decision and
+  Windows/Ubuntu installation/upgrade QA. No release approved.

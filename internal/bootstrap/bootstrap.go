@@ -361,6 +361,12 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 		_ = db.Close()
 		return nil,fmt.Errorf("bootstrap metadata-only goal reviewer: %w",err)
 	}
+	// A distinct system identity performs only separately human-approved,
+	// exact-target recurring TCP handshakes; no grant is created here.
+	if err:=projectWorkspaceService.EnsureTCPRecurringWorkerPrincipal(ctx);err!=nil{
+		_ = db.Close()
+		return nil,fmt.Errorf("bootstrap consented TCP observation identity: %w",err)
+	}
 	sandboxAdapter.SetPublisher(workspacepublisher.New(db.SQL(),artifactService,projectWorkspaceService,localNode.ID))
 	agentProfileService := agentprofile.NewService(db.SQL(), db, clk)
 	skillCatalogService := skillcatalog.NewService(db.SQL(), db, clk, cfg.Storage.DataDir)

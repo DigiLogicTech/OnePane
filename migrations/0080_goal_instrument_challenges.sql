@@ -8,7 +8,7 @@ CREATE TABLE project_goal_instrument_keys (
  project_workspace_id TEXT NOT NULL REFERENCES project_workspaces(id) ON DELETE RESTRICT,
  declared_target_id TEXT NOT NULL REFERENCES project_goal_tcp_declared_target_bindings(id) ON DELETE RESTRICT,
  tls_pin_id TEXT NOT NULL REFERENCES project_goal_tls_endpoint_pins(id) ON DELETE RESTRICT,
- plan_hash TEXT NOT NULL,
+ plan_hash TEXT NOT NULL CHECK(length(plan_hash)=71 AND substr(plan_hash,1,7)='sha256:'),
  public_key BLOB NOT NULL CHECK(length(public_key)=32),
  status TEXT NOT NULL CHECK(status IN ('approved','revoked')),
  revision INTEGER NOT NULL CHECK(revision>=1),
@@ -52,7 +52,7 @@ CREATE TABLE project_goal_instrument_challenges (
  status TEXT NOT NULL CHECK(status IN ('issued','accepted')),
  accepted_at INTEGER NOT NULL DEFAULT 0 CHECK(accepted_at>=0),
  CHECK((status='issued' AND accepted_at=0) OR
-  (status='accepted' AND accepted_at>=issued_at))
+  (status='accepted' AND accepted_at>=issued_at AND accepted_at<expires_at))
 ) STRICT;
 CREATE INDEX idx_instrument_challenges_budget ON project_goal_instrument_challenges
  (instrument_key_id,issued_at DESC);
@@ -74,7 +74,8 @@ CREATE TABLE project_goal_instrument_proofs (
  goal_id TEXT NOT NULL REFERENCES project_continuous_goals(id) ON DELETE RESTRICT,
  declared_target_id TEXT NOT NULL REFERENCES project_goal_tcp_declared_target_bindings(id) ON DELETE RESTRICT,
  tls_pin_id TEXT NOT NULL REFERENCES project_goal_tls_endpoint_pins(id) ON DELETE RESTRICT,
- signature_sha256 TEXT NOT NULL CHECK(length(signature_sha256)=71),
+ signature_sha256 TEXT NOT NULL
+  CHECK(length(signature_sha256)=71 AND substr(signature_sha256,1,7)='sha256:'),
  signature BLOB NOT NULL CHECK(length(signature)=64),
  accepted_at INTEGER NOT NULL CHECK(accepted_at>0),
  proof_class TEXT NOT NULL DEFAULT 'human_bound_instrument_key_possession'

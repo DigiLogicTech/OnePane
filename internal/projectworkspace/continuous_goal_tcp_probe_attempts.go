@@ -125,7 +125,8 @@ func(s *Service)claimGoalTCPAttempt(ctx context.Context,c RunGoalTCPProbeCommand
   window:=now/(cadence*60000)
   var exists int
   if err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_goal_tcp_probe_attempts
-   WHERE permit_id=? AND cadence_window=?`,permit.ID,window).Scan(&exists);err!=nil{return err}
+   WHERE goal_id=? AND source_id=? AND cadence_window=?`,
+   c.GoalID,permit.SourceID,window).Scan(&exists);err!=nil{return err}
   if exists!=0{return ErrInvalidTransition}
   attempt=GoalTCPProbeAttempt{
    ID:attemptID,ProjectID:c.ProjectID,GoalID:c.GoalID,

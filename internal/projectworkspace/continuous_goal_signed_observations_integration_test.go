@@ -115,6 +115,30 @@ func TestLevel5SignedObservationEnrollmentAntiReplayAndLiveRevocation(t *testing
  if _,err=accept(foreign,1,sign(foreign,priv,1));err==nil{
   t.Fatal("valid cryptographic signature upgraded foreign Workspace evidence")
  }
+ // Even a database Node marked 'paired' supplies NO cryptographic
+ // measurement transport identity here. A source signature over its
+ // unverified Node claim is insufficient to enter the local-only lane.
+ _,err=db.SQL().ExecContext(ctx,`INSERT INTO harness_nodes(
+  id,name,local,identity_fingerprint,trust_state,protocol_json,
+  capabilities_json,revision,created_at,updated_at)
+  VALUES('claimed-node','Remote',0,'unverified-fingerprint','paired',
+   '{}','{}',1,1,1)`)
+ if err!=nil{t.Fatal(err)}
+ claimedNode:="source"
+ claimed,err:=obsService.Record(ctx,observation.RecordCommand{
+  WorkspaceID:"tenant",SubjectRef:"sensor://claimed-node",
+  ObservationType:"system.sample",ProbeToolID:"router",ProbeToolVersion:"1",
+  SourcePrincipalID:&claimedNode,ActorPrincipalID:&claimedNode,
+  Value:json.RawMessage(`{"node":"claimed-node"}`),
+  Label:policy.DataLabel{WorkspaceID:"tenant",OriginNodeID:"claimed-node",
+   Confidentiality:policy.ConfidentialityInternal,
+   Residency:policy.ResidencyTrustedNodes,
+   Trust:policy.TrustUnverifiedDerived},
+ })
+ if err!=nil{t.Fatal(err)}
+ if _,err=accept(claimed,1,sign(claimed,priv,1));err==nil{
+  t.Fatal("paired Node registry row falsely authenticated remote measurement")
+ }
  accepted,err:=accept(first,1,firstSig)
  if err!=nil{t.Fatal(err)}
  if accepted.Sequence!=1||accepted.SourceID!="router"||accepted.IntegrityHash!=first.IntegrityHash{

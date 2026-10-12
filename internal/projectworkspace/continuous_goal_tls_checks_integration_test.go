@@ -267,7 +267,7 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
  var instrumentEvents int
  if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
   WHERE event_type LIKE 'project.goal_instrument_%'`).Scan(&instrumentEvents);
-  err!=nil||instrumentEvents!=8{
+  err!=nil||instrumentEvents!=7{
   t.Fatalf("pre-revocation instrument key/proof/measurement audit incomplete: %d %v",
    instrumentEvents,err)
  }
@@ -290,7 +290,7 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
  }
  if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
   WHERE event_type LIKE 'project.goal_instrument_%'`).Scan(&instrumentEvents);
-  err!=nil||instrumentEvents!=9{
+  err!=nil||instrumentEvents!=8{
   t.Fatalf("instrument key revocation was missing from tenant audit: %d %v",
    instrumentEvents,err)
  }

@@ -295,6 +295,38 @@ func TestHumanPinnedTLSCertificateRequiresExactExistingTargetAndOneBoundedCheck(
   scopedPlan.AttestationClass!="human_authorised_endpoint_snapshot_not_device_attestation"{
   t.Fatalf("server-issued snapshot deviates from exact original permit: %+v",scopedPlan)
  }
+ again:=request("POST","operator",targetPlanURL,string(targetPlanBody))
+ if again.Code!=200{
+  t.Fatalf("same human cannot safely re-read approved plan: %d %s",
+   again.Code,again.Body)
+ }
+ var exportCount int
+ if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*)
+  FROM project_goal_instrument_probe_plan_exports
+  WHERE challenge_id=? AND actor_principal_id=?`,
+  mch.ID,"operator").Scan(&exportCount);err!=nil||exportCount!=1{
+  t.Fatalf("re-read duplicated private-topology access ledger: %d %v",
+   exportCount,err)
+ }
+ var eventCount int
+ if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
+  WHERE event_type='project.goal_instrument_probe_plan_first_exported'
+   AND CAST(payload_json AS TEXT) NOT LIKE '%192.168.42.247%'`).
+   Scan(&eventCount);err!=nil||eventCount!=1{
+  t.Fatalf("private endpoint export audit missing or duplicated: %d %v",
+   eventCount,err)
+ }
+ var leaked int
+ if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
+  WHERE event_type='project.goal_instrument_probe_plan_first_exported'
+   AND CAST(payload_json AS TEXT) LIKE '%192.168.42.247%'`).
+   Scan(&leaked);err!=nil||leaked!=0{
+  t.Fatalf("private endpoint appeared in audit payload: %d %v",leaked,err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`DELETE FROM
+  project_goal_instrument_probe_plan_exports WHERE challenge_id=?`,mch.ID);err==nil{
+  t.Fatal("human private topology-export audit could be deleted")
+ }
  observedAt:=clock.Real{}.UnixMilli()
  if observedAt<mch.IssuedAt{observedAt=mch.IssuedAt}
  preparation:=map[string]any{

@@ -83,6 +83,11 @@ const instrumentMeasurementColumns=`id,project_id,goal_id,instrument_key_id,
  challenge_id,declared_target_id,tls_pin_id,source_id,measurement_type,
  outcome,observed_at,accepted_at,signature_sha256,proof_class`
 
+const instrumentMeasurementColumnsQualified=`m.id,m.project_id,m.goal_id,
+ m.instrument_key_id,m.challenge_id,m.declared_target_id,m.tls_pin_id,
+ m.source_id,m.measurement_type,m.outcome,m.observed_at,m.accepted_at,
+ m.signature_sha256,m.proof_class`
+
 func scanSignedMeasurement(row scanner)(SignedMeasurementClaim,error){
  var p SignedMeasurementClaim
  err:=row.Scan(&p.ID,&p.ProjectID,&p.GoalID,&p.InstrumentKeyID,
@@ -304,7 +309,7 @@ func(s *Service)GetGoalInstrumentMeasurementBundle(ctx context.Context,
  var nonce []byte
  var pinHash,keyPlan string
  var issued,expires int64
- err:=s.db.QueryRowContext(ctx,`SELECT `+instrumentMeasurementColumns+`,
+ err:=s.db.QueryRowContext(ctx,`SELECT `+instrumentMeasurementColumnsQualified+`,
   m.signed_payload,m.signature,k.public_key,
   ch.signing_payload,ch.nonce,ch.issued_at,ch.expires_at,
   pin.certificate_sha256,k.plan_hash

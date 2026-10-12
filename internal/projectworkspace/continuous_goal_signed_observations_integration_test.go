@@ -122,6 +122,30 @@ func TestLevel5SignedObservationEnrollmentAntiReplayAndLiveRevocation(t *testing
   t.Fatal("cross-goal signature accepted")
  }
  secondSig:=sign(second,priv,2)
+ // Live revocation and identity-type changes override a valid signature
+ // at the final durable admission boundary, without consuming sequence 2.
+ for _,principal:=range []string{"source","owner"}{
+  if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships
+   SET status='revoked' WHERE workspace_id='tenant' AND principal_id=?`,principal);err!=nil{t.Fatal(err)}
+  if _,err=accept(second,2,secondSig);!errors.Is(err,ErrPrincipalIneligible){
+   t.Fatalf("revoked %s was accepted as source authority: %v",principal,err)
+  }
+  if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships
+   SET status='active' WHERE workspace_id='tenant' AND principal_id=?`,principal);err!=nil{t.Fatal(err)}
+ }
+ for _,entry:=range []struct{id,kind string}{
+  {"source","human"},{"owner","agent"},
+ }{
+  if _,err=db.SQL().ExecContext(ctx,`UPDATE principals
+   SET principal_type=? WHERE id=?`,entry.kind,entry.id);err!=nil{t.Fatal(err)}
+  if _,err=accept(second,2,secondSig);!errors.Is(err,ErrPrincipalIneligible){
+   t.Fatalf("demoted %s was accepted as valid source/approver: %v",entry.id,err)
+  }
+  restored:="service"
+  if entry.id=="owner"{restored="human"}
+  if _,err=db.SQL().ExecContext(ctx,`UPDATE principals
+   SET principal_type=? WHERE id=?`,restored,entry.id);err!=nil{t.Fatal(err)}
+ }
  proof2,err:=accept(second,2,secondSig)
  if err!=nil||proof2.Sequence!=2{t.Fatalf("new ordered proof: %+v %v",proof2,err)}
  coverage,err:=svc.GoalEvidenceCoverage(ctx,p.ID,g.ID)

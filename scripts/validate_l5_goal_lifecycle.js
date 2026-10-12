@@ -191,4 +191,38 @@ for(const token of ["x.tcp_reachability","x.last_tcp_test_at",
  "(not verified health)"]){
  assert(ui.includes(token),"read-only TCP coverage UI missing "+token);
 }
+// Opt-in unattended TCP checks require a separate, expiring human grant.
+// The ordinary manual source permit is NEVER background-scheduler authority.
+const recurring=fs.readFileSync("internal/projectworkspace/continuous_goal_tcp_recurring_grants.go","utf8");
+const recurringAdmission=fs.readFileSync("internal/projectworkspace/continuous_goal_tcp_recurring_admission.go","utf8");
+const recurringWorker=fs.readFileSync("internal/projectworkspace/continuous_goal_tcp_recurring_worker.go","utf8");
+const recurringAPI=fs.readFileSync("internal/api/project_goal_tcp_recurring_grants.go","utf8");
+const recurringDDL=fs.readFileSync("migrations/0065_goal_tcp_recurring_grants.sql","utf8");
+for(const token of ["ApproveTCPRecurringGrant","RevokeTCPRecurringGrant",
+ "ExpectedManualPermitRevision","humanGoalReviewer",
+ "ManualPermitID","ExpiresAt","recurring_tcp_connect"]){
+ assert(recurring.includes(token),"independent recurring TCP authority missing "+token);
+}
+for(const token of ["authorizeRecurringTCPClaimTx",
+ "GoalTCPRecurringWorkerPrincipal","grant.ManualPermitRevision",
+ "grant.TargetIPv4","grant.CadenceMinutes"]){
+ assert(recurringAdmission.includes(token),"TCP claim admission missing "+token);
+}
+for(const token of ["TickDueTCPRecurringProbes","claimGoalTCPAttempt",
+ "tcpRecurringClaimStillAuthorised","manualTCPProbeSlots",
+ "net.JoinHostPort","LIMIT 32"]){
+ assert(recurringWorker.includes(token),"bounded recurring TCP worker missing "+token);
+}
+for(const token of ["project.write","project.read",
+ "ApproveTCPRecurringGrant","RevokeTCPRecurringGrant"]){
+ assert(recurringAPI.includes(token),"human recurring TCP consent API missing "+token);
+}
+assert(recurringDDL.includes("idx_goal_tcp_recurring_active_source"),
+ "a source may not own overlapping recurring TCP permissions");
+assert(harness.includes("TickDueTCPRecurringProbes(ctx,1)"),
+ "recurring TCP worker must be rate bounded to one source per minute");
+assert(bootstrap.includes("EnsureTCPRecurringWorkerPrincipal(ctx)"),
+ "independent worker identity must be created before scheduler activity");
+assert(!harness.includes("RunManualGoalTCPProbe"),
+ "a manual TCP permission is not background network authority");
 console.log("L5 pause/retire UI and fail-closed goal lifecycle: PASS");

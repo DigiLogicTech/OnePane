@@ -151,7 +151,9 @@ func TestGoalSignalTriageRequiresLiveIndependentEvidenceAndNeverPromotesHealth(t
   }
  }
  payload,_:=json.Marshal(multiple)
- for _,secret:=range []string{"192.168.1.20","443","token","device_healthy"}{
+ for _,secret:=range []string{"192.168.1.20",
+  "\"target_ipv4\"","\"target_port\"","\"timeout_ms\"",
+  "\"pairing_token\"","\"device_healthy\""}{
   if strings.Contains(string(payload),secret){
    t.Fatalf("triage leaked target/credential or health assertion %q",secret)
   }

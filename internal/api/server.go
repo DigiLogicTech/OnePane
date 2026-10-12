@@ -565,6 +565,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-keys/{keyID}/challenge", s.issueProjectGoalInstrumentChallenge)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-keys/{keyID}/prove", s.acceptProjectGoalInstrumentChallenge)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-proofs", s.listProjectGoalInstrumentProofs)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-proofs/{proofID}/verification-bundle", s.getProjectGoalInstrumentVerificationBundle)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tls-pins", s.listProjectGoalTLSPins)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tls-pins/{pinID}/revoke", s.revokeProjectGoalTLSPin)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tls-pins/{pinID}/verify", s.runProjectGoalTLSPinCheck)

@@ -238,6 +238,83 @@ func TestHumanPinnedTLSCertificateRequiresExactExistingTargetAndOneBoundedCheck(
   got.Code!=200||!strings.Contains(got.Body.String(),proof.ID){
   t.Fatalf("human could not audit accepted instrument proof: %d %s",got.Code,got.Body)
  }
+ // A second challenge supports one exact target-scoped, signed instrument
+ // SELF-REPORT; neither an Agent nor a foreign tenant may prepare/admit it.
+ measureChallengeResponse:=request("POST","operator",keyPath+"/challenge",
+  string(challengeBody))
+ if measureChallengeResponse.Code!=201{
+  t.Fatalf("measurement challenge issue failed: %d %s",
+   measureChallengeResponse.Code,measureChallengeResponse.Body)
+ }
+ var mch projectworkspace.GoalInstrumentChallenge
+ if err=json.Unmarshal(measureChallengeResponse.Body.Bytes(),&mch);err!=nil{t.Fatal(err)}
+ observedAt:=clock.Real{}.UnixMilli()
+ if observedAt<mch.IssuedAt{observedAt=mch.IssuedAt}
+ preparation:=map[string]any{
+  "challenge_id":mch.ID,"outcome":"not_connected",
+  "observed_at":observedAt,"expected_goal_revision":goal.Revision,
+ }
+ prepareJSON,_:=json.Marshal(preparation)
+ prepareURL:=keyPath+"/measurement/prepare"
+ acceptURL:=keyPath+"/measurement/accept"
+ for _,who:=range []string{"","robot","outsider"}{
+  if got:=request("POST",who,prepareURL,string(prepareJSON));got.Code<400{
+   t.Fatalf("nonhuman %s prepared measurement signing payload: %d",who,got.Code)
+  }
+ }
+ preparedResponse:=request("POST","operator",prepareURL,string(prepareJSON))
+ if preparedResponse.Code!=200{
+  t.Fatalf("human cannot prepare exact signed observation: %d %s",
+   preparedResponse.Code,preparedResponse.Body)
+ }
+ var prepared projectworkspace.InstrumentMeasurementSigningPayload
+ if err=json.Unmarshal(preparedResponse.Body.Bytes(),&prepared);err!=nil{t.Fatal(err)}
+ if len(prepared.SigningPayload)==0||prepared.ObserverVantageVerified{
+  t.Fatalf("prepared measurement claims verified source vantage: %+v",prepared)
+ }
+ preparation["signature"]=ed25519.Sign(private,prepared.SigningPayload)
+ acceptanceJSON,_:=json.Marshal(preparation)
+ if got:=request("POST","robot",acceptURL,string(acceptanceJSON));got.Code!=403{
+  t.Fatalf("agent admitted instrument signed claim: %d",got.Code)
+ }
+ accepted:=request("POST","operator",acceptURL,string(acceptanceJSON))
+ if accepted.Code!=201{
+  t.Fatalf("signed instrument self-report admission rejected: %d %s",
+   accepted.Code,accepted.Body)
+ }
+ var mclaim projectworkspace.SignedMeasurementClaim
+ if err=json.Unmarshal(accepted.Body.Bytes(),&mclaim);err!=nil{t.Fatal(err)}
+ if mclaim.Outcome!="not_connected"||mclaim.DeviceIdentityVerified||
+  mclaim.ObserverVantageVerified||mclaim.TargetCorrelationEstablished||
+  mclaim.RemediationAuthorized{
+  t.Fatalf("signed source self-report became verified network truth: %+v",mclaim)
+ }
+ if got:=request("POST","operator",acceptURL,string(acceptanceJSON));got.Code<400{
+  t.Fatalf("instrument signed measurement replay passed HTTP: %d",got.Code)
+ }
+ mlistURL:=base+"/instrument-measurements"
+ if got:=request("GET","robot",mlistURL,"");got.Code!=403{
+  t.Fatalf("Agent read human-only signed measurement list: %d",got.Code)
+ }
+ if got:=request("GET","operator",mlistURL,"");got.Code!=200||
+  !strings.Contains(got.Body.String(),mclaim.ID){
+  t.Fatalf("signed measurement list missing valid proof: %d %s",got.Code,got.Body)
+ }
+ mbundleURL:=mlistURL+"/"+mclaim.ID+"/verification-bundle"
+ if got:=request("GET","outsider",mbundleURL,"");got.Code!=403{
+  t.Fatalf("cross tenant accessed signed instrument measurement: %d",got.Code)
+ }
+ mexport:=request("GET","operator",mbundleURL,"")
+ if mexport.Code!=200{t.Fatalf("signed measurement bundle unavailable: %d %s",
+  mexport.Code,mexport.Body)}
+ var mverify projectworkspace.InstrumentMeasurementVerificationBundle
+ if err=json.Unmarshal(mexport.Body.Bytes(),&mverify);err!=nil{t.Fatal(err)}
+ if !mverify.DetachedSignatureVerified||
+  !ed25519.Verify(ed25519.PublicKey(mverify.PublicKey),
+   mverify.SigningPayload,mverify.Signature)||
+  strings.Contains(mexport.Body.String(),"192.168.42.247"){
+  t.Fatalf("offline signed measurement verification or privacy failed: %+v",mverify)
+ }
  goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
  revokeKeyBody,_:=json.Marshal(map[string]any{
   "expected_goal_revision":goal.Revision,
@@ -253,6 +330,10 @@ func TestHumanPinnedTLSCertificateRequiresExactExistingTargetAndOneBoundedCheck(
  }
  if got:=request("GET","operator",bundlePath,"");got.Code!=200{
   t.Fatalf("human cannot inspect immutable instrument proof after key revoke: %d %s",
+   got.Code,got.Body)
+ }
+ if got:=request("GET","operator",mbundleURL,"");got.Code!=200{
+  t.Fatalf("human could not audit signed measurement after key revocation: %d %s",
    got.Code,got.Body)
  }
  goal,err=svc.ContinuousGoal(ctx,goal.ID)

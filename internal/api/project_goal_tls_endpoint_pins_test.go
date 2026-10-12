@@ -398,6 +398,28 @@ func TestHumanPinnedTLSCertificateRequiresExactExistingTargetAndOneBoundedCheck(
   t.Fatalf("offline signed measurement verification or privacy failed: %+v",mverify)
  }
  goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
+ // One extra nonce remains UNUSED across the key revocation. The
+ // next probe-plan request must fail due to CURRENT authority loss,
+ // independently of challenge consumption or expiry.
+ freshInput,_:=json.Marshal(map[string]any{
+  "expected_goal_revision":goal.Revision,
+  "expected_key_revision":instrument.Revision,
+ })
+ freshResponse:=request("POST","operator",keyPath+"/challenge",string(freshInput))
+ if freshResponse.Code!=201{
+  t.Fatalf("could not issue unused revocation test nonce: %d %s",
+   freshResponse.Code,freshResponse.Body)
+ }
+ var fresh projectworkspace.GoalInstrumentChallenge
+ if err=json.Unmarshal(freshResponse.Body.Bytes(),&fresh);err!=nil{t.Fatal(err)}
+ freshPlanInput,_:=json.Marshal(map[string]any{
+  "challenge_id":fresh.ID,"expected_goal_revision":goal.Revision,
+ })
+ if got:=request("POST","operator",targetPlanURL,string(freshPlanInput));
+  got.Code!=200{
+  t.Fatalf("currently approved nonce unexpectedly cannot export target: %d %s",
+   got.Code,got.Body)
+ }
  revokeKeyBody,_:=json.Marshal(map[string]any{
   "expected_goal_revision":goal.Revision,
   "expected_key_revision":instrument.Revision,
@@ -417,6 +439,10 @@ func TestHumanPinnedTLSCertificateRequiresExactExistingTargetAndOneBoundedCheck(
  if got:=request("GET","operator",mbundleURL,"");got.Code!=200{
   t.Fatalf("human could not audit signed measurement after key revocation: %d %s",
    got.Code,got.Body)
+ }
+ if got:=request("POST","operator",targetPlanURL,string(freshPlanInput));got.Code<400{
+  t.Fatalf("revoked key still exported a private endpoint for its unused nonce: %d",
+   got.Code)
  }
  goal,err=svc.ContinuousGoal(ctx,goal.ID)
  if err!=nil{t.Fatal(err)}

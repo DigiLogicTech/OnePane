@@ -564,6 +564,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-keys/{keyID}/revoke", s.revokeProjectGoalInstrumentKey)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-keys/{keyID}/challenge", s.issueProjectGoalInstrumentChallenge)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-keys/{keyID}/prove", s.acceptProjectGoalInstrumentChallenge)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-keys/{keyID}/probe-plan", s.prepareProjectGoalInstrumentProbePlan)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-keys/{keyID}/measurement/prepare", s.prepareProjectGoalInstrumentMeasurement)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-keys/{keyID}/measurement/accept", s.acceptProjectGoalInstrumentMeasurement)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-measurements", s.listProjectGoalInstrumentMeasurements)

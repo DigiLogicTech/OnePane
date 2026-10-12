@@ -315,11 +315,13 @@ func(s *Service)completeTCPAttempt(ctx context.Context,a GoalTCPProbeAttempt,sta
 // successful connection. Only possession of a real dialled connection with
 // no error is evidence of TCP reachability (not security or health).
 func tcpDialOutcome(parentCtx, dialCtx context.Context, conn net.Conn, dialErr error) string {
- if parentCtx.Err()!=nil||errors.Is(dialErr,context.Canceled)||
+ if errors.Is(parentCtx.Err(),context.Canceled)||
+  errors.Is(dialErr,context.Canceled)||
   errors.Is(dialCtx.Err(),context.Canceled) {
   return "cancelled"
  }
- if errors.Is(dialErr,context.DeadlineExceeded)||
+ if errors.Is(parentCtx.Err(),context.DeadlineExceeded)||
+  errors.Is(dialErr,context.DeadlineExceeded)||
   errors.Is(dialErr,os.ErrDeadlineExceeded)||
   errors.Is(dialCtx.Err(),context.DeadlineExceeded){
   return "timed_out"

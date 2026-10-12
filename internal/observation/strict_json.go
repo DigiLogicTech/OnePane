@@ -67,3 +67,10 @@ func scanUniqueObservationValue(dec *json.Decoder,depth int)error{
   return fmt.Errorf("unexpected JSON delimiter")
  }
 }
+
+ // ValidateUnambiguousJSON permits security-sensitive API callers to apply
+ // the same depth-bounded, duplicate-key-rejecting JSON parser used by
+ // persisted Observation evidence. It validates syntax only, not meaning.
+func ValidateUnambiguousJSON(raw json.RawMessage) error {
+ return validateUnambiguousObservationJSON(raw)
+}

@@ -14,6 +14,9 @@ on:
       - 'internal/webui/static/model-agentcheck-diagnostics.js'
       - 'internal/webui/static/app-foundation.js'
       - 'internal/webui/static/index.html'
+      - 'internal/webui/static/ux-alignment.css'
+      - 'scripts/validate_product_ux_alignment.js'
+      - 'docs/rc11-product-ux-alignment.md'
       - 'internal/api/qa_execution_evidence.go'
       - 'internal/api/qa_execution_evidence_test.go'
       - 'internal/api/qa_snapshot.go'
@@ -160,6 +163,7 @@ jobs:
           node --check internal/webui/static/app.js
           node scripts/validate_unified_assistant_chat.js
           node scripts/validate_l5_goal_lifecycle.js
+          node scripts/validate_product_ux_alignment.js
           node --check internal/webui/static/settings-redesign.js
           node --check internal/webui/static/qa-execution-provenance.js
           node scripts/validate_qa_execution_provenance.js

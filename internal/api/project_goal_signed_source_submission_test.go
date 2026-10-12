@@ -115,6 +115,11 @@ func TestGoalSignedSourceMachineCredentialAndHumanKeyAPIBoundaries(t *testing.T)
   "cred-source-key",p.ID,g.ID,ws.ID,"tenant",key.ID,"sensor",
   "operator",key.ApprovedAt,key.ExpiresAt)
  if err!=nil{t.Fatal(err)}
+ // Bound source tokens must have a real finite lifetime. In particular,
+ // nil-ttl legacy project bearer credentials must not enter this lane.
+ if _,err=db.SQL().ExecContext(ctx,
+  "UPDATE api_credentials SET expires_at=? WHERE id='cred-source-key'",
+  key.ExpiresAt);err!=nil{t.Fatal(err)}
  // The operator can mint an actual random one-time bearer credential,
  // revoke it without affecting the separate test credential, and never
  // recover its secret from listings, audit events or subsequent requests.

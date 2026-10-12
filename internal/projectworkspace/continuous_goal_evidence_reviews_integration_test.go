@@ -7,6 +7,7 @@ import (
  "encoding/json"
  "errors"
  "testing"
+ "time"
  "strings"
 
  "github.com/DigiLogicTech/OnePane/internal/clock"
@@ -64,6 +65,15 @@ func TestL5EvidenceOnlyReviewIsIdempotentRevocableAndNeverActivatesGoal(t *testi
   ProjectID:p.ID,GoalID:goal.ID,PermitID:permit.ID,
   ExpectedGoalRevision:goal.Revision,ExpectedPermitRevision:permit.Revision,
   ActorPrincipalID:"robot",
+ }
+ // The clock may cross a permit expiry while waiting for the SQLite
+ // writer lock. Verify the final transaction, not the caller preflight
+ // timestamp, decides permission.
+ crossing:=NewService(db.SQL(),db,&twoStepReviewClock{
+  before:permit.ExpiresAt-1,after:permit.ExpiresAt+1,
+ })
+ if _,err:=crossing.ReviewGoalEvidence(ctx,cmd);!errors.Is(err,ErrInvalidTransition){
+  t.Fatalf("expired permit used stale pre-transaction clock: %v",err)
  }
  run,err:=s.ReviewGoalEvidence(ctx,cmd)
  if err!=nil{t.Fatal(err)}
@@ -156,4 +166,16 @@ func TestL5EvidenceReviewDeniedWithoutPermitAndOnPause(t *testing.T){
  if _,err:=s.ReviewGoalEvidence(ctx,cmd);!errors.Is(err,ErrInvalidTransition){
   t.Fatalf("paused goal dispatched review: %v",err)
  }
+}
+
+type twoStepReviewClock struct {
+ before int64
+ after int64
+ calls int
+}
+func(c *twoStepReviewClock)Now()time.Time{return time.UnixMilli(c.after)}
+func(c *twoStepReviewClock)UnixMilli()int64{
+ c.calls++
+ if c.calls==1{return c.before}
+ return c.after
 }

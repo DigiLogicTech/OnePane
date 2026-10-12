@@ -4,6 +4,8 @@ import (
  "context"
  "fmt"
  "strings"
+
+ "github.com/DigiLogicTech/OnePane/internal/authority"
 )
 
 // authorizeToolFeatureActions applies the current canonical Task policy.
@@ -21,6 +23,18 @@ func (g *Gateway) authorizeToolFeatureActions(ctx context.Context,cmd InvokeComm
     strings.HasPrefix(id,"project.runtime.")||
     strings.HasPrefix(id,"project.image."){
    return fmt.Errorf("Project tool requires an attached, scoped Task")
+  }
+  // The persisted feature-policy resolver needs a canonical Task to
+  // identify which Project, Workspace and Agent permissions govern a
+  // generic shell/MCP/OCI or external-send effect. A tenant lease alone
+  // is not a Project permission grant. Keep legacy in-memory Gateway
+  // tests compatible; production gateways always have a scope store.
+  if g.scopes.DB!=nil{
+   switch def.Mode{
+   case authority.ActionExecuteSandboxed,authority.ActionMutate,
+     authority.ActionExternalSend:
+    return fmt.Errorf("side-effecting Tool requires an attached, scoped Task")
+   }
   }
   return nil
  }

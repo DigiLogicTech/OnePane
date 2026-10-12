@@ -139,7 +139,8 @@ func TestGoalSignalTriageRequiresLiveIndependentEvidenceAndNeverPromotesHealth(t
   multiple.RecentNodeNegativeSources!=1||
   len(multiple.Limitations)!=4||
   multiple.DeviceIdentityVerified||multiple.MonitoringActive||
-  multiple.RemediationAuthorized{
+  multiple.RemediationAuthorized||
+  multiple.CrossClassTargetCorrelation!="not_established"{
   t.Fatalf("distinct adverse reports were misclassified as verified health: %+v",multiple)
  }
  for _,src:=range multiple.Sources{
@@ -147,7 +148,8 @@ func TestGoalSignalTriageRequiresLiveIndependentEvidenceAndNeverPromotesHealth(t
    t.Fatal("TCP receipt lost immutable evidence pointer")
   }
   if src.NodeState=="unreachable"&&
-   (src.NodeReceiptID!="node-adverse"||src.PeerNodeID!="peer"){
+   (src.NodeReceiptID!="node-adverse"||src.PeerNodeID!="peer"||
+    src.NodeIdentityClass!="paired_node_transport_self_report"){
    t.Fatal("mTLS receipt lost exact Node source provenance")
   }
  }

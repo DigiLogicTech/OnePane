@@ -114,6 +114,7 @@ func runKeygen(args []string)error{
 func runProbe(args []string)error{
  fs:=flag.NewFlagSet("probe",flag.ContinueOnError)
  challenge:=fs.String("challenge","","human-issued JSON challenge file")
+ planFile:=fs.String("plan","","human-only current OnePane approved probe-plan JSON")
  keyFile:=fs.String("private-key","","base64 Ed25519 private key 0600 file")
  addr:=fs.String("ipv4","","operator-verified exact private IPv4 literal")
  port:=fs.Int("port",0,"operator-approved TCP port")
@@ -126,10 +127,25 @@ func runProbe(args []string)error{
  if err:=readJSON(*challenge,&ch);err!=nil{return err}
  pk,err:=readPrivateKey(*keyFile)
  if err!=nil{return err}
- target:=instrumentprobe.Target{IPv4:*addr,Port:*port,TimeoutMS:*timeout,
-  ConfirmedDeclaredTargetID:*declared}
- receipt,err:=instrumentprobe.ProbeOnce(context.Background(),ch,target,
-  pk,&net.Dialer{},time.Now)
+ var receipt instrumentprobe.LocalProbeReceipt
+ if *planFile!=""{
+  // Fail closed: a plan must be the sole source of the endpoint; mixing
+  // legacy manually selected flags could silently change approved scope.
+  if *addr!=""||*port!=0||*timeout!=0||*declared!=""{
+   return errors.New("approved --plan cannot be combined with manual endpoint flags")
+  }
+  var plan instrumentprobe.ProbePlan
+  if err=readJSON(*planFile,&plan);err!=nil{return err}
+  receipt,err=instrumentprobe.ProbeApprovedPlan(context.Background(),ch,plan,
+   pk,&net.Dialer{},time.Now)
+ }else{
+  // Explicit legacy manual operator workflow. OnePane cannot establish
+  // that these manually selected bytes match the server's original permit.
+  target:=instrumentprobe.Target{IPv4:*addr,Port:*port,TimeoutMS:*timeout,
+   ConfirmedDeclaredTargetID:*declared}
+  receipt,err=instrumentprobe.ProbeOnce(context.Background(),ch,target,
+   pk,&net.Dialer{},time.Now)
+ }
  if err!=nil{return err}
  if err=writeExclusive(*output,receipt);err!=nil{return err}
  fmt.Println("One explicit private-IPv4 TCP probe completed; local signed receipt saved.")

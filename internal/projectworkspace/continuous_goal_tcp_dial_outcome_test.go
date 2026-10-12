@@ -38,6 +38,7 @@ func TestTCPDialOutcomeNeverMisstatesCancelledOrMissingConnections(t *testing.T)
   {"deadline result",context.Background(),context.Background(),nil,context.DeadlineExceeded,"timed_out"},
   {"os deadline result",context.Background(),context.Background(),nil,os.ErrDeadlineExceeded,"timed_out"},
   {"expired dial context",context.Background(),deadlineCtx,nil,nil,"timed_out"},
+  {"expired parent context",deadlineCtx,context.Background(),nil,nil,"timed_out"},
  }
  for _,tc:=range cases{
   t.Run(tc.name,func(t *testing.T){

@@ -22,6 +22,8 @@ type GoalEvidenceCoverage struct {
  Sources []GoalEvidenceSource `json:"sources"`
  Assessment string `json:"assessment"`
  MonitoringActive bool `json:"monitoring_active"`
+ // Short-lived network permission is separate from verified system health.
+ RecurringTCPAuthorizedSources int `json:"recurring_tcp_authorized_sources"`
 }
 
 type GoalEvidenceSource struct {
@@ -32,6 +34,7 @@ type GoalEvidenceSource struct {
  // Observation or proof that the source is healthy or secure.
  LastTCPTestAt int64 `json:"last_tcp_test_at,omitempty"`
  TCPReachability string `json:"tcp_reachability,omitempty"`
+ TCPRecurringAuthorized bool `json:"tcp_recurring_authorized"`
 }
 
 func(s *Service)GoalEvidenceCoverage(ctx context.Context,projectID,goalID string)(GoalEvidenceCoverage,error){
@@ -104,11 +107,38 @@ func(s *Service)GoalEvidenceCoverage(ctx context.Context,projectID,goalID string
  }
  if err=tcpRows.Err();err!=nil{tcpRows.Close();return GoalEvidenceCoverage{},err}
  tcpRows.Close()
+ // An existing manual TCP target permit or stored source name does NOT
+ // activate unattended network traffic. Only independently approved,
+ // unexpired recurring grants with valid approvers and an unchanged
+ // canonical Project/Workspace/source can be reported as authorised.
+ recurring:=map[string]bool{}
+ grantRows,err:=s.db.QueryContext(ctx,`SELECT source_id,id
+  FROM project_goal_tcp_recurring_grants
+  WHERE project_id=? AND goal_id=? AND status='approved'
+   AND expires_at>? ORDER BY source_id,id LIMIT 32`,projectID,goalID,now)
+ if err!=nil{return GoalEvidenceCoverage{},err}
+ type grantScope struct{sourceID,id string}
+ grants:=make([]grantScope,0,32)
+ for grantRows.Next(){
+  var row grantScope
+  if err=grantRows.Scan(&row.sourceID,&row.id);err!=nil{
+   grantRows.Close();return GoalEvidenceCoverage{},err
+  }
+  grants=append(grants,row)
+ }
+ if err=grantRows.Err();err!=nil{grantRows.Close();return GoalEvidenceCoverage{},err}
+ grantRows.Close()
+ for _,candidate:=range grants{
+  valid,err:=s.TCPRecurringGrantAllowed(ctx,candidate.id)
+  if err!=nil{return GoalEvidenceCoverage{},err}
+  if valid{recurring[candidate.sourceID]=true}
+ }
  sources:=make([]GoalEvidenceSource,0,len(plan.SourceIDs))
  fresh,stale,missing:=0,0,0
+ tcpAuthorizedCount:=0
  for _,id:=range plan.SourceIDs{
   seen:=last[id]
-  item:=GoalEvidenceSource{SourceID:id,LastObservedAt:seen}
+  item:=GoalEvidenceSource{SourceID:id,LastObservedAt:seen,TCPRecurringAuthorized:recurring[id]}
   if latest,ok:=tcp[id];ok{
    item.LastTCPTestAt=latest.at
    if latest.outcome=="claimed"{
@@ -128,6 +158,7 @@ func(s *Service)GoalEvidenceCoverage(ctx context.Context,projectID,goalID string
    item.EvidenceState="recent_attached"
    fresh++
   }
+  if item.TCPRecurringAuthorized{tcpAuthorizedCount++}
   sources=append(sources,item)
  }
  _=fresh
@@ -141,6 +172,7 @@ func(s *Service)GoalEvidenceCoverage(ctx context.Context,projectID,goalID string
   GoalStatus:status,GoalHealth:health,AssessedAt:now,
   FreshnessMinutes:freshness,Sources:sources,Assessment:assessment,
   MonitoringActive:false,
+  RecurringTCPAuthorizedSources:tcpAuthorizedCount,
  },nil
 }
 

@@ -81,6 +81,10 @@ for(const token of ["TickDueGoalEvidenceReviews","GoalEvidenceReviewWorkerPrinci
 }
 assert(bootstrap.includes("EnsureGoalEvidenceReviewWorkerPrincipal(ctx)"),"review worker principal not bootstrapped");
 assert(harness.includes("TickDueGoalEvidenceReviews(ctx,8)"),"passive L5 review worker not scheduled");
+for(const token of ["goal_review_worker_cursors","after_permit_id","ORDER BY p.id LIMIT 64",
+ "advanceGoalReviewCursor","dueGoalEvidenceReviewCandidates"]){
+ assert(worker.includes(token),"durable fair review cursor missing "+token);
+}
 assert(ui.includes("Approve recurring receipt review"),"UI does not disclose recurring nature of review consent");
 assert(ui.includes("Device monitoring not activated"),"UI falsely presents receipt review as device monitoring");
 console.log("L5 pause/retire UI and fail-closed goal lifecycle: PASS");

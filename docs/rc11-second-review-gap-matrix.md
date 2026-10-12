@@ -309,3 +309,46 @@ Completed in this integration branch, with source and regression tests:
   bounded remediation approval/rollback; installed hardware QA and final
   independent security audit. Current evidence reviews are manually
   triggered, not autonomous recurring sensor monitoring.
+
+
+## RC11 Level 5 passive recurring evidence reviews — 2026-10-12
+
+- [x] **OPM-05 narrow automatic execution subset:** `harnessd` now invokes
+  `TickDueGoalEvidenceReviews(ctx,8)` on startup and once per minute. This
+  is a bounded CPU/SQLite-only loop that reviews **preexisting, previously
+  attested receipt timestamps** when a human-approved source permit has not
+  expired. It does not load any model or invoke probes, network, shell,
+  secrets, tools or device remediation.
+- [x] The durable reviewer identity is
+  `system:goal-evidence-reviewer`, independently bootstrapped as a named
+  audited system principal. It cannot mint or revoke human permits. Every
+  review rechecks Project/Workspace status, L5 mode, permit revision, grant
+  expiry, exact source and plan hash inside the SQLite transaction.
+- [x] Cadence windows are deduplicated by the immutable
+  `(permit_id,cadence_window)` ledger. Startup and repeated ticks do not
+  replay completed windows, and service restarts do not backfill offline
+  intervals. Revoked permits and paused or retired goals block subsequent
+  work. The candidate batch and per-tick results are bounded, allowing
+  resource-constrained local hardware to remain responsive.
+- [x] Project Inspector labels grant consent as **recurring receipt
+  review** and explicitly states that device/security monitoring and
+  remediation are *not* activated. Separate manual review and immutable
+  historical timeline remain available.
+- [ ] Validate final integrated CI and automatic worker integration
+  regression after the UI contract wording correction in `5b7b8bb`.
+  [Run #38191942666](https://github.com/DigiLogicTech/OnePane/actions/runs/38191942666)
+  was running at checkpoint time. Earlier UI runs failed only an obsolete
+  expected message string and must not be treated as a code-security
+  failure or as proof the new source head is green.
+- [ ] **Next P0-D:** add separately human-approved **real probe**
+  identities/targets, durable external-effect admission and cancellation,
+  bounded/read-only adapter execution and observation intake; establish
+  verified baselines, truthful health, privacy-filtered incident history,
+  signed evidence and approved remediation/postcondition checks.
+- [ ] **Operational performance follow-up:** durable fairness/cursor for
+  large sets of invalid source permits, full retention/compaction policy
+  for historical review ledgers, resource-pressure prioritisation and
+  installed Windows/Ubuntu CPU-only and paired-Node QA. Current source
+  candidate prefetch is capped at 256 and can starve a healthy source
+  beyond that prefix if the earlier candidates repeatedly fail; do not
+  claim starvation-free recurring delivery.

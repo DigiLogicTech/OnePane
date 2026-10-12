@@ -25,11 +25,14 @@ Evidence is current only when the latest qualified observation is no more than *
 
 | `state` | Meaning |
 | --- | --- |
-| `no_recent_measurements` | No qualifying recent evidence from either class |
+| `goal_not_configured` | Goal is paused, retired or otherwise not configured for live evaluation; historical receipts remain available separately |
+| `no_recent_measurements` | Configured Goal with no qualifying recent evidence from either class |
 | `single_measurement_class` | Recent results from only one class, with no adverse outcome |
 | `mixed_classes_no_adverse_indicator` | Both classes have recent records, neither currently adverse |
 | `adverse_indicator_needs_review` | At least one adverse signal, but the strict multi-class/independent-source threshold is not reached |
 | `multiple_adverse_indicators_investigate` | At least two distinct allowlisted source IDs have adverse indicators, **including at least one failed TCP connect and one peer-reported unavailable connection**; investigation is warranted, but this is NOT corroboration of the same target or a security incident |
+
+The response also retains the canonical stored Goal `goal_status` and `goal_health` without promoting either from these diagnostic signals. A paused, retired or otherwise nonconfigured Goal short-circuits current triage with `goal_not_configured`.
 
 All responses explicitly set `monitoring_active=false`, `device_identity_verified=false` and `remediation_authorized=false`. The limitations array explains the missing target/instrument identity and trusted device-health evidence. The method never schedules a Task, opens a socket, changes a Goal, sends an alert or authorises a recovery action.
 

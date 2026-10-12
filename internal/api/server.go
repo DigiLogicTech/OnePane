@@ -1333,6 +1333,12 @@ func respondDomain(w http.ResponseWriter, v any, err error, success int) {
 	case errors.Is(err, projectworkspace.ErrSourceProofRateLimited):
 		w.Header().Set("Retry-After", "60")
 		writeError(w, http.StatusTooManyRequests, "source proof rate limit reached")
+	case errors.Is(err, projectworkspace.ErrInstrumentProjectFiveMinuteRateLimited):
+		w.Header().Set("Retry-After", "300")
+		writeError(w, http.StatusTooManyRequests, "instrument Project five-minute challenge budget reached")
+	case errors.Is(err, projectworkspace.ErrInstrumentProjectDailyRateLimited):
+		w.Header().Set("Retry-After", "86400")
+		writeError(w, http.StatusTooManyRequests, "instrument Project daily challenge budget reached")
 	case errors.Is(err, projectworkspace.ErrInvalidCommand), errors.Is(err, projectworkspace.ErrInvalidTransition):
 		writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, projectworkspace.ErrRevisionConflict):

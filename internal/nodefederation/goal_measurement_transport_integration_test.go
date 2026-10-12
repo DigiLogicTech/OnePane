@@ -9,6 +9,7 @@ import (
  "encoding/json"
  "errors"
  "fmt"
+ "net/http"
  "net/http/httptest"
  "strings"
  "testing"
@@ -86,9 +87,12 @@ func TestGoalNodeMeasurementsRequireHumanScopeRealPeerTLSAndMonotonicReceipt(t *
  if err!=nil||len(listed)!=1||listed[0].ID!=grant.ID{
   t.Fatalf("human grant inventory unavailable: %+v %v",listed,err)
  }
+ origin,err:=EnsureIdentity(t.TempDir(),"origin")
+ if err!=nil{t.Fatal(err)}
  service:=NewService(db.SQL(),db,clock.Real{},
-  NodeView{ID:"origin",Local:true},Identity{},"",30*time.Second)
- handler:=NewServer(service,nil).Handler()
+  NodeView{ID:"origin",Local:true},origin,"",30*time.Second)
+ federationServer:=NewServer(service,nil)
+ handler:=federationServer.Handler()
  cert,_:=x509.ParseCertificate(peer.Certificate.Certificate[0])
  otherCert,_:=x509.ParseCertificate(impostor.Certificate.Certificate[0])
  route:="/federation/v1/measurements"
@@ -122,7 +126,36 @@ func TestGoalNodeMeasurementsRequireHumanScopeRealPeerTLSAndMonotonicReceipt(t *
   `,"device_healthy":true}`,cert);got.Code!=400{
   t.Fatalf("client-chosen verified health accepted: %d",got.Code)
  }
- first:=send(makeBody(1),cert)
+ // Actual local TLS handshake with a client certificate verifies the
+ // pinned peer identity boundary beyond synthetic request.TLS test states.
+ live:=httptest.NewUnstartedServer(handler)
+ live.TLS=federationServer.TLSConfig()
+ live.StartTLS()
+ defer live.Close()
+ authenticatedClient:=&http.Client{Transport:&http.Transport{
+  TLSClientConfig:&tls.Config{InsecureSkipVerify:true,
+   Certificates:[]tls.Certificate{peer.Certificate}},
+ }}
+ noCertificateClient:=&http.Client{Transport:&http.Transport{
+  TLSClientConfig:&tls.Config{InsecureSkipVerify:true},
+ }}
+ anonymousResponse,err:=noCertificateClient.Post(
+  live.URL+route,"application/json",strings.NewReader(makeBody(1)))
+ if err!=nil{t.Fatal(err)}
+ anonymousResponse.Body.Close()
+ if anonymousResponse.StatusCode!=401{
+  t.Fatalf("real TLS socket without client certificate admitted: %d",
+   anonymousResponse.StatusCode)
+ }
+ liveResponse,err:=authenticatedClient.Post(
+  live.URL+route,"application/json",strings.NewReader(makeBody(1)))
+ if err!=nil{t.Fatal(err)}
+ liveResponse.Body.Close()
+ if liveResponse.StatusCode!=201{
+  t.Fatalf("pinned peer TLS handshake did not admit scoped telemetry: %d",
+   liveResponse.StatusCode)
+ }
+ first:=send(makeBody(2),cert)
  if first.Code!=201{
   t.Fatalf("valid pinned TLS measurement rejected: %d %s",first.Code,first.Body)
  }
@@ -133,7 +166,7 @@ func TestGoalNodeMeasurementsRequireHumanScopeRealPeerTLSAndMonotonicReceipt(t *
   receipt.TransportKind!="pinned_peer_mtls"{
   t.Fatalf("mTLS receipt was not exact grant/Node scoped: %+v",receipt)
  }
- if got:=send(makeBody(1),cert);got.Code!=409{
+ if got:=send(makeBody(2),cert);got.Code!=409{
   t.Fatalf("same sequence replayed successfully: %d",got.Code)
  }
  if got:=send(makeBody(0),cert);got.Code<400{
@@ -142,7 +175,7 @@ func TestGoalNodeMeasurementsRequireHumanScopeRealPeerTLSAndMonotonicReceipt(t *
  if got:=send(makeBody(2)+makeBody(3),cert);got.Code!=400{
   t.Fatalf("multiple JSON roots accepted: %d",got.Code)
  }
- for i:=int64(2);i<=30;i++{
+ for i:=int64(3);i<=30;i++{
   got:=send(makeBody(i),cert)
   if got.Code!=201{t.Fatalf("bounded Node sample %d rejected: %d %s",i,got.Code,got.Body)}
  }

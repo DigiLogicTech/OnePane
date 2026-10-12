@@ -42,7 +42,9 @@ func scopedReadGateway(t *testing.T,db *sql.DB, a authorityConsumer)(*Gateway,*c
  reg:=NewRegistry()
  err:=reg.Register(Definition{
   ID:"project.app.files.inspect",Version:"1",CapabilityID:"filesystem.read",
-  Mode:authority.ActionRead,AdapterID:adapter.id,AdapterVersion:adapter.version,
+  // Mirror the real built-in Project files.inspect registration:
+  // it executes a fixed command inside an approved OCI sandbox.
+  Mode:authority.ActionExecuteSandboxed,AdapterID:adapter.id,AdapterVersion:adapter.version,
   Risk:policy.RiskLow,MinimumVerification:policy.VerificationV1,
   MinimumApproval:policy.ApprovalNone,
  },adapter)
@@ -51,6 +53,7 @@ func scopedReadGateway(t *testing.T,db *sql.DB, a authorityConsumer)(*Gateway,*c
  evaluator:=&fakePolicy{decision:policy.Decision{Allowed:true,LeaseRevision:1,RequiredApproval:policy.ApprovalNone}}
  gateway:=newGateway(store,evaluator,a,reg,&fakeClock{now:1000})
  gateway.scopes=featurepolicy.StoredScopes{DB:db}
+ gateway.EnableSandboxAdapter(adapter.id,adapter.version)
  return gateway,adapter,store
 }
 

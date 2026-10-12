@@ -130,18 +130,7 @@ func(s *Service)runRecurringGoalTCPProbe(ctx context.Context,
  conn,dialErr:=dialer.DialContext(dialCtx,"tcp4",
   net.JoinHostPort(claim.TargetIPv4,strconv.Itoa(claim.TargetPort)))
  if conn!=nil{_ = conn.Close()}
- outcome:="connected"
- if dialErr!=nil{
-  outcome="not_connected"
-  switch {
-  case errors.Is(dialErr,context.Canceled)||ctx.Err()!=nil:
-   // Host shutdown or operator cancellation is not endpoint failure.
-   outcome="cancelled"
-  case errors.Is(dialErr,context.DeadlineExceeded)||
-    dialCtx.Err()==context.DeadlineExceeded:
-   outcome="timed_out"
-  }
- }
+ outcome:=tcpDialOutcome(ctx,dialCtx,conn,dialErr)
  return s.completeTCPAttempt(ctx,claim,outcome)
 }
 

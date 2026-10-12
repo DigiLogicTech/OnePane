@@ -259,6 +259,20 @@ func TestHumanPinnedTLSCertificateRequiresExactExistingTargetAndOneBoundedCheck(
     who,got.Code,got.Body)
   }
  }
+ staleGoalBody,_:=json.Marshal(map[string]any{
+  "challenge_id":mch.ID,"expected_goal_revision":goal.Revision+1,
+ })
+ if got:=request("POST","operator",targetPlanURL,string(staleGoalBody));
+  got.Code<400{
+  t.Fatalf("stale Goal revision exported private approved endpoint: %d",got.Code)
+ }
+ crossChallengeBody,_:=json.Marshal(map[string]any{
+  "challenge_id":"another-challenge","expected_goal_revision":goal.Revision,
+ })
+ if got:=request("POST","operator",targetPlanURL,string(crossChallengeBody));
+  got.Code<400{
+  t.Fatalf("foreign nonce exported human-only endpoint plan: %d",got.Code)
+ }
  if got:=request("POST","operator",targetPlanURL,
   strings.TrimSuffix(string(targetPlanBody),"}")+`,"target_ipv4":"8.8.8.8"}`);
   got.Code!=400{

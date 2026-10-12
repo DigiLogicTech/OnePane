@@ -97,6 +97,18 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
  history,err:=svc.ListGoalPinnedTLSChecks(ctx,project.ID,goal.ID)
  if err!=nil||len(history)!=1||history[0].ID!=check.ID||
   history[0].Status!="matched"{t.Fatalf("pin proof not durably listed: %+v %v",history,err)}
+ triage,err:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ if len(triage.Sources)!=1||triage.Sources[0].TLSCheckID!=check.ID||
+  triage.Sources[0].TLSPinID!=pin.ID||
+  triage.Sources[0].TLSCheckState!="matched"||
+  !triage.Sources[0].TLSCertificatePossessionMatched||
+  triage.Sources[0].TLSIdentityClass!="operator_pinned_tls_certificate"||
+  triage.CrossClassTargetCorrelation!="not_established"||
+  triage.DeviceIdentityVerified||triage.MonitoringActive||
+  triage.RemediationAuthorized||triage.RecentNegativeSources!=0{
+  t.Fatalf("certificate possession became device security/incident: %+v",triage)
+ }
  if _,err=svc.runGoalPinnedTLSCheck(ctx,command,dialer);err==nil{
   t.Fatal("a second 5-minute TLS check bypassed resource budget")
  }
@@ -119,6 +131,13 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
   t.Fatal("revoked pin dispatched a network connection")
  }
  if dialer.called!=1{t.Fatalf("revoked pin opened TLS socket: %d",dialer.called)}
+ revokedTriage,err:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ if len(revokedTriage.Sources)!=1||
+  revokedTriage.Sources[0].TLSCertificatePossessionMatched||
+  revokedTriage.Sources[0].TLSCheckState!="no_current_approved_check"{
+  t.Fatalf("revoked pin remained trusted in current triage: %+v",revokedTriage)
+ }
  var count int
  if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM project_goal_tls_endpoint_checks
   WHERE pin_id=?`,pin.ID).Scan(&count);err!=nil||count!=1{

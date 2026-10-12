@@ -52,6 +52,12 @@ type tcpConnectDialer interface {
  DialContext(context.Context,string,string)(net.Conn,error)
 }
 
+// Constrained-hardware default: at most two manual outbound TCP handshake
+// attempts concurrently in one OnePane process. Waiting callers do not
+// claim an attempt, create a socket, or consume the source cadence quota.
+var manualTCPProbeSlots=make(chan struct{},2)
+
+
 const tcpAttemptColumns=`id,project_id,goal_id,permit_id,project_workspace_id,source_id,
 target_ipv4,target_port,timeout_ms,cadence_window,goal_revision,permit_revision,
 requested_by,status,claimed_at,completed_at`
@@ -261,6 +267,13 @@ func(s *Service)RunManualGoalTCPProbe(ctx context.Context,c RunGoalTCPProbeComma
 
 func(s *Service)runManualGoalTCPProbe(ctx context.Context,c RunGoalTCPProbeCommand,dialer tcpConnectDialer)(GoalTCPProbeAttempt,error){
  if dialer==nil{return GoalTCPProbeAttempt{},ErrInvalidCommand}
+ // Do not queue unbounded sockets or Claims when a small CPU/VM is busy.
+ select{
+ case manualTCPProbeSlots<-struct{}{}:
+  defer func(){<-manualTCPProbeSlots}()
+ case <-ctx.Done():
+  return GoalTCPProbeAttempt{},ctx.Err()
+ }
  attempt,err:=s.claimGoalTCPAttempt(ctx,c)
  if err!=nil{return GoalTCPProbeAttempt{},err}
  allowed,e:=s.tcpAttemptStillAuthorised(ctx,attempt)

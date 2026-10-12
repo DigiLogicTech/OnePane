@@ -133,8 +133,12 @@ func(s *Service)runRecurringGoalTCPProbe(ctx context.Context,
  outcome:="connected"
  if dialErr!=nil{
   outcome="not_connected"
-  if errors.Is(dialErr,context.DeadlineExceeded)||
-   errors.Is(dialErr,context.Canceled)||dialCtx.Err()!=nil{
+  switch {
+  case errors.Is(dialErr,context.Canceled)||ctx.Err()!=nil:
+   // Host shutdown or operator cancellation is not endpoint failure.
+   outcome="cancelled"
+  case errors.Is(dialErr,context.DeadlineExceeded)||
+    dialCtx.Err()==context.DeadlineExceeded:
    outcome="timed_out"
   }
  }

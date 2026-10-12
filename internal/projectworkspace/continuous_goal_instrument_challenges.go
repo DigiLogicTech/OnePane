@@ -415,11 +415,11 @@ func(s *Service)AcceptGoalInstrumentChallenge(ctx context.Context,
   }
   _,err=tx.ExecContext(ctx,`INSERT INTO project_goal_instrument_proofs
    (id,instrument_key_id,challenge_id,project_id,goal_id,declared_target_id,
-   tls_pin_id,signature_sha256,accepted_at,proof_class)
-   VALUES(?,?,?,?,?,?,?,?,?,?)`,
+   tls_pin_id,signature_sha256,signature,accepted_at,proof_class)
+   VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
    proof.ID,proof.KeyID,proof.ChallengeID,proof.ProjectID,proof.GoalID,
    proof.DeclaredTargetID,proof.TLSPinID,proof.SignatureSHA256,
-   proof.AcceptedAt,proof.ProofClass)
+   append([]byte(nil),c.Signature...),proof.AcceptedAt,proof.ProofClass)
   if err!=nil{return err}
   body,_:=json.Marshal(map[string]any{
    "goal_id":c.GoalID,"instrument_key_id":key.ID,

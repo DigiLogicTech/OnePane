@@ -43,6 +43,7 @@ type challengeEnvelope struct{
  TLSPinID string `json:"tls_pin_id"`
  PinnedCertificateSHA256 string `json:"pinned_certificate_sha256"`
  PlanHash string `json:"plan_hash"`
+ TargetEndpointSHA256 string `json:"target_endpoint_sha256,omitempty"`
  Nonce []byte `json:"nonce"`
  IssuedAt int64 `json:"issued_at"`
  ExpiresAt int64 `json:"expires_at"`
@@ -130,6 +131,9 @@ func ParseChallenge(ch Challenge,now time.Time)(string,error){
   ch.KeyID==""{return "",errors.New("missing or oversized instrument challenge")}
  var env challengeEnvelope
  if err:=json.Unmarshal(ch.SigningPayload,&env);err!=nil{return "",errors.New("invalid signed challenge envelope")}
+ if env.TargetEndpointSHA256!=""&&!canonicalSHA256(env.TargetEndpointSHA256){
+  return "",errors.New("noncanonical approved endpoint digest")
+ }
  if env.Domain!=challengeDomain||env.ChallengeID!=ch.ID||
   env.InstrumentKeyID!=ch.KeyID||env.ProjectID!=ch.ProjectID||
   env.GoalID!=ch.GoalID||env.TLSPinID==""||env.DeclaredTargetID==""||
@@ -151,6 +155,14 @@ func ParseChallenge(ch Challenge,now time.Time)(string,error){
 
 // ValidateProbePlan binds the plan to exactly the live human-issued nonce
 // and canonical v1 challenge envelope before any network effect.
+// endpointDigest matches the server's live human-approval hash. It never
+// turns a manually supplied address into an attested physical device.
+func endpointDigest(ip string,port int)string{
+ raw:=sha256.Sum256([]byte(fmt.Sprintf(
+  "OnePane/target-endpoint/v1|%s:%d",ip,port)))
+ return fmt.Sprintf("sha256:%x",raw[:])
+}
+
 func ValidateProbePlan(ch Challenge,p ProbePlan,now time.Time)(Target,error){
  id,err:=ParseChallenge(ch,now)
  if err!=nil{return Target{},err}
@@ -165,6 +177,8 @@ func ValidateProbePlan(ch Challenge,p ProbePlan,now time.Time)(Target,error){
   p.DeclaredTargetID!=id||p.TLSPinID!=challengeScope.TLSPinID||
   p.SourceID==""||p.ExpiresAt!=ch.ExpiresAt||
   p.OriginalChallengeSHA256!=expected||
+  challengeScope.TargetEndpointSHA256==""||
+  challengeScope.TargetEndpointSHA256!=endpointDigest(p.TargetIPv4,p.TargetPort)||
   p.AttestationClass!="human_authorised_endpoint_snapshot_not_device_attestation"||
   p.ObserverVantageVerified||p.TargetDeviceIdentityVerified{
   return Target{},errors.New("one-shot target plan diverges from approved challenge")

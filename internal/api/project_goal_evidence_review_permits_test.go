@@ -75,6 +75,32 @@ func TestGoalEvidenceReviewPermitAPIRequiresHumanCASAndDoesNotActivateProbes(t *
   t.Fatalf("permit metadata hidden from owner: %d %s",listing.Code,listing.Body)
  }
  if w:=call("GET","outsider",route,"");w.Code!=403{t.Fatalf("cross-tenant listing: %d",w.Code)}
+ // Review execution is a bounded metadata-only operation, not a probe.
+ reviewRoute:=route+"/"+permit.ID+"/review"
+ reviewBody:=`{"expected_goal_revision":2,"expected_permit_revision":1}`
+ if w:=call("POST","outsider",reviewRoute,reviewBody);w.Code!=403{
+  t.Fatalf("untrusted caller executed review: %d",w.Code)
+ }
+ result:=call("POST","robot",reviewRoute,reviewBody)
+ if result.Code!=200||!strings.Contains(result.Body.String(),`"evidence_state":"missing"`)||
+   !strings.Contains(result.Body.String(),`"monitoring_active":false`){
+  t.Fatalf("read-only review failed: %d %s",result.Code,result.Body)
+ }
+ var run projectworkspace.GoalEvidenceReviewRun
+ if err:=json.Unmarshal(result.Body.Bytes(),&run);err!=nil{t.Fatal(err)}
+ replay:=call("POST","robot",reviewRoute,reviewBody)
+ if replay.Code!=200||!strings.Contains(replay.Body.String(),run.ID){
+  t.Fatalf("same-window replay not idempotent: %d %s",replay.Code,replay.Body)
+ }
+ histRoute:="/v1/projects/"+p.ID+"/continuous-goals/"+goal.ID+"/evidence-reviews"
+ if w:=call("GET","outsider",histRoute,"");w.Code!=403{
+  t.Fatalf("foreign review history access: %d",w.Code)
+ }
+ hist:=call("GET","operator",histRoute,"")
+ if hist.Code!=200||!strings.Contains(hist.Body.String(),run.ID)||
+   strings.Contains(hist.Body.String(),`"monitoring_active":true`){
+  t.Fatalf("review history missing or falsely monitored: %d %s",hist.Code,hist.Body)
+ }
  revokeRoute:=route+"/"+permit.ID+"/revoke"
  revoke:=`{"expected_goal_revision":2,"expected_permit_revision":1}`
  if w:=call("POST","robot",revokeRoute,revoke);w.Code!=403{t.Fatalf("Agent revoked permit: %d %s",w.Code,w.Body)}

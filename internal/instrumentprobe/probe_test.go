@@ -123,6 +123,62 @@ func TestProbeOnceOnePrivateIPv4ConnectionAndLocalSignature(t *testing.T){
   t.Fatal("expired challenge generated a new signed API import")
  }
 }
+func TestV2ManualProbeRejectsDifferentPrivateIPv4OrPortBeforeAnySocket(t *testing.T){
+ now:=time.Now()
+ ch:=fixtureChallengeForEndpoint(t,now,"192.168.5.9",443)
+ _,key,err:=ed25519.GenerateKey(rand.Reader)
+ if err!=nil{t.Fatal(err)}
+ target:=Target{IPv4:"192.168.5.10",Port:443,TimeoutMS:500,
+  ConfirmedDeclaredTargetID:"target1"}
+ for _,change:=range []struct{
+  label string
+  ip string
+  port int
+ }{
+  {"different-private-host","192.168.5.10",443},
+  {"different-port","192.168.5.9",8443},
+ }{
+  t.Run(change.label,func(t *testing.T){
+   target.IPv4=change.ip;target.Port=change.port
+   dial:=&recordingDialer{}
+   if _,err=ProbeOnce(context.Background(),ch,target,key,dial,
+    func()time.Time{return now});err==nil||dial.calls!=0{
+    t.Fatalf("v2 manual fallback dialled an unapproved private endpoint: %v %+v",err,dial)
+   }
+  })
+ }
+ // A caller with the enrolled private key can re-sign a local receipt,
+ // but a v2 mismatch must still be refused on the later import path.
+ approved:=Target{IPv4:"192.168.5.9",Port:443,TimeoutMS:500,
+  ConfirmedDeclaredTargetID:"target1"}
+ dial:=&recordingDialer{}
+ receipt,err:=ProbeOnce(context.Background(),ch,approved,key,dial,
+  func()time.Time{return now})
+ if err!=nil{t.Fatal(err)}
+ altered:=receipt
+ altered.Target.IPv4="192.168.5.10"
+ original,err:=localReceiptSigningBytes(altered)
+ if err!=nil{t.Fatal(err)}
+ altered.LocalReportSignature=ed25519.Sign(key,original)
+ payload,err:=json.Marshal(measurementEnvelope{
+  Domain:measurementDomain,ChallengePayload:ch.SigningPayload,
+  ProjectID:ch.ProjectID,GoalID:ch.GoalID,
+  InstrumentKeyID:ch.KeyID,ChallengeID:ch.ID,DeclaredTargetID:"target1",
+  TLSPinID:"pin1",SourceID:"router",
+  MeasurementType:"endpoint_tcp_connect_claim",
+  Outcome:altered.Outcome,ObservedAt:altered.ObservedAt,
+ })
+ if err!=nil{t.Fatal(err)}
+ prepared:=PreparedMeasurement{
+  ChallengeID:ch.ID,MeasurementType:"endpoint_tcp_connect_claim",
+  Outcome:altered.Outcome,ObservedAt:altered.ObservedAt,
+  SigningPayload:payload,ExpiresAt:ch.ExpiresAt,
+ }
+ if _,err=SignPrepared(altered,prepared,key,1,now);err==nil{
+  t.Fatal("resigned off-target local result gained admission under original v2 target")
+ }
+}
+
 func TestProbeRefusesUnsafeTargetsAndExpiredChallengeWithoutSocket(t *testing.T){
  now:=time.Now()
  ch:=fixtureChallenge(t,now)
@@ -166,7 +222,7 @@ func TestProbeRefusesUnsafeTargetsAndExpiredChallengeWithoutSocket(t *testing.T)
  }
 }
 func TestProbeNeverRetriesFailedConnection(t *testing.T){
- now:=time.Now();ch:=fixtureChallenge(t,now)
+ now:=time.Now();ch:=fixtureChallengeForEndpoint(t,now,"172.16.0.23",443)
  _,key,err:=ed25519.GenerateKey(rand.Reader)
  if err!=nil{t.Fatal(err)}
  d:=&recordingDialer{err:errors.New("connection refused")}

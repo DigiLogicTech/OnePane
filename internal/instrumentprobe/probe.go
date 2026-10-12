@@ -230,6 +230,24 @@ func validOutcome(o string)bool{
  return o=="connected"||o=="not_connected"||o=="timed_out"||o=="unknown"
 }
 
+// validateManualChallengeTarget closes a legacy gap: a v2 challenge already
+// seals its approved IPv4:port digest, so even an explicit manual-target
+// override MUST NOT silently reach a different private endpoint. Historic
+// v1 challenges lack the digest and remain explicitly less protected.
+// This is an integrity constraint on approved address bytes, NOT proof
+// that the physical device or local executable is trustworthy.
+func validateManualChallengeTarget(ch Challenge,target Target)error{
+ var envelope challengeEnvelope
+ if err:=json.Unmarshal(ch.SigningPayload,&envelope);err!=nil{
+  return errors.New("unreadable challenge endpoint scope")
+ }
+ if envelope.Domain==challengeDomainV2&&
+  envelope.TargetEndpointSHA256!=endpointDigest(target.IPv4,target.Port){
+  return errors.New("selected instrument endpoint differs from human-approved v2 scope")
+ }
+ return nil
+}
+
 // ProbeOnce opens AT MOST ONE TCP4 connection to one operator-selected private
 // IPv4 socket. It does not perform DNS, a scan, TLS identity check, HTTP,
 // redirects, application writes, retries, Tasks or automatic monitoring.
@@ -242,6 +260,7 @@ func ProbeOnce(ctx context.Context,ch Challenge,target Target,
  id,err:=ParseChallenge(ch,now())
  if err!=nil{return LocalProbeReceipt{},err}
  if err=ValidateTarget(target,id);err!=nil{return LocalProbeReceipt{},err}
+ if err=validateManualChallengeTarget(ch,target);err!=nil{return LocalProbeReceipt{},err}
  if ctx.Err()!=nil{return LocalProbeReceipt{},ctx.Err()}
  start:=now()
  deadline:=time.Duration(target.TimeoutMS)*time.Millisecond
@@ -285,6 +304,9 @@ func SignPrepared(r LocalProbeReceipt,prepared PreparedMeasurement,
  id,err:=ParseChallenge(r.Challenge,now)
  if err!=nil{return Acceptance{},err}
  if err=ValidateTarget(r.Target,id);err!=nil{return Acceptance{},err}
+ if err=validateManualChallengeTarget(r.Challenge,r.Target);err!=nil{
+  return Acceptance{},err
+ }
  var original challengeEnvelope
  if err=json.Unmarshal(r.Challenge.SigningPayload,&original);err!=nil{
   return Acceptance{},errors.New("invalid original signing challenge")

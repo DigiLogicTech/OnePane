@@ -307,12 +307,13 @@ func(s *Service)GetGoalInstrumentMeasurementBundle(ctx context.Context,
  var result InstrumentMeasurementVerificationBundle
  var chPayload []byte
  var nonce []byte
- var pinHash,keyPlan string
+ var pinHash,keyPlan,targetIP string
+ var targetPort int
  var issued,expires int64
  err:=s.db.QueryRowContext(ctx,`SELECT `+instrumentMeasurementColumnsQualified+`,
   m.signed_payload,m.signature,k.public_key,
   ch.signing_payload,ch.nonce,ch.issued_at,ch.expires_at,
-  pin.certificate_sha256,k.plan_hash
+  pin.certificate_sha256,k.plan_hash,target.target_ipv4,target.target_port
   FROM project_goal_instrument_measurement_claims m
   JOIN project_goal_instrument_keys k ON k.id=m.instrument_key_id
    AND k.project_id=m.project_id AND k.goal_id=m.goal_id
@@ -344,7 +345,7 @@ func(s *Service)GetGoalInstrumentMeasurementBundle(ctx context.Context,
    &result.Claim.Outcome,&result.Claim.ObservedAt,&result.Claim.AcceptedAt,
    &result.Claim.SignatureSHA256,&result.Claim.ProofClass,
    &result.SigningPayload,&result.Signature,&result.PublicKey,
-   &chPayload,&nonce,&issued,&expires,&pinHash,&keyPlan)
+   &chPayload,&nonce,&issued,&expires,&pinHash,&keyPlan,&targetIP,&targetPort)
  if errors.Is(err,sql.ErrNoRows){return InstrumentMeasurementVerificationBundle{},ErrInvalidTransition}
  if err!=nil{return InstrumentMeasurementVerificationBundle{},err}
  var msg instrumentMeasurementEnvelope
@@ -366,7 +367,8 @@ func(s *Service)GetGoalInstrumentMeasurementBundle(ctx context.Context,
   msg.MeasurementType!=result.Claim.MeasurementType||
   msg.Outcome!=result.Claim.Outcome||
   msg.ObservedAt!=result.Claim.ObservedAt||
-  base.Domain!="OnePane/instrument-challenge/ed25519/v1"||
+  (base.Domain!="OnePane/instrument-challenge/ed25519/v1"&&
+   base.Domain!="OnePane/instrument-challenge/ed25519/v2")||
   base.ProjectID!=projectID||base.GoalID!=goalID||
   base.InstrumentKeyID!=result.Claim.InstrumentKeyID||
   base.ChallengeID!=result.Claim.ChallengeID||
@@ -377,6 +379,10 @@ func(s *Service)GetGoalInstrumentMeasurementBundle(ctx context.Context,
   base.ExpiresAt!=expires||
   msg.ObservedAt<issued||msg.ObservedAt>=expires||
   result.Claim.AcceptedAt>=expires{
+  return InstrumentMeasurementVerificationBundle{},ErrInvalidTransition
+ }
+ if base.Domain=="OnePane/instrument-challenge/ed25519/v2"&&
+  base.TargetEndpointSHA256!=goalEndpointDigest(targetIP,targetPort){
   return InstrumentMeasurementVerificationBundle{},ErrInvalidTransition
  }
  sum:=sha256.Sum256(result.Signature)

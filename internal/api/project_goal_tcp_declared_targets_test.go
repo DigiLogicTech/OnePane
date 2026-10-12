@@ -141,6 +141,20 @@ func TestDeclaredTCPTargetIsHumanOnlyAndNeverRetroactiveDeviceAttestation(t *tes
  if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
   SET monitoring_plan_json=?,revision=revision+1 WHERE id=?`,
   `{"version":1,"source_ids":["router"]}`,goal.ID);err!=nil{t.Fatal(err)}
+ // Even retaining the original source name cannot silently transfer an
+ // immutable target label to a modified monitoring plan.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
+  SET monitoring_plan_json=?,revision=revision+1 WHERE id=?`,
+  `{"version":1,"source_ids":["router","secondary"]}`,goal.ID);err!=nil{t.Fatal(err)}
+ listed=call("GET","operator",route,"")
+ if listed.Code!=200||!strings.Contains(listed.Body.String(),
+  "\"effective_identity_state\":\"permit_inactive\""){
+  t.Fatalf("changed plan reused old target authority despite source match: %d %s",
+   listed.Code,listed.Body)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
+  SET monitoring_plan_json=?,revision=revision+1 WHERE id=?`,
+  `{"version":1,"source_ids":["router"]}`,goal.ID);err!=nil{t.Fatal(err)}
  if got:=call("GET","outsider",route,"");got.Code!=403{
   t.Fatalf("foreign tenant listed target: %d",got.Code)
  }

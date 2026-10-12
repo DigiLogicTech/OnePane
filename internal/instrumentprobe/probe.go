@@ -97,6 +97,13 @@ type Acceptance struct{
  ExpectedGoalRevision int64 `json:"expected_goal_revision"`
 }
 
+func canonicalSHA256(s string)bool{
+ if len(s)!=71||s[:7]!="sha256:"{return false}
+ for _,ch:=range s[7:]{
+  if !((ch>='0'&&ch<='9')||(ch>='a'&&ch<='f')){return false}
+ }
+ return true
+}
 func ParseChallenge(ch Challenge,now time.Time)(string,error){
  if len(ch.SigningPayload)<128||len(ch.SigningPayload)>2048||
   len(ch.Nonce)!=32||ch.Status!="issued"||ch.ID==""||ch.ProjectID==""||ch.GoalID==""||
@@ -109,7 +116,7 @@ func ParseChallenge(ch Challenge,now time.Time)(string,error){
   !bytes.Equal(env.Nonce,ch.Nonce)||env.IssuedAt!=ch.IssuedAt||
   env.ExpiresAt!=ch.ExpiresAt||ch.ExpiresAt<=ch.IssuedAt||
   ch.ExpiresAt-ch.IssuedAt>120000||
-  len(env.PinnedCertificateSHA256)!=71||len(env.PlanHash)!=71||
+  !canonicalSHA256(env.PinnedCertificateSHA256)||!canonicalSHA256(env.PlanHash)||
   now.UnixMilli()<ch.IssuedAt||now.UnixMilli()>=ch.ExpiresAt{
   return "",errors.New("stale or inconsistent instrument challenge")
  }
@@ -200,6 +207,10 @@ func SignPrepared(r LocalProbeReceipt,prepared PreparedMeasurement,
  id,err:=ParseChallenge(r.Challenge,now)
  if err!=nil{return Acceptance{},err}
  if err=ValidateTarget(r.Target,id);err!=nil{return Acceptance{},err}
+ var original challengeEnvelope
+ if err=json.Unmarshal(r.Challenge.SigningPayload,&original);err!=nil{
+  return Acceptance{},errors.New("invalid original signing challenge")
+ }
  localBytes,err:=localReceiptSigningBytes(r)
  if err!=nil{return Acceptance{},err}
  pub:=private.Public().(ed25519.PublicKey)
@@ -217,7 +228,8 @@ func SignPrepared(r LocalProbeReceipt,prepared PreparedMeasurement,
   !bytes.Equal(env.ChallengePayload,r.Challenge.SigningPayload)||
   env.ProjectID!=r.Challenge.ProjectID||env.GoalID!=r.Challenge.GoalID||
   env.InstrumentKeyID!=r.Challenge.KeyID||env.ChallengeID!=r.Challenge.ID||
-  env.DeclaredTargetID!=id||env.TLSPinID==""||env.SourceID==""||
+  env.DeclaredTargetID!=id||env.TLSPinID!=original.TLSPinID||
+  env.SourceID==""||
   env.ObservedAt!=r.ObservedAt||env.Outcome!=r.Outcome||
   prepared.ChallengeID!=r.Challenge.ID||
   prepared.MeasurementType!="endpoint_tcp_connect_claim"||

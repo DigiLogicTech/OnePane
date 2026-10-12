@@ -74,6 +74,14 @@ func scopedToolActions(capabilityID, toolID string, mode authority.ActionMode)([
     // alone must not bypass an explicitly read-only Workspace.
     return []string{"files.write","process.execute","network.connect"},true
   }
+  // Never let a new Project-scoped tool borrow the generic capability
+  // vocabulary without an explicit reviewed effect manifest. These names
+  // carry privileged canonical Project/Workspace meaning and are reserved.
+  if strings.HasPrefix(id,"project.app.")||
+    strings.HasPrefix(id,"project.runtime.")||
+    strings.HasPrefix(id,"project.image."){
+    return nil,false
+  }
   // Unknown adapter identities must be classified by their *actual
   // execution mode first*. A custom sandbox command declaring
   // filesystem.read may still write/execute; a network-sending adapter

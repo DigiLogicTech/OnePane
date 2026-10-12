@@ -26,6 +26,7 @@ type GoalSignalTriage struct {
  MonitoringActive bool `json:"monitoring_active"`
  DeviceIdentityVerified bool `json:"device_identity_verified"`
  RemediationAuthorized bool `json:"remediation_authorized"`
+ CrossClassTargetCorrelation string `json:"cross_class_target_correlation"`
  Limitations []string `json:"limitations"`
 }
 type GoalSignalTriageSource struct {
@@ -38,6 +39,7 @@ type GoalSignalTriageSource struct {
  NodeState string `json:"node_state"`
  NodeObservedAt int64 `json:"node_observed_at,omitempty"`
  NodeReceiptID string `json:"node_receipt_id,omitempty"`
+ NodeIdentityClass string `json:"node_identity_class,omitempty"`
  PeerNodeID string `json:"peer_node_id,omitempty"`
  NegativeIndicator bool `json:"negative_indicator"`
 }
@@ -73,6 +75,7 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
   GoalStatus:coverage.GoalStatus,GoalHealth:coverage.GoalHealth,
   AssessedAt:now,SignalFreshnessMinutes:15,
   State:"no_recent_measurements",
+  CrossClassTargetCorrelation:"not_established",
   Sources:make([]GoalSignalTriageSource,0,len(coverage.Sources)),
   Limitations:[]string{
    "tcp_connect_tests_reachability_not_device_security",
@@ -222,7 +225,8 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
   if err!=nil&&!errors.Is(err,sql.ErrNoRows){return GoalSignalTriage{},err}
   if err==nil{
    item.NodeState=nodeOutcome;item.NodeReceiptID=receiptID
-   item.NodeObservedAt=nodeAt;item.PeerNodeID=nodeID;seenNode=true
+   item.NodeObservedAt=nodeAt;item.PeerNodeID=nodeID
+   item.NodeIdentityClass="paired_node_transport_self_report";seenNode=true
    if nodeOutcome=="unreachable"{
     item.NegativeIndicator=true;out.RecentNodeNegativeSources++
    }

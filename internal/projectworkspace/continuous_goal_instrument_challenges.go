@@ -1,6 +1,7 @@
 package projectworkspace
 
 import(
+ "bytes"
  "context"
  "crypto/ed25519"
  "crypto/rand"
@@ -337,9 +338,11 @@ func(s *Service)IssueGoalInstrumentChallenge(ctx context.Context,
   challenge.SigningPayload,err=instrumentSigningBytes(key,pin,challenge)
   if err!=nil{return err}
   _,err=tx.ExecContext(ctx,`INSERT INTO project_goal_instrument_challenges
-   (id,instrument_key_id,project_id,goal_id,nonce,issued_at,expires_at,
-   status,accepted_at) VALUES(?,?,?,?,?,?,?,'issued',0)`,
-   challenge.ID,key.ID,c.ProjectID,c.GoalID,challenge.Nonce,now,expires)
+   (id,instrument_key_id,project_id,goal_id,nonce,signing_payload,
+    issued_at,expires_at,status,accepted_at)
+   VALUES(?,?,?,?,?,?,?,?,'issued',0)`,
+   challenge.ID,key.ID,c.ProjectID,c.GoalID,challenge.Nonce,
+   challenge.SigningPayload,now,expires)
   if err!=nil{return err}
   body,_:=json.Marshal(map[string]any{
    "goal_id":c.GoalID,"instrument_key_id":key.ID,"challenge_id":idv,
@@ -384,20 +387,28 @@ func(s *Service)AcceptGoalInstrumentChallenge(ctx context.Context,
   challenge.KeyID=c.KeyID
   challenge.ProjectID=c.ProjectID
   challenge.GoalID=c.GoalID
-  err=tx.QueryRowContext(ctx,`SELECT nonce,issued_at,expires_at,status
+  err=tx.QueryRowContext(ctx,`SELECT nonce,signing_payload,issued_at,expires_at,status
    FROM project_goal_instrument_challenges
    WHERE id=? AND instrument_key_id=? AND project_id=? AND goal_id=?`,
    c.ChallengeID,c.KeyID,c.ProjectID,c.GoalID).
-   Scan(&challenge.Nonce,&challenge.IssuedAt,&challenge.ExpiresAt,&challenge.Status)
+   Scan(&challenge.Nonce,&challenge.SigningPayload,
+    &challenge.IssuedAt,&challenge.ExpiresAt,&challenge.Status)
   if errors.Is(err,sql.ErrNoRows){return ErrInvalidTransition}
   if err!=nil{return err}
   if challenge.Status!="issued"||challenge.ExpiresAt<=now||
    challenge.IssuedAt>now||challenge.IssuedAt<key.ApprovedAt{
    return ErrInvalidTransition
   }
-  message,err:=instrumentSigningBytes(key,pin,challenge)
+  // Check that persisted bytes are still the canonical v1 envelope
+  // required by this live two-minute challenge; a later code version may
+  // change new messages but cannot change historical issuance bytes.
+  expected,err:=instrumentSigningBytes(key,pin,challenge)
   if err!=nil{return err}
-  if !ed25519.Verify(ed25519.PublicKey(key.PublicKey),message,c.Signature){
+  if !bytes.Equal(challenge.SigningPayload,expected){
+   return ErrInvalidTransition
+  }
+  if !ed25519.Verify(ed25519.PublicKey(key.PublicKey),
+   challenge.SigningPayload,c.Signature){
    return ErrInvalidCommand
   }
   updated,err:=tx.ExecContext(ctx,`UPDATE project_goal_instrument_challenges
@@ -557,7 +568,8 @@ func(s *Service)GetGoalInstrumentVerificationBundle(ctx context.Context,
   p.declared_target_id,p.tls_pin_id,p.signature_sha256,
   p.accepted_at,p.proof_class,p.signature,
   k.public_key,k.plan_hash,pin.certificate_sha256,
-  challenge.nonce,challenge.issued_at,challenge.expires_at
+  challenge.nonce,challenge.signing_payload,
+  challenge.issued_at,challenge.expires_at
   FROM project_goal_instrument_proofs p
   JOIN project_goal_instrument_keys k ON k.id=p.instrument_key_id
    AND k.project_id=p.project_id AND k.goal_id=p.goal_id
@@ -581,7 +593,7 @@ func(s *Service)GetGoalInstrumentVerificationBundle(ctx context.Context,
    &out.Proof.ProjectID,&out.Proof.GoalID,&out.Proof.DeclaredTargetID,
    &out.Proof.TLSPinID,&out.Proof.SignatureSHA256,&out.Proof.AcceptedAt,
    &out.Proof.ProofClass,&out.Signature,&out.PublicKey,&planHash,
-   &certHash,&nonce,&issuedAt,&expiresAt)
+   &certHash,&nonce,&out.SigningPayload,&issuedAt,&expiresAt)
  if errors.Is(err,sql.ErrNoRows){return GoalInstrumentVerificationBundle{},ErrInvalidTransition}
  if err!=nil{return GoalInstrumentVerificationBundle{},err}
  key:=GoalInstrumentKey{ID:out.Proof.KeyID,ProjectID:projectID,GoalID:goalID,
@@ -591,8 +603,13 @@ func(s *Service)GetGoalInstrumentVerificationBundle(ctx context.Context,
  challenge:=GoalInstrumentChallenge{
   ID:out.Proof.ChallengeID,Nonce:nonce,IssuedAt:issuedAt,ExpiresAt:expiresAt,
  }
- out.SigningPayload,err=instrumentSigningBytes(key,pin,challenge)
- if err!=nil{return GoalInstrumentVerificationBundle{},err}
+ // Preserve the original immutable signing bytes rather than relying
+ // on a later Go version to reconstruct a bit-identical old JSON format.
+ // The response includes the original key, pin and challenge identifiers
+ // in those bytes; independent Ed25519 verification is authoritative.
+ _=key
+ _=pin
+ _=challenge
  actual:=sha256.Sum256(out.Signature)
  if len(out.Signature)!=ed25519.SignatureSize||
   len(out.PublicKey)!=ed25519.PublicKeySize||

@@ -1,0 +1,146 @@
+// OnePane one-shot instrument probe. Explicit, human-initiated operation
+// only. This program does NOT attest the host's identity or replace OnePane
+// human approval, and does not send an HTTP request by itself.
+//
+// Protocol:
+// 1. Human obtains a one-use challenge using authenticated OnePane API.
+// 2. probe: one private IPv4 TCP connect, sign private local receipt.
+// 3. Human submits the receipt's outcome/observed_at through the existing
+//    instrument measurement/prepare endpoint.
+// 4. sign: verify the exact prepared bytes against the locally signed receipt,
+//    output a detached signature request for human API /measurement/accept.
+package main
+
+import(
+ "context"
+ "crypto/ed25519"
+ "encoding/base64"
+ "encoding/json"
+ "errors"
+ "flag"
+ "fmt"
+ "net"
+ "os"
+ "runtime"
+ "time"
+
+ "github.com/DigiLogicTech/OnePane/internal/instrumentprobe"
+)
+
+func readPrivateKey(path string)(ed25519.PrivateKey,error){
+ if path==""{return nil,errors.New("private key file required")}
+ stat,err:=os.Stat(path)
+ if err!=nil{return nil,err}
+ if !stat.Mode().IsRegular(){return nil,errors.New("private key must be a regular file")}
+ if runtime.GOOS!="windows"&&stat.Mode().Perm()&0077!=0{
+  return nil,errors.New("private key file must be owner-only (chmod 600)")
+ }
+ if stat.Size()>256{return nil,errors.New("private key file too large")}
+ contents,err:=os.ReadFile(path)
+ if err!=nil{return nil,err}
+ // Supply private 64-byte Go Ed25519 key as base64 in a local 0600 file.
+ // Never show, upload or put that key on the command line.
+ keyBytes,err:=base64.StdEncoding.DecodeString(string(trimSpace(contents)))
+ if err!=nil||len(keyBytes)!=ed25519.PrivateKeySize{
+  return nil,errors.New("expected base64 Ed25519 64-byte private key")
+ }
+ return ed25519.PrivateKey(keyBytes),nil
+}
+func trimSpace(s []byte)[]byte{
+ begin,end:=0,len(s)
+ for begin<end&&(s[begin]=='\n'||s[begin]=='\r'||s[begin]=='\t'||s[begin]==' '){begin++}
+ for end>begin&&(s[end-1]=='\n'||s[end-1]=='\r'||s[end-1]=='\t'||s[end-1]==' '){end--}
+ return s[begin:end]
+}
+func readJSON(path string,v any)error{
+ if path==""{return errors.New("input file required")}
+ info,err:=os.Stat(path)
+ if err!=nil{return err}
+ if !info.Mode().IsRegular()||info.Size()>8192{
+  return errors.New("input must be a regular JSON file at most 8 KiB")
+ }
+ bytes,err:=os.ReadFile(path)
+ if err!=nil{return err}
+ // Canonical files produced by OnePane or this CLI. Unknown/duplicate
+ // top-level values cannot silently rewrite the signed object.
+ if err=json.Unmarshal(bytes,v);err!=nil{return err}
+ canonical,err:=json.Marshal(v)
+ if err!=nil{return err}
+ if string(trimSpace(bytes))!=string(canonical){
+  return errors.New("input JSON must use canonical OnePane encoding")
+ }
+ return nil
+}
+func writeExclusive(path string,record any)error{
+ if path==""{return errors.New("explicit output file required")}
+ b,err:=json.Marshal(record)
+ if err!=nil{return err}
+ f,err:=os.OpenFile(path,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
+ if err!=nil{return err}
+ defer f.Close()
+ if _,err=f.Write(append(b,'\n'));err!=nil{return err}
+ return f.Sync()
+}
+func runProbe(args []string)error{
+ fs:=flag.NewFlagSet("probe",flag.ContinueOnError)
+ challenge:=fs.String("challenge","","human-issued JSON challenge file")
+ keyFile:=fs.String("private-key","","base64 Ed25519 private key 0600 file")
+ addr:=fs.String("ipv4","","operator-verified exact private IPv4 literal")
+ port:=fs.Int("port",0,"operator-approved TCP port")
+ timeout:=fs.Int("timeout-ms",0,"original permit timeout, 100-1500 ms")
+ declared:=fs.String("confirm-target-id","","human-approved declared target ID")
+ output:=fs.String("out","","new 0600 local probe receipt JSON path")
+ if err:=fs.Parse(args);err!=nil{return err}
+ if fs.NArg()!=0{return errors.New("unexpected positional arguments")}
+ var ch instrumentprobe.Challenge
+ if err:=readJSON(*challenge,&ch);err!=nil{return err}
+ pk,err:=readPrivateKey(*keyFile)
+ if err!=nil{return err}
+ target:=instrumentprobe.Target{IPv4:*addr,Port:*port,TimeoutMS:*timeout,
+  ConfirmedDeclaredTargetID:*declared}
+ receipt,err:=instrumentprobe.ProbeOnce(context.Background(),ch,target,
+  pk,&net.Dialer{},time.Now)
+ if err!=nil{return err}
+ if err=writeExclusive(*output,receipt);err!=nil{return err}
+ fmt.Println("One explicit private-IPv4 TCP probe completed; local signed receipt saved.")
+ fmt.Println("Outcome is an instrument self-report, NOT physical device attestation.")
+ return nil
+}
+func runSign(args []string)error{
+ fs:=flag.NewFlagSet("sign",flag.ContinueOnError)
+ report:=fs.String("receipt","","signed private local probe report file")
+ prepared:=fs.String("prepared","","human API /measurement/prepare response file")
+ keyFile:=fs.String("private-key","","same locally held private signing key")
+ revision:=fs.Int64("goal-revision",0,"current Goal revision expected by OnePane")
+ output:=fs.String("out","","new JSON body file for human API /measurement/accept")
+ if err:=fs.Parse(args);err!=nil{return err}
+ if fs.NArg()!=0{return errors.New("unexpected positional arguments")}
+ pk,err:=readPrivateKey(*keyFile)
+ if err!=nil{return err}
+ var local instrumentprobe.LocalProbeReceipt
+ if err=readJSON(*report,&local);err!=nil{return err}
+ var preparedDoc instrumentprobe.PreparedMeasurement
+ if err=readJSON(*prepared,&preparedDoc);err!=nil{return err}
+ body,err:=instrumentprobe.SignPrepared(local,preparedDoc,pk,*revision,time.Now())
+ if err!=nil{return err}
+ if err=writeExclusive(*output,body);err!=nil{return err}
+ fmt.Println("Signed admission body saved for human-authorised OnePane import.")
+ fmt.Println("No background monitoring, scan or host modification was performed.")
+ return nil
+}
+func main(){
+ var err error
+ if len(os.Args)<2{
+  err=errors.New("usage: onepane-instrument-probe probe|sign [flags]")
+ }else{
+  switch os.Args[1]{
+  case "probe":err=runProbe(os.Args[2:])
+  case "sign":err=runSign(os.Args[2:])
+  default:err=fmt.Errorf("unsupported instrument operation: %s",os.Args[1])
+  }
+ }
+ if err!=nil{
+  fmt.Fprintln(os.Stderr,"onepane-instrument-probe:",err)
+  os.Exit(2)
+ }
+}

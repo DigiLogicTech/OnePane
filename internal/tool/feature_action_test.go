@@ -34,7 +34,7 @@ func TestToolEffectClassificationIsConservativeAcrossAdapters(t *testing.T){
   {"project.app.git.mutate","project.app.execute",authority.ActionExecuteSandboxed,[]string{"files.read","files.write","process.execute"},true},
   {"project.app.exec","project.app.execute",authority.ActionExecuteSandboxed,[]string{"files.read","files.write","process.execute"},true},
   {"project.app.godot.build","project.app.execute",authority.ActionExecuteSandboxed,[]string{"files.read","files.write","process.execute"},true},
-  {"project.app.pull","project.app.manage",authority.ActionMutate,[]string{"process.execute","network.connect"},true},
+  {"project.app.pull","project.app.manage",authority.ActionMutate,[]string{"files.write","process.execute","network.connect"},true},
   {"project.app.unreal.mcp.probe","project.app.execute",authority.ActionExecuteSandboxed,[]string{"process.execute","network.connect"},true},
   {"http.post","network.send",authority.ActionExternalSend,[]string{"network.connect"},true},
   {"vault.get","vault.read",authority.ActionRead,[]string{"secrets.use"},true},

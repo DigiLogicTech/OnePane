@@ -45,7 +45,7 @@ assert(!/height\s*:\s*(?:100vh|100dvh)/.test(css),
  'shared page design may not override Logs/Inspector height ownership');
 assert(!/\.main-shell\s*\{/.test(css),
  'UX layer must not change shell grid; that owns drawer resizing');
-assert(/@media \(prefers-reduced-motion: reduce\)/.test(shared),
+assert(/@media\s*\(\s*prefers-reduced-motion\s*:\s*reduce\s*\)/.test(shared),
  'existing motion-reduction theme styling must remain');
 assert(canonical.includes('parentActive=route===r&&!expandable'),
  'canonical navigation must not double-highlight expandable parents');

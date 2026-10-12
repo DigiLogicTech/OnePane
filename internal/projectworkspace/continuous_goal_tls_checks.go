@@ -145,9 +145,13 @@ func(s *Service)runGoalPinnedTLSCheck(ctx context.Context,
    scope.Permit.Revision!=pin.PermitRevision||
    scope.Permit.PlanHash!=pin.PlanHash{return ErrInvalidTransition}
   window:=now/(5*60000)
+  // Cadence-window uniqueness prevents concurrent claims in one bucket.
+  // ALSO check a true rolling five-minute window: otherwise a claim
+  // immediately before a bucket boundary and another immediately after
+  // could dispatch two TCP handshakes within milliseconds.
   var used int
   err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_goal_tls_endpoint_checks
-   WHERE pin_id=? AND cadence_window=?`,pin.ID,window).Scan(&used)
+   WHERE pin_id=? AND claimed_at>?`,pin.ID,now-5*60000).Scan(&used)
   if err!=nil{return err}
   if used!=0{return ErrInvalidTransition}
   check=GoalPinnedTLSCheck{ID:checkID,PinID:pin.ID,ProjectID:c.ProjectID,

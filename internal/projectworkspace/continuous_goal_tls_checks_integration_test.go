@@ -195,8 +195,8 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
  var instrumentEvents int
  if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
   WHERE event_type LIKE 'project.goal_instrument_%'`).Scan(&instrumentEvents);
-  err!=nil||instrumentEvents!=7{
-  t.Fatalf("instrument key/proof audit lifecycle incomplete: %d %v",
+  err!=nil||instrumentEvents!=6{
+  t.Fatalf("pre-revocation instrument key/proof audit incomplete: %d %v",
    instrumentEvents,err)
  }
  var leaked int
@@ -215,6 +215,12 @@ func TestHumanPinnedTLSEndpointMatchedCertificateIsAuditedNeverDeviceHealth(t *t
  })
  if err!=nil||revokedKey.Status!="revoked"{
   t.Fatalf("human could not revoke independent instrument identity: %+v %v",revokedKey,err)
+ }
+ if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
+  WHERE event_type LIKE 'project.goal_instrument_%'`).Scan(&instrumentEvents);
+  err!=nil||instrumentEvents!=7{
+  t.Fatalf("instrument key revocation was missing from tenant audit: %d %v",
+   instrumentEvents,err)
  }
  goal,err=svc.ContinuousGoal(ctx,goal.ID)
  if err!=nil{t.Fatal(err)}

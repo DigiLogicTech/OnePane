@@ -246,7 +246,7 @@ func runProbe(args []string)error{
  if err:=fs.Parse(args);err!=nil{return err}
  if fs.NArg()!=0{return errors.New("unexpected positional arguments")}
  var ch instrumentprobe.Challenge
- if err:=readJSON(*challenge,&ch);err!=nil{return err}
+ if err:=readPrivateJSON(*challenge,&ch);err!=nil{return err}
  pk,err:=readPrivateKey(*keyFile)
  if err!=nil{return err}
  var receipt instrumentprobe.LocalProbeReceipt
@@ -333,13 +333,13 @@ func runVerifyReceipt(args []string)error{
  var receipt instrumentprobe.LocalProbeReceipt
  if err=readPrivateJSON(*input,&receipt);err!=nil{return err}
  var original instrumentprobe.Challenge
- if err=readJSON(*originalFile,&original);err!=nil{return err}
+ if err=readPrivateJSON(*originalFile,&original);err!=nil{return err}
  var plan instrumentprobe.ProbePlan
  if err=readPrivateJSON(*planFile,&plan);err!=nil{return err}
  if err=instrumentprobe.VerifyLocalReceiptAgainstApproval(receipt,ed25519.PublicKey(pub),original,plan);err!=nil{
   return err
  }
- fmt.Println("Offline local signed receipt matches independent OnePane challenge, approved plan and public key.")
+ fmt.Println("Offline signed receipt matches independently supplied trusted OnePane challenge, private plan and enrolled key.")
  fmt.Println("This does NOT attest instrument identity, physical execution, target device, or network health.")
  return nil
 }

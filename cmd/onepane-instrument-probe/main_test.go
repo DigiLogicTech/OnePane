@@ -354,3 +354,23 @@ func TestOfflineReceiptCLIRejectsAbsentPublicIdentityAndPrivateEvidence(t *testi
   t.Fatal("empty or unauthenticated report was presented as verified evidence")
  }
 }
+
+func TestInstrumentChallengeWithSharedModeIsRejected(t *testing.T){
+ dir:=t.TempDir()
+ path:=filepath.Join(dir,"challenge.json")
+ if err:=os.WriteFile(path,[]byte("{}"),0600);err!=nil{t.Fatal(err)}
+ if runtime.GOOS=="windows"{t.Skip("Windows NTFS ACL requires operator validation")}
+ if err:=os.Chmod(path,0644);err!=nil{t.Fatal(err)}
+ if err:=runProbe([]string{"--challenge",path,"--private-key","unused.key"});err==nil||
+  !strings.Contains(err.Error(),"private file must be owner-only"){
+  t.Fatalf("shared challenge passed local probe permission preflight: %v",err)
+ }
+ pub,_,err:=ed25519.GenerateKey(rand.Reader);if err!=nil{t.Fatal(err)}
+ report:=filepath.Join(dir,"receipt.json")
+ if err=os.WriteFile(report,[]byte("{}"),0600);err!=nil{t.Fatal(err)}
+ if err=runVerifyReceipt([]string{"--receipt",report,"--challenge",path,
+  "--plan",filepath.Join(dir,"unused-plan"),"--public-key",base64.StdEncoding.EncodeToString(pub),
+ });err==nil||!strings.Contains(err.Error(),"private file must be owner-only"){
+  t.Fatalf("shared challenge passed offline verifier permission preflight: %v",err)
+ }
+}

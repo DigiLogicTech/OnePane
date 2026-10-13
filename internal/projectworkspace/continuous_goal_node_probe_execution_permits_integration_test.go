@@ -4,6 +4,7 @@ package projectworkspace
 
 import (
  "context"
+ "errors"
  "crypto/ed25519"
  "crypto/rand"
  "encoding/json"
@@ -162,6 +163,29 @@ func TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly(t *testing.T){
   found[0].EffectiveExecutionState!="active"{
   t.Fatalf("human approval inventory did not reflect current scope: %+v %v",found,err)
  }
+ makeSealCalls:=0
+ makeSeal:=func(p GoalNodeProbeExecutionPermit)([]byte,error){
+  makeSealCalls++
+  if p.ID!=permit.ID||p.EffectiveExecutionState!="active"||
+   p.OperatorPublicKeySHA256!=permit.OperatorPublicKeySHA256{
+   t.Fatalf("transactional server admitted wrong operator or Node approval: %+v",p)
+  }
+  return []byte(`{"sealed":"original-onepane-approval"}`),nil
+ }
+ sealCommand:=SealGoalNodeProbeExecutionPermitCommand{
+  ProjectID:p.ID,GoalID:goal.ID,PermitID:permit.ID,
+  ActorPrincipalID:"human",
+ }
+ originalSeal,err:=svc.SealGoalNodeProbeExecutionPermit(ctx,sealCommand,makeSeal)
+ if err!=nil||len(originalSeal)==0||makeSealCalls!=1{
+  t.Fatalf("active human grant not transactionally sealed: %v %s",err,originalSeal)
+ }
+ var sealEvents int
+ if err=db.SQL().QueryRowContext(ctx,
+  "SELECT COUNT(*) FROM events WHERE event_type='project.goal_node_probe_execution_sealed' AND aggregate_id=?",
+  permit.ID).Scan(&sealEvents);err!=nil||sealEvents!=1{
+  t.Fatalf("original server seal not immutably audited: %v %d",err,sealEvents)
+ }
  if _,err=db.SQL().ExecContext(ctx,
   "UPDATE harness_nodes SET trust_state='unavailable' WHERE id='peer'");err!=nil{t.Fatal(err)}
  found,err=svc.ListGoalNodeProbeExecutionPermits(ctx,p.ID,goal.ID)
@@ -195,6 +219,15 @@ func TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly(t *testing.T){
  if err!=nil||len(found)!=1||found[0].Status!="approved"||
   found[0].EffectiveExecutionState!="tcp_scope_unavailable"{
   t.Fatalf("TCP consent withdrawn but Node action still appeared live: %v %+v",err,found)
+ }
+ if _,err=svc.SealGoalNodeProbeExecutionPermit(ctx,sealCommand,makeSeal);
+  !errors.Is(err,ErrRevisionConflict)||makeSealCalls!=1{
+  t.Fatalf("revoked TCP scope was signed again: %v (seal calls %d)",err,makeSealCalls)
+ }
+ if err=db.SQL().QueryRowContext(ctx,
+  "SELECT COUNT(*) FROM events WHERE event_type='project.goal_node_probe_execution_sealed' AND aggregate_id=?",
+  permit.ID).Scan(&sealEvents);err!=nil||sealEvents!=1{
+  t.Fatalf("revoked Node scope appended a seal audit event: %v %d",err,sealEvents)
  }
  // Changing and restoring original JSON cannot revive the original
  // execution consent, even when source IDs and SHA-256 match again.

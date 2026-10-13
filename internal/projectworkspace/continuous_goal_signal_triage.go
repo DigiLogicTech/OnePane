@@ -423,6 +423,11 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
    JOIN project_continuous_goals g ON g.id=r.goal_id
     AND g.project_id=r.project_id AND g.status='configured'
     AND g.project_workspace_id=r.project_workspace_id
+    -- A fresh-looking receipt from a PREVIOUS monitoring generation
+    -- does not become present-tense device evidence after a plan edit,
+    -- even if the user later restores the exact original plan JSON.
+    AND g.plan_generation=grant.plan_generation
+    AND grant.plan_generation>0 AND grant.plan_sha256=?
    JOIN projects p ON p.id=g.project_id AND p.status='active'
    JOIN workspaces tenant ON tenant.id=p.workspace_id AND tenant.status='active'
    JOIN project_workspaces w ON w.id=g.project_workspace_id
@@ -440,7 +445,7 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
    WHERE r.project_id=? AND r.goal_id=? AND r.source_id=?
     AND r.observed_at BETWEEN ? AND ?
    ORDER BY r.observed_at DESC,r.id DESC LIMIT 1`,
-   now,projectID,goalID,source.SourceID,now-freshnessMS,now).
+   now,planHash,projectID,goalID,source.SourceID,now-freshnessMS,now).
    Scan(&receiptID,&nodeOutcome,&nodeAt,&nodeID)
   if err!=nil&&!errors.Is(err,sql.ErrNoRows){return GoalSignalTriage{},err}
   if err==nil{

@@ -72,3 +72,15 @@ Even when the operator explicitly selects the **less-protected manual target** p
 The CLI's local anti-retry ledger now canonicalises the private key's **physical parent directory** before deriving its private claim location. Relative paths, absolute paths and symlinked aliases of that parent share one claim directory rather than creating separate accidental retry opportunities. On POSIX, the newly created ledger directory and individual nonce marker are both synchronised to disk before the TCP dial begins; failure to persist either step denies the network action. This is best-effort local filesystem crash protection, not hardware attestation, a global key lock, or defence against copying/hardlinking the key or an operator who can delete the ledger. Windows remains subject to its filesystem and NTFS ACL limitations.
 
 The CLI also opens the requested new private receipt file with exclusive creation **before** reserving the nonce or dialing. An existing/unwritable/missing output fails without an extra network effect. If the attempt crashes or is denied after reserving a new file, a zero-length/partial receipt may remain; it is **not valid signed evidence**, must not be imported and does not justify replaying a spent challenge. A fresh, separately approved challenge is needed for another probe. No background retry, additional scan, incident vote or protection claim is introduced.
+
+## Independent offline receipt inspection (13 October 2026)
+
+A new strictly read-only CLI command verifies the local one-shot report's detached Ed25519 signature, versioned original challenge encoding, observation chronology, target ID and exact v2 human-approved endpoint digest against an **independently obtained enrollment public key**:
+
+```bash
+./onepane-instrument-probe verify-receipt \
+  --receipt ./local-probe-receipt.json \
+  --public-key YOUR_INDEPENDENTLY_VERIFIED_BASE64_PUBLIC_KEY
+```
+
+It needs no private signing key, credential, OnePane HTTP connection, network socket or newly issued challenge. It can verify *historical* receipts after challenge expiry by checking the original claimed observation time; it **cannot** refresh or authorise an expired probe. The receipt file remains private (owner-only on POSIX), and verification prints no local target IPv4/port or receipt data. An untrusted actor can create their own key and signed report; therefore the reviewer must match the supplied public key to the original out-of-band human approval. A valid signature authenticates the report bytes/key possession **only**. It does not attest physical instrument execution, independent network vantage, target ownership, measurement truthfulness or active Level 5 protection.

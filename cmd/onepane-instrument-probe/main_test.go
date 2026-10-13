@@ -335,3 +335,22 @@ func TestInstrumentProbeReceiptReservationPreflightsOutput(t *testing.T){
   if stat.Mode().Perm()!=0600{t.Fatalf("reserved receipt not owner-only: %v",stat.Mode())}
  }
 }
+
+func TestOfflineReceiptCLIRejectsAbsentPublicIdentityAndPrivateEvidence(t *testing.T){
+ if err:=runVerifyReceipt([]string{"--receipt","not-real"});err==nil{
+  t.Fatal("offline evidence verifier accepted a report without independent key")
+ }
+ if err:=runVerifyReceipt([]string{"--receipt","missing.json","--public-key","invalid"});err==nil{
+  t.Fatal("offline evidence verifier accepted invalid external public key")
+ }
+ pub,_,err:=ed25519.GenerateKey(rand.Reader);if err!=nil{t.Fatal(err)}
+ path:=filepath.Join(t.TempDir(),"receipt.json")
+ b,err:=json.Marshal(instrumentprobe.LocalProbeReceipt{})
+ if err!=nil{t.Fatal(err)}
+ if err=os.WriteFile(path,b,0600);err!=nil{t.Fatal(err)}
+ if err=runVerifyReceipt([]string{
+  "--receipt",path,"--public-key",base64.StdEncoding.EncodeToString(pub),
+ });err==nil{
+  t.Fatal("empty or unauthenticated report was presented as verified evidence")
+ }
+}

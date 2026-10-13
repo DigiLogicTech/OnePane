@@ -312,15 +312,42 @@ func runSign(args []string)error{
  fmt.Println("No background monitoring, scan or host modification was performed.")
  return nil
 }
+// Offline-only verification requires the enrolled public key supplied
+// through an independently trusted human channel. The receipt's network
+// address stays private and no network socket is opened.
+func runVerifyReceipt(args []string)error{
+ fs:=flag.NewFlagSet("verify-receipt",flag.ContinueOnError)
+ input:=fs.String("receipt","","private 0600 local one-shot receipt file")
+ publicArg:=fs.String("public-key","","independently enrolled Ed25519 public key in base64")
+ if err:=fs.Parse(args);err!=nil{return err}
+ if fs.NArg()!=0||*input==""||*publicArg==""{
+  return errors.New("verify-receipt requires --receipt and independently verified --public-key")
+ }
+ pub,err:=base64.StdEncoding.Strict().DecodeString(*publicArg)
+ if err!=nil||len(pub)!=ed25519.PublicKeySize||
+  base64.StdEncoding.EncodeToString(pub)!=*publicArg{
+  return errors.New("expected canonical base64 Ed25519 public key")
+ }
+ var receipt instrumentprobe.LocalProbeReceipt
+ if err=readPrivateJSON(*input,&receipt);err!=nil{return err}
+ if err=instrumentprobe.VerifyLocalReceipt(receipt,ed25519.PublicKey(pub));err!=nil{
+  return err
+ }
+ fmt.Println("Offline Ed25519 local self-report signature verified against supplied public key.")
+ fmt.Println("This does NOT attest instrument identity, physical execution, target device, or network health.")
+ return nil
+}
+
 func main(){
  var err error
  if len(os.Args)<2{
-  err=errors.New("usage: onepane-instrument-probe keygen|probe|sign [flags]")
+  err=errors.New("usage: onepane-instrument-probe keygen|probe|sign|verify-receipt [flags]")
  }else{
   switch os.Args[1]{
   case "keygen":err=runKeygen(os.Args[2:])
   case "probe":err=runProbe(os.Args[2:])
   case "sign":err=runSign(os.Args[2:])
+  case "verify-receipt":err=runVerifyReceipt(os.Args[2:])
   default:err=fmt.Errorf("unsupported instrument operation: %s",os.Args[1])
   }
  }

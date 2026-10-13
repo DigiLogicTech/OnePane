@@ -375,3 +375,51 @@ func TestHistoricalV1ChallengeOnlyAllowedAsExplicitManualFallback(t *testing.T){
   t.Fatal("legacy v1 nonce lacking endpoint hash gained authenticated plan authority")
  }
 }
+
+func TestOfflineInstrumentReceiptVerificationRequiresIndependentSignerAndExactEvidence(t *testing.T){
+ now:=time.Now()
+ ch:=fixtureChallengeForEndpoint(t,now,"192.168.5.9",443)
+ public,private,err:=ed25519.GenerateKey(rand.Reader)
+ if err!=nil{t.Fatal(err)}
+ r,err:=ProbeOnce(context.Background(),ch,Target{
+  IPv4:"192.168.5.9",Port:443,TimeoutMS:500,
+  ConfirmedDeclaredTargetID:"target1",
+ },private,&recordingDialer{},func()time.Time{return now})
+ if err!=nil{t.Fatal(err)}
+ // A historical receipt remains checkable offline after its two-minute
+ // challenge expires. It cannot become a new current probing permit.
+ if err=VerifyLocalReceipt(r,public);err!=nil{
+  t.Fatalf("independently signed local report was not verifiable: %v",err)
+ }
+ _,other,err:=ed25519.GenerateKey(rand.Reader)
+ if err!=nil{t.Fatal(err)}
+ if err=VerifyLocalReceipt(r,other.Public().(ed25519.PublicKey));err==nil{
+  t.Fatal("independently enrolled public key was not required")
+ }
+ for _,change:=range []struct{
+  name string
+  edit func(*LocalProbeReceipt)
+ }{
+  {"outcome",func(x *LocalProbeReceipt){x.Outcome="not_connected"}},
+  {"observed_time",func(x *LocalProbeReceipt){x.ObservedAt++}},
+  {"endpoint",func(x *LocalProbeReceipt){x.Target.IPv4="192.168.5.10"}},
+  {"port",func(x *LocalProbeReceipt){x.Target.Port=8443}},
+  {"target_id",func(x *LocalProbeReceipt){x.Target.ConfirmedDeclaredTargetID="other"}},
+  {"nonce",func(x *LocalProbeReceipt){x.Challenge.Nonce=make([]byte,32)}},
+  {"signature",func(x *LocalProbeReceipt){
+   x.LocalReportSignature=append([]byte(nil),x.LocalReportSignature...)
+   x.LocalReportSignature[0]^=1
+  }},
+  {"outside_window",func(x *LocalProbeReceipt){x.ObservedAt=x.Challenge.ExpiresAt}},
+ }{
+  t.Run(change.name,func(t *testing.T){
+   altered:=r;change.edit(&altered)
+   if err:=VerifyLocalReceipt(altered,public);err==nil{
+    t.Fatal("tampered receipt passed independent offline signature review")
+   }
+  })
+ }
+ if err=VerifyLocalReceipt(r,nil);err==nil{
+  t.Fatal("missing independently pinned public key accepted")
+ }
+}

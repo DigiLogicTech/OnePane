@@ -1016,5 +1016,13 @@ Contract: `docs/rc11-instrument-project-challenge-budget.md`, `docs/rc11-tls-cer
 - [x] Canonicalise local instrument key parent directory before deciding which per-key replay ledger holds a nonce. Regression denies absolute/relative/symlinked-parent aliases, but deliberately makes no tamper-resistant or across-host claim.
 - [x] fsync POSIX parent and ledger directory metadata around first nonce reservation; decline probe when local crash-durable claim cannot be confirmed.
 - [x] Exclusively reserve a private receipt output **before** consuming any nonce or opening the single socket. Existing or missing destinations fail closed and cannot silently overwrite evidence; partial failed outputs are not signed receipts.
-- [ ] Verify exact-head hosted CI and Windows/Ubuntu compilation for this batched change. No installed QA, device attestation, automatic monitoring, remediation authority or release approval is implied.
+- [x] The P0-T one-shot local IO durability commit `4170b7b8a3f69847465f905f35f1ab339aa1bf43` passed full hosted CI [#38333680445](https://github.com/DigiLogicTech/OnePane/actions/runs/38333680445), including full Go regression and Windows/Ubuntu cross-compilation. No installed QA, device attestation, automatic monitoring, remediation authority or release approval is implied.
 - [ ] Next P0: independently approved paired-Node execution/vantage binding and trustworthy same-target correlation, then calibrated incident logic, bounded consented reversible playbooks with verification/rollback and low-resource endurance/security review. UI/UX is the final development review before human-approved packaging.
+
+
+## RC11 P0-U — human-independent offline local receipt signature review (2026-10-13)
+
+- [x] Add an offline-only `verify-receipt` command requiring a separately known, canonical Ed25519 enrollment public key and private local receipt file. No private key, network connection, retry, automatic work or target export is involved.
+- [x] Verify original canonical challenge, chronologically valid signed observation and approved v2 endpoint fingerprint, target and Ed25519 signature; historical verification must not refresh an expired challenge or be interpreted as an authenticated device observation.
+- [x] Negative tests for wrong public key, changed outcome, observation time, target/port/target ID, nonce and signature.
+- [ ] Run exact-head hosted CI for this increment. Next P0 remains trusted paired-Node physical source/vantage and device correlation, not an upgrade of self-signed evidence to autonomous incident authority.

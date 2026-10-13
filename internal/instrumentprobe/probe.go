@@ -230,6 +230,30 @@ func validOutcome(o string)bool{
  return o=="connected"||o=="not_connected"||o=="timed_out"||o=="unknown"
 }
 
+// VerifyLocalReceipt permits offline, historical cryptographic review of
+// the originally signed local TCP self-report. The public key MUST be
+// independently established by the operator, not taken from this report.
+// It does not prove physical execution, sensor honesty or device identity.
+// Historical verification checks the original observed time, not the
+// current clock, and therefore is NOT a fresh authorisation to probe.
+func VerifyLocalReceipt(r LocalProbeReceipt,public ed25519.PublicKey)error{
+ if len(public)!=ed25519.PublicKeySize||
+  len(r.LocalReportSignature)!=ed25519.SignatureSize||
+  !validOutcome(r.Outcome){
+  return errors.New("invalid local instrument receipt or external public key")
+ }
+ targetID,err:=ParseChallenge(r.Challenge,time.UnixMilli(r.ObservedAt))
+ if err!=nil{return err}
+ if err=ValidateTarget(r.Target,targetID);err!=nil{return err}
+ if err=validateManualChallengeTarget(r.Challenge,r.Target);err!=nil{return err}
+ signed,err:=localReceiptSigningBytes(r)
+ if err!=nil{return err}
+ if !ed25519.Verify(public,signed,r.LocalReportSignature){
+  return errors.New("local instrument receipt signature mismatch")
+ }
+ return nil
+}
+
 // validateManualChallengeTarget closes a legacy gap: a v2 challenge already
 // seals its approved IPv4:port digest, so even an explicit manual-target
 // override MUST NOT silently reach a different private endpoint. Historic

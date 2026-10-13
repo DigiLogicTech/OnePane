@@ -3,6 +3,7 @@ package projectworkspace
 import (
  "bytes"
  "context"
+ "database/sql"
  "crypto/sha256"
  "crypto/ed25519"
  "encoding/hex"
@@ -250,8 +251,16 @@ func(s *Service)ListGoalNodeProbeExecutionPermits(ctx context.Context,
   "SELECT 1 FROM project_continuous_goals g JOIN projects p ON p.id=g.project_id AND p.status='active' JOIN workspaces t ON t.id=p.workspace_id AND t.status='active' WHERE g.id=? AND g.project_id=?",
   goalID,projectID).Scan(&exists)
  if err!=nil{return nil,err}
- now:=s.clock.UnixMilli()
- rows,err:=s.db.QueryContext(ctx,"SELECT "+nodeProbePermitColumns+`,
+ return s.listGoalNodeProbeExecutionPermitsWith(ctx,s.db,projectID,goalID,s.clock.UnixMilli())
+}
+
+type nodeProbeExecutionQuerier interface {
+ QueryContext(context.Context,string,...any)(*sql.Rows,error)
+}
+func(s *Service)listGoalNodeProbeExecutionPermitsWith(
+ ctx context.Context,query nodeProbeExecutionQuerier,
+ projectID,goalID string,now int64)([]GoalNodeProbeExecutionPermit,error){
+ rows,err:=query.QueryContext(ctx,"SELECT "+nodeProbePermitColumns+`,
  CASE
   WHEN permit.status='revoked' THEN 'revoked'
   WHEN permit.expires_at<=? THEN 'expired'

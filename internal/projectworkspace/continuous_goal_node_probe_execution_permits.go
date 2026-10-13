@@ -268,6 +268,12 @@ func(s *Service)ListGoalNodeProbeExecutionPermits(ctx context.Context,
     AND EXISTS(SELECT 1 FROM json_each(goal.monitoring_plan_json,'$.source_ids') src
      WHERE src.type='text' AND src.value=permit.source_id))
    THEN 'scope_inactive'
+  WHEN NOT EXISTS(SELECT 1 FROM principals h
+   JOIN projects p ON p.id=permit.project_id
+   JOIN workspace_memberships m ON m.workspace_id=p.workspace_id
+    AND m.principal_id=h.id AND m.status='active'
+   WHERE h.id=permit.approved_by AND h.status='active'
+    AND h.principal_type='human') THEN 'approver_inactive'
   WHEN NOT EXISTS(
    SELECT 1 FROM project_goal_tcp_declared_target_bindings target
    JOIN project_goal_tcp_probe_permits tcp
@@ -328,12 +334,6 @@ func(s *Service)ListGoalNodeProbeExecutionPermits(ctx context.Context,
     AND pin.permit_revision=target.permit_revision
     AND pin.plan_hash=permit.plan_sha256
     AND pin.expires_at>?) THEN 'pin_unavailable'
-  WHEN NOT EXISTS(SELECT 1 FROM principals h
-   JOIN projects p ON p.id=permit.project_id
-   JOIN workspace_memberships m ON m.workspace_id=p.workspace_id
-    AND m.principal_id=h.id AND m.status='active'
-   WHERE h.id=permit.approved_by AND h.status='active'
-    AND h.principal_type='human') THEN 'approver_inactive'
   WHEN NOT EXISTS(SELECT 1 FROM harness_nodes n
    JOIN node_pairings pair ON pair.peer_node_id=n.id
    WHERE n.id=permit.peer_node_id AND n.local=0

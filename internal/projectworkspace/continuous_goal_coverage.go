@@ -47,12 +47,12 @@ func(s *Service)GoalEvidenceCoverage(ctx context.Context,projectID,goalID string
  if projectID==""||goalID==""{return GoalEvidenceCoverage{},ErrInvalidCommand}
  var planRaw,status,health,projectWorkspaceID,tenantWorkspaceID string
  var cadence int
- var revision int64
+ var revision,planGeneration int64
  // A goal must belong to the canonical Project and an active Workspace
  // before its current coverage can be evaluated. Archived Workspaces do
  // not silently become a Project-wide monitoring source.
  err:=s.db.QueryRowContext(ctx,`SELECT g.monitoring_plan_json,g.status,g.health,g.cadence_minutes,g.revision,
-   g.project_workspace_id,p.workspace_id
+   g.project_workspace_id,p.workspace_id,g.plan_generation
   FROM project_continuous_goals g
   JOIN projects p ON p.id=g.project_id
   JOIN workspaces tenant ON tenant.id=p.workspace_id AND tenant.status='active'
@@ -60,7 +60,7 @@ func(s *Service)GoalEvidenceCoverage(ctx context.Context,projectID,goalID string
       AND w.project_id=p.id AND w.status='active'
   WHERE g.id=? AND g.project_id=? AND p.status='active'`,
   goalID,projectID).Scan(&planRaw,&status,&health,&cadence,&revision,
-   &projectWorkspaceID,&tenantWorkspaceID)
+   &projectWorkspaceID,&tenantWorkspaceID,&planGeneration)
  if err!=nil{return GoalEvidenceCoverage{},err}
  // Stored source allowlists are security inputs, too: a legacy or
  // tampered row must not bypass the same strict admission as a new goal.
@@ -95,12 +95,29 @@ func(s *Service)GoalEvidenceCoverage(ctx context.Context,projectID,goalID string
  tcp:=map[string]lastTCP{}
  tcpRows,err:=s.db.QueryContext(ctx,`SELECT a.source_id,a.status,a.claimed_at
   FROM project_goal_tcp_probe_attempts a
+  JOIN project_goal_tcp_probe_permits permit ON permit.id=a.permit_id
+   AND permit.project_id=a.project_id AND permit.goal_id=a.goal_id
+   AND permit.project_workspace_id=a.project_workspace_id
+   AND permit.source_id=a.source_id AND permit.status='approved'
+   AND permit.expires_at>? AND permit.plan_hash=?
+   AND permit.plan_generation=? AND permit.plan_generation>0
+   AND permit.revision=a.permit_revision
+   AND permit.target_ipv4=a.target_ipv4 AND permit.target_port=a.target_port
+   AND permit.timeout_ms=a.timeout_ms AND a.claimed_at>=permit.approved_at
+  JOIN project_continuous_goals goal ON goal.id=a.goal_id
+   AND goal.project_id=a.project_id AND goal.project_workspace_id=a.project_workspace_id
+   AND goal.status='configured' AND goal.plan_generation=permit.plan_generation
+  JOIN principals approver ON approver.id=permit.approved_by
+   AND approver.principal_type='human' AND approver.status='active'
+  JOIN workspace_memberships member ON member.principal_id=approver.id
+   AND member.workspace_id=? AND member.status='active'
   WHERE a.project_id=? AND a.goal_id=? AND a.id=(
     SELECT b.id FROM project_goal_tcp_probe_attempts b
     WHERE b.project_id=a.project_id AND b.goal_id=a.goal_id
       AND b.source_id=a.source_id
     ORDER BY b.claimed_at DESC,b.id DESC LIMIT 1)
-  ORDER BY a.source_id LIMIT 32`,projectID,goalID)
+  ORDER BY a.source_id LIMIT 32`,
+  now,planHash,planGeneration,tenantWorkspaceID,projectID,goalID)
  if err!=nil{return GoalEvidenceCoverage{},err}
  for tcpRows.Next(){
   var id,state string

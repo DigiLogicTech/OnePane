@@ -165,6 +165,12 @@ func TestRestoredGoalPlanCannotReviveApprovedTCPAndInstrumentChain(t *testing.T)
  }
  initiallyAllowed,err:=svc.tcpAttemptStillAuthorised(ctx,claim)
  if err!=nil||!initiallyAllowed{t.Fatalf("current claim was denied: %t %v",initiallyAllowed,err)}
+ originalCoverage,err:=svc.GoalEvidenceCoverage(ctx,project.ID,goal.ID)
+ if err!=nil||len(originalCoverage.Sources)!=1||
+  originalCoverage.Sources[0].LastTCPTestAt!=claim.ClaimedAt||
+  originalCoverage.Sources[0].TCPReachability!="unknown_after_interruption"{
+  t.Fatalf("original approved claimed receipt missing from coverage: %+v %v",originalCoverage,err)
+ }
  listed,err:=svc.ListGoalTCPProbePermits(ctx,project.ID,goal.ID)
  if err!=nil||len(listed)!=1||listed[0].EffectiveScopeState!="active"{
   t.Fatalf("human-approved original TCP grant not represented as live: %+v %v",listed,err)
@@ -179,6 +185,15 @@ func TestRestoredGoalPlanCannotReviveApprovedTCPAndInstrumentChain(t *testing.T)
   allowed,authErr:=svc.tcpAttemptStillAuthorised(ctx,claim)
   if authErr!=nil||allowed{
    t.Fatalf("old TCP claim reached the last socket boundary after plan edit/restore: %t %v",allowed,authErr)
+  }
+  coverage,coverageErr:=svc.GoalEvidenceCoverage(ctx,project.ID,goal.ID)
+  if coverageErr!=nil||len(coverage.Sources)<1{
+   t.Fatalf("current Goal coverage absent after plan edit: %+v %v",coverage,coverageErr)
+  }
+  for _,src:=range coverage.Sources{
+   if src.SourceID=="router"&&(src.LastTCPTestAt!=0||src.TCPReachability!=""){
+    t.Fatalf("untrusted old TCP reachability revived in general coverage: %+v",src)
+   }
   }
   stale,triageErr:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
   if triageErr!=nil{t.Fatal(triageErr)}

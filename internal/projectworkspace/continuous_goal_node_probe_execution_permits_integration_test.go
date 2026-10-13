@@ -68,6 +68,8 @@ func TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly(t *testing.T){
  if err!=nil{t.Fatal(err)}
  public,_,err:=ed25519.GenerateKey(rand.Reader)
  if err!=nil{t.Fatal(err)}
+ operatorPublic,_,err:=ed25519.GenerateKey(rand.Reader)
+ if err!=nil{t.Fatal(err)}
  goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
  key,err:=svc.ApproveGoalInstrumentKey(ctx,ApproveGoalInstrumentKeyCommand{
   ProjectID:p.ID,GoalID:goal.ID,TLSPinID:pin.ID,
@@ -89,7 +91,7 @@ func TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly(t *testing.T){
  approve:=ApproveGoalNodeProbeExecutionPermitCommand{
   ProjectID:p.ID,GoalID:goal.ID,InstrumentKeyID:key.ID,
   ChallengeID:challenge.ID,PeerNodeID:"peer",ActorPrincipalID:"human",
-  ExpectedGoalRevision:goal.Revision,
+  ExpectedGoalRevision:goal.Revision,OperatorPublicKey:operatorPublic,
  }
  if _,err=svc.ApproveGoalNodeProbeExecutionPermit(ctx,approve);err==nil{
   t.Fatal("unpaired Node admitted")
@@ -116,6 +118,7 @@ func TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly(t *testing.T){
   permit.DeclaredTargetID!=target.ID||permit.SourceID!="router"||
   permit.OriginalChallengeSHA256!=nodeProbeHash(challenge.SigningPayload)||
   permit.InstrumentPublicKeySHA256!=nodeProbeHash(public)||
+  permit.OperatorPublicKeySHA256!=nodeProbeHash(operatorPublic)||
   permit.PlanGeneration!=1||permit.PlanSHA256==""||
   permit.ExpiresAt!=challenge.ExpiresAt{
   t.Fatalf("issued permit does not bind original Node instrument and target: %+v",permit)
@@ -126,6 +129,11 @@ func TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly(t *testing.T){
  if _,err=db.SQL().ExecContext(ctx,
   "UPDATE project_goal_node_probe_execution_permits SET peer_node_id='other' WHERE id=?",permit.ID);err==nil{
   t.Fatal("Node fingerprint/identity could be rewritten")
+ }
+ if _,err=db.SQL().ExecContext(ctx,
+  "UPDATE project_goal_node_probe_execution_permits SET operator_public_key_sha256=? WHERE id=?",
+  "sha256:"+strings.Repeat("0",64),permit.ID);err==nil{
+  t.Fatal("human operator signer was changed after authenticated approval")
  }
  if _,err=db.SQL().ExecContext(ctx,
   "DELETE FROM project_goal_node_probe_execution_permits WHERE id=?",permit.ID);err==nil{

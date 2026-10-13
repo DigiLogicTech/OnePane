@@ -19,9 +19,10 @@ func TestHumanCanSeparatelySignAuthenticatedNodeExecutionPermitOffline(t *testin
  var signed SignedNodeExecutionPermit
  if err:=readCanonical(c.ExecutionPermitFile,&signed,true);err!=nil{t.Fatal(err)}
  dir:=t.TempDir()
- original:=writeCanonicalTest(t,dir,"original-permit.json",signed.Permit)
  pub,priv,err:=ed25519.GenerateKey(rand.Reader)
  if err!=nil{t.Fatal(err)}
+ signed.Permit.OperatorPublicKeySHA256=operatorKeyFingerprint(pub)
+ original:=writeCanonicalTest(t,dir,"original-permit.json",signed.Permit)
  private:=filepath.Join(dir,"operator.key")
  if err=os.WriteFile(private,[]byte(base64.StdEncoding.EncodeToString(priv)),0600);err!=nil{
   t.Fatal(err)
@@ -70,8 +71,9 @@ func TestHumanOperatorPermitSigningRefusesUnapprovedMetadata(t *testing.T){
  c,_,_:=nodeProbeFixture(t)
  var transfer SignedNodeExecutionPermit
  if err:=readCanonical(c.ExecutionPermitFile,&transfer,true);err!=nil{t.Fatal(err)}
- _,key,err:=ed25519.GenerateKey(rand.Reader)
+ pub,key,err:=ed25519.GenerateKey(rand.Reader)
  if err!=nil{t.Fatal(err)}
+ transfer.Permit.OperatorPublicKeySHA256=operatorKeyFingerprint(pub)
  dir:=t.TempDir()
  private:=filepath.Join(dir,"human.key")
  if err=os.WriteFile(private,[]byte(base64.StdEncoding.EncodeToString(key)),0600);err!=nil{
@@ -82,6 +84,7 @@ func TestHumanOperatorPermitSigningRefusesUnapprovedMetadata(t *testing.T){
   "peer_unavailable":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.EffectiveExecutionState="peer_unavailable"},
   "old_plan_generation":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.PlanGeneration=0},
   "missing_plan_hash":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.PlanSHA256=""},
+  "unbound_operator":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.OperatorPublicKeySHA256=""},
   "wrong_actor":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.ApprovedBy="other-human"},
   "future_approval":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.ApprovedAt=time.Now().Add(time.Minute).UnixMilli()},
   "expired":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.ExpiresAt=time.Now().Add(-time.Minute).UnixMilli()},

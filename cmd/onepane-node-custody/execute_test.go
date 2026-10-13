@@ -65,9 +65,10 @@ func nodeProbeFixture(t *testing.T)(ExplicitNodeProbeCommand,
   ApprovedBy:"human",ApprovedAt:ch.IssuedAt+1,
   ExpiresAt:ch.ExpiresAt,
  }
- permitFile:=writeCanonicalTest(t,filepath.Dir(chFile),"execution-permit.json",permit)
  operatorPub,operatorPriv,err:=ed25519.GenerateKey(rand.Reader)
  if err!=nil{t.Fatal(err)}
+ permit.OperatorPublicKeySHA256=h(operatorPub)
+ permitFile:=writeCanonicalTest(t,filepath.Dir(chFile),"execution-permit.json",permit)
  signedPayload,err:=operatorPermitMessage(permit)
  if err!=nil{t.Fatal(err)}
  signedPermit:=SignedNodeExecutionPermit{
@@ -215,6 +216,7 @@ func TestNodeLocalProbeRefusesInvalidOrForgedOperatorExecutionPermit(t *testing.
   "bad_generation":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.Revision=2},
   "old_plan_generation":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.PlanGeneration=0},
   "different_plan_hash":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.PlanSHA256="sha256:"+strings.Repeat("f",64)},
+  "different_operator_fingerprint":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.OperatorPublicKeySHA256="sha256:"+strings.Repeat("f",64)},
  }
  for name,mutate:=range cases{t.Run(name,func(t *testing.T){
   c,ch,_:=nodeProbeFixture(t)

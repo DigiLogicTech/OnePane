@@ -116,6 +116,7 @@ func TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly(t *testing.T){
   permit.DeclaredTargetID!=target.ID||permit.SourceID!="router"||
   permit.OriginalChallengeSHA256!=nodeProbeHash(challenge.SigningPayload)||
   permit.InstrumentPublicKeySHA256!=nodeProbeHash(public)||
+  permit.PlanGeneration!=1||permit.PlanSHA256==""||
   permit.ExpiresAt!=challenge.ExpiresAt{
   t.Fatalf("issued permit does not bind original Node instrument and target: %+v",permit)
  }
@@ -151,6 +152,26 @@ func TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly(t *testing.T){
  }
  if _,err=db.SQL().ExecContext(ctx,
   "UPDATE workspace_memberships SET status='active' WHERE workspace_id='tenant' AND principal_id='human'");err!=nil{t.Fatal(err)}
+ // Changing and restoring original JSON cannot revive the original
+ // execution consent, even when source IDs and SHA-256 match again.
+ var originalJSON string
+ if err=db.SQL().QueryRowContext(ctx,
+  "SELECT monitoring_plan_json FROM project_continuous_goals WHERE id=?",
+  goal.ID).Scan(&originalJSON);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,
+  "UPDATE project_continuous_goals SET monitoring_plan_json=? WHERE id=?",
+  "{\"version\":1,\"source_ids\":[\"router\",\"extra\"]}",goal.ID);err!=nil{t.Fatal(err)}
+ found,err=svc.ListGoalNodeProbeExecutionPermits(ctx,p.ID,goal.ID)
+ if err!=nil||len(found)!=1||found[0].EffectiveExecutionState!="scope_inactive"{
+  t.Fatalf("changed plan retained former Node authority: %+v %v",found,err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,
+  "UPDATE project_continuous_goals SET monitoring_plan_json=? WHERE id=?",
+  originalJSON,goal.ID);err!=nil{t.Fatal(err)}
+ found,err=svc.ListGoalNodeProbeExecutionPermits(ctx,p.ID,goal.ID)
+ if err!=nil||len(found)!=1||found[0].EffectiveExecutionState!="scope_inactive"{
+  t.Fatalf("restored plan resurrected original execution grant: %+v %v",found,err)
+ }
  goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
  revoked,err:=svc.RevokeGoalNodeProbeExecutionPermit(ctx,
   RevokeGoalNodeProbeExecutionPermitCommand{

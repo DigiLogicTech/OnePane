@@ -5,6 +5,7 @@ import (
  "crypto/ed25519"
  "crypto/rand"
  "encoding/base64"
+ "encoding/json"
  "crypto/sha256"
  "encoding/hex"
  "errors"
@@ -49,6 +50,8 @@ func nodeProbeFixture(t *testing.T)(ExplicitNodeProbeCommand,
   sum:=sha256.Sum256(raw)
   return "sha256:"+hex.EncodeToString(sum[:])
  }
+ var originalPlan struct{PlanHash string `json:"plan_hash"`}
+ if err=json.Unmarshal(ch.SigningPayload,&originalPlan);err!=nil{t.Fatal(err)}
  permit:=projectworkspace.GoalNodeProbeExecutionPermit{
   ID:"human-permit-1",ProjectID:ch.ProjectID,GoalID:ch.GoalID,
   ProjectWorkspaceID:"workspace1",InstrumentKeyID:ch.KeyID,
@@ -56,7 +59,9 @@ func nodeProbeFixture(t *testing.T)(ExplicitNodeProbeCommand,
   DeclaredTargetID:plan.DeclaredTargetID,TLSPinID:plan.TLSPinID,
   PeerNodeID:"peer",PeerTLSFingerprint:fp,
   OriginalChallengeSHA256:h(ch.SigningPayload),
-  InstrumentPublicKeySHA256:h(pub),Status:"approved",Revision:1,
+  InstrumentPublicKeySHA256:h(pub),
+  PlanSHA256:originalPlan.PlanHash,PlanGeneration:1,
+  Status:"approved",Revision:1,
   ApprovedBy:"human",ApprovedAt:ch.IssuedAt+1,
   ExpiresAt:ch.ExpiresAt,
  }
@@ -208,6 +213,8 @@ func TestNodeLocalProbeRefusesInvalidOrForgedOperatorExecutionPermit(t *testing.
   "expired":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.ExpiresAt=p.ApprovedAt},
   "future_approval":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.ApprovedAt=time.Now().Add(time.Minute).UnixMilli()},
   "bad_generation":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.Revision=2},
+  "old_plan_generation":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.PlanGeneration=0},
+  "different_plan_hash":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.PlanSHA256="sha256:"+strings.Repeat("f",64)},
  }
  for name,mutate:=range cases{t.Run(name,func(t *testing.T){
   c,ch,_:=nodeProbeFixture(t)

@@ -48,7 +48,11 @@ func validateNodeProbeExecutionPermit(p projectworkspace.GoalNodeProbeExecutionP
   return "sha256:"+hex.EncodeToString(digest[:])
  }
  ts:=now.UnixMilli()
+ var originalPlan struct{PlanHash string `json:"plan_hash"`}
+ if err:=json.Unmarshal(ch.SigningPayload,&originalPlan);err!=nil{return err}
  if p.ID==""||p.ProjectWorkspaceID==""||p.ApprovedBy==""||
+  p.PlanGeneration<1||p.PlanSHA256==""||
+  p.PlanSHA256!=originalPlan.PlanHash||
   p.Status!="approved"||p.Revision!=1||
   (p.EffectiveExecutionState!=""&&p.EffectiveExecutionState!="active")||
   p.RevokedAt!=0||

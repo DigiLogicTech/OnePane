@@ -345,6 +345,41 @@ func TestLevel5SignedObservationEnrollmentAntiReplayAndLiveRevocation(t *testing
   "tenant","source",clock.Real{}.UnixMilli());err!=nil{
   t.Fatalf("current source bearer preflight refused: %v",err)
  }
+ // Both the issuing human's approval and the source's membership must
+ // remain effective after the one-time bearer token was minted.
+ for _,participant:=range []struct{
+  principalID,signerState,credentialState string
+ }{
+  {"owner","approver_inactive","approver_inactive"},
+  {"source","source_inactive","scope_inactive"},
+ }{
+  if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships
+   SET status='revoked' WHERE workspace_id='tenant' AND principal_id=?`,
+   participant.principalID);err!=nil{t.Fatal(err)}
+  revokedSigners,e:=svc.ListGoalObservationSigners(ctx,p.ID,g.ID)
+  if e!=nil{t.Fatal(e)}
+  var foundState string
+  for _,item:=range revokedSigners{
+   if item.ID==rotated.ID{foundState=item.EffectiveScopeState}
+  }
+  if foundState!=participant.signerState{
+   t.Fatalf("revoked original participant still effective: %s (expected %s)",
+    foundState,participant.signerState)
+  }
+  revokedCredentials,e:=svc.ListGoalSourceCredentials(ctx,p.ID,g.ID,rotated.ID)
+  if e!=nil||len(revokedCredentials)!=1||
+   revokedCredentials[0].Status!=participant.credentialState{
+   t.Fatalf("revoked human/source bearer status: %+v %v",revokedCredentials,e)
+  }
+  if e=checkGoalSourceCredentialTx(ctx,db.SQL(),
+   enrolledCredential.Credential.CredentialID,p.ID,g.ID,rotated.ID,
+   "tenant","source",clock.Real{}.UnixMilli());!errors.Is(e,ErrPrincipalIneligible){
+   t.Fatalf("revoked human/source still passed token preflight: %v",e)
+  }
+  if _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships
+   SET status='active' WHERE workspace_id='tenant' AND principal_id=?`,
+   participant.principalID);err!=nil{t.Fatal(err)}
+ }
  // The exact old plan JSON cannot restore an old source identity.
  // All receipts remain immutable history, but new signatures,
  // credentials and CURRENT health evidence must fail closed.

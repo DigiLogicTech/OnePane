@@ -303,6 +303,11 @@ func checkGoalSourceCredentialTx(ctx context.Context,tx goalSourceCredentialQuer
       AND member.workspace_id=b.workspace_id AND member.status='active'
      WHERE human.id=k.approved_by AND human.status='active'
       AND human.principal_type='human')
+   AND EXISTS(SELECT 1 FROM principals source
+     JOIN workspace_memberships member ON member.principal_id=source.id
+      AND member.workspace_id=b.workspace_id AND member.status='active'
+     WHERE source.id=b.source_principal_id AND source.status='active'
+      AND source.principal_type IN ('service','agent'))
    AND a.workspace_scope_json=? AND a.capability_scope_json='["goal.source.submit"]'`,
    credentialID,projectID,goalID,signerID,workspaceID,principalID,
    now,now,now,string(mustJSONSourceWorkspace(workspaceID))).Scan(&found)

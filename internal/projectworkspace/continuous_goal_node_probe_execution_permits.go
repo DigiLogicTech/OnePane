@@ -28,6 +28,8 @@ type GoalNodeProbeExecutionPermit struct {
  PeerTLSFingerprint string `json:"peer_tls_fingerprint"`
  OriginalChallengeSHA256 string `json:"original_challenge_sha256"`
  InstrumentPublicKeySHA256 string `json:"instrument_public_key_sha256"`
+ PlanSHA256 string `json:"plan_sha256"`
+ PlanGeneration int64 `json:"plan_generation"`
  Status string `json:"status"`
  EffectiveExecutionState string `json:"effective_execution_state,omitempty"`
  Revision int64 `json:"revision"`
@@ -44,14 +46,14 @@ type RevokeGoalNodeProbeExecutionPermitCommand struct {
  ProjectID,GoalID,PermitID,ActorPrincipalID string
  ExpectedGoalRevision,ExpectedPermitRevision int64
 }
-const nodeProbePermitColumns="id,project_id,goal_id,project_workspace_id,instrument_key_id,challenge_id,source_id,declared_target_id,tls_pin_id,peer_node_id,peer_tls_fingerprint,original_challenge_sha256,instrument_public_key_sha256,status,revision,approved_by,approved_at,expires_at,revoked_at"
+const nodeProbePermitColumns="id,project_id,goal_id,project_workspace_id,instrument_key_id,challenge_id,source_id,declared_target_id,tls_pin_id,peer_node_id,peer_tls_fingerprint,original_challenge_sha256,instrument_public_key_sha256,plan_sha256,plan_generation,status,revision,approved_by,approved_at,expires_at,revoked_at"
 func scanNodeProbePermit(row scanner)(GoalNodeProbeExecutionPermit,error){
  var p GoalNodeProbeExecutionPermit
  err:=row.Scan(&p.ID,&p.ProjectID,&p.GoalID,&p.ProjectWorkspaceID,
   &p.InstrumentKeyID,&p.ChallengeID,&p.SourceID,&p.DeclaredTargetID,
   &p.TLSPinID,&p.PeerNodeID,&p.PeerTLSFingerprint,
   &p.OriginalChallengeSHA256,&p.InstrumentPublicKeySHA256,
-  &p.Status,&p.Revision,&p.ApprovedBy,&p.ApprovedAt,&p.ExpiresAt,&p.RevokedAt)
+  &p.PlanSHA256,&p.PlanGeneration,&p.Status,&p.Revision,&p.ApprovedBy,&p.ApprovedAt,&p.ExpiresAt,&p.RevokedAt)
  return p,err
 }
 func nodeProbeHash(raw []byte)string{
@@ -79,20 +81,26 @@ func(s *Service)ApproveGoalNodeProbeExecutionPermit(ctx context.Context,
   }
   if err=s.requireActor(ctx,tx,project.WorkspaceID,c.ActorPrincipalID);err!=nil{return err}
   if err=humanGoalReviewer(ctx,tx,c.ActorPrincipalID);err!=nil{return err}
-  var revision int64
-  var status,wsID string
+  var revision,planGeneration int64
+  var status,wsID,planRaw string
   err=tx.QueryRowContext(ctx,
-   "SELECT revision,status,project_workspace_id FROM project_continuous_goals WHERE id=? AND project_id=?",
-   c.GoalID,c.ProjectID).Scan(&revision,&status,&wsID)
+   "SELECT revision,status,project_workspace_id,monitoring_plan_json,plan_generation FROM project_continuous_goals WHERE id=? AND project_id=?",
+   c.GoalID,c.ProjectID).Scan(&revision,&status,&wsID,&planRaw,&planGeneration)
   if err!=nil{return err}
   if revision!=c.ExpectedGoalRevision{return ErrRevisionConflict}
-  if status!="configured"{return ErrInvalidTransition}
+  if status!="configured"||planGeneration<1{return ErrInvalidTransition}
+  monitored,planHash,err:=goalReviewPlan(planRaw)
+  if err!=nil{return err}
   key,pin,err:=s.activeInstrumentKeyTx(ctx,tx,c.ProjectID,c.GoalID,c.InstrumentKeyID,now)
   if err!=nil{return err}
   if key.ProjectWorkspaceID!=wsID{return ErrInvalidTransition}
   scope,err:=s.activePinnedTargetTx(ctx,tx,c.ProjectID,c.GoalID,key.DeclaredTargetID,now)
   if err!=nil{return err}
-  if scope.Target.SourceID!=scope.Permit.SourceID||
+  monitoredSource:=false
+  for _,source:=range monitored.SourceIDs{
+   if source==scope.Target.SourceID{monitoredSource=true;break}
+  }
+  if !monitoredSource||scope.Target.SourceID!=scope.Permit.SourceID||
    scope.Target.ProjectWorkspaceID!=wsID||
    scope.Target.PermitID!=pin.PermitID||
    scope.Permit.PlanHash!=key.PlanHash{return ErrInvalidTransition}
@@ -124,6 +132,7 @@ func(s *Service)ApproveGoalNodeProbeExecutionPermit(ctx context.Context,
    PeerTLSFingerprint:fp,
    OriginalChallengeSHA256:nodeProbeHash(ch.SigningPayload),
    InstrumentPublicKeySHA256:nodeProbeHash(key.PublicKey),
+   PlanSHA256:planHash,PlanGeneration:planGeneration,
    Status:"approved",Revision:1,ApprovedBy:c.ActorPrincipalID,
    ApprovedAt:now,ExpiresAt:ch.ExpiresAt,
   }
@@ -131,12 +140,13 @@ func(s *Service)ApproveGoalNodeProbeExecutionPermit(ctx context.Context,
    id,project_id,goal_id,project_workspace_id,instrument_key_id,
    challenge_id,source_id,declared_target_id,tls_pin_id,peer_node_id,
    peer_tls_fingerprint,original_challenge_sha256,instrument_public_key_sha256,
-   status,revision,approved_by,approved_at,expires_at,revoked_at)
-   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'approved',1,?,?,?,0)`,
+   plan_sha256,plan_generation,status,revision,approved_by,approved_at,expires_at,revoked_at)
+   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'approved',1,?,?,?,0)`,
    out.ID,out.ProjectID,out.GoalID,out.ProjectWorkspaceID,out.InstrumentKeyID,
    out.ChallengeID,out.SourceID,out.DeclaredTargetID,out.TLSPinID,
    out.PeerNodeID,out.PeerTLSFingerprint,out.OriginalChallengeSHA256,
-   out.InstrumentPublicKeySHA256,out.ApprovedBy,out.ApprovedAt,out.ExpiresAt)
+   out.InstrumentPublicKeySHA256,out.PlanSHA256,out.PlanGeneration,
+   out.ApprovedBy,out.ApprovedAt,out.ExpiresAt)
   if err!=nil{return err}
   updated,err:=tx.ExecContext(ctx,
    "UPDATE project_continuous_goals SET revision=revision+1,updated_at=? WHERE id=? AND project_id=? AND revision=?",
@@ -243,6 +253,7 @@ func(s *Service)ListGoalNodeProbeExecutionPermits(ctx context.Context,
     AND pw.project_id=p.id AND pw.status='active'
    WHERE p.id=permit.project_id AND p.status='active'
     AND goal.project_workspace_id=permit.project_workspace_id
+    AND goal.plan_generation=permit.plan_generation
     AND EXISTS(SELECT 1 FROM json_each(goal.monitoring_plan_json,'$.source_ids') src
      WHERE src.type='text' AND src.value=permit.source_id))
    THEN 'scope_inactive'
@@ -283,7 +294,7 @@ func(s *Service)ListGoalNodeProbeExecutionPermits(ctx context.Context,
    &p.InstrumentKeyID,&p.ChallengeID,&p.SourceID,&p.DeclaredTargetID,
    &p.TLSPinID,&p.PeerNodeID,&p.PeerTLSFingerprint,
    &p.OriginalChallengeSHA256,&p.InstrumentPublicKeySHA256,
-   &p.Status,&p.Revision,&p.ApprovedBy,&p.ApprovedAt,&p.ExpiresAt,
+   &p.PlanSHA256,&p.PlanGeneration,&p.Status,&p.Revision,&p.ApprovedBy,&p.ApprovedAt,&p.ExpiresAt,
    &p.RevokedAt,&p.EffectiveExecutionState)
   if err!=nil{return nil,err}
   out=append(out,p)

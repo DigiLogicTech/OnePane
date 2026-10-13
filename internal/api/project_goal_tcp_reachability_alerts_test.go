@@ -136,6 +136,26 @@ func TestTCPReachabilityAlertAPIIsScopedAndHumanAcknowledgedOnly(t *testing.T){
  if err:=db.SQL().QueryRowContext(ctx,
   "SELECT id FROM project_goal_incident_reviews WHERE tcp_alert_id='test-notice'").
   Scan(&reviewID);err!=nil{t.Fatal(err)}
+ evidenceURL:=caseRoute+"/"+reviewID+"/evidence"
+ for _,who:=range []string{"","outsider","robot"}{
+  got:=call("GET",who,evidenceURL,"")
+  expected:=403;if who==""{expected=401}
+  if got.Code!=expected{
+   t.Fatalf("unapproved incident evidence read %q: %d %s",who,got.Code,got.Body)
+  }
+ }
+ evidence:=call("GET","operator",evidenceURL,"")
+ if evidence.Code!=200||
+  !strings.Contains(evidence.Body.String(),`"endpoint_association":"not_established"`)||
+  !strings.Contains(evidence.Body.String(),`"device_identity_verified":false`)||
+  !strings.Contains(evidence.Body.String(),`"remediation_authorized":false`)||
+  !strings.Contains(evidence.Body.String(),"test-notice")||
+  strings.Contains(evidence.Body.String(),"192.168.10.11"){
+  t.Fatalf("incident evidence leaked target or claimed verified identity: %d %s",evidence.Code,evidence.Body)
+ }
+ if got:=call("GET","operator",caseRoute+"/unrelated/evidence","");got.Code<400{
+  t.Fatalf("foreign incident evidence read accepted: %d",got.Code)
+ }
  reviewURL:=caseRoute+"/"+reviewID+"/review"
  if got:=call("POST","robot",reviewURL,
   `{"decision":"needs_investigation","expected_revision":1}`);got.Code!=403{

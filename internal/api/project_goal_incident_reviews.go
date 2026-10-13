@@ -10,6 +10,7 @@ import (
 
 type goalIncidentReviewService interface {
  ListGoalIncidentReviews(context.Context,string,string)([]projectworkspace.GoalIncidentReview,error)
+ GoalIncidentEvidence(context.Context,string,string,string)(projectworkspace.GoalIncidentEvidence,error)
  OpenGoalIncidentReview(context.Context,projectworkspace.OpenGoalIncidentReviewCommand)(projectworkspace.GoalIncidentReview,error)
  CompleteGoalIncidentReview(context.Context,projectworkspace.CompleteGoalIncidentReviewCommand)(projectworkspace.GoalIncidentReview,error)
 }
@@ -24,7 +25,7 @@ func(s *Server)incidentReviewRequest(w http.ResponseWriter,r *http.Request,
  project,err:=s.projects.Project(r.Context(),strings.TrimSpace(r.PathValue("projectID")))
  if err!=nil{respondDomain(w,nil,err,0);return}
  required:="project.read"
- if action!="list"{required="project.write"}
+ if action!="list"&&action!="evidence"{required="project.write"}
  if !s.authorize(w,r,identity,project.WorkspaceID,required){return}
  svc,ok:=s.projects.(goalIncidentReviewService)
  if !ok{writeError(w,http.StatusServiceUnavailable,"incident reviews unavailable");return}
@@ -32,6 +33,10 @@ func(s *Server)incidentReviewRequest(w http.ResponseWriter,r *http.Request,
  switch action{
  case "list":
   out,err:=svc.ListGoalIncidentReviews(r.Context(),project.ID,goalID)
+  respondDomain(w,out,err,http.StatusOK)
+ case "evidence":
+  out,err:=svc.GoalIncidentEvidence(r.Context(),project.ID,goalID,
+   strings.TrimSpace(r.PathValue("reviewID")))
   respondDomain(w,out,err,http.StatusOK)
  case "open":
   var body struct{
@@ -67,4 +72,8 @@ func(s *Server)openProjectGoalIncidentReview(w http.ResponseWriter,r *http.Reque
 }
 func(s *Server)completeProjectGoalIncidentReview(w http.ResponseWriter,r *http.Request){
  s.incidentReviewRequest(w,r,"review")
+}
+
+func(s *Server)getProjectGoalIncidentEvidence(w http.ResponseWriter,r *http.Request){
+ s.incidentReviewRequest(w,r,"evidence")
 }

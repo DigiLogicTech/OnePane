@@ -92,6 +92,18 @@ func TestTCPIncidentCaseIsOperatorReviewedNotAutonomousRemediation(t *testing.T)
  if _,err:=svc.ListGoalIncidentReviews(ctx,"foreign",goal.ID);err==nil{
   t.Fatal("foreign Project exposed operator case")
  }
+ evidence,err:=svc.GoalIncidentEvidence(ctx,project.ID,goal.ID,review.ID)
+ if err!=nil||evidence.Alert.ID!=alerts[0].ID||
+  evidence.Alert.ReturnToBaselineEvidenceState!="not_observed"||
+  evidence.EndpointAssociation!="not_established"||
+  len(evidence.SignedEndpointClaims)!=0||
+  evidence.IncidentConfirmed||evidence.DeviceIdentityVerified||
+  evidence.RemediationAuthorized{
+  t.Fatalf("historical case evidence incorrectly trusted: %+v %v",evidence,err)
+ }
+ if _,err:=svc.GoalIncidentEvidence(ctx,"foreign",goal.ID,review.ID);err==nil{
+  t.Fatal("cross-Project incident evidence was exposed")
+ }
  decision:=CompleteGoalIncidentReviewCommand{
   ProjectID:project.ID,GoalID:goal.ID,ReviewID:review.ID,
   ExpectedRevision:review.Revision,ActorPrincipalID:"robot",

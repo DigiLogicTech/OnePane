@@ -1,0 +1,13 @@
+# RC11 — Bounded incident evidence review
+
+A new **read-only** Project-scoped incident view ties an existing human-owned review case to its original TCP baseline drift notice, the first independently admitted historical TCP return-to-baseline receipt (when present), and at most eight already-recorded signed instrument **self-report** claims that identify the same **operator-declared** exact endpoint.
+
+`GET /v1/projects/{projectID}/continuous-goals/{goalID}/incident-reviews/{reviewID}/evidence` is authenticated, **human-only**, and requires `project.read`. No input body, raw IP/port, signature, TLS certificate, credential, challenge, external network call, Task, case mutation, incident declaration or remediation can originate from this endpoint.
+
+A later signed instrument claim is associated only when its immutable challenge, key, TLS pin, Project, Goal, source, canonical Workspace and declared target match the original approved TCP permit and a declaration that predated the original TCP attempt. Claims are bounded to a 15-minute historical window around the drift detection timestamp and returned as metadata, including `proof_class` explicitly describing a non-attested instrument self-report. Temporal proximity and matching operator-assigned endpoint are **not** independent device-identity, physical-vantage or sensor-accuracy proof.
+
+The response explicitly returns `device_identity_verified=false`, `independent_vantage_verified=false`, `incident_confirmed=false`, `remediation_authorized=false`, and `endpoint_association=not_established` unless matching historical signed claims exist (in which case `historical_operator_declared_same_endpoint`). If missing, revoked or stale grants prevent the original source from being attributed historically, that association stays absent. The case and original alert remain open or reviewed independently; historical return-to-baseline never asserts current device health.
+
+Source-level validation includes scoped HTTP tests rejecting Agents/anonymous/foreign access and showing no secrets or false positive, plus SQLite service integration checking that no synthetic claim is inferred from a TCP reachability notice. The full cryptographic accepted-claim path is separately covered by existing signed instrument regressions; end-to-end cross-source target fidelity, hardware-vantage identity and acceptance remain unproven. No release/packaging authority is added.
+
+**Next gates:** signed instrument case fixture positive/negative linkage, longer historical lookup/endurance tests, user-reviewed reversible playbook boundaries and real physical Node measurement. Comprehensive UI/UX alignment remains last before QA build.

@@ -595,6 +595,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-assessment/{sourceID}", s.getProjectGoalTCPReachabilityAssessment)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-alerts", s.listProjectGoalTCPReachabilityAlerts)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/incident-reviews", s.listProjectGoalIncidentReviews)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/incident-reviews/{reviewID}/evidence", s.getProjectGoalIncidentEvidence)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/incident-reviews", s.openProjectGoalIncidentReview)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/incident-reviews/{reviewID}/review", s.completeProjectGoalIncidentReview)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-alerts/{alertID}/acknowledge", s.acknowledgeProjectGoalTCPReachabilityAlert)

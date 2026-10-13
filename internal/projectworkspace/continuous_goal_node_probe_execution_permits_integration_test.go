@@ -180,10 +180,20 @@ func TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly(t *testing.T){
  if err!=nil||len(originalSeal)==0||makeSealCalls!=1{
   t.Fatalf("active human grant not transactionally sealed: %v %s",err,originalSeal)
  }
+ // Human may re-export a misplaced handoff twice, but cannot spam the
+ // low-resource SQLite immutable audit indefinitely within one nonce.
+ for attempt:=0;attempt<2;attempt++{
+  if _,err=svc.SealGoalNodeProbeExecutionPermit(ctx,sealCommand,makeSeal);
+   err!=nil{t.Fatalf("human bounded re-export %d rejected: %v",attempt,err)}
+ }
+ if _,err=svc.SealGoalNodeProbeExecutionPermit(ctx,sealCommand,makeSeal);
+  !errors.Is(err,ErrRevisionConflict)||makeSealCalls!=3{
+  t.Fatalf("fourth seal exceeded bounded original grant quota: %v calls=%d",err,makeSealCalls)
+ }
  var sealEvents int
  if err=db.SQL().QueryRowContext(ctx,
   "SELECT COUNT(*) FROM events WHERE event_type='project.goal_node_probe_execution_sealed' AND aggregate_id=?",
-  permit.ID).Scan(&sealEvents);err!=nil||sealEvents!=1{
+  permit.ID).Scan(&sealEvents);err!=nil||sealEvents!=3{
   t.Fatalf("original server seal not immutably audited: %v %d",err,sealEvents)
  }
  if _,err=db.SQL().ExecContext(ctx,
@@ -221,12 +231,12 @@ func TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly(t *testing.T){
   t.Fatalf("TCP consent withdrawn but Node action still appeared live: %v %+v",err,found)
  }
  if _,err=svc.SealGoalNodeProbeExecutionPermit(ctx,sealCommand,makeSeal);
-  !errors.Is(err,ErrRevisionConflict)||makeSealCalls!=1{
+  !errors.Is(err,ErrRevisionConflict)||makeSealCalls!=3{
   t.Fatalf("revoked TCP scope was signed again: %v (seal calls %d)",err,makeSealCalls)
  }
  if err=db.SQL().QueryRowContext(ctx,
   "SELECT COUNT(*) FROM events WHERE event_type='project.goal_node_probe_execution_sealed' AND aggregate_id=?",
-  permit.ID).Scan(&sealEvents);err!=nil||sealEvents!=1{
+  permit.ID).Scan(&sealEvents);err!=nil||sealEvents!=3{
   t.Fatalf("revoked Node scope appended a seal audit event: %v %d",err,sealEvents)
  }
  // Changing and restoring original JSON cannot revive the original

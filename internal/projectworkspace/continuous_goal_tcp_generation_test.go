@@ -157,14 +157,17 @@ func TestRestoredGoalPlanCannotReviveApprovedTCPAndInstrumentChain(t *testing.T)
   assertState("permit_inactive","target_inactive","pin_inactive")
   stale,triageErr:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
   if triageErr!=nil{t.Fatal(triageErr)}
-  if len(stale.Sources)!=1||
-   stale.Sources[0].TLSCheckID!=""||
-   stale.Sources[0].InstrumentProofID!=""||
-   stale.Sources[0].SignedMeasurementClaimID!=""||
-   stale.Sources[0].TLSCheckState!="no_current_approved_check"||
-   stale.Sources[0].InstrumentProofState!="no_current_authenticated_proof"||
-   stale.Sources[0].SignedMeasurementClaimState!="no_current_signed_claim"{
-   t.Fatalf("old TLS/instrument signature metadata revived after plan edit/restore: %+v",stale)
+  if stale.RecentNegativeSources!=0||len(stale.Sources)<1{
+   t.Fatalf("old signed source created a current adverse indication: %+v",stale)
+  }
+  for _,source:=range stale.Sources{
+   if source.TLSCheckID!=""||source.InstrumentProofID!=""||
+    source.SignedMeasurementClaimID!=""||
+    source.TLSCheckState!="no_current_approved_check"||
+    source.InstrumentProofState!="no_current_authenticated_proof"||
+    source.SignedMeasurementClaimState!="no_current_signed_claim"{
+    t.Fatalf("old TLS/instrument signature metadata revived after plan edit/restore: %+v",source)
+   }
   }
   listed,err=svc.ListGoalTCPProbePermits(ctx,project.ID,goal.ID)
   if err!=nil||len(listed)!=1||

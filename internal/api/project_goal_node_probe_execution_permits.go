@@ -2,6 +2,7 @@ package api
 
 import (
  "context"
+ "encoding/json"
  "net/http"
  "time"
 
@@ -95,26 +96,29 @@ func(s *Server)sealProjectGoalNodeProbeExecution(w http.ResponseWriter,r *http.R
   writeError(w,http.StatusServiceUnavailable,"current OnePane server signing identity unavailable")
   return
  }
- grants,err:=svc.ListGoalNodeProbeExecutionPermits(r.Context(),p.ID,r.PathValue("goalID"))
+ sealService,ok:=svc.(interface{
+  SealGoalNodeProbeExecutionPermit(context.Context,
+   projectworkspace.SealGoalNodeProbeExecutionPermitCommand,
+   func(projectworkspace.GoalNodeProbeExecutionPermit)([]byte,error))([]byte,error)
+ })
+ if !ok{
+  writeError(w,http.StatusServiceUnavailable,"transactional server seal admission unavailable")
+  return
+ }
+ originalJSON,err:=sealService.SealGoalNodeProbeExecutionPermit(
+  r.Context(),projectworkspace.SealGoalNodeProbeExecutionPermitCommand{
+   ProjectID:p.ID,GoalID:r.PathValue("goalID"),
+   PermitID:r.PathValue("permitID"),ActorPrincipalID:i.PrincipalID,
+  },func(grant projectworkspace.GoalNodeProbeExecutionPermit)([]byte,error){
+   sealed,err:=nodefederation.SealHumanNodeProbeExecution(signer.Identity(),grant,time.Now())
+   if err!=nil{return nil,err}
+   return json.Marshal(sealed)
+  })
  if err!=nil{respondDomain(w,nil,err,0);return}
- var grant *projectworkspace.GoalNodeProbeExecutionPermit
- for j:=range grants{
-  candidate:=&grants[j]
-  if candidate.ID==r.PathValue("permitID")&&
-   candidate.ApprovedBy==i.PrincipalID{
-   grant=candidate
-   break
-  }
- }
- if grant==nil{
-  writeError(w,http.StatusNotFound,"live human execution permit not found")
+ var sealed nodefederation.SealedNodeProbeAuthority
+ if err=json.Unmarshal(originalJSON,&sealed);err!=nil{
+  writeError(w,http.StatusInternalServerError,"server issuer envelope invalid")
   return
  }
- if grant.EffectiveExecutionState!="active"{
-  writeError(w,http.StatusConflict,"execution permit is no longer active")
-  return
- }
- sealed,err:=nodefederation.SealHumanNodeProbeExecution(signer.Identity(),*grant,time.Now())
- if err!=nil{writeError(w,http.StatusConflict,"server cannot seal an inactive one-shot scope");return}
  respondDomain(w,sealed,nil,http.StatusOK)
 }

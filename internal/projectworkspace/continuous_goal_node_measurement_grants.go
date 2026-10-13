@@ -22,6 +22,8 @@ type GoalNodeMeasurementGrant struct {
  SourceID string `json:"source_id"`
  PeerNodeID string `json:"peer_node_id"`
  PeerTLSFingerprint string `json:"peer_tls_fingerprint"`
+ PlanSHA256 string `json:"plan_sha256"`
+ PlanGeneration int64 `json:"plan_generation"`
  Status string `json:"status"`
  EffectiveTransportState string `json:"effective_transport_state,omitempty"`
  Revision int64 `json:"revision"`
@@ -40,13 +42,13 @@ type RevokeGoalNodeMeasurementGrantCommand struct {
  ExpectedGoalRevision,ExpectedGrantRevision int64
 }
 const goalNodeMeasurementGrantColumns=`id,project_id,goal_id,project_workspace_id,
- source_id,peer_node_id,peer_tls_fingerprint,status,revision,
+ source_id,peer_node_id,peer_tls_fingerprint,plan_sha256,plan_generation,status,revision,
  last_sequence,approved_by,approved_at,expires_at,revoked_at`
 
 func scanGoalNodeMeasurementGrant(row scanner)(GoalNodeMeasurementGrant,error){
  var g GoalNodeMeasurementGrant
  err:=row.Scan(&g.ID,&g.ProjectID,&g.GoalID,&g.ProjectWorkspaceID,
-  &g.SourceID,&g.PeerNodeID,&g.PeerTLSFingerprint,&g.Status,
+  &g.SourceID,&g.PeerNodeID,&g.PeerTLSFingerprint,&g.PlanSHA256,&g.PlanGeneration,&g.Status,
   &g.Revision,&g.LastSequence,&g.ApprovedBy,&g.ApprovedAt,
   &g.ExpiresAt,&g.RevokedAt)
  return g,err
@@ -75,19 +77,20 @@ func(s *Service)ApproveGoalNodeMeasurementGrant(ctx context.Context,
   if err=s.requireActor(ctx,tx,p.WorkspaceID,c.ActorPrincipalID);err!=nil{return err}
   if err=humanGoalReviewer(ctx,tx,c.ActorPrincipalID);err!=nil{return err}
   var workspaceID,status,planRaw string
-  var revision int64
+  var revision,planGeneration int64
   err=tx.QueryRowContext(ctx,`SELECT g.project_workspace_id,g.status,
-   g.monitoring_plan_json,g.revision
+   g.monitoring_plan_json,g.revision,g.plan_generation
    FROM project_continuous_goals g
    JOIN project_workspaces w ON w.id=g.project_workspace_id AND w.project_id=g.project_id
    JOIN workspaces tenant ON tenant.id=? AND tenant.status='active'
    WHERE g.id=? AND g.project_id=? AND w.status='active'`,
    p.WorkspaceID,c.GoalID,c.ProjectID).
-   Scan(&workspaceID,&status,&planRaw,&revision)
+   Scan(&workspaceID,&status,&planRaw,&revision,&planGeneration)
   if err!=nil{return err}
   if status!="configured"{return ErrInvalidTransition}
   if revision!=c.ExpectedGoalRevision{return ErrRevisionConflict}
-  plan,_,err:=goalReviewPlan(planRaw);if err!=nil{return err}
+  plan,planHash,err:=goalReviewPlan(planRaw);if err!=nil{return err}
+  if planGeneration<1{return ErrInvalidTransition}
   allowed:=false
   for _,source:=range plan.SourceIDs{if source==c.SourceID{allowed=true;break}}
   if !allowed{return ErrInvalidCommand}
@@ -116,16 +119,18 @@ func(s *Service)ApproveGoalNodeMeasurementGrant(ctx context.Context,
    ID:idv,ProjectID:c.ProjectID,GoalID:c.GoalID,
    ProjectWorkspaceID:workspaceID,SourceID:c.SourceID,
    PeerNodeID:c.PeerNodeID,PeerTLSFingerprint:fingerprint,
+   PlanSHA256:planHash,PlanGeneration:planGeneration,
    Status:"approved",EffectiveTransportState:"active",Revision:1,ApprovedBy:c.ActorPrincipalID,
    ApprovedAt:now,ExpiresAt:c.ExpiresAt,
   }
   _,err=tx.ExecContext(ctx,`INSERT INTO project_goal_node_measurement_grants(
    id,project_id,goal_id,project_workspace_id,source_id,
-   peer_node_id,peer_tls_fingerprint,status,revision,last_sequence,
+   peer_node_id,peer_tls_fingerprint,plan_sha256,plan_generation,status,revision,last_sequence,
    approved_by,approved_at,expires_at,revoked_at)
-   VALUES(?,?,?,?,?,?,?,'approved',1,0,?,?,?,0)`,
+   VALUES(?,?,?,?,?,?,?,?,?,'approved',1,0,?,?,?,0)`,
    result.ID,result.ProjectID,result.GoalID,result.ProjectWorkspaceID,
    result.SourceID,result.PeerNodeID,result.PeerTLSFingerprint,
+   result.PlanSHA256,result.PlanGeneration,
    result.ApprovedBy,result.ApprovedAt,result.ExpiresAt)
   if err!=nil{return err}
   resultRevision,err:=tx.ExecContext(ctx,`UPDATE project_continuous_goals
@@ -215,13 +220,16 @@ func(s *Service)ListGoalNodeMeasurementGrants(ctx context.Context,
  if strings.TrimSpace(projectID)==""||strings.TrimSpace(goalID)==""{
   return nil,ErrInvalidCommand
  }
- var found int
- err:=s.db.QueryRowContext(ctx,`SELECT 1 FROM project_continuous_goals g
+ var planRaw string
+ var activePlanGeneration int64
+ err:=s.db.QueryRowContext(ctx,`SELECT g.monitoring_plan_json,g.plan_generation FROM project_continuous_goals g
   JOIN projects p ON p.id=g.project_id AND p.status='active'
   JOIN workspaces t ON t.id=p.workspace_id AND t.status='active'
   JOIN project_workspaces w ON w.id=g.project_workspace_id
    AND w.project_id=p.id AND w.status='active'
-  WHERE g.id=? AND g.project_id=?`,goalID,projectID).Scan(&found)
+  WHERE g.id=? AND g.project_id=?`,goalID,projectID).Scan(&planRaw,&activePlanGeneration)
+ if err!=nil{return nil,err}
+ _,activePlanHash,err:=goalReviewPlan(planRaw)
  if err!=nil{return nil,err}
  rows,err:=s.db.QueryContext(ctx,`SELECT `+goalNodeMeasurementGrantColumns+`,
   CASE
@@ -235,6 +243,7 @@ func(s *Service)ListGoalNodeMeasurementGrants(ctx context.Context,
      AND pw.project_id=p.id AND pw.status='active'
     WHERE p.id=project_goal_node_measurement_grants.project_id AND p.status='active'
      AND goal.project_workspace_id=project_goal_node_measurement_grants.project_workspace_id
+     AND goal.plan_generation=project_goal_node_measurement_grants.plan_generation
      AND EXISTS(SELECT 1 FROM json_each(goal.monitoring_plan_json,'$.source_ids') source
       WHERE source.type='text' AND source.value=project_goal_node_measurement_grants.source_id))
     THEN 'scope_inactive'
@@ -266,10 +275,15 @@ func(s *Service)ListGoalNodeMeasurementGrants(ctx context.Context,
   var item GoalNodeMeasurementGrant
   err=rows.Scan(&item.ID,&item.ProjectID,&item.GoalID,
    &item.ProjectWorkspaceID,&item.SourceID,&item.PeerNodeID,
-   &item.PeerTLSFingerprint,&item.Status,&item.Revision,
+   &item.PeerTLSFingerprint,&item.PlanSHA256,&item.PlanGeneration,
+   &item.Status,&item.Revision,
    &item.LastSequence,&item.ApprovedBy,&item.ApprovedAt,
    &item.ExpiresAt,&item.RevokedAt,&item.EffectiveTransportState)
   if err!=nil{return nil,err}
+  if item.Status=="approved"&&item.ExpiresAt>s.clock.UnixMilli()&&
+   (item.PlanGeneration!=activePlanGeneration||item.PlanSHA256!=activePlanHash){
+   item.EffectiveTransportState="scope_inactive"
+  }
   out=append(out,item)
  }
  return out,rows.Err()

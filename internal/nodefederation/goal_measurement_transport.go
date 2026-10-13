@@ -4,6 +4,8 @@ import (
  "context"
  "database/sql"
  "encoding/json"
+ "crypto/sha256"
+ "encoding/hex"
  "errors"
  "strings"
 
@@ -63,19 +65,21 @@ func(s *Service)AcceptPairedNodeMeasurement(ctx context.Context,
   if c.ObservedAt>now||now-c.ObservedAt>5*60*1000{
    return ErrNodeMeasurementNotAdmitted
   }
-  var tenantID,grantStatus,planRaw,nodeTrust,pairStatus,storedFingerprint,approverStatus string
-  var grantRevision,lastSeq,approvedAt,expiresAt int64
+  var tenantID,grantStatus,planRaw,approvedPlanHash,nodeTrust,pairStatus,storedFingerprint,approverStatus string
+  var grantRevision,lastSeq,approvedAt,expiresAt,approvedPlanGeneration,livePlanGeneration int64
   var confirmedLocal,confirmedPeer int
   err:=tx.QueryRowContext(ctx,`SELECT
    p.workspace_id,g.project_id,g.goal_id,g.project_workspace_id,g.source_id,g.status,
    g.revision,g.last_sequence,g.approved_at,g.expires_at,
-   goal.monitoring_plan_json,n.trust_state,pair.status,pair.peer_tls_fingerprint,
+   goal.monitoring_plan_json,g.plan_sha256,g.plan_generation,goal.plan_generation,
+   n.trust_state,pair.status,pair.peer_tls_fingerprint,
    pair.local_confirmed,pair.peer_confirmed,approver.status
    FROM project_goal_node_measurement_grants g
    JOIN projects p ON p.id=g.project_id AND p.status='active'
    JOIN workspaces tenant ON tenant.id=p.workspace_id AND tenant.status='active'
    JOIN project_continuous_goals goal ON goal.id=g.goal_id
     AND goal.project_id=p.id AND goal.status='configured'
+    AND goal.project_workspace_id=g.project_workspace_id
    JOIN project_workspaces pw ON pw.id=g.project_workspace_id
     AND pw.project_id=p.id AND pw.status='active'
    JOIN harness_nodes n ON n.id=g.peer_node_id AND n.local=0
@@ -88,7 +92,8 @@ func(s *Service)AcceptPairedNodeMeasurement(ctx context.Context,
    c.GrantID,peerID,peerFingerprint).
    Scan(&tenantID,&receipt.ProjectID,&receipt.GoalID,&receipt.ProjectWorkspaceID,
     &receipt.SourceID,&grantStatus,&grantRevision,&lastSeq,&approvedAt,&expiresAt,
-    &planRaw,&nodeTrust,&pairStatus,&storedFingerprint,
+    &planRaw,&approvedPlanHash,&approvedPlanGeneration,&livePlanGeneration,
+    &nodeTrust,&pairStatus,&storedFingerprint,
     &confirmedLocal,&confirmedPeer,&approverStatus)
   if err!=nil{return ErrNodeMeasurementNotAdmitted}
   if grantStatus!="approved"||expiresAt<=now||approvedAt>c.ObservedAt||
@@ -103,6 +108,11 @@ func(s *Service)AcceptPairedNodeMeasurement(ctx context.Context,
    if source==receipt.SourceID{allowed=true;break}
   }
   if !allowed{return ErrNodeMeasurementNotAdmitted}
+  hash:=sha256.Sum256([]byte(planRaw))
+  if approvedPlanGeneration<1||approvedPlanGeneration!=livePlanGeneration||
+   approvedPlanHash!="sha256:"+hex.EncodeToString(hash[:]){
+   return ErrNodeMeasurementNotAdmitted
+  }
   if c.Sequence<=lastSeq{return ErrNodeMeasurementReplay}
   // Bounded indexed scan: one compromised Node cannot indefinitely fill
   // the local receipt ledger, even with valid mTLS credentials.

@@ -169,7 +169,8 @@ func(s *Service)ListGoalSourceCredentials(ctx context.Context,
    WHEN k.status!='approved' OR k.expires_at<=? OR
     k.plan_generation<1 OR k.plan_generation!=g.plan_generation
     THEN 'signer_inactive'
-   WHEN p.status!='active' OR w.status!='active' THEN 'scope_inactive'
+   WHEN p.status!='active' OR w.status!='active' OR g.status!='configured'
+    THEN 'scope_inactive'
    WHEN EXISTS(SELECT 1 FROM principals pr
      LEFT JOIN workspace_memberships m ON m.workspace_id=b.workspace_id AND m.principal_id=pr.id
      WHERE pr.id=b.source_principal_id
@@ -270,6 +271,9 @@ func checkGoalSourceCredentialTx(ctx context.Context,tx goalSourceCredentialQuer
  err:=tx.QueryRowContext(ctx,`SELECT 1 FROM project_goal_source_credential_grants b
   JOIN api_credentials a ON a.id=b.credential_id AND a.principal_id=b.source_principal_id
   JOIN project_goal_observation_signers k ON k.id=b.signer_id AND k.goal_id=b.goal_id
+  JOIN project_continuous_goals g ON g.id=b.goal_id AND g.project_id=b.project_id
+   AND g.status='configured' AND g.plan_generation=k.plan_generation
+   AND k.plan_generation>0
   WHERE b.credential_id=? AND b.project_id=? AND b.goal_id=?
    AND b.signer_id=? AND b.workspace_id=? AND b.source_principal_id=?
    AND b.revoked_by IS NULL AND b.expires_at>? AND a.revoked_at IS NULL

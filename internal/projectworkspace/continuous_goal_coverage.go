@@ -166,6 +166,7 @@ func(s *Service)GoalEvidenceCoverage(ctx context.Context,projectID,goalID string
   MAX(CASE WHEN signer.status='approved' AND signer.expires_at>?
     AND signer.plan_hash=? AND signer.project_workspace_id=?
     AND signer.plan_generation=? AND signer.plan_generation>0
+    AND ?='configured'
     AND EXISTS(SELECT 1 FROM principals p JOIN workspace_memberships m
       ON m.principal_id=p.id AND m.workspace_id=?
      WHERE p.id=signer.approved_by AND p.status='active'
@@ -181,7 +182,7 @@ func(s *Service)GoalEvidenceCoverage(ctx context.Context,projectID,goalID string
     AND signer.source_id=proof.source_id
   WHERE proof.project_id=? AND proof.goal_id=?
   GROUP BY proof.source_id ORDER BY proof.source_id LIMIT 32`,
-  now,planHash,projectWorkspaceID,planGeneration,tenantWorkspaceID,tenantWorkspaceID,projectID,goalID)
+  now,planHash,projectWorkspaceID,planGeneration,status,tenantWorkspaceID,tenantWorkspaceID,projectID,goalID)
  if err!=nil{return GoalEvidenceCoverage{},err}
  for signedRows.Next(){
   var id string

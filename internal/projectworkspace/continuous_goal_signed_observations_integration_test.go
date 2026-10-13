@@ -324,6 +324,22 @@ func TestLevel5SignedObservationEnrollmentAntiReplayAndLiveRevocation(t *testing
   t.Fatalf("rate-denied proof consumed signer sequence: %+v %v",saved,err)
  }
 
+ // Register a real bearer grant to prove its effective status is derived
+ // from live signer/Goal consent rather than the original approval label.
+ enrolledCredential,err:=svc.MintGoalSourceCredential(ctx,MintGoalSourceCredentialCommand{
+  ProjectID:p.ID,GoalID:g.ID,SignerID:rotated.ID,
+  ActorPrincipalID:"owner",ExpiresAt:expiry,
+ })
+ if err!=nil{t.Fatalf("current signed source credential approval: %v",err)}
+ currentCredentials,err:=svc.ListGoalSourceCredentials(ctx,p.ID,g.ID,rotated.ID)
+ if err!=nil||len(currentCredentials)!=1||currentCredentials[0].Status!="active"{
+  t.Fatalf("approved live source credential not listed: %+v %v",currentCredentials,err)
+ }
+ if err=checkGoalSourceCredentialTx(ctx,db.SQL(),
+  enrolledCredential.Credential.CredentialID,p.ID,g.ID,rotated.ID,
+  "tenant","source",clock.Real{}.UnixMilli());err!=nil{
+  t.Fatalf("current source bearer preflight refused: %v",err)
+ }
  // The exact old plan JSON cannot restore an old source identity.
  // All receipts remain immutable history, but new signatures,
  // credentials and CURRENT health evidence must fail closed.
@@ -356,6 +372,17 @@ func TestLevel5SignedObservationEnrollmentAntiReplayAndLiveRevocation(t *testing
   t.Fatal("historical signer could rewrite its immutable approval generation")
  }
  afterPlanEdit,err:=svc.GoalEvidenceCoverage(ctx,p.ID,g.ID)
+ currentCredentials,err=svc.ListGoalSourceCredentials(ctx,p.ID,g.ID,rotated.ID)
+ if err!=nil||len(currentCredentials)!=1||
+  currentCredentials[0].Status!="signer_inactive"{
+  t.Fatalf("previous signed consent still appears to have a live credential: %+v %v",
+   currentCredentials,err)
+ }
+ if err=checkGoalSourceCredentialTx(ctx,db.SQL(),
+  enrolledCredential.Credential.CredentialID,p.ID,g.ID,rotated.ID,
+  "tenant","source",clock.Real{}.UnixMilli());!errors.Is(err,ErrPrincipalIneligible){
+  t.Fatalf("expired signer-generation grant passed bearer preflight: %v",err)
+ }
  if err!=nil||afterPlanEdit.RecentSourceSignedSources!=0||
   len(afterPlanEdit.Sources)!=1||
   afterPlanEdit.Sources[0].SignatureEvidenceState!="historical_key_inactive"{

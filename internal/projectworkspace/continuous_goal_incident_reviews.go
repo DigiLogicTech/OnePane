@@ -138,12 +138,14 @@ func(s *Service)CompleteGoalIncidentReview(ctx context.Context,
   if err=humanGoalReviewer(ctx,tx,c.ActorPrincipalID);err!=nil{return err}
   a,err:=scanGoalIncidentReview(tx.QueryRowContext(ctx,`SELECT `+
    goalIncidentReviewColumns+` FROM project_goal_incident_reviews review
-   JOIN project_continuous_goals goal ON goal.id=review.goal_id
-    AND goal.project_id=review.project_id
-    AND goal.project_workspace_id=review.project_workspace_id
-   JOIN project_workspaces workspace ON workspace.id=goal.project_workspace_id
-    AND workspace.project_id=goal.project_id AND workspace.status='active'
-   WHERE review.id=? AND review.project_id=? AND review.goal_id=?`,
+   WHERE review.id=? AND review.project_id=? AND review.goal_id=?
+   AND EXISTS(
+    SELECT 1 FROM project_continuous_goals goal
+    JOIN project_workspaces workspace ON workspace.id=goal.project_workspace_id
+     AND workspace.project_id=goal.project_id AND workspace.status='active'
+    WHERE goal.id=review.goal_id AND goal.project_id=review.project_id
+     AND goal.project_workspace_id=review.project_workspace_id
+   )`,
    c.ReviewID,c.ProjectID,c.GoalID))
   if err!=nil{return err}
   if a.Revision!=c.ExpectedRevision{return ErrRevisionConflict}

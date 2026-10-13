@@ -318,10 +318,12 @@ func runSign(args []string)error{
 func runVerifyReceipt(args []string)error{
  fs:=flag.NewFlagSet("verify-receipt",flag.ContinueOnError)
  input:=fs.String("receipt","","private 0600 local one-shot receipt file")
+ originalFile:=fs.String("challenge","","separately retained trusted OnePane challenge")
+ planFile:=fs.String("plan","","separately retained private 0600 OnePane probe plan")
  publicArg:=fs.String("public-key","","independently enrolled Ed25519 public key in base64")
  if err:=fs.Parse(args);err!=nil{return err}
- if fs.NArg()!=0||*input==""||*publicArg==""{
-  return errors.New("verify-receipt requires --receipt and independently verified --public-key")
+ if fs.NArg()!=0||*input==""||*publicArg==""||*originalFile==""||*planFile==""{
+  return errors.New("verify-receipt requires --receipt, trusted --challenge, private --plan and independently verified --public-key")
  }
  pub,err:=base64.StdEncoding.Strict().DecodeString(*publicArg)
  if err!=nil||len(pub)!=ed25519.PublicKeySize||
@@ -330,10 +332,14 @@ func runVerifyReceipt(args []string)error{
  }
  var receipt instrumentprobe.LocalProbeReceipt
  if err=readPrivateJSON(*input,&receipt);err!=nil{return err}
- if err=instrumentprobe.VerifyLocalReceipt(receipt,ed25519.PublicKey(pub));err!=nil{
+ var original instrumentprobe.Challenge
+ if err=readJSON(*originalFile,&original);err!=nil{return err}
+ var plan instrumentprobe.ProbePlan
+ if err=readPrivateJSON(*planFile,&plan);err!=nil{return err}
+ if err=instrumentprobe.VerifyLocalReceiptAgainstApproval(receipt,ed25519.PublicKey(pub),original,plan);err!=nil{
   return err
  }
- fmt.Println("Offline Ed25519 local self-report signature verified against supplied public key.")
+ fmt.Println("Offline local signed receipt matches independent OnePane challenge, approved plan and public key.")
  fmt.Println("This does NOT attest instrument identity, physical execution, target device, or network health.")
  return nil
 }

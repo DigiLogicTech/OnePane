@@ -180,6 +180,11 @@ func TestRestoredGoalPlanCannotReviveApprovedTCPAndInstrumentChain(t *testing.T)
  if currentGen!=permit.PlanGeneration+2{
   t.Fatalf("original Goal plan generation not advanced on restore: %d",currentGen)
  }
+ if _,err=db.SQL().ExecContext(ctx,
+  "UPDATE project_goal_tcp_probe_permits SET plan_generation=? WHERE id=?",
+  currentGen,permit.ID);err==nil{
+  t.Fatal("original human permit generation rewritten after approval")
+ }
  goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
  if _,err=svc.claimGoalTCPAttempt(ctx,RunGoalTCPProbeCommand{
   ProjectID:project.ID,GoalID:goal.ID,PermitID:permit.ID,

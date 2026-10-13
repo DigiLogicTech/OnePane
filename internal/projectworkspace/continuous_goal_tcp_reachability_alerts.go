@@ -34,6 +34,12 @@ type TCPReachabilityAlert struct {
  AcknowledgedBy *string `json:"acknowledged_by,omitempty"`
  AcknowledgedAt int64 `json:"acknowledged_at"`
  DeviceHealth string `json:"device_health"`
+ // A later approved TCP attempt recorded the same baseline expectation.
+ // This is historical socket evidence, NEVER verified device health,
+ // current reachability or confirmation that an incident was resolved.
+ ReturnToBaselineEvidenceState string `json:"return_to_baseline_evidence_state"`
+ ReturnToBaselineAttemptID string `json:"return_to_baseline_attempt_id,omitempty"`
+ ReturnToBaselineAt int64 `json:"return_to_baseline_at,omitempty"`
 }
 type AcknowledgeTCPReachabilityAlertCommand struct {
  ProjectID string
@@ -141,6 +147,43 @@ func(s *Service)ListTCPReachabilityAlerts(ctx context.Context,projectID,goalID s
  for rows.Next(){
   a,err:=scanTCPReachabilityAlert(rows)
   if err!=nil{return nil,err}
+  a.ReturnToBaselineEvidenceState="not_observed"
+  // Historical evidence is correlated only with the exact original
+  // permit, its approved target, and the immutable baseline version.
+  // This deliberately does NOT read current network status, generate
+  // a remediation, or change the alert's open/acknowledged status.
+  var returnID string
+  var returnAt int64
+  recoveryErr:=s.db.QueryRowContext(ctx,`SELECT later.id,later.completed_at
+   FROM project_goal_tcp_probe_attempts later
+   JOIN project_goal_tcp_probe_attempts original
+    ON original.id=? AND original.project_id=? AND original.goal_id=?
+    AND original.project_workspace_id=? AND original.source_id=?
+   WHERE later.project_id=? AND later.goal_id=?
+    AND later.project_workspace_id=? AND later.source_id=?
+    AND later.permit_id=original.permit_id
+    AND later.permit_revision=original.permit_revision
+    AND later.target_ipv4=original.target_ipv4
+    AND later.target_port=original.target_port
+    AND later.timeout_ms=original.timeout_ms
+    AND later.baseline_id_at_claim=?
+    AND later.baseline_revision_at_claim=?
+    AND later.status=?
+    AND later.claimed_at>?
+    AND later.completed_at>=later.claimed_at
+    AND later.completed_at<=?
+   ORDER BY later.claimed_at ASC,later.id ASC LIMIT 1`,
+   a.AttemptID,a.ProjectID,a.GoalID,a.ProjectWorkspaceID,a.SourceID,
+   a.ProjectID,a.GoalID,a.ProjectWorkspaceID,a.SourceID,
+   a.BaselineID,a.BaselineRevision,a.ExpectedTCP,a.DetectedAt,
+   s.clock.UnixMilli()).Scan(&returnID,&returnAt)
+  if recoveryErr==nil{
+   a.ReturnToBaselineEvidenceState="historical_tcp_return_observed"
+   a.ReturnToBaselineAttemptID=returnID
+   a.ReturnToBaselineAt=returnAt
+  }else if !errors.Is(recoveryErr,sql.ErrNoRows){
+   return nil,recoveryErr
+  }
   out=append(out,a)
  }
  return out,rows.Err()

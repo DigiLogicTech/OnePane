@@ -128,7 +128,7 @@ func TestRestoredGoalPlanCannotReviveApprovedTCPAndInstrumentChain(t *testing.T)
   id,project_id,goal_id,instrument_key_id,challenge_id,declared_target_id,
   tls_pin_id,source_id,measurement_type,outcome,observed_at,accepted_at,
   signed_payload,signature,signature_sha256)
-  VALUES('report-old-generation',?,?,?,?,?,?,?,'router',
+  VALUES('report-old-generation',?,?,?,?,?,?,'router',
    'endpoint_tcp_connect_claim','not_connected',?,?,?,?,?)`,
   project.ID,goal.ID,key.ID,"challenge-report",target.ID,pin.ID,
   observed,observed,bytes.Repeat([]byte{0x33},300),

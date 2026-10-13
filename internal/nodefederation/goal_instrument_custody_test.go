@@ -106,9 +106,20 @@ func TestNodeCustodyCountersignatureRequiresOriginalApprovalsAndTwoKeys(t *testi
  if err=verify(w,cert,node.Fingerprint,instrumentKey,receipt,ch,plan);err!=nil{
   t.Fatalf("valid separately pinned two-key chain rejected: %v",err)
  }
- if strings.Contains(string(w.SigningPayload),plan.TargetIPv4)||
-  strings.Contains(string(w.SigningPayload),"8443"){
-  t.Fatal("private endpoint address/port appeared in Node custody envelope")
+ // Numeric port digits are NOT a valid raw-port leak check: the
+ // random key digest or Unix timestamp can independently contain "8443".
+ // Instead inspect the typed envelope's exact allowed metadata keys.
+ var witnessFields map[string]json.RawMessage
+ if err=json.Unmarshal(w.SigningPayload,&witnessFields);err!=nil{t.Fatal(err)}
+ for _,name:=range []string{
+  "target_ipv4","target_port","ipv4","port","host","address","socket",
+ }{
+  if _,present:=witnessFields[name];present{
+   t.Fatalf("private socket field %s leaked into Node custody envelope",name)
+  }
+ }
+ if strings.Contains(string(w.SigningPayload),plan.TargetIPv4){
+  t.Fatal("original private IPv4 literal leaked into Node custody envelope")
  }
  if err=verify(w,cert,"sha256:"+strings.Repeat("0",64),
   instrumentKey,receipt,ch,plan);err==nil{

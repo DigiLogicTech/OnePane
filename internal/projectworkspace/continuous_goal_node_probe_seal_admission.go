@@ -2,6 +2,7 @@ package projectworkspace
 
 import (
  "context"
+ "database/sql"
  "crypto/sha256"
  "encoding/json"
  "errors"
@@ -69,9 +70,8 @@ func(s *Service)SealGoalNodeProbeExecutionPermit(
     break
    }
   }
-  if original==nil||original.EffectiveExecutionState!="active"{
-   return ErrInvalidTransition
-  }
+  if original==nil{return sql.ErrNoRows}
+  if original.EffectiveExecutionState!="active"{return ErrRevisionConflict}
   envelope,err:=seal(*original)
   if err!=nil{return err}
   if len(envelope)==0||len(envelope)>8192||!json.Valid(envelope){

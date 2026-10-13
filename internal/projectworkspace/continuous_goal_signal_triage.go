@@ -239,6 +239,8 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
    JOIN project_continuous_goals goal ON goal.id=pin.goal_id
     AND goal.project_id=p.id AND goal.status='configured'
     AND goal.project_workspace_id=pin.project_workspace_id
+    AND goal.plan_generation=permit.plan_generation
+    AND permit.plan_generation>0
    JOIN project_workspaces workspace ON workspace.id=goal.project_workspace_id
     AND workspace.project_id=p.id AND workspace.status='active'
    JOIN principals pin_review ON pin_review.id=pin.approved_by
@@ -301,6 +303,8 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
     AND permit.source_id=target.source_id
    JOIN project_continuous_goals goal ON goal.id=ik.goal_id
     AND goal.project_id=ik.project_id AND goal.status='configured'
+    AND goal.plan_generation=permit.plan_generation
+    AND permit.plan_generation>0
     AND goal.project_workspace_id=ik.project_workspace_id
     AND goal.project_workspace_id=target.project_workspace_id
     AND goal.project_workspace_id=pin.project_workspace_id
@@ -368,6 +372,8 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
     AND permit.source_id=target.source_id
    JOIN project_continuous_goals goal ON goal.id=ik.goal_id
     AND goal.project_id=ik.project_id AND goal.status='configured'
+    AND goal.plan_generation=permit.plan_generation
+    AND permit.plan_generation>0
     AND goal.project_workspace_id=ik.project_workspace_id
     AND goal.project_workspace_id=target.project_workspace_id
     AND goal.project_workspace_id=pin.project_workspace_id

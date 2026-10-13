@@ -76,6 +76,30 @@ func custodyMessage(nodeID,fp string,instrumentKey ed25519.PublicKey,
  })
 }
 
+// ValidateLocalInstrumentCustodyIdentity is an offline pre-effect gate:
+// require a live enrolled Node leaf and the MATCHING signing private key.
+// This checks local software key possession, not physical host attestation.
+func ValidateLocalInstrumentCustodyIdentity(nodeID string,ident Identity,
+ now time.Time)error{
+ if len(ident.Certificate.Certificate)!=1{
+  return errors.New("Node custody enrollment certificate unavailable")
+ }
+ leaf,err:=x509.ParseCertificate(ident.Certificate.Certificate[0])
+ if err!=nil{return err}
+ if err=validateCustodyCert(leaf,nodeID,ident.Fingerprint,now.UnixMilli());
+  err!=nil{return err}
+ private,ok:=ident.Certificate.PrivateKey.(ed25519.PrivateKey)
+ if !ok||len(private)!=ed25519.PrivateKeySize{
+  return errors.New("Node custody signing private key unavailable")
+ }
+ proof:=[]byte("OnePane/node-custody-local-identity-self-test/v1")
+ if !ed25519.Verify(leaf.PublicKey.(ed25519.PublicKey),
+  proof,ed25519.Sign(private,proof)){
+  return errors.New("Node software signer differs from enrolled public identity")
+ }
+ return nil
+}
+
 func validateCustodyCert(cert *x509.Certificate,nodeID,pin string,
  witnessedAt int64)error{
  if cert==nil||len(cert.Raw)==0||cert.Subject.CommonName!=nodeID||

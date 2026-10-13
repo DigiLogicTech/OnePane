@@ -208,3 +208,30 @@ func TestNodeCustodyCannotWitnessStaleUnsignedOrFalseVantageReport(t *testing.T)
   })
  }
 }
+
+func TestNodeCustodyPreflightRejectsWrongSignerOrExpiredIdentity(t *testing.T){
+ ident,err:=EnsureIdentity(t.TempDir(),"peer")
+ if err!=nil{t.Fatal(err)}
+ if err=ValidateLocalInstrumentCustodyIdentity("peer",ident,time.Now());err!=nil{
+  t.Fatalf("valid enrolled local Node signer rejected before effect: %v",err)
+ }
+ if err=ValidateLocalInstrumentCustodyIdentity("impostor",ident,time.Now());err==nil{
+  t.Fatal("wrong Node ID accepted for pre-effect key signing")
+ }
+ if err=ValidateLocalInstrumentCustodyIdentity("peer",ident,
+  time.Now().AddDate(12,0,0));err==nil{
+  t.Fatal("expired Node certificate accepted before probe")
+ }
+ other,err:=EnsureIdentity(t.TempDir(),"other")
+ if err!=nil{t.Fatal(err)}
+ wrong:=ident
+ wrong.Certificate.PrivateKey=other.Certificate.PrivateKey
+ if err=ValidateLocalInstrumentCustodyIdentity("peer",wrong,time.Now());err==nil{
+  t.Fatal("wrong private signer approved Node execution")
+ }
+ wrong=ident
+ wrong.Fingerprint=other.Fingerprint
+ if err=ValidateLocalInstrumentCustodyIdentity("peer",wrong,time.Now());err==nil{
+  t.Fatal("different registered Node pin accepted")
+ }
+}

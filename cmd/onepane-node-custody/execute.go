@@ -117,6 +117,8 @@ func ExecuteExplicitNodeProbe(ctx context.Context,c ExplicitNodeProbeCommand,
  if node.Fingerprint!=c.NodeFingerprint{
   return errors.New("current Node key does not match independently enrolled fingerprint")
  }
+ if err=nodefederation.ValidateLocalInstrumentCustodyIdentity(
+  c.NodeID,node,now());err!=nil{return err}
  instrumentPub,err:=parseInstrumentKey(c.InstrumentPublicKey)
  if err!=nil{return err}
  raw,err:=readBounded(c.InstrumentPrivateKeyFile,256,true)

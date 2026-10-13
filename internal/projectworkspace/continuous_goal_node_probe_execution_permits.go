@@ -268,14 +268,65 @@ func(s *Service)ListGoalNodeProbeExecutionPermits(ctx context.Context,
     AND EXISTS(SELECT 1 FROM json_each(goal.monitoring_plan_json,'$.source_ids') src
      WHERE src.type='text' AND src.value=permit.source_id))
    THEN 'scope_inactive'
+  WHEN NOT EXISTS(
+   SELECT 1 FROM project_goal_tcp_declared_target_bindings target
+   JOIN project_goal_tcp_probe_permits tcp
+     ON tcp.id=target.permit_id
+    AND tcp.project_id=target.project_id
+    AND tcp.goal_id=target.goal_id
+    AND tcp.project_workspace_id=target.project_workspace_id
+    AND tcp.source_id=target.source_id
+    AND tcp.plan_hash=target.plan_hash
+    AND tcp.revision=target.permit_revision
+    AND tcp.target_ipv4=target.target_ipv4
+    AND tcp.target_port=target.target_port
+   JOIN projects p ON p.id=target.project_id AND p.status='active'
+   JOIN principals target_human ON target_human.id=target.approved_by
+    AND target_human.principal_type='human' AND target_human.status='active'
+   JOIN workspace_memberships target_membership
+    ON target_membership.workspace_id=p.workspace_id
+    AND target_membership.principal_id=target_human.id
+    AND target_membership.status='active'
+   JOIN principals tcp_human ON tcp_human.id=tcp.approved_by
+    AND tcp_human.principal_type='human' AND tcp_human.status='active'
+   JOIN workspace_memberships tcp_membership
+    ON tcp_membership.workspace_id=p.workspace_id
+    AND tcp_membership.principal_id=tcp_human.id
+    AND tcp_membership.status='active'
+   WHERE target.id=permit.declared_target_id
+    AND target.project_id=permit.project_id
+    AND target.goal_id=permit.goal_id
+    AND target.project_workspace_id=permit.project_workspace_id
+    AND target.source_id=permit.source_id
+    AND target.plan_hash=permit.plan_sha256
+    AND target.status='approved' AND target.expires_at>?
+    AND tcp.status='approved' AND tcp.expires_at>?
+    AND tcp.probe_kind='tcp_connect'
+    AND tcp.effect_class='network_tcp_connect'
+    AND tcp.timeout_ms BETWEEN 100 AND 1500
+  ) THEN 'tcp_scope_unavailable'
   WHEN NOT EXISTS(SELECT 1 FROM project_goal_instrument_challenges ch
    WHERE ch.id=permit.challenge_id AND ch.status='issued'
+    AND ch.instrument_key_id=permit.instrument_key_id
+    AND ch.project_id=permit.project_id AND ch.goal_id=permit.goal_id
     AND ch.expires_at>?) THEN 'challenge_unavailable'
   WHEN NOT EXISTS(SELECT 1 FROM project_goal_instrument_keys k
    WHERE k.id=permit.instrument_key_id AND k.status='approved'
+    AND k.project_id=permit.project_id AND k.goal_id=permit.goal_id
+    AND k.project_workspace_id=permit.project_workspace_id
+    AND k.declared_target_id=permit.declared_target_id
+    AND k.tls_pin_id=permit.tls_pin_id AND k.plan_hash=permit.plan_sha256
     AND k.expires_at>?) THEN 'instrument_unavailable'
   WHEN NOT EXISTS(SELECT 1 FROM project_goal_tls_endpoint_pins pin
+   JOIN project_goal_tcp_declared_target_bindings target
+    ON target.id=pin.declared_target_id
    WHERE pin.id=permit.tls_pin_id AND pin.status='approved'
+    AND pin.project_id=permit.project_id AND pin.goal_id=permit.goal_id
+    AND pin.project_workspace_id=permit.project_workspace_id
+    AND pin.declared_target_id=permit.declared_target_id
+    AND pin.permit_id=target.permit_id
+    AND pin.permit_revision=target.permit_revision
+    AND pin.plan_hash=permit.plan_sha256
     AND pin.expires_at>?) THEN 'pin_unavailable'
   WHEN NOT EXISTS(SELECT 1 FROM principals h
    JOIN projects p ON p.id=permit.project_id
@@ -295,7 +346,7 @@ func(s *Service)ListGoalNodeProbeExecutionPermits(ctx context.Context,
  FROM project_goal_node_probe_execution_permits permit
  WHERE permit.project_id=? AND permit.goal_id=?
  ORDER BY permit.approved_at DESC LIMIT 100`,
- now,now,now,now,projectID,goalID)
+ now,now,now,now,now,now,projectID,goalID)
  if err!=nil{return nil,err}
  defer rows.Close()
  out:=[]GoalNodeProbeExecutionPermit{}

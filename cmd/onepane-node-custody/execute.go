@@ -74,6 +74,23 @@ func validateNodeProbeExecutionPermit(p projectworkspace.GoalNodeProbeExecutionP
  return nil
 }
 
+// The API approval POST omits the *derived* effective state; the live
+// signed server export includes "active". Only that display-only field may
+// be normalised. All original immutable scope, key hashes and time values
+// must still match byte-for-byte at the typed record level.
+func sameSealedHumanProbeScope(
+ sealed,operatorSigned projectworkspace.GoalNodeProbeExecutionPermit)bool{
+ if sealed.EffectiveExecutionState!="active"{
+  return false
+ }
+ if operatorSigned.EffectiveExecutionState!=""&&
+  operatorSigned.EffectiveExecutionState!="active"{
+  return false
+ }
+ operatorSigned.EffectiveExecutionState="active"
+ return sealed==operatorSigned
+}
+
 // reservePrivateOutput creates a durable exclusive receipt slot BEFORE
 // opening any network connection or spending the one-shot nonce. Failed
 // execution intentionally leaves both slots and claim in place.
@@ -176,7 +193,7 @@ func ExecuteExplicitNodeProbe(ctx context.Context,c ExplicitNodeProbeCommand,
  originalPermit,err:=nodefederation.VerifySealedNodeProbeExecution(
   serverSeal,block.Bytes,c.ServerNodeID,c.ServerFingerprint)
  if err!=nil{return err}
- if originalPermit!=signed.Permit{
+ if !sameSealedHumanProbeScope(originalPermit,signed.Permit){
   return errors.New("human signature and original OnePane server seal concern different approvals")
  }
  // Prevent writes to existing plans, instrument keys or evidence, even

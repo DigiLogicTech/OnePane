@@ -1,6 +1,7 @@
 // onepane-node-custody is an explicitly invoked offline evidence-custody
-// utility. It does not generate a Node identity, perform a network probe,
-// contact another Node or import a Goal's health/incident state.
+// utility. sign/verify open no network socket. The separately opted-in
+// probe-and-witness operation performs at most one approved private TCP4
+// dial. None create a Node identity, contact another Node or update health.
 package main
 
 import (
@@ -201,13 +202,14 @@ func runVerify(args []string)error{
 
 func main(){
  if len(os.Args)<2{
-  fmt.Fprintln(os.Stderr,"usage: onepane-node-custody sign|verify [flags]")
+  fmt.Fprintln(os.Stderr,"usage: onepane-node-custody sign|verify|probe-and-witness [flags]")
   os.Exit(2)
  }
  var err error
  switch os.Args[1]{
  case "sign":err=runSign(os.Args[2:])
  case "verify":err=runVerify(os.Args[2:])
+ case "probe-and-witness":err=runProbeAndWitness(os.Args[2:])
  default:err=errors.New("expected sign or verify")
  }
  if err!=nil{

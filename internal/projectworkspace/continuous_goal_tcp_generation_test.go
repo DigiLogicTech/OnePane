@@ -1,0 +1,123 @@
+package projectworkspace
+
+import(
+ "context"
+ "crypto/ed25519"
+ "crypto/rand"
+ "encoding/json"
+ "strings"
+ "testing"
+
+ "github.com/DigiLogicTech/OnePane/internal/clock"
+ sqliteStore "github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
+)
+
+// Testing entirely synthetic SQLite permissions: NO network dial. After a
+// changed plan returns to identical JSON, none of the historical human
+// TCP, target, pin or instrument grants can become currently executable.
+func TestRestoredGoalPlanCannotReviveApprovedTCPAndInstrumentChain(t *testing.T){
+ ctx:=context.Background()
+ db,err:=sqliteStore.Open(t.TempDir()+"/tcp-generation.db")
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ if err=db.Migrate(ctx);err!=nil{t.Fatal(err)}
+ for _,q:=range []string{
+  "INSERT INTO workspaces(id,name,status,revision,created_at,updated_at) VALUES('tenant','Tenant','active',1,1,1)",
+  "INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at) VALUES('operator','human','Operator','active',1,1,1)",
+  "INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at) VALUES('tenant','operator','active',1,1)",
+ }{if _,err=db.SQL().ExecContext(ctx,q);err!=nil{t.Fatal(err)}}
+ svc:=NewService(db.SQL(),db,clock.Real{})
+ project,err:=svc.CreateProject(ctx,CreateProjectCommand{
+  WorkspaceID:"tenant",Name:"TCP scope never revives",CreatedBy:"operator",
+  ProjectPolicyJSON:json.RawMessage(`{"onepane_operations":{"version":1,"mode":"continuous_operations"}}`),
+ })
+ if err!=nil{t.Fatal(err)}
+ w,err:=svc.CreateWorkspaceView(ctx,CreateWorkspaceViewCommand{
+  ProjectID:project.ID,Name:"Dedicated",ActorPrincipalID:"operator",
+ })
+ if err!=nil{t.Fatal(err)}
+ original:=`{"version":1,"source_ids":["router"]}`
+ goal,err:=svc.ConfigureContinuousGoal(ctx,ConfigureContinuousGoalCommand{
+  ProjectID:project.ID,ProjectWorkspaceID:w.ID,
+  ActorPrincipalID:"operator",Objective:"No restored TCP consent",
+  MonitoringPlanJSON:json.RawMessage(original),
+ })
+ if err!=nil{t.Fatal(err)}
+ now:=clock.Real{}.UnixMilli()
+ permit,err:=svc.ApproveGoalTCPProbe(ctx,ApproveGoalTCPProbeCommand{
+  ProjectID:project.ID,GoalID:goal.ID,SourceID:"router",
+  TargetIPv4:"192.168.42.37",TargetPort:443,TimeoutMS:200,
+  ExpiresAt:now+30*60000,ExpectedGoalRevision:goal.Revision,
+  ActorPrincipalID:"operator",
+ })
+ if err!=nil{t.Fatal(err)}
+ goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
+ target,err:=svc.DeclareGoalTCPTarget(ctx,DeclareGoalTCPTargetCommand{
+  ProjectID:project.ID,GoalID:goal.ID,PermitID:permit.ID,
+  DisplayLabel:"Operator router",ActorPrincipalID:"operator",
+  ExpectedGoalRevision:goal.Revision,ExpectedPermitRevision:permit.Revision,
+  ExpiresAt:now+20*60000,
+ })
+ if err!=nil{t.Fatal(err)}
+ goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
+ pin,err:=svc.ApproveGoalTLSPin(ctx,ApproveGoalTLSPinCommand{
+  ProjectID:project.ID,GoalID:goal.ID,DeclaredTargetID:target.ID,
+  CertificateSHA256:"sha256:"+strings.Repeat("b",64),
+  ActorPrincipalID:"operator",ExpectedGoalRevision:goal.Revision,
+  ExpectedTargetRevision:target.Revision,ExpiresAt:now+15*60000,
+ })
+ if err!=nil{t.Fatal(err)}
+ pub,_,err:=ed25519.GenerateKey(rand.Reader);if err!=nil{t.Fatal(err)}
+ goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
+ key,err:=svc.ApproveGoalInstrumentKey(ctx,ApproveGoalInstrumentKeyCommand{
+  ProjectID:project.ID,GoalID:goal.ID,TLSPinID:pin.ID,
+  PublicKey:pub,ActorPrincipalID:"operator",
+  ExpectedGoalRevision:goal.Revision,ExpectedPinRevision:pin.Revision,
+  ExpiresAt:now+10*60000,
+ })
+ if err!=nil{t.Fatal(err)}
+ if permit.PlanGeneration<1{
+  t.Fatalf("original TCP permit did not pin Goal generation: %+v",permit)
+ }
+ assertState:=func(targetState,pinState,keyState string){
+  t.Helper()
+  targets,err:=svc.ListGoalTCPTargets(ctx,project.ID,goal.ID)
+  if err!=nil{t.Fatal(err)}
+  pins,err:=svc.ListGoalTLSPins(ctx,project.ID,goal.ID)
+  if err!=nil{t.Fatal(err)}
+  keys,err:=svc.ListGoalInstrumentKeys(ctx,project.ID,goal.ID)
+  if err!=nil{t.Fatal(err)}
+  if len(targets)!=1||targets[0].ID!=target.ID||
+   targets[0].EffectiveIdentityState!=targetState||
+   len(pins)!=1||pins[0].ID!=pin.ID||
+   pins[0].EffectivePinState!=pinState||
+   len(keys)!=1||keys[0].ID!=key.ID||
+   keys[0].EffectiveInstrumentState!=keyState{
+   t.Fatalf("effective chain: targets=%+v pins=%+v keys=%+v",targets,pins,keys)
+  }
+ }
+ assertState("active","active","active")
+ for _,plan:=range []string{
+  `{"version":1,"source_ids":["router","other"]}`,original,
+ }{
+  if _,err=db.SQL().ExecContext(ctx,
+   "UPDATE project_continuous_goals SET monitoring_plan_json=? WHERE id=?",
+   plan,goal.ID);err!=nil{t.Fatal(err)}
+  assertState("permit_inactive","target_inactive","pin_inactive")
+ }
+ var currentGen int64
+ if err=db.SQL().QueryRowContext(ctx,
+  "SELECT plan_generation FROM project_continuous_goals WHERE id=?",
+  goal.ID).Scan(&currentGen);err!=nil{t.Fatal(err)}
+ if currentGen!=permit.PlanGeneration+2{
+  t.Fatalf("original Goal plan generation not advanced on restore: %d",currentGen)
+ }
+ goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
+ if _,err=svc.claimGoalTCPAttempt(ctx,RunGoalTCPProbeCommand{
+  ProjectID:project.ID,GoalID:goal.ID,PermitID:permit.ID,
+  ExpectedGoalRevision:goal.Revision,
+  ExpectedPermitRevision:permit.Revision,ActorPrincipalID:"operator",
+ });err==nil{
+  t.Fatal("old permit admitted new TCP work after restored plan")
+ }
+}

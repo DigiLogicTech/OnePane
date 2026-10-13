@@ -64,10 +64,15 @@ func runVerifyExecution(args []string)error{
  nodeFingerprint:=fs.String("node-fingerprint","","independently enrolled Node SHA-256 pin")
  instrumentKey:=fs.String("instrument-public-key","","independently enrolled instrument Ed25519 key")
  humanKey:=fs.String("operator-public-key","","independently enrolled human operator Ed25519 key")
+ serverSealFile:=fs.String("server-seal","","original private OnePane-signed execution approval")
+ serverCertFile:=fs.String("server-certificate","","separately trusted original OnePane server PEM")
+ serverID:=fs.String("server-node-id","","independently enrolled OnePane server Node ID")
+ serverFingerprint:=fs.String("server-fingerprint","","independently enrolled OnePane server certificate SHA256 pin")
  if err:=fs.Parse(args);err!=nil{return err}
  if fs.NArg()!=0||*witnessFile==""||*receiptFile==""||
   *challengeFile==""||*planFile==""||*permitFile==""||
-  *certFile==""||*nodeFingerprint==""||*instrumentKey==""||*humanKey==""{
+  *certFile==""||*nodeFingerprint==""||*instrumentKey==""||*humanKey==""||
+  *serverSealFile==""||*serverCertFile==""||*serverID==""||*serverFingerprint==""{
   return errors.New("verify-execution requires original receipt/witness/challenge/plan, signed execution permit, independent Node certificate/pin, and separately enrolled instrument/operator keys")
  }
  instrumentPublic,err:=parseInstrumentKey(*instrumentKey)
@@ -88,7 +93,22 @@ func runVerifyExecution(args []string)error{
  }
  if err=VerifyApprovedNodeExecutionEvidence(witness,approval,block.Bytes,
   *nodeFingerprint,humanPublic,instrumentPublic,receipt,ch,plan);err!=nil{return err}
- fmt.Println("Historical signed human approval, enrolled Node custody and instrument report match one original approved challenge.")
- fmt.Println("This verifies three software keys and historical metadata, NOT physical execution, independent vantage or device health.")
+ var originalSeal nodefederation.SealedNodeProbeAuthority
+ if err=readCanonical(*serverSealFile,&originalSeal,true);err!=nil{return err}
+ pinnedPEM,err:=readBounded(*serverCertFile,65536,false)
+ if err!=nil{return err}
+ serverBlock,serverRest:=pem.Decode(pinnedPEM)
+ if serverBlock==nil||serverBlock.Type!="CERTIFICATE"||
+  len(bytes.TrimSpace(serverRest))!=0{
+  return errors.New("original independently pinned OnePane server certificate required")
+ }
+ sealedPermit,err:=nodefederation.VerifySealedNodeProbeExecution(
+  originalSeal,serverBlock.Bytes,*serverID,*serverFingerprint)
+ if err!=nil{return err}
+ if sealedPermit!=approval.Permit{
+  return errors.New("human and OnePane server signatures refer to different approvals")
+ }
+ fmt.Println("Original OnePane, human operator, Node and instrument signatures bind one historical approved challenge.")
+ fmt.Println("This verifies four software keys and historical metadata, NOT live revocation, physical execution, independent vantage or device health.")
  return nil
 }

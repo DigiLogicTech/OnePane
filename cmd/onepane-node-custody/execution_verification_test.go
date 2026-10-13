@@ -44,6 +44,10 @@ func TestHistoricalHumanNodeInstrumentChainRequiresThreeSeparateKeys(t *testing.
   "--node-certificate",certPath,"--node-fingerprint",c.NodeFingerprint,
   "--instrument-public-key",c.InstrumentPublicKey,
   "--operator-public-key",c.OperatorPublicKey,
+  "--server-seal",c.ServerSealFile,
+  "--server-certificate",c.ServerCertificateFile,
+  "--server-node-id",c.ServerNodeID,
+  "--server-fingerprint",c.ServerFingerprint,
  }
  if err=runVerifyExecution(args);err!=nil{
   t.Fatalf("offline operator verification command failed: %v",err)

@@ -66,6 +66,8 @@ func runSignNodeExecutionPermit(args []string)error{
  if p.ID==""||p.ApprovedBy!=*operatorPrincipal||
   p.Status!="approved"||p.Revision!=1||
   (p.EffectiveExecutionState!=""&&p.EffectiveExecutionState!="active")||
+  p.PlanGeneration<1||len(p.PlanSHA256)!=71||
+  p.PlanSHA256[:7]!="sha256:"||
   p.ApprovedAt>now||p.ExpiresAt<=now||
   p.OriginalChallengeSHA256==""||p.InstrumentPublicKeySHA256==""{
   return errors.New("operator permit is not an approved live original human record")

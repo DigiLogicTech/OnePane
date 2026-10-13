@@ -80,6 +80,8 @@ func TestHumanOperatorPermitSigningRefusesUnapprovedMetadata(t *testing.T){
  for name,alter:=range map[string]func(*projectworkspace.GoalNodeProbeExecutionPermit){
   "revoked":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.Status="revoked"},
   "peer_unavailable":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.EffectiveExecutionState="peer_unavailable"},
+  "old_plan_generation":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.PlanGeneration=0},
+  "missing_plan_hash":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.PlanSHA256=""},
   "wrong_actor":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.ApprovedBy="other-human"},
   "future_approval":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.ApprovedAt=time.Now().Add(time.Minute).UnixMilli()},
   "expired":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.ExpiresAt=time.Now().Add(-time.Minute).UnixMilli()},

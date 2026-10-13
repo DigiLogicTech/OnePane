@@ -86,6 +86,19 @@ func TestHumanNodeProbeExecutionPermitAPICannotGrantToAgentOrAnonymous(t *testin
  if got:=req("POST","operator",revokedURL,body);got.Code<400{
   t.Fatalf("human revoked a nonexistent permit as if valid: %d",got.Code)
  }
+ // A server-origin execution seal is a sensitive HUMAN action.
+ // An unconfigured original OnePane signing identity must fail closed,
+ // not generate a new identity or return an unsigned imitation.
+ sealURL:=route+"/unknown/seal"
+ for _,tc:=range []struct{who string;expect int}{
+  {"",401},{"outsider",403},{"robot",403},{"operator",503},
+ }{
+  got:=req("POST",tc.who,sealURL,"")
+  if got.Code!=tc.expect{
+   t.Fatalf("principal %q unexpectedly exported live Node authority: %d %s",
+    tc.who,got.Code,got.Body)
+  }
+ }
  gotGoal,err:=projects.ContinuousGoal(ctx,goal.ID)
  if err!=nil{t.Fatal(err)}
  if gotGoal.Health!="unobserved"||gotGoal.Status!="configured"||

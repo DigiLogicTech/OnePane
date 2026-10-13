@@ -131,9 +131,26 @@ func TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly(t *testing.T){
   t.Fatal("execution permit immutable history deleted")
  }
  found,err:=svc.ListGoalNodeProbeExecutionPermits(ctx,p.ID,goal.ID)
- if err!=nil||len(found)!=1||found[0].ID!=permit.ID{
-  t.Fatalf("human approval inventory failed: %+v %v",found,err)
+ if err!=nil||len(found)!=1||found[0].ID!=permit.ID||
+  found[0].EffectiveExecutionState!="active"{
+  t.Fatalf("human approval inventory did not reflect current scope: %+v %v",found,err)
  }
+ if _,err=db.SQL().ExecContext(ctx,
+  "UPDATE harness_nodes SET trust_state='unavailable' WHERE id='peer'");err!=nil{t.Fatal(err)}
+ found,err=svc.ListGoalNodeProbeExecutionPermits(ctx,p.ID,goal.ID)
+ if err!=nil||len(found)!=1||found[0].EffectiveExecutionState!="peer_unavailable"{
+  t.Fatalf("Node trust loss hidden by historical approval: %+v %v",found,err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,
+  "UPDATE harness_nodes SET trust_state='paired' WHERE id='peer'");err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,
+  "UPDATE workspace_memberships SET status='suspended' WHERE workspace_id='tenant' AND principal_id='human'");err!=nil{t.Fatal(err)}
+ found,err=svc.ListGoalNodeProbeExecutionPermits(ctx,p.ID,goal.ID)
+ if err!=nil||len(found)!=1||found[0].EffectiveExecutionState!="approver_inactive"{
+  t.Fatalf("human reviewer withdrawal was hidden: %+v %v",found,err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,
+  "UPDATE workspace_memberships SET status='active' WHERE workspace_id='tenant' AND principal_id='human'");err!=nil{t.Fatal(err)}
  goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
  revoked,err:=svc.RevokeGoalNodeProbeExecutionPermit(ctx,
   RevokeGoalNodeProbeExecutionPermitCommand{
@@ -143,6 +160,10 @@ func TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly(t *testing.T){
   })
  if err!=nil||revoked.Status!="revoked"{
   t.Fatalf("human revocation failed: %+v %v",revoked,err)
+ }
+ found,err=svc.ListGoalNodeProbeExecutionPermits(ctx,p.ID,goal.ID)
+ if err!=nil||len(found)!=1||found[0].EffectiveExecutionState!="revoked"{
+  t.Fatalf("revoked approval showed as live: %+v %v",found,err)
  }
  goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
  approve.ExpectedGoalRevision=goal.Revision

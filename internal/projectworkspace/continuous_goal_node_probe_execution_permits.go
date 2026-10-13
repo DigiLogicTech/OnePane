@@ -29,6 +29,7 @@ type GoalNodeProbeExecutionPermit struct {
  OriginalChallengeSHA256 string `json:"original_challenge_sha256"`
  InstrumentPublicKeySHA256 string `json:"instrument_public_key_sha256"`
  Status string `json:"status"`
+ EffectiveExecutionState string `json:"effective_execution_state,omitempty"`
  Revision int64 `json:"revision"`
  ApprovedBy string `json:"approved_by"`
  ApprovedAt int64 `json:"approved_at"`
@@ -219,6 +220,8 @@ func(s *Service)RevokeGoalNodeProbeExecutionPermit(ctx context.Context,
  if err!=nil{return GoalNodeProbeExecutionPermit{},err}
  return out,nil
 }
+// Effective execution state is a bounded live inventory projection.
+// Historical approval alone does NOT mean a Node may still act.
 func(s *Service)ListGoalNodeProbeExecutionPermits(ctx context.Context,
  projectID,goalID string)([]GoalNodeProbeExecutionPermit,error){
  if projectID==""||goalID==""{return nil,ErrInvalidCommand}
@@ -227,14 +230,62 @@ func(s *Service)ListGoalNodeProbeExecutionPermits(ctx context.Context,
   "SELECT 1 FROM project_continuous_goals g JOIN projects p ON p.id=g.project_id AND p.status='active' JOIN workspaces t ON t.id=p.workspace_id AND t.status='active' WHERE g.id=? AND g.project_id=?",
   goalID,projectID).Scan(&exists)
  if err!=nil{return nil,err}
- rows,err:=s.db.QueryContext(ctx,
-  "SELECT "+nodeProbePermitColumns+" FROM project_goal_node_probe_execution_permits WHERE project_id=? AND goal_id=? ORDER BY approved_at DESC LIMIT 100",
-  projectID,goalID)
+ now:=s.clock.UnixMilli()
+ rows,err:=s.db.QueryContext(ctx,"SELECT "+nodeProbePermitColumns+`,
+ CASE
+  WHEN permit.status='revoked' THEN 'revoked'
+  WHEN permit.expires_at<=? THEN 'expired'
+  WHEN NOT EXISTS(SELECT 1 FROM projects p
+   JOIN workspaces tenant ON tenant.id=p.workspace_id AND tenant.status='active'
+   JOIN project_continuous_goals goal ON goal.id=permit.goal_id
+    AND goal.project_id=p.id AND goal.status='configured'
+   JOIN project_workspaces pw ON pw.id=permit.project_workspace_id
+    AND pw.project_id=p.id AND pw.status='active'
+   WHERE p.id=permit.project_id AND p.status='active'
+    AND goal.project_workspace_id=permit.project_workspace_id
+    AND EXISTS(SELECT 1 FROM json_each(goal.monitoring_plan_json,'$.source_ids') src
+     WHERE src.type='text' AND src.value=permit.source_id))
+   THEN 'scope_inactive'
+  WHEN NOT EXISTS(SELECT 1 FROM project_goal_instrument_challenges ch
+   WHERE ch.id=permit.challenge_id AND ch.status='issued'
+    AND ch.expires_at>?) THEN 'challenge_unavailable'
+  WHEN NOT EXISTS(SELECT 1 FROM project_goal_instrument_keys k
+   WHERE k.id=permit.instrument_key_id AND k.status='approved'
+    AND k.expires_at>?) THEN 'instrument_unavailable'
+  WHEN NOT EXISTS(SELECT 1 FROM project_goal_tls_endpoint_pins pin
+   WHERE pin.id=permit.tls_pin_id AND pin.status='approved'
+    AND pin.expires_at>?) THEN 'pin_unavailable'
+  WHEN NOT EXISTS(SELECT 1 FROM principals h
+   JOIN projects p ON p.id=permit.project_id
+   JOIN workspace_memberships m ON m.workspace_id=p.workspace_id
+    AND m.principal_id=h.id AND m.status='active'
+   WHERE h.id=permit.approved_by AND h.status='active'
+    AND h.principal_type='human') THEN 'approver_inactive'
+  WHEN NOT EXISTS(SELECT 1 FROM harness_nodes n
+   JOIN node_pairings pair ON pair.peer_node_id=n.id
+   WHERE n.id=permit.peer_node_id AND n.local=0
+    AND n.trust_state='paired' AND pair.status='paired'
+    AND pair.local_confirmed=1 AND pair.peer_confirmed=1
+    AND pair.peer_tls_fingerprint=permit.peer_tls_fingerprint)
+   THEN 'peer_unavailable'
+  ELSE 'active'
+ END
+ FROM project_goal_node_probe_execution_permits permit
+ WHERE permit.project_id=? AND permit.goal_id=?
+ ORDER BY permit.approved_at DESC LIMIT 100`,
+ now,now,now,now,projectID,goalID)
  if err!=nil{return nil,err}
  defer rows.Close()
  out:=[]GoalNodeProbeExecutionPermit{}
  for rows.Next(){
-  p,err:=scanNodeProbePermit(rows);if err!=nil{return nil,err}
+  var p GoalNodeProbeExecutionPermit
+  err=rows.Scan(&p.ID,&p.ProjectID,&p.GoalID,&p.ProjectWorkspaceID,
+   &p.InstrumentKeyID,&p.ChallengeID,&p.SourceID,&p.DeclaredTargetID,
+   &p.TLSPinID,&p.PeerNodeID,&p.PeerTLSFingerprint,
+   &p.OriginalChallengeSHA256,&p.InstrumentPublicKeySHA256,
+   &p.Status,&p.Revision,&p.ApprovedBy,&p.ApprovedAt,&p.ExpiresAt,
+   &p.RevokedAt,&p.EffectiveExecutionState)
+  if err!=nil{return nil,err}
   out=append(out,p)
  }
  return out,rows.Err()

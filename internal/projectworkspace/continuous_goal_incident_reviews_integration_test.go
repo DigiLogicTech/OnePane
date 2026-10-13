@@ -141,6 +141,78 @@ func TestTCPIncidentCaseIsOperatorReviewedNotAutonomousRemediation(t *testing.T)
  if current.Health!="unobserved"||current.LastVerifiedAt!=0||current.NextDueAt!=0{
   t.Fatalf("case falsely activated health monitoring: %+v",current)
  }
+ // Response preparation is a narrowly scoped human-only intent, never
+ // authorisation to restart a process or change a network/device.
+ g,err:=svc.ContinuousGoal(ctx,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ propose:=ProposeGoalResponseCandidateCommand{
+  ProjectID:project.ID,GoalID:goal.ID,IncidentReviewID:review.ID,
+  ActorPrincipalID:"robot",ActionCode:"restart_local_observation_worker",
+  ExpectedGoalRevision:g.Revision,ExpectedReviewRevision:done.Revision,
+  ExpiresAt:time.Now().Add(time.Hour).UnixMilli(),
+ }
+ if _,err:=svc.ProposeGoalResponseCandidate(ctx,propose);
+  !errors.Is(err,ErrPrincipalIneligible){
+  t.Fatalf("Agent proposed host mutation: %v",err)
+ }
+ propose.ActorPrincipalID="human"
+ propose.ActionCode="arbitrary_router_reconfiguration"
+ if _,err:=svc.ProposeGoalResponseCandidate(ctx,propose);
+  !errors.Is(err,ErrInvalidCommand){
+  t.Fatalf("unapproved response action accepted: %v",err)
+ }
+ propose.ActionCode="restart_local_observation_worker"
+ propose.ExpectedReviewRevision=review.Revision
+ if _,err:=svc.ProposeGoalResponseCandidate(ctx,propose);
+  !errors.Is(err,ErrRevisionConflict){
+  t.Fatalf("stale incident authority accepted: %v",err)
+ }
+ propose.ExpectedReviewRevision=done.Revision
+ candidate,err:=svc.ProposeGoalResponseCandidate(ctx,propose)
+ if err!=nil||candidate.ExecutionAuthorized||
+  candidate.Status!="proposed"||candidate.RiskClass!="requires_separate_approval"{
+  t.Fatalf("response intent assumed execution right: %+v %v",candidate,err)
+ }
+ readiness,err:=svc.GoalResponseCandidateReadiness(ctx,project.ID,goal.ID,candidate.ID)
+ if err!=nil||readiness.ExecutionAuthorized||readiness.State!="blocked"||
+  len(readiness.Blockers)<3{
+  t.Fatalf("response readiness was not fail-closed: %+v %v",readiness,err)
+ }
+ if _,err:=svc.ProposeGoalResponseCandidate(ctx,propose);err==nil{
+  t.Fatal("duplicate pending response intent admitted")
+ }
+ if _,err:=svc.ListGoalResponseCandidates(ctx,"foreign",goal.ID);err==nil{
+  t.Fatal("cross Project response intent listed")
+ }
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE project_goal_response_candidates
+    SET execution_authorized=1 WHERE id=?`,candidate.ID);err==nil{
+  t.Fatal("direct database mutation granted response execution")
+ }
+ withdraw:=WithdrawGoalResponseCandidateCommand{
+  ProjectID:project.ID,GoalID:goal.ID,CandidateID:candidate.ID,
+  ActorPrincipalID:"robot",ExpectedRevision:candidate.Revision,
+ }
+ if _,err:=svc.WithdrawGoalResponseCandidate(ctx,withdraw);
+  !errors.Is(err,ErrPrincipalIneligible){
+  t.Fatalf("Agent withdrew response intent: %v",err)
+ }
+ withdraw.ActorPrincipalID="human"
+ withdrawn,err:=svc.WithdrawGoalResponseCandidate(ctx,withdraw)
+ if err!=nil||withdrawn.Status!="withdrawn"||withdrawn.Revision!=2{
+  t.Fatalf("human withdrawal failed: %+v %v",withdrawn,err)
+ }
+ if _,err:=svc.WithdrawGoalResponseCandidate(ctx,withdraw);
+  !errors.Is(err,ErrRevisionConflict){
+  t.Fatalf("stale withdrawal replay accepted: %v",err)
+ }
+ if _,err:=db.SQL().ExecContext(ctx,`DELETE FROM project_goal_response_candidates
+    WHERE id=?`,candidate.ID);err==nil{
+  t.Fatal("response history could be deleted")
+ }
+ after,err:=svc.GoalResponseCandidateReadiness(ctx,project.ID,goal.ID,candidate.ID)
+ if err!=nil||after.ExecutionAuthorized||len(after.Blockers)<4{
+  t.Fatalf("withdrawn candidate appeared executable: %+v %v",after,err)
+ }
  var tasks int
  if err:=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM tasks").Scan(&tasks);
   err!=nil||tasks!=0{t.Fatalf("review created Tasks: %d %v",tasks,err)}

@@ -177,6 +177,49 @@ func TestTCPReachabilityAlertAPIIsScopedAndHumanAcknowledgedOnly(t *testing.T){
   t.Fatalf("review history inaccessible: %d %s",listed.Code,listed.Body)
  }
 
+ // An Agent cannot use even a non-executable response candidate API.
+ currentGoal,err:=svc.ContinuousGoal(ctx,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ responseRoute:="/v1/projects/"+p.ID+"/continuous-goals/"+goal.ID+"/response-candidates"
+ proposal:=fmt.Sprintf(`{"incident_review_id":%q,"action_code":"restart_local_observation_worker","expected_goal_revision":%d,"expected_review_revision":2,"expires_at":%d}`,
+  reviewID,currentGoal.Revision,time.Now().Add(time.Hour).UnixMilli())
+ if got:=call("POST","robot",responseRoute,proposal);got.Code!=403{
+  t.Fatalf("Agent proposed response: %d %s",got.Code,got.Body)
+ }
+ if got:=call("POST","operator",responseRoute,
+  strings.Replace(proposal,"restart_local_observation_worker","run_router_shell",1));got.Code<400{
+  t.Fatalf("arbitrary response command accepted: %d",got.Code)
+ }
+ proposed:=call("POST","operator",responseRoute,proposal)
+ if proposed.Code!=201||!strings.Contains(proposed.Body.String(),
+  `"execution_authorized":false`){
+  t.Fatalf("response intent incorrectly authorised execution: %d %s",proposed.Code,proposed.Body)
+ }
+ var candidateID string
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT id FROM project_goal_response_candidates
+  WHERE incident_review_id=?`,reviewID).Scan(&candidateID);err!=nil{t.Fatal(err)}
+ readinessURL:=responseRoute+"/"+candidateID+"/readiness"
+ for _,who:=range []string{"","robot","outsider"}{
+  got:=call("GET",who,readinessURL,"")
+  want:=403;if who==""{want=401}
+  if got.Code!=want{t.Fatalf("unauthorised response readiness %q: %d",who,got.Code)}
+ }
+ readiness:=call("GET","operator",readinessURL,"")
+ if readiness.Code!=200||!strings.Contains(readiness.Body.String(),`"state":"blocked"`)||
+  !strings.Contains(readiness.Body.String(),`"not_an_execution_grant"`){
+  t.Fatalf("response readiness claimed granted permission: %d %s",readiness.Code,readiness.Body)
+ }
+ if got:=call("POST","robot",responseRoute+"/"+candidateID+"/withdraw",
+  `{"expected_revision":1}`);got.Code!=403{
+  t.Fatalf("Agent withdrew candidate: %d",got.Code)
+ }
+ withdrawal:=call("POST","operator",responseRoute+"/"+candidateID+"/withdraw",
+  `{"expected_revision":1}`)
+ if withdrawal.Code!=200||!strings.Contains(withdrawal.Body.String(),
+  `"status":"withdrawn"`){
+  t.Fatalf("operator could not revoke response intent: %d %s",withdrawal.Code,withdrawal.Body)
+ }
+
  var tasks int
  if err:=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM tasks").Scan(&tasks);err!=nil||tasks!=0{
   t.Fatal(fmt.Sprintf("TCP notice unexpectedly initiated Tasks: %d %v",tasks,err))

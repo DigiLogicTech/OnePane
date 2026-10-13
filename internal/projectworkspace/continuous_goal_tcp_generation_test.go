@@ -2,6 +2,7 @@ package projectworkspace
 
 import(
  "context"
+ "bytes"
  "crypto/ed25519"
  "crypto/rand"
  "encoding/json"
@@ -96,6 +97,52 @@ func TestRestoredGoalPlanCannotReviveApprovedTCPAndInstrumentChain(t *testing.T)
    t.Fatalf("effective chain: targets=%+v pins=%+v keys=%+v",targets,pins,keys)
   }
  }
+ // TEST-ONLY previously admitted metadata: fabricated nonces/signatures
+ // here are foreign-key fixtures, not cryptographically verified claims,
+ // and in particular not proof of a physical observer or honest sensor.
+ observed:=clock.Real{}.UnixMilli()
+ if observed<key.ApprovedAt{observed=key.ApprovedAt}
+ _,err=db.SQL().ExecContext(ctx,`INSERT INTO project_goal_tls_endpoint_checks(
+  id,pin_id,project_id,goal_id,claimed_at,cadence_window,status,completed_at)
+  VALUES('tls-old-generation',?,?,?,?,0,'matched',?)`,
+  pin.ID,project.ID,goal.ID,observed,observed)
+ if err!=nil{t.Fatal(err)}
+ for i,id:=range []string{"challenge-proof","challenge-report"}{
+  _,err=db.SQL().ExecContext(ctx,`INSERT INTO project_goal_instrument_challenges(
+   id,instrument_key_id,project_id,goal_id,nonce,signing_payload,
+   issued_at,expires_at,status,accepted_at)
+   VALUES(?,?,?,?,?,?,?,?,'accepted',?)`,
+   id,key.ID,project.ID,goal.ID,bytes.Repeat([]byte{byte(i+1)},32),
+   bytes.Repeat([]byte{0x33},256),observed-1,observed+60000,observed)
+  if err!=nil{t.Fatal(err)}
+ }
+ digest:="sha256:"+strings.Repeat("a",64)
+ _,err=db.SQL().ExecContext(ctx,`INSERT INTO project_goal_instrument_proofs(
+  id,instrument_key_id,challenge_id,project_id,goal_id,
+  declared_target_id,tls_pin_id,signature_sha256,signature,accepted_at)
+  VALUES('proof-old-generation',?,?,?,?,?,?,?,?,?)`,
+  key.ID,"challenge-proof",project.ID,goal.ID,target.ID,pin.ID,
+  digest,bytes.Repeat([]byte{0x42},64),observed)
+ if err!=nil{t.Fatal(err)}
+ _,err=db.SQL().ExecContext(ctx,`INSERT INTO project_goal_instrument_measurement_claims(
+  id,project_id,goal_id,instrument_key_id,challenge_id,declared_target_id,
+  tls_pin_id,source_id,measurement_type,outcome,observed_at,accepted_at,
+  signed_payload,signature,signature_sha256)
+  VALUES('report-old-generation',?,?,?,?,?,?,?,'router',
+   'endpoint_tcp_connect_claim','not_connected',?,?,?,?,?)`,
+  project.ID,goal.ID,key.ID,"challenge-report",target.ID,pin.ID,
+  observed,observed,bytes.Repeat([]byte{0x33},300),
+  bytes.Repeat([]byte{0x42},64),digest)
+ if err!=nil{t.Fatal(err)}
+ before,err:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ if len(before.Sources)!=1||
+  before.Sources[0].TLSCheckState!="matched"||
+  before.Sources[0].InstrumentProofState!="recent_signed_challenge"||
+  before.Sources[0].SignedMeasurementClaimState!="recent_instrument_self_report_unverified"||
+  before.DeviceIdentityVerified||before.RemediationAuthorized{
+  t.Fatalf("old-generation metadata fixture not projected conservatively: %+v",before)
+ }
  assertState("active","active","active")
  listed,err:=svc.ListGoalTCPProbePermits(ctx,project.ID,goal.ID)
  if err!=nil||len(listed)!=1||listed[0].EffectiveScopeState!="active"{
@@ -108,6 +155,17 @@ func TestRestoredGoalPlanCannotReviveApprovedTCPAndInstrumentChain(t *testing.T)
    "UPDATE project_continuous_goals SET monitoring_plan_json=? WHERE id=?",
    plan,goal.ID);err!=nil{t.Fatal(err)}
   assertState("permit_inactive","target_inactive","pin_inactive")
+  stale,triageErr:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
+  if triageErr!=nil{t.Fatal(triageErr)}
+  if len(stale.Sources)!=1||
+   stale.Sources[0].TLSCheckID!=""||
+   stale.Sources[0].InstrumentProofID!=""||
+   stale.Sources[0].SignedMeasurementClaimID!=""||
+   stale.Sources[0].TLSCheckState!="no_current_approved_check"||
+   stale.Sources[0].InstrumentProofState!="no_current_authenticated_proof"||
+   stale.Sources[0].SignedMeasurementClaimState!="no_current_signed_claim"{
+   t.Fatalf("old TLS/instrument signature metadata revived after plan edit/restore: %+v",stale)
+  }
   listed,err=svc.ListGoalTCPProbePermits(ctx,project.ID,goal.ID)
   if err!=nil||len(listed)!=1||
    listed[0].Status!="approved"||

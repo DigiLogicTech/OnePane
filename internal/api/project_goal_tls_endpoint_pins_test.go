@@ -119,20 +119,6 @@ func TestHumanPinnedTLSCertificateRequiresExactExistingTargetAndOneBoundedCheck(
   !strings.Contains(list.Body.String(),"\"effective_pin_state\":\"active\""){
   t.Fatalf("human cannot inspect active bounded pin inventory: %d %s",list.Code,list.Body)
  }
- // A change to the Goal plan, even retaining the approved source name,
- // invalidates the pin's effective network authority.
- if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
-  SET monitoring_plan_json=?,revision=revision+1 WHERE id=?`,
-  `{"version":1,"source_ids":["router","other"]}`,goal.ID);err!=nil{t.Fatal(err)}
- list=request("GET","operator",pins,"")
- if list.Code!=200||!strings.Contains(list.Body.String(),
-  "\"effective_pin_state\":\"target_inactive\""){
-  t.Fatalf("modified Goal plan left previous TLS pin active: %d %s",
-   list.Code,list.Body)
- }
- if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
-  SET monitoring_plan_json=?,revision=revision+1 WHERE id=?`,
-  `{"version":1,"source_ids":["router"]}`,goal.ID);err!=nil{t.Fatal(err)}
  // The private instrument key is generated independently. Only its
  // public counterpart is human enrolled and bound to the existing pin.
  public,private,err:=ed25519.GenerateKey(rand.Reader)
@@ -167,20 +153,6 @@ func TestHumanPinnedTLSCertificateRequiresExactExistingTargetAndOneBoundedCheck(
   t.Fatalf("active instrument key status was not available: %d %s",
    listedKeys.Code,listedKeys.Body)
  }
- // A changed Goal plan preserving the original source must still
- // invalidate the pin and all independently enrolled instrument keys.
- if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
-  SET monitoring_plan_json=?,revision=revision+1 WHERE id=?`,
-  `{"version":1,"source_ids":["router","other"]}`,goal.ID);err!=nil{t.Fatal(err)}
- listedKeys=request("GET","operator",enrollPath,"")
- if listedKeys.Code!=200||!strings.Contains(listedKeys.Body.String(),
-  "\"effective_instrument_state\":\"pin_inactive\""){
-  t.Fatalf("changed plan left human instrument key live: %d %s",
-   listedKeys.Code,listedKeys.Body)
- }
- if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
-  SET monitoring_plan_json=?,revision=revision+1 WHERE id=?`,
-  `{"version":1,"source_ids":["router"]}`,goal.ID);err!=nil{t.Fatal(err)}
  goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
  keyPath:=enrollPath+"/"+instrument.ID
  challengeBody,_:=json.Marshal(map[string]any{

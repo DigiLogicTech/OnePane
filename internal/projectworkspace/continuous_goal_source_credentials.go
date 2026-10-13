@@ -71,11 +71,12 @@ func(s *Service)MintGoalSourceCredential(ctx context.Context,
   if err=s.requireActor(ctx,tx,project.WorkspaceID,c.ActorPrincipalID);err!=nil{return err}
   if err=humanGoalReviewer(ctx,tx,c.ActorPrincipalID);err!=nil{return err}
   var goalWS,goalStatus,planRaw string
-  err=tx.QueryRowContext(ctx,`SELECT g.project_workspace_id,g.status,g.monitoring_plan_json
+  var planGeneration int64
+  err=tx.QueryRowContext(ctx,`SELECT g.project_workspace_id,g.status,g.monitoring_plan_json,g.plan_generation
    FROM project_continuous_goals g
    JOIN project_workspaces w ON w.id=g.project_workspace_id
     AND w.project_id=g.project_id AND w.status='active'
-   WHERE g.id=? AND g.project_id=?`,c.GoalID,c.ProjectID).Scan(&goalWS,&goalStatus,&planRaw)
+   WHERE g.id=? AND g.project_id=?`,c.GoalID,c.ProjectID).Scan(&goalWS,&goalStatus,&planRaw,&planGeneration)
   if err!=nil{return err}
   if goalStatus!="configured"{return ErrInvalidTransition}
   _,planHash,err:=goalReviewPlan(planRaw)
@@ -85,6 +86,7 @@ func(s *Service)MintGoalSourceCredential(ctx context.Context,
     WHERE id=? AND project_id=? AND goal_id=?`,c.SignerID,c.ProjectID,c.GoalID))
   if err!=nil{return err}
   if signer.Status!="approved"||signer.PlanHash!=planHash||
+   signer.PlanGeneration<1||signer.PlanGeneration!=planGeneration||
    signer.ExpiresAt<c.ExpiresAt||signer.ProjectWorkspaceID!=goalWS{return ErrInvalidTransition}
   var sourceActive int
   err=tx.QueryRowContext(ctx,`SELECT 1 FROM principals p
@@ -164,7 +166,9 @@ func(s *Service)ListGoalSourceCredentials(ctx context.Context,
   CASE
    WHEN b.revoked_by IS NOT NULL OR a.revoked_at IS NOT NULL THEN 'revoked'
    WHEN b.expires_at<=? OR a.expires_at IS NULL OR a.expires_at<=? THEN 'expired'
-   WHEN k.status!='approved' OR k.expires_at<=? THEN 'signer_inactive'
+   WHEN k.status!='approved' OR k.expires_at<=? OR
+    k.plan_generation<1 OR k.plan_generation!=g.plan_generation
+    THEN 'signer_inactive'
    WHEN p.status!='active' OR w.status!='active' THEN 'scope_inactive'
    WHEN EXISTS(SELECT 1 FROM principals pr
      LEFT JOIN workspace_memberships m ON m.workspace_id=b.workspace_id AND m.principal_id=pr.id
@@ -176,6 +180,8 @@ func(s *Service)ListGoalSourceCredentials(ctx context.Context,
   FROM project_goal_source_credential_grants b
   JOIN api_credentials a ON a.id=b.credential_id
   JOIN project_goal_observation_signers k ON k.id=b.signer_id
+  JOIN project_continuous_goals g ON g.id=k.goal_id
+   AND g.project_id=k.project_id
   JOIN projects p ON p.id=b.project_id
   JOIN project_workspaces w ON w.id=b.project_workspace_id
   WHERE b.project_id=? AND b.goal_id=? AND b.signer_id=?

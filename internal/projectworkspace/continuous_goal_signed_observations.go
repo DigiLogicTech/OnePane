@@ -29,6 +29,7 @@ type GoalObservationSigner struct {
  SourceID string `json:"source_id"`
  SourcePrincipalID string `json:"source_principal_id"`
  PlanHash string `json:"plan_hash"`
+ PlanGeneration int64 `json:"plan_generation"`
  PublicKey []byte `json:"public_key"`
  Status string `json:"status"`
  Revision int64 `json:"revision"`
@@ -70,13 +71,13 @@ type AcceptSignedGoalObservationCommand struct {
 }
 
 const goalObservationSignerColumns=`id,project_id,goal_id,project_workspace_id,
- source_id,source_principal_id,plan_hash,public_key,status,revision,
+ source_id,source_principal_id,plan_hash,plan_generation,public_key,status,revision,
  last_sequence,approved_by,approved_at,expires_at`
 
 func scanGoalObservationSigner(row scanner)(GoalObservationSigner,error){
  var g GoalObservationSigner
  err:=row.Scan(&g.ID,&g.ProjectID,&g.GoalID,&g.ProjectWorkspaceID,
-  &g.SourceID,&g.SourcePrincipalID,&g.PlanHash,&g.PublicKey,&g.Status,
+  &g.SourceID,&g.SourcePrincipalID,&g.PlanHash,&g.PlanGeneration,&g.PublicKey,&g.Status,
   &g.Revision,&g.LastSequence,&g.ApprovedBy,&g.ApprovedAt,&g.ExpiresAt)
  return g,err
 }
@@ -111,16 +112,16 @@ func(s *Service)ApproveGoalObservationSigner(ctx context.Context,
   if err=s.requireActor(ctx,tx,project.WorkspaceID,c.ActorPrincipalID);err!=nil{return err}
   if err=humanGoalReviewer(ctx,tx,c.ActorPrincipalID);err!=nil{return err}
   var wsID,status,planRaw string
-  var revision int64
+  var revision,planGeneration int64
   err=tx.QueryRowContext(ctx,`SELECT g.project_workspace_id,g.status,
-   g.monitoring_plan_json,g.revision FROM project_continuous_goals g
+   g.monitoring_plan_json,g.revision,g.plan_generation FROM project_continuous_goals g
    JOIN project_workspaces w ON w.id=g.project_workspace_id
     AND w.project_id=g.project_id AND w.status='active'
    WHERE g.id=? AND g.project_id=?`,c.GoalID,c.ProjectID).
-   Scan(&wsID,&status,&planRaw,&revision)
+   Scan(&wsID,&status,&planRaw,&revision,&planGeneration)
   if err!=nil{return err}
   if revision!=c.ExpectedGoalRevision{return ErrRevisionConflict}
-  if status!="configured"{return ErrInvalidTransition}
+  if status!="configured"||planGeneration<1{return ErrInvalidTransition}
   plan,hash,err:=goalReviewPlan(planRaw)
   if err!=nil{return err}
   allowed:=false
@@ -139,17 +140,18 @@ func(s *Service)ApproveGoalObservationSigner(ctx context.Context,
   saved=GoalObservationSigner{
    ID:idv,ProjectID:c.ProjectID,GoalID:c.GoalID,ProjectWorkspaceID:wsID,
    SourceID:c.SourceID,SourcePrincipalID:c.SourcePrincipalID,
-   PlanHash:hash,PublicKey:append([]byte(nil),c.PublicKey...),
+   PlanHash:hash,PlanGeneration:planGeneration,
+   PublicKey:append([]byte(nil),c.PublicKey...),
    Status:"approved",Revision:1,ApprovedBy:c.ActorPrincipalID,
    ApprovedAt:now,ExpiresAt:c.ExpiresAt,
   }
   _,err=tx.ExecContext(ctx,`INSERT INTO project_goal_observation_signers
    (id,project_id,goal_id,project_workspace_id,source_id,
-   source_principal_id,plan_hash,public_key,status,revision,last_sequence,
+   source_principal_id,plan_hash,plan_generation,public_key,status,revision,last_sequence,
    approved_by,approved_at,expires_at)
-   VALUES(?,?,?,?,?,?,?,?,'approved',1,0,?,?,?)`,
+   VALUES(?,?,?,?,?,?,?,?,?,'approved',1,0,?,?,?)`,
    saved.ID,saved.ProjectID,saved.GoalID,saved.ProjectWorkspaceID,
-   saved.SourceID,saved.SourcePrincipalID,saved.PlanHash,saved.PublicKey,
+   saved.SourceID,saved.SourcePrincipalID,saved.PlanHash,saved.PlanGeneration,saved.PublicKey,
    saved.ApprovedBy,saved.ApprovedAt,saved.ExpiresAt)
   if err!=nil{return err}
   result,err:=tx.ExecContext(ctx,`UPDATE project_continuous_goals
@@ -310,14 +312,14 @@ func(s *Service)AcceptSignedGoalObservation(ctx context.Context,
   }
   if err=s.requireActor(ctx,tx,project.WorkspaceID,c.ActorPrincipalID);err!=nil{return err}
   var wsID,status,planRaw string
-  var rev int64
+  var rev,planGeneration int64
   var cadence int64
   err=tx.QueryRowContext(ctx,`SELECT g.project_workspace_id,g.status,
-   g.monitoring_plan_json,g.revision,g.cadence_minutes
+   g.monitoring_plan_json,g.revision,g.cadence_minutes,g.plan_generation
    FROM project_continuous_goals g JOIN project_workspaces w
    ON w.id=g.project_workspace_id AND w.project_id=g.project_id AND w.status='active'
    WHERE g.id=? AND g.project_id=?`,c.GoalID,c.ProjectID).
-   Scan(&wsID,&status,&planRaw,&rev,&cadence)
+   Scan(&wsID,&status,&planRaw,&rev,&cadence,&planGeneration)
   if err!=nil{return err}
   if rev!=c.ExpectedGoalRevision{return ErrRevisionConflict}
   if status!="configured"{return ErrInvalidTransition}
@@ -331,6 +333,7 @@ func(s *Service)AcceptSignedGoalObservation(ctx context.Context,
    c.GoalID,c.SignerID,project.WorkspaceID,c.ActorPrincipalID,now);err!=nil{return err}
   if signer.Status!="approved"||signer.ExpiresAt<=now||
    signer.ProjectWorkspaceID!=wsID||signer.PlanHash!=hash||
+   signer.PlanGeneration<1||signer.PlanGeneration!=planGeneration||
    signer.SourcePrincipalID!=c.ActorPrincipalID||
    c.Sequence<=signer.LastSequence{return ErrInvalidTransition}
   allowed:=false

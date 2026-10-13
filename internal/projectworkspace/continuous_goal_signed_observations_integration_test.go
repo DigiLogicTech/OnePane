@@ -323,4 +323,62 @@ func TestLevel5SignedObservationEnrollmentAntiReplayAndLiveRevocation(t *testing
  if err!=nil||saved.LastSequence!=30{
   t.Fatalf("rate-denied proof consumed signer sequence: %+v %v",saved,err)
  }
+
+ // The exact old plan JSON cannot restore an old source identity.
+ // All receipts remain immutable history, but new signatures,
+ // credentials and CURRENT health evidence must fail closed.
+ beforePlanEdit,err:=svc.GoalEvidenceCoverage(ctx,p.ID,g.ID)
+ if err!=nil||beforePlanEdit.RecentSourceSignedSources!=1{
+  t.Fatalf("current source not shown before plan edit: %+v %v",beforePlanEdit,err)
+ }
+ var savedPlan string
+ var savedGeneration int64
+ if err=db.SQL().QueryRowContext(ctx,`SELECT monitoring_plan_json,plan_generation
+  FROM project_continuous_goals WHERE id=?`,g.ID).
+  Scan(&savedPlan,&savedGeneration);err!=nil{t.Fatal(err)}
+ if rotated.PlanGeneration!=savedGeneration||rotated.PlanGeneration<1{
+  t.Fatalf("signed source enrollment not generation bound: %+v",rotated)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
+  SET monitoring_plan_json=? WHERE id=?`,
+  `{"version":1,"source_ids":["router","another-source"]}`,g.ID);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
+  SET monitoring_plan_json=? WHERE id=?`,savedPlan,g.ID);err!=nil{t.Fatal(err)}
+ var newGeneration int64
+ if err=db.SQL().QueryRowContext(ctx,`SELECT plan_generation
+  FROM project_continuous_goals WHERE id=?`,g.ID).
+  Scan(&newGeneration);err!=nil{t.Fatal(err)}
+ if newGeneration!=savedGeneration+2{
+  t.Fatalf("exact plan rollback did not advance generation: %d",newGeneration)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_goal_observation_signers
+  SET plan_generation=? WHERE id=?`,newGeneration,rotated.ID);err==nil{
+  t.Fatal("historical signer could rewrite its immutable approval generation")
+ }
+ afterPlanEdit,err:=svc.GoalEvidenceCoverage(ctx,p.ID,g.ID)
+ if err!=nil||afterPlanEdit.RecentSourceSignedSources!=0||
+  len(afterPlanEdit.Sources)!=1||
+  afterPlanEdit.Sources[0].SignatureEvidenceState!="historical_key_inactive"{
+  t.Fatalf("old signed proof promoted after plan restore: %+v %v",afterPlanEdit,err)
+ }
+ g,err=svc.ContinuousGoal(ctx,g.ID);if err!=nil{t.Fatal(err)}
+ if _,err=svc.MintGoalSourceCredential(ctx,MintGoalSourceCredentialCommand{
+  ProjectID:p.ID,GoalID:g.ID,SignerID:rotated.ID,
+  ActorPrincipalID:"owner",ExpiresAt:expiry,
+ });!errors.Is(err,ErrInvalidTransition){
+  t.Fatalf("old signer minted credential after identical plan restore: %v",err)
+ }
+ staleSample:=record("router")
+ stalePayload,err:=SignedGoalObservationMessage(p.ID,g.ID,rotated.ID,
+  staleSample.ID,staleSample.IntegrityHash,31)
+ if err!=nil{t.Fatal(err)}
+ if _,err=svc.AcceptSignedGoalObservation(ctx,AcceptSignedGoalObservationCommand{
+  ProjectID:p.ID,GoalID:g.ID,SignerID:rotated.ID,
+  ObservationID:staleSample.ID,ActorPrincipalID:"source",
+  Sequence:31,ExpectedGoalRevision:g.Revision,
+  Signature:ed25519.Sign(newPriv,stalePayload),
+ });!errors.Is(err,ErrInvalidTransition){
+  t.Fatalf("old signer signed a new proof after identical plan restore: %v",err)
+ }
+
 }

@@ -2,6 +2,7 @@ package api
 
 import (
  "context"
+ "database/sql"
  "encoding/json"
  "net/http/httptest"
  "strings"
@@ -25,6 +26,23 @@ func(s *originalNodeSealProjectService)ListGoalNodeProbeExecutionPermits(
   return []projectworkspace.GoalNodeProbeExecutionPermit{},nil
  }
  return []projectworkspace.GoalNodeProbeExecutionPermit{s.activePermit},nil
+}
+
+// The route test simulates a transactionally admitted record. Actual
+// SQLite revocation locking and append-audit behavior are checked by
+// projectworkspace integration tests rather than this HTTP auth mock.
+func(s *originalNodeSealProjectService)SealGoalNodeProbeExecutionPermit(
+ _ context.Context,c projectworkspace.SealGoalNodeProbeExecutionPermitCommand,
+ seal func(projectworkspace.GoalNodeProbeExecutionPermit)([]byte,error))([]byte,error){
+ p:=s.activePermit
+ if c.ProjectID!=p.ProjectID||c.GoalID!=p.GoalID||
+  c.PermitID!=p.ID||c.ActorPrincipalID!=p.ApprovedBy{
+  return nil,sql.ErrNoRows
+ }
+ if p.EffectiveExecutionState!="active"{
+  return nil,projectworkspace.ErrRevisionConflict
+ }
+ return seal(p)
 }
 
 // API auth and real identity signing; the mock only supplies an already

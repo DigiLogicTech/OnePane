@@ -127,6 +127,33 @@ func TestDeclaredTCPTargetIsHumanOnlyAndNeverRetroactiveDeviceAttestation(t *tes
   !strings.Contains(listed.Body.String(),"\"effective_identity_state\":\"active\""){
   t.Fatalf("human cannot view current declared target: %d %s",listed.Code,listed.Body)
  }
+ if got:=call("GET","outsider",route,"");got.Code!=403{
+  t.Fatalf("foreign tenant listed target: %d",got.Code)
+ }
+ if got:=call("GET","robot",route,"");got.Code!=403{
+  t.Fatalf("agent listed target: %d",got.Code)
+ }
+ before,err:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ if len(before.Sources)!=1||before.Sources[0].TCPDeclaredTargetID!=""{
+  t.Fatalf("prebinding receipt inherited a later operator identity: %+v",before)
+ }
+ time.Sleep(2*time.Millisecond)
+ observedAfterBinding:=clock.Real{}.UnixMilli()
+ if observedAfterBinding<target.ApprovedAt{
+  observedAfterBinding=target.ApprovedAt
+ }
+ sample("after-binding",2,observedAfterBinding)
+ matched,err:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ if len(matched.Sources)!=1||
+  matched.Sources[0].TCPDeclaredTargetID!=target.ID||
+  matched.Sources[0].TCPIdentityClass!="operator_declared_tcp_endpoint"||
+  matched.DeviceIdentityVerified||matched.MonitoringActive||
+  matched.RemediationAuthorized||
+  matched.CrossClassTargetCorrelation!="not_established"{
+  t.Fatalf("operator-labelled evidence incorrectly attested device: %+v",matched)
+ }
  // A plan no longer allowing this TCP source makes its operator label
  // unusable even though original human approval remains in audit.
  if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
@@ -155,33 +182,17 @@ func TestDeclaredTCPTargetIsHumanOnlyAndNeverRetroactiveDeviceAttestation(t *tes
  if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
   SET monitoring_plan_json=?,revision=revision+1 WHERE id=?`,
   `{"version":1,"source_ids":["router"]}`,goal.ID);err!=nil{t.Fatal(err)}
- if got:=call("GET","outsider",route,"");got.Code!=403{
-  t.Fatalf("foreign tenant listed target: %d",got.Code)
- }
- if got:=call("GET","robot",route,"");got.Code!=403{
-  t.Fatalf("agent listed target: %d",got.Code)
- }
- before,err:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
+
+ // After editing and RESTORING original Goal JSON, a previous human
+ // permit generation cannot be used for new current target evidence.
+ stale,err:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
  if err!=nil{t.Fatal(err)}
- if len(before.Sources)!=1||before.Sources[0].TCPDeclaredTargetID!=""{
-  t.Fatalf("prebinding receipt inherited a later operator identity: %+v",before)
+ if stale.RecentTCPNegativeSources!=0||
+  stale.Sources[0].TCPAttemptID!=""||
+  stale.Sources[0].TCPDeclaredTargetID!=""{
+  t.Fatalf("old TCP generation trusted after plan restore: %+v",stale)
  }
- time.Sleep(2*time.Millisecond)
- observedAfterBinding:=clock.Real{}.UnixMilli()
- if observedAfterBinding<target.ApprovedAt{
-  observedAfterBinding=target.ApprovedAt
- }
- sample("after-binding",2,observedAfterBinding)
- matched,err:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
- if err!=nil{t.Fatal(err)}
- if len(matched.Sources)!=1||
-  matched.Sources[0].TCPDeclaredTargetID!=target.ID||
-  matched.Sources[0].TCPIdentityClass!="operator_declared_tcp_endpoint"||
-  matched.DeviceIdentityVerified||matched.MonitoringActive||
-  matched.RemediationAuthorized||
-  matched.CrossClassTargetCorrelation!="not_established"{
-  t.Fatalf("operator-labelled evidence incorrectly attested device: %+v",matched)
- }
+
  goal,err=svc.ContinuousGoal(ctx,goal.ID)
  if err!=nil{t.Fatal(err)}
  revokeBody:=fmt.Sprintf(`{"expected_goal_revision":%d,
@@ -202,7 +213,7 @@ func TestDeclaredTCPTargetIsHumanOnlyAndNeverRetroactiveDeviceAttestation(t *tes
  after,err:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
  if err!=nil{t.Fatal(err)}
  if after.Sources[0].TCPDeclaredTargetID!=""||
-  after.RecentTCPNegativeSources!=1{
+  after.RecentTCPNegativeSources!=0{
   t.Fatalf("revoked identity continued to attach or erased TCP evidence: %+v",after)
  }
  if _,err=db.SQL().ExecContext(ctx,`DELETE FROM

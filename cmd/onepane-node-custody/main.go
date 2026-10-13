@@ -202,7 +202,7 @@ func runVerify(args []string)error{
 
 func main(){
  if len(os.Args)<2{
-  fmt.Fprintln(os.Stderr,"usage: onepane-node-custody sign|verify|probe-and-witness|sign-execution-permit|verify-execution [flags]")
+  fmt.Fprintln(os.Stderr,"usage: onepane-node-custody sign|verify|probe-and-witness|sign-execution-permit|verify-execution|prepare-approval-request [flags]")
   os.Exit(2)
  }
  var err error
@@ -212,6 +212,7 @@ func main(){
  case "probe-and-witness":err=runProbeAndWitness(os.Args[2:])
  case "sign-execution-permit":err=runSignNodeExecutionPermit(os.Args[2:])
  case "verify-execution":err=runVerifyExecution(os.Args[2:])
+ case "prepare-approval-request":err=runPrepareHumanApproval(os.Args[2:])
  default:err=errors.New("expected sign or verify")
  }
  if err!=nil{

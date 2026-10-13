@@ -50,6 +50,7 @@ func validateNodeProbeExecutionPermit(p projectworkspace.GoalNodeProbeExecutionP
  ts:=now.UnixMilli()
  if p.ID==""||p.ProjectWorkspaceID==""||p.ApprovedBy==""||
   p.Status!="approved"||p.Revision!=1||
+  (p.EffectiveExecutionState!=""&&p.EffectiveExecutionState!="active")||
   p.RevokedAt!=0||
   p.PeerNodeID!=nodeID||p.PeerTLSFingerprint!=nodePin||
   p.ProjectID!=ch.ProjectID||p.GoalID!=ch.GoalID||

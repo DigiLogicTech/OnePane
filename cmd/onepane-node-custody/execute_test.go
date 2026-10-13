@@ -204,6 +204,7 @@ func TestNodeLocalProbeRefusesInvalidOrForgedOperatorExecutionPermit(t *testing.
   "other_instrument":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.InstrumentPublicKeySHA256="sha256:"+strings.Repeat("0",64)},
   "modified_challenge":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.OriginalChallengeSHA256="sha256:"+strings.Repeat("0",64)},
   "revoked":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.Status="revoked";p.RevokedAt=p.ApprovedAt},
+  "scope_inactive":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.EffectiveExecutionState="scope_inactive"},
   "expired":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.ExpiresAt=p.ApprovedAt},
   "future_approval":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.ApprovedAt=time.Now().Add(time.Minute).UnixMilli()},
   "bad_generation":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.Revision=2},

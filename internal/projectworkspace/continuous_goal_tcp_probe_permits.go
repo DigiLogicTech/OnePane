@@ -22,6 +22,7 @@ type GoalTCPProbePermit struct {
  ProjectWorkspaceID string `json:"project_workspace_id"`
  SourceID string `json:"source_id"`
  PlanHash string `json:"plan_hash"`
+ PlanGeneration int64 `json:"plan_generation"`
  ProbeKind string `json:"probe_kind"`
  TargetIPv4 string `json:"target_ipv4"`
  TargetPort int `json:"target_port"`
@@ -56,7 +57,7 @@ type RevokeGoalTCPProbeCommand struct {
  ActorPrincipalID string
 }
 
-const tcpProbePermitCols = `id,project_id,goal_id,project_workspace_id,source_id,plan_hash,
+const tcpProbePermitCols = `id,project_id,goal_id,project_workspace_id,source_id,plan_hash,plan_generation,
 probe_kind,target_ipv4,target_port,timeout_ms,effect_class,status,revision,
 approved_by,revoked_by,approved_at,expires_at,revoked_at`
 
@@ -64,7 +65,7 @@ func scanGoalTCPProbePermit(r scanner)(GoalTCPProbePermit,error){
  var p GoalTCPProbePermit
  var revoked sql.NullString
  err:=r.Scan(&p.ID,&p.ProjectID,&p.GoalID,&p.ProjectWorkspaceID,&p.SourceID,
-  &p.PlanHash,&p.ProbeKind,&p.TargetIPv4,&p.TargetPort,&p.TimeoutMS,
+  &p.PlanHash,&p.PlanGeneration,&p.ProbeKind,&p.TargetIPv4,&p.TargetPort,&p.TimeoutMS,
   &p.EffectClass,&p.Status,&p.Revision,&p.ApprovedBy,&revoked,
   &p.ApprovedAt,&p.ExpiresAt,&p.RevokedAt)
  if revoked.Valid{p.RevokedBy=&revoked.String}
@@ -114,16 +115,16 @@ func(s *Service)ApproveGoalTCPProbe(ctx context.Context,c ApproveGoalTCPProbeCom
   if err=s.requireActor(ctx,tx,project.WorkspaceID,c.ActorPrincipalID);err!=nil{return err}
   if err=humanGoalReviewer(ctx,tx,c.ActorPrincipalID);err!=nil{return err}
   var workspaceID,status,planRaw string
-  var revision int64
-  err=tx.QueryRowContext(ctx,`SELECT g.project_workspace_id,g.status,g.monitoring_plan_json,g.revision
+  var revision,planGeneration int64
+  err=tx.QueryRowContext(ctx,`SELECT g.project_workspace_id,g.status,g.monitoring_plan_json,g.revision,g.plan_generation
     FROM project_continuous_goals g JOIN project_workspaces w
       ON w.id=g.project_workspace_id AND w.project_id=g.project_id AND w.status='active'
     JOIN workspaces tenant ON tenant.id=? AND tenant.status='active'
     WHERE g.id=? AND g.project_id=?`,project.WorkspaceID,c.GoalID,c.ProjectID).
-    Scan(&workspaceID,&status,&planRaw,&revision)
+    Scan(&workspaceID,&status,&planRaw,&revision,&planGeneration)
   if err!=nil{return err}
   if revision!=c.ExpectedGoalRevision{return ErrRevisionConflict}
-  if status!="configured"{return ErrInvalidTransition}
+  if status!="configured"||planGeneration<1{return ErrInvalidTransition}
   plan,hash,err:=goalReviewPlan(planRaw)
   if err!=nil{return err}
   permitted:=false
@@ -136,17 +137,17 @@ func(s *Service)ApproveGoalTCPProbe(ctx context.Context,c ApproveGoalTCPProbeCom
   if existing!=0{return ErrInvalidTransition}
   result=GoalTCPProbePermit{
    ID:idv,ProjectID:c.ProjectID,GoalID:c.GoalID,ProjectWorkspaceID:workspaceID,
-   SourceID:c.SourceID,PlanHash:hash,ProbeKind:"tcp_connect",
+   SourceID:c.SourceID,PlanHash:hash,PlanGeneration:planGeneration,ProbeKind:"tcp_connect",
    TargetIPv4:ip,TargetPort:c.TargetPort,TimeoutMS:c.TimeoutMS,
    EffectClass:"network_tcp_connect",Status:"approved",Revision:1,
    ApprovedBy:c.ActorPrincipalID,ApprovedAt:now,ExpiresAt:c.ExpiresAt,
   }
   _,err=tx.ExecContext(ctx,`INSERT INTO project_goal_tcp_probe_permits(
-    id,project_id,goal_id,project_workspace_id,source_id,plan_hash,probe_kind,
+    id,project_id,goal_id,project_workspace_id,source_id,plan_hash,plan_generation,probe_kind,
     target_ipv4,target_port,timeout_ms,effect_class,status,revision,
     approved_by,approved_at,expires_at)
-    VALUES(?,?,?,?,?,?,'tcp_connect',?,? ,?,'network_tcp_connect','approved',1,?,?,?)`,
-    idv,c.ProjectID,c.GoalID,workspaceID,c.SourceID,hash,
+    VALUES(?,?,?,?,?,?,?,'tcp_connect',?,? ,?,'network_tcp_connect','approved',1,?,?,?)`,
+    idv,c.ProjectID,c.GoalID,workspaceID,c.SourceID,hash,planGeneration,
     result.TargetIPv4,result.TargetPort,result.TimeoutMS,result.ApprovedBy,
     result.ApprovedAt,result.ExpiresAt)
   if err!=nil{return err}

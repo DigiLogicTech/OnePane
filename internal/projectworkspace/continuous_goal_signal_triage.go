@@ -136,6 +136,7 @@ func(s *Service)GoalSignalTriage(ctx context.Context,
     AND g.project_id=a.project_id AND g.status='configured'
     AND g.project_workspace_id=a.project_workspace_id
     AND g.project_workspace_id=p.project_workspace_id
+    AND p.plan_generation=g.plan_generation AND p.plan_generation>0
    JOIN projects pr ON pr.id=g.project_id AND pr.status='active'
    JOIN workspaces tenant ON tenant.id=pr.workspace_id
     AND tenant.status='active'

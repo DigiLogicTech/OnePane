@@ -113,15 +113,15 @@ func(s *Service)claimGoalTCPAttempt(ctx context.Context,c RunGoalTCPProbeCommand
    return ErrPrincipalIneligible
   }
   var wsID,status,planRaw string
-  var revision int64
+  var revision,planGeneration int64
   var cadence int64
   err=tx.QueryRowContext(ctx,`SELECT g.project_workspace_id,g.status,g.monitoring_plan_json,
-    g.revision,g.cadence_minutes FROM project_continuous_goals g
+    g.revision,g.cadence_minutes,g.plan_generation FROM project_continuous_goals g
     JOIN project_workspaces w ON w.id=g.project_workspace_id
       AND w.project_id=g.project_id AND w.status='active'
     JOIN workspaces t ON t.id=? AND t.status='active'
     WHERE g.id=? AND g.project_id=?`,project.WorkspaceID,c.GoalID,c.ProjectID).
-    Scan(&wsID,&status,&planRaw,&revision,&cadence)
+    Scan(&wsID,&status,&planRaw,&revision,&cadence,&planGeneration)
   if err!=nil{return err}
   if revision!=c.ExpectedGoalRevision{return ErrRevisionConflict}
   if status!="configured"||cadence<5||cadence>10080{return ErrInvalidTransition}
@@ -144,6 +144,7 @@ func(s *Service)claimGoalTCPAttempt(ctx context.Context,c RunGoalTCPProbeCommand
   if permit.Revision!=c.ExpectedPermitRevision{return ErrRevisionConflict}
   if permit.Status!="approved"||permit.ExpiresAt<=now||
     permit.ProjectWorkspaceID!=wsID||permit.PlanHash!=hash||
+    permit.PlanGeneration!=planGeneration||permit.PlanGeneration<1||
     permit.ProbeKind!="tcp_connect"||permit.EffectClass!="network_tcp_connect"||
     permit.TimeoutMS<100||permit.TimeoutMS>1500||
     permit.TargetPort<1||permit.TargetPort>65535{

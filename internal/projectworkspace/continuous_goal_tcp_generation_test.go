@@ -97,6 +97,10 @@ func TestRestoredGoalPlanCannotReviveApprovedTCPAndInstrumentChain(t *testing.T)
   }
  }
  assertState("active","active","active")
+ listed,err:=svc.ListGoalTCPProbePermits(ctx,project.ID,goal.ID)
+ if err!=nil||len(listed)!=1||listed[0].EffectiveScopeState!="active"{
+  t.Fatalf("human-approved original TCP grant not represented as live: %+v %v",listed,err)
+ }
  for _,plan:=range []string{
   `{"version":1,"source_ids":["router","other"]}`,original,
  }{
@@ -104,6 +108,12 @@ func TestRestoredGoalPlanCannotReviveApprovedTCPAndInstrumentChain(t *testing.T)
    "UPDATE project_continuous_goals SET monitoring_plan_json=? WHERE id=?",
    plan,goal.ID);err!=nil{t.Fatal(err)}
   assertState("permit_inactive","target_inactive","pin_inactive")
+  listed,err=svc.ListGoalTCPProbePermits(ctx,project.ID,goal.ID)
+  if err!=nil||len(listed)!=1||
+   listed[0].Status!="approved"||
+   listed[0].EffectiveScopeState!="goal_scope_inactive"{
+   t.Fatalf("historically approved TCP grant improperly active: %+v %v",listed,err)
+  }
  }
  var currentGen int64
  if err=db.SQL().QueryRowContext(ctx,

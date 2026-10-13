@@ -367,7 +367,9 @@ func TestInstrumentChallengeWithSharedModeIsRejected(t *testing.T){
  }
  pub,_,err:=ed25519.GenerateKey(rand.Reader);if err!=nil{t.Fatal(err)}
  report:=filepath.Join(dir,"receipt.json")
- if err=os.WriteFile(report,[]byte("{}"),0600);err!=nil{t.Fatal(err)}
+ canonicalReceipt,err:=json.Marshal(instrumentprobe.LocalProbeReceipt{})
+ if err!=nil{t.Fatal(err)}
+ if err=os.WriteFile(report,canonicalReceipt,0600);err!=nil{t.Fatal(err)}
  if err=runVerifyReceipt([]string{"--receipt",report,"--challenge",path,
   "--plan",filepath.Join(dir,"unused-plan"),"--public-key",base64.StdEncoding.EncodeToString(pub),
  });err==nil||!strings.Contains(err.Error(),"private file must be owner-only"){

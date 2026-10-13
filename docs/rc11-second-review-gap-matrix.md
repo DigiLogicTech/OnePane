@@ -1007,5 +1007,14 @@ Contract: `docs/rc11-instrument-project-challenge-budget.md`, `docs/rc11-tls-cer
 
 - [x] Full hosted CI [#38322732883](https://github.com/DigiLogicTech/OnePane/actions/runs/38322732883) PASSED on source/test/doc head `52da423c4ae685589cc0f95db45151015ee0546e`. One atomic Git tree commit replaced the prior high-latency one-file/one-CI pattern.
 - [x] v2 challenge endpoint SHA-256 digest now enforced before manual TCP socket AND before post-hoc signed admission; a different RFC1918 IPv4 or port cannot inherit an exact approved v2 target ID. Legitimate historic v1 proof bundles retain historical readability, not present-day attested endpoint or trusted-sensor authority.
-- [ ] Follow-on local per-key anti-rerun CLI nonce ledger, private key self-check and invalid-directory handling are part of the current batched source regression. Verify full CI and record its commit before calling this line complete. The ledger is only accidental-retry protection on the chosen host and is not tamper-resistant, global, or independent hardware attestation.
+- [x] Follow-on local per-key anti-rerun CLI nonce ledger, private key self-check and invalid-directory handling passed full hosted CI #38323225758 at `d68cc4aeccb240e819233017877ed971145d7671`. The ledger is only accidental-retry protection on the chosen host and is not tamper-resistant, global, or independent hardware attestation.
 - [ ] Remaining P0: trusted paired-Node source execution witness + real instrument/target provenance, consented and calibrated cross-source incident decisions, reversible human-approved Level 5 actions with rollback/postconditions, bounded small-hardware soak, initial code/security audit, and LAST comprehensive human-centred UI/UX/customisation pass before Windows/Ubuntu QA installers. Draft unmerged, no autonomous protection claim.
+
+
+## RC11 P0-T — one-shot local IO durability hardening (2026-10-13)
+
+- [x] Canonicalise local instrument key parent directory before deciding which per-key replay ledger holds a nonce. Regression denies absolute/relative/symlinked-parent aliases, but deliberately makes no tamper-resistant or across-host claim.
+- [x] fsync POSIX parent and ledger directory metadata around first nonce reservation; decline probe when local crash-durable claim cannot be confirmed.
+- [x] Exclusively reserve a private receipt output **before** consuming any nonce or opening the single socket. Existing or missing destinations fail closed and cannot silently overwrite evidence; partial failed outputs are not signed receipts.
+- [ ] Verify exact-head hosted CI and Windows/Ubuntu compilation for this batched change. No installed QA, device attestation, automatic monitoring, remediation authority or release approval is implied.
+- [ ] Next P0: independently approved paired-Node execution/vantage binding and trustworthy same-target correlation, then calibrated incident logic, bounded consented reversible playbooks with verification/rollback and low-resource endurance/security review. UI/UX is the final development review before human-approved packaging.

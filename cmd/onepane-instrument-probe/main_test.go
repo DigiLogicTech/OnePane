@@ -279,3 +279,59 @@ func TestLocalInstrumentPrivateKeyRejectsIncorrectEmbeddedPublicPart(t *testing.
   t.Fatal("corrupt private instrument file passed self-check before probe")
  }
 }
+
+func TestInstrumentProbeNonceLedgerRejectsAliasParentRetries(t *testing.T){
+ root:=t.TempDir()
+ actual:=filepath.Join(root,"physical")
+ if err:=os.Mkdir(actual,0700);err!=nil{t.Fatal(err)}
+ alias:=filepath.Join(root,"alias")
+ if err:=os.Symlink(actual,alias);err!=nil{
+  if runtime.GOOS=="windows"{t.Skip("Windows symlink creation privilege unavailable")}
+  t.Fatal(err)
+ }
+ original:=filepath.Join(actual,"instrument.key")
+ alternate:=filepath.Join(alias,"instrument.key")
+ ch:=instrumentprobe.Challenge{SigningPayload:[]byte("same externally issued challenge")}
+ if err:=claimLocalProbeOnce(original,ch);err!=nil{t.Fatal(err)}
+ if err:=claimLocalProbeOnce(alternate,ch);err==nil{
+  t.Fatal("symlink-parent spelling bypassed durable one-shot nonce fence")
+ }
+ oldWorking,err:=os.Getwd();if err!=nil{t.Fatal(err)}
+ if err=os.Chdir(actual);err!=nil{t.Fatal(err)}
+ defer os.Chdir(oldWorking)
+ if err=claimLocalProbeOnce("./instrument.key",ch);err==nil{
+  t.Fatal("relative key spelling bypassed nonce reservation")
+ }
+}
+
+func TestInstrumentProbeReceiptReservationPreflightsOutput(t *testing.T){
+ dir:=t.TempDir()
+ existing:=filepath.Join(dir,"existing-receipt.json")
+ original:=[]byte("existing receipt remains untouched")
+ if err:=os.WriteFile(existing,original,0600);err!=nil{t.Fatal(err)}
+ if file,err:=reserveProbeReceipt(existing);err==nil{
+  _=file.Close()
+  t.Fatal("pre-existing receipt was overwritten before network effect")
+ }
+ preserved,err:=os.ReadFile(existing);if err!=nil{t.Fatal(err)}
+ if !bytes.Equal(preserved,original){t.Fatal("existing receipt mutated")}
+ if file,err:=reserveProbeReceipt("");err==nil{
+  _=file.Close()
+  t.Fatal("missing output path admitted before nonce consumption")
+ }
+ path:=filepath.Join(dir,"reserved.json")
+ file,err:=reserveProbeReceipt(path);if err!=nil{t.Fatal(err)}
+ if err=writeReservedProbeReceipt(file,instrumentprobe.LocalProbeReceipt{
+  Outcome:"not_connected",ObservedAt:123,
+ });err!=nil{_ = file.Close();t.Fatal(err)}
+ if err=file.Close();err!=nil{t.Fatal(err)}
+ data,err:=os.ReadFile(path);if err!=nil{t.Fatal(err)}
+ var got instrumentprobe.LocalProbeReceipt
+ if err=json.Unmarshal(bytes.TrimSpace(data),&got);err!=nil||got.Outcome!="not_connected"{
+  t.Fatalf("reserved receipt not valid canonical JSON: %v",err)
+ }
+ if runtime.GOOS!="windows"{
+  stat,err:=os.Stat(path);if err!=nil{t.Fatal(err)}
+  if stat.Mode().Perm()!=0600{t.Fatalf("reserved receipt not owner-only: %v",stat.Mode())}
+ }
+}

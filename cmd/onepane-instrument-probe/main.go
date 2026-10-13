@@ -156,12 +156,35 @@ func runKeygen(args []string)error{
 // than silently performing additional network effects after a retry.
 // A malicious operator with filesystem control can remove these files:
 // the fence is NOT hardware-backed attestation or global replay defence.
+// Use the physical parent directory, not the spelling of --private-key.
+// Relative, absolute and symlinked-parent aliases must share a local fence.
+// This cannot prevent a privileged operator from copying/hardlinking a key.
+func canonicalProbeLedger(keyFile string)(string,error){
+ if keyFile==""{return "",errors.New("instrument key path required")}
+ abs,err:=filepath.Abs(keyFile)
+ if err!=nil{return "",err}
+ parent,err:=filepath.EvalSymlinks(filepath.Dir(abs))
+ if err!=nil{return "",fmt.Errorf("resolve instrument key parent: %w",err)}
+ return filepath.Join(parent,filepath.Base(abs))+".onepane-probe-claims",nil
+}
+
+// fsync the containing directory as well as the claim itself before any
+// network effect. On Windows this remains a best-effort local fence.
+func syncProbeDirectory(path string)error{
+ if runtime.GOOS=="windows"{return nil}
+ f,err:=os.Open(path)
+ if err!=nil{return err}
+ defer f.Close()
+ return f.Sync()
+}
 func claimLocalProbeOnce(keyFile string,ch instrumentprobe.Challenge)error{
- if keyFile==""||len(ch.SigningPayload)==0{
-  return errors.New("instrument key path or challenge missing")
+ if len(ch.SigningPayload)==0{
+  return errors.New("instrument challenge missing")
  }
- dirname:=keyFile+".onepane-probe-claims"
- if err:=os.Mkdir(dirname,0700);err!=nil&&!os.IsExist(err){return err}
+ dirname,err:=canonicalProbeLedger(keyFile)
+ if err!=nil{return err}
+ mkdirErr:=os.Mkdir(dirname,0700)
+ if mkdirErr!=nil&&!os.IsExist(mkdirErr){return mkdirErr}
  info,err:=os.Lstat(dirname)
  if err!=nil{return err}
  if !info.IsDir()||info.Mode()&os.ModeSymlink!=0{
@@ -169,6 +192,11 @@ func claimLocalProbeOnce(keyFile string,ch instrumentprobe.Challenge)error{
  }
  if runtime.GOOS!="windows"&&info.Mode().Perm()&0077!=0{
   return errors.New("nonce ledger directory must be owner-only (chmod 700)")
+ }
+ if mkdirErr==nil{
+  if err=syncProbeDirectory(filepath.Dir(dirname));err!=nil{
+   return fmt.Errorf("cannot durably create nonce ledger: %w",err)
+  }
  }
  digest:=sha256.Sum256(ch.SigningPayload)
  path:=filepath.Join(dirname,fmt.Sprintf("%x.claim",digest[:]))
@@ -181,7 +209,26 @@ func claimLocalProbeOnce(keyFile string,ch instrumentprobe.Challenge)error{
   return err
  }
  if err=file.Sync();err!=nil{_=file.Close();return err}
- return file.Close()
+ if err=file.Close();err!=nil{return err}
+ if err=syncProbeDirectory(dirname);err!=nil{
+  return fmt.Errorf("cannot durably reserve nonce: %w",err)
+ }
+ return nil
+}
+
+// Reserve the receipt destination BEFORE spending a challenge or opening a
+// socket. A partial file after crash/error is not a signed receipt, and must
+// never be treated as one. Never overwrite an existing private artifact.
+func reserveProbeReceipt(path string)(*os.File,error){
+ if path==""{return nil,errors.New("explicit receipt output file required")}
+ return os.OpenFile(path,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
+}
+func writeReservedProbeReceipt(f *os.File,receipt instrumentprobe.LocalProbeReceipt)error{
+ if f==nil{return errors.New("probe receipt was not reserved")}
+ b,err:=json.Marshal(receipt)
+ if err!=nil{return err}
+ if _,err=f.Write(append(b,'\n'));err!=nil{return err}
+ return f.Sync()
 }
 
 func runProbe(args []string)error{
@@ -203,6 +250,7 @@ func runProbe(args []string)error{
  pk,err:=readPrivateKey(*keyFile)
  if err!=nil{return err}
  var receipt instrumentprobe.LocalProbeReceipt
+ var receiptFile *os.File
  if *planFile!=""{
   // Fail closed: a plan must be the sole source of the endpoint; mixing
   // legacy manually selected flags could silently change approved scope.
@@ -212,6 +260,9 @@ func runProbe(args []string)error{
   var plan instrumentprobe.ProbePlan
   if err=readPrivateJSON(*planFile,&plan);err!=nil{return err}
   if _,err=instrumentprobe.ValidateProbePlan(ch,plan,time.Now());err!=nil{return err}
+  receiptFile,err=reserveProbeReceipt(*output)
+  if err!=nil{return err}
+  defer receiptFile.Close()
   if err=claimLocalProbeOnce(*keyFile,ch);err!=nil{return err}
   receipt,err=instrumentprobe.ProbeApprovedPlan(context.Background(),ch,plan,
    pk,&net.Dialer{},time.Now)
@@ -226,12 +277,15 @@ func runProbe(args []string)error{
   target:=instrumentprobe.Target{IPv4:*addr,Port:*port,TimeoutMS:*timeout,
    ConfirmedDeclaredTargetID:*declared}
   if err=instrumentprobe.ValidateOneShotTarget(ch,target,time.Now());err!=nil{return err}
+  receiptFile,err=reserveProbeReceipt(*output)
+  if err!=nil{return err}
+  defer receiptFile.Close()
   if err=claimLocalProbeOnce(*keyFile,ch);err!=nil{return err}
   receipt,err=instrumentprobe.ProbeOnce(context.Background(),ch,target,
    pk,&net.Dialer{},time.Now)
  }
  if err!=nil{return err}
- if err=writeExclusive(*output,receipt);err!=nil{return err}
+ if err=writeReservedProbeReceipt(receiptFile,receipt);err!=nil{return err}
  fmt.Println("One explicit private-IPv4 TCP probe completed; local signed receipt saved.")
  fmt.Println("Outcome is an instrument self-report, NOT physical device attestation.")
  return nil

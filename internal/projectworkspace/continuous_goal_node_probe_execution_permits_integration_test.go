@@ -178,6 +178,24 @@ func TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly(t *testing.T){
  }
  if _,err=db.SQL().ExecContext(ctx,
   "UPDATE workspace_memberships SET status='active' WHERE workspace_id='tenant' AND principal_id='human'");err!=nil{t.Fatal(err)}
+ // Revoking the ORIGINAL human-approved TCP socket consent must also
+ // revoke the effective authority of an already sealed Node permit.
+ // This may not be inferred just from the still-valid instrument key,
+ // declared target, TLS pin and previously paired Node.
+ goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
+ tcpRevoked,err:=svc.RevokeGoalTCPProbe(ctx,RevokeGoalTCPProbeCommand{
+  ProjectID:p.ID,GoalID:goal.ID,PermitID:tcp.ID,
+  ActorPrincipalID:"human",ExpectedGoalRevision:goal.Revision,
+  ExpectedPermitRevision:tcp.Revision,
+ })
+ if err!=nil||tcpRevoked.Status!="revoked"{
+  t.Fatalf("human TCP permit revocation failed: %v %+v",err,tcpRevoked)
+ }
+ found,err=svc.ListGoalNodeProbeExecutionPermits(ctx,p.ID,goal.ID)
+ if err!=nil||len(found)!=1||found[0].Status!="approved"||
+  found[0].EffectiveExecutionState!="tcp_scope_unavailable"{
+  t.Fatalf("TCP consent withdrawn but Node action still appeared live: %v %+v",err,found)
+ }
  // Changing and restoring original JSON cannot revive the original
  // execution consent, even when source IDs and SHA-256 match again.
  var originalJSON string

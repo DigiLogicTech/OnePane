@@ -5,6 +5,8 @@ import (
  "crypto/ed25519"
  "encoding/base64"
  "encoding/json"
+ "encoding/pem"
+ "github.com/DigiLogicTech/OnePane/internal/nodefederation"
  "crypto/sha256"
  "fmt"
  "errors"
@@ -57,19 +59,33 @@ func verifySignedNodeExecutionPermit(s SignedNodeExecutionPermit,
 func runSignNodeExecutionPermit(args []string)error{
  fs:=flag.NewFlagSet("sign-execution-permit",flag.ContinueOnError)
  fs.SetOutput(io.Discard)
- permitFile:=fs.String("permit","","original canonical owner-only OnePane human permit JSON")
+ serverSealFile:=fs.String("server-seal","","original OnePane-signed active execution permit")
+ serverCertFile:=fs.String("server-certificate","","independently pinned original OnePane PEM certificate")
+ serverID:=fs.String("server-node-id","","independently enrolled original OnePane server Node ID")
+ serverFingerprint:=fs.String("server-fingerprint","","independently enrolled original OnePane server certificate SHA256 pin")
  operatorKeyFile:=fs.String("operator-private-key","","separate owner-only operator Ed25519 private key file")
  operatorPrincipal:=fs.String("operator-principal-id","","operator identity matching original human approver")
  output:=fs.String("output","","new owner-only signed permit transfer file")
  if err:=fs.Parse(args);err!=nil{return err}
- if fs.NArg()!=0||*permitFile==""||*operatorKeyFile==""||
+ if fs.NArg()!=0||*serverSealFile==""||*serverCertFile==""||
+  *serverID==""||*serverFingerprint==""||*operatorKeyFile==""||
   *operatorPrincipal==""||*output==""{
-  return errors.New("sign-execution-permit requires --permit, --operator-private-key, --operator-principal-id and --output")
+  return errors.New("sign-execution-permit requires a pinned original --server-seal, --server-certificate, --server-node-id, --server-fingerprint, --operator-private-key, --operator-principal-id and --output")
  }
- var p projectworkspace.GoalNodeProbeExecutionPermit
- if err:=readCanonical(*permitFile,&p,true);err!=nil{return err}
+ var original nodefederation.SealedNodeProbeAuthority
+ if err:=readCanonical(*serverSealFile,&original,true);err!=nil{return err}
+ rawCertificate,err:=readBounded(*serverCertFile,65536,false)
+ if err!=nil{return err}
+ certBlock,rest:=pem.Decode(rawCertificate)
+ if certBlock==nil||certBlock.Type!="CERTIFICATE"||len(bytes.TrimSpace(rest))!=0{
+  return errors.New("independently enrolled original OnePane PEM certificate required")
+ }
+ p,err:=nodefederation.VerifySealedNodeProbeExecution(
+  original,certBlock.Bytes,*serverID,*serverFingerprint)
+ if err!=nil{return err}
  now:=time.Now().UnixMilli()
  if p.ID==""||p.ApprovedBy!=*operatorPrincipal||
+  p.EffectiveExecutionState!="active"||
   p.Status!="approved"||p.Revision!=1||
   (p.EffectiveExecutionState!=""&&p.EffectiveExecutionState!="active")||
   p.PlanGeneration<1||len(p.PlanSHA256)!=71||

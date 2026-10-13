@@ -1097,3 +1097,11 @@ Verified source head before this documentation checkpoint: 32dc229a1add595c6f62d
 - [ ] Next: independent physical Node and actual owned device target/vantage association, calibrated human-reviewed same-asset incident assessment, reversible human-approved L5 playbooks with postcondition and rollback, low-RAM/retention/security audit. Full human-centred UI/UX review remains LAST before authorised QA packaging. PR #227 stays draft; no release/merge.
 
 Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7d0c32907b7.
+
+
+## RC11 P0-AN — current signal authority across plan rollback (2026-10-14)
+
+- [x] TCP baseline consent, read-only reachability, final network dispatch, drift notices and Goal evidence coverage require the original positive current monitoring-plan generation. Restoring byte-identical JSON never regrants old TCP authority. Commits e4d539d, 2129893, ed5b512; exact-source hosted CIs #38464619001, #38464826395 and #38464979338 passed. Only synthetic/fake sockets; physical Node job skipped.
+- [x] Migration 0090 adds immutable original generation to human-enrolled signed source grants. Existing historic signers start at generation zero and require renewed human enrollment; signed proof admission, credential minting, bearer preflight, credential inventory and current signature coverage deny an edited/restored plan without new permission. Goal pause suppresses current signed proof projection. Commits 4e06903, 2fb760d. CI #38465590757 and #38465803783 pending at this checkpoint.
+- [ ] P0: independently verify physical paired Node execution/vantage and owned target identity, independent same-target evidence, calibrated human-reviewed incidents, bounded explicit reversible L5 response permissions with preconditions/postconditions and rollback. A cryptographic signature does not prove physical attestation.
+- [ ] Before installer: low-RAM and long-term SQLite retention, post-export revocation, Windows NTFS ACL and physical-node installed testing, complete independent code/security audit, final human-centred customisable UI/UX review LAST, and explicit user approval for QA packaging. Draft PR #227 remains unmerged; preserve existing Projects, models, credentials and settings.

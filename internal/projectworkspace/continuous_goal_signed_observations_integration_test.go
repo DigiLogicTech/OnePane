@@ -371,7 +371,7 @@ func TestLevel5SignedObservationEnrollmentAntiReplayAndLiveRevocation(t *testing
   SET plan_generation=? WHERE id=?`,newGeneration,rotated.ID);err==nil{
   t.Fatal("historical signer could rewrite its immutable approval generation")
  }
- afterPlanEdit,err:=svc.GoalEvidenceCoverage(ctx,p.ID,g.ID)
+ afterPlanEdit,coverageErr:=svc.GoalEvidenceCoverage(ctx,p.ID,g.ID)
  currentCredentials,err=svc.ListGoalSourceCredentials(ctx,p.ID,g.ID,rotated.ID)
  if err!=nil||len(currentCredentials)!=1||
   currentCredentials[0].Status!="signer_inactive"{
@@ -383,7 +383,7 @@ func TestLevel5SignedObservationEnrollmentAntiReplayAndLiveRevocation(t *testing
   "tenant","source",clock.Real{}.UnixMilli());!errors.Is(err,ErrPrincipalIneligible){
   t.Fatalf("expired signer-generation grant passed bearer preflight: %v",err)
  }
- if err!=nil||afterPlanEdit.RecentSourceSignedSources!=0||
+ if coverageErr!=nil||afterPlanEdit.RecentSourceSignedSources!=0||
   len(afterPlanEdit.Sources)!=1||
   afterPlanEdit.Sources[0].SignatureEvidenceState!="historical_key_inactive"{
   t.Fatalf("old signed proof promoted after plan restore: %+v %v",afterPlanEdit,err)

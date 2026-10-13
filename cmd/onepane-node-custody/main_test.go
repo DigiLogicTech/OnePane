@@ -49,19 +49,19 @@ func fixtureNodeCustodyCLI(t *testing.T)(string,string,string,
  }
  for i:=range ch.Nonce{ch.Nonce[i]=byte(i+1)}
  payload:=struct{
-  Domain string §json:"domain"§
-  ProjectID string §json:"project_id"§
-  GoalID string §json:"goal_id"§
-  InstrumentKeyID string §json:"instrument_key_id"§
-  ChallengeID string §json:"challenge_id"§
-  DeclaredTargetID string §json:"declared_target_id"§
-  TLSPinID string §json:"tls_pin_id"§
-  PinnedCertificateSHA256 string §json:"pinned_certificate_sha256"§
-  PlanHash string §json:"plan_hash"§
-  TargetEndpointSHA256 string §json:"target_endpoint_sha256,omitempty"§
-  Nonce []byte §json:"nonce"§
-  IssuedAt int64 §json:"issued_at"§
-  ExpiresAt int64 §json:"expires_at"§
+  Domain string `json:"domain"`
+  ProjectID string `json:"project_id"`
+  GoalID string `json:"goal_id"`
+  InstrumentKeyID string `json:"instrument_key_id"`
+  ChallengeID string `json:"challenge_id"`
+  DeclaredTargetID string `json:"declared_target_id"`
+  TLSPinID string `json:"tls_pin_id"`
+  PinnedCertificateSHA256 string `json:"pinned_certificate_sha256"`
+  PlanHash string `json:"plan_hash"`
+  TargetEndpointSHA256 string `json:"target_endpoint_sha256,omitempty"`
+  Nonce []byte `json:"nonce"`
+  IssuedAt int64 `json:"issued_at"`
+  ExpiresAt int64 `json:"expires_at"`
  }{
   Domain:"OnePane/instrument-challenge/ed25519/v2",
   ProjectID:ch.ProjectID,GoalID:ch.GoalID,
@@ -92,11 +92,11 @@ func fixtureNodeCustodyCLI(t *testing.T)(string,string,string,
   Outcome:"not_connected",ObservedAt:now.UnixMilli(),
  }
  signingPayload:=struct{
-  Domain string §json:"domain"§
-  ChallengePayload []byte §json:"challenge_payload"§
-  Target instrumentprobe.Target §json:"target"§
-  Outcome string §json:"outcome"§
-  ObservedAt int64 §json:"observed_at"§
+  Domain string `json:"domain"`
+  ChallengePayload []byte `json:"challenge_payload"`
+  Target instrumentprobe.Target `json:"target"`
+  Outcome string `json:"outcome"`
+  ObservedAt int64 `json:"observed_at"`
  }{"OnePane/local-one-shot-probe/ed25519/v1",
   ch.SigningPayload,receipt.Target,receipt.Outcome,receipt.ObservedAt}
  raw,err:=json.Marshal(signingPayload)

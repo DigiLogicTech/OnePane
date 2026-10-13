@@ -64,6 +64,7 @@ func validateNodeProbeExecutionPermit(p projectworkspace.GoalNodeProbeExecutionP
   p.TLSPinID!=plan.TLSPinID||
   p.OriginalChallengeSHA256!=hash(ch.SigningPayload)||
   p.InstrumentPublicKeySHA256!=hash(pub)||
+  p.OperatorPublicKeySHA256==""||
   p.ApprovedAt<ch.IssuedAt||p.ApprovedAt>ts||
   p.ExpiresAt!=ch.ExpiresAt||p.ExpiresAt<=ts{
   return errors.New("separately authorised Node execution permit does not match exact live challenge/Node")

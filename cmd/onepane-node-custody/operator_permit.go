@@ -5,6 +5,8 @@ import (
  "crypto/ed25519"
  "encoding/base64"
  "encoding/json"
+ "crypto/sha256"
+ "fmt"
  "errors"
  "flag"
  "io"
@@ -13,6 +15,9 @@ import (
  "github.com/DigiLogicTech/OnePane/internal/projectworkspace"
 )
 
+func operatorKeyFingerprint(pub ed25519.PublicKey)string{
+ return fmt.Sprintf("sha256:%x",sha256.Sum256(pub))
+}
 const operatorPermitDomain="OnePane/operator-node-execution-permit/ed25519/v1"
 
 type SignedNodeExecutionPermit struct{
@@ -33,7 +38,8 @@ func operatorPermitMessage(p projectworkspace.GoalNodeProbeExecutionPermit)([]by
 func verifySignedNodeExecutionPermit(s SignedNodeExecutionPermit,
  operatorPublic ed25519.PublicKey)error{
  if len(operatorPublic)!=ed25519.PublicKeySize||
-  len(s.OperatorSignature)!=ed25519.SignatureSize{
+  len(s.OperatorSignature)!=ed25519.SignatureSize||
+  s.Permit.OperatorPublicKeySHA256!=operatorKeyFingerprint(operatorPublic){
   return errors.New("separately enrolled human operator signature is required")
  }
  payload,err:=operatorPermitMessage(s.Permit)

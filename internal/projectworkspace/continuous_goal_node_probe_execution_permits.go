@@ -4,6 +4,7 @@ import (
  "bytes"
  "context"
  "crypto/sha256"
+ "crypto/ed25519"
  "encoding/hex"
  "encoding/json"
 
@@ -28,6 +29,7 @@ type GoalNodeProbeExecutionPermit struct {
  PeerTLSFingerprint string `json:"peer_tls_fingerprint"`
  OriginalChallengeSHA256 string `json:"original_challenge_sha256"`
  InstrumentPublicKeySHA256 string `json:"instrument_public_key_sha256"`
+ OperatorPublicKeySHA256 string `json:"operator_public_key_sha256"`
  PlanSHA256 string `json:"plan_sha256"`
  PlanGeneration int64 `json:"plan_generation"`
  Status string `json:"status"`
@@ -41,19 +43,20 @@ type GoalNodeProbeExecutionPermit struct {
 type ApproveGoalNodeProbeExecutionPermitCommand struct {
  ProjectID,GoalID,InstrumentKeyID,ChallengeID,PeerNodeID,ActorPrincipalID string
  ExpectedGoalRevision int64
+ OperatorPublicKey []byte
 }
 type RevokeGoalNodeProbeExecutionPermitCommand struct {
  ProjectID,GoalID,PermitID,ActorPrincipalID string
  ExpectedGoalRevision,ExpectedPermitRevision int64
 }
-const nodeProbePermitColumns="id,project_id,goal_id,project_workspace_id,instrument_key_id,challenge_id,source_id,declared_target_id,tls_pin_id,peer_node_id,peer_tls_fingerprint,original_challenge_sha256,instrument_public_key_sha256,plan_sha256,plan_generation,status,revision,approved_by,approved_at,expires_at,revoked_at"
+const nodeProbePermitColumns="id,project_id,goal_id,project_workspace_id,instrument_key_id,challenge_id,source_id,declared_target_id,tls_pin_id,peer_node_id,peer_tls_fingerprint,original_challenge_sha256,instrument_public_key_sha256,operator_public_key_sha256,plan_sha256,plan_generation,status,revision,approved_by,approved_at,expires_at,revoked_at"
 func scanNodeProbePermit(row scanner)(GoalNodeProbeExecutionPermit,error){
  var p GoalNodeProbeExecutionPermit
  err:=row.Scan(&p.ID,&p.ProjectID,&p.GoalID,&p.ProjectWorkspaceID,
   &p.InstrumentKeyID,&p.ChallengeID,&p.SourceID,&p.DeclaredTargetID,
   &p.TLSPinID,&p.PeerNodeID,&p.PeerTLSFingerprint,
   &p.OriginalChallengeSHA256,&p.InstrumentPublicKeySHA256,
-  &p.PlanSHA256,&p.PlanGeneration,&p.Status,&p.Revision,&p.ApprovedBy,&p.ApprovedAt,&p.ExpiresAt,&p.RevokedAt)
+  &p.OperatorPublicKeySHA256,&p.PlanSHA256,&p.PlanGeneration,&p.Status,&p.Revision,&p.ApprovedBy,&p.ApprovedAt,&p.ExpiresAt,&p.RevokedAt)
  return p,err
 }
 func nodeProbeHash(raw []byte)string{
@@ -68,7 +71,7 @@ func(s *Service)ApproveGoalNodeProbeExecutionPermit(ctx context.Context,
  c ApproveGoalNodeProbeExecutionPermitCommand)(GoalNodeProbeExecutionPermit,error){
  if c.ProjectID==""||c.GoalID==""||c.InstrumentKeyID==""||
   c.ChallengeID==""||c.PeerNodeID==""||c.ActorPrincipalID==""||
-  c.ExpectedGoalRevision<1{return GoalNodeProbeExecutionPermit{},ErrInvalidCommand}
+  c.ExpectedGoalRevision<1||len(c.OperatorPublicKey)!=ed25519.PublicKeySize{return GoalNodeProbeExecutionPermit{},ErrInvalidCommand}
  id,err:=s.ids.New("gnexec");if err!=nil{return GoalNodeProbeExecutionPermit{},err}
  evt,err:=s.ids.New("evt");if err!=nil{return GoalNodeProbeExecutionPermit{},err}
  var out GoalNodeProbeExecutionPermit
@@ -93,7 +96,7 @@ func(s *Service)ApproveGoalNodeProbeExecutionPermit(ctx context.Context,
   if err!=nil{return err}
   key,pin,err:=s.activeInstrumentKeyTx(ctx,tx,c.ProjectID,c.GoalID,c.InstrumentKeyID,now)
   if err!=nil{return err}
-  if key.ProjectWorkspaceID!=wsID{return ErrInvalidTransition}
+  if key.ProjectWorkspaceID!=wsID||bytes.Equal(key.PublicKey,c.OperatorPublicKey){return ErrInvalidTransition}
   scope,err:=s.activePinnedTargetTx(ctx,tx,c.ProjectID,c.GoalID,key.DeclaredTargetID,now)
   if err!=nil{return err}
   monitoredSource:=false
@@ -132,6 +135,7 @@ func(s *Service)ApproveGoalNodeProbeExecutionPermit(ctx context.Context,
    PeerTLSFingerprint:fp,
    OriginalChallengeSHA256:nodeProbeHash(ch.SigningPayload),
    InstrumentPublicKeySHA256:nodeProbeHash(key.PublicKey),
+   OperatorPublicKeySHA256:nodeProbeHash(c.OperatorPublicKey),
    PlanSHA256:planHash,PlanGeneration:planGeneration,
    Status:"approved",Revision:1,ApprovedBy:c.ActorPrincipalID,
    ApprovedAt:now,ExpiresAt:ch.ExpiresAt,
@@ -140,12 +144,12 @@ func(s *Service)ApproveGoalNodeProbeExecutionPermit(ctx context.Context,
    id,project_id,goal_id,project_workspace_id,instrument_key_id,
    challenge_id,source_id,declared_target_id,tls_pin_id,peer_node_id,
    peer_tls_fingerprint,original_challenge_sha256,instrument_public_key_sha256,
-   plan_sha256,plan_generation,status,revision,approved_by,approved_at,expires_at,revoked_at)
-   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'approved',1,?,?,?,0)`,
+   operator_public_key_sha256,plan_sha256,plan_generation,status,revision,approved_by,approved_at,expires_at,revoked_at)
+   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'approved',1,?,?,?,0)`,
    out.ID,out.ProjectID,out.GoalID,out.ProjectWorkspaceID,out.InstrumentKeyID,
    out.ChallengeID,out.SourceID,out.DeclaredTargetID,out.TLSPinID,
    out.PeerNodeID,out.PeerTLSFingerprint,out.OriginalChallengeSHA256,
-   out.InstrumentPublicKeySHA256,out.PlanSHA256,out.PlanGeneration,
+   out.InstrumentPublicKeySHA256,out.OperatorPublicKeySHA256,out.PlanSHA256,out.PlanGeneration,
    out.ApprovedBy,out.ApprovedAt,out.ExpiresAt)
   if err!=nil{return err}
   updated,err:=tx.ExecContext(ctx,
@@ -245,6 +249,7 @@ func(s *Service)ListGoalNodeProbeExecutionPermits(ctx context.Context,
  CASE
   WHEN permit.status='revoked' THEN 'revoked'
   WHEN permit.expires_at<=? THEN 'expired'
+  WHEN permit.operator_public_key_sha256='' THEN 'operator_unbound'
   WHEN NOT EXISTS(SELECT 1 FROM projects p
    JOIN workspaces tenant ON tenant.id=p.workspace_id AND tenant.status='active'
    JOIN project_continuous_goals goal ON goal.id=permit.goal_id
@@ -294,7 +299,7 @@ func(s *Service)ListGoalNodeProbeExecutionPermits(ctx context.Context,
    &p.InstrumentKeyID,&p.ChallengeID,&p.SourceID,&p.DeclaredTargetID,
    &p.TLSPinID,&p.PeerNodeID,&p.PeerTLSFingerprint,
    &p.OriginalChallengeSHA256,&p.InstrumentPublicKeySHA256,
-   &p.PlanSHA256,&p.PlanGeneration,&p.Status,&p.Revision,&p.ApprovedBy,&p.ApprovedAt,&p.ExpiresAt,
+   &p.OperatorPublicKeySHA256,&p.PlanSHA256,&p.PlanGeneration,&p.Status,&p.Revision,&p.ApprovedBy,&p.ApprovedAt,&p.ExpiresAt,
    &p.RevokedAt,&p.EffectiveExecutionState)
   if err!=nil{return nil,err}
   out=append(out,p)

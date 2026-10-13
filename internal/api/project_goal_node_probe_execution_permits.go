@@ -39,6 +39,7 @@ func(s *Server)approveProjectGoalNodeProbeExecution(w http.ResponseWriter,r *htt
   InstrumentKeyID string `json:"instrument_key_id"`
   ChallengeID string `json:"challenge_id"`
   PeerNodeID string `json:"peer_node_id"`
+  OperatorPublicKey []byte `json:"operator_public_key"`
   ExpectedGoalRevision int64 `json:"expected_goal_revision"`
  }
  if !decodeSignedSourceJSON(w,r,&in){return}
@@ -46,7 +47,8 @@ func(s *Server)approveProjectGoalNodeProbeExecution(w http.ResponseWriter,r *htt
   projectworkspace.ApproveGoalNodeProbeExecutionPermitCommand{
    ProjectID:p.ID,GoalID:r.PathValue("goalID"),
    InstrumentKeyID:in.InstrumentKeyID,ChallengeID:in.ChallengeID,
-   PeerNodeID:in.PeerNodeID,ActorPrincipalID:i.PrincipalID,
+   PeerNodeID:in.PeerNodeID,OperatorPublicKey:in.OperatorPublicKey,
+   ActorPrincipalID:i.PrincipalID,
    ExpectedGoalRevision:in.ExpectedGoalRevision,
   })
  respondDomain(w,result,err,http.StatusCreated)

@@ -171,6 +171,21 @@ func(s *Service)ListGoalSourceCredentials(ctx context.Context,
     THEN 'signer_inactive'
    WHEN p.status!='active' OR w.status!='active' OR g.status!='configured'
     THEN 'scope_inactive'
+   WHEN NOT EXISTS(
+    SELECT 1 FROM principals reviewer
+    JOIN workspace_memberships membership
+     ON membership.principal_id=reviewer.id AND membership.workspace_id=b.workspace_id
+     AND membership.status='active'
+    WHERE reviewer.id=b.approved_by AND reviewer.principal_type='human'
+     AND reviewer.status='active'
+   ) OR NOT EXISTS(
+    SELECT 1 FROM principals reviewer
+    JOIN workspace_memberships membership
+     ON membership.principal_id=reviewer.id AND membership.workspace_id=b.workspace_id
+     AND membership.status='active'
+    WHERE reviewer.id=k.approved_by AND reviewer.principal_type='human'
+     AND reviewer.status='active'
+   ) THEN 'approver_inactive'
    WHEN EXISTS(SELECT 1 FROM principals pr
      LEFT JOIN workspace_memberships m ON m.workspace_id=b.workspace_id AND m.principal_id=pr.id
      WHERE pr.id=b.source_principal_id
@@ -278,6 +293,16 @@ func checkGoalSourceCredentialTx(ctx context.Context,tx goalSourceCredentialQuer
    AND b.signer_id=? AND b.workspace_id=? AND b.source_principal_id=?
    AND b.revoked_by IS NULL AND b.expires_at>? AND a.revoked_at IS NULL
    AND a.expires_at>? AND k.status='approved' AND k.expires_at>?
+   AND EXISTS(SELECT 1 FROM principals human
+     JOIN workspace_memberships member ON member.principal_id=human.id
+      AND member.workspace_id=b.workspace_id AND member.status='active'
+     WHERE human.id=b.approved_by AND human.status='active'
+      AND human.principal_type='human')
+   AND EXISTS(SELECT 1 FROM principals human
+     JOIN workspace_memberships member ON member.principal_id=human.id
+      AND member.workspace_id=b.workspace_id AND member.status='active'
+     WHERE human.id=k.approved_by AND human.status='active'
+      AND human.principal_type='human')
    AND a.workspace_scope_json=? AND a.capability_scope_json='["goal.source.submit"]'`,
    credentialID,projectID,goalID,signerID,workspaceID,principalID,
    now,now,now,string(mustJSONSourceWorkspace(workspaceID))).Scan(&found)

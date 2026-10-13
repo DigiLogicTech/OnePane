@@ -331,6 +331,11 @@ func TestLevel5SignedObservationEnrollmentAntiReplayAndLiveRevocation(t *testing
   ActorPrincipalID:"owner",ExpiresAt:expiry,
  })
  if err!=nil{t.Fatalf("current signed source credential approval: %v",err)}
+ enrolledSigners,err:=svc.ListGoalObservationSigners(ctx,p.ID,g.ID)
+ if err!=nil||len(enrolledSigners)<1||enrolledSigners[0].ID!=rotated.ID||
+  enrolledSigners[0].EffectiveScopeState!="active"{
+  t.Fatalf("new signed source was not shown as currently enrolled: %+v %v",enrolledSigners,err)
+ }
  currentCredentials,err:=svc.ListGoalSourceCredentials(ctx,p.ID,g.ID,rotated.ID)
  if err!=nil||len(currentCredentials)!=1||currentCredentials[0].Status!="active"{
   t.Fatalf("approved live source credential not listed: %+v %v",currentCredentials,err)
@@ -372,6 +377,12 @@ func TestLevel5SignedObservationEnrollmentAntiReplayAndLiveRevocation(t *testing
   t.Fatal("historical signer could rewrite its immutable approval generation")
  }
  afterPlanEdit,coverageErr:=svc.GoalEvidenceCoverage(ctx,p.ID,g.ID)
+ enrolledSigners,err=svc.ListGoalObservationSigners(ctx,p.ID,g.ID)
+ if err!=nil||len(enrolledSigners)<1||enrolledSigners[0].ID!=rotated.ID||
+  enrolledSigners[0].Status!="approved"||
+  enrolledSigners[0].EffectiveScopeState!="goal_scope_inactive"{
+  t.Fatalf("historical signer was presented as presently approved: %+v %v",enrolledSigners,err)
+ }
  currentCredentials,err=svc.ListGoalSourceCredentials(ctx,p.ID,g.ID,rotated.ID)
  if err!=nil||len(currentCredentials)!=1||
   currentCredentials[0].Status!="signer_inactive"{

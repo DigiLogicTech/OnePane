@@ -290,5 +290,46 @@ func(s *Service)GoalResponseCandidateReadiness(ctx context.Context,
   reviewRevision!=c.IncidentReviewRevision{
   out.Blockers=append(out.Blockers,"incident_review_changed")
  }
+ project,err:=s.repo.Project(ctx,projectID)
+ if err!=nil{return GoalResponseCandidateReadiness{},err}
+ if project.Status!="active"||project.OperatingMode!=OperatingContinuousOperations{
+  out.Blockers=append(out.Blockers,"project_mode_changed")
+ }
+ // A candidate never authorises execution, but operator diagnostics must
+ // still show when the original probe authority has expired or been
+ // withdrawn. The original permit cannot be revived by an old case.
+ var livePermit int
+ err=s.db.QueryRowContext(ctx,`SELECT COUNT(*)
+   FROM project_goal_tcp_reachability_alerts alert
+   JOIN project_goal_tcp_probe_attempts attempt ON attempt.id=alert.attempt_id
+    AND attempt.project_id=alert.project_id AND attempt.goal_id=alert.goal_id
+    AND attempt.project_workspace_id=alert.project_workspace_id
+    AND attempt.source_id=alert.source_id
+   JOIN project_goal_tcp_probe_permits permit ON permit.id=attempt.permit_id
+    AND permit.project_id=attempt.project_id AND permit.goal_id=attempt.goal_id
+    AND permit.project_workspace_id=attempt.project_workspace_id
+    AND permit.source_id=attempt.source_id
+    AND permit.revision=attempt.permit_revision
+    AND permit.plan_hash=? AND permit.plan_generation=?
+    AND permit.status='approved' AND permit.expires_at>?
+   JOIN principals reviewer ON reviewer.id=permit.approved_by
+    AND reviewer.principal_type='human' AND reviewer.status='active'
+   JOIN workspace_memberships member ON member.principal_id=reviewer.id
+    AND member.workspace_id=? AND member.status='active'
+   WHERE alert.id=? AND alert.project_id=? AND alert.goal_id=?
+    AND alert.project_workspace_id=? AND alert.source_id=?`,
+   c.GoalPlanHash,c.GoalPlanGeneration,s.clock.UnixMilli(),
+   project.WorkspaceID,c.TCPAlertID,projectID,goalID,
+   c.ProjectWorkspaceID,c.SourceID).Scan(&livePermit)
+ if err!=nil{return GoalResponseCandidateReadiness{},err}
+ if livePermit!=1{out.Blockers=append(out.Blockers,"original_observation_permission_inactive")}
+ var activeProposer int
+ err=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM principals human
+  JOIN workspace_memberships member ON member.principal_id=human.id
+   AND member.workspace_id=? AND member.status='active'
+  WHERE human.id=? AND human.status='active' AND human.principal_type='human'`,
+  project.WorkspaceID,c.ProposedBy).Scan(&activeProposer)
+ if err!=nil{return GoalResponseCandidateReadiness{},err}
+ if activeProposer!=1{out.Blockers=append(out.Blockers,"proposing_operator_inactive")}
  return out,nil
 }

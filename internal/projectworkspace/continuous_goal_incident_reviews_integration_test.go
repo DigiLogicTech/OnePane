@@ -213,6 +213,25 @@ func TestTCPIncidentCaseIsOperatorReviewedNotAutonomousRemediation(t *testing.T)
  if err!=nil||after.ExecutionAuthorized||len(after.Blockers)<4{
   t.Fatalf("withdrawn candidate appeared executable: %+v %v",after,err)
  }
+ // Even a formerly valid historical response intent cannot mask the
+ // human revocation of the original network observation permit.
+ g,err=svc.ContinuousGoal(ctx,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ _,err=svc.RevokeGoalTCPProbe(ctx,RevokeGoalTCPProbeCommand{
+  ProjectID:project.ID,GoalID:goal.ID,PermitID:permit.ID,
+  ExpectedGoalRevision:g.Revision,ExpectedPermitRevision:permit.Revision,
+  ActorPrincipalID:"human",
+ })
+ if err!=nil{t.Fatal(err)}
+ revokedReadiness,err:=svc.GoalResponseCandidateReadiness(ctx,project.ID,goal.ID,candidate.ID)
+ if err!=nil{t.Fatal(err)}
+ foundRevocation:=false
+ for _,reason:=range revokedReadiness.Blockers{
+  if reason=="original_observation_permission_inactive"{foundRevocation=true}
+ }
+ if !foundRevocation||revokedReadiness.ExecutionAuthorized{
+  t.Fatalf("revoked source authority survived as candidate approval: %+v",revokedReadiness)
+ }
  var tasks int
  if err:=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM tasks").Scan(&tasks);
   err!=nil||tasks!=0{t.Fatalf("review created Tasks: %d %v",tasks,err)}

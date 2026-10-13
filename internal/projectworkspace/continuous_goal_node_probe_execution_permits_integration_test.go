@@ -68,7 +68,7 @@ func TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly(t *testing.T){
  if err!=nil{t.Fatal(err)}
  public,_,err:=ed25519.GenerateKey(rand.Reader)
  if err!=nil{t.Fatal(err)}
- operatorPublic,_,err:=ed25519.GenerateKey(rand.Reader)
+ operatorPublic,operatorPrivate,err:=ed25519.GenerateKey(rand.Reader)
  if err!=nil{t.Fatal(err)}
  goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
  key,err:=svc.ApproveGoalInstrumentKey(ctx,ApproveGoalInstrumentKeyCommand{
@@ -93,6 +93,24 @@ func TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly(t *testing.T){
   ChallengeID:challenge.ID,PeerNodeID:"peer",ActorPrincipalID:"human",
   ExpectedGoalRevision:goal.Revision,OperatorPublicKey:operatorPublic,
  }
+ originalApprovalMessage,err:=NodeOperatorExecutionApprovalSigningBytes(approve)
+ if err!=nil{t.Fatal(err)}
+ approve.OperatorProofSignature=ed25519.Sign(operatorPrivate,originalApprovalMessage)
+ invalidProof:=approve
+ invalidProof.OperatorProofSignature=append([]byte(nil),approve.OperatorProofSignature...)
+ invalidProof.OperatorProofSignature[0]^=1
+ if _,err=svc.ApproveGoalNodeProbeExecutionPermit(ctx,invalidProof);err==nil{
+  t.Fatal("operator private signing key possession was not enforced")
+ }
+ unproved:=approve;unproved.OperatorProofSignature=nil
+ if _,err=svc.ApproveGoalNodeProbeExecutionPermit(ctx,unproved);err==nil{
+  t.Fatal("Node permission accepted an unsigned human approval")
+ }
+ wrongScope:=approve;wrongScope.PeerNodeID="other-peer"
+ if _,err=svc.ApproveGoalNodeProbeExecutionPermit(ctx,wrongScope);err==nil{
+  t.Fatal("operator approval signature reused for a different Node")
+ }
+
  if _,err=svc.ApproveGoalNodeProbeExecutionPermit(ctx,approve);err==nil{
   t.Fatal("unpaired Node admitted")
  }

@@ -40,6 +40,7 @@ func(s *Server)approveProjectGoalNodeProbeExecution(w http.ResponseWriter,r *htt
   ChallengeID string `json:"challenge_id"`
   PeerNodeID string `json:"peer_node_id"`
   OperatorPublicKey []byte `json:"operator_public_key"`
+  OperatorProofSignature []byte `json:"operator_proof_signature"`
   ExpectedGoalRevision int64 `json:"expected_goal_revision"`
  }
  if !decodeSignedSourceJSON(w,r,&in){return}
@@ -48,6 +49,7 @@ func(s *Server)approveProjectGoalNodeProbeExecution(w http.ResponseWriter,r *htt
    ProjectID:p.ID,GoalID:r.PathValue("goalID"),
    InstrumentKeyID:in.InstrumentKeyID,ChallengeID:in.ChallengeID,
    PeerNodeID:in.PeerNodeID,OperatorPublicKey:in.OperatorPublicKey,
+   OperatorProofSignature:in.OperatorProofSignature,
    ActorPrincipalID:i.PrincipalID,
    ExpectedGoalRevision:in.ExpectedGoalRevision,
   })

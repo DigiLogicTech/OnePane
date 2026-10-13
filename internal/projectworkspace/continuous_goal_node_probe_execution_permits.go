@@ -44,6 +44,7 @@ type ApproveGoalNodeProbeExecutionPermitCommand struct {
  ProjectID,GoalID,InstrumentKeyID,ChallengeID,PeerNodeID,ActorPrincipalID string
  ExpectedGoalRevision int64
  OperatorPublicKey []byte
+ OperatorProofSignature []byte
 }
 type RevokeGoalNodeProbeExecutionPermitCommand struct {
  ProjectID,GoalID,PermitID,ActorPrincipalID string
@@ -71,7 +72,12 @@ func(s *Service)ApproveGoalNodeProbeExecutionPermit(ctx context.Context,
  c ApproveGoalNodeProbeExecutionPermitCommand)(GoalNodeProbeExecutionPermit,error){
  if c.ProjectID==""||c.GoalID==""||c.InstrumentKeyID==""||
   c.ChallengeID==""||c.PeerNodeID==""||c.ActorPrincipalID==""||
-  c.ExpectedGoalRevision<1||len(c.OperatorPublicKey)!=ed25519.PublicKeySize{return GoalNodeProbeExecutionPermit{},ErrInvalidCommand}
+  c.ExpectedGoalRevision<1||len(c.OperatorPublicKey)!=ed25519.PublicKeySize||
+  len(c.OperatorProofSignature)!=ed25519.SignatureSize{return GoalNodeProbeExecutionPermit{},ErrInvalidCommand}
+ approvalBytes,err:=NodeOperatorExecutionApprovalSigningBytes(c)
+ if err!=nil||!ed25519.Verify(c.OperatorPublicKey,approvalBytes,c.OperatorProofSignature){
+  return GoalNodeProbeExecutionPermit{},ErrInvalidCommand
+ }
  id,err:=s.ids.New("gnexec");if err!=nil{return GoalNodeProbeExecutionPermit{},err}
  evt,err:=s.ids.New("evt");if err!=nil{return GoalNodeProbeExecutionPermit{},err}
  var out GoalNodeProbeExecutionPermit

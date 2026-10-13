@@ -111,6 +111,52 @@ func TestTCPReachabilityAlertAPIIsScopedAndHumanAcknowledgedOnly(t *testing.T){
  }
  if got:=call("POST","operator",ackRoute,`{"expected_revision":1}`);
   got.Code!=409{t.Fatalf("alert acknowledgement CAS replay accepted: %d",got.Code)}
+ // An incident review is deliberately human-owned and does not inherit
+ // the alert's acknowledgement as an execution or health grant.
+ caseRoute:="/v1/projects/"+p.ID+"/continuous-goals/"+goal.ID+"/incident-reviews"
+ if got:=call("GET","robot",caseRoute,"");got.Code!=403{
+  t.Fatalf("Agent listed human incident cases: %d",got.Code)
+ }
+ if got:=call("POST","robot",caseRoute,
+  `{"tcp_alert_id":"test-notice","expected_alert_revision":2}`);got.Code!=403{
+  t.Fatalf("Agent opened incident case: %d",got.Code)
+ }
+ opened:=call("POST","operator",caseRoute,
+  `{"tcp_alert_id":"test-notice","expected_alert_revision":2}`)
+ if opened.Code!=201||!strings.Contains(opened.Body.String(),
+  `"status":"pending_review"`)||
+  !strings.Contains(opened.Body.String(),`"device_health":"unverified"`){
+  t.Fatalf("human could not open scoped case: %d %s",opened.Code,opened.Body)
+ }
+ if got:=call("POST","operator",caseRoute,
+  `{"tcp_alert_id":"test-notice","expected_alert_revision":2}`);got.Code<400{
+  t.Fatalf("duplicate case accepted: %d %s",got.Code,got.Body)
+ }
+ var reviewID string
+ if err:=db.SQL().QueryRowContext(ctx,
+  "SELECT id FROM project_goal_incident_reviews WHERE tcp_alert_id='test-notice'").
+  Scan(&reviewID);err!=nil{t.Fatal(err)}
+ reviewURL:=caseRoute+"/"+reviewID+"/review"
+ if got:=call("POST","robot",reviewURL,
+  `{"decision":"needs_investigation","expected_revision":1}`);got.Code!=403{
+  t.Fatalf("Agent reviewed case: %d",got.Code)
+ }
+ reviewed:=call("POST","operator",reviewURL,
+  `{"decision":"needs_investigation","expected_revision":1}`)
+ if reviewed.Code!=200||!strings.Contains(reviewed.Body.String(),
+  `"status":"reviewed"`)||
+  !strings.Contains(reviewed.Body.String(),`"remediation_authorized":false`){
+  t.Fatalf("human review failed: %d %s",reviewed.Code,reviewed.Body)
+ }
+ if got:=call("POST","operator",reviewURL,
+  `{"decision":"needs_investigation","expected_revision":1}`);got.Code!=409{
+  t.Fatalf("stale incident review CAS replay succeeded: %d",got.Code)
+ }
+ if listed:=call("GET","operator",caseRoute,"");listed.Code!=200||
+  !strings.Contains(listed.Body.String(),reviewID){
+  t.Fatalf("review history inaccessible: %d %s",listed.Code,listed.Body)
+ }
+
  var tasks int
  if err:=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM tasks").Scan(&tasks);err!=nil||tasks!=0{
   t.Fatal(fmt.Sprintf("TCP notice unexpectedly initiated Tasks: %d %v",tasks,err))

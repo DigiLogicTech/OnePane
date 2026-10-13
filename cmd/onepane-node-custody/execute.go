@@ -4,6 +4,8 @@ import (
  "bytes"
  "context"
  "crypto/ed25519"
+ "crypto/sha256"
+ "encoding/hex"
  "encoding/base64"
  "encoding/json"
  "errors"
@@ -18,6 +20,7 @@ import (
 
  "github.com/DigiLogicTech/OnePane/internal/instrumentprobe"
  "github.com/DigiLogicTech/OnePane/internal/nodefederation"
+ "github.com/DigiLogicTech/OnePane/internal/projectworkspace"
 )
 
 // ExplicitNodeProbeCommand describes one manually invoked, scope-bound,
@@ -26,7 +29,40 @@ import (
 type ExplicitNodeProbeCommand struct {
  NodeDataDir, NodeID, NodeFingerprint string
  InstrumentPrivateKeyFile, InstrumentPublicKey string
- ChallengeFile, PlanFile, ReceiptOutput, WitnessOutput string
+ ChallengeFile, PlanFile, ExecutionPermitFile, ReceiptOutput, WitnessOutput string
+}
+
+// This checks the scope of a SEPARATELY operator-authenticated OnePane
+// permit. The permit is not server-signed and a file supplied by an
+// untrusted Node cannot prove human approval. It must arrive over an
+// independent authenticated operator channel before any network effect.
+// Offline revocation cannot be observed after export; expiry <=2 minutes
+// and the live OnePane nonce ledger remain additional separate gates.
+func validateNodeProbeExecutionPermit(p projectworkspace.GoalNodeProbeExecutionPermit,
+ nodeID,nodePin string,pub ed25519.PublicKey,
+ ch instrumentprobe.Challenge,plan instrumentprobe.ProbePlan,
+ now time.Time)error{
+ hash:=func(raw []byte)string{
+  digest:=sha256.Sum256(raw)
+  return "sha256:"+hex.EncodeToString(digest[:])
+ }
+ ts:=now.UnixMilli()
+ if p.ID==""||p.ProjectWorkspaceID==""||p.ApprovedBy==""||
+  p.Status!="approved"||p.Revision!=1||
+  p.RevokedAt!=0||
+  p.PeerNodeID!=nodeID||p.PeerTLSFingerprint!=nodePin||
+  p.ProjectID!=ch.ProjectID||p.GoalID!=ch.GoalID||
+  p.InstrumentKeyID!=ch.KeyID||p.ChallengeID!=ch.ID||
+  p.SourceID!=plan.SourceID||
+  p.DeclaredTargetID!=plan.DeclaredTargetID||
+  p.TLSPinID!=plan.TLSPinID||
+  p.OriginalChallengeSHA256!=hash(ch.SigningPayload)||
+  p.InstrumentPublicKeySHA256!=hash(pub)||
+  p.ApprovedAt<ch.IssuedAt||p.ApprovedAt>ts||
+  p.ExpiresAt!=ch.ExpiresAt||p.ExpiresAt<=ts{
+  return errors.New("separately authorised Node execution permit does not match exact live challenge/Node")
+ }
+ return nil
 }
 
 // reservePrivateOutput creates a durable exclusive receipt slot BEFORE
@@ -70,6 +106,7 @@ func ExecuteExplicitNodeProbe(ctx context.Context,c ExplicitNodeProbeCommand,
   c.NodeDataDir==""||c.NodeID==""||
   c.NodeFingerprint==""||c.InstrumentPrivateKeyFile==""||
   c.InstrumentPublicKey==""||c.ChallengeFile==""||c.PlanFile==""||
+  c.ExecutionPermitFile==""||
   c.ReceiptOutput==""||c.WitnessOutput==""||
   c.ReceiptOutput==c.WitnessOutput{
   return errors.New("explicit Node, enrolled keys, approved challenge/plan and two distinct private outputs required")
@@ -99,6 +136,10 @@ func ExecuteExplicitNodeProbe(ctx context.Context,c ExplicitNodeProbeCommand,
  if err=readCanonical(c.ChallengeFile,&ch,true);err!=nil{return err}
  if err=readCanonical(c.PlanFile,&plan,true);err!=nil{return err}
  if _,err=instrumentprobe.ValidateProbePlan(ch,plan,now());err!=nil{return err}
+ var permit projectworkspace.GoalNodeProbeExecutionPermit
+ if err=readCanonical(c.ExecutionPermitFile,&permit,true);err!=nil{return err}
+ if err=validateNodeProbeExecutionPermit(permit,c.NodeID,
+  node.Fingerprint,instrumentPub,ch,plan,now());err!=nil{return err}
  // Prevent writes to existing plans, instrument keys or evidence, even
  // with aliased filenames. O_EXCL also refuses an existing symlink.
  receiptOut,err:=reservePrivateOutput(c.ReceiptOutput)
@@ -131,6 +172,7 @@ func runProbeAndWitness(args []string)error{
  instrumentPin:=fs.String("instrument-public-key","","independently enrolled instrument Ed25519 base64 public key")
  challenge:=fs.String("challenge","","original owner-only OnePane-issued challenge")
  plan:=fs.String("plan","","original owner-only human-approved exact private endpoint plan")
+ permit:=fs.String("execution-permit","","owner-only, separately authenticated human Node execution permit")
  receipt:=fs.String("receipt-output","","new owner-only signed instrument receipt")
  witness:=fs.String("witness-output","","new owner-only paired-Node custody witness")
  if err:=fs.Parse(args);err!=nil{return err}
@@ -138,7 +180,8 @@ func runProbeAndWitness(args []string)error{
  err:=ExecuteExplicitNodeProbe(context.Background(),ExplicitNodeProbeCommand{
   NodeDataDir:*dataDir,NodeID:*nodeID,NodeFingerprint:*nodePin,
   InstrumentPrivateKeyFile:*privateKey,InstrumentPublicKey:*instrumentPin,
-  ChallengeFile:*challenge,PlanFile:*plan,ReceiptOutput:*receipt,
+  ChallengeFile:*challenge,PlanFile:*plan,ExecutionPermitFile:*permit,
+  ReceiptOutput:*receipt,
   WitnessOutput:*witness,
  },&net.Dialer{},time.Now)
  if err!=nil{return err}

@@ -5,6 +5,8 @@ import (
  "crypto/ed25519"
  "crypto/rand"
  "encoding/base64"
+ "crypto/sha256"
+ "encoding/hex"
  "errors"
  "net"
  "os"
@@ -15,6 +17,7 @@ import (
 
  "github.com/DigiLogicTech/OnePane/internal/instrumentprobe"
  "github.com/DigiLogicTech/OnePane/internal/nodefederation"
+ "github.com/DigiLogicTech/OnePane/internal/projectworkspace"
 )
 type recordingNodeDialer struct{
  calls int
@@ -42,11 +45,27 @@ func nodeProbeFixture(t *testing.T)(ExplicitNodeProbeCommand,
  var plan instrumentprobe.ProbePlan
  if err=readCanonical(chFile,&ch,true);err!=nil{t.Fatal(err)}
  if err=readCanonical(planFile,&plan,true);err!=nil{t.Fatal(err)}
+ h:=func(raw []byte)string{
+  sum:=sha256.Sum256(raw)
+  return "sha256:"+hex.EncodeToString(sum[:])
+ }
+ permit:=projectworkspace.GoalNodeProbeExecutionPermit{
+  ID:"human-permit-1",ProjectID:ch.ProjectID,GoalID:ch.GoalID,
+  ProjectWorkspaceID:"workspace1",InstrumentKeyID:ch.KeyID,
+  ChallengeID:ch.ID,SourceID:plan.SourceID,
+  DeclaredTargetID:plan.DeclaredTargetID,TLSPinID:plan.TLSPinID,
+  PeerNodeID:"peer",PeerTLSFingerprint:fp,
+  OriginalChallengeSHA256:h(ch.SigningPayload),
+  InstrumentPublicKeySHA256:h(pub),Status:"approved",Revision:1,
+  ApprovedBy:"human",ApprovedAt:ch.IssuedAt+1,
+  ExpiresAt:ch.ExpiresAt,
+ }
+ permitFile:=writeCanonicalTest(t,filepath.Dir(chFile),"execution-permit.json",permit)
  c:=ExplicitNodeProbeCommand{
   NodeDataDir:dataDir,NodeID:"peer",NodeFingerprint:fp,
   InstrumentPrivateKeyFile:keyFile,
   InstrumentPublicKey:base64.StdEncoding.EncodeToString(pub),
-  ChallengeFile:chFile,PlanFile:planFile,
+  ChallengeFile:chFile,PlanFile:planFile,ExecutionPermitFile:permitFile,
   ReceiptOutput:filepath.Join(filepath.Dir(chFile),"node-exec-receipt.json"),
   WitnessOutput:filepath.Join(filepath.Dir(chFile),"node-exec-witness.json"),
  }
@@ -163,4 +182,36 @@ func TestNodeLocalProbeCancelledBeforeEffects(t *testing.T){
  if err:=instrumentprobe.ClaimLocalProbeOnce(c.InstrumentPrivateKeyFile,ch);err!=nil{
   t.Fatalf("preflight cancellation spent nonce: %v",err)
  }
+}
+func TestNodeLocalProbeRefusesInvalidOrForgedOperatorExecutionPermit(t *testing.T){
+ cases:=map[string]func(*projectworkspace.GoalNodeProbeExecutionPermit){
+  "other_node":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.PeerNodeID="other"},
+  "other_fingerprint":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.PeerTLSFingerprint="sha256:"+strings.Repeat("f",64)},
+  "other_goal":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.GoalID="other"},
+  "other_challenge":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.ChallengeID="other"},
+  "other_source":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.SourceID="other"},
+  "other_target":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.DeclaredTargetID="other"},
+  "other_tls_pin":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.TLSPinID="other"},
+  "other_instrument":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.InstrumentPublicKeySHA256="sha256:"+strings.Repeat("0",64)},
+  "modified_challenge":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.OriginalChallengeSHA256="sha256:"+strings.Repeat("0",64)},
+  "revoked":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.Status="revoked";p.RevokedAt=p.ApprovedAt},
+  "expired":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.ExpiresAt=p.ApprovedAt},
+  "future_approval":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.ApprovedAt=time.Now().Add(time.Minute).UnixMilli()},
+  "bad_generation":func(p *projectworkspace.GoalNodeProbeExecutionPermit){p.Revision=2},
+ }
+ for name,mutate:=range cases{t.Run(name,func(t *testing.T){
+  c,ch,_:=nodeProbeFixture(t)
+  var p projectworkspace.GoalNodeProbeExecutionPermit
+  if err:=readCanonical(c.ExecutionPermitFile,&p,true);err!=nil{t.Fatal(err)}
+  mutate(&p)
+  c.ExecutionPermitFile=writeCanonicalTest(t,t.TempDir(),"changed-permit.json",p)
+  dial:=&recordingNodeDialer{}
+  if err:=ExecuteExplicitNodeProbe(context.Background(),c,dial,time.Now);
+   err==nil||dial.calls!=0{
+   t.Fatalf("invalid Node execution authority opened network: %v %+v",err,dial)
+  }
+  if err:=instrumentprobe.ClaimLocalProbeOnce(c.InstrumentPrivateKeyFile,ch);err!=nil{
+   t.Fatalf("invalid grant improperly spent nonce: %v",err)
+  }
+ })}
 }

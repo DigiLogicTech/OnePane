@@ -105,7 +105,7 @@ func runVerifyExecution(args []string)error{
  sealedPermit,err:=nodefederation.VerifySealedNodeProbeExecution(
   originalSeal,serverBlock.Bytes,*serverID,*serverFingerprint)
  if err!=nil{return err}
- if sealedPermit!=approval.Permit{
+ if !sameSealedHumanProbeScope(sealedPermit,approval.Permit){
   return errors.New("human and OnePane server signatures refer to different approvals")
  }
  fmt.Println("Original OnePane, human operator, Node and instrument signatures bind one historical approved challenge.")

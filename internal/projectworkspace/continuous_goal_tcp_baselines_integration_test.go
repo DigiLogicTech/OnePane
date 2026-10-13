@@ -142,4 +142,76 @@ func TestTCPBaselineComparisonsAreVersionedReadOnlyAndNeverVerifyHealth(t *testi
  if err:=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM tasks").Scan(&taskCount);err!=nil||taskCount!=0{
   t.Fatalf("baseline unexpectedly queued work: %d %v",taskCount,err)
  }
+
+ // The exact same monitoring plan JSON must not restore an old human
+ // permit, its baseline, or its previously matching TCP measurement.
+ restoredGoal,err:=svc.ConfigureContinuousGoal(ctx,ConfigureContinuousGoalCommand{
+  ProjectID:project.ID,ProjectWorkspaceID:ws.ID,
+  Objective:"Generation-fenced TCP baseline",ActorPrincipalID:"operator",
+  MonitoringPlanJSON:json.RawMessage(`{"version":1,"source_ids":["restore-test"]}`),
+ })
+ if err!=nil{t.Fatal(err)}
+ restoredPermit,err:=svc.ApproveGoalTCPProbe(ctx,ApproveGoalTCPProbeCommand{
+  ProjectID:project.ID,GoalID:restoredGoal.ID,SourceID:"restore-test",
+  TargetIPv4:"192.168.18.41",TargetPort:443,TimeoutMS:300,
+  ExpiresAt:clock.Real{}.UnixMilli()+60*60*1000,
+  ExpectedGoalRevision:restoredGoal.Revision,ActorPrincipalID:"operator",
+ })
+ if err!=nil{t.Fatal(err)}
+ restoredGoal,err=svc.ContinuousGoal(ctx,restoredGoal.ID)
+ if err!=nil{t.Fatal(err)}
+ restoredBaseline,err:=svc.SetGoalTCPBaseline(ctx,SetGoalTCPBaselineCommand{
+  ProjectID:project.ID,GoalID:restoredGoal.ID,PermitID:restoredPermit.ID,
+  ExpectedTCP:"connected",ExpectedGoalRevision:restoredGoal.Revision,
+  ExpectedBaselineRevision:0,ActorPrincipalID:"operator",
+ })
+ if err!=nil{t.Fatal(err)}
+ restoredGoal,err=svc.ContinuousGoal(ctx,restoredGoal.ID)
+ if err!=nil{t.Fatal(err)}
+ restoredSample,err:=svc.runManualGoalTCPProbe(ctx,RunGoalTCPProbeCommand{
+  ProjectID:project.ID,GoalID:restoredGoal.ID,PermitID:restoredPermit.ID,
+  ExpectedGoalRevision:restoredGoal.Revision,ExpectedPermitRevision:restoredPermit.Revision,
+  ActorPrincipalID:"operator",
+ },&fakeGoalTCPDialer{})
+ if err!=nil||restoredSample.Status!="connected"{
+  t.Fatalf("synthetic TCP baseline setup failed: %+v %v",restoredSample,err)
+ }
+ beforeRestore,err:=svc.GoalTCPReachabilityAssessment(ctx,project.ID,restoredGoal.ID,"restore-test")
+ if err!=nil||beforeRestore.Assessment!="matches_last_tcp_test"{
+  t.Fatalf("initial synthetic baseline did not match: %+v %v",beforeRestore,err)
+ }
+ var originalPlan string
+ var originalGeneration int64
+ if err=db.SQL().QueryRowContext(ctx,`SELECT monitoring_plan_json,plan_generation
+   FROM project_continuous_goals WHERE id=?`,restoredGoal.ID).
+   Scan(&originalPlan,&originalGeneration);err!=nil{t.Fatal(err)}
+ if restoredPermit.PlanGeneration!=originalGeneration{t.Fatal("approved TCP permit generation mismatch")}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
+   SET monitoring_plan_json=? WHERE id=?`,
+   `{"version":1,"source_ids":["restore-test","other-source"]}`,restoredGoal.ID);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
+   SET monitoring_plan_json=? WHERE id=?`,originalPlan,restoredGoal.ID);err!=nil{t.Fatal(err)}
+ var advancedGeneration int64
+ if err=db.SQL().QueryRowContext(ctx,`SELECT plan_generation
+   FROM project_continuous_goals WHERE id=?`,restoredGoal.ID).
+   Scan(&advancedGeneration);err!=nil{t.Fatal(err)}
+ if advancedGeneration!=originalGeneration+2{
+  t.Fatalf("monitoring plan rollback did not advance generation: %d",advancedGeneration)
+ }
+ afterRestore,err:=svc.GoalTCPReachabilityAssessment(ctx,project.ID,restoredGoal.ID,"restore-test")
+ if err!=nil||afterRestore.Assessment!="permission_inactive"||
+   afterRestore.DeviceHealth!="unverified"||afterRestore.MonitoringActive{
+  t.Fatalf("historical TCP baseline was reactivated: %+v %v",afterRestore,err)
+ }
+ restoredGoal,err=svc.ContinuousGoal(ctx,restoredGoal.ID)
+ if err!=nil{t.Fatal(err)}
+ _,err=svc.SetGoalTCPBaseline(ctx,SetGoalTCPBaselineCommand{
+  ProjectID:project.ID,GoalID:restoredGoal.ID,PermitID:restoredPermit.ID,
+  ExpectedTCP:"not_connected",ExpectedGoalRevision:restoredGoal.Revision,
+  ExpectedBaselineRevision:restoredBaseline.Revision,ActorPrincipalID:"operator",
+ })
+ if !errors.Is(err,ErrInvalidTransition){
+  t.Fatalf("stale human approval could revise a baseline: %v",err)
+ }
+
 }

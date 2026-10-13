@@ -73,14 +73,14 @@ func(s *Service)SetGoalTCPBaseline(ctx context.Context,c SetGoalTCPBaselineComma
   if err=s.requireActor(ctx,tx,project.WorkspaceID,c.ActorPrincipalID);err!=nil{return err}
   if err=humanGoalReviewer(ctx,tx,c.ActorPrincipalID);err!=nil{return err}
   var status,workspaceID,planRaw string
-  var revision int64
-  err=tx.QueryRowContext(ctx,`SELECT g.status,g.project_workspace_id,g.monitoring_plan_json,g.revision
+  var revision,planGeneration int64
+  err=tx.QueryRowContext(ctx,`SELECT g.status,g.project_workspace_id,g.monitoring_plan_json,g.revision,g.plan_generation
    FROM project_continuous_goals g
    JOIN project_workspaces w ON w.id=g.project_workspace_id
     AND w.project_id=g.project_id AND w.status='active'
    JOIN workspaces tenant ON tenant.id=? AND tenant.status='active'
    WHERE g.id=? AND g.project_id=?`,
-   project.WorkspaceID,c.GoalID,c.ProjectID).Scan(&status,&workspaceID,&planRaw,&revision)
+   project.WorkspaceID,c.GoalID,c.ProjectID).Scan(&status,&workspaceID,&planRaw,&revision,&planGeneration)
   if err!=nil{return err}
   if revision!=c.ExpectedGoalRevision{return ErrRevisionConflict}
   if status!="configured"{return ErrInvalidTransition}
@@ -91,6 +91,7 @@ func(s *Service)SetGoalTCPBaseline(ctx context.Context,c SetGoalTCPBaselineComma
    c.PermitID,c.ProjectID,c.GoalID))
   if err!=nil{return err}
   if permit.Status!="approved"||permit.ExpiresAt<=now||permit.PlanHash!=hash||
+    permit.PlanGeneration<1||permit.PlanGeneration!=planGeneration||
     permit.ProjectWorkspaceID!=workspaceID||
     permit.EffectClass!="network_tcp_connect"||permit.ProbeKind!="tcp_connect"{
    return ErrInvalidTransition
@@ -202,15 +203,15 @@ func(s *Service)GoalTCPReachabilityAssessment(ctx context.Context,projectID,goal
   MonitoringActive:false,DeviceHealth:"unverified",
  }
  var goalStatus,planRaw,workspaceID string
- var cadence int64
+ var cadence,planGeneration int64
  err=s.db.QueryRowContext(ctx,`SELECT g.status,g.monitoring_plan_json,
-   g.project_workspace_id,g.cadence_minutes FROM project_continuous_goals g
+   g.project_workspace_id,g.cadence_minutes,g.plan_generation FROM project_continuous_goals g
    JOIN projects p ON p.id=g.project_id AND p.status='active'
    JOIN workspaces tenant ON tenant.id=p.workspace_id AND tenant.status='active'
    JOIN project_workspaces w ON w.id=g.project_workspace_id
     AND w.project_id=p.id AND w.status='active'
    WHERE g.id=? AND g.project_id=?`,goalID,projectID).
-  Scan(&goalStatus,&planRaw,&workspaceID,&cadence)
+  Scan(&goalStatus,&planRaw,&workspaceID,&cadence,&planGeneration)
  if err!=nil{return GoalTCPReachabilityAssessment{},err}
  plan,hash,err:=goalReviewPlan(planRaw)
  if err!=nil{return GoalTCPReachabilityAssessment{},err}
@@ -242,8 +243,9 @@ func(s *Service)GoalTCPReachabilityAssessment(ctx context.Context,projectID,goal
    AND membership.principal_id=approver.id AND membership.status='active'
   WHERE permit.id=? AND permit.project_id=? AND permit.goal_id=?
    AND permit.source_id=? AND permit.project_workspace_id=? AND permit.plan_hash=?
+   AND permit.plan_generation=? AND permit.plan_generation>0
    AND permit.effect_class='network_tcp_connect'`,
-  permitID,projectID,goalID,sourceID,workspaceID,hash).
+  permitID,projectID,goalID,sourceID,workspaceID,hash,planGeneration).
   Scan(&permitStatus,&permitExpiry)
  if errors.Is(err,sql.ErrNoRows){out.Assessment="permission_inactive";return out,nil}
  if err!=nil{return GoalTCPReachabilityAssessment{},err}

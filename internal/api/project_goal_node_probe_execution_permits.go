@@ -3,6 +3,9 @@ package api
 import (
  "context"
  "net/http"
+ "time"
+
+ "github.com/DigiLogicTech/OnePane/internal/nodefederation"
 
  "github.com/DigiLogicTech/OnePane/internal/projectworkspace"
 )
@@ -78,4 +81,40 @@ func(s *Server)listProjectGoalNodeProbeExecutions(w http.ResponseWriter,r *http.
  result,err:=svc.ListGoalNodeProbeExecutionPermits(r.Context(),
   p.ID,r.PathValue("goalID"))
  respondDomain(w,result,err,http.StatusOK)
+}
+
+// Seal a live original grant ONLY after human authentication and checking
+// the current effective Node, challenge, L5 scope and approver. Never
+// generate a signing identity, infer trust from portable file contents,
+// or initiate a network probe while exporting this historical snapshot.
+func(s *Server)sealProjectGoalNodeProbeExecution(w http.ResponseWriter,r *http.Request){
+ p,svc,i,ok:=s.goalNodeProbeExecutionOperator(w,r,"project.write")
+ if !ok{return}
+ signer,ok:=s.federation.(interface{Identity() nodefederation.Identity})
+ if !ok{
+  writeError(w,http.StatusServiceUnavailable,"current OnePane server signing identity unavailable")
+  return
+ }
+ grants,err:=svc.ListGoalNodeProbeExecutionPermits(r.Context(),p.ID,r.PathValue("goalID"))
+ if err!=nil{respondDomain(w,nil,err,0);return}
+ var grant *projectworkspace.GoalNodeProbeExecutionPermit
+ for j:=range grants{
+  candidate:=&grants[j]
+  if candidate.ID==r.PathValue("permitID")&&
+   candidate.ApprovedBy==i.PrincipalID{
+   grant=candidate
+   break
+  }
+ }
+ if grant==nil{
+  writeError(w,http.StatusNotFound,"live human execution permit not found")
+  return
+ }
+ if grant.EffectiveExecutionState!="active"{
+  writeError(w,http.StatusConflict,"execution permit is no longer active")
+  return
+ }
+ sealed,err:=nodefederation.SealHumanNodeProbeExecution(signer.Identity(),*grant,time.Now())
+ if err!=nil{writeError(w,http.StatusConflict,"server cannot seal an inactive one-shot scope");return}
+ respondDomain(w,sealed,nil,http.StatusOK)
 }

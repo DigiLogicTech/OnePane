@@ -540,6 +540,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/node-probe-execution-permits", s.listProjectGoalNodeProbeExecutions)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/node-probe-execution-permits", s.approveProjectGoalNodeProbeExecution)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/node-probe-execution-permits/{permitID}/revoke", s.revokeProjectGoalNodeProbeExecution)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/node-probe-execution-permits/{permitID}/seal", s.sealProjectGoalNodeProbeExecution)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers", s.listProjectGoalSourceSigners)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers", s.approveProjectGoalSourceSigner)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers/{signerID}/revoke", s.revokeProjectGoalSourceSigner)

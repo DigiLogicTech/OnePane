@@ -242,19 +242,41 @@ func (s *Service) pairedEndpoint(ctx context.Context, peerID string) (string, st
 	return strings.TrimRight(ep.FederationURL, "/"), fp, nil
 }
 
+// Pinned trust is a direct operator-approved certificate identity, not a
+// public CA chain. InsecureSkipVerify disables Go's default expiration/EKU
+// checks as well as chain verification; restore those checks explicitly.
+// A correct fingerprint alone must never admit an expired or not-yet-valid
+// peer certificate. Enrollment handshake expiry is a different concept:
+// established Node pairings do not expire on that short bootstrap deadline.
+func validatePinnedPeerServerCertificate(cs tls.ConnectionState,
+ fingerprint string, now time.Time) error {
+	if len(cs.PeerCertificates) != 1 {
+		return ErrPeerCertificate
+	}
+	leaf:=cs.PeerCertificates[0]
+	if leaf==nil||len(leaf.Raw)==0||
+	 !strings.HasPrefix(fingerprint,"sha256:")||len(fingerprint)!=71||
+	 CertificateFingerprint(leaf.Raw)!=fingerprint||
+	 now.Before(leaf.NotBefore)||!now.Before(leaf.NotAfter) {
+		return ErrPeerCertificate
+	}
+	serverAuth:=false
+	for _,purpose:=range leaf.ExtKeyUsage{
+		if purpose==x509.ExtKeyUsageServerAuth{serverAuth=true;break}
+	}
+	if !serverAuth || leaf.KeyUsage&x509.KeyUsageDigitalSignature==0 {
+		return ErrPeerCertificate
+	}
+	return nil
+}
+
 func (s *Service) pinnedClient(fp string, withClientCert bool) *http.Client {
 	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true}
 	if withClientCert {
 		tlsCfg.Certificates = []tls.Certificate{s.identity.Certificate}
 	}
 	tlsCfg.VerifyConnection = func(cs tls.ConnectionState) error {
-		if len(cs.PeerCertificates) != 1 {
-			return ErrPeerCertificate
-		}
-		if CertificateFingerprint(cs.PeerCertificates[0].Raw) != fp {
-			return ErrPeerCertificate
-		}
-		return nil
+		return validatePinnedPeerServerCertificate(cs,fp,time.Now())
 	}
 	return &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{TLSClientConfig: tlsCfg, ForceAttemptHTTP2: true}}
 }

@@ -61,8 +61,17 @@ func nodeProbeFixture(t *testing.T)(ExplicitNodeProbeCommand,
   ExpiresAt:ch.ExpiresAt,
  }
  permitFile:=writeCanonicalTest(t,filepath.Dir(chFile),"execution-permit.json",permit)
+ operatorPub,operatorPriv,err:=ed25519.GenerateKey(rand.Reader)
+ if err!=nil{t.Fatal(err)}
+ signedPayload,err:=operatorPermitMessage(permit)
+ if err!=nil{t.Fatal(err)}
+ signedPermit:=SignedNodeExecutionPermit{
+  Permit:permit,OperatorSignature:ed25519.Sign(operatorPriv,signedPayload),
+ }
+ permitFile=writeCanonicalTest(t,filepath.Dir(chFile),"signed-execution-permit.json",signedPermit)
  c:=ExplicitNodeProbeCommand{
   NodeDataDir:dataDir,NodeID:"peer",NodeFingerprint:fp,
+  OperatorPublicKey:base64.StdEncoding.EncodeToString(operatorPub),
   InstrumentPrivateKeyFile:keyFile,
   InstrumentPublicKey:base64.StdEncoding.EncodeToString(pub),
   ChallengeFile:chFile,PlanFile:planFile,ExecutionPermitFile:permitFile,
@@ -201,10 +210,10 @@ func TestNodeLocalProbeRefusesInvalidOrForgedOperatorExecutionPermit(t *testing.
  }
  for name,mutate:=range cases{t.Run(name,func(t *testing.T){
   c,ch,_:=nodeProbeFixture(t)
-  var p projectworkspace.GoalNodeProbeExecutionPermit
-  if err:=readCanonical(c.ExecutionPermitFile,&p,true);err!=nil{t.Fatal(err)}
-  mutate(&p)
-  c.ExecutionPermitFile=writeCanonicalTest(t,t.TempDir(),"changed-permit.json",p)
+  var original SignedNodeExecutionPermit
+  if err:=readCanonical(c.ExecutionPermitFile,&original,true);err!=nil{t.Fatal(err)}
+  mutate(&original.Permit)
+  c.ExecutionPermitFile=writeCanonicalTest(t,t.TempDir(),"changed-permit.json",original)
   dial:=&recordingNodeDialer{}
   if err:=ExecuteExplicitNodeProbe(context.Background(),c,dial,time.Now);
    err==nil||dial.calls!=0{
@@ -214,4 +223,20 @@ func TestNodeLocalProbeRefusesInvalidOrForgedOperatorExecutionPermit(t *testing.
    t.Fatalf("invalid grant improperly spent nonce: %v",err)
   }
  })}
+}
+
+func TestNodeLocalProbeRejectsForgedOperatorPermitSignatureBeforeDial(t *testing.T){
+ c,ch,_:=nodeProbeFixture(t)
+ var original SignedNodeExecutionPermit
+ if err:=readCanonical(c.ExecutionPermitFile,&original,true);err!=nil{t.Fatal(err)}
+ other,_,err:=ed25519.GenerateKey(rand.Reader);if err!=nil{t.Fatal(err)}
+ c.OperatorPublicKey=base64.StdEncoding.EncodeToString(other)
+ dial:=&recordingNodeDialer{}
+ if err:=ExecuteExplicitNodeProbe(context.Background(),c,dial,time.Now);
+  err==nil||dial.calls!=0{
+  t.Fatalf("unregistered signer opened socket: %v %+v",err,dial)
+ }
+ if err:=instrumentprobe.ClaimLocalProbeOnce(c.InstrumentPrivateKeyFile,ch);err!=nil{
+  t.Fatalf("bad signer incorrectly spent nonce: %v",err)
+ }
 }

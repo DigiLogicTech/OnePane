@@ -4,6 +4,7 @@ import (
  "bytes"
  "context"
  "crypto/ed25519"
+ "crypto/x509"
  "crypto/sha256"
  "encoding/hex"
  "encoding/base64"
@@ -27,7 +28,7 @@ import (
 // private IPv4 TCP socket. An authenticated operator must independently
 // supply the original server-issued challenge/plan and both enrolled pins.
 type ExplicitNodeProbeCommand struct {
- NodeDataDir, NodeID, NodeFingerprint string
+ NodeDataDir, NodeID, NodeFingerprint, OperatorPublicKey string
  InstrumentPrivateKeyFile, InstrumentPublicKey string
  ChallengeFile, PlanFile, ExecutionPermitFile, ReceiptOutput, WitnessOutput string
 }
@@ -104,7 +105,7 @@ func ExecuteExplicitNodeProbe(ctx context.Context,c ExplicitNodeProbeCommand,
  if now==nil{now=time.Now}
  if ctx==nil||dialer==nil||
   c.NodeDataDir==""||c.NodeID==""||
-  c.NodeFingerprint==""||c.InstrumentPrivateKeyFile==""||
+  c.NodeFingerprint==""||c.OperatorPublicKey==""||c.InstrumentPrivateKeyFile==""||
   c.InstrumentPublicKey==""||c.ChallengeFile==""||c.PlanFile==""||
   c.ExecutionPermitFile==""||
   c.ReceiptOutput==""||c.WitnessOutput==""||
@@ -138,9 +139,21 @@ func ExecuteExplicitNodeProbe(ctx context.Context,c ExplicitNodeProbeCommand,
  if err=readCanonical(c.ChallengeFile,&ch,true);err!=nil{return err}
  if err=readCanonical(c.PlanFile,&plan,true);err!=nil{return err}
  if _,err=instrumentprobe.ValidateProbePlan(ch,plan,now());err!=nil{return err}
- var permit projectworkspace.GoalNodeProbeExecutionPermit
- if err=readCanonical(c.ExecutionPermitFile,&permit,true);err!=nil{return err}
- if err=validateNodeProbeExecutionPermit(permit,c.NodeID,
+ var signed SignedNodeExecutionPermit
+ if err=readCanonical(c.ExecutionPermitFile,&signed,true);err!=nil{return err}
+ operatorPublic,err:=parseInstrumentKey(c.OperatorPublicKey)
+ if err!=nil{return err}
+ if bytes.Equal(operatorPublic,instrumentPub){
+  return errors.New("human operator must hold a separate key from instrument")
+ }
+ nodeLeaf,err:=x509.ParseCertificate(node.Certificate.Certificate[0])
+ if err!=nil{return err}
+ if nodePub,ok:=nodeLeaf.PublicKey.(ed25519.PublicKey);ok&&
+  bytes.Equal(operatorPublic,nodePub){
+  return errors.New("human operator must hold a separate key from Node")
+ }
+ if err=verifySignedNodeExecutionPermit(signed,operatorPublic);err!=nil{return err}
+ if err=validateNodeProbeExecutionPermit(signed.Permit,c.NodeID,
   node.Fingerprint,instrumentPub,ch,plan,now());err!=nil{return err}
  // Prevent writes to existing plans, instrument keys or evidence, even
  // with aliased filenames. O_EXCL also refuses an existing symlink.
@@ -170,6 +183,7 @@ func runProbeAndWitness(args []string)error{
  dataDir:=fs.String("data-dir","","existing Node data directory (no provisioning)")
  nodeID:=fs.String("node-id","","existing independently enrolled Node ID")
  nodePin:=fs.String("node-fingerprint","","independently enrolled pinned Node TLS SHA256 fingerprint")
+ operatorPub:=fs.String("operator-public-key","","independently enrolled human operator Ed25519 base64 public key")
  privateKey:=fs.String("instrument-private-key","","owner-only 64-byte base64 Ed25519 instrument key file")
  instrumentPin:=fs.String("instrument-public-key","","independently enrolled instrument Ed25519 base64 public key")
  challenge:=fs.String("challenge","","original owner-only OnePane-issued challenge")
@@ -181,6 +195,7 @@ func runProbeAndWitness(args []string)error{
  if fs.NArg()!=0{return errors.New("unexpected positional arguments")}
  err:=ExecuteExplicitNodeProbe(context.Background(),ExplicitNodeProbeCommand{
   NodeDataDir:*dataDir,NodeID:*nodeID,NodeFingerprint:*nodePin,
+  OperatorPublicKey:*operatorPub,
   InstrumentPrivateKeyFile:*privateKey,InstrumentPublicKey:*instrumentPin,
   ChallengeFile:*challenge,PlanFile:*plan,ExecutionPermitFile:*permit,
   ReceiptOutput:*receipt,

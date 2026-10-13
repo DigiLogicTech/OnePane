@@ -23,6 +23,7 @@ type GoalTCPProbePermit struct {
  SourceID string `json:"source_id"`
  PlanHash string `json:"plan_hash"`
  PlanGeneration int64 `json:"plan_generation"`
+ EffectiveScopeState string `json:"effective_scope_state,omitempty"`
  ProbeKind string `json:"probe_kind"`
  TargetIPv4 string `json:"target_ipv4"`
  TargetPort int `json:"target_port"`
@@ -251,17 +252,52 @@ func(s *Service)ListGoalTCPProbePermits(ctx context.Context,projectID,goalID str
     AND w.project_id=p.id AND w.status='active'
    WHERE g.id=? AND g.project_id=?`,goalID,projectID).Scan(&owned)
  if err!=nil{return nil,err}
- rows,err:=s.db.QueryContext(ctx,`SELECT `+tcpProbePermitCols+
-  ` FROM project_goal_tcp_probe_permits
-  WHERE project_id=? AND goal_id=?
-  ORDER BY approved_at DESC,id DESC LIMIT 64`,projectID,goalID)
+ rows,err:=s.db.QueryContext(ctx,`SELECT `+tcpProbePermitCols+`,
+ CASE
+  WHEN tcp.status='revoked' THEN 'revoked'
+  WHEN tcp.expires_at<=? THEN 'expired'
+  WHEN NOT EXISTS(
+   SELECT 1 FROM project_continuous_goals g
+    JOIN project_workspaces w ON w.id=g.project_workspace_id
+     AND w.project_id=g.project_id AND w.status='active'
+    JOIN projects p ON p.id=g.project_id AND p.status='active'
+    JOIN workspaces tenant ON tenant.id=p.workspace_id AND tenant.status='active'
+   WHERE g.id=tcp.goal_id AND g.project_id=tcp.project_id
+    AND g.status='configured'
+    AND g.project_workspace_id=tcp.project_workspace_id
+    AND g.plan_generation=tcp.plan_generation
+    AND tcp.plan_generation>0
+    AND EXISTS(SELECT 1 FROM json_each(g.monitoring_plan_json,'$.source_ids') source
+     WHERE source.type='text' AND source.value=tcp.source_id)
+  ) THEN 'goal_scope_inactive'
+  WHEN NOT EXISTS(
+   SELECT 1 FROM projects project
+    JOIN principals human ON human.id=tcp.approved_by
+     AND human.status='active' AND human.principal_type='human'
+    JOIN workspace_memberships member ON member.workspace_id=project.workspace_id
+     AND member.principal_id=human.id AND member.status='active'
+   WHERE project.id=tcp.project_id AND project.status='active'
+  ) THEN 'approver_inactive'
+  ELSE 'active'
+ END
+ FROM project_goal_tcp_probe_permits tcp
+ WHERE tcp.project_id=? AND tcp.goal_id=?
+ ORDER BY tcp.approved_at DESC,tcp.id DESC LIMIT 64`,
+  s.clock.UnixMilli(),projectID,goalID)
  if err!=nil{return nil,err}
  defer rows.Close()
  out:=[]GoalTCPProbePermit{}
  for rows.Next(){
-  permit,err:=scanGoalTCPProbePermit(rows)
+  var p GoalTCPProbePermit
+  var revoked sql.NullString
+  err=rows.Scan(&p.ID,&p.ProjectID,&p.GoalID,&p.ProjectWorkspaceID,
+   &p.SourceID,&p.PlanHash,&p.PlanGeneration,
+   &p.ProbeKind,&p.TargetIPv4,&p.TargetPort,&p.TimeoutMS,
+   &p.EffectClass,&p.Status,&p.Revision,&p.ApprovedBy,&revoked,
+   &p.ApprovedAt,&p.ExpiresAt,&p.RevokedAt,&p.EffectiveScopeState)
   if err!=nil{return nil,err}
-  out=append(out,permit)
+  if revoked.Valid{p.RevokedBy=&revoked.String}
+  out=append(out,p)
  }
  return out,rows.Err()
 }

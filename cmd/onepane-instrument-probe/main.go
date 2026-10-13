@@ -24,7 +24,6 @@ import(
  "io"
  "net"
  "os"
- "path/filepath"
  "runtime"
  "time"
 
@@ -150,70 +149,9 @@ func runKeygen(args []string)error{
  return nil
 }
 
-// claimLocalProbeOnce is a crash-persistent, best-effort anti-duplicate
-// *local execution* fence. The remote proof ledger remains authoritative.
-// This intentionally spends a challenge on a failed dial or crash rather
-// than silently performing additional network effects after a retry.
-// A malicious operator with filesystem control can remove these files:
-// the fence is NOT hardware-backed attestation or global replay defence.
-// Use the physical parent directory, not the spelling of --private-key.
-// Relative, absolute and symlinked-parent aliases must share a local fence.
-// This cannot prevent a privileged operator from copying/hardlinking a key.
-func canonicalProbeLedger(keyFile string)(string,error){
- if keyFile==""{return "",errors.New("instrument key path required")}
- abs,err:=filepath.Abs(keyFile)
- if err!=nil{return "",err}
- parent,err:=filepath.EvalSymlinks(filepath.Dir(abs))
- if err!=nil{return "",fmt.Errorf("resolve instrument key parent: %w",err)}
- return filepath.Join(parent,filepath.Base(abs))+".onepane-probe-claims",nil
-}
-
-// fsync the containing directory as well as the claim itself before any
-// network effect. On Windows this remains a best-effort local fence.
-func syncProbeDirectory(path string)error{
- if runtime.GOOS=="windows"{return nil}
- f,err:=os.Open(path)
- if err!=nil{return err}
- defer f.Close()
- return f.Sync()
-}
+// All executors share the same durable one-shot instrument-key ledger.
 func claimLocalProbeOnce(keyFile string,ch instrumentprobe.Challenge)error{
- if len(ch.SigningPayload)==0{
-  return errors.New("instrument challenge missing")
- }
- dirname,err:=canonicalProbeLedger(keyFile)
- if err!=nil{return err}
- mkdirErr:=os.Mkdir(dirname,0700)
- if mkdirErr!=nil&&!os.IsExist(mkdirErr){return mkdirErr}
- info,err:=os.Lstat(dirname)
- if err!=nil{return err}
- if !info.IsDir()||info.Mode()&os.ModeSymlink!=0{
-  return errors.New("nonce ledger must be a real directory, not a symlink")
- }
- if runtime.GOOS!="windows"&&info.Mode().Perm()&0077!=0{
-  return errors.New("nonce ledger directory must be owner-only (chmod 700)")
- }
- if mkdirErr==nil{
-  if err=syncProbeDirectory(filepath.Dir(dirname));err!=nil{
-   return fmt.Errorf("cannot durably create nonce ledger: %w",err)
-  }
- }
- digest:=sha256.Sum256(ch.SigningPayload)
- path:=filepath.Join(dirname,fmt.Sprintf("%x.claim",digest[:]))
- file,err:=os.OpenFile(path,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
- if err!=nil{return fmt.Errorf("one-shot nonce already claimed or ledger unavailable: %w",err)}
- // No target IP, private key, output filename or instrument response
- // appears in the marker; one marker per original challenge bytes.
- if _,err=file.Write([]byte("attempt-reserved\n"));err!=nil{
-  _=file.Close()
-  return err
- }
- if err=file.Sync();err!=nil{_=file.Close();return err}
- if err=file.Close();err!=nil{return err}
- if err=syncProbeDirectory(dirname);err!=nil{
-  return fmt.Errorf("cannot durably reserve nonce: %w",err)
- }
- return nil
+ return instrumentprobe.ClaimLocalProbeOnce(keyFile,ch)
 }
 
 // Reserve the receipt destination BEFORE spending a challenge or opening a

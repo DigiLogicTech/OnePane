@@ -70,11 +70,20 @@ func(s *Service)recordTCPReachabilityAlertTx(ctx context.Context,tx storage.Tx,
  err:=tx.QueryRowContext(ctx,`SELECT baseline.expected_tcp
   FROM project_goal_tcp_baseline_heads head
   JOIN project_goal_tcp_baseline_revisions baseline ON baseline.id=head.baseline_id
+  JOIN project_goal_tcp_probe_permits permit ON permit.id=baseline.permit_id
+   AND permit.project_id=baseline.project_id AND permit.goal_id=baseline.goal_id
+   AND permit.status='approved' AND permit.expires_at>?
+   AND permit.plan_generation>0
+   AND permit.plan_hash=baseline.plan_hash
+  JOIN project_continuous_goals goal ON goal.id=baseline.goal_id
+   AND goal.project_id=baseline.project_id AND goal.status='configured'
+   AND goal.project_workspace_id=baseline.project_workspace_id
+   AND goal.plan_generation=permit.plan_generation
   WHERE head.goal_id=? AND head.source_id=?
    AND head.baseline_id=? AND head.revision=?
    AND baseline.project_id=? AND baseline.project_workspace_id=?
    AND baseline.permit_id=?`,
-  attempt.GoalID,attempt.SourceID,attempt.BaselineIDAtClaim,
+  now,attempt.GoalID,attempt.SourceID,attempt.BaselineIDAtClaim,
   attempt.BaselineRevisionAtClaim,attempt.ProjectID,
   attempt.ProjectWorkspaceID,attempt.PermitID).Scan(&expected)
  if errors.Is(err,sql.ErrNoRows){return nil}

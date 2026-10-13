@@ -144,6 +144,27 @@ func TestRestoredGoalPlanCannotReviveApprovedTCPAndInstrumentChain(t *testing.T)
   t.Fatalf("old-generation metadata fixture not projected conservatively: %+v",before)
  }
  assertState("active","active","active")
+ // Claim one synthetic sample against a current human baseline, without
+ // opening a socket. Simulate a plan edit/restore before the final dial
+ // boundary and before finalising an historical receipt.
+ goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
+ baseline,err:=svc.SetGoalTCPBaseline(ctx,SetGoalTCPBaselineCommand{
+  ProjectID:project.ID,GoalID:goal.ID,PermitID:permit.ID,
+  ExpectedTCP:"not_connected",ExpectedGoalRevision:goal.Revision,
+  ExpectedBaselineRevision:0,ActorPrincipalID:"operator",
+ })
+ if err!=nil{t.Fatal(err)}
+ goal,err=svc.ContinuousGoal(ctx,goal.ID);if err!=nil{t.Fatal(err)}
+ claim,err:=svc.claimGoalTCPAttempt(ctx,RunGoalTCPProbeCommand{
+  ProjectID:project.ID,GoalID:goal.ID,PermitID:permit.ID,
+  ExpectedGoalRevision:goal.Revision,
+  ExpectedPermitRevision:permit.Revision,ActorPrincipalID:"operator",
+ })
+ if err!=nil||claim.BaselineIDAtClaim!=baseline.ID{
+  t.Fatalf("baseline claim fixture: %+v %v",claim,err)
+ }
+ initiallyAllowed,err:=svc.tcpAttemptStillAuthorised(ctx,claim)
+ if err!=nil||!initiallyAllowed{t.Fatalf("current claim was denied: %t %v",initiallyAllowed,err)}
  listed,err:=svc.ListGoalTCPProbePermits(ctx,project.ID,goal.ID)
  if err!=nil||len(listed)!=1||listed[0].EffectiveScopeState!="active"{
   t.Fatalf("human-approved original TCP grant not represented as live: %+v %v",listed,err)
@@ -155,6 +176,10 @@ func TestRestoredGoalPlanCannotReviveApprovedTCPAndInstrumentChain(t *testing.T)
    "UPDATE project_continuous_goals SET monitoring_plan_json=? WHERE id=?",
    plan,goal.ID);err!=nil{t.Fatal(err)}
   assertState("permit_inactive","target_inactive","pin_inactive")
+  allowed,authErr:=svc.tcpAttemptStillAuthorised(ctx,claim)
+  if authErr!=nil||allowed{
+   t.Fatalf("old TCP claim reached the last socket boundary after plan edit/restore: %t %v",allowed,authErr)
+  }
   stale,triageErr:=svc.GoalSignalTriage(ctx,project.ID,goal.ID)
   if triageErr!=nil{t.Fatal(triageErr)}
   if stale.RecentNegativeSources!=0||len(stale.Sources)<1{
@@ -195,5 +220,15 @@ func TestRestoredGoalPlanCannotReviveApprovedTCPAndInstrumentChain(t *testing.T)
   ExpectedPermitRevision:permit.Revision,ActorPrincipalID:"operator",
  });err==nil{
   t.Fatal("old permit admitted new TCP work after restored plan")
+ }
+ // A late completed receipt may be retained as history, but cannot
+ // generate a present-tense drift notice from an invalidated permit.
+ completed,err:=svc.completeTCPAttempt(ctx,claim,"connected")
+ if err!=nil||completed.Status!="connected"{
+  t.Fatalf("synthetic historical completion failed: %+v %v",completed,err)
+ }
+ alerts,err:=svc.ListTCPReachabilityAlerts(ctx,project.ID,goal.ID)
+ if err!=nil||len(alerts)!=0{
+  t.Fatalf("stale generation created a fresh drift notice: %+v %v",alerts,err)
  }
 }

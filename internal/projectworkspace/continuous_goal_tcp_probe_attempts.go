@@ -238,11 +238,12 @@ func(s *Service)tcpAttemptStillAuthorised(ctx context.Context,a GoalTCPProbeAtte
   return false,nil
  }
  var status,permitStatus,hash,goalPlan,source,ip,effect,kind string
- var permitRevision,goalRevision,expiresAt int64
+ var permitRevision,goalRevision,expiresAt,permitGeneration,goalGeneration int64
  var port,timeout int
  err=s.db.QueryRowContext(ctx,`SELECT g.status,p.status,p.plan_hash,g.monitoring_plan_json,
     p.source_id,p.target_ipv4,p.effect_class,p.probe_kind,
-    p.revision,g.revision,p.expires_at,p.target_port,p.timeout_ms
+    p.revision,g.revision,p.expires_at,p.target_port,p.timeout_ms,
+    p.plan_generation,g.plan_generation
    FROM project_goal_tcp_probe_permits p
    JOIN project_continuous_goals g ON g.id=p.goal_id
     AND g.project_id=p.project_id AND g.project_workspace_id=p.project_workspace_id
@@ -263,11 +264,13 @@ func(s *Service)tcpAttemptStillAuthorised(ctx context.Context,a GoalTCPProbeAtte
    WHERE p.id=? AND p.project_id=? AND p.goal_id=?`,
   a.RequestedBy,a.PermitID,a.ProjectID,a.GoalID).
   Scan(&status,&permitStatus,&hash,&goalPlan,&source,&ip,&effect,&kind,
-   &permitRevision,&goalRevision,&expiresAt,&port,&timeout)
+   &permitRevision,&goalRevision,&expiresAt,&port,&timeout,
+   &permitGeneration,&goalGeneration)
  if errors.Is(err,sql.ErrNoRows){return false,nil}
  if err!=nil{return false,err}
  if status!="configured"||permitStatus!="approved"||expiresAt<=s.clock.UnixMilli()||
   permitRevision!=a.PermitRevision||goalRevision!=a.GoalRevision||
+  permitGeneration<1||permitGeneration!=goalGeneration||
   effect!="network_tcp_connect"||kind!="tcp_connect"||
   source!=a.SourceID||ip!=a.TargetIPv4||
   port!=a.TargetPort||timeout!=a.TimeoutMS{return false,nil}

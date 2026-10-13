@@ -61,7 +61,7 @@ func nodeProbeFixture(t *testing.T)(ExplicitNodeProbeCommand,
   OriginalChallengeSHA256:h(ch.SigningPayload),
   InstrumentPublicKeySHA256:h(pub),
   PlanSHA256:originalPlan.PlanHash,PlanGeneration:1,
-  Status:"approved",Revision:1,
+  Status:"approved",EffectiveExecutionState:"active",Revision:1,
   ApprovedBy:"human",ApprovedAt:ch.IssuedAt+1,
   ExpiresAt:ch.ExpiresAt,
  }
@@ -75,9 +75,18 @@ func nodeProbeFixture(t *testing.T)(ExplicitNodeProbeCommand,
   Permit:permit,OperatorSignature:ed25519.Sign(operatorPriv,signedPayload),
  }
  permitFile=writeCanonicalTest(t,filepath.Dir(chFile),"signed-execution-permit.json",signedPermit)
+ serverDir:=filepath.Join(t.TempDir(),"onepane-server")
+ serverIdentity,err:=nodefederation.EnsureIdentity(serverDir,"onepane-server")
+ if err!=nil{t.Fatal(err)}
+ serverSeal,err:=nodefederation.SealHumanNodeProbeExecution(serverIdentity,permit,time.Now())
+ if err!=nil{t.Fatalf("valid original OnePane server identity failed to seal grant: %v",err)}
+ serverSealFile:=writeCanonicalTest(t,filepath.Dir(chFile),"server-original-seal.json",serverSeal)
+ serverCertificateFile:=filepath.Join(serverDir,"keys","federation.crt")
  c:=ExplicitNodeProbeCommand{
   NodeDataDir:dataDir,NodeID:"peer",NodeFingerprint:fp,
   OperatorPublicKey:base64.StdEncoding.EncodeToString(operatorPub),
+  ServerSealFile:serverSealFile,ServerCertificateFile:serverCertificateFile,
+  ServerNodeID:"onepane-server",ServerFingerprint:serverIdentity.Fingerprint,
   InstrumentPrivateKeyFile:keyFile,
   InstrumentPublicKey:base64.StdEncoding.EncodeToString(pub),
   ChallengeFile:chFile,PlanFile:planFile,ExecutionPermitFile:permitFile,
@@ -249,4 +258,34 @@ func TestNodeLocalProbeRejectsForgedOperatorPermitSignatureBeforeDial(t *testing
  if err:=instrumentprobe.ClaimLocalProbeOnce(c.InstrumentPrivateKeyFile,ch);err!=nil{
   t.Fatalf("bad signer incorrectly spent nonce: %v",err)
  }
+}
+
+func TestNodeLocalProbeRequiresIndependentlyPinnedOriginalServerSeal(t *testing.T){
+ cases:=map[string]func(*testing.T,*ExplicitNodeProbeCommand){
+  "missing_seal":func(t *testing.T,c *ExplicitNodeProbeCommand){c.ServerSealFile=""},
+  "unknown_server_pin":func(t *testing.T,c *ExplicitNodeProbeCommand){c.ServerFingerprint="sha256:"+strings.Repeat("0",64)},
+  "different_server_id":func(t *testing.T,c *ExplicitNodeProbeCommand){c.ServerNodeID="impostor"},
+  "tampered_seal":func(t *testing.T,c *ExplicitNodeProbeCommand){
+   var seal nodefederation.SealedNodeProbeAuthority
+   if err:=readCanonical(c.ServerSealFile,&seal,true);err!=nil{t.Fatal(err)}
+   seal.Signature=append([]byte(nil),seal.Signature...);seal.Signature[0]^=1
+   c.ServerSealFile=writeCanonicalTest(t,t.TempDir(),"changed-server.json",seal)
+  },
+  "different_original_scope":func(t *testing.T,c *ExplicitNodeProbeCommand){
+   var seal nodefederation.SealedNodeProbeAuthority
+   if err:=readCanonical(c.ServerSealFile,&seal,true);err!=nil{t.Fatal(err)}
+   seal.SigningPayload=append([]byte(nil),seal.SigningPayload...)
+   seal.SigningPayload[len(seal.SigningPayload)/2]^=1
+   c.ServerSealFile=writeCanonicalTest(t,t.TempDir(),"different-server.json",seal)
+  },
+ }
+ for name,alter:=range cases{t.Run(name,func(t *testing.T){
+  c,ch,_:=nodeProbeFixture(t);alter(t,&c)
+  d:=&recordingNodeDialer{}
+  if err:=ExecuteExplicitNodeProbe(context.Background(),c,d,time.Now);
+   err==nil||d.calls!=0{t.Fatalf("untrusted server permit opened socket: %v %+v",err,d)}
+  if err:=instrumentprobe.ClaimLocalProbeOnce(c.InstrumentPrivateKeyFile,ch);err!=nil{
+   t.Fatalf("bad server provenance spent nonce before socket: %v",err)
+  }
+ })}
 }

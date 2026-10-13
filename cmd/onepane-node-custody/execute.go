@@ -9,6 +9,7 @@ import (
  "encoding/hex"
  "encoding/base64"
  "encoding/json"
+ "encoding/pem"
  "errors"
  "flag"
  "fmt"
@@ -29,6 +30,7 @@ import (
 // supply the original server-issued challenge/plan and both enrolled pins.
 type ExplicitNodeProbeCommand struct {
  NodeDataDir, NodeID, NodeFingerprint, OperatorPublicKey string
+ ServerSealFile, ServerCertificateFile, ServerNodeID, ServerFingerprint string
  InstrumentPrivateKeyFile, InstrumentPublicKey string
  ChallengeFile, PlanFile, ExecutionPermitFile, ReceiptOutput, WitnessOutput string
 }
@@ -112,6 +114,8 @@ func ExecuteExplicitNodeProbe(ctx context.Context,c ExplicitNodeProbeCommand,
  if ctx==nil||dialer==nil||
   c.NodeDataDir==""||c.NodeID==""||
   c.NodeFingerprint==""||c.OperatorPublicKey==""||c.InstrumentPrivateKeyFile==""||
+  c.ServerSealFile==""||c.ServerCertificateFile==""||
+  c.ServerNodeID==""||c.ServerFingerprint==""||
   c.InstrumentPublicKey==""||c.ChallengeFile==""||c.PlanFile==""||
   c.ExecutionPermitFile==""||
   c.ReceiptOutput==""||c.WitnessOutput==""||
@@ -161,6 +165,20 @@ func ExecuteExplicitNodeProbe(ctx context.Context,c ExplicitNodeProbeCommand,
  if err=verifySignedNodeExecutionPermit(signed,operatorPublic);err!=nil{return err}
  if err=validateNodeProbeExecutionPermit(signed.Permit,c.NodeID,
   node.Fingerprint,instrumentPub,ch,plan,now());err!=nil{return err}
+ var serverSeal nodefederation.SealedNodeProbeAuthority
+ if err=readCanonical(c.ServerSealFile,&serverSeal,true);err!=nil{return err}
+ serverPEM,err:=readBounded(c.ServerCertificateFile,65536,false)
+ if err!=nil{return err}
+ block,rest:=pem.Decode(serverPEM)
+ if block==nil||block.Type!="CERTIFICATE"||len(bytes.TrimSpace(rest))!=0{
+  return errors.New("one independent original OnePane server certificate required")
+ }
+ originalPermit,err:=nodefederation.VerifySealedNodeProbeExecution(
+  serverSeal,block.Bytes,c.ServerNodeID,c.ServerFingerprint)
+ if err!=nil{return err}
+ if originalPermit!=signed.Permit{
+  return errors.New("human signature and original OnePane server seal concern different approvals")
+ }
  // Prevent writes to existing plans, instrument keys or evidence, even
  // with aliased filenames. O_EXCL also refuses an existing symlink.
  receiptOut,err:=reservePrivateOutput(c.ReceiptOutput)
@@ -190,6 +208,10 @@ func runProbeAndWitness(args []string)error{
  nodeID:=fs.String("node-id","","existing independently enrolled Node ID")
  nodePin:=fs.String("node-fingerprint","","independently enrolled pinned Node TLS SHA256 fingerprint")
  operatorPub:=fs.String("operator-public-key","","independently enrolled human operator Ed25519 base64 public key")
+ serverSeal:=fs.String("server-seal","","owner-only original OnePane server signed permit")
+ serverCert:=fs.String("server-certificate","","independently retained original OnePane certificate PEM")
+ serverID:=fs.String("server-node-id","","independently enrolled original OnePane server Node ID")
+ serverPin:=fs.String("server-fingerprint","","independently enrolled original OnePane certificate SHA256 pin")
  privateKey:=fs.String("instrument-private-key","","owner-only 64-byte base64 Ed25519 instrument key file")
  instrumentPin:=fs.String("instrument-public-key","","independently enrolled instrument Ed25519 base64 public key")
  challenge:=fs.String("challenge","","original owner-only OnePane-issued challenge")
@@ -202,6 +224,8 @@ func runProbeAndWitness(args []string)error{
  err:=ExecuteExplicitNodeProbe(context.Background(),ExplicitNodeProbeCommand{
   NodeDataDir:*dataDir,NodeID:*nodeID,NodeFingerprint:*nodePin,
   OperatorPublicKey:*operatorPub,
+  ServerSealFile:*serverSeal,ServerCertificateFile:*serverCert,
+  ServerNodeID:*serverID,ServerFingerprint:*serverPin,
   InstrumentPrivateKeyFile:*privateKey,InstrumentPublicKey:*instrumentPin,
   ChallengeFile:*challenge,PlanFile:*plan,ExecutionPermitFile:*permit,
   ReceiptOutput:*receipt,

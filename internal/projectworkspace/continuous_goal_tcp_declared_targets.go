@@ -290,6 +290,8 @@ func(s *Service)ListGoalTCPTargets(ctx context.Context,
      AND permit.status='approved' AND permit.expires_at>?
      AND permit.revision=project_goal_tcp_declared_target_bindings.permit_revision
      AND permit.plan_hash=project_goal_tcp_declared_target_bindings.plan_hash
+     AND permit.plan_generation=g.plan_generation
+     AND permit.plan_generation>0
      AND permit.target_ipv4=project_goal_tcp_declared_target_bindings.target_ipv4
      AND permit.target_port=project_goal_tcp_declared_target_bindings.target_port
      AND permit.source_id=project_goal_tcp_declared_target_bindings.source_id

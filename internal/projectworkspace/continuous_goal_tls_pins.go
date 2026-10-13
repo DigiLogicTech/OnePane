@@ -80,15 +80,16 @@ func(s *Service)activePinnedTargetTx(ctx context.Context,tx storage.Tx,
   return scope,ErrInvalidTransition
  }
  var goalStatus,wsID,planJSON string
+ var currentGeneration int64
  err=tx.QueryRowContext(ctx,`SELECT g.status,g.project_workspace_id,
-  g.monitoring_plan_json,g.revision
+  g.monitoring_plan_json,g.revision,g.plan_generation
   FROM project_continuous_goals g
   JOIN project_workspaces w ON w.id=g.project_workspace_id
    AND w.project_id=g.project_id AND w.status='active'
   JOIN workspaces tenant ON tenant.id=? AND tenant.status='active'
   WHERE g.id=? AND g.project_id=?`,
   project.WorkspaceID,goalID,projectID).
-  Scan(&goalStatus,&wsID,&planJSON,&scope.GoalRevision)
+  Scan(&goalStatus,&wsID,&planJSON,&scope.GoalRevision,&currentGeneration)
  if err!=nil{return scope,err}
  if goalStatus!="configured"{return scope,ErrInvalidTransition}
  plan,hash,err:=goalReviewPlan(planJSON)
@@ -111,6 +112,7 @@ func(s *Service)activePinnedTargetTx(ctx context.Context,tx storage.Tx,
  if err!=nil{return scope,err}
  if permit.Status!="approved"||permit.ExpiresAt<=now||
   permit.Revision!=target.PermitRevision||permit.PlanHash!=hash||
+  permit.PlanGeneration!=currentGeneration||permit.PlanGeneration<1||
   permit.ProjectWorkspaceID!=wsID||permit.SourceID!=target.SourceID||
   permit.TargetIPv4!=target.TargetIPv4||permit.TargetPort!=target.TargetPort||
   permit.TimeoutMS<100||permit.TimeoutMS>1500||

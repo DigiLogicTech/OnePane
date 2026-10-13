@@ -229,9 +229,10 @@ func TestGoalSignalTriageRequiresLiveIndependentEvidenceAndNeverPromotesHealth(t
  if err=db.SQL().QueryRowContext(ctx,`SELECT monitoring_plan_json,plan_generation
   FROM project_continuous_goals WHERE id=?`,goal.ID).
   Scan(&originalPlan,&originalGeneration);err!=nil{t.Fatal(err)}
- if grant.PlanGeneration!=originalGeneration{
-  t.Fatalf("original Node grant generation not pinned: grant=%d goal=%d",
-   grant.PlanGeneration,originalGeneration)
+ if grant.PlanGeneration!=originalGeneration||
+  permit.PlanGeneration!=originalGeneration{
+  t.Fatalf("original TCP/Node grants not generation bound: tcp=%d node=%d goal=%d",
+   permit.PlanGeneration,grant.PlanGeneration,originalGeneration)
  }
  editedPlan:=`{"version":1,"source_ids":["tcp-link","peer-link","new-node"]}`
  if _,err=db.SQL().ExecContext(ctx,
@@ -266,6 +267,21 @@ func TestGoalSignalTriageRequiresLiveIndependentEvidenceAndNeverPromotesHealth(t
    e.NodeState!="no_current_approved_measurement"){
    t.Fatalf("stale paired-Node report retained current evidence pointer: %+v",e)
   }
+  if e.SourceID=="tcp-link"&&(e.TCPAttemptID!=""||
+   e.TCPState!="no_current_approved_measurement"){
+   t.Fatalf("stale approved TCP source revived after plan restore: %+v",e)
+  }
+ }
+ // Admission is still refused before an actual network connection, even
+ // when the original plan hash has returned to identical JSON.
+ current,err:=svc.ContinuousGoal(ctx,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ if _,err=svc.claimGoalTCPAttempt(ctx,RunGoalTCPProbeCommand{
+  ProjectID:p.ID,GoalID:goal.ID,PermitID:permit.ID,
+  ExpectedGoalRevision:current.Revision,
+  ExpectedPermitRevision:permit.Revision,ActorPrincipalID:"owner",
+ });err==nil{
+  t.Fatal("old generation TCP permit admitted a fresh socket after plan restore")
  }
  persisted,err=svc.ContinuousGoal(ctx,goal.ID)
  if err!=nil{t.Fatal(err)}

@@ -221,6 +221,52 @@ func TestGoalSignalTriageRequiresLiveIndependentEvidenceAndNeverPromotesHealth(t
    t.Fatalf("newer in-flight probe was treated as completed: %+v",entry)
   }
  }
+ // The exact same paired mTLS receipt must never count as CURRENT
+ // independent signal evidence after the owner edits the Goal plan.
+ // A later return to identical JSON must not resurrect the old grant.
+ var originalPlan string
+ var originalGeneration int64
+ if err=db.SQL().QueryRowContext(ctx,`SELECT monitoring_plan_json,plan_generation
+  FROM project_continuous_goals WHERE id=?`,goal.ID).
+  Scan(&originalPlan,&originalGeneration);err!=nil{t.Fatal(err)}
+ if grant.PlanGeneration!=originalGeneration{
+  t.Fatalf("original Node grant generation not pinned: grant=%d goal=%d",
+   grant.PlanGeneration,originalGeneration)
+ }
+ editedPlan:=`{"version":1,"source_ids":["tcp-link","peer-link","new-node"]}`
+ if _,err=db.SQL().ExecContext(ctx,
+  "UPDATE project_continuous_goals SET monitoring_plan_json=? WHERE id=?",
+  editedPlan,goal.ID);err!=nil{t.Fatal(err)}
+ afterEdit,err:=svc.GoalSignalTriage(ctx,p.ID,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ if afterEdit.RecentNodeNegativeSources!=0||
+  afterEdit.RecentNegativeSources!=0||
+  afterEdit.State!="no_recent_measurements"{
+  t.Fatalf("old Node grant counted as present signal after plan edit: %+v",afterEdit)
+ }
+ if _,err=db.SQL().ExecContext(ctx,
+  "UPDATE project_continuous_goals SET monitoring_plan_json=? WHERE id=?",
+  originalPlan,goal.ID);err!=nil{t.Fatal(err)}
+ var restoredGeneration int64
+ if err=db.SQL().QueryRowContext(ctx,
+  "SELECT plan_generation FROM project_continuous_goals WHERE id=?",
+  goal.ID).Scan(&restoredGeneration);err!=nil{t.Fatal(err)}
+ if restoredGeneration!=originalGeneration+2{
+  t.Fatalf("plan restore did not advance monotonic generation: %d",restoredGeneration)
+ }
+ afterRestore,err:=svc.GoalSignalTriage(ctx,p.ID,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ if afterRestore.RecentNodeNegativeSources!=0||
+  afterRestore.RecentNegativeSources!=0||
+  afterRestore.State!="no_recent_measurements"{
+  t.Fatalf("restoring old JSON resurrected Node adverse evidence: %+v",afterRestore)
+ }
+ for _,e:=range afterRestore.Sources{
+  if e.SourceID=="peer-link"&&(e.NodeReceiptID!=""||
+   e.NodeState!="no_current_approved_measurement"){
+   t.Fatalf("stale paired-Node report retained current evidence pointer: %+v",e)
+  }
+ }
  persisted,err=svc.ContinuousGoal(ctx,goal.ID)
  if err!=nil{t.Fatal(err)}
  paused,err:=svc.TransitionContinuousGoal(ctx,TransitionContinuousGoalCommand{

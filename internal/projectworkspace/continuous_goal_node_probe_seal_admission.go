@@ -72,6 +72,15 @@ func(s *Service)SealGoalNodeProbeExecutionPermit(
   }
   if original==nil{return sql.ErrNoRows}
   if original.EffectiveExecutionState!="active"{return ErrRevisionConflict}
+  // One short challenge cannot fill a low-end host's immutable audit
+  // with repeated operator exports. Three human-requested original seals
+  // are sufficient to recover a lost handoff without unlimited retries.
+  var priorSeals int
+  if err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM events
+   WHERE aggregate_type='project_goal_node_probe_execution_permit'
+    AND aggregate_id=? AND event_type='project.goal_node_probe_execution_sealed'`,
+   c.PermitID).Scan(&priorSeals);err!=nil{return err}
+  if priorSeals>=3{return ErrRevisionConflict}
   envelope,err:=seal(*original)
   if err!=nil{return err}
   if len(envelope)==0||len(envelope)>8192||!json.Valid(envelope){

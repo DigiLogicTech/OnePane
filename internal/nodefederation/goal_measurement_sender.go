@@ -101,10 +101,29 @@ func(s *Service)SendPeerNodeMeasurement(ctx context.Context,
   endpoint+"/federation/v1/measurements",request,&response)
  if err!=nil{return PeerNodeMeasurementReceipt{},err}
  // Never trust a response for a different grant or sequence.
- if response.GrantID!=cmd.GrantID||response.Sequence!=seq||
-  response.PeerNodeID!=s.local.ID||
-  response.TransportKind!="pinned_peer_mtls"{
-  return PeerNodeMeasurementReceipt{},ErrNodeMeasurementNotAdmitted
+ if err=validatePeerMeasurementAcknowledgement(request,response,s.local.ID);err!=nil{
+  return PeerNodeMeasurementReceipt{},err
  }
  return response,nil
+}
+
+// validatePeerMeasurementAcknowledgement refuses a syntactically valid
+// mTLS response whose claimed persisted evidence does not EXACTLY match the
+// originally transmitted telemetry. A pinned peer identity alone cannot
+// make a contradictory receipt a valid acknowledgement. The received
+// metadata remains a Node self-report, NOT a verified physical observation.
+func validatePeerMeasurementAcknowledgement(
+ request PeerNodeMeasurement, ack PeerNodeMeasurementReceipt,
+ senderNodeID string)error{
+ if senderNodeID==""||ack.ID==""||
+  ack.ProjectID==""||ack.GoalID==""||
+  ack.ProjectWorkspaceID==""||ack.SourceID==""||
+  ack.GrantID!=request.GrantID||ack.Sequence!=request.Sequence||
+  ack.PeerNodeID!=senderNodeID||ack.SignalType!=request.SignalType||
+  ack.Outcome!=request.Outcome||ack.ObservedAt!=request.ObservedAt||
+  ack.ReceivedAt<ack.ObservedAt||
+  ack.TransportKind!="pinned_peer_mtls"{
+  return ErrNodeMeasurementNotAdmitted
+ }
+ return nil
 }

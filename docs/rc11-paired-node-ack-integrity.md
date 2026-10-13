@@ -1,0 +1,7 @@
+# RC11 P0-W — Pinned paired-Node telemetry acknowledgement integrity
+
+The outbound authenticated paired-Node telemetry sender must not regard any HTTP-201 JSON body as proof the intended self-report was durably recorded. The reply is now checked for exact original approved grant, durable sequence, authenticated origin Node ID, signal type, outcome, observed time, nonempty Project/Goal/Workspace/source and immutable receipt identity, legitimate chronological ordering and pinned peer-mTLS transport label. A missing/contradictory response returns \`node measurement transport not admitted\` rather than displaying a false success.
+
+The sender's original durable sequence is **not** undone after an acknowledgement discrepancy. The outcome is unknown until reconciled; a later separately approved attempt receives a new sequence. No automatic retry, packet scanning, third-party target association, authenticated device health, Level 5 incident scoring or remediation is introduced.
+
+This is an exact-message acknowledgement and Node-transport integrity control, not a second signer, physical execution proof or independently attested network-vantage witness. Real paired-Node physical trust, same-target correlation and separate instrument evidence remain outstanding. Hosted CI source tests and Windows/Ubuntu compilation are the only automatic checks; the trusted physical Node job requires explicit operator approval.

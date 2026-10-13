@@ -4,6 +4,8 @@ import (
  "crypto/ed25519"
  "crypto/rand"
  "encoding/base64"
+ "encoding/json"
+ "github.com/DigiLogicTech/OnePane/internal/nodefederation"
  "os"
  "path/filepath"
  "runtime"
@@ -22,13 +24,22 @@ func TestHumanCanSeparatelySignAuthenticatedNodeExecutionPermitOffline(t *testin
  pub,priv,err:=ed25519.GenerateKey(rand.Reader)
  if err!=nil{t.Fatal(err)}
  signed.Permit.OperatorPublicKeySHA256=operatorKeyFingerprint(pub)
- original:=writeCanonicalTest(t,dir,"original-permit.json",signed.Permit)
+ serverDataDir:=filepath.Dir(filepath.Dir(c.ServerCertificateFile))
+ serverIdentity,err:=loadExistingNodeIdentity(serverDataDir,c.ServerNodeID)
+ if err!=nil{t.Fatal(err)}
+ validServerSeal,err:=nodefederation.SealHumanNodeProbeExecution(
+  serverIdentity,signed.Permit,time.Now())
+ if err!=nil{t.Fatalf("valid original human authorization not sealed: %v",err)}
+ serverSealFile:=writeCanonicalTest(t,dir,"original-server-seal.json",validServerSeal)
  private:=filepath.Join(dir,"operator.key")
  if err=os.WriteFile(private,[]byte(base64.StdEncoding.EncodeToString(priv)),0600);err!=nil{
   t.Fatal(err)
  }
  out:=filepath.Join(dir,"operator-signed.json")
- args:=[]string{"--permit",original,"--operator-private-key",private,
+ args:=[]string{"--server-seal",serverSealFile,
+  "--server-certificate",c.ServerCertificateFile,
+  "--server-node-id",c.ServerNodeID,"--server-fingerprint",c.ServerFingerprint,
+  "--operator-private-key",private,
   "--operator-principal-id",signed.Permit.ApprovedBy,"--output",out}
  if err=runSignNodeExecutionPermit(args);err!=nil{
   t.Fatalf("trusted human operator could not sign exact grant: %v",err)
@@ -59,7 +70,10 @@ func TestHumanCanSeparatelySignAuthenticatedNodeExecutionPermitOffline(t *testin
  if runtime.GOOS!="windows"{
   if err=os.Chmod(private,0644);err!=nil{t.Fatal(err)}
   replacement:=filepath.Join(dir,"not-signed.json")
-  wrong:=[]string{"--permit",original,"--operator-private-key",private,
+  wrong:=[]string{"--server-seal",serverSealFile,
+   "--server-certificate",c.ServerCertificateFile,
+   "--server-node-id",c.ServerNodeID,"--server-fingerprint",c.ServerFingerprint,
+   "--operator-private-key",private,
    "--operator-principal-id",signed.Permit.ApprovedBy,"--output",replacement}
   if err=runSignNodeExecutionPermit(wrong);err==nil{
    t.Fatal("shared operator private key signed live Node authority")
@@ -74,6 +88,11 @@ func TestHumanOperatorPermitSigningRefusesUnapprovedMetadata(t *testing.T){
  pub,key,err:=ed25519.GenerateKey(rand.Reader)
  if err!=nil{t.Fatal(err)}
  transfer.Permit.OperatorPublicKeySHA256=operatorKeyFingerprint(pub)
+ serverDataDir:=filepath.Dir(filepath.Dir(c.ServerCertificateFile))
+ originalServer,err:=loadExistingNodeIdentity(serverDataDir,c.ServerNodeID)
+ if err!=nil{t.Fatal(err)}
+ originalSeal,err:=nodefederation.SealHumanNodeProbeExecution(originalServer,transfer.Permit,time.Now())
+ if err!=nil{t.Fatal(err)}
  dir:=t.TempDir()
  private:=filepath.Join(dir,"human.key")
  if err=os.WriteFile(private,[]byte(base64.StdEncoding.EncodeToString(key)),0600);err!=nil{
@@ -92,11 +111,25 @@ func TestHumanOperatorPermitSigningRefusesUnapprovedMetadata(t *testing.T){
   t.Run(name,func(t *testing.T){
    p:=transfer.Permit
    alter(&p)
-   file:=writeCanonicalTest(t,t.TempDir(),"one-permit.json",p)
+   var env struct{
+    Domain string `json:"domain"`
+    ServerNodeID string `json:"server_node_id"`
+    ServerCertificateSHA256 string `json:"server_certificate_sha256"`
+    SignedAt int64 `json:"signed_at"`
+    Permit projectworkspace.GoalNodeProbeExecutionPermit `json:"permit"`
+   }
+   if err=json.Unmarshal(originalSeal.SigningPayload,&env);err!=nil{t.Fatal(err)}
+   env.Permit=p
+   changedPayload,err:=json.Marshal(env)
+   if err!=nil{t.Fatal(err)}
+   forged:=originalSeal;forged.SigningPayload=changedPayload
+   file:=writeCanonicalTest(t,t.TempDir(),"tampered-server-seal.json",forged)
    out:=filepath.Join(t.TempDir(),"signed.json")
-   err:=runSignNodeExecutionPermit([]string{
-    "--permit",file,"--operator-private-key",private,
-    "--operator-principal-id","human","--output",out})
+   err=runSignNodeExecutionPermit([]string{
+    "--server-seal",file,"--server-certificate",c.ServerCertificateFile,
+    "--server-node-id",c.ServerNodeID,"--server-fingerprint",c.ServerFingerprint,
+    "--operator-private-key",private,"--operator-principal-id","human",
+    "--output",out})
    if err==nil{t.Fatal("unapproved operator metadata obtained a signature")}
    if _,err=os.Stat(out);!os.IsNotExist(err){
     t.Fatal("failed human signing left an apparently approved signed file")

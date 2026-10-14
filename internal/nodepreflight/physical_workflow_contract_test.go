@@ -2,6 +2,7 @@ package nodepreflight
 
 import (
  "os"
+ "fmt"
  "path/filepath"
  "strings"
  "testing"
@@ -19,7 +20,7 @@ func TestRC11PhysicalWorkflowIsExplicitReviewedManualDispatchOnly(t *testing.T){
   Jobs map[string]struct{
    If string `yaml:"if"`
    Environment string `yaml:"environment"`
-   RunsOn []string `yaml:"runs-on"`
+   RunsOn any `yaml:"runs-on"`
    Needs []string `yaml:"needs"`
    Steps []struct{
     Uses string `yaml:"uses"`
@@ -37,7 +38,7 @@ func TestRC11PhysicalWorkflowIsExplicitReviewedManualDispatchOnly(t *testing.T){
   if name=="physical-acceptance-summary"{
    if job.If!="${{ always() }}"||
     strings.Join(job.Needs,",")!="physical-rootless-node,physical-rootless-godot,physical-rootless-large-artifact,physical-rootless-library-e2e,physical-rootless-workspace-service"||
-    strings.Join(job.RunsOn,",")!="ubuntu-latest"{
+    fmt.Sprint(job.RunsOn)!="ubuntu-latest"{
     t.Fatal("the independent hosted physical acceptance summary has lost its dependencies")
    }
    if len(job.Steps)!=1||
@@ -69,7 +70,7 @@ func TestRC11PhysicalWorkflowIsExplicitReviewedManualDispatchOnly(t *testing.T){
   if job.Environment!="rc11-physical-node-approval"{
    t.Errorf("%s lacks protected operator environment",name)
   }
-  if strings.Join(job.RunsOn,",")!="self-hosted,linux,x64"{
+  if fmt.Sprint(job.RunsOn)!="[self-hosted linux x64]"{
    t.Errorf("%s unexpected runner: %v",name,job.RunsOn)
   }
   checkout:=0

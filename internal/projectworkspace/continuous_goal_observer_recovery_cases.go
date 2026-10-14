@@ -53,10 +53,16 @@ func(s *Service)ListGoalObserverRecoveryCases(ctx context.Context,
  defer rows.Close()
  out:=[]GoalObserverRecoveryCase{}
  for rows.Next(){
-  v:=GoalObserverRecoveryCase{HumanReconciliationRequired:true}
+  var v GoalObserverRecoveryCase
   if err:=rows.Scan(&v.OperationID,&v.ToolID,&v.State,&v.UpdatedAt);err!=nil{
    return nil,err
   }
+  // Executing/observing/verified may be a *normal* live operation.
+  // Only durable unknown/blocked or failed-compensation states demand
+  // independent human reconciliation; startup recovery quarantines the
+  // transient crash phases rather than automatically retrying.
+  v.HumanReconciliationRequired=v.State=="unknown_outcome"||
+   v.State=="blocked_unknown_outcome"||v.State=="compensation_failed"
   out=append(out,v)
  }
  return out,rows.Err()

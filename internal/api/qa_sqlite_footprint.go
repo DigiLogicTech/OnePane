@@ -86,7 +86,13 @@ func qaReadSQLiteFootprint(ctx context.Context,db *sql.DB)(qaSQLiteFootprint,err
 }
 
 func(s *Server)qaSQLiteFootprintHandler(w http.ResponseWriter,r *http.Request){
- if _,ok:=s.requireNodeOperator(w,r);!ok{return}
+ identity,ok:=s.requireNodeOperator(w,r);if !ok{return}
+ // A privileged Agent should not receive global SQLite data merely
+ // because a role or downstream federation checker was misconfigured.
+ if identity.PrincipalType!="human"{
+  writeError(w,http.StatusForbidden,"human Node operator required")
+  return
+ }
  if s.attentionDB==nil{
   writeError(w,http.StatusServiceUnavailable,"SQLite diagnostics unavailable")
   return

@@ -4,6 +4,7 @@ import (
  "context"
  "database/sql"
  "encoding/json"
+ "net/http"
  "net/http/httptest"
  "os"
  "path/filepath"
@@ -57,9 +58,19 @@ func TestQASQLiteFootprintMissingAndClosedFailClosed(t *testing.T){
  }
 }
 
+type qaFootprintHumanAuth struct{qaCaptureTestAuth}
+func(qaFootprintHumanAuth)Authenticate(r *http.Request)(Identity,error){
+ identity,err:=(qaCaptureTestAuth{}).Authenticate(r)
+ if err==nil{
+  if identity.PrincipalID=="admin"{identity.PrincipalType="human"
+  }else{identity.PrincipalType="agent"}
+ }
+ return identity,err
+}
+
 func TestQASQLiteFootprintHTTPRequiresNodeOperator(t *testing.T){
  db:=qaReadinessTestDB(t);defer db.Close()
- s:=NewServer(nil,nil,qaCaptureTestAuth{})
+ s:=NewServer(nil,nil,qaFootprintHumanAuth{})
  s.SetFederation(&qaCaptureTestFederation{})
  s.SetAttentionDB(db)
  for _,tc:=range []struct{name,bearer string;code int}{
@@ -82,9 +93,24 @@ func TestQASQLiteFootprintHTTPRequiresNodeOperator(t *testing.T){
    }
   })
  }
+ // An agent that is incorrectly granted the Node Admin role
+ // must still be forbidden from collecting global database figures.
+ s.auth=qaFootprintAgentAdminAuth{}
+ reqAgent:=httptest.NewRequest("GET","/v1/qa/sqlite-footprint",nil)
+ reqAgent.Header.Set("Authorization","Bearer adminA")
+ rwAgent:=httptest.NewRecorder();s.Handler().ServeHTTP(rwAgent,reqAgent)
+ if rwAgent.Code!=403{t.Fatalf("Agent with Admin was allowed: %d",rwAgent.Code)}
+ s.auth=qaFootprintHumanAuth{}
  s.SetAttentionDB(nil)
  req:=httptest.NewRequest("GET","/v1/qa/sqlite-footprint",nil)
  req.Header.Set("Authorization","Bearer adminA")
  rw:=httptest.NewRecorder();s.Handler().ServeHTTP(rw,req)
  if rw.Code!=503{t.Fatalf("missing canonical DB not blocked: %d",rw.Code)}
+}
+
+type qaFootprintAgentAdminAuth struct{qaFootprintHumanAuth}
+func(qaFootprintAgentAdminAuth)Authenticate(r *http.Request)(Identity,error){
+ identity,err:=(qaCaptureTestAuth{}).Authenticate(r)
+ if err==nil{identity.PrincipalType="agent"}
+ return identity,err
 }

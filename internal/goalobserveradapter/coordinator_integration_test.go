@@ -363,7 +363,7 @@ func TestObserverPauseResumeRequiresRealCoordinatorApprovalAndCompensation(t *te
    VALUES(?,'tenant',?,'owner',?,'blocked_unknown_outcome',
     ? ,? ,? ,'1',? ,'1','{}','{}','{}',1,'synthetic',1,?,?)`,
     id,taskID,"idem-"+id,CapabilityID,resource,PauseToolID,
-    AdapterID,now,now+int64(i+1))
+    AdapterID,now,now+60000+int64(i+1))
   if err!=nil{t.Fatal(err)}
  }
  limited,err:=goalService.ListGoalObserverRecoveryCases(ctx,project.ID,goal.ID)

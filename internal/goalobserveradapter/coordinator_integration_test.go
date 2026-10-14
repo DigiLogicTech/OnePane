@@ -6,6 +6,7 @@ import (
  "context"
  "encoding/json"
  "errors"
+ "fmt"
  "testing"
  "time"
 
@@ -349,5 +350,30 @@ func TestObserverPauseResumeRequiresRealCoordinatorApprovalAndCompensation(t *te
  }
  if _,err:=goalService.ListGoalObserverRecoveryCases(ctx,"other-project",goal.ID);err==nil{
   t.Fatal("observer recovery cases exposed to another Project")
+ }
+ // 30 more source-only historical unresolved rows exercise bounded
+ // listing without loading every stored receipt or original Tool input.
+ for i:=0;i<30;i++{
+  id:=fmt.Sprintf("synthetic-blocked-%02d",i)
+  _,err=db.SQL().ExecContext(ctx,`INSERT INTO operations(
+   id,workspace_id,task_id,principal_id,idempotency_key,
+   state,capability_id,resource_ref,tool_id,tool_version,
+   adapter_id,adapter_version,desired_state_json,precondition_json,
+   reconciliation_json,policy_revision,input_hash,revision,created_at,updated_at)
+   VALUES(?,'tenant',?,'owner',?,'blocked_unknown_outcome',
+    ? ,? ,? ,'1',? ,'1','{}','{}','{}',1,'synthetic',1,?,?)`,
+    id,taskID,"idem-"+id,CapabilityID,resource,PauseToolID,
+    AdapterID,now,now+int64(i+1))
+  if err!=nil{t.Fatal(err)}
+ }
+ limited,err:=goalService.ListGoalObserverRecoveryCases(ctx,project.ID,goal.ID)
+ if err!=nil||len(limited)!=25||limited[0].OperationID!="synthetic-blocked-29"{
+  t.Fatalf("recovery list not bounded/newest-first: %d %+v %v",len(limited),limited,err)
+ }
+ for _,entry:=range limited{
+  if entry.OperationID==""||entry.IndependentDeviceVerification||
+   !entry.HumanReconciliationRequired{
+   t.Fatalf("unsafe recovery list entry: %+v",entry)
+  }
  }
 }

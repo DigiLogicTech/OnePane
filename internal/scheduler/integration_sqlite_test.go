@@ -133,4 +133,35 @@ func TestSQLiteProviderBackedOriginNodeCannotMasqueradeAsFreeLocal(t *testing.T)
  if c.ID!="deployment"||c.Local||c.CostClass!=CostPaid||c.HardZeroIncrementalCost||c.ComputeMode!="cloud"{
   t.Fatalf("unverified provider presented as local or free: %+v",c)
  }
+ // Simulate a damaged legacy import with a dangling provider association.
+ // SQLite normally enforces the FK. The scheduler must still deny rather
+ // than silently reclassifying it as a free trusted paired Node.
+ conn,err:=db.SQL().Conn(ctx)
+ if err!=nil{t.Fatal(err)}
+ if _,err=conn.ExecContext(ctx,"PRAGMA foreign_keys=OFF");err!=nil{
+  conn.Close();t.Fatal(err)
+ }
+ if _,err=conn.ExecContext(ctx,`UPDATE model_deployments
+  SET provider_connection_id='missing-provider' WHERE id='deployment'`);err!=nil{
+  conn.Close();t.Fatal(err)
+ }
+ if _,err=conn.ExecContext(ctx,"PRAGMA foreign_keys=ON");err!=nil{
+  conn.Close();t.Fatal(err)
+ }
+ if err=conn.Close();err!=nil{t.Fatal(err)}
+ cands,err:=NewCatalog(db.SQL()).Candidates(ctx,"ws","agent.reason","")
+ if err!=nil{t.Fatal(err)}
+ found:=false
+ for _,item:=range cands{
+  if item.ID!="deployment"{continue}
+  found=true
+  if item.Schedulable||item.Local||item.HardZeroIncrementalCost||
+   item.CostClass!=CostUnknown||item.ComputeMode!="cloud"{
+   t.Fatalf("dangling provider association borrowed local trusted compute: %+v",item)
+  }
+ }
+ if !found{t.Fatal("dangling provider model was hidden instead of explicitly denied")}
+ if dec,err:=svc.Route(ctx,paid);err!=ErrNoEligibleCandidate||dec.Selected!=nil{
+  t.Fatalf("damaged provider association unexpectedly routed: %+v %v",dec.Selected,err)
+ }
 }

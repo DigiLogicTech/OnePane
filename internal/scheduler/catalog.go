@@ -199,6 +199,17 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 				cand.AllowedResidency = pc.DataPolicy.AllowedResidency
 				cand.Destination = destination(pc.DataPolicy.DestinationKind, ws, node.String, pc.DataPolicy.MaxConfidentiality)
 			}
+		} else if providerID.Valid {
+			// A provider-backed deployment whose provider record disappeared
+			// MUST NOT fall back to trusted/zero-cost Node classification.
+			// This can occur after legacy imports or a damaged catalogue;
+			// a dangling foreign key is never a local-compute grant.
+			cand.Schedulable = false
+			cand.Local = false
+			cand.ComputeMode = "cloud"
+			cand.CostClass = CostUnknown
+			cand.HardZeroIncrementalCost = false
+			cand.Destination = destination("cloud", ws, "", "public")
 		} else if node.Valid {
 			cand.ComputeMode = "remote"
 			cand.CostClass = CostLocal

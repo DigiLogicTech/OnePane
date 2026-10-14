@@ -185,6 +185,63 @@ jobs:
         run: |
           go test ./internal/projectworkspace ./internal/projectruntime ./internal/sandboxrunner ./internal/agentprotocol ./internal/agentworker ./internal/team ./internal/teamworker ./internal/task ./internal/storage/sqlite ./internal/scheduler ./internal/localai ./internal/api
           go test -tags integration ./internal/inference ./internal/tool ./internal/projectworkspace ./internal/sandboxrunner ./internal/agentworker ./internal/task ./internal/workspacepublisher ./internal/projectorchestrator ./internal/workspacebroker ./internal/nodefederation ./internal/scheduler ./internal/operation ./internal/goalobserveradapter
+      - name: Bounded low-memory L5 observer lifecycle (hosted simulation)
+        env:
+          GOMEMLIMIT: 256MiB
+          GOMAXPROCS: '2'
+          GOGC: '50'
+        run: |
+          # Source/in-memory SQLite acceptance, not physical hardware or
+          # a measured peak RSS guarantee. Repeat with fresh Go processes.
+          go test -tags integration -count=1 -timeout 3m -run '^(TestObserverPauseResumeRequiresRealCoordinatorApprovalAndCompensation|TestRecurringTCPWorkerRequiresOptInAndPersistsCadenceAcrossRestart)
+        run: |
+          go test -race -count=1 ./internal/instrumentprobe ./internal/nodefederation ./cmd/onepane-node-custody ./cmd/onepane-instrument-probe
+          go test -race -tags integration -count=1 -run TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly ./internal/projectworkspace
+      - name: Full Go regression and cross-platform compilation
+        run: |
+          go test ./internal/featurepolicy ./internal/inference ./internal/tool ./internal/webui
+          go test ./...
+          # Exercise a real pre-config, pre-HTTP backend failure and the
+          # offline-only reader without a running OnePane API or database.
+          go build -o /tmp/onepane-qa-bootstrap ./cmd/harnessd
+          evidence_root="$(mktemp -d)"
+          if ONEPANE_STARTUP_EVIDENCE_ROOT="$evidence_root" /tmp/onepane-qa-bootstrap -config "$evidence_root/nonexistent.yaml" >/dev/null 2>&1; then
+            echo "Deliberately invalid configuration unexpectedly passed"
+            exit 1
+          fi
+          /tmp/onepane-qa-bootstrap -startup-evidence-root "$evidence_root" |
+            node -e 'let data="";process.stdin.on("data",x=>data+=x).on("end",()=>{
+              const events=JSON.parse(data);
+              if(!events.some(e=>e.schema===1 && e.component==="backend" &&
+                 e.stage==="configuration" && e.outcome==="failed"))process.exit(1);
+              for(const e of events){
+                if(Object.keys(e).some(k=>!["schema","at_utc","component","stage","outcome"].includes(k)))
+                  process.exit(2);
+              }
+            })'
+          rm -rf -- "$evidence_root"
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-node-preflight.exe ./cmd/onepane-node-preflight
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-node-custody.exe ./cmd/onepane-node-custody
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-instrument-probe.exe ./cmd/onepane-instrument-probe
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-harnessd.exe ./cmd/harnessd
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-service.exe ./packaging/windows/service
+          # Compile the legacy setup source without a real distributable payload.
+          # No installer is packaged or released by this compilation check.
+          mkdir -p packaging/windows/setup/payload
+          printf 'CI compile fixture' > packaging/windows/setup/payload/qa-compile-fixture.bin
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-legacy-setup.exe ./packaging/windows/setup
+          bash -n scripts/install-ubuntu.sh
+
+  offline-msi-evidence:
+    name: Validate opt-in Windows MSI log reader
+    runs-on: windows-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test allowlisted MSI analysis against synthetic secret-bearing logs
+        shell: powershell
+        run: .\scripts\test_offline_msi_evidence.ps1
+ ./internal/projectworkspace ./internal/goalobserveradapter
       - name: Node approval and SQLite race checks (hosted source only)
         run: |
           go test -race -count=1 ./internal/instrumentprobe ./internal/nodefederation ./cmd/onepane-node-custody ./cmd/onepane-instrument-probe

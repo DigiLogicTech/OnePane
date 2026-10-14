@@ -121,8 +121,8 @@ func (g *MutationGate) ValidateAndConsume(ctx context.Context, c tool.MutationPe
 		   JOIN roles role ON role.id=pr.role_id
 		   WHERE pr.principal_id=human.id AND role.role_class='human'
 		    AND (pr.workspace_id=a.workspace_id OR pr.workspace_id IS NULL)
-		    AND (role.name='admin' OR
-		     (role.name='approver' AND ?='approver')))`,
+		    AND (lower(role.name)='admin' OR
+		     (lower(role.name)='approver' AND ?='approver')))`,
 		 o.ID,o.WorkspaceID,o.PrincipalID,o.PolicyRevision,
 		 time.Now().UTC().UnixMilli(),string(c.RequiredApproval)).Scan(&approved)
 		if err != nil || approved != 1 { return ErrExecutionPermit }

@@ -48,6 +48,8 @@ func scopedToolActions(capabilityID, toolID string, mode authority.ActionMode)([
   case "project.runtime.ensure","project.runtime.stop","project.app.ensure",
     "project.app.stop","project.app.pull":
     if mode!=authority.ActionMutate{return nil,false}
+  case "project.goal.tcp_observer.pause","project.goal.tcp_observer.resume":
+    if mode!=authority.ActionMutate{return nil,false}
   }
   if (mode==authority.ActionMutate||mode==authority.ActionExternalSend)&&
     (cap=="filesystem.read"||cap=="file.read"){
@@ -69,6 +71,11 @@ func scopedToolActions(capabilityID, toolID string, mode authority.ActionMode)([
     return []string{},true
   case "project.runtime.ensure","project.runtime.stop","project.app.ensure","project.app.stop":
     return []string{"process.execute"},true
+  case "project.goal.tcp_observer.pause","project.goal.tcp_observer.resume":
+    // Resume may re-enable separately approved network observations;
+    // require the explicit Workspace network-connect policy in addition to
+    // the human-owned Operation permit, not a generic custom Tool default.
+    return []string{"network.connect"},true
   case "project.app.pull":
     // PullImage mutates the local OCI image store. Network + Execute
     // alone must not bypass an explicitly read-only Workspace.

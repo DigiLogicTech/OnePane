@@ -27,6 +27,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/config"
 	"github.com/DigiLogicTech/OnePane/internal/connectors"
 	"github.com/DigiLogicTech/OnePane/internal/gateway"
+	"github.com/DigiLogicTech/OnePane/internal/goalobserveradapter"
 	"github.com/DigiLogicTech/OnePane/internal/inference"
 	"github.com/DigiLogicTech/OnePane/internal/localai"
 	"github.com/DigiLogicTech/OnePane/internal/node"
@@ -349,6 +350,14 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 	}
 	log.Printf("bootstrap stage: initialize Projects and agents")
 	projectWorkspaceService := projectworkspace.NewService(db.SQL(), db, clk)
+	// Human-bound reversible local observation dispatch. Registration grants
+	// no leases or approvals; the gateway requires an OperationCoordinator
+	// single-use permit, separately approved authority and verified human.
+	if err := goalobserveradapter.Register(toolRegistry,
+		goalobserveradapter.New(db.SQL(), projectWorkspaceService)); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("register controlled TCP observer effects: %w", err)
+	}
 	projectRoot := strings.TrimSpace(cfg.Storage.ProjectRoot)
 	if projectRoot == "" {
 		projectRoot = filepath.Join(cfg.Storage.DataDir, "projects")

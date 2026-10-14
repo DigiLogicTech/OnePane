@@ -44,6 +44,22 @@ func TestHumanCanSeparatelySignAuthenticatedNodeExecutionPermitOffline(t *testin
  if err=runSignNodeExecutionPermit(args);err!=nil{
   t.Fatalf("trusted human operator could not sign exact grant: %v",err)
  }
+ futureSeal,err:=nodefederation.SealHumanNodeProbeExecution(
+  serverIdentity,signed.Permit,time.Now().Add(3*time.Second))
+ if err!=nil{t.Fatal(err)}
+ futureFile:=writeCanonicalTest(t,dir,"postdated-server-seal.json",futureSeal)
+ futureOut:=filepath.Join(dir,"untrusted-future-approval.json")
+ futureArgs:=append([]string(nil),args...)
+ for i:=0;i+1<len(futureArgs);i++{
+  if futureArgs[i]=="--server-seal"{futureArgs[i+1]=futureFile}
+  if futureArgs[i]=="--output"{futureArgs[i+1]=futureOut}
+ }
+ if err=runSignNodeExecutionPermit(futureArgs);err==nil{
+  t.Fatal("human signer approved a server seal not yet issued")
+ }
+ if _,err=os.Stat(futureOut);!os.IsNotExist(err){
+  t.Fatalf("future issuer seal created a signed permit: %v",err)
+ }
  var result SignedNodeExecutionPermit
  if err=readCanonical(out,&result,true);err!=nil{t.Fatal(err)}
  if err=verifySignedNodeExecutionPermit(result,pub);err!=nil{

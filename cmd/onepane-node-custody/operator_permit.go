@@ -80,10 +80,10 @@ func runSignNodeExecutionPermit(args []string)error{
  if certBlock==nil||certBlock.Type!="CERTIFICATE"||len(bytes.TrimSpace(rest))!=0{
   return errors.New("independently enrolled original OnePane PEM certificate required")
  }
- p,err:=nodefederation.VerifySealedNodeProbeExecution(
-  original,certBlock.Bytes,*serverID,*serverFingerprint)
- if err!=nil{return err}
  now:=time.Now().UnixMilli()
+ p,err:=nodefederation.VerifySealedNodeProbeExecutionAtObservation(
+  original,certBlock.Bytes,*serverID,*serverFingerprint,now)
+ if err!=nil{return err}
  if p.ID==""||p.ApprovedBy!=*operatorPrincipal||
   p.EffectiveExecutionState!="active"||
   p.Status!="approved"||p.Revision!=1||

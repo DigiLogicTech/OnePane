@@ -70,6 +70,27 @@ func TestHistoricalHumanNodeInstrumentChainRequiresThreeSeparateKeys(t *testing.
  if err=runVerifyExecution(clonedArgs);err==nil{
   t.Fatal("historical verification misreported cloned server/Node key as independent")
  }
+ // A server seal generated AFTER the instrument had already observed
+ // the endpoint must not retroactively authorise that earlier receipt,
+ // even though its server signature, scope and operator signatures match.
+ serverDataDir:=filepath.Dir(filepath.Dir(c.ServerCertificateFile))
+ issuer,err:=nodefederation.EnsureIdentity(serverDataDir,c.ServerNodeID)
+ if err!=nil{t.Fatal(err)}
+ lateAt:=time.UnixMilli(receipt.ObservedAt+1000)
+ if lateAt.UnixMilli()>=approval.Permit.ExpiresAt{
+  t.Fatal("fixture is too close to original challenge expiration")
+ }
+ postdatedSeal,err:=nodefederation.SealHumanNodeProbeExecution(
+  issuer,approval.Permit,lateAt)
+ if err!=nil{t.Fatalf("test needs a valid but postdated signature: %v",err)}
+ postdatedFile:=writeCanonicalTest(t,t.TempDir(),"postdated-server-seal.json",postdatedSeal)
+ lateArgs:=append([]string(nil),args...)
+ for i:=0;i+1<len(lateArgs);i++{
+  if lateArgs[i]=="--server-seal"{lateArgs[i+1]=postdatedFile}
+ }
+ if err=runVerifyExecution(lateArgs);err==nil{
+  t.Fatal("historical receipt was retroactively authorised with a newer issuer seal")
+ }
  wrongPub,_,err:=ed25519.GenerateKey(rand.Reader)
  if err!=nil{t.Fatal(err)}
  if err=verify(witness,approval,cert,wrongPub);err==nil{

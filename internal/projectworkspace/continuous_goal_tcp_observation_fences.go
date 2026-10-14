@@ -26,6 +26,9 @@ type GoalTCPObservationFence struct {
 }
 type SetGoalTCPObservationFenceCommand struct {
  ProjectID,GoalID,ActorPrincipalID,TargetStatus string
+ // Non-empty only for a separately approved Operation Coordinator tool.
+ // A direct human API call is independently authenticated as project.write.
+ AttachedTaskID string
  ExpectedGoalRevision,ExpectedFenceRevision int64
 }
 func scanGoalTCPObservationFence(row scanner)(GoalTCPObservationFence,error){
@@ -100,6 +103,18 @@ func(s *Service)SetGoalTCPObservationFence(ctx context.Context,
   // A paused Goal's own status is a separate, stronger stop: this latch
   // cannot reactivate it by modifying only the worker's dispatch fence.
   if status!="configured"{return ErrInvalidTransition}
+  if c.AttachedTaskID!=""{
+   // Recheck canonical Task ownership in the SAME writer transaction as
+   // the dispatch-fence mutation. A Task reassigned after Gateway policy
+   // evaluation may not borrow another Project's approved observer action.
+   var scoped int
+   err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM tasks t
+    WHERE t.id=? AND t.workspace_id=? AND t.project_id=?
+     AND t.project_workspace_id=? AND t.state='running'`,
+    c.AttachedTaskID,project.WorkspaceID,c.ProjectID,wsID).Scan(&scoped)
+   if err!=nil{return err}
+   if scoped!=1{return ErrInvalidTransition}
+  }
   var oldStatus string
   var oldRevision int64
   err=tx.QueryRowContext(ctx,`SELECT status,revision

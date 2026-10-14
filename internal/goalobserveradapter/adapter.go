@@ -148,6 +148,7 @@ func(a *Adapter)Invoke(ctx context.Context,r tool.AdapterRequest)(tool.AdapterRe
   projectworkspace.SetGoalTCPObservationFenceCommand{
    ProjectID:v.ProjectID,GoalID:v.GoalID,
    ActorPrincipalID:actor,TargetStatus:status,
+   AttachedTaskID:*r.TaskID,
    ExpectedGoalRevision:v.ExpectedGoalRevision,
    ExpectedFenceRevision:v.ExpectedFenceRevision,
   })

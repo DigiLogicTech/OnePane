@@ -60,10 +60,36 @@ func TestSQLiteSchedulerProtectsSubscriptionAndPrefersStrictFree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Selected == nil || d.Selected.Candidate.ID != "d-free" {
-		t.Fatalf("strict free route should beat opted-in subscription: %#v", d.Selected)
+	if d.Selected == nil || d.Selected.Candidate.ID != "d-sub" {
+		t.Fatalf("unknown-cost provider must not beat opted-in subscription without spend consent: %#v", d.Selected)
 	}
 
+	// A self-declared "$0" provider is not independently verified.
+	// It must not be routed even when the caller allowed subscription
+	// entitlement use but explicitly denied monetary spend.
+	freeOnly,err:=svc.Route(ctx, RouteRequest{
+	 WorkspaceID:"ws",CapabilityID:"agent.reason",ProtocolLevel:"L1",
+	 DataLabel:label,IncludeCandidateIDs:[]string{"d-free"},
+	 AllowSubscriptionUsage:true,
+	})
+	if err!=ErrNoEligibleCandidate||freeOnly.Selected!=nil{
+	 t.Fatalf("provider forged a no-spend contract: %+v %v",freeOnly.Selected,err)
+	}
+	for _,c:=range freeOnly.Rejected{
+	 if c.CandidateID=="d-free"&&c.Reason!="candidate may incur monetary cost"{
+	  t.Fatalf("misleading provider denial reason: %+v",freeOnly.Rejected)
+	 }
+	}
+	potentialSpend,err:=svc.Route(ctx,RouteRequest{
+	 WorkspaceID:"ws",CapabilityID:"agent.reason",ProtocolLevel:"L1",
+	 DataLabel:label,IncludeCandidateIDs:[]string{"d-free"},
+	 AllowPotentialMonetarySpend:true,
+	})
+	if err!=nil||potentialSpend.Selected==nil||
+	 potentialSpend.Selected.Candidate.CostClass!=CostUnknown||
+	 potentialSpend.Selected.Candidate.HardZeroIncrementalCost{
+	  t.Fatalf("explicit cloud spend opt-in misclassified: %+v %v",potentialSpend.Selected,err)
+	}
 	if _, err := svc.Route(ctx, RouteRequest{WorkspaceID: "ws", CapabilityID: "agent.subscription-only", ProtocolLevel: "L1", DataLabel: label}); err != ErrNoEligibleCandidate {
 		t.Fatalf("subscription-only route should be protected by default, got %v", err)
 	}

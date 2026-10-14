@@ -192,11 +192,19 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 			if err := json.Unmarshal([]byte(pjson.String), &pc); err != nil {
 				cand.Schedulable = false
 			} else {
-				cand.CostClass = pc.Scheduling.CostClass
-				if cand.CostClass == "" {
+				// The provider's own JSON (including "free", "local", or a
+				// hard_zero flag) is not a signed zero-charge contract.
+				// Only the explicit monetary-spend/entitlement gates
+				// may authorize an opaque provider route. Do not let a
+				// missing or misleading declaration consume cloud usage
+				// while the operator expects local-only, $0 behaviour.
+				switch pc.Scheduling.CostClass {
+				case CostPaid, CostProviderManaged, CostIncludedSubscription:
+					cand.CostClass = pc.Scheduling.CostClass
+				default:
 					cand.CostClass = CostUnknown
 				}
-				cand.HardZeroIncrementalCost = pc.Scheduling.HardZeroIncrementalCost
+				cand.HardZeroIncrementalCost = false
 				cand.AllowedResidency = pc.DataPolicy.AllowedResidency
 				// Provider configuration is not cryptographic endpoint proof.
 				// A provider-backed deployment must never become an origin/paired

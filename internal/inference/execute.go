@@ -410,25 +410,15 @@ func (s *Service) releaseBudgetBeforeDispatch(ctx context.Context, cmd ExecuteCo
 // model deployment metadata supplied by a routing client or a model.
 func inferenceRouteRequiresBudget(d ModelDeployment, p *ProviderConnection) bool {
 	if p == nil {
-		// Non-provider deployments run on the local runtime or a separately
-		// approved paired Node; they have no per-request provider charge.
+		// Canonical provider-less deployments are local or require separate
+		// paired-Node transfer authority, not an external billing contract.
 		return false
 	}
-	type schedulingPolicy struct {
-		Scheduling struct {
-			CostClass string `json:"cost_class"`
-			HardZero bool `json:"hard_zero_incremental_cost"`
-		} `json:"scheduling"`
-	}
-	var effective schedulingPolicy
-	if json.Unmarshal(p.ConnectionJSON,&effective)!=nil{
-		return true
-	}
-	// A claimed "local" provider can still name an outbound endpoint until
-	// its transport/identity has been independently verified. Deny a
-	// zero-budget route for this ambiguous provider type.
-	return !(strings.EqualFold(strings.TrimSpace(effective.Scheduling.CostClass),"free") &&
-		effective.Scheduling.HardZero)
+	// A provider connection can be directed at a paid endpoint regardless
+	// of its own free/local/hard_zero JSON. No independent zero-charge
+	// contract attestation exists yet: even an alleged free provider MUST
+	// have a bounded, separately authorized budget reservation.
+	return true
 }
 
 func storageConfidentiality(v string) policy.Confidentiality {

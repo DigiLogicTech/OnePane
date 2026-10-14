@@ -55,8 +55,7 @@ func TestHistoricalHumanNodeInstrumentChainRequiresThreeSeparateKeys(t *testing.
  // A historical chain signed by the paired Node AGAIN in the role of
  // OnePane issuer can have valid signatures but only three unique keys.
  // The offline verifier must reject that misleading four-role claim.
- clonedIssuerSeal,err:=nodefederation.SealHumanNodeProbeExecution(node,approval.Permit,time.Now())
- if err!=nil{t.Fatal(err)}
+ clonedIssuerSeal:=forgeClonedIssuerSeal(t,node,approval.Permit,time.Now())
  clonedSealFile:=writeCanonicalTest(t,t.TempDir(),"cloned-historical-issuer.json",clonedIssuerSeal)
  clonedArgs:=append([]string(nil),args...)
  for i:=0;i+1<len(clonedArgs);i++{

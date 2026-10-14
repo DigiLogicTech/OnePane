@@ -3,6 +3,10 @@ package nodefederation
 import (
  "strings"
  "testing"
+ "crypto/sha256"
+ "crypto/x509"
+ "crypto/ed25519"
+ "encoding/hex"
  "time"
 
  "github.com/DigiLogicTech/OnePane/internal/projectworkspace"
@@ -64,6 +68,28 @@ func TestPinnedOriginalOnePaneSignerSealsOnlyLiveHumanScope(t *testing.T){
  if err=assert(wrong,original.Certificate.Certificate[0],"onepane-hub",original.Fingerprint);err==nil{
   t.Fatal("noncanonical server envelope admitted")
  }
+ // The issuer cannot serve as a second distinct custody role by
+ // duplicating its public key digest or enrolled peer certificate.
+ duplicateCases:=map[string]func(*projectworkspace.GoalNodeProbeExecutionPermit){
+  "issuer_is_peer":func(x *projectworkspace.GoalNodeProbeExecutionPermit){
+   x.PeerTLSFingerprint=original.Fingerprint
+  },
+  "issuer_is_operator":func(x *projectworkspace.GoalNodeProbeExecutionPermit){
+   x.OperatorPublicKeySHA256=nodeIssuerPublicDigest(t,original)
+  },
+  "issuer_is_instrument":func(x *projectworkspace.GoalNodeProbeExecutionPermit){
+   x.InstrumentPublicKeySHA256=nodeIssuerPublicDigest(t,original)
+  },
+  "operator_is_instrument":func(x *projectworkspace.GoalNodeProbeExecutionPermit){
+   x.InstrumentPublicKeySHA256=x.OperatorPublicKeySHA256
+  },
+ }
+ for name,change:=range duplicateCases{t.Run(name,func(t *testing.T){
+  altered:=p;change(&altered)
+  if _,err:=SealHumanNodeProbeExecution(original,altered,now);err==nil{
+   t.Fatal("issuer signed duplicate custody role")
+  }
+ })}
  cases:=map[string]func(*projectworkspace.GoalNodeProbeExecutionPermit){
   "revoked":func(x *projectworkspace.GoalNodeProbeExecutionPermit){x.Status="revoked"},
   "inactive":func(x *projectworkspace.GoalNodeProbeExecutionPermit){x.EffectiveExecutionState="scope_inactive"},
@@ -77,4 +103,14 @@ func TestPinnedOriginalOnePaneSignerSealsOnlyLiveHumanScope(t *testing.T){
    t.Fatal("original OnePane server signed unavailable execution authority")
   }
  })}
+}
+
+func nodeIssuerPublicDigest(t *testing.T,id Identity)string{
+ t.Helper()
+ cert,err:=x509.ParseCertificate(id.Certificate.Certificate[0])
+ if err!=nil{t.Fatal(err)}
+ k,ok:=cert.PublicKey.(ed25519.PublicKey)
+ if !ok{t.Fatal("invalid server test key")}
+ digest:=sha256.Sum256(k)
+ return "sha256:"+hex.EncodeToString(digest[:])
 }

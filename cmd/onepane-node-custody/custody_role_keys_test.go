@@ -5,6 +5,9 @@ import (
  "crypto/ed25519"
  "crypto/rand"
  "crypto/x509"
+ "encoding/json"
+
+ "github.com/DigiLogicTech/OnePane/internal/projectworkspace"
  "path/filepath"
  "testing"
  "time"
@@ -61,8 +64,12 @@ func TestNodeExecutionRejectsClonedServerKeyBeforeNetworkAndNonce(t *testing.T){
  // The attacker uses the EXISTING enrolled Node key as the original
  // OnePane issuer as well. Both signatures verify individually, but four
  // independent software identities do not exist.
- seal,err:=nodefederation.SealHumanNodeProbeExecution(node,signed.Permit,time.Now())
- if err!=nil{t.Fatal(err)}
+ if _,err:=nodefederation.SealHumanNodeProbeExecution(node,signed.Permit,time.Now());err==nil{
+  t.Fatal("OnePane issuer accepted its own paired Node signing identity")
+ }
+ // Simulate a hostile detached file bypassing the normal issuer endpoint:
+ // signatures are genuine but server/Node roles share one private key.
+ seal:=forgeClonedIssuerSeal(t,node,signed.Permit,time.Now())
  c.ServerSealFile=writeCanonicalTest(t,t.TempDir(),"cloned-issuer-seal.json",seal)
  c.ServerCertificateFile=filepath.Join(c.NodeDataDir,"keys","federation.crt")
  c.ServerNodeID=c.NodeID
@@ -74,5 +81,31 @@ func TestNodeExecutionRejectsClonedServerKeyBeforeNetworkAndNonce(t *testing.T){
  if dial.calls!=0{t.Fatalf("denied duplicate key opened %d socket(s)",dial.calls)}
  if err:=instrumentprobe.ClaimLocalProbeOnce(c.InstrumentPrivateKeyFile,ch);err!=nil{
   t.Fatalf("denied duplicate key spent the one-shot nonce: %v",err)
+ }
+}
+
+func forgeClonedIssuerSeal(t *testing.T,
+ node nodefederation.Identity,p projectworkspace.GoalNodeProbeExecutionPermit,
+ at time.Time)nodefederation.SealedNodeProbeAuthority{
+ t.Helper()
+ cert,err:=x509.ParseCertificate(node.Certificate.Certificate[0])
+ if err!=nil{t.Fatal(err)}
+ env:=struct{
+  Domain string `json:"domain"`
+  ServerNodeID string `json:"server_node_id"`
+  ServerCertificateSHA256 string `json:"server_certificate_sha256"`
+  SignedAt int64 `json:"signed_at"`
+  Permit projectworkspace.GoalNodeProbeExecutionPermit `json:"permit"`
+ }{
+  Domain:"OnePane/server-node-probe-authority/ed25519/v1",
+  ServerNodeID:cert.Subject.CommonName,
+  ServerCertificateSHA256:node.Fingerprint,
+  SignedAt:at.UnixMilli(),Permit:p,
+ }
+ raw,err:=json.Marshal(env);if err!=nil{t.Fatal(err)}
+ key,ok:=node.Certificate.PrivateKey.(ed25519.PrivateKey)
+ if !ok{t.Fatal("test requires the original Node Ed25519 signer")}
+ return nodefederation.SealedNodeProbeAuthority{
+  SigningPayload:raw,Signature:ed25519.Sign(key,raw),
  }
 }

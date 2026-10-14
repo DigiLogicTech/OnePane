@@ -197,7 +197,16 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 				}
 				cand.HardZeroIncrementalCost = pc.Scheduling.HardZeroIncrementalCost
 				cand.AllowedResidency = pc.DataPolicy.AllowedResidency
-				cand.Destination = destination(pc.DataPolicy.DestinationKind, ws, node.String, pc.DataPolicy.MaxConfidentiality)
+				// Provider configuration is not cryptographic endpoint proof.
+				// A provider-backed deployment must never become an origin/paired
+				// Node just because its JSON says "trusted_node"/"origin_node".
+				// Preserve an explicit untrusted classification; all other
+				// provider-backed destinations stay cloud until verified.
+				kind := "cloud"
+				if pc.DataPolicy.DestinationKind == "untrusted" {
+					kind = "untrusted"
+				}
+				cand.Destination = destination(kind, ws, "", pc.DataPolicy.MaxConfidentiality)
 			}
 		} else if providerID.Valid {
 			// A provider-backed deployment whose provider record disappeared

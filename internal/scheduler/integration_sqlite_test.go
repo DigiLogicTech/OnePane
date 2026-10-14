@@ -133,6 +133,30 @@ func TestSQLiteProviderBackedOriginNodeCannotMasqueradeAsFreeLocal(t *testing.T)
  if c.ID!="deployment"||c.Local||c.CostClass!=CostPaid||c.HardZeroIncrementalCost||c.ComputeMode!="cloud"{
   t.Fatalf("unverified provider presented as local or free: %+v",c)
  }
+ // User/provider JSON must not impersonate an independently verified
+ // host-local or paired-Node destination and bypass information flow.
+ for _,tc:=range []struct{label string;want policy.DestinationKind}{
+  {"origin_node",policy.DestinationCloud},
+  {"trusted_node",policy.DestinationCloud},
+  {"untrusted",policy.DestinationUntrusted},
+ }{
+  if _,err:=db.SQL().ExecContext(ctx,`UPDATE provider_connections SET
+   connection_json=json_set(connection_json,'$.data_policy.destination_kind',?)
+   WHERE id='provider'`,tc.label);err!=nil{t.Fatal(err)}
+  candidates,e:=NewCatalog(db.SQL()).Candidates(ctx,"ws","agent.reason","")
+  if e!=nil{t.Fatal(e)}
+  found:=false
+  for _,item:=range candidates{
+   if item.ID!="deployment"{continue}
+   found=true
+   if item.Destination.Kind!=tc.want||item.Destination.NodeID!=""||
+    item.Local||item.CostClass!=CostPaid||
+    item.HardZeroIncrementalCost||item.ComputeMode!="cloud"{
+    t.Fatalf("provider JSON %q spoofed a verified local destination: %+v",tc.label,item)
+   }
+  }
+  if !found{t.Fatalf("provider candidate %q missing",tc.label)}
+ }
  // Simulate a damaged legacy import with a dangling provider association.
  // SQLite normally enforces the FK. The scheduler must still deny rather
  // than silently reclassifying it as a free trusted paired Node.

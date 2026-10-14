@@ -19,6 +19,8 @@ func TestTasklessProjectAdapterCannotSkipCanonicalProjectWorkspaceScope(t *testi
   {"project.app.pull","project.runtime.manage",authority.ActionMutate},
   {"project.runtime.inspect","project.runtime.observe",authority.ActionObserve},
   {"project.image.inspect","project.runtime.observe",authority.ActionObserve},
+  {"project.goal.unreviewed","filesystem.read",authority.ActionRead},
+  {"project.goal.tcp_observer.pause","network.send",authority.ActionMutate},
  }
  for _,tc:=range tests{
   t.Run(tc.id,func(t *testing.T){
@@ -97,6 +99,8 @@ func TestLegacyProjectToolNamesCannotSpoofModeOrBorrowGenericCapabilities(t *tes
   {"project.app.files.inspect","filesystem.read",authority.ActionMutate},
   {"project.app.unreviewed","filesystem.read",authority.ActionRead},
   {"project.runtime.fake","project.runtime.observe",authority.ActionObserve},
+  {"project.goal.unreviewed","filesystem.read",authority.ActionRead},
+  {"project.goal.tcp_observer.resume","network.send",authority.ActionExecuteSandboxed},
  }
  for _,tc:=range candidates{
   t.Run(tc.id,func(t *testing.T){

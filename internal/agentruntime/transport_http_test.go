@@ -3,6 +3,7 @@ package agentruntime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/DigiLogicTech/OnePane/internal/agentprotocol"
 	"net/http"
 	"net/http/httptest"
@@ -46,4 +47,43 @@ func TestAgentProtocolHTTPRejectsBearerOverRemoteHTTP(t *testing.T) {
 	if _, err := (AgentProtocolHTTPTransport{}).Invoke(context.Background(), c, req, runtimeStaticSecrets{"vault:runtime": "token"}); err == nil {
 		t.Fatal("expected remote plaintext credential destination rejection")
 	}
+}
+
+func TestAgentProtocolHTTPNeverSendsOriginLabelToRemoteOrDNSHost(t *testing.T){
+ req:=agentprotocol.Request{ProtocolVersion:agentprotocol.Version,RequestID:"r",
+  WorkspaceID:"ws",PrincipalID:"agent",Objective:"reason",
+  Constraints:json.RawMessage(`{}`),ContextManifest:json.RawMessage(`{}`),
+  PermittedProposalTypes:[]agentprotocol.ProposalType{agentprotocol.ProposalComplete}}
+ for _,base:=range []string{
+  "http://localhost:9000","https://example.com","http://192.168.2.1:9000",
+  "http://127.0.0.1@evil.test","https://[2001:db8::1]/v1",
+ }{
+  t.Run(base,func(t *testing.T){
+   cfg,_:=json.Marshal(map[string]string{"base_url":base})
+   c:=Connection{EndpointJSON:cfg,AuthType:"none",
+    DataPolicyJSON:json.RawMessage(`{"destination_kind":"origin_node"}`)}
+   _,err:=(AgentProtocolHTTPTransport{}).Invoke(context.Background(),c,req,nil)
+   var transportErr *RuntimeTransportError
+   if !errors.As(err,&transportErr)||transportErr.Code!="origin_endpoint_not_loopback"||
+    !transportErr.OutcomeKnown{
+    t.Fatalf("origin endpoint %s did not fail before transport: %v",base,err)
+   }
+  })
+ }
+}
+
+func TestAgentProtocolHTTPPlainBearerRejectsAmbiguousLocalhostDNS(t *testing.T){
+ secret:="vault:local-test"
+ req:=agentprotocol.Request{ProtocolVersion:agentprotocol.Version,RequestID:"r",
+  WorkspaceID:"ws",PrincipalID:"agent",Objective:"reason",
+  Constraints:json.RawMessage(`{}`),ContextManifest:json.RawMessage(`{}`),
+  PermittedProposalTypes:[]agentprotocol.ProposalType{agentprotocol.ProposalComplete}}
+ c:=Connection{EndpointJSON:json.RawMessage(`{"base_url":"http://localhost:9000"}`),
+  AuthType:"bearer",SecretRef:&secret}
+ _,err:=(AgentProtocolHTTPTransport{}).Invoke(context.Background(),c,req,
+  runtimeStaticSecrets{"vault:local-test":"PRIVATE_SECRET_CANARY"})
+ var transportErr *RuntimeTransportError
+ if !errors.As(err,&transportErr)||transportErr.Code!="insecure_credential_destination"{
+  t.Fatalf("DNS hostname was allowed plaintext bearer: %v",err)
+ }
 }

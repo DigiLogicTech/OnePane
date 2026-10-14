@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/DigiLogicTech/OnePane/internal/agentprotocol"
+	"github.com/DigiLogicTech/OnePane/internal/runtimeendpoint"
 )
 
 type AgentProtocolHTTPTransport struct{ Client *http.Client }
@@ -28,6 +29,16 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
 	if err := json.Unmarshal(c.EndpointJSON, &cfg); err != nil {
 		return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_endpoint", OutcomeKnown: true, Err: err}
 	}
+	// The built-in transport is an independent last safety boundary:
+	// a self-declared origin_node must not send data to a remote service,
+	// even when the caller neglected the Service's canonical admission.
+	var dp DataPolicy
+	if json.Unmarshal(c.DataPolicyJSON,&dp)==nil &&
+	 dp.DestinationKind=="origin_node" &&
+	 !runtimeendpoint.LiteralLoopbackHTTP(c.EndpointJSON){
+		return agentprotocol.Response{},&RuntimeTransportError{
+		 Code:"origin_endpoint_not_loopback",OutcomeKnown:true}
+	}
 	u, err := url.Parse(cfg.BaseURL)
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
 		return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_base_url", OutcomeKnown: true, Err: err}
@@ -35,7 +46,7 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
 	if strings.ToLower(c.AuthType) != "none" && u.Scheme != "https" {
 		host := u.Hostname()
 		ip := net.ParseIP(host)
-		if !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
+		if ip == nil || !ip.IsLoopback() {
 			return agentprotocol.Response{}, &RuntimeTransportError{Code: "insecure_credential_destination", OutcomeKnown: true}
 		}
 	}

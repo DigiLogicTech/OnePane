@@ -49,6 +49,13 @@ func (s *Service) Invoke(ctx context.Context, cmd InvokeCommand) (InvokeResult, 
 	if err != nil {
 		return InvokeResult{}, err
 	}
+	// Unlike a service-local model, an external Agent Runtime can move
+	// Task inputs over HTTP and may use a Vault-backed credential. Every
+	// configured canonical Task/Workspace/Agent restriction must permit
+	// the actual network and secrets capabilities before any work begins.
+	if err:=s.requireTaskRuntimeEffects(ctx,cmd,c);err!=nil{
+		return InvokeResult{},err
+	}
 	if len(cmd.Constraints) == 0 {
 		cmd.Constraints = json.RawMessage(`{}`)
 	}
@@ -157,7 +164,7 @@ func (s *Service) Invoke(ctx context.Context, cmd InvokeCommand) (InvokeResult, 
 		s.releaseBudgetBeforeDispatch(ctx, cmd)
 		return InvokeResult{}, err
 	}
-	if err:=s.requireCurrentRuntimeDispatch(ctx,c,cmd.InputLabel);err!=nil{
+	if err:=s.requireCurrentRuntimeDispatch(ctx,c,cmd);err!=nil{
 		s.releaseBudgetBeforeDispatch(ctx,cmd)
 		return s.finishInvocationError(ctx,inv.ID,InvocationAuthorized,err,cmd)
 	}
@@ -172,7 +179,7 @@ func (s *Service) Invoke(ctx context.Context, cmd InvokeCommand) (InvokeResult, 
 	// Revalidate the canonical peer and data policy immediately before the
 	// potentially external side-effect. A non-replayable unknown network
 	// outcome remains handled by the existing Invocation state machine.
-	if err:=s.requireCurrentRuntimeDispatch(ctx,c,cmd.InputLabel);err!=nil{
+	if err:=s.requireCurrentRuntimeDispatch(ctx,c,cmd);err!=nil{
 		s.releaseBudgetBeforeDispatch(ctx,cmd)
 		return s.finishInvocationError(ctx,inv.ID,InvocationExecuting,err,cmd)
 	}

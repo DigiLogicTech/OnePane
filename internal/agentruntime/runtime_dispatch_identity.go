@@ -5,7 +5,6 @@ import(
  "fmt"
  "reflect"
 
- "github.com/DigiLogicTech/OnePane/internal/policy"
 )
 
 // requireCurrentRuntimeDispatch checks canonical runtime destination, trust,
@@ -14,7 +13,7 @@ import(
 // Self-supplied endpoint JSON or a stale scheduled candidate never grants
 // permission for a changed/revoked runtime.
 func (s *Service)requireCurrentRuntimeDispatch(
- ctx context.Context, original Connection,input policy.DataLabel)error{
+ ctx context.Context, original Connection,cmd InvokeCommand)error{
  if s==nil||s.repo==nil{
   return fmt.Errorf("%w: canonical runtime unavailable",ErrRuntimeInformationFlow)
  }
@@ -22,7 +21,8 @@ func (s *Service)requireCurrentRuntimeDispatch(
  if err!=nil||!reflect.DeepEqual(current,original){
   return fmt.Errorf("%w: runtime identity, endpoint or grant changed while queued",ErrRuntimeInformationFlow)
  }
- if _,_,err:=s.authorizeInvocation(current,input);err!=nil{
+ if err:=s.requireTaskRuntimeEffects(ctx,cmd,current);err!=nil{return err}
+ if _,_,err:=s.authorizeInvocation(current,cmd.InputLabel);err!=nil{
   return fmt.Errorf("%w: runtime policy revoked or transport unavailable: %v",ErrRuntimeInformationFlow,err)
  }
  return nil

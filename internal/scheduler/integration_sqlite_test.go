@@ -90,6 +90,21 @@ func TestSQLiteSchedulerProtectsSubscriptionAndPrefersStrictFree(t *testing.T) {
 	 potentialSpend.Selected.Candidate.HardZeroIncrementalCost{
 	  t.Fatalf("explicit cloud spend opt-in misclassified: %+v %v",potentialSpend.Selected,err)
 	}
+	// An OAuth-labelled connection is not itself proof that the
+	// deployment will use the constrained ChatGPT plan transport.
+	// A generic HTTP transport must not inherit the plan allowance.
+	if _,err:=db.SQL().ExecContext(ctx,`UPDATE model_deployments
+	  SET runtime_name='openai-compatible' WHERE id='d-sub'`);err!=nil{t.Fatal(err)}
+	runtimeSpoof,err:=NewCatalog(db.SQL()).Candidates(ctx,"ws","agent.subscription-only","")
+	if err!=nil{t.Fatal(err)}
+	for _,c:=range runtimeSpoof{
+	 if c.ID=="d-sub" && (c.CostClass!=CostUnknown||
+	  c.HardZeroIncrementalCost){
+	  t.Fatalf("generic transport spoofed protected plan category: %+v",c)
+	 }
+	}
+	if _,err:=db.SQL().ExecContext(ctx,`UPDATE model_deployments
+	  SET runtime_name='openai-chatgpt-plan' WHERE id='d-sub'`);err!=nil{t.Fatal(err)}
 	if _, err := svc.Route(ctx, RouteRequest{WorkspaceID: "ws", CapabilityID: "agent.subscription-only", ProtocolLevel: "L1", DataLabel: label}); err != ErrNoEligibleCandidate {
 		t.Fatalf("subscription-only route should be protected by default, got %v", err)
 	}

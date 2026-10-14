@@ -49,7 +49,7 @@ func TestQueuedAgentRuntimeIdentityAndTrustRevocationFailBeforeTransport(t *test
  if err!=nil{t.Fatal(err)}
  label:=policy.DataLabel{WorkspaceID:"ws",Confidentiality:policy.ConfidentialityPublic,
   Residency:policy.ResidencyOriginNode,Trust:policy.TrustUserInstruction,OriginNodeID:"node"}
- if err:=svc.requireCurrentRuntimeDispatch(ctx,original,label);err!=nil{
+ if err:=svc.requireCurrentRuntimeDispatch(ctx,original,InvokeCommand{WorkspaceID:"ws",InputLabel:label});err!=nil{
   t.Fatalf("stable canonical local bridge denied: %v",err)
  }
  cases:=[]struct{name,sql string}{
@@ -64,7 +64,7 @@ func TestQueuedAgentRuntimeIdentityAndTrustRevocationFailBeforeTransport(t *test
  for _,tc:=range cases{
   t.Run(tc.name,func(t *testing.T){
    if _,err:=db.SQL().ExecContext(ctx,tc.sql,original.ID);err!=nil{t.Fatal(err)}
-   if err:=svc.requireCurrentRuntimeDispatch(ctx,original,label);
+   if err:=svc.requireCurrentRuntimeDispatch(ctx,original,InvokeCommand{WorkspaceID:"ws",InputLabel:label});
     !errors.Is(err,ErrRuntimeInformationFlow){
     t.Fatalf("mutated runtime dispatch unexpectedly admitted: %v",err)
    }
@@ -78,7 +78,7 @@ func TestQueuedAgentRuntimeIdentityAndTrustRevocationFailBeforeTransport(t *test
     string(original.DataPolicyJSON),original.SecretRef,
     original.OperatingMode,original.Revision,original.UpdatedAt,original.ID);
     err!=nil{t.Fatal(err)}
-   if err:=svc.requireCurrentRuntimeDispatch(ctx,original,label);err!=nil{
+   if err:=svc.requireCurrentRuntimeDispatch(ctx,original,InvokeCommand{WorkspaceID:"ws",InputLabel:label});err!=nil{
     t.Fatalf("stable identity rejected after fixture restore: %v",err)
    }
   })

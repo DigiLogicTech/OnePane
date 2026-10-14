@@ -190,3 +190,48 @@ func TestSQLiteProviderBackedOriginNodeCannotMasqueradeAsFreeLocal(t *testing.T)
   t.Fatalf("damaged provider association unexpectedly routed: %+v %v",dec.Selected,err)
  }
 }
+
+
+func TestRevokedHostNodeNeverRoutesAsTrustedFreeLocalModel(t *testing.T){
+ ctx:=context.Background()
+ db,err:=sqliteStore.Open(t.TempDir()+"/revoked-local-node.db")
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ if err=db.Migrate(ctx);err!=nil{t.Fatal(err)}
+ seeds:=[]string{
+  `INSERT INTO workspaces(id,name,status,revision,created_at,updated_at) VALUES('ws','Workspace','active',1,1,1)`,
+  `INSERT INTO harness_nodes(id,name,local,identity_fingerprint,trust_state,trust_zone,protocol_json,capabilities_json,last_seen_at,revision,created_at,updated_at)
+  VALUES('origin','Origin',1,'origin-key','local','LOCAL_TRUSTED','{}','{}',1,1,1,1)`,
+  `INSERT INTO models(id,provider_name,model_ref,modalities_json,static_metadata_json,trust_state,created_at,updated_at)
+  VALUES('host-model','local','llama.cpp','["text"]','{}','user_trusted',1,1)`,
+  `INSERT INTO model_deployments(id,model_id,node_id,runtime_name,runtime_config_json,status,deployment_fingerprint,revision,discovered_at,updated_at)
+  VALUES('local-model','host-model','origin','llama.cpp','{"scheduling":{"cost_class":"local","hard_zero_incremental_cost":true},"compute":{"mode":"gpu"}}','ready','fp',1,1,1)`,
+  `INSERT INTO compatibility_profiles(id,deployment_id,capability_id,protocol_level,context_min,context_max_supported,risk_class,qualification,mediation_json,evidence_json,profile_fingerprint,revision,created_at,updated_at)
+  VALUES('cap','local-model','agent.reason','L1',0,8192,'low','verified','{}','{}','cap-fp',1,1,1)`,
+ }
+ for _,q:=range seeds{if _,err:=db.SQL().ExecContext(ctx,q);err!=nil{t.Fatal(err)}}
+ cat:=NewCatalog(db.SQL())
+ candidates,err:=cat.Candidates(ctx,"ws","agent.reason","")
+ if err!=nil{t.Fatal(err)}
+ if len(candidates)!=1||!candidates[0].Local||!candidates[0].Schedulable||
+  candidates[0].CostClass!=CostLocal||!candidates[0].HardZeroIncrementalCost{
+  t.Fatalf("genuinely trusted local model was rejected: %+v",candidates)
+ }
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE harness_nodes SET trust_state='revoked',revision=revision+1 WHERE id='origin'`);err!=nil{t.Fatal(err)}
+ candidates,err=cat.Candidates(ctx,"ws","agent.reason","")
+ if err!=nil{t.Fatal(err)}
+ if len(candidates)!=1{t.Fatalf("missing revoked candidate: %+v",candidates)}
+ denied:=candidates[0]
+ if denied.Local||denied.Schedulable||denied.CostClass!=CostUnknown||
+  denied.HardZeroIncrementalCost||denied.TrustedNodeVerified||
+  denied.Destination.Kind!=policy.DestinationUntrusted||denied.ComputeMode!="unavailable"{
+  t.Fatalf("revoked host borrowed local compute rights from READY/model metadata: %+v",denied)
+ }
+ req:=RouteRequest{WorkspaceID:"ws",CapabilityID:"agent.reason",ProtocolLevel:"L1",
+  DataLabel:policy.DataLabel{WorkspaceID:"ws",Confidentiality:policy.ConfidentialityPublic,
+   Residency:policy.ResidencyAny,Trust:policy.TrustUserInstruction},
+  LocalOnly:true,RequireZeroIncrementalCost:true}
+ if decision,err:=Route(req,candidates);err!=ErrNoEligibleCandidate||decision.Selected!=nil{
+  t.Fatalf("revoked origin Node still schedulable: %+v %v",decision.Selected,err)
+ }
+}

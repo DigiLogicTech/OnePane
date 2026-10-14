@@ -163,7 +163,7 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 		if err := rows.Scan(&id, &status, &node, &providerID, &reported, &verified, &runtimeCfg, &modelRef, &trust, &metadata, &pws, &provider, &pstatus, &pjson, &local, &nodeTrust, &pairingStatus, &manifestExpires); err != nil {
 			return nil, err
 		}
-		cand := Candidate{ID: id, Kind: CandidateModel, DisplayName: modelRef, Status: status, TrustState: trust, Local: local == 1 && !providerID.Valid, Qualification: QualUntested, ProtocolLevel: "L0", CostClass: CostUnknown, Schedulable: (status == "ready" || status == "degraded") && (trust == "trusted" || trust == "user_trusted"), CapabilityIDs: []string{}, RoleNames: []string{}, ToolCallback: true}
+		cand := Candidate{ID: id, Kind: CandidateModel, DisplayName: modelRef, Status: status, TrustState: trust, Local: node.Valid && local == 1 && nodeTrust == "local" && !providerID.Valid, Qualification: QualUntested, ProtocolLevel: "L0", CostClass: CostUnknown, Schedulable: (status == "ready" || status == "degraded") && (trust == "trusted" || trust == "user_trusted"), CapabilityIDs: []string{}, RoleNames: []string{}, ToolCallback: true}
 		if node.Valid {
 			cand.NodeID = node.String
 		}
@@ -176,7 +176,7 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 			v := pws.String
 			cand.WorkspaceID = &v
 		}
-		if local == 1 && !providerID.Valid {
+		if node.Valid && local == 1 && nodeTrust == "local" && !providerID.Valid {
 			cand.ComputeMode = "cpu"
 			cand.CostClass = CostLocal
 			cand.HardZeroIncrementalCost = true
@@ -209,6 +209,17 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 				}
 				cand.Destination = destination(kind, ws, "", pc.DataPolicy.MaxConfidentiality)
 			}
+		 } else if node.Valid && local == 1 && !providerID.Valid {
+			// A local flag alone is not an active host trust grant.
+			// Revoked/malformed origin-node identity cannot be treated as
+			// verified free local compute just because the model is READY.
+			cand.Schedulable = false
+			cand.Local = false
+			cand.TrustedNodeVerified = false
+			cand.ComputeMode = "unavailable"
+			cand.CostClass = CostUnknown
+			cand.HardZeroIncrementalCost = false
+			cand.Destination = destination("untrusted", ws, "", "public")
 		} else if providerID.Valid {
 			// A provider-backed deployment whose provider record disappeared
 			// MUST NOT fall back to trusted/zero-cost Node classification.
@@ -260,7 +271,7 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 			// A deployment may refine local scheduling metadata, but it cannot
 			// downgrade a provider-backed route to "free/local" or claim a
 			// zero-cost contract independently of its provider policy.
-			if !providerID.Valid && dc.Scheduling.CostClass != "" {
+			if !providerID.Valid && cand.Schedulable && dc.Scheduling.CostClass != "" {
 				cand.CostClass = dc.Scheduling.CostClass
 				cand.HardZeroIncrementalCost = dc.Scheduling.HardZeroIncrementalCost
 			}
@@ -270,7 +281,7 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 			// A provider-backed route remains remote/cloud until verified
 			// destination attestation exists; model metadata cannot turn it
 			// into an apparent CPU or GPU placement on the current host.
-			if !providerID.Valid && dc.Compute.Mode != "" {
+			if !providerID.Valid && cand.Schedulable && dc.Compute.Mode != "" {
 				cand.ComputeMode = dc.Compute.Mode
 			}
 			if dc.Compute.Backend != "" {
@@ -281,7 +292,7 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 			if cand.RuntimeBackend == "" {
 				cand.RuntimeBackend = firstNonBlank(dc.Placement.Backend, dc.RuntimeBackend)
 			}
-			if !providerID.Valid && dc.Compute.Mode == "" && dc.Placement.Mode != "" {
+			if !providerID.Valid && cand.Schedulable && dc.Compute.Mode == "" && dc.Placement.Mode != "" {
 				hasCPU, hasGPU := false, false
 				for _, dev := range dc.Placement.Devices {
 					if dev.Kind == "cpu" {

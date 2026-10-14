@@ -52,7 +52,26 @@ func TestQueuedAgentRuntimeIdentityAndTrustRevocationFailBeforeTransport(t *test
  if err:=svc.requireCurrentRuntimeDispatch(ctx,original,InvokeCommand{WorkspaceID:"ws",InputLabel:label});err!=nil{
   t.Fatalf("stable canonical local bridge denied: %v",err)
  }
- cases:=[]struct{name,sql string}{
+ // The runtime connection remains identical while the trusted
+ // origin host identity is independently revoked. A queued invocation
+ // must fail before the HTTP transport receives any request.
+ if _,err:=db.SQL().ExecContext(ctx,
+  `UPDATE harness_nodes SET trust_state='revoked',revision=revision+1 WHERE id='node'`);
+  err!=nil{t.Fatal(err)}
+ if err:=svc.requireCurrentRuntimeDispatch(ctx,original,InvokeCommand{
+  WorkspaceID:"ws",InputLabel:label,
+ });!errors.Is(err,ErrRuntimeInformationFlow){
+  t.Fatalf("revoked host Node retained trusted bridge identity: %v",err)
+ }
+ if _,err:=db.SQL().ExecContext(ctx,
+  `UPDATE harness_nodes SET trust_state='local',revision=revision+1 WHERE id='node'`);
+  err!=nil{t.Fatal(err)}
+ if err:=svc.requireCurrentRuntimeDispatch(ctx,original,InvokeCommand{
+  WorkspaceID:"ws",InputLabel:label,
+ });err!=nil{
+  t.Fatalf("revalidated host trust denied stable local bridge: %v",err)
+ }
+  cases:=[]struct{name,sql string}{
   {"connection revoked",`UPDATE agent_runtime_connections SET status='revoked',revision=revision+1 WHERE id=?`},
   {"adapter replaced",`UPDATE agent_runtime_connections SET adapter_name='malicious.adapter',revision=revision+1 WHERE id=?`},
   {"endpoint rerouted external",`UPDATE agent_runtime_connections SET endpoint_json='{"base_url":"https://example.com"}',revision=revision+1 WHERE id=?`},

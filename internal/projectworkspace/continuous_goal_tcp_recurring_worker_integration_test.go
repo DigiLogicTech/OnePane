@@ -71,6 +71,38 @@ func TestRecurringTCPWorkerRequiresOptInAndPersistsCadenceAcrossRestart(t *testi
  if err!=nil||beforeFence.Revision!=0||beforeFence.ObservationAuthorized{
   t.Fatalf("unexpected implicit observer permission: %+v %v",beforeFence,err)
  }
+ // Failure-injection: SQLite may refuse a disk write after the dispatch
+ // fence row has changed but before its append-only event can be written.
+ // That MUST roll back the entire transaction, not silently report a
+ // successful pause with missing audit evidence.
+ _,err=db.SQL().ExecContext(ctx,`CREATE TRIGGER test_observer_event_failure
+  BEFORE INSERT ON events
+  WHEN NEW.aggregate_type='project_goal_tcp_observation_fence'
+  BEGIN SELECT RAISE(ABORT,'injected operator audit write failure'); END`)
+ if err!=nil{t.Fatal(err)}
+ if _,err:=svc.SetGoalTCPObservationFence(ctx,SetGoalTCPObservationFenceCommand{
+  ProjectID:p.ID,GoalID:g.ID,ActorPrincipalID:"owner",
+  TargetStatus:"paused",ExpectedGoalRevision:g.Revision,
+  ExpectedFenceRevision:beforeFence.Revision,
+ });err==nil{
+  t.Fatal("observer reported success after append-only audit insert failed")
+ }
+ blocked,err:=svc.GetGoalTCPObservationFence(ctx,p.ID,g.ID)
+ if err!=nil||blocked.Status!="running"||blocked.Revision!=0||
+  blocked.ObservationAuthorized{
+  t.Fatalf("audit failure committed unaudited dispatch mutation: %+v %v",blocked,err)
+ }
+ var orphanEvents int
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM events
+  WHERE aggregate_type='project_goal_tcp_observation_fence'
+   AND aggregate_id=?`,g.ID).Scan(&orphanEvents);
+  err!=nil||orphanEvents!=0{
+  t.Fatalf("failed transaction retained orphan events: %d %v",orphanEvents,err)
+ }
+ if _,err:=db.SQL().ExecContext(ctx,`DROP TRIGGER test_observer_event_failure`);
+  err!=nil{t.Fatal(err)}
+ // Explicit human retry must be a fresh transaction and produce exactly
+ // one version-1 row and event, not reuse the earlier failed attempt.
  paused,err:=svc.SetGoalTCPObservationFence(ctx,SetGoalTCPObservationFenceCommand{
   ProjectID:p.ID,GoalID:g.ID,ActorPrincipalID:"owner",
   TargetStatus:"paused",ExpectedGoalRevision:g.Revision,

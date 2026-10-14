@@ -159,6 +159,32 @@ func TestSQLiteProviderBackedOriginNodeCannotMasqueradeAsFreeLocal(t *testing.T)
  if c.ID!="deployment"||c.Local||c.CostClass!=CostPaid||c.HardZeroIncrementalCost||c.ComputeMode!="cloud"{
   t.Fatalf("unverified provider presented as local or free: %+v",c)
  }
+ // An ordinary provider with an unverified "included subscription"
+ // field must not borrow a first-party plan allowance or bypass the
+ // separate monetary-spend gate.
+ _,err=db.SQL().ExecContext(ctx,`UPDATE provider_connections SET
+  connection_json=json_set(connection_json,
+    '$.scheduling.cost_class','included_subscription',
+    '$.scheduling.hard_zero_incremental_cost',true)
+  WHERE id='provider'`)
+ if err!=nil{t.Fatal(err)}
+ forged,err:=NewCatalog(db.SQL()).Candidates(ctx,"ws","agent.reason","")
+ if err!=nil{t.Fatal(err)}
+ for _,item:=range forged{
+  if item.ID=="deployment"&&
+   (item.CostClass!=CostUnknown||item.HardZeroIncrementalCost){
+   t.Fatalf("custom provider promoted unverified subscription entitlement: %+v",item)
+  }
+ }
+ noSpend:=base;noSpend.AllowSubscriptionUsage=true
+ if dec,err:=svc.Route(ctx,noSpend);err!=ErrNoEligibleCandidate||dec.Selected!=nil{
+  t.Fatalf("unknown-cost provider evaded spend gate with forged subscription: %+v %v",dec.Selected,err)
+ }
+ _,err=db.SQL().ExecContext(ctx,`UPDATE provider_connections SET
+  connection_json=json_set(connection_json,'$.scheduling.cost_class','paid',
+   '$.scheduling.hard_zero_incremental_cost',false)
+  WHERE id='provider'`)
+ if err!=nil{t.Fatal(err)}
  // User/provider JSON must not impersonate an independently verified
  // host-local or paired-Node destination and bypass information flow.
  for _,tc:=range []struct{label string;want policy.DestinationKind}{

@@ -140,7 +140,7 @@ func (c *Catalog) applyManagedAdmission(ctx context.Context, deploymentID, capab
 
 func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role string) ([]Candidate, error) {
 	rows, err := c.db.QueryContext(ctx, `SELECT d.id,d.status,d.node_id,d.provider_connection_id,d.context_max_reported,d.context_max_verified,d.runtime_config_json,
- m.model_ref,m.trust_state,m.static_metadata_json,p.workspace_id,p.provider,p.status,p.connection_json,
+ m.model_ref,m.trust_state,m.static_metadata_json,p.workspace_id,p.provider,p.status,p.auth_type,p.connection_json,
  COALESCE(n.local,0),COALESCE(n.trust_state,''),COALESCE(np.status,''),COALESCE(cm.expires_at,0)
  FROM model_deployments d JOIN models m ON m.id=d.model_id
  LEFT JOIN provider_connections p ON p.id=d.provider_connection_id
@@ -155,12 +155,12 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 	var out []Candidate
 	for rows.Next() {
 		var id, status, modelRef, trust, runtimeCfg, metadata string
-		var node, providerID, pws, provider, pstatus, pjson sql.NullString
+		var node, providerID, pws, provider, pstatus, pauth, pjson sql.NullString
 		var reported, verified sql.NullInt64
 		var local int
 		var nodeTrust, pairingStatus string
 		var manifestExpires int64
-		if err := rows.Scan(&id, &status, &node, &providerID, &reported, &verified, &runtimeCfg, &modelRef, &trust, &metadata, &pws, &provider, &pstatus, &pjson, &local, &nodeTrust, &pairingStatus, &manifestExpires); err != nil {
+		if err := rows.Scan(&id, &status, &node, &providerID, &reported, &verified, &runtimeCfg, &modelRef, &trust, &metadata, &pws, &provider, &pstatus, &pauth, &pjson, &local, &nodeTrust, &pairingStatus, &manifestExpires); err != nil {
 			return nil, err
 		}
 		cand := Candidate{ID: id, Kind: CandidateModel, DisplayName: modelRef, Status: status, TrustState: trust, Local: node.Valid && local == 1 && nodeTrust == "local" && !providerID.Valid, Qualification: QualUntested, ProtocolLevel: "L0", CostClass: CostUnknown, Schedulable: (status == "ready" || status == "degraded") && (trust == "trusted" || trust == "user_trusted"), CapabilityIDs: []string{}, RoleNames: []string{}, ToolCallback: true}
@@ -199,8 +199,19 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 				// missing or misleading declaration consume cloud usage
 				// while the operator expects local-only, $0 behaviour.
 				switch pc.Scheduling.CostClass {
-				case CostPaid, CostProviderManaged, CostIncludedSubscription:
+				case CostPaid, CostProviderManaged:
 					cand.CostClass = pc.Scheduling.CostClass
+				case CostIncludedSubscription:
+					// Only the dedicated first-party plan transport can
+					// consume a separately opted-in entitlement. Any
+					// generic provider using a fabricated "included" tag
+					// must still obtain monetary-spend consent.
+					if provider.String == "openai_chatgpt_plan" &&
+						pauth.String == "oauth2-pkce" {
+						cand.CostClass = CostIncludedSubscription
+					} else {
+						cand.CostClass = CostUnknown
+					}
 				default:
 					cand.CostClass = CostUnknown
 				}

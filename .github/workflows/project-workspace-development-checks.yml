@@ -70,6 +70,8 @@ on:
       - 'internal/team/**'
       - 'internal/teamworker/**'
       - 'internal/agentprotocol/**'
+      - 'internal/agentruntime/**'
+      - 'internal/runtimeendpoint/**'
       - 'internal/task/**'
       - 'internal/storage/sqlite/**'
       - 'migrations/**'

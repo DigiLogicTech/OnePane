@@ -102,8 +102,8 @@ func runVerifyExecution(args []string)error{
   len(bytes.TrimSpace(serverRest))!=0{
   return errors.New("original independently pinned OnePane server certificate required")
  }
- sealedPermit,err:=nodefederation.VerifySealedNodeProbeExecution(
-  originalSeal,serverBlock.Bytes,*serverID,*serverFingerprint)
+ sealedPermit,err:=nodefederation.VerifySealedNodeProbeExecutionAtObservation(
+  originalSeal,serverBlock.Bytes,*serverID,*serverFingerprint,receipt.ObservedAt)
  if err!=nil{return err}
  if !sameSealedHumanProbeScope(sealedPermit,approval.Permit){
   return errors.New("human and OnePane server signatures refer to different approvals")

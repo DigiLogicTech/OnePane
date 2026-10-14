@@ -190,8 +190,8 @@ func ExecuteExplicitNodeProbe(ctx context.Context,c ExplicitNodeProbeCommand,
  if block==nil||block.Type!="CERTIFICATE"||len(bytes.TrimSpace(rest))!=0{
   return errors.New("one independent original OnePane server certificate required")
  }
- originalPermit,err:=nodefederation.VerifySealedNodeProbeExecution(
-  serverSeal,block.Bytes,c.ServerNodeID,c.ServerFingerprint)
+ originalPermit,err:=nodefederation.VerifySealedNodeProbeExecutionAtObservation(
+  serverSeal,block.Bytes,c.ServerNodeID,c.ServerFingerprint,now().UnixMilli())
  if err!=nil{return err}
  if !sameSealedHumanProbeScope(originalPermit,signed.Permit){
   return errors.New("human signature and original OnePane server seal concern different approvals")

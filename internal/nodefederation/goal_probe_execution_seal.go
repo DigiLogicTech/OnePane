@@ -101,3 +101,25 @@ func VerifySealedNodeProbeExecution(s SealedNodeProbeAuthority,
  }
  return env.Permit,nil
 }
+
+// VerifySealedNodeProbeExecutionAtObservation enforces historical temporal
+// causality: an operator must not attach a NEW server approval, however
+// correctly signed, to a signed instrument receipt from BEFORE that approval.
+// The original signature is still checked by VerifySealedNodeProbeExecution.
+// This does not prove trusted clocks, physical execution or live revocation.
+func VerifySealedNodeProbeExecutionAtObservation(
+ s SealedNodeProbeAuthority,originalServerCertDER []byte,
+ knownServerNodeID,knownFingerprint string,observedAt int64)(
+ projectworkspace.GoalNodeProbeExecutionPermit,error){
+ permit,err:=VerifySealedNodeProbeExecution(s,originalServerCertDER,
+  knownServerNodeID,knownFingerprint)
+ if err!=nil{return permit,err}
+ var envelope struct{SignedAt int64 `json:"signed_at"`}
+ if err=json.Unmarshal(s.SigningPayload,&envelope);err!=nil{return permit,err}
+ if observedAt<permit.ApprovedAt||observedAt<envelope.SignedAt||
+  observedAt>=permit.ExpiresAt{
+  return projectworkspace.GoalNodeProbeExecutionPermit{},
+   errors.New("OnePane server execution seal is newer than observation or outside original approved window")
+ }
+ return permit,nil
+}

@@ -142,6 +142,40 @@ func TestRecurringTCPWorkerRequiresOptInAndPersistsCadenceAcrossRestart(t *testi
    t.Fatalf("bounded resume cycle %d: %+v %v",cycle,restored,e)
   }
  }
+ // A read-only, scoped inventory must show the exact retained evidence
+ // without deleting it or interpreting it as device health.
+ inv,err:=svc.GoalRetentionInventory(ctx,p.ID,g.ID)
+ if err!=nil||inv.TCPAttempts!=0||inv.TCPRecurringGrants!=1||
+  inv.TCPPermits<1||inv.ObserverFenceEvents!=130||
+  inv.CurrentFenceStatus!="running"||inv.CurrentFenceRevision!=130||
+  inv.AutomaticPruningEnabled||inv.BytesMeasured||
+  len(inv.StorageAttentionReasons)!=0{
+  t.Fatalf("bounded Goal inventory changed evidence/authority: %+v %v",inv,err)
+ }
+ if _,err:=svc.GoalRetentionInventory(ctx,"another-project",g.ID);err==nil{
+  t.Fatal("foreign Project obtained Goal retention counts")
+ }
+ // A single synthetic append-only insert crosses the advisory threshold
+ // without a controller doing any real network observation.
+ _,err=db.SQL().ExecContext(ctx,`WITH RECURSIVE seq(n) AS (
+  SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<900
+ ) INSERT INTO events(id,workspace_id,event_type,aggregate_type,
+    aggregate_id,actor_principal_id,payload_json,occurred_at)
+ SELECT printf('retention-test-%d',n),'tenant',
+  'project.goal_tcp_observer_paused',
+  'project_goal_tcp_observation_fence',?,'owner','{}',1 FROM seq`,g.ID)
+ if err!=nil{t.Fatal(err)}
+ inv,err=svc.GoalRetentionInventory(ctx,p.ID,g.ID)
+ if err!=nil||inv.ObserverFenceEvents!=1030||
+  len(inv.StorageAttentionReasons)!=1||
+  inv.StorageAttentionReasons[0]!="observer_audit_growth"{
+  t.Fatalf("large immutable history was silently lost/hidden: %+v %v",inv,err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`DELETE FROM events WHERE
+   aggregate_type='project_goal_tcp_observation_fence' AND aggregate_id=?`,g.ID);
+  err==nil{
+  t.Fatal("historical observer evidence can be deleted")
+ }
  checked,err:=svc.tickDueTCPRecurringProbes(ctx,1,fake)
  if err!=nil||len(checked)!=1||fake.calls!=1||
   fake.network!="tcp4"||fake.address!="192.168.9.23:443"||

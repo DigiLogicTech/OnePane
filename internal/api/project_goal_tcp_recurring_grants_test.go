@@ -91,6 +91,21 @@ func TestTCPRecurringGrantAPIRequiresSeparateHumanConsent(t *testing.T){
    !strings.Contains(got.Body.String(),grant.ID){
   t.Fatalf("recurring grant invisible to owner: %d %s",got.Code,got.Body)
  }
+ inventoryURL:="/v1/projects/"+project.ID+"/continuous-goals/"+goal.ID+"/retention-inventory"
+ for _,who:=range []string{"","outsider","robot"}{
+  got:=call("GET",who,inventoryURL,"")
+  want:=403;if who==""{want=401}
+  if got.Code!=want{
+   t.Fatalf("unauthorised Goal history inventory %q: %d %s",who,got.Code,got.Body)
+  }
+ }
+ inventory:=call("GET","operator",inventoryURL,"")
+ if inventory.Code!=200||
+  !strings.Contains(inventory.Body.String(),`"tcp_recurring_grants":1`)||
+  !strings.Contains(inventory.Body.String(),`"automatic_pruning_enabled":false`)||
+  !strings.Contains(inventory.Body.String(),`"bytes_measured":false`){
+  t.Fatalf("human-only retention inventory misleading: %d %s",inventory.Code,inventory.Body)
+ }
  fenceURL:="/v1/projects/"+project.ID+"/continuous-goals/"+goal.ID+"/tcp-observer-fence"
  for _,who:=range []string{"","outsider","robot"}{
   got:=call("GET",who,fenceURL,"")

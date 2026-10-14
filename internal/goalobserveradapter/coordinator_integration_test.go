@@ -338,6 +338,7 @@ func TestObserverPauseResumeRequiresRealCoordinatorApprovalAndCompensation(t *te
  }
  inventory,err:=goalService.GoalRetentionInventory(ctx,project.ID,goal.ID)
  if err!=nil||inventory.UnreconciledObserverOperations!=1||
+  inventory.InFlightObserverOperations!=0||
   len(inventory.StorageAttentionReasons)!=1||
   inventory.StorageAttentionReasons[0]!="observer_mutation_needs_reconciliation"{
   t.Fatalf("uncertain local operation invisible to operator: %+v %v",inventory,err)
@@ -403,4 +404,9 @@ func TestObserverPauseResumeRequiresRealCoordinatorApprovalAndCompensation(t *te
   }
  }
  if !seenLive{t.Fatal("live operation no longer in bounded recovery list")}
+ inventory,err=goalService.GoalRetentionInventory(ctx,project.ID,goal.ID)
+ if err!=nil||inventory.InFlightObserverOperations!=1||
+  inventory.UnreconciledObserverOperations!=30{
+  t.Fatalf("in-flight operation incorrectly counted as unresolved: %+v %v",inventory,err)
+ }
 }

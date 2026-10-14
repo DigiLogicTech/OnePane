@@ -113,6 +113,7 @@ func TestTCPRecurringGrantAPIRequiresSeparateHumanConsent(t *testing.T){
  if inventory.Code!=200||
   !strings.Contains(inventory.Body.String(),`"tcp_recurring_grants":1`)||
   !strings.Contains(inventory.Body.String(),`"unreconciled_observer_operations":0`)||
+  !strings.Contains(inventory.Body.String(),`"in_flight_observer_operations":0`)||
   !strings.Contains(inventory.Body.String(),`"automatic_pruning_enabled":false`)||
   !strings.Contains(inventory.Body.String(),`"bytes_measured":false`){
   t.Fatalf("human-only retention inventory misleading: %d %s",inventory.Code,inventory.Body)

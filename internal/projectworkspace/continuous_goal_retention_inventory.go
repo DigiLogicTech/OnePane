@@ -21,6 +21,7 @@ type GoalRetentionInventory struct {
  ResponseCandidates int64 `json:"response_candidates"`
  ObserverFenceEvents int64 `json:"observer_fence_events"`
  UnreconciledObserverOperations int64 `json:"unreconciled_observer_operations"`
+ InFlightObserverOperations int64 `json:"in_flight_observer_operations"`
  CurrentFenceStatus string `json:"current_fence_status"`
  CurrentFenceRevision int64 `json:"current_fence_revision"`
  RetentionPolicy string `json:"retention_policy"`
@@ -87,12 +88,18 @@ func(s *Service)GoalRetentionInventory(ctx context.Context,projectID,goalID stri
   Scan(&out.CurrentFenceStatus,&out.CurrentFenceRevision)
  if err!=nil && err!=sql.ErrNoRows{return GoalRetentionInventory{},err}
  // Unknown external outcomes are NOT inferred from mere connectivity.
- // Surface exact Task- and Goal-scoped local observer mutations that still
- // require a human reconciliation decision after a crash or failed undo.
- // Even an executing/observing Operation is included before startup
- // recovery has had an opportunity to quarantine its outcome.
+ // Count durable uncertain/failed-compensation states separately from
+ // routine transient phases that may still be executing successfully.
+ // Startup recovery can later quarantine a transient crashed phase.
  resourceRef:="goal-tcp-observer://"+projectID+"/"+goalID
- err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM operations op
+ err=tx.QueryRowContext(ctx,`SELECT
+    COALESCE(SUM(CASE WHEN op.state IN (
+      'unknown_outcome','blocked_unknown_outcome','compensation_failed')
+      THEN 1 ELSE 0 END),0),
+    COALESCE(SUM(CASE WHEN op.state IN (
+      'executing','observing','verified','compensating')
+      THEN 1 ELSE 0 END),0)
+  FROM operations op
   JOIN tasks task ON task.id=op.task_id
    AND task.workspace_id=op.workspace_id
    AND task.project_id=? AND task.project_workspace_id=?
@@ -105,7 +112,7 @@ func(s *Service)GoalRetentionInventory(ctx context.Context,projectID,goalID stri
     'unknown_outcome','blocked_unknown_outcome','compensating',
     'compensation_failed')`,
    projectID,out.ProjectWorkspaceID,projectID,resourceRef).
-   Scan(&out.UnreconciledObserverOperations)
+   Scan(&out.UnreconciledObserverOperations,&out.InFlightObserverOperations)
  if err!=nil{return GoalRetentionInventory{},err}
  if out.UnreconciledObserverOperations>0{
   out.StorageAttentionReasons=append(out.StorageAttentionReasons,

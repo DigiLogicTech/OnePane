@@ -1,0 +1,12 @@
+# RC11: Agent Runtime routing versus actual destination trust
+
+A third-party Agent Runtime / Hermes bridge is **not** a verified model deployment. Its `capabilities_json.scheduling` is self-reported, and a bridge on localhost may itself call commercial cloud LLMs or forward data. Therefore, an Agent Runtime can **never** acquire a hard-zero-cost/local-compute claim from its JSON cost flag alone.
+
+- The Scheduler lists such runtimes at `cost_class=unknown` and `hard_zero_incremental_cost=false` unless already declared paid, provider-managed, or included subscription, which remain conservatively chargeable. `LocalOnly`, `RequireZeroIncrementalCost`, and default no-spend routing do not silently admit them.
+- An `origin_node` policy is accepted only for the built-in `builtin.agent_protocol_http@1` bridge, linked to a canonical local-trust Node record and an endpoint URL with a **literal loopback IP**. HTTPS or HTTP is allowed; DNS names including `localhost`, RFC1918/private nonloopback addresses, userinfo URLs, invalid ports, queries and fragments are **not proof**. The final Agent Runtime invocation boundary independently revalidates the same URL before selecting the transport.
+- A policy naming `trusted_node` is **not** proof of live paired Node transfer approval; such runtimes remain unschedulable, and invocation's existing unimplemented trusted-node transport blocks use. Unknown remote or provider destinations remain cloud (explicit untrusted remains untrusted), not elevated by metadata.
+- A verified local **transport address** is not evidence the external harness runs its inference locally, has no internet access, or avoids spend. Full per-Task cross-Workspace/network/data-flow consent, transport peer authentication, DNS/redirect/rebinding hardening for other protocols, and physical installed Node acceptance remain release gates.
+
+This source change makes previously permissive unsupported runtime variants explicitly ineligible for autonomous scheduling. Legitimate host-loopback bridges can remain a selectable, **potentially chargeable** Agent Runtime under the existing policy gates. Direct human-mediated runtimes and managed ModelDeployment local-first scheduling remain distinct paths.
+
+The final integrated code/security audit and LAST human-first UI/UX alignment still precede a user-approved Windows/Ubuntu QA installer. No physical probe or release merge is authorised.

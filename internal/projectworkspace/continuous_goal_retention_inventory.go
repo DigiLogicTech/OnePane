@@ -20,6 +20,7 @@ type GoalRetentionInventory struct {
  IncidentReviews int64 `json:"incident_reviews"`
  ResponseCandidates int64 `json:"response_candidates"`
  ObserverFenceEvents int64 `json:"observer_fence_events"`
+ UnreconciledObserverOperations int64 `json:"unreconciled_observer_operations"`
  CurrentFenceStatus string `json:"current_fence_status"`
  CurrentFenceRevision int64 `json:"current_fence_revision"`
  RetentionPolicy string `json:"retention_policy"`
@@ -85,6 +86,31 @@ func(s *Service)GoalRetentionInventory(ctx context.Context,projectID,goalID stri
   projectID,goalID,out.ProjectWorkspaceID).
   Scan(&out.CurrentFenceStatus,&out.CurrentFenceRevision)
  if err!=nil && err!=sql.ErrNoRows{return GoalRetentionInventory{},err}
+ // Unknown external outcomes are NOT inferred from mere connectivity.
+ // Surface exact Task- and Goal-scoped local observer mutations that still
+ // require a human reconciliation decision after a crash or failed undo.
+ // Even an executing/observing Operation is included before startup
+ // recovery has had an opportunity to quarantine its outcome.
+ resourceRef:="goal-tcp-observer://"+projectID+"/"+goalID
+ err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM operations op
+  JOIN tasks task ON task.id=op.task_id
+   AND task.workspace_id=op.workspace_id
+   AND task.project_id=? AND task.project_workspace_id=?
+  WHERE op.workspace_id=(SELECT workspace_id FROM projects WHERE id=?)
+   AND op.resource_ref=?
+   AND op.tool_id IN ('project.goal.tcp_observer.pause',
+    'project.goal.tcp_observer.resume')
+   AND op.adapter_id='onepane.goal.tcp_observer.control'
+   AND op.state IN ('executing','observing','verified',
+    'unknown_outcome','blocked_unknown_outcome','compensating',
+    'compensation_failed')`,
+   projectID,out.ProjectWorkspaceID,projectID,resourceRef).
+   Scan(&out.UnreconciledObserverOperations)
+ if err!=nil{return GoalRetentionInventory{},err}
+ if out.UnreconciledObserverOperations>0{
+  out.StorageAttentionReasons=append(out.StorageAttentionReasons,
+   "observer_mutation_needs_reconciliation")
+ }
  if out.ObserverFenceEvents>=1024{
   out.StorageAttentionReasons=append(out.StorageAttentionReasons,"observer_audit_growth")
  }

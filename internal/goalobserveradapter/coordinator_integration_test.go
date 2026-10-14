@@ -335,4 +335,10 @@ func TestObserverPauseResumeRequiresRealCoordinatorApprovalAndCompensation(t *te
  if err!=nil||finalFence.Status!="paused"||finalFence.Revision!=3{
   t.Fatalf("recovery changed local state or reexecuted adapter: %+v %v",finalFence,err)
  }
+ inventory,err:=goalService.GoalRetentionInventory(ctx,project.ID,goal.ID)
+ if err!=nil||inventory.UnreconciledObserverOperations!=1||
+  len(inventory.StorageAttentionReasons)!=1||
+  inventory.StorageAttentionReasons[0]!="observer_mutation_needs_reconciliation"{
+  t.Fatalf("uncertain local operation invisible to operator: %+v %v",inventory,err)
+ }
 }

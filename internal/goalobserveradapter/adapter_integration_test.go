@@ -110,6 +110,38 @@ func TestHumanBoundGoalTCPObserverAdapterPersistsAndRequiresActualInvocationPrin
  if _,err:=a.Invoke(ctx,human);err==nil{
   t.Fatal("one-shot effect replay unexpectedly mutated twice")
  }
+ // A valid human and tenant Workspace are insufficient: a Task
+ // owned by a different Project must not inherit this Goal's authority.
+ foreignProject,err:=svc.CreateProject(ctx,projectworkspace.CreateProjectCommand{
+  WorkspaceID:"tenant",Name:"Other isolated Project",CreatedBy:"owner",
+  ProjectPolicyJSON:json.RawMessage(`{"onepane_operations":{"version":1,"mode":"continuous_operations"}}`),
+ })
+ if err!=nil{t.Fatal(err)}
+ foreignWS,err:=svc.CreateWorkspaceView(ctx,projectworkspace.CreateWorkspaceViewCommand{
+  ProjectID:foreignProject.ID,Name:"Different sandbox",ActorPrincipalID:"owner",
+ })
+ if err!=nil{t.Fatal(err)}
+ otherTask:="foreign-task"
+ _,err=db.SQL().ExecContext(ctx,`INSERT INTO tasks(
+  id,workspace_id,project_id,project_workspace_id,objective,state,
+  scheduling_class,priority,completion_json,revision,created_at,updated_at)
+  VALUES(?,?,?,?,?,'running','normal_task',0,'{}',1,?,?)`,
+  otherTask,"tenant",foreignProject.ID,foreignWS.ID,"Unrelated project",now,now)
+ if err!=nil{t.Fatal(err)}
+ taskID=otherTask
+ crossProject:=mk("cross-project","owner",ResumeToolID,1)
+ if _,err:=a.Invoke(ctx,crossProject);err==nil{
+  t.Fatal("foreign Project Task permitted observer resume")
+ }
+ crossProject.TaskID=nil
+ if _,err:=a.Invoke(ctx,crossProject);err==nil{
+  t.Fatal("Taskless invocation permitted observer mutation")
+ }
+ taskID="observer-task"
+ unchanged,err:=svc.GetGoalTCPObservationFence(ctx,p.ID,g.ID)
+ if err!=nil||unchanged.Status!="paused"||unchanged.Revision!=1{
+  t.Fatalf("cross-Project attempt mutated observer: %+v %v",unchanged,err)
+ }
  restored:=mk("restore","owner",ResumeToolID,1)
  if _,err:=a.Invoke(ctx,restored);err!=nil{t.Fatalf("compensation-style new human operation denied: %v",err)}
  again:=projectworkspace.NewService(db.SQL(),db,clock.Real{})

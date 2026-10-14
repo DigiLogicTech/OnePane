@@ -180,7 +180,7 @@ func TestSQLiteProviderBackedOriginNodeCannotMasqueradeAsFreeLocal(t *testing.T)
  _,err=db.SQL().ExecContext(ctx,`UPDATE provider_connections SET
   connection_json=json_set(connection_json,
     '$.scheduling.cost_class','included_subscription',
-    '$.scheduling.hard_zero_incremental_cost',true)
+    '$.scheduling.hard_zero_incremental_cost',json('true'))
   WHERE id='provider'`)
  if err!=nil{t.Fatal(err)}
  forged,err:=NewCatalog(db.SQL()).Candidates(ctx,"ws","agent.reason","")
@@ -197,7 +197,7 @@ func TestSQLiteProviderBackedOriginNodeCannotMasqueradeAsFreeLocal(t *testing.T)
  }
  _,err=db.SQL().ExecContext(ctx,`UPDATE provider_connections SET
   connection_json=json_set(connection_json,'$.scheduling.cost_class','paid',
-   '$.scheduling.hard_zero_incremental_cost',false)
+   '$.scheduling.hard_zero_incremental_cost',json('false'))
   WHERE id='provider'`)
  if err!=nil{t.Fatal(err)}
  // User/provider JSON must not impersonate an independently verified

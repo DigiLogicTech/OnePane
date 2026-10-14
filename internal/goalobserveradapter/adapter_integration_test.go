@@ -137,6 +137,15 @@ func TestHumanBoundGoalTCPObserverAdapterPersistsAndRequiresActualInvocationPrin
  if _,err:=a.Invoke(ctx,crossProject);err==nil{
   t.Fatal("Taskless invocation permitted observer mutation")
  }
+ // A direct writer invocation carrying a foreign Task is also denied,
+ // even when the actor is otherwise a valid human Project member.
+ _,err=svc.SetGoalTCPObservationFence(ctx,
+  projectworkspace.SetGoalTCPObservationFenceCommand{
+   ProjectID:p.ID,GoalID:g.ID,ActorPrincipalID:"owner",
+   AttachedTaskID:otherTask,TargetStatus:"running",
+   ExpectedGoalRevision:g.Revision,ExpectedFenceRevision:1,
+  })
+ if err==nil{t.Fatal("writer transaction admitted cross-Project Task")}
  taskID="observer-task"
  unchanged,err:=svc.GetGoalTCPObservationFence(ctx,p.ID,g.ID)
  if err!=nil||unchanged.Status!="paused"||unchanged.Revision!=1{

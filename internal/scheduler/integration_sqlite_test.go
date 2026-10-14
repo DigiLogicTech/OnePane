@@ -235,3 +235,53 @@ func TestRevokedHostNodeNeverRoutesAsTrustedFreeLocalModel(t *testing.T){
   t.Fatalf("revoked origin Node still schedulable: %+v %v",decision.Selected,err)
  }
 }
+
+func TestUnpairedOrDisabledRemoteNodeCannotAdvertiseVerifiedZeroCost(t *testing.T){
+ ctx:=context.Background()
+ db,err:=sqliteStore.Open(t.TempDir()+"/unpaired-node-cost.db")
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ if err=db.Migrate(ctx);err!=nil{t.Fatal(err)}
+ for _,q:=range []string{
+  `INSERT INTO workspaces(id,name,status,revision,created_at,updated_at) VALUES('ws','Workspace','active',1,1,1)`,
+  `INSERT INTO harness_nodes(id,name,local,identity_fingerprint,trust_state,trust_zone,protocol_json,capabilities_json,last_seen_at,revision,created_at,updated_at)
+   VALUES('remote','Unpaired host',0,'remote-key','paired','LOCAL_TRUSTED','{}','{}',1,1,1,1)`,
+  `INSERT INTO models(id,provider_name,model_ref,modalities_json,static_metadata_json,trust_state,created_at,updated_at)
+   VALUES('remote-model','local','model','["text"]','{}','trusted',1,1)`,
+  `INSERT INTO model_deployments(id,model_id,node_id,runtime_name,runtime_config_json,status,deployment_fingerprint,revision,discovered_at,updated_at)
+   VALUES('off-host','remote-model','remote','llama.cpp','{"scheduling":{"cost_class":"local","hard_zero_incremental_cost":true}}','ready','fp',1,1,1)`,
+  `INSERT INTO compatibility_profiles(id,deployment_id,capability_id,protocol_level,context_min,context_max_supported,risk_class,qualification,mediation_json,evidence_json,profile_fingerprint,revision,created_at,updated_at)
+   VALUES('cap','off-host','agent.reason','L1',0,2048,'low','verified','{}','{}','cap',1,1,1)`,
+ }{
+  if _,err:=db.SQL().ExecContext(ctx,q);err!=nil{t.Fatal(err)}
+ }
+ cat:=NewCatalog(db.SQL())
+ candidates,err:=cat.Candidates(ctx,"ws","agent.reason","")
+ if err!=nil||len(candidates)!=1{t.Fatalf("catalogue: %+v %v",candidates,err)}
+ c:=candidates[0]
+ if c.Schedulable||c.TrustedNodeVerified||c.Local||
+  c.CostClass!=CostUnknown||c.HardZeroIncrementalCost||
+  c.Destination.Kind!=policy.DestinationUntrusted{
+  t.Fatalf("unpaired Node presented as trusted zero-cost: %+v",c)
+ }
+ // A stale deployment declaring local/$0 cannot override the disabled
+ // remote compute policy or an absent signed pairing/manifest.
+ if _,err:=db.SQL().ExecContext(ctx,`INSERT INTO remote_node_compute_policies(
+  node_id,enabled,idle_only,created_at,updated_at)
+  VALUES('remote',0,0,1,1)`);err!=nil{t.Fatal(err)}
+ candidates,err=cat.Candidates(ctx,"ws","agent.reason","")
+ if err!=nil||len(candidates)!=1{t.Fatalf("disabled catalogue: %+v %v",candidates,err)}
+ c=candidates[0]
+ if c.Schedulable||c.TrustedNodeVerified||c.CostClass!=CostUnknown||
+  c.HardZeroIncrementalCost||c.Destination.Kind!=policy.DestinationUntrusted{
+  t.Fatalf("disabled remote Node still claimed free trusted compute: %+v",c)
+ }
+ req:=RouteRequest{WorkspaceID:"ws",CapabilityID:"agent.reason",
+  ProtocolLevel:"L1",DataLabel:policy.DataLabel{WorkspaceID:"ws",
+   Confidentiality:policy.ConfidentialityPublic,Residency:policy.ResidencyAny,
+   Trust:policy.TrustUserInstruction},LocalOnly:true,AllowTrustedNodes:true,
+  AllowedTrustedNodeIDs:[]string{"remote"},AllowPotentialMonetarySpend:true}
+ if dec,e:=Route(req,candidates);e!=ErrNoEligibleCandidate||dec.Selected!=nil{
+  t.Fatalf("unpaired remote Node bypassed allowlist: %+v %v",dec.Selected,e)
+ }
+}

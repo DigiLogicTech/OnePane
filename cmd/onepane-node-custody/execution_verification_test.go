@@ -52,6 +52,24 @@ func TestHistoricalHumanNodeInstrumentChainRequiresThreeSeparateKeys(t *testing.
  if err=runVerifyExecution(args);err!=nil{
   t.Fatalf("offline operator verification command failed: %v",err)
  }
+ // A historical chain signed by the paired Node AGAIN in the role of
+ // OnePane issuer can have valid signatures but only three unique keys.
+ // The offline verifier must reject that misleading four-role claim.
+ clonedIssuerSeal,err:=nodefederation.SealHumanNodeProbeExecution(node,approval.Permit,time.Now())
+ if err!=nil{t.Fatal(err)}
+ clonedSealFile:=writeCanonicalTest(t,t.TempDir(),"cloned-historical-issuer.json",clonedIssuerSeal)
+ clonedArgs:=append([]string(nil),args...)
+ for i:=0;i+1<len(clonedArgs);i++{
+  switch clonedArgs[i]{
+  case "--server-seal":clonedArgs[i+1]=clonedSealFile
+  case "--server-certificate":clonedArgs[i+1]=certPath
+  case "--server-node-id":clonedArgs[i+1]=c.NodeID
+  case "--server-fingerprint":clonedArgs[i+1]=c.NodeFingerprint
+  }
+ }
+ if err=runVerifyExecution(clonedArgs);err==nil{
+  t.Fatal("historical verification misreported cloned server/Node key as independent")
+ }
  wrongPub,_,err:=ed25519.GenerateKey(rand.Reader)
  if err!=nil{t.Fatal(err)}
  if err=verify(witness,approval,cert,wrongPub);err==nil{

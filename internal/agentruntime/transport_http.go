@@ -93,23 +93,28 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
 	}
 	clone := *client
 	if originOnly {
-		// A loopback URL is not enough: a user-supplied http.Client may
-		// include an explicit HTTP proxy, which could forward private
-		// Assistant/Project input to another host. Strip proxy routes
-		// even from a caller-tuned standard Transport. Reject opaque
-		// RoundTrippers whose egress cannot be inspected.
+		// A literal loopback endpoint must also use an independently owned
+		// direct transport. Cloning a caller-supplied http.Transport and
+		// clearing Proxy is insufficient: custom DialContext/DialTLSContext,
+		// TLSNextProto or similar hooks can silently redirect private input.
+		// Reject opaque RoundTrippers and discard all caller transport hooks.
+		// HTTPS must use the normal platform trust roots.
 		switch transport := clone.Transport.(type) {
 		case nil:
-			clone.Transport = &http.Transport{Proxy: nil}
 		case *http.Transport:
 			if transport == nil {
 				return agentprotocol.Response{}, &RuntimeTransportError{Code: "unsafe_origin_transport", OutcomeKnown: true}
 			}
-			direct := transport.Clone()
-			direct.Proxy = nil
-			clone.Transport = direct
 		default:
 			return agentprotocol.Response{}, &RuntimeTransportError{Code: "unsafe_origin_transport", OutcomeKnown: true}
+		}
+		clone.Transport = &http.Transport{
+			Proxy:                 nil,
+			DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			ForceAttemptHTTP2:     true,
+			TLSHandshakeTimeout:   10 * time.Second,
+			IdleConnTimeout:       90 * time.Second,
+			ExpectContinueTimeout: time.Second,
 		}
 	}
 	clone.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }

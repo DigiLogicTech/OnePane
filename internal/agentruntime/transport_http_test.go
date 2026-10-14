@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/DigiLogicTech/OnePane/internal/agentprotocol"
 	"net/http"
+	"net"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -161,4 +162,62 @@ func TestAgentProtocolOriginRejectsUninspectableRoundTripper(t *testing.T) {
 		t.Fatalf("opaque client bypassed origin-only transport rule: calls=%d err=%v",opaque.calls,err)
 	}
 	if strings.Contains(err.Error(),"private-input") { t.Fatal("private content included in unsafe transport error") }
+}
+
+func TestAgentProtocolOriginLoopbackCannotUseInjectedDialContext(t *testing.T) {
+	// The substituted receiver simulates an unauthorized off-host sink,
+	// without allowing any real external network traffic in the test.
+	var originCalls, interceptedCalls, injectedDials int
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		originCalls++
+		var req agentprotocol.Request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+			return
+		}
+		if req.Objective != "private-origin-dialer-input" {
+			t.Errorf("unexpected objective: %q", req.Objective)
+		}
+		_ = json.NewEncoder(w).Encode(agentprotocol.Response{
+			ProtocolVersion: agentprotocol.Version,
+			RequestID: req.RequestID,
+			ProposalType: agentprotocol.ProposalComplete,
+			Proposal: json.RawMessage(`{"summary":"local-only"}`),
+		})
+	}))
+	defer origin.Close()
+	sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		interceptedCalls++
+		t.Error("private origin input reached the substituted network dial target")
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer sink.Close()
+	endpoint, err := json.Marshal(map[string]string{"base_url": origin.URL})
+	if err != nil { t.Fatal(err) }
+	c := Connection{
+		EndpointJSON: endpoint, AuthType: "none",
+		DataPolicyJSON: json.RawMessage(`{"destination_kind":"origin_node"}`),
+	}
+	req := agentprotocol.Request{
+		ProtocolVersion: agentprotocol.Version,
+		RequestID: "origin-dialer-regression",
+		WorkspaceID: "ws", PrincipalID: "agent",
+		Objective: "private-origin-dialer-input",
+		Constraints: json.RawMessage(`{}`),
+		ContextManifest: json.RawMessage(`{}`),
+		PermittedProposalTypes: []agentprotocol.ProposalType{agentprotocol.ProposalComplete},
+	}
+	customDial := func(ctx context.Context, network, address string) (net.Conn, error) {
+		injectedDials++
+		return (&net.Dialer{}).DialContext(ctx, network, sink.Listener.Addr().String())
+	}
+	caller := &http.Client{Transport: &http.Transport{DialContext: customDial}}
+	_, err = (AgentProtocolHTTPTransport{Client: caller}).Invoke(context.Background(), c, req, nil)
+	if err != nil || originCalls != 1 || interceptedCalls != 0 || injectedDials != 0 {
+		t.Fatalf("origin input escaped through custom dialer: origin=%d intercepted=%d injected=%d err=%v",
+			originCalls, interceptedCalls, injectedDials, err)
+	}
+	if caller.Transport.(*http.Transport).DialContext == nil {
+		t.Fatal("caller-owned transport was mutated")
+	}
 }

@@ -91,6 +91,18 @@ func TestRecurringTCPWorkerRequiresOptInAndPersistsCadenceAcrossRestart(t *testi
  if err!=nil||len(skipped)!=0||fake.calls!=0{
   t.Fatalf("paused observer dialled: %+v %v calls=%d",skipped,err,fake.calls)
  }
+ _,err=svc.claimGoalTCPAttempt(ctx,RunGoalTCPProbeCommand{
+  ProjectID:p.ID,GoalID:g.ID,PermitID:manual.ID,
+  ActorPrincipalID:GoalTCPRecurringWorkerPrincipal,RecurringGrantID:grant.ID,
+  ExpectedGoalRevision:g.Revision,ExpectedPermitRevision:manual.Revision,
+ })
+ if !errors.Is(err,ErrInvalidTransition){
+  t.Fatalf("suspended source admitted a recurring claim in writer tx: %v",err)
+ }
+ if _,err:=db.SQL().ExecContext(ctx,`DELETE FROM project_goal_tcp_observation_fences
+  WHERE goal_id=?`,g.ID);err==nil{
+  t.Fatal("observer pause was deletable without audit")
+ }
  restored,err:=svc.SetGoalTCPObservationFence(ctx,SetGoalTCPObservationFenceCommand{
   ProjectID:p.ID,GoalID:g.ID,ActorPrincipalID:"owner",
   TargetStatus:"running",ExpectedGoalRevision:g.Revision,

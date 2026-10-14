@@ -91,6 +91,9 @@ func Register(reg *tool.Registry,a *Adapter)error{
 // NEVER read an "actor" field out of untrusted adapter JSON. A registered
 // adapter cannot mint a coordinator permit or approval itself.
 func(a *Adapter)actor(ctx context.Context,r tool.AdapterRequest,v input)(string,error){
+ if r.TaskID==nil||strings.TrimSpace(*r.TaskID)==""{
+  return "",errors.New("observer mutation requires canonical Project Task")
+ }
  var actor string
  err:=a.db.QueryRowContext(ctx,`SELECT inv.principal_id
   FROM tool_invocations inv
@@ -108,11 +111,18 @@ func(a *Adapter)actor(ctx context.Context,r tool.AdapterRequest,v input)(string,
   JOIN project_continuous_goals goal ON goal.id=? AND goal.project_id=p.id
   JOIN project_workspaces pw ON pw.id=goal.project_workspace_id
    AND pw.project_id=p.id AND pw.status='active'
+  JOIN tasks task ON task.id=inv.task_id
+   AND task.workspace_id=inv.workspace_id
+   AND task.project_id=p.id
+   AND task.project_workspace_id=goal.project_workspace_id
   WHERE inv.id=? AND inv.status='running'
+   AND inv.task_id=? AND op.task_id=inv.task_id
+   AND inv.mode='mutate'
+   AND op.adapter_id=inv.adapter_id AND op.adapter_version=inv.adapter_version
    AND inv.workspace_id=? AND inv.tool_id=? AND inv.tool_version=?
    AND inv.resource_ref=? AND inv.adapter_id=? AND inv.adapter_version=?
    AND inv.operation_id IS NOT NULL`,
-  v.ProjectID,v.GoalID,r.InvocationID,r.WorkspaceID,
+  v.ProjectID,v.GoalID,r.InvocationID,*r.TaskID,r.WorkspaceID,
   r.ToolID,r.ToolVersion,r.ResourceRef,AdapterID,AdapterVersion).Scan(&actor)
  if err!=nil{return "",fmt.Errorf("human-approved executing operation required: %w",err)}
  return actor,nil

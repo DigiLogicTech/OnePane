@@ -51,27 +51,35 @@ func TestHumanBoundGoalTCPObserverAdapterPersistsAndRequiresActualInvocationPrin
   MonitoringPlanJSON:json.RawMessage(`{"version":1,"source_ids":["router"]}`),
  })
  if err!=nil{t.Fatal(err)}
+ now:=time.Now().UnixMilli()
+ taskID:="observer-task"
+ _,err=db.SQL().ExecContext(ctx,`INSERT INTO tasks(
+  id,workspace_id,project_id,project_workspace_id,objective,state,
+  scheduling_class,priority,completion_json,revision,created_at,updated_at)
+  VALUES(?,?,?,?,?,'running','normal_task',0,'{}',1,?,?)`,
+  taskID,"tenant",p.ID,ws.ID,"Human-reviewed exact observer control",now,now)
+ if err!=nil{t.Fatal(err)}
  a:=New(db.SQL(),svc)
  mk:=func(id,actor,toolID string,rev int64)tool.AdapterRequest{
   t.Helper()
   now:=time.Now().UnixMilli()
   resource:=ResourceRef(p.ID,g.ID)
   _,err:=db.SQL().ExecContext(ctx,`INSERT INTO operations(
-   id,workspace_id,principal_id,idempotency_key,state,capability_id,
+   id,workspace_id,task_id,principal_id,idempotency_key,state,capability_id,
    resource_ref,tool_id,tool_version,adapter_id,adapter_version,
    desired_state_json,precondition_json,reconciliation_json,
    policy_revision,input_hash,revision,created_at,updated_at)
-   VALUES(?,? ,? ,? ,'executing',?, ?, ?, '1',?, '1',
+   VALUES(?,? ,? ,? ,? ,'executing',?, ?, ?, '1',?, '1',
     '{}','{}','{}',1,'testhash',1,?,?)`,
-   "op-"+id,"tenant",actor,"idem-"+id,CapabilityID,
+   "op-"+id,"tenant",taskID,actor,"idem-"+id,CapabilityID,
    resource,toolID,AdapterID,now,now)
   if err!=nil{t.Fatal(err)}
   _,err=db.SQL().ExecContext(ctx,`INSERT INTO tool_invocations(
-    id,workspace_id,principal_id,operation_id,tool_id,tool_version,
+    id,workspace_id,task_id,principal_id,operation_id,tool_id,tool_version,
     adapter_id,adapter_version,mode,resource_ref,input_hash,status,
     created_at,updated_at)
-   VALUES(?,'tenant',?,?,?,'1',?,'1','mutate',?,'testhash','running',?,?)`,
-   "inv-"+id,actor,"op-"+id,toolID,AdapterID,resource,now,now)
+   VALUES(?,'tenant',?,?,?,?,'1',?,'1','mutate',?,'testhash','running',?,?)`,
+   "inv-"+id,taskID,actor,"op-"+id,toolID,AdapterID,resource,now,now)
   if err!=nil{t.Fatal(err)}
   revInput,_:=json.Marshal(map[string]any{
    "project_id":p.ID,"goal_id":g.ID,
@@ -79,7 +87,7 @@ func TestHumanBoundGoalTCPObserverAdapterPersistsAndRequiresActualInvocationPrin
    "expected_fence_revision":rev,
   })
   return tool.AdapterRequest{
-   InvocationID:"inv-"+id,WorkspaceID:"tenant",ToolID:toolID,
+   InvocationID:"inv-"+id,WorkspaceID:"tenant",TaskID:&taskID,ToolID:toolID,
    ToolVersion:"1",ResourceRef:resource,Input:revInput,
   }
  }

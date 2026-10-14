@@ -112,6 +112,36 @@ func TestRecurringTCPWorkerRequiresOptInAndPersistsCadenceAcrossRestart(t *testi
   restored.ObservationAuthorized{
   t.Fatalf("resume incorrectly granted monitoring: %+v %v",restored,err)
  }
+ // Bounded churn regression on lightweight hardware: rapid operator
+ // pause/resume cycles must not cause a socket, activate monitoring,
+ // spawn Tasks, lose CAS monotonicity or bypass the original cadence.
+ // This is NOT a 24-hour endurance or physical Node acceptance test.
+ for cycle:=0;cycle<64;cycle++{
+  suspended,e:=svc.SetGoalTCPObservationFence(ctx,SetGoalTCPObservationFenceCommand{
+   ProjectID:p.ID,GoalID:g.ID,ActorPrincipalID:"owner",
+   TargetStatus:"paused",ExpectedGoalRevision:g.Revision,
+   ExpectedFenceRevision:restored.Revision,
+  })
+  if e!=nil||suspended.Status!="paused"||suspended.ObservationAuthorized{
+   t.Fatalf("bounded pause cycle %d: %+v %v",cycle,suspended,e)
+  }
+  if cycle%8==0{
+   fresh:=NewService(db.SQL(),db,clock.Real{})
+   none,e:=fresh.tickDueTCPRecurringProbes(ctx,1,fake)
+   if e!=nil||len(none)!=0||fake.calls!=0{
+    t.Fatalf("paused churn triggered TCP at %d: %+v %v",cycle,none,e)
+   }
+  }
+  restored,e=svc.SetGoalTCPObservationFence(ctx,SetGoalTCPObservationFenceCommand{
+   ProjectID:p.ID,GoalID:g.ID,ActorPrincipalID:"owner",
+   TargetStatus:"running",ExpectedGoalRevision:g.Revision,
+   ExpectedFenceRevision:suspended.Revision,
+  })
+  if e!=nil||restored.Status!="running"||
+   restored.Revision!=int64(4+2*cycle)||restored.ObservationAuthorized{
+   t.Fatalf("bounded resume cycle %d: %+v %v",cycle,restored,e)
+  }
+ }
  checked,err:=svc.tickDueTCPRecurringProbes(ctx,1,fake)
  if err!=nil||len(checked)!=1||fake.calls!=1||
   fake.network!="tcp4"||fake.address!="192.168.9.23:443"||

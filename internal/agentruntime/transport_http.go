@@ -33,9 +33,9 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
 	// a self-declared origin_node must not send data to a remote service,
 	// even when the caller neglected the Service's canonical admission.
 	var dp DataPolicy
-	if json.Unmarshal(c.DataPolicyJSON,&dp)==nil &&
-	 dp.DestinationKind=="origin_node" &&
-	 !runtimeendpoint.LiteralLoopbackHTTP(c.EndpointJSON){
+	_ = json.Unmarshal(c.DataPolicyJSON, &dp)
+	originOnly := dp.DestinationKind == "origin_node"
+	if originOnly && !runtimeendpoint.LiteralLoopbackHTTP(c.EndpointJSON) {
 		return agentprotocol.Response{},&RuntimeTransportError{
 		 Code:"origin_endpoint_not_loopback",OutcomeKnown:true}
 	}
@@ -92,6 +92,26 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
 		client = &http.Client{}
 	}
 	clone := *client
+	if originOnly {
+		// A loopback URL is not enough: a user-supplied http.Client may
+		// include an explicit HTTP proxy, which could forward private
+		// Assistant/Project input to another host. Strip proxy routes
+		// even from a caller-tuned standard Transport. Reject opaque
+		// RoundTrippers whose egress cannot be inspected.
+		switch transport := clone.Transport.(type) {
+		case nil:
+			clone.Transport = &http.Transport{Proxy: nil}
+		case *http.Transport:
+			if transport == nil {
+				return agentprotocol.Response{}, &RuntimeTransportError{Code: "unsafe_origin_transport", OutcomeKnown: true}
+			}
+			direct := transport.Clone()
+			direct.Proxy = nil
+			clone.Transport = direct
+		default:
+			return agentprotocol.Response{}, &RuntimeTransportError{Code: "unsafe_origin_transport", OutcomeKnown: true}
+		}
+	}
 	clone.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
 	if cfg.TimeoutMS > 0 {
 		clone.Timeout = time.Duration(cfg.TimeoutMS) * time.Millisecond

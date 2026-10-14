@@ -4,6 +4,7 @@ package projectworkspace
 
 import (
  "context"
+ "database/sql"
  "encoding/json"
  "fmt"
  "os"
@@ -58,7 +59,21 @@ func TestObserverFenceBoundedRestartWALDurabilitySoak(t *testing.T){
  expectedRevision:=int64(0)
  start:=time.Now()
  maximumHeap:=uint64(0)
+ peakPinnedWALBytes:=int64(0)
  for generation:=0;generation<reopenCount;generation++{
+  // Hold the first read transaction at an older snapshot while another
+  // connection commits 160 independent append-only audit events. WAL
+  // readers must neither block the writer nor see uncommitted/new rows.
+  var snapshot *sql.Tx
+  if generation==0{
+   snapshot,err=db.SQL().BeginTx(ctx,&sql.TxOptions{ReadOnly:true})
+   if err!=nil{t.Fatal(err)}
+   var firstCount int64
+   err=snapshot.QueryRowContext(ctx,`SELECT COUNT(*) FROM events
+    WHERE aggregate_type='project_goal_tcp_observation_fence'
+      AND aggregate_id=?`,goal.ID).Scan(&firstCount)
+   if err!=nil||firstCount!=0{t.Fatalf("initial WAL snapshot: %d %v",firstCount,err)}
+  }
   for i:=0;i<togglesPerOpen;i++{
    status:="paused";if expectedRevision%2==1{status="running"}
    state,e:=svc.SetGoalTCPObservationFence(ctx,SetGoalTCPObservationFenceCommand{
@@ -76,6 +91,24 @@ func TestObserverFenceBoundedRestartWALDurabilitySoak(t *testing.T){
     var mem runtime.MemStats
     runtime.ReadMemStats(&mem)
     if mem.HeapAlloc>maximumHeap{maximumHeap=mem.HeapAlloc}
+   }
+   if snapshot!=nil&&i%32==0{
+    var count int64
+    e=snapshot.QueryRowContext(ctx,`SELECT COUNT(*) FROM events
+     WHERE aggregate_type='project_goal_tcp_observation_fence'
+       AND aggregate_id=?`,goal.ID).Scan(&count)
+    if e!=nil||count!=0{
+     t.Fatalf("pinned read snapshot saw later writes: %d %v",count,e)
+    }
+    st,e:=os.Stat(path+"-wal")
+    if e!=nil&&!os.IsNotExist(e){t.Fatal(e)}
+    if e==nil&&st.Size()>peakPinnedWALBytes{peakPinnedWALBytes=st.Size()}
+   }
+  }
+  if snapshot!=nil{
+   if err:=snapshot.Rollback();err!=nil{t.Fatal(err)}
+   if peakPinnedWALBytes==0||peakPinnedWALBytes>32<<20{
+    t.Fatalf("pinned-reader WAL bounded-growth check failed: %d",peakPinnedWALBytes)
    }
   }
   if err:=db.Close();err!=nil{t.Fatal(err)}
@@ -140,7 +173,8 @@ func TestObserverFenceBoundedRestartWALDurabilitySoak(t *testing.T){
    "toggles":expectedRevision,"event_rows":auditRows,
    "db_bytes":fileBytes[""],"wal_bytes":fileBytes["-wal"],
    "shm_bytes":fileBytes["-shm"],"max_heap_sample_bytes":maximumHeap,
-   "max_rss_bytes":maxRSSBytes,"elapsed_ms":time.Since(start).Milliseconds(),
+   "max_rss_bytes":maxRSSBytes,"peak_pinned_wal_bytes":peakPinnedWALBytes,
+   "elapsed_ms":time.Since(start).Milliseconds(),
    "physical_node_accepted":false,"network_attempts":0,
   })
   return string(v)

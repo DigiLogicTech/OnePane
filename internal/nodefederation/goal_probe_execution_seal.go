@@ -3,7 +3,9 @@ package nodefederation
 import (
  "bytes"
  "crypto/ed25519"
+ "crypto/sha256"
  "crypto/x509"
+ "encoding/hex"
  "encoding/json"
  "errors"
  "time"
@@ -64,6 +66,19 @@ func SealHumanNodeProbeExecution(ident Identity,
  private,ok:=ident.Certificate.PrivateKey.(ed25519.PrivateKey)
  if !ok||len(private)!=ed25519.PrivateKeySize{
   return SealedNodeProbeAuthority{},errors.New("server identity cannot sign")
+ }
+ issuerKey,ok:=cert.PublicKey.(ed25519.PublicKey)
+ if !ok||len(issuerKey)!=ed25519.PublicKeySize{
+  return SealedNodeProbeAuthority{},errors.New("OnePane server issuer key is not Ed25519")
+ }
+ issuerDigest:=sha256.Sum256(issuerKey)
+ issuerKeyHash:="sha256:"+hex.EncodeToString(issuerDigest[:])
+ if p.PeerTLSFingerprint==ident.Fingerprint||
+  p.OperatorPublicKeySHA256==issuerKeyHash||
+  p.InstrumentPublicKeySHA256==issuerKeyHash||
+  p.OperatorPublicKeySHA256==p.InstrumentPublicKeySHA256{
+  return SealedNodeProbeAuthority{},
+   errors.New("original server, paired Node, operator and instrument must hold distinct signing roles")
  }
  payload,err:=serverProbeSealPayload(cert.Subject.CommonName,ident.Fingerprint,p,now.UnixMilli())
  if err!=nil{return SealedNodeProbeAuthority{},err}

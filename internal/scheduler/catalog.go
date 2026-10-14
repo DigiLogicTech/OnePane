@@ -340,6 +340,13 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 			if !cand.TrustedNodeVerified {
 				cand.Schedulable = false
 				cand.NodeStatus = "unavailable"
+				// Until a live pairing and signed capability manifest
+				// are verified, the foreign host's advertised "local"
+				// cost is not a proven $0 resource. Retain Node ID only
+				// for operator diagnostics, never as transfer authority.
+				cand.CostClass = CostUnknown
+				cand.HardZeroIncrementalCost = false
+				cand.Destination = destination("untrusted", ws, "", "public")
 			}
 			var enabled, idleOnly int
 			err := c.db.QueryRowContext(ctx, `SELECT enabled,idle_only FROM remote_node_compute_policies WHERE node_id=?`, node.String).Scan(&enabled, &idleOnly)
@@ -347,6 +354,9 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 				if enabled == 0 {
 					cand.Schedulable = false
 					cand.TrustedNodeVerified = false
+					cand.CostClass = CostUnknown
+					cand.HardZeroIncrementalCost = false
+					cand.Destination = destination("untrusted", ws, "", "public")
 				}
 				if idleOnly != 0 && strings.EqualFold(cand.NodeStatus, "busy") {
 					cand.Schedulable = false

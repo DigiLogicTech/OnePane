@@ -202,25 +202,13 @@ func (s *Service) releaseBudgetBeforeDispatch(ctx context.Context, cmd InvokeCom
 	_, _ = s.budgets.Release(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 }
 
-func runtimeRouteRequiresBudget(c Connection) bool {
-	var caps struct {
-		Scheduling struct {
-			CostClass string `json:"cost_class"`
-			HardZero  bool   `json:"hard_zero_incremental_cost"`
-		} `json:"scheduling"`
-	}
-	_ = json.Unmarshal(c.CapabilitiesJSON, &caps)
-	switch strings.ToLower(strings.TrimSpace(caps.Scheduling.CostClass)) {
-	case "local":
-		return false
-	case "free":
-		return !caps.Scheduling.HardZero
-	case "included_subscription", "provider_managed", "paid", "unknown", "":
-		return true
-	default:
-		return true
-	}
-}
+// A third-party Agent Runtime is NOT a verified inference deployment:
+// even a bridge reached at 127.0.0.1 can call paid providers on its own.
+// A runtime's self-declared "local/free/hard_zero_incremental_cost" is
+// never authority to consume someone else's money or subscription quota.
+// A later independent, enforceable zero-spend lease can narrow this
+// requirement, but merely trusting the bridge's JSON cannot.
+func runtimeRouteRequiresBudget(_ Connection) bool { return true }
 
 func (s *Service) authorizeInvocation(c Connection, input policy.DataLabel) (policy.DataLabel, RuntimeTransport, error) {
 	if c.WorkspaceID != nil && *c.WorkspaceID != input.WorkspaceID {

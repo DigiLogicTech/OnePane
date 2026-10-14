@@ -108,6 +108,8 @@ func runVerifyExecution(args []string)error{
  if !sameSealedHumanProbeScope(sealedPermit,approval.Permit){
   return errors.New("human and OnePane server signatures refer to different approvals")
  }
+ if err=requireDistinctCustodyRoles(serverBlock.Bytes,block.Bytes,
+  humanPublic,instrumentPublic);err!=nil{return err}
  fmt.Println("Original OnePane, human operator, Node and instrument signatures bind one historical approved challenge.")
  fmt.Println("This verifies four software keys and historical metadata, NOT live revocation, physical execution, independent vantage or device health.")
  return nil

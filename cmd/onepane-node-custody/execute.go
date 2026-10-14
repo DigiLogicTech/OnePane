@@ -196,6 +196,11 @@ func ExecuteExplicitNodeProbe(ctx context.Context,c ExplicitNodeProbeCommand,
  if !sameSealedHumanProbeScope(originalPermit,signed.Permit){
   return errors.New("human signature and original OnePane server seal concern different approvals")
  }
+ // Check custody-role key separation AFTER verifying the original
+ // server/human scopes but BEFORE reserving outputs or consuming the
+ // instrument's one-shot nonce or opening a network socket.
+ if err=requireDistinctCustodyRoles(block.Bytes,node.Certificate.Certificate[0],
+  operatorPublic,instrumentPub);err!=nil{return err}
  // Prevent writes to existing plans, instrument keys or evidence, even
  // with aliased filenames. O_EXCL also refuses an existing symlink.
  receiptOut,err:=reservePrivateOutput(c.ReceiptOutput)

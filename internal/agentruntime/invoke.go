@@ -157,6 +157,10 @@ func (s *Service) Invoke(ctx context.Context, cmd InvokeCommand) (InvokeResult, 
 		s.releaseBudgetBeforeDispatch(ctx, cmd)
 		return InvokeResult{}, err
 	}
+	if err:=s.requireCurrentRuntimeDispatch(ctx,c,cmd.InputLabel);err!=nil{
+		s.releaseBudgetBeforeDispatch(ctx,cmd)
+		return s.finishInvocationError(ctx,inv.ID,InvocationAuthorized,err,cmd)
+	}
 	if err := s.transitionInvocation(ctx, inv.ID, InvocationDispatched, nil, nil, nil, cmd, "agent_runtime_invocation.dispatched", nil); err != nil {
 		s.releaseBudgetBeforeDispatch(ctx, cmd)
 		return InvokeResult{}, err
@@ -164,6 +168,13 @@ func (s *Service) Invoke(ctx context.Context, cmd InvokeCommand) (InvokeResult, 
 	if err := s.transitionInvocation(ctx, inv.ID, InvocationExecuting, nil, nil, nil, cmd, "agent_runtime_invocation.executing", nil); err != nil {
 		s.releaseBudgetBeforeDispatch(ctx, cmd)
 		return InvokeResult{}, err
+	}
+	// Revalidate the canonical peer and data policy immediately before the
+	// potentially external side-effect. A non-replayable unknown network
+	// outcome remains handled by the existing Invocation state machine.
+	if err:=s.requireCurrentRuntimeDispatch(ctx,c,cmd.InputLabel);err!=nil{
+		s.releaseBudgetBeforeDispatch(ctx,cmd)
+		return s.finishInvocationError(ctx,inv.ID,InvocationExecuting,err,cmd)
 	}
 	resp, callErr := transport.Invoke(ctx, c, req, s.secrets)
 	if cmd.BudgetReservationID != nil && s.budgets != nil {

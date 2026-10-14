@@ -310,7 +310,7 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 		if err := c.applyManagedAdmission(ctx, id, capability, role, &cand); err != nil {
 			return nil, err
 		}
-		if node.Valid && local == 0 && !provider.Valid {
+		if node.Valid && local == 0 && !providerID.Valid {
 			// A persisted READY deployment cannot authorize a dispatch after
 			// its Node's signed/mTLS-paired capability heartbeat has expired.
 			// This flag is catalogue-derived, not a model-provided label.

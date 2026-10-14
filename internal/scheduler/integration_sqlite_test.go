@@ -156,7 +156,8 @@ func TestSQLiteProviderBackedOriginNodeCannotMasqueradeAsFreeLocal(t *testing.T)
   if item.ID!="deployment"{continue}
   found=true
   if item.Schedulable||item.Local||item.HardZeroIncrementalCost||
-   item.CostClass!=CostUnknown||item.ComputeMode!="cloud"{
+   item.CostClass!=CostUnknown||item.ComputeMode!="cloud"||
+   item.TrustedNodeVerified{
    t.Fatalf("dangling provider association borrowed local trusted compute: %+v",item)
   }
  }

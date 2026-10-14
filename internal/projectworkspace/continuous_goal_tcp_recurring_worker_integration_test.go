@@ -65,6 +65,41 @@ func TestRecurringTCPWorkerRequiresOptInAndPersistsCadenceAcrossRestart(t *testi
   ActorPrincipalID:"owner",ExpiresAt:expiry,
  })
  if err!=nil{t.Fatal(err)}
+ // No socket is created by a human pause, including after a restart.
+ g,err=svc.ContinuousGoal(ctx,g.ID);if err!=nil{t.Fatal(err)}
+ beforeFence,err:=svc.GetGoalTCPObservationFence(ctx,p.ID,g.ID)
+ if err!=nil||beforeFence.Revision!=0||beforeFence.ObservationAuthorized{
+  t.Fatalf("unexpected implicit observer permission: %+v %v",beforeFence,err)
+ }
+ paused,err:=svc.SetGoalTCPObservationFence(ctx,SetGoalTCPObservationFenceCommand{
+  ProjectID:p.ID,GoalID:g.ID,ActorPrincipalID:"owner",
+  TargetStatus:"paused",ExpectedGoalRevision:g.Revision,
+  ExpectedFenceRevision:beforeFence.Revision,
+ })
+ if err!=nil||paused.Status!="paused"||paused.Revision!=1{
+  t.Fatalf("operator pause rejected: %+v %v",paused,err)
+ }
+ if _,err:=svc.SetGoalTCPObservationFence(ctx,SetGoalTCPObservationFenceCommand{
+  ProjectID:p.ID,GoalID:g.ID,ActorPrincipalID:"owner",
+  TargetStatus:"running",ExpectedGoalRevision:g.Revision,
+  ExpectedFenceRevision:0,
+ });!errors.Is(err,ErrRevisionConflict){
+  t.Fatalf("stale resume override accepted: %v",err)
+ }
+ hold:=NewService(db.SQL(),db,clock.Real{})
+ skipped,err:=hold.tickDueTCPRecurringProbes(ctx,1,fake)
+ if err!=nil||len(skipped)!=0||fake.calls!=0{
+  t.Fatalf("paused observer dialled: %+v %v calls=%d",skipped,err,fake.calls)
+ }
+ restored,err:=svc.SetGoalTCPObservationFence(ctx,SetGoalTCPObservationFenceCommand{
+  ProjectID:p.ID,GoalID:g.ID,ActorPrincipalID:"owner",
+  TargetStatus:"running",ExpectedGoalRevision:g.Revision,
+  ExpectedFenceRevision:paused.Revision,
+ })
+ if err!=nil||restored.Status!="running"||restored.Revision!=2||
+  restored.ObservationAuthorized{
+  t.Fatalf("resume incorrectly granted monitoring: %+v %v",restored,err)
+ }
  checked,err:=svc.tickDueTCPRecurringProbes(ctx,1,fake)
  if err!=nil||len(checked)!=1||fake.calls!=1||
   fake.network!="tcp4"||fake.address!="192.168.9.23:443"||

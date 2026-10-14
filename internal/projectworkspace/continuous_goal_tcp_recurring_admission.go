@@ -18,6 +18,11 @@ const GoalTCPRecurringWorkerPrincipal="system:tcp-recurring-observer"
 func(s *Service)authorizeRecurringTCPClaimTx(ctx context.Context,tx storage.Tx,
  grantID,projectID,goalID,workspaceID string,manual GoalTCPProbePermit,
  planHash string,cadence,now int64)error{
+ var paused int
+ if err:=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_goal_tcp_observation_fences
+  WHERE project_id=? AND goal_id=? AND project_workspace_id=? AND status='paused'`,
+  projectID,goalID,workspaceID).Scan(&paused);err!=nil{return err}
+ if paused!=0{return ErrInvalidTransition}
  grant,err:=scanRecurringGrant(tx.QueryRowContext(ctx,`SELECT `+recurringGrantColumns+
   ` FROM project_goal_tcp_recurring_grants
   WHERE id=? AND project_id=? AND goal_id=?`,grantID,projectID,goalID))
@@ -64,6 +69,8 @@ func(s *Service)tcpRecurringClaimStillAuthorised(ctx context.Context,
  a GoalTCPProbeAttempt,grantID string)(bool,error){
  if a.RequestedBy!=GoalTCPRecurringWorkerPrincipal||a.RecurringGrantID==nil||
   *a.RecurringGrantID!=grantID{return false,nil}
+ paused,err:=s.tcpObservationPaused(ctx,a.ProjectID,a.GoalID)
+ if err!=nil||paused{return false,err}
  valid,err:=s.TCPRecurringGrantAllowed(ctx,grantID)
  if err!=nil||!valid{return false,err}
  grant,err:=scanRecurringGrant(s.db.QueryRowContext(ctx,`SELECT `+recurringGrantColumns+

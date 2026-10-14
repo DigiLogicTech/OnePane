@@ -77,6 +77,10 @@ func(s *Service)dueTCPRecurringGrants(ctx context.Context,now int64,after string
    AND w.project_id=pr.id AND w.status='active'
   WHERE r.status='approved' AND r.expires_at>? AND r.id>?
    AND NOT EXISTS(
+    SELECT 1 FROM project_goal_tcp_observation_fences fence
+    WHERE fence.project_id=r.project_id AND fence.goal_id=r.goal_id
+     AND fence.project_workspace_id=r.project_workspace_id AND fence.status='paused')
+   AND NOT EXISTS(
     SELECT 1 FROM project_goal_tcp_probe_attempts a
      WHERE a.goal_id=r.goal_id AND a.source_id=r.source_id
       AND a.cadence_window=CAST(?/(r.cadence_minutes*60000) AS INTEGER))

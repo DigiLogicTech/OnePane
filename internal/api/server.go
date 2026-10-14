@@ -596,6 +596,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-alerts", s.listProjectGoalTCPReachabilityAlerts)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/incident-reviews", s.listProjectGoalIncidentReviews)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/response-candidates", s.listProjectGoalResponseCandidates)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-observer-fence", s.getProjectGoalTCPObserverFence)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-observer-fence", s.setProjectGoalTCPObserverFence)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/response-candidates", s.proposeProjectGoalResponseCandidate)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/response-candidates/{candidateID}/readiness", s.getProjectGoalResponseCandidateReadiness)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/response-candidates/{candidateID}/withdraw", s.withdrawProjectGoalResponseCandidate)

@@ -27,6 +27,7 @@ func identityGuardFixture(t *testing.T, remote,provider bool)(*Service,ModelDepl
    display_name TEXT,auth_type TEXT,secret_ref TEXT,status TEXT,connection_json TEXT,
    retry_after INTEGER,revision INTEGER,created_at INTEGER,updated_at INTEGER)`,
   `INSERT INTO models VALUES('m',NULL,'qwen-local',NULL,NULL,NULL,NULL,'{}','{}','trusted',1,1)`,
+  `INSERT INTO harness_nodes VALUES('local','local')`,
   `INSERT INTO harness_nodes VALUES('remote','paired')`,
   `INSERT INTO provider_connections VALUES('provider',NULL,'cloud','Cloud','api_key','old-secret',
    'connected','{}',NULL,1,1,1)`,
@@ -124,6 +125,29 @@ func TestColdLoadResidencyAndVerifiedContextUpdatesDoNotCancelQueuedInference(t 
   WHERE id='d'`);err!=nil{t.Fatal(err)}
  if err:=svc.requireCurrentDispatchIdentity(ctx,d,m,p);!errors.Is(err,ErrInformationFlow){
   t.Fatalf("runtime endpoint changed while cold-loading: %v",err)
+ }
+}
+
+func TestInferenceLastDispatchRejectsRevokedLocalNodeAfterQueue(t *testing.T){
+ svc,d,m,p:=identityGuardFixture(t,false,false)
+ db:=svc.repo.(*sqlRepository).db
+ if _,err:=db.ExecContext(context.Background(),
+  `UPDATE harness_nodes SET trust_state='revoked' WHERE id='local'`);err!=nil{
+  t.Fatal(err)
+ }
+ if err:=svc.requireCurrentDispatchIdentity(context.Background(),d,m,p);
+  !errors.Is(err,ErrInformationFlow){
+  t.Fatalf("revoked host Node still allowed queued local inference: %v",err)
+ }
+ // Re-enrolling the original local identity is not accomplished by
+ // modifying a model's advertised compute mode; only the canonical
+ // Node trust store can supply this independently managed state.
+ if _,err:=db.ExecContext(context.Background(),
+  `UPDATE harness_nodes SET trust_state='local' WHERE id='local'`);err!=nil{
+  t.Fatal(err)
+ }
+ if err:=svc.requireCurrentDispatchIdentity(context.Background(),d,m,p);err!=nil{
+  t.Fatalf("valid local placement refused after canonical trust recheck: %v",err)
  }
 }
 

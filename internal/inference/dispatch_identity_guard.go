@@ -38,11 +38,23 @@ func(s *Service)requireCurrentDispatchIdentity(ctx context.Context,
  }else if selectedDeployment.ProviderConnectionID!=nil{
   return fmt.Errorf("%w: unapproved provider association",ErrInformationFlow)
  }
- // A paired Node can be untrusted while a local model is cold-swapped.
- if selectedDeployment.NodeID!=nil&&*selectedDeployment.NodeID!=s.localNodeID{
-  state,err:=s.repo.NodeTrust(ctx,*selectedDeployment.NodeID)
-  if err!=nil||state!="paired"{
-   return fmt.Errorf("%w: paired Node trust was revoked before dispatch",ErrInformationFlow)
+ // Revocation applies to the origin host too. READY and resident
+ // deployment metadata cannot preserve a zero-cost local authority if
+ // its canonical Node trust was revoked during a model queue/cold load.
+ // Provider-backed routes do not obtain local placement merely by
+ // referencing the origin Node in historical deployment metadata.
+ if selectedDeployment.NodeID!=nil{
+  nodeID:=*selectedDeployment.NodeID
+  if nodeID==s.localNodeID && selectedDeployment.ProviderConnectionID==nil{
+   state,e:=s.repo.NodeTrust(ctx,nodeID)
+   if e!=nil||state!="local"{
+    return fmt.Errorf("%w: host Node trust was revoked before local inference dispatch",ErrInformationFlow)
+   }
+  }else if nodeID!=s.localNodeID{
+   state,e:=s.repo.NodeTrust(ctx,nodeID)
+   if e!=nil||state!="paired"{
+    return fmt.Errorf("%w: paired Node trust was revoked before dispatch",ErrInformationFlow)
+   }
   }
  }
  return nil

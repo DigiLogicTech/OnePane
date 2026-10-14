@@ -91,6 +91,44 @@ func TestTCPRecurringGrantAPIRequiresSeparateHumanConsent(t *testing.T){
    !strings.Contains(got.Body.String(),grant.ID){
   t.Fatalf("recurring grant invisible to owner: %d %s",got.Code,got.Body)
  }
+ fenceURL:="/v1/projects/"+project.ID+"/continuous-goals/"+goal.ID+"/tcp-observer-fence"
+ for _,who:=range []string{"","outsider","robot"}{
+  got:=call("GET",who,fenceURL,"")
+  want:=403;if who==""{want=401}
+  if got.Code!=want{t.Fatalf("unauthorised observer status %q: %d",who,got.Code)}
+ }
+ for _,who:=range []string{"","outsider","robot"}{
+  got:=call("POST",who,fenceURL,
+   `{"target_status":"paused","expected_goal_revision":3,"expected_fence_revision":0}`)
+  want:=403;if who==""{want=401}
+  if got.Code!=want{t.Fatalf("unauthorised pause %q: %d",who,got.Code)}
+ }
+ beforeFence:=call("GET","operator",fenceURL,"")
+ if beforeFence.Code!=200||
+  !strings.Contains(beforeFence.Body.String(),`"revision":0`)||
+  !strings.Contains(beforeFence.Body.String(),`"observation_authorized":false`){
+  t.Fatalf("observer fence incorrectly granted network consent: %d %s",beforeFence.Code,beforeFence.Body)
+ }
+ pause:=call("POST","operator",fenceURL,
+  `{"target_status":"paused","expected_goal_revision":3,"expected_fence_revision":0}`)
+ if pause.Code!=200||
+  !strings.Contains(pause.Body.String(),`"status":"paused"`)||
+  !strings.Contains(pause.Body.String(),`"revision":1`){
+  t.Fatalf("operator cannot pause recurring source: %d %s",pause.Code,pause.Body)
+ }
+ if replay:=call("POST","operator",fenceURL,
+  `{"target_status":"running","expected_goal_revision":3,"expected_fence_revision":0}`);
+  replay.Code!=409{
+  t.Fatalf("stale observer resume bypassed CAS: %d %s",replay.Code,replay.Body)
+ }
+ resume:=call("POST","operator",fenceURL,
+  `{"target_status":"running","expected_goal_revision":3,"expected_fence_revision":1}`)
+ if resume.Code!=200||
+  !strings.Contains(resume.Body.String(),`"status":"running"`)||
+  !strings.Contains(resume.Body.String(),`"revision":2`)||
+  !strings.Contains(resume.Body.String(),`"observation_authorized":false`){
+  t.Fatalf("operator resume failed or granted independent authority: %d %s",resume.Code,resume.Body)
+ }
  stop:=route+"/"+grant.ID+"/revoke"
  revoke:=`{"expected_goal_revision":3,"expected_grant_revision":1}`
  if got:=call("POST","robot",stop,revoke);got.Code!=403{

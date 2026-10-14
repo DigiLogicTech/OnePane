@@ -77,6 +77,51 @@ func TestRuntimeCatalogueCannotPromoteSelfDeclaredZeroCostOrOffHostOrigin(t *tes
   }
  }
  if len(seen)!=7{t.Fatalf("lost scheduler runtime candidates: %v",seen)}
+ // A third-party bridge cannot mint a paid-provider "included plan" claim
+ // to use the subscription-only opt-in as a substitute for spend consent.
+ for _,tc:=range []struct{claim string;want CostClass}{
+  {"local",CostUnknown},{"free",CostUnknown},
+  {"included_subscription",CostUnknown},
+  {"paid",CostPaid},{"provider_managed",CostProviderManaged},
+ }{
+  _,e:=db.SQL().ExecContext(ctx,`UPDATE agent_runtime_connections SET
+   capabilities_json=json_set(capabilities_json,'$.scheduling.cost_class',?)
+   WHERE id='host-loopback'`,tc.claim)
+  if e!=nil{t.Fatal(e)}
+  got,e:=NewCatalog(db.SQL()).Candidates(ctx,"ws","agent.reason","")
+  if e!=nil{t.Fatal(e)}
+  found:=false
+  for _,c:=range got{
+   if c.ID!="host-loopback"{continue}
+   found=true
+   if c.CostClass!=tc.want||c.HardZeroIncrementalCost{
+    t.Fatalf("unverified Agent Runtime cost claim %q granted protected allowance: %+v",tc.claim,c)
+   }
+  }
+  if !found{t.Fatal("local runtime vanished during cost test")}
+ }
+ _,err=db.SQL().ExecContext(ctx,`UPDATE agent_runtime_connections SET
+  capabilities_json=json_set(capabilities_json,'$.scheduling.cost_class','included_subscription')
+  WHERE id='host-loopback'`)
+ if err!=nil{t.Fatal(err)}
+ includes,err:=NewCatalog(db.SQL()).Candidates(ctx,"ws","agent.reason","")
+ if err!=nil{t.Fatal(err)}
+ subRequest:=RouteRequest{WorkspaceID:"ws",CapabilityID:"agent.reason",
+  ProtocolLevel:"L1",
+  DataLabel:policy.DataLabel{WorkspaceID:"ws",Confidentiality:policy.ConfidentialityPublic,
+   Residency:policy.ResidencyAny,Trust:policy.TrustUserInstruction},
+  AllowSubscriptionUsage:true,
+  AllowPotentialMonetarySpend:false,
+ }
+ if got,e:=Route(subRequest,includes);e!=ErrNoEligibleCandidate||got.Selected!=nil{
+  t.Fatalf("subscription-only consent silently authorised unknown third-party spend: %+v %v",got.Selected,e)
+ }
+ // Restore the original unverified local claim before the invariant checks.
+ _,err=db.SQL().ExecContext(ctx,`UPDATE agent_runtime_connections SET
+  capabilities_json=json_set(capabilities_json,'$.scheduling.cost_class','local')
+  WHERE id='host-loopback'`)
+ if err!=nil{t.Fatal(err)}
+
  for _,restriction:=range []struct{name string;req RouteRequest}{
   {"strict-local",RouteRequest{LocalOnly:true,AllowPotentialMonetarySpend:true}},
   {"strict-free",RouteRequest{RequireZeroIncrementalCost:true,AllowPotentialMonetarySpend:true}},

@@ -414,7 +414,11 @@ func (c *Catalog) runtimeCandidates(ctx context.Context, ws string) ([]Candidate
 		// costs never establish a zero-cost contract.
 		cost := CostUnknown
 		switch caps.Scheduling.CostClass {
-		case CostPaid,CostProviderManaged,CostIncludedSubscription:
+		case CostPaid,CostProviderManaged:
+			// These two are already protected by independent explicit
+			// monetary-spend consent. An alleged included subscription is
+			// NOT verified: treating it as subscription-only would allow
+			// potentially paid use without AllowPotentialMonetarySpend.
 			cost=caps.Scheduling.CostClass
 		}
 		qual := QualUntested

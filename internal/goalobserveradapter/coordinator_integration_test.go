@@ -367,15 +367,21 @@ func TestObserverPauseResumeRequiresRealCoordinatorApprovalAndCompensation(t *te
   if err!=nil{t.Fatal(err)}
  }
  limited,err:=goalService.ListGoalObserverRecoveryCases(ctx,project.ID,goal.ID)
- if err!=nil||len(limited)!=25||limited[0].OperationID!="synthetic-blocked-29"{
-  t.Fatalf("recovery list not bounded/newest-first: %d %+v %v",len(limited),limited,err)
+ if err!=nil||len(limited)!=25{
+  t.Fatalf("recovery list was not bounded: %d %+v %v",len(limited),limited,err)
  }
- for _,entry:=range limited{
+ foundNewestSynthetic:=false
+ for i,entry:=range limited{
+  if i>0&&limited[i-1].UpdatedAt<entry.UpdatedAt{
+   t.Fatalf("recovery list not newest-first at %d: %+v",i,limited)
+  }
+  if entry.OperationID=="synthetic-blocked-29"{foundNewestSynthetic=true}
   if entry.OperationID==""||entry.IndependentDeviceVerification||
    !entry.HumanReconciliationRequired{
    t.Fatalf("unsafe recovery list entry: %+v",entry)
   }
  }
+ if !foundNewestSynthetic{t.Fatal("newest synthetic recovery item omitted")}
  // An actively executing Operation is not automatically a crash or a
  // human reconciliation task until the startup recovery sweep identifies
  // an uncertain outcome. It remains operator-visible without false urgency.
@@ -383,8 +389,18 @@ func TestObserverPauseResumeRequiresRealCoordinatorApprovalAndCompensation(t *te
   WHERE id='synthetic-blocked-29'`)
  if err!=nil{t.Fatal(err)}
  live,err:=goalService.ListGoalObserverRecoveryCases(ctx,project.ID,goal.ID)
- if err!=nil||len(live)!=25||live[0].OperationID!="synthetic-blocked-29"||
-  live[0].HumanReconciliationRequired{
-  t.Fatalf("normal executing effect mislabeled as crashed: %+v %v",live,err)
+ if err!=nil||len(live)!=25{
+  t.Fatalf("bounded list disappeared after live state change: %+v %v",live,err)
  }
+ seenLive:=false
+ for _,item:=range live{
+  if item.OperationID=="synthetic-blocked-29"{
+   seenLive=true
+   if item.HumanReconciliationRequired||
+    item.State!="executing"||item.IndependentDeviceVerification{
+    t.Fatalf("live operation misclassified as crashed: %+v",item)
+   }
+  }
+ }
+ if !seenLive{t.Fatal("live operation no longer in bounded recovery list")}
 }

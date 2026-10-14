@@ -376,4 +376,15 @@ func TestObserverPauseResumeRequiresRealCoordinatorApprovalAndCompensation(t *te
    t.Fatalf("unsafe recovery list entry: %+v",entry)
   }
  }
+ // An actively executing Operation is not automatically a crash or a
+ // human reconciliation task until the startup recovery sweep identifies
+ // an uncertain outcome. It remains operator-visible without false urgency.
+ _,err=db.SQL().ExecContext(ctx,`UPDATE operations SET state='executing'
+  WHERE id='synthetic-blocked-29'`)
+ if err!=nil{t.Fatal(err)}
+ live,err:=goalService.ListGoalObserverRecoveryCases(ctx,project.ID,goal.ID)
+ if err!=nil||len(live)!=25||live[0].OperationID!="synthetic-blocked-29"||
+  live[0].HumanReconciliationRequired{
+  t.Fatalf("normal executing effect mislabeled as crashed: %+v %v",live,err)
+ }
 }

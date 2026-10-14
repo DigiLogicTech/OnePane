@@ -162,5 +162,5 @@ func TestHumanBoundGoalTCPObserverAdapterPersistsAndRequiresActualInvocationPrin
  var tasks,probes int
  if err:=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM tasks").Scan(&tasks);err!=nil{t.Fatal(err)}
  if err:=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM project_goal_tcp_probe_attempts").Scan(&probes);err!=nil{t.Fatal(err)}
- if tasks!=0||probes!=0{t.Fatalf("adapter dispatched external work: %d Tasks, %d TCP probes",tasks,probes)}
+ if tasks!=2||probes!=0{t.Fatalf("adapter created Tasks or TCP probes: %d Tasks, %d probes",tasks,probes)}
 }

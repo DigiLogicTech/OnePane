@@ -65,6 +65,7 @@ on:
       - 'scripts/validate_policy_diagnostic_review.js'
       - 'internal/inference/**'
       - 'internal/tool/**'
+      - 'internal/goalobserveradapter/**'
       - 'internal/agentworker/**'
       - 'internal/team/**'
       - 'internal/teamworker/**'
@@ -183,7 +184,7 @@ jobs:
       - name: Existing sandbox and Project contract tests
         run: |
           go test ./internal/projectworkspace ./internal/projectruntime ./internal/sandboxrunner ./internal/agentprotocol ./internal/agentworker ./internal/team ./internal/teamworker ./internal/task ./internal/storage/sqlite ./internal/scheduler ./internal/localai ./internal/api
-          go test -tags integration ./internal/inference ./internal/tool ./internal/projectworkspace ./internal/sandboxrunner ./internal/agentworker ./internal/task ./internal/workspacepublisher ./internal/projectorchestrator ./internal/workspacebroker ./internal/nodefederation ./internal/scheduler ./internal/operation
+          go test -tags integration ./internal/inference ./internal/tool ./internal/projectworkspace ./internal/sandboxrunner ./internal/agentworker ./internal/task ./internal/workspacepublisher ./internal/projectorchestrator ./internal/workspacebroker ./internal/nodefederation ./internal/scheduler ./internal/operation ./internal/goalobserveradapter
       - name: Node approval and SQLite race checks (hosted source only)
         run: |
           go test -race -count=1 ./internal/instrumentprobe ./internal/nodefederation ./cmd/onepane-node-custody ./cmd/onepane-instrument-probe

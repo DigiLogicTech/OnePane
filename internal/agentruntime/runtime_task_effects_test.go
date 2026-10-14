@@ -3,6 +3,7 @@ package agentruntime
 import (
  "context"
  "database/sql"
+ "encoding/json"
  "errors"
  "path/filepath"
  "testing"
@@ -89,5 +90,42 @@ func TestAgentRuntimeTaskEffectStoreMissingFailsClosed(t *testing.T){
   Connection{AuthType:"none"});
   !errors.Is(err,ErrRuntimeInformationFlow){
   t.Fatalf("missing policy DB admitted external runtime: %v",err)
+ }
+}
+
+func TestTasklessAgentRuntimeOnlyPermitsUncredentialedLocalProposalBridge(t *testing.T){
+ node:="node"
+ service:=&Service{localNodeID:node}
+ c:=Connection{
+  NodeID:&node,AdapterName:"builtin.agent_protocol_http",AdapterVersion:"1",
+  OperatingMode:ProposalOnly,AuthType:"none",
+  EndpointJSON:json.RawMessage(`{"base_url":"http://127.0.0.1:9000"}`),
+  DataPolicyJSON:json.RawMessage(`{"destination_kind":"origin_node"}`),
+ }
+ cmd:=InvokeCommand{WorkspaceID:"ws"}
+ if err:=service.requireTaskRuntimeEffects(context.Background(),cmd,c);err!=nil{
+  t.Fatalf("explicit local proposal without network secrets rejected: %v",err)
+ }
+ negatives:=[]struct{name string;alter func(*Connection)}{
+  {"offhost",func(x *Connection){x.EndpointJSON=json.RawMessage(`{"base_url":"https://example.com"}`)}},
+  {"ambiguous localhost dns",func(x *Connection){x.EndpointJSON=json.RawMessage(`{"base_url":"http://localhost:9000"}`)}},
+  {"private nonloopback",func(x *Connection){x.EndpointJSON=json.RawMessage(`{"base_url":"http://192.168.1.9"}`)}},
+  {"bearer credential",func(x *Connection){x.AuthType="bearer"}},
+  {"gateway callback",func(x *Connection){x.OperatingMode=GatewayMediated}},
+  {"unmanaged",func(x *Connection){x.OperatingMode=Unmanaged}},
+  {"cloud classification",func(x *Connection){x.DataPolicyJSON=json.RawMessage(`{"destination_kind":"cloud"}`)}},
+  {"untrusted classification",func(x *Connection){x.DataPolicyJSON=json.RawMessage(`{"destination_kind":"untrusted"}`)}},
+  {"missing policy",func(x *Connection){x.DataPolicyJSON=json.RawMessage(`{}`)}},
+  {"forged Node",func(x *Connection){n:="foreign-node";x.NodeID=&n}},
+  {"unknown adapter",func(x *Connection){x.AdapterName="custom.external"}},
+ }
+ for _,tc:=range negatives{
+  t.Run(tc.name,func(t *testing.T){
+   clone:=c;tc.alter(&clone)
+   if err:=service.requireTaskRuntimeEffects(context.Background(),cmd,clone);
+    !errors.Is(err,ErrRuntimeInformationFlow){
+    t.Fatalf("unscoped Agent Runtime bypassed Task boundary: %v",err)
+   }
+  })
  }
 }

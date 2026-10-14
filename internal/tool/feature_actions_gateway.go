@@ -21,7 +21,8 @@ func (g *Gateway) authorizeToolFeatureActions(ctx context.Context,cmd InvokeComm
   id:=strings.ToLower(strings.TrimSpace(def.ID))
   if strings.HasPrefix(id,"project.app.")||
     strings.HasPrefix(id,"project.runtime.")||
-    strings.HasPrefix(id,"project.image."){
+    strings.HasPrefix(id,"project.image.")||
+    strings.HasPrefix(id,"project.goal."){
    return fmt.Errorf("Project tool requires an attached, scoped Task")
   }
   // The persisted feature-policy resolver needs a canonical Task to
@@ -49,7 +50,8 @@ func (g *Gateway) authorizeToolFeatureActions(ctx context.Context,cmd InvokeComm
  id:=strings.ToLower(strings.TrimSpace(def.ID))
  projectTool:=strings.HasPrefix(id,"project.app.")||
    strings.HasPrefix(id,"project.runtime.")||
-   strings.HasPrefix(id,"project.image.")
+   strings.HasPrefix(id,"project.image.")||
+   strings.HasPrefix(id,"project.goal.")
  actions,classified:=scopedToolActions(def.CapabilityID,def.ID,def.Mode)
  if projectTool&&!classified{
   return fmt.Errorf("unrecognised Project Tool ID or execution mode")

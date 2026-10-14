@@ -40,6 +40,11 @@ func TestToolEffectClassificationIsConservativeAcrossAdapters(t *testing.T){
   {"vault.get","vault.read",authority.ActionRead,[]string{"secrets.use"},true},
   {"unknown.tool","unclassified",authority.ActionExecuteSandboxed,[]string{"files.read","files.write","process.execute"},true},
   {"unknown.mutate","unclassified",authority.ActionMutate,nil,false},
+  {"unknown.mutate","filesystem.write",authority.ActionMutate,nil,false},
+  {"unknown.mutate","vault.read",authority.ActionMutate,nil,false},
+  {"unknown.mutate","network.send",authority.ActionMutate,nil,false},
+  {"project.goal.unreviewed","file.read",authority.ActionRead,nil,false},
+  {"project.goal.unreviewed","network.send",authority.ActionExternalSend,nil,false},
   {"unknown.read","unclassified",authority.ActionRead,nil,false},
  }
  for _,tc:=range cases{

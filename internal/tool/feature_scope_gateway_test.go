@@ -146,6 +146,52 @@ func(a *revokeExecuteAuthority)Consume(ctx context.Context,_ authority.ConsumeCo
   `UPDATE project_workspaces SET ai_settings_json='{"feature_policy":{"ProcessExecute":"disabled"}}' WHERE id='world'`)
  return authority.Lease{},err
 }
+// An adapter may claim "filesystem.write" or "vault.read" while its
+// actual mutation can do anything. Configured Workspaces require an exact,
+// reviewed tool effect mapping instead of trusting its capability label.
+func TestUnknownMutatingToolCannotBorrowNarrowCapability(t *testing.T){
+ db:=featureScopeFixture(t)
+ for _,q:=range []string{
+  `UPDATE projects SET project_policy_json='{"feature_policy":{"Files":"enabled","FileWrite":"enabled","ProcessExecute":"enabled","NetworkAccess":"enabled","SecretsAccess":"enabled"}}' WHERE id='game'`,
+  `UPDATE project_workspaces SET ai_settings_json='{"feature_policy":{"Files":"enabled","FileWrite":"enabled","ProcessExecute":"enabled","NetworkAccess":"enabled","SecretsAccess":"enabled"}}' WHERE id='world'`,
+ }{
+  if _,err:=db.Exec(q);err!=nil{t.Fatal(err)}
+ }
+ for _,tc:=range []struct{name,cap,id string;mode authority.ActionMode}{
+  {"file-write-labelled mutation","filesystem.write","customer.generic.mutate",authority.ActionMutate},
+  {"vault-labelled mutation","vault.read","customer.generic.mutate",authority.ActionMutate},
+  {"network-labelled mutation","network.send","customer.generic.mutate",authority.ActionMutate},
+  {"reserved-goal-read impersonation","filesystem.read","project.goal.unreviewed",authority.ActionRead},
+  {"reserved-goal-send impersonation","network.send","project.goal.unreviewed",authority.ActionExternalSend},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   adapter:=&countingAdapter{id:"unreviewed-adapter",version:"1",
+    result:AdapterResult{Summary:"must not run",Result:json.RawMessage(`{}`)}}
+   reg:=NewRegistry()
+   if err:=reg.Register(Definition{
+    ID:tc.id,Version:"1",CapabilityID:tc.cap,Mode:tc.mode,
+    AdapterID:adapter.id,AdapterVersion:adapter.version,
+    Risk:policy.RiskLow,MinimumVerification:policy.VerificationV1,
+    MinimumApproval:policy.ApprovalNone,
+   },adapter);err!=nil{t.Fatal(err)}
+   auth:=&fakeAuthority{}
+   g:=newGateway(&fakeStore{},&fakePolicy{decision:policy.Decision{
+    Allowed:true,LeaseRevision:1,RequiredApproval:policy.ApprovalNone}},
+    auth,reg,&fakeClock{now:1000})
+   g.scopes=featurepolicy.StoredScopes{DB:db}
+   cmd:=scopedReadCommand()
+   cmd.ToolID=tc.id
+   got,err:=g.Invoke(context.Background(),cmd)
+   if !errors.Is(err,ErrPolicyDenied)||got.ErrorCode==nil||
+    *got.ErrorCode!="feature_policy_denied"||
+    auth.calls!=0||adapter.calls!=0{
+    t.Fatalf("unknown mutation/Goal adapter got rights from forged capability label: %+v err=%v authority=%d adapter=%d",
+     got,err,auth.calls,adapter.calls)
+   }
+  })
+ }
+}
+
 func TestToolGatewayRevokedSandboxExecuteNeverCallsAdapter(t *testing.T){
  db:=featureScopeFixture(t)
  if _,err:=db.Exec(`UPDATE projects SET project_policy_json='{"feature_policy":{"ProcessExecute":"enabled"}}' WHERE id='game'`);err!=nil{t.Fatal(err)}

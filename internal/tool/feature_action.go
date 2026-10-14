@@ -86,7 +86,8 @@ func scopedToolActions(capabilityID, toolID string, mode authority.ActionMode)([
   // carry privileged canonical Project/Workspace meaning and are reserved.
   if strings.HasPrefix(id,"project.app.")||
     strings.HasPrefix(id,"project.runtime.")||
-    strings.HasPrefix(id,"project.image."){
+    strings.HasPrefix(id,"project.image.")||
+    strings.HasPrefix(id,"project.goal."){
     return nil,false
   }
   // Unknown adapter identities must be classified by their *actual
@@ -104,6 +105,13 @@ func scopedToolActions(capabilityID, toolID string, mode authority.ActionMode)([
       actions=append(actions,"network.connect")
     }
     return actions,true
+  case authority.ActionMutate:
+    // An unknown mutating adapter can affect process state, files, secrets
+    // or external systems regardless of its self-declared capability ID.
+    // A generic capability label is NOT an audited effect manifest.
+    // Require explicit exact Tool ID classification when an opt-in
+    // Project/Workspace feature policy exists.
+    return nil,false
   case authority.ActionExternalSend:
     actions:=[]string{"network.connect"}
     if cap=="secrets.use"||cap=="vault.read"||cap=="vault.use"{

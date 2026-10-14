@@ -35,6 +35,19 @@ func TestPinnedOriginalOnePaneSignerSealsOnlyLiveHumanScope(t *testing.T){
  if err=assert(s,original.Certificate.Certificate[0],"onepane-hub",original.Fingerprint);err!=nil{
   t.Fatalf("separately enrolled original OnePane cert rejected: %v",err)
  }
+ for _,tc:=range []struct{name string;observed int64;valid bool}{
+  {"observed_before_original_server_seal",now.UnixMilli()-1,false},
+  {"observed_at_server_seal",now.UnixMilli(),true},
+  {"observed_after_original_server_seal",now.UnixMilli()+1,true},
+  {"observed_at_expiry",p.ExpiresAt,false},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   _,e:=VerifySealedNodeProbeExecutionAtObservation(
+    s,original.Certificate.Certificate[0],"onepane-hub",
+    original.Fingerprint,tc.observed)
+   if (e==nil)!=tc.valid{t.Fatalf("unexpected time-ordered approval validation: %v",e)}
+  })
+ }
  if err=assert(s,peer.Certificate.Certificate[0],"other-hub",peer.Fingerprint);err==nil{
   t.Fatal("unrelated OnePane issuer verified authority")
  }

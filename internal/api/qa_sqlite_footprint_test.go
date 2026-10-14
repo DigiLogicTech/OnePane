@@ -28,7 +28,7 @@ func TestQASQLiteFootprintReadOnlyAndNoPaths(t *testing.T){
  before,err:=os.Stat(path);if err!=nil{t.Fatal(err)}
  got,e:=qaReadSQLiteFootprint(context.Background(),db)
  if e!=nil{t.Fatal(e)}
- if !got.DatabaseHealthy||!got.ReadOnly||got.AutoPruneEnabled||
+ if !got.MetadataReadable||!got.ReadOnly||got.CleanupPerformed||
   got.DatabaseBytes<1||got.PageSizeBytes<512||got.PageCount<1||
   got.FreePageCount>got.PageCount||got.AllocationBytes<got.PageSizeBytes{
   t.Fatalf("misleading SQLite footprint: %+v",got)

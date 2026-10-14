@@ -22,9 +22,9 @@ type qaSQLiteFootprint struct {
  PageCount int64 `json:"page_count"`
  FreePageCount int64 `json:"freelist_pages"`
  AllocationBytes int64 `json:"page_allocation_bytes"`
- DatabaseHealthy bool `json:"database_healthy"`
+ MetadataReadable bool `json:"metadata_readable"`
  ReadOnly bool `json:"read_only"`
- AutoPruneEnabled bool `json:"automatic_pruning_enabled"`
+ CleanupPerformed bool `json:"cleanup_performed"`
  Limitations []string `json:"limitations"`
 }
 
@@ -80,8 +80,8 @@ func qaReadSQLiteFootprint(ctx context.Context,db *sql.DB)(qaSQLiteFootprint,err
   if !st.Mode().IsRegular(){return qaSQLiteFootprint{},errors.New("SQLite storage not regular")}
   *slot.value=st.Size()
  }
- // Readable page metadata is not a full integrity check.
- out.DatabaseHealthy=true
+ // Only metadata readability is verified, not a full integrity check.
+ out.MetadataReadable=true
  return out,nil
 }
 

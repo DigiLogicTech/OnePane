@@ -214,3 +214,41 @@ jobs:
         run: go run ./cmd/onepane-node-preflight -require ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE -strict
       - name: Verify real OCI health response, sibling denial and revocation
         run: go test -tags integration ./internal/workspacebroker -run '^TestRealRootlessWorkspaceHealthBroker$' -v -count=1 -timeout 9m
+
+  physical-acceptance-summary:
+    name: Physical acceptance outcome (fail closed if Node skipped)
+    if: ${{ always() }}
+    needs:
+      - physical-rootless-node
+      - physical-rootless-godot
+      - physical-rootless-large-artifact
+      - physical-rootless-library-e2e
+      - physical-rootless-workspace-service
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require completed physical rootless Node before calling run successful
+        shell: bash
+        env:
+          NODE_RESULT: ${{ needs.physical-rootless-node.result }}
+          GODOT_RESULT: ${{ needs.physical-rootless-godot.result }}
+          ARTIFACT_RESULT: ${{ needs.physical-rootless-large-artifact.result }}
+          LIBRARY_RESULT: ${{ needs.physical-rootless-library-e2e.result }}
+          BROKER_RESULT: ${{ needs.physical-rootless-workspace-service.result }}
+        run: |
+          set -euo pipefail
+          echo "Physical rootless Node: $NODE_RESULT"
+          echo "Optional Godot: $GODOT_RESULT"
+          echo "Optional artifact: $ARTIFACT_RESULT"
+          echo "Optional Library: $LIBRARY_RESULT"
+          echo "Optional broker: $BROKER_RESULT"
+          if [[ "$NODE_RESULT" != "success" ]]; then
+            echo '::error::No successfully completed primary physical rootless Node job: physical acceptance FAILED'
+            exit 1
+          fi
+          for result in "$GODOT_RESULT" "$ARTIFACT_RESULT" "$LIBRARY_RESULT" "$BROKER_RESULT"; do
+            if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
+              echo '::error::An additional physical acceptance job failed or was cancelled'
+              exit 1
+            fi
+          done
+          echo '::notice::Primary physical rootless Node test passed; skipped optional jobs are UNVERIFIED, not accepted'

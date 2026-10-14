@@ -20,6 +20,7 @@ func TestRC11PhysicalWorkflowIsExplicitReviewedManualDispatchOnly(t *testing.T){
    If string `yaml:"if"`
    Environment string `yaml:"environment"`
    RunsOn []string `yaml:"runs-on"`
+   Needs []string `yaml:"needs"`
    Steps []struct{
     Uses string `yaml:"uses"`
     With map[string]any `yaml:"with"`
@@ -31,8 +32,22 @@ func TestRC11PhysicalWorkflowIsExplicitReviewedManualDispatchOnly(t *testing.T){
  if len(spec.On)!=1||spec.On["workflow_dispatch"]==nil{
   t.Fatalf("physical workflow is not manual-only: %+v",spec.On)
  }
- if len(spec.Jobs)!=5{t.Fatalf("review all physical jobs before enabling: %d",len(spec.Jobs))}
+ if len(spec.Jobs)!=6{t.Fatalf("review all physical jobs before enabling: %d",len(spec.Jobs))}
  for name,job:=range spec.Jobs{
+  if name=="physical-acceptance-summary"{
+   if job.If!="${{ always() }}"||
+    strings.Join(job.Needs,",")!="physical-rootless-node,physical-rootless-godot,physical-rootless-large-artifact,physical-rootless-library-e2e,physical-rootless-workspace-service"||
+    strings.Join(job.RunsOn,",")!="ubuntu-latest"{
+    t.Fatal("the independent hosted physical acceptance summary has lost its dependencies")
+   }
+   if len(job.Steps)!=1||
+    !strings.Contains(job.Steps[0].Run,`"$NODE_RESULT" != "success"`)||
+    !strings.Contains(job.Steps[0].Run,"exit 1")||
+    !strings.Contains(job.Steps[0].Run,"UNVERIFIED"){
+    t.Fatal("skipped or failed physical jobs could be misreported as accepted")
+   }
+   continue
+  }
   condition:=job.If
   for _,term:=range []string{
    "github.event_name == 'workflow_dispatch'",

@@ -130,3 +130,16 @@ workflow run ID, exact checkout SHA, approved image digests, operator approval,
 rootless identity, test outcomes, and cleanup evidence. **SKIPPED** jobs
 do not count as passed. Physical approval remains an operator-controlled
 procedure and is not proof of TPM attestation or a real endpoint's health.
+
+## Fail-closed hosted result summary
+
+The physically executing workflow now includes a separate **GitHub-hosted**
+`physical-acceptance-summary` job with dependencies on all five physical
+jobs and an `always()` condition. The workflow's conclusion MUST be a failure
+if the primary rootless Node job did not actually finish `success` (including
+when the image, manual approval or protected environment is absent). Optional
+Godot/artifact/Library/broker jobs are reported individually; an optional job
+that is `skipped` stays **unverified** even if the primary job passes.
+A source unit test confirms this contract without scheduling any self-hosted
+runner. A successful summary is NOT TPM attestation, remote Node acceptance,
+or proof that an installed OnePane service can protect a real target.

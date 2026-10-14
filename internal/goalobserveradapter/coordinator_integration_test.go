@@ -251,6 +251,41 @@ func TestObserverPauseResumeRequiresRealCoordinatorApprovalAndCompensation(t *te
  if err:=db.SQL().QueryRowContext(ctx,
   "SELECT COUNT(*) FROM project_goal_tcp_probe_attempts").Scan(&probes);err!=nil{t.Fatal(err)}
  if probes!=0{t.Fatalf("observation control dispatched network I/O: %d",probes)}
+ // An approval is not standing privilege: removing the approver's tenant
+ // membership AFTER approval consumption but BEFORE the Tool call must
+ // deny the one-shot permit, without touching the local dispatch fence.
+ revokedLease:=issue()
+ revokedInput:=packInput(2)
+ revokedOp,err:=coord.Prepare(ctx,operation.PrepareCommand{
+  WorkspaceID:"tenant",TaskID:&taskID,PrincipalID:"owner",
+  CapabilityLeaseID:revokedLease,IdempotencyKey:"approval-revoked-pre-dispatch",
+  ToolID:PauseToolID,ToolVersion:ToolVersion,ResourceRef:resource,
+  Input:revokedInput,
+  DesiredState:json.RawMessage(`{"dispatch":"paused"}`),
+  Precondition:json.RawMessage(`{"dispatch":"running"}`),
+  Reconciliation:json.RawMessage(`{"type":"local_fence_revision","revision":3}`),
+ })
+ if !errors.Is(err,operation.ErrApprovalRequired)||revokedOp.State!=operation.StateAuthorized{
+  t.Fatalf("revocation test did not require fresh approval: %+v %v",revokedOp,err)
+ }
+ revokedOp=makeApproved(revokedOp)
+ _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships
+  SET status='revoked' WHERE workspace_id='tenant' AND principal_id='approver'`)
+ if err!=nil{t.Fatal(err)}
+ denied,denial:=coord.Execute(ctx,operation.ExecuteCommand{
+  OperationID:revokedOp.ID,ExpectedRevision:revokedOp.Revision,
+  LeaseID:revokedLease,Input:revokedInput,
+ })
+ if denial==nil||denied.State!=operation.StateFailed{
+  t.Fatalf("inactive approver's consumed approval still executed: %+v %v",denied,denial)
+ }
+ unchanged,err:=goalService.GetGoalTCPObservationFence(ctx,project.ID,goal.ID)
+ if err!=nil||unchanged.Status!="running"||unchanged.Revision!=2{
+  t.Fatalf("denied effect changed local dispatch: %+v %v",unchanged,err)
+ }
+ _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships
+  SET status='active' WHERE workspace_id='tenant' AND principal_id='approver'`)
+ if err!=nil{t.Fatal(err)}
  // A crash after an effect but before independent verification must not
  // replay the original Tool. Bootstrap blocks the uncertain Operation;
  // reconciliation belongs to an authorised operator, not an Agent retry.

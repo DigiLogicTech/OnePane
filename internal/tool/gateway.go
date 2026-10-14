@@ -151,7 +151,13 @@ func (g *Gateway) Invoke(ctx context.Context, cmd InvokeCommand) (Invocation, er
 	if err := g.store.ValidateExecutionContext(ctx, cmd.WorkspaceID, cmd.PrincipalID, cmd.TaskID, cmd.AttemptID); err != nil {
 		return g.fail(ctx, inv, meta, "execution_context_invalid", err.Error(), fmt.Errorf("%w: %v", ErrExecutionContext, err))
 	}
-	if decision.RequiredApproval != policy.ApprovalNone {
+	// A mutating/external-send action can satisfy mandatory approval ONLY
+	// through an executing Operation Coordinator permit whose consumed human
+	// approval is revalidated by the MutationGate. Nonmutation Tools have no
+	// such channel and continue to fail closed.
+	mutationMode := binding.Definition.Mode == authority.ActionMutate ||
+		binding.Definition.Mode == authority.ActionExternalSend
+	if decision.RequiredApproval != policy.ApprovalNone && !mutationMode {
 		return g.fail(ctx, inv, meta, "approval_required", "required approval: "+string(decision.RequiredApproval), ErrApprovalRequired)
 	}
 	switch binding.Definition.Mode {
@@ -160,6 +166,7 @@ func (g *Gateway) Invoke(ctx context.Context, cmd InvokeCommand) (Invocation, er
 			return g.fail(ctx, inv, meta, "operation_coordinator_required", "mutating/external-send tools require an OperationCoordinator execution permit", ErrOperationCoordinatorRequired)
 		}
 		if err := g.mutationPermits.ValidateAndConsume(ctx, MutationPermitCheck{
+			RequiredApproval:decision.RequiredApproval,PolicyRevision:decision.PolicyRevision,
 			OperationID: *cmd.OperationID, Permit: cmd.ExecutionPermit, WorkspaceID: cmd.WorkspaceID,
 			TaskID: cmd.TaskID, AttemptID: cmd.AttemptID, PrincipalID: cmd.PrincipalID, LeaseID: cmd.LeaseID,
 			ToolID: binding.Definition.ID, ToolVersion: binding.Definition.Version,

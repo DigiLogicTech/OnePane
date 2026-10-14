@@ -109,6 +109,10 @@ type InvokeCommand struct {
 }
 
 type MutationPermitCheck struct {
+	// Current policy requirements must match the coordinator's persisted
+	// approved Operation. A mutation permit must not bypass approval changes.
+	RequiredApproval policy.ApprovalLevel
+	PolicyRevision int64
 	OperationID    string
 	Permit         string
 	WorkspaceID    string

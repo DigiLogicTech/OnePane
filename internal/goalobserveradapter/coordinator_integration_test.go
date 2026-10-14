@@ -251,4 +251,53 @@ func TestObserverPauseResumeRequiresRealCoordinatorApprovalAndCompensation(t *te
  if err:=db.SQL().QueryRowContext(ctx,
   "SELECT COUNT(*) FROM project_goal_tcp_probe_attempts").Scan(&probes);err!=nil{t.Fatal(err)}
  if probes!=0{t.Fatalf("observation control dispatched network I/O: %d",probes)}
+ // A crash after an effect but before independent verification must not
+ // replay the original Tool. Bootstrap blocks the uncertain Operation;
+ // reconciliation belongs to an authorised operator, not an Agent retry.
+ strandedLease:=issue()
+ strandedInput:=packInput(2)
+ stranded,err:=coord.Prepare(ctx,operation.PrepareCommand{
+  WorkspaceID:"tenant",TaskID:&taskID,PrincipalID:"owner",
+  CapabilityLeaseID:strandedLease,IdempotencyKey:"crash-before-local-verification",
+  ToolID:PauseToolID,ToolVersion:ToolVersion,ResourceRef:resource,
+  Input:strandedInput,
+  DesiredState:json.RawMessage(`{"dispatch":"paused"}`),
+  Precondition:json.RawMessage(`{"dispatch":"running"}`),
+  Reconciliation:json.RawMessage(`{"type":"manual_state_check"}`),
+ })
+ if !errors.Is(err,operation.ErrApprovalRequired)||stranded.State!=operation.StateAuthorized{
+  t.Fatalf("crash test preauthorization failed: %+v %v",stranded,err)
+ }
+ stranded=makeApproved(stranded)
+ stranded,err=coord.Execute(ctx,operation.ExecuteCommand{
+  OperationID:stranded.ID,ExpectedRevision:stranded.Revision,
+  LeaseID:strandedLease,Input:strandedInput,
+ })
+ if err!=nil||stranded.State!=operation.StateObserving{
+  t.Fatalf("crash test effect failed: %+v %v",stranded,err)
+ }
+ recovered:=operation.NewCoordinator(db.SQL(),db,nil,nil,nil,clock.Real{})
+ sweep,err:=recovered.RecoverInterrupted(ctx,nil,nil,nil)
+ if err!=nil||len(sweep.Interrupted)!=1||len(sweep.Blocked)!=1||
+  sweep.Interrupted[0]!=stranded.ID||sweep.Blocked[0]!=stranded.ID{
+  t.Fatalf("restart silently trusted uncertain effect: %+v %v",sweep,err)
+ }
+ unknown,err:=recovered.Get(ctx,stranded.ID)
+ if err!=nil||unknown.State!=operation.StateBlockedUnknownOutcome{
+  t.Fatalf("outcome not blocked after restart: %+v %v",unknown,err)
+ }
+ sweep,err=recovered.RecoverInterrupted(ctx,nil,nil,nil)
+ if err!=nil||len(sweep.Interrupted)!=0||len(sweep.Blocked)!=0{
+  t.Fatalf("recovery repeated external mutation: %+v %v",sweep,err)
+ }
+ if _,err=coord.Execute(ctx,operation.ExecuteCommand{
+  OperationID:unknown.ID,ExpectedRevision:unknown.Revision,
+  LeaseID:strandedLease,Input:strandedInput,
+ });err==nil{
+  t.Fatal("blocked unknown-outcome operation replayed without human reconciliation")
+ }
+ finalFence,err:=goalService.GetGoalTCPObservationFence(ctx,project.ID,goal.ID)
+ if err!=nil||finalFence.Status!="paused"||finalFence.Revision!=3{
+  t.Fatalf("recovery changed local state or reexecuted adapter: %+v %v",finalFence,err)
+ }
 }

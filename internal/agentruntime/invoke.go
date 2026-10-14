@@ -13,6 +13,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/budget"
 	"github.com/DigiLogicTech/OnePane/internal/event"
 	"github.com/DigiLogicTech/OnePane/internal/policy"
+	"github.com/DigiLogicTech/OnePane/internal/runtimeendpoint"
 	"github.com/DigiLogicTech/OnePane/internal/storage"
 )
 
@@ -249,6 +250,13 @@ func (s *Service) authorizeInvocation(c Connection, input policy.DataLabel) (pol
 	}
 	dest := policy.FlowDestination{WorkspaceID: input.WorkspaceID, Kind: policy.DestinationKind(dp.DestinationKind), Clearance: clearance}
 	if dest.Kind == policy.DestinationOriginNode {
+		// The Node ID and JSON policy alone cannot turn an off-host URL
+		// into origin-host inference. No socket or budget is consumed on
+		// denial. DNS names, including localhost, are not sufficient proof.
+		if c.AdapterName!="builtin.agent_protocol_http"||
+		 c.AdapterVersion!="1"||!runtimeendpoint.LiteralLoopbackHTTP(c.EndpointJSON){
+			return policy.DataLabel{},nil,ErrRuntimeInformationFlow
+		}
 		if c.NodeID == nil || *c.NodeID != s.localNodeID {
 			return policy.DataLabel{}, nil, ErrRuntimeInformationFlow
 		}

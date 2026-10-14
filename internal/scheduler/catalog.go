@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DigiLogicTech/OnePane/internal/policy"
+	"github.com/DigiLogicTech/OnePane/internal/runtimeendpoint"
 )
 
 type Catalog struct{ db *sql.DB }
@@ -388,32 +389,61 @@ func (c *Catalog) bestProfile(ctx context.Context, deployment, capability, role 
 func qualScore(q Qualification) int { return qualRank(q) }
 
 func (c *Catalog) runtimeCandidates(ctx context.Context, ws string) ([]Candidate, error) {
-	rows, err := c.db.QueryContext(ctx, `SELECT id,workspace_id,node_id,runtime_kind,display_name,status,trust_state,operating_mode,protocol_json,capabilities_json,data_policy_json FROM agent_runtime_connections WHERE workspace_id IS NULL OR workspace_id=?`, ws)
+	rows, err := c.db.QueryContext(ctx, `SELECT r.id,r.workspace_id,r.node_id,r.runtime_kind,r.display_name,r.status,r.trust_state,r.operating_mode,r.protocol_json,r.capabilities_json,r.data_policy_json,r.endpoint_json,r.adapter_name,r.adapter_version,
+ COALESCE(n.local,0),COALESCE(n.trust_state,'')
+ FROM agent_runtime_connections r LEFT JOIN harness_nodes n ON n.id=r.node_id
+ WHERE r.workspace_id IS NULL OR r.workspace_id=?`, ws)
 	if err != nil {
 		return nil, fmt.Errorf("list runtime scheduler candidates: %w", err)
 	}
 	defer rows.Close()
 	var out []Candidate
 	for rows.Next() {
-		var id, kind, name, status, trust, mode, protoJSON, capsJSON, dataJSON string
+		var id, kind, name, status, trust, mode, protoJSON, capsJSON, dataJSON, endpointJSON,adapterName,adapterVersion,nodeTrust string
 		var pws, node sql.NullString
-		if err := rows.Scan(&id, &pws, &node, &kind, &name, &status, &trust, &mode, &protoJSON, &capsJSON, &dataJSON); err != nil {
+		var nodeLocal int
+		if err := rows.Scan(&id, &pws, &node, &kind, &name, &status, &trust, &mode, &protoJSON, &capsJSON, &dataJSON,&endpointJSON,&adapterName,&adapterVersion,&nodeLocal,&nodeTrust); err != nil {
 			return nil, err
 		}
 		var caps runtimeCaps
 		_ = json.Unmarshal([]byte(capsJSON), &caps)
 		var dp runtimePolicy
 		_ = json.Unmarshal([]byte(dataJSON), &dp)
-		cost := caps.Scheduling.CostClass
-		if cost == "" {
-			cost = CostUnknown
+		// The runtime, unlike a verified model deployment, can itself
+		// route requests to paid cloud models. Self-reported "local"/"free"
+		// costs never establish a zero-cost contract.
+		cost := CostUnknown
+		switch caps.Scheduling.CostClass {
+		case CostPaid,CostProviderManaged,CostIncludedSubscription:
+			cost=caps.Scheduling.CostClass
 		}
 		qual := QualUntested
 		if len(caps.Capabilities) > 0 || caps.ProtocolLevel != "" {
 			qual = QualSupported
 		}
 		sched := (status == "connected" || status == "degraded") && (trust == "user_trusted" || trust == "trusted_adapter") && mode != "unmanaged"
-		cand := Candidate{ID: id, Kind: CandidateAgentRuntime, DisplayName: name, Provider: kind, Status: status, TrustState: trust, CostClass: cost, HardZeroIncrementalCost: caps.Scheduling.HardZeroIncrementalCost, Qualification: qual, ProtocolLevel: caps.ProtocolLevel, RoleNames: caps.Roles, CapabilityIDs: caps.Capabilities, ContextMax: caps.ContextMax, Schedulable: sched, ToolCallback: mode == "gateway_mediated", AllowedResidency: dp.AllowedResidency, Destination: destination(dp.DestinationKind, ws, node.String, dp.MaxConfidentiality)}
+		// The only supported direct host-origin runtime transport is the
+		// built-in HTTP bridge to an exact literal IP loopback address.
+		// A node_id or data_policy_json value alone is not endpoint proof.
+		localTransport:=node.Valid&&nodeLocal==1&&nodeTrust=="local"&&
+			adapterName=="builtin.agent_protocol_http"&&adapterVersion=="1"&&
+			runtimeendpoint.LiteralLoopbackHTTP([]byte(endpointJSON))
+		kindForFlow:="cloud"
+		if dp.DestinationKind=="untrusted"{kindForFlow="untrusted"}
+		if dp.DestinationKind=="trusted_node"{
+			// Remote Agent Runtime transfer is not implemented as a paired,
+			// consent-checked channel; never borrow Node scheduler trust.
+			sched=false
+		}
+		if dp.DestinationKind=="origin_node"{
+			if localTransport{kindForFlow="origin_node"}else{sched=false}
+		}
+		// Local *transport* is not proof the bridge does not use cloud
+		// models internally; keep CostUnknown unless independently proven.
+		destNode:=""
+		if kindForFlow=="origin_node"{destNode=node.String}
+		cand := Candidate{ID: id, Kind: CandidateAgentRuntime, DisplayName: name, Provider: kind, Status: status, TrustState: trust, CostClass: cost, HardZeroIncrementalCost: false, Qualification: qual, ProtocolLevel: caps.ProtocolLevel, RoleNames: caps.Roles, CapabilityIDs: caps.Capabilities, ContextMax: caps.ContextMax, Schedulable: sched, ToolCallback: mode == "gateway_mediated", AllowedResidency: dp.AllowedResidency, Destination: destination(kindForFlow, ws, destNode, dp.MaxConfidentiality)}
+		if json.Unmarshal([]byte(capsJSON), &caps)!=nil||json.Unmarshal([]byte(dataJSON), &dp)!=nil{cand.Schedulable=false}
 		if pws.Valid {
 			v := pws.String
 			cand.WorkspaceID = &v

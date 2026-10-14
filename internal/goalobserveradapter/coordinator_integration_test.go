@@ -341,4 +341,13 @@ func TestObserverPauseResumeRequiresRealCoordinatorApprovalAndCompensation(t *te
   inventory.StorageAttentionReasons[0]!="observer_mutation_needs_reconciliation"{
   t.Fatalf("uncertain local operation invisible to operator: %+v %v",inventory,err)
  }
+ cases,err:=goalService.ListGoalObserverRecoveryCases(ctx,project.ID,goal.ID)
+ if err!=nil||len(cases)!=1||cases[0].OperationID!=stranded.ID||
+  cases[0].State!=string(operation.StateBlockedUnknownOutcome)||
+  !cases[0].HumanReconciliationRequired||cases[0].IndependentDeviceVerification{
+  t.Fatalf("blocked effect not available as non-executable recovery pointer: %+v %v",cases,err)
+ }
+ if _,err:=goalService.ListGoalObserverRecoveryCases(ctx,"other-project",goal.ID);err==nil{
+  t.Fatal("observer recovery cases exposed to another Project")
+ }
 }

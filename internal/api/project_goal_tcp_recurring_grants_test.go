@@ -99,6 +99,16 @@ func TestTCPRecurringGrantAPIRequiresSeparateHumanConsent(t *testing.T){
    t.Fatalf("unauthorised Goal history inventory %q: %d %s",who,got.Code,got.Body)
   }
  }
+ recoveryURL:="/v1/projects/"+project.ID+"/continuous-goals/"+goal.ID+"/observer-recovery-cases"
+ for _,who:=range []string{"","outsider","robot"}{
+  got:=call("GET",who,recoveryURL,"")
+  want:=403;if who==""{want=401}
+  if got.Code!=want{t.Fatalf("unauthorised recovery cases %q: %d %s",who,got.Code,got.Body)}
+ }
+ recoveries:=call("GET","operator",recoveryURL,"")
+ if recoveries.Code!=200||strings.TrimSpace(recoveries.Body.String())!="[]"{
+  t.Fatalf("invented recovery case or unauthorised data: %d %s",recoveries.Code,recoveries.Body)
+ }
  inventory:=call("GET","operator",inventoryURL,"")
  if inventory.Code!=200||
   !strings.Contains(inventory.Body.String(),`"tcp_recurring_grants":1`)||

@@ -3,6 +3,7 @@ package main
 import (
  "bytes"
  "crypto/ed25519"
+ "crypto/x509"
  "encoding/base64"
  "encoding/json"
  "encoding/pem"
@@ -102,6 +103,18 @@ func runSignNodeExecutionPermit(args []string)error{
  }
  key:=ed25519.PrivateKey(decoded)
  pub:=key.Public().(ed25519.PublicKey)
+ originalServerCert,err:=x509.ParseCertificate(certBlock.Bytes)
+ if err!=nil{return err}
+ issuerPub,ok:=originalServerCert.PublicKey.(ed25519.PublicKey)
+ if !ok||len(issuerPub)!=ed25519.PublicKeySize{
+  return errors.New("pinned original OnePane issuer key must be Ed25519")
+ }
+ if bytes.Equal(pub,issuerPub)||
+  p.InstrumentPublicKeySHA256==operatorKeyFingerprint(issuerPub)||
+  p.PeerTLSFingerprint==*serverFingerprint||
+  p.OperatorPublicKeySHA256==p.InstrumentPublicKeySHA256{
+  return errors.New("original server, peer Node, human and instrument must use separate signing identities")
+ }
  payload,err:=operatorPermitMessage(p)
  if err!=nil{return err}
  result:=SignedNodeExecutionPermit{

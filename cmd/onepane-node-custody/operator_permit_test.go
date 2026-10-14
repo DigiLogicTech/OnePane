@@ -65,6 +65,61 @@ func TestHumanCanSeparatelySignAuthenticatedNodeExecutionPermitOffline(t *testin
  if err=verifySignedNodeExecutionPermit(result,pub);err!=nil{
   t.Fatalf("operator signature denied by independently pinned key: %v",err)
  }
+ // A fully signed detached server file can still contain duplicated role
+ // keys. The human signing client must refuse to export those as a second
+ // independent approval, before creating any signed output file.
+ serverPrivate:=serverIdentity.Certificate.PrivateKey.(ed25519.PrivateKey)
+ serverPublic:=serverPrivate.Public().(ed25519.PublicKey)
+ nodeIdentity,err:=loadExistingNodeIdentity(c.NodeDataDir,c.NodeID)
+ if err!=nil{t.Fatal(err)}
+ duplicateServerOperatorKeyFile:=filepath.Join(dir,"issuer-reused-as-operator.key")
+ if err=os.WriteFile(duplicateServerOperatorKeyFile,
+  []byte(base64.StdEncoding.EncodeToString(serverPrivate)),0600);err!=nil{t.Fatal(err)}
+ for _,tc:=range []struct{
+  name string
+  issuer nodefederation.Identity
+  permit projectworkspace.GoalNodeProbeExecutionPermit
+  operatorKeyFile string
+  certPath,id,pin string
+ }{
+  {name:"issuer_is_operator",issuer:serverIdentity,
+   permit:func()projectworkspace.GoalNodeProbeExecutionPermit{
+    p:=signed.Permit;p.OperatorPublicKeySHA256=operatorKeyFingerprint(serverPublic);return p}(),
+   operatorKeyFile:duplicateServerOperatorKeyFile,
+   certPath:c.ServerCertificateFile,id:c.ServerNodeID,pin:c.ServerFingerprint},
+  {name:"issuer_is_instrument",issuer:serverIdentity,
+   permit:func()projectworkspace.GoalNodeProbeExecutionPermit{
+    p:=signed.Permit;p.InstrumentPublicKeySHA256=operatorKeyFingerprint(serverPublic);return p}(),
+   operatorKeyFile:private,
+   certPath:c.ServerCertificateFile,id:c.ServerNodeID,pin:c.ServerFingerprint},
+  {name:"issuer_is_peer_node",issuer:nodeIdentity,permit:signed.Permit,
+   operatorKeyFile:private,
+   certPath:filepath.Join(c.NodeDataDir,"keys","federation.crt"),
+   id:c.NodeID,pin:c.NodeFingerprint},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   forged:=forgeClonedIssuerSeal(t,tc.issuer,tc.permit,time.Now())
+   forgedPath:=writeCanonicalTest(t,dir,tc.name+".json",forged)
+   clonedArgs:=append([]string(nil),args...)
+   target:=filepath.Join(dir,tc.name+"-should-not-exist.json")
+   for i:=0;i+1<len(clonedArgs);i++{
+    switch clonedArgs[i]{
+    case "--server-seal":clonedArgs[i+1]=forgedPath
+    case "--server-certificate":clonedArgs[i+1]=tc.certPath
+    case "--server-node-id":clonedArgs[i+1]=tc.id
+    case "--server-fingerprint":clonedArgs[i+1]=tc.pin
+    case "--operator-private-key":clonedArgs[i+1]=tc.operatorKeyFile
+    case "--output":clonedArgs[i+1]=target
+    }
+   }
+   if err:=runSignNodeExecutionPermit(clonedArgs);err==nil{
+    t.Fatal("operator client exported duplicate role as independent custody")
+   }
+   if _,err:=os.Stat(target);!os.IsNotExist(err){
+    t.Fatalf("invalid role grant left signed output: %v",err)
+   }
+  })
+ }
  if err=runSignNodeExecutionPermit(args);!os.IsExist(err){
   t.Fatalf("repeated human grant export overwrote existing original: %v",err)
  }

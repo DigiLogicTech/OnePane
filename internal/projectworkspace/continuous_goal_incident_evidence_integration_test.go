@@ -143,4 +143,60 @@ func TestIncidentEvidenceAssociatesOnlyHumanDeclaredHistoricalEndpoint(t *testin
  var tasks int
  if err:=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM tasks").Scan(&tasks);
   err!=nil||tasks!=0{t.Fatalf("metadata view started Tasks: %d %v",tasks,err)}
+
+ // A report received inside the 15-minute window need not have been
+ // observed inside it. The signer may submit near the end of the
+ // challenge's two-minute lifetime. Admission time alone must NOT make
+ // an older reading appear correlated with a later TCP drift.
+ // All timings are controlled by a fake clock and the TCP socket is fake.
+ clk.now=time.UnixMilli(alerts[0].DetectedAt).Add(14*time.Minute)
+ g,err=svc.ContinuousGoal(ctx,g.ID);if err!=nil{t.Fatal(err)}
+ delayedChallenge,err:=svc.IssueGoalInstrumentChallenge(ctx,IssueGoalInstrumentChallengeCommand{
+  ProjectID:p.ID,GoalID:g.ID,KeyID:key.ID,ActorPrincipalID:"human",
+  ExpectedGoalRevision:g.Revision,ExpectedKeyRevision:key.Revision,
+ })
+ if err!=nil{t.Fatal(err)}
+ delayed:=SignedMeasurementCommand{
+  ProjectID:p.ID,GoalID:g.ID,KeyID:key.ID,ChallengeID:delayedChallenge.ID,
+  ActorPrincipalID:"human",ExpectedGoalRevision:g.Revision,
+  Outcome:"not_connected",ObservedAt:clk.UnixMilli(),
+ }
+ delayedPayload,err:=svc.PrepareGoalInstrumentMeasurement(ctx,delayed)
+ if err!=nil{t.Fatal(err)}
+ delayed.Signature=ed25519.Sign(privateKey,delayedPayload.SigningPayload)
+ clk.now=clk.now.Add(90*time.Second)
+ delayedClaim,err:=svc.AcceptGoalInstrumentMeasurement(ctx,delayed)
+ if err!=nil{t.Fatal(err)}
+ clk.now=time.UnixMilli(alerts[0].DetectedAt).Add(30*time.Minute)
+ g,err=svc.ContinuousGoal(ctx,g.ID);if err!=nil{t.Fatal(err)}
+ secondTCP,err:=svc.runManualGoalTCPProbe(ctx,RunGoalTCPProbeCommand{
+  ProjectID:p.ID,GoalID:g.ID,PermitID:permit.ID,
+  ActorPrincipalID:"human",ExpectedGoalRevision:g.Revision,
+  ExpectedPermitRevision:permit.Revision,
+ },&fakeGoalTCPDialer{})
+ if err!=nil||secondTCP.Status!="connected"{t.Fatalf("second fake drift: %+v %v",secondTCP,err)}
+ laterAlerts,err:=svc.ListTCPReachabilityAlerts(ctx,p.ID,g.ID)
+ if err!=nil||len(laterAlerts)!=2{t.Fatalf("second drift missing: %+v %v",laterAlerts,err)}
+ var secondAlert TCPReachabilityAlert
+ for _,a:=range laterAlerts{if a.AttemptID==secondTCP.ID{secondAlert=a}}
+ if secondAlert.ID==""{t.Fatalf("second drift not bound to attempt %s",secondTCP.ID)}
+ if !(delayedClaim.ObservedAt<secondAlert.DetectedAt-15*60*1000 &&
+  delayedClaim.AcceptedAt>=secondAlert.DetectedAt-15*60*1000){
+  t.Fatalf("fixture failed to straddle review window: claim=%+v detected=%d",
+   delayedClaim,secondAlert.DetectedAt)
+ }
+ secondCase,err:=svc.OpenGoalIncidentReview(ctx,OpenGoalIncidentReviewCommand{
+  ProjectID:p.ID,GoalID:g.ID,TCPAlertID:secondAlert.ID,
+  ExpectedAlertRevision:secondAlert.Revision,ActorPrincipalID:"human",
+ })
+ if err!=nil{t.Fatal(err)}
+ lateEvidence,err:=svc.GoalIncidentEvidence(ctx,p.ID,g.ID,secondCase.ID)
+ if err!=nil{t.Fatal(err)}
+ if lateEvidence.EndpointAssociation!="not_established"||
+   len(lateEvidence.SignedEndpointClaims)!=0||
+   lateEvidence.IncidentConfirmed||lateEvidence.RemediationAuthorized||
+   lateEvidence.IndependentVantageVerified{
+  t.Fatalf("late-accepted report became contemporaneous incident evidence: %+v",lateEvidence)
+ }
+
 }

@@ -164,10 +164,16 @@ func(s *Service)GoalIncidentEvidence(ctx context.Context,projectID,goalID,review
     AND d.permit_revision=pin.permit_revision AND d.plan_hash=pin.plan_hash
    WHERE m.project_id=? AND m.goal_id=? AND m.declared_target_id=?
     AND m.source_id=? AND m.accepted_at BETWEEN ? AND ?
-    AND m.accepted_at>=challenge.issued_at
+    -- Admission time is not the measurement time: a late-received
+    -- instrument self-report cannot be presented as a timely reading
+    -- of the original drift unless BOTH timestamps fit the window.
+    AND m.observed_at BETWEEN ? AND ?
+    AND m.observed_at>=challenge.issued_at
+    AND m.observed_at<=m.accepted_at
     AND m.accepted_at<=?
    ORDER BY m.accepted_at DESC,m.id DESC LIMIT 8`,
    projectID,goalID,declaredID,review.SourceID,from,
+   alert.DetectedAt+windowMillis,from,
    alert.DetectedAt+windowMillis,s.clock.UnixMilli())
  if err!=nil{return GoalIncidentEvidence{},err}
  defer rows.Close()

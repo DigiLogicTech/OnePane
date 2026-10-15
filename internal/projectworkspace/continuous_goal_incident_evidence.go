@@ -28,6 +28,9 @@ type GoalIncidentSignedEndpointClaim struct {
  ClaimID string `json:"claim_id"`
  InstrumentKeyID string `json:"instrument_key_id"`
  Outcome string `json:"outcome"`
+ // This is signed but reported by the source; it is not a trusted
+ // hardware timestamp or proof of the observer's physical vantage.
+ ObservedAt int64 `json:"observed_at"`
  AcceptedAt int64 `json:"accepted_at"`
  ProofClass string `json:"proof_class"`
 }
@@ -144,7 +147,7 @@ func(s *Service)GoalIncidentEvidence(ctx context.Context,projectID,goalID,review
  from:=alert.DetectedAt-windowMillis
  if from<0{from=0}
  rows,err:=s.db.QueryContext(ctx,`SELECT m.id,m.instrument_key_id,m.outcome,
-   m.accepted_at,m.proof_class
+   m.observed_at,m.accepted_at,m.proof_class
    FROM project_goal_instrument_measurement_claims m
    JOIN project_goal_instrument_keys key ON key.id=m.instrument_key_id
     AND key.project_id=m.project_id AND key.goal_id=m.goal_id
@@ -180,7 +183,7 @@ func(s *Service)GoalIncidentEvidence(ctx context.Context,projectID,goalID,review
  for rows.Next(){
   var claim GoalIncidentSignedEndpointClaim
   if err=rows.Scan(&claim.ClaimID,&claim.InstrumentKeyID,&claim.Outcome,
-   &claim.AcceptedAt,&claim.ProofClass);err!=nil{return GoalIncidentEvidence{},err}
+   &claim.ObservedAt,&claim.AcceptedAt,&claim.ProofClass);err!=nil{return GoalIncidentEvidence{},err}
   out.SignedEndpointClaims=append(out.SignedEndpointClaims,claim)
  }
  if err=rows.Err();err!=nil{return GoalIncidentEvidence{},err}

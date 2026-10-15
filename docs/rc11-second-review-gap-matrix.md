@@ -1133,3 +1133,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Add new additive SQLite migration 0095 with a per-Project, Goal, operator-declared target, source, and acceptance-time lookup index. Avoid broad goal-wide history scans for the human-only bounded signed measurement incident review without changing immutable receipts, retention or approval semantics. A real SQLite integration test asserts the migrated index exists.
 - [ ] Hosted CI on exact-head source, upgrade-path/rollback performance, realistic SQLite retention and low-memory endurance remain to be measured. This is indexing only, **not** evidence of physical vantage, sensor independence or release readiness.
 - [ ] Next blocking P0: trustworthy physical Node/owned-target validation, independent same-device corroboration, human-approved reversible bounded L5 action with postcondition and rollback; then comprehensive code/security review. User-centred UI/UX and customisation review remains LAST before separately approved Windows/Ubuntu QA installer. PR #227 remains draft/unmerged.
+
+
+## RC11 P0-AS — display historical instrument observation versus receipt time (2026-10-15)
+
+- [x] Include the original signed **source-asserted** `observed_at` alongside server `accepted_at` in human-only, bounded incident evidence projections. No device/vantage trust escalation, no raw endpoint or signer material, and no mutation or response grant. Real SQLite integration asserts exact claim timing and established non-attested proof status.
+- [ ] Source-level CI verification pending for this exact head. Independently signed observation time is *not* hardware-attested or proven physically accurate.
+- [ ] Continue physical Node/owned device/vantage acceptance and audited human-approved reversible L5 response development. Low-memory/security review before final comprehensive UI/UX customisation review LAST, then only explicitly authorised QA installer packaging; draft PR unmerged.

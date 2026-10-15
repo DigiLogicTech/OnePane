@@ -139,6 +139,8 @@ func TestIncidentEvidenceAssociatesOnlyHumanDeclaredHistoricalEndpoint(t *testin
   len(evidence.SignedEndpointClaims)!=1||
   evidence.SignedEndpointClaims[0].ClaimID!=claim.ID||
   evidence.SignedEndpointClaims[0].Outcome!="not_connected"||
+  evidence.SignedEndpointClaims[0].ObservedAt!=claim.ObservedAt||
+  evidence.SignedEndpointClaims[0].AcceptedAt!=claim.AcceptedAt||
   evidence.DeviceIdentityVerified||evidence.IncidentConfirmed||
   evidence.IndependentVantageVerified||evidence.RemediationAuthorized||
   evidence.Alert.Status!="open"{

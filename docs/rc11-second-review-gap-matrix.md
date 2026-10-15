@@ -1195,3 +1195,9 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Add a real SQLite, live human-admission, single-use challenge and Ed25519-signature regression proving opposite outcomes from one instrument signer are metadata only, not independent physical sensors, incident votes or L5 action authority.
 - [x] Check delayed third report remains outside a later incident window; retained history and staged migration now assert all 3 signed receipts, while original case association includes only two.
 - [ ] Exact-source hosted CI must pass. No claim of physically independent vantage, verified owned-device identity or safe autonomous remediation; those plus low-memory soak, source/security audit and final LAST user-focused UI/UX review still block authorised QA packaging.
+
+## RC11 P0-BB — report bounded incident-evidence truncation (2026-10-15)
+
+- [x] Query up to nine metadata-only signed-instrument receipts, publish at most eight, and set `signed_claims_truncated` if a ninth exists. Human operators can now recognise when reported consistency and key counts are only a limited snapshot, not all historical self-report outcomes.
+- [x] Unit test checks fixed limit and positive truncation without inventing unique sensor votes, full-history confidence, physical target identity or remediation consent.
+- [ ] Exact-head hosted CI pending. Independently trusted physical Node/device-vantage proof, explicitly scoped reversible Level 5 actions, low-memory/SQLite endurance, full code/security review and LAST human-centred UI/UX remain outstanding before an authorised QA build.

@@ -1182,3 +1182,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Add bounded, human-only `signed_claim_consistency` and `distinct_signing_keys` metadata on historical incident review evidence. Multiple genuine signatures or even different software keys NEVER become independent-vantage proof, incident votes, target-device ownership or remediation authority. Contradictory outcomes remain descriptively visible, not automatically adjudicated.
 - [x] Add unit regression matrix for repeated same-key claims, same-key contradiction, multiple un-attested signing keys and absent evidence. Read path remains capped at eight claims with zero new network operations or data migrations.
 - [ ] Hosted exact-head Go/SQLite/Windows CI pending; actual separate physical observer custody/verified device identity and safe L5 reversible execution still require engineering and physical acceptance. Low-resource endurance/security audit then human-first UI/UX alignment LAST before approved QA installer.
+
+
+## RC11 P0-AZ — atomic stored incident-evidence read snapshot (2026-10-15)
+
+- [x] Resolve a human-only incident review's Project/Workspace status, alert, historical TCP return-to-baseline and bounded signed claim list within one SQLite read transaction. Previously separate SQL statements could produce mixed-time records across concurrent case changes. Release snapshot on all returns including no-declaration and query errors; final success commits a read-only transaction.
+- [x] Existing real SQLite case regression covers first no-declaration read followed by independent signed-key/incident writes, successful historical reads, and source preservation across migration. Exact-head hosted CI pending.
+- [ ] This does NOT establish physical Node target identity/vantage, multi-sensor independence or Level 5 remediation safety. Continue user-scoped reversible permitted actions, physical tests, measured low-resource endurance/security audit and LAST human-first UI/UX review before approved installers.

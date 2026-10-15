@@ -43,19 +43,24 @@ func(s *Service)GoalIncidentEvidence(ctx context.Context,projectID,goalID,review
  goalID=strings.TrimSpace(goalID)
  reviewID=strings.TrimSpace(reviewID)
  if projectID==""||goalID==""||reviewID==""{return GoalIncidentEvidence{},ErrInvalidCommand}
+ // Resolve Project status, incident case, TCP alert and signed self-reports
+ // from the SAME read snapshot, not an inconsistent mix of commits.
+ tx,err:=s.db.BeginTx(ctx,&sql.TxOptions{ReadOnly:true})
+ if err!=nil{return GoalIncidentEvidence{},err}
+ defer tx.Rollback()
  var active int
- err:=s.db.QueryRowContext(ctx,`SELECT 1 FROM project_continuous_goals g
+ err=tx.QueryRowContext(ctx,`SELECT 1 FROM project_continuous_goals g
   JOIN projects p ON p.id=g.project_id AND p.status='active'
   JOIN workspaces tenant ON tenant.id=p.workspace_id AND tenant.status='active'
   JOIN project_workspaces w ON w.id=g.project_workspace_id
     AND w.project_id=p.id AND w.status='active'
   WHERE g.id=? AND g.project_id=?`,goalID,projectID).Scan(&active)
  if err!=nil{return GoalIncidentEvidence{},err}
- review,err:=scanGoalIncidentReview(s.db.QueryRowContext(ctx,`SELECT `+
+ review,err:=scanGoalIncidentReview(tx.QueryRowContext(ctx,`SELECT `+
   goalIncidentReviewColumns+` FROM project_goal_incident_reviews
   WHERE id=? AND project_id=? AND goal_id=?`,reviewID,projectID,goalID))
  if err!=nil{return GoalIncidentEvidence{},err}
- alert,err:=scanTCPReachabilityAlert(s.db.QueryRowContext(ctx,`SELECT `+
+ alert,err:=scanTCPReachabilityAlert(tx.QueryRowContext(ctx,`SELECT `+
   tcpReachabilityAlertColumns+` FROM project_goal_tcp_reachability_alerts
   WHERE id=? AND project_id=? AND goal_id=? AND project_workspace_id=?
     AND source_id=?`,review.TCPAlertID,projectID,goalID,
@@ -78,7 +83,7 @@ func(s *Service)GoalIncidentEvidence(ctx context.Context,projectID,goalID,review
  // and alert remain unchanged, regardless of return status.
  var recoveredID string
  var recoveredAt int64
- err=s.db.QueryRowContext(ctx,`SELECT later.id,later.completed_at
+ err=tx.QueryRowContext(ctx,`SELECT later.id,later.completed_at
   FROM project_goal_tcp_probe_attempts later
   JOIN project_goal_tcp_probe_attempts original
    ON original.id=? AND original.project_id=? AND original.goal_id=?
@@ -112,7 +117,7 @@ func(s *Service)GoalIncidentEvidence(ctx context.Context,projectID,goalID,review
  // explicitly approved BEFORE the original socket attempt. An expired or
  // revoked declaration cannot be silently reapplied to later attempts.
  var declaredID string
- err=s.db.QueryRowContext(ctx,`SELECT declared.id
+ err=tx.QueryRowContext(ctx,`SELECT declared.id
   FROM project_goal_tcp_probe_attempts original
   JOIN project_goal_tcp_probe_permits permit ON permit.id=original.permit_id
    AND permit.project_id=original.project_id AND permit.goal_id=original.goal_id
@@ -149,7 +154,7 @@ func(s *Service)GoalIncidentEvidence(ctx context.Context,projectID,goalID,review
  const windowMillis int64=15*60*1000
  from:=alert.DetectedAt-windowMillis
  if from<0{from=0}
- rows,err:=s.db.QueryContext(ctx,`SELECT m.id,m.instrument_key_id,m.outcome,
+ rows,err:=tx.QueryContext(ctx,`SELECT m.id,m.instrument_key_id,m.outcome,
    m.observed_at,m.accepted_at,m.proof_class
    FROM project_goal_instrument_measurement_claims m
    JOIN project_goal_instrument_keys key ON key.id=m.instrument_key_id
@@ -195,6 +200,7 @@ func(s *Service)GoalIncidentEvidence(ctx context.Context,projectID,goalID,review
   out.SignedClaimConsistency,out.DistinctSigningKeys=
    summarizeInstrumentSelfReports(out.SignedEndpointClaims)
  }
+ if err=tx.Commit();err!=nil{return GoalIncidentEvidence{},err}
  return out,nil
 }
 

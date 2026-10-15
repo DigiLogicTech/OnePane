@@ -289,3 +289,34 @@ func TestAgentHTTPPolicyKeyCheckerAcceptsUnambiguousJSON(t *testing.T) {
   }
  }
 }
+
+
+func TestAgentHTTPAuthHeaderCannotBecomeProxyOrRoutingSecret(t *testing.T){
+ var calls int
+ sink:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+  calls++
+  t.Error("unsafe auth header reached server")
+ }))
+ defer sink.Close()
+ secret:="env:auth-boundary"
+ request:=agentprotocol.Request{ProtocolVersion:agentprotocol.Version,
+  RequestID:"header-policy",WorkspaceID:"ws",PrincipalID:"agent",
+  Constraints:json.RawMessage(`{}`),ContextManifest:json.RawMessage(`{}`),
+  PermittedProposalTypes:[]agentprotocol.ProposalType{agentprotocol.ProposalComplete},
+ }
+ for _,name:=range []string{"Proxy-Authorization","Host","Connection",
+  "Transfer-Encoding","Content-Length","Bad Header","X-Auth\nInjected"}{
+  config,_:=json.Marshal(map[string]string{"base_url":sink.URL,"auth_header":name})
+  c:=Connection{EndpointJSON:config,AuthType:"bearer",SecretRef:&secret}
+  _,err:=(AgentProtocolHTTPTransport{}).Invoke(context.Background(),c,request,
+   runtimeStaticSecrets{"env:auth-boundary":"PRIVATE_CANARY"})
+  var transportErr *RuntimeTransportError
+  if !errors.As(err,&transportErr)||transportErr.Code!="invalid_auth_config"||
+    !transportErr.OutcomeKnown||calls!=0{
+   t.Fatalf("unsafe auth header %q escaped: calls=%d err=%v",name,calls,err)
+  }
+ }
+ for _,allowed:=range []string{"Authorization","X-API-Key","Api-Key","X_Auth_Token"}{
+  if !safeAgentAuthHeader(allowed){t.Fatalf("valid custom auth header rejected: %s",allowed)}
+ }
+}

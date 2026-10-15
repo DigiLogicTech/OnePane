@@ -1272,3 +1272,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Deny explicit Agent Protocol HTTP data policies with duplicate top-level properties before performing a request, including origin-only/remote destination overrides in either direction and duplicate authorisation flags. Preserve valid key order, whitespace, canonical Service normalization and host-side Origin isolation.
 - [x] Add a no-egress loopback interception regression covering ambiguous policies and a valid-policy unit matrix. Exact-head hosted CI pending.
 - [ ] Physical L5 Node trust/owned endpoint acceptance, audited reversible human-approved effects, low-resource endurance and security review remain; operator-first comprehensive UI/UX LAST before approved QA installers.
+
+
+## RC11 P0-BN — deny proxy/host/framing credential header destinations (2026-10-15)
+
+- [x] Explicit Agent Runtime auth-header config remains customisable for normal HTTP token field names while rejecting proxy authentication, host routing, connection and framing headers or invalid field names. Reject CR/LF/NUL in auth prefix. Denial occurs before resolving a secret or any HTTP effect.
+- [x] No-egress interception regressions for reserved headers and invalid names, plus explicit allowlist regression of standard/custom API-token names. Exact-head hosted CI pending.
+- [ ] Continue owned Node and independent target/observer proof, bounded operator-granted reversible L5 effects, low-resource endurance and security/code audit. Final comprehensive human-first UI/UX LAST before authorised QA packaging.

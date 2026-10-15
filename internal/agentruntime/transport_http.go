@@ -81,7 +81,8 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
 	if cfg.AuthPrefix == "" {
 		cfg.AuthPrefix = "Bearer"
 	}
-	if strings.ContainsAny(cfg.AuthHeader+cfg.AuthPrefix, "\r\n") {
+	if !safeAgentAuthHeader(cfg.AuthHeader) ||
+  strings.ContainsAny(cfg.AuthPrefix,"\r\n\x00") {
 		return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_auth_config", OutcomeKnown: true}
 	}
 	if cfg.TimeoutMS < 0 || cfg.TimeoutMS > int64((10*time.Minute)/time.Millisecond) {
@@ -206,4 +207,30 @@ func hasAmbiguousPolicyKeys(raw []byte) bool {
  if err!=nil||end!=json.Delim('}'){return true}
  _,err=decoder.Token()
  return err!=io.EOF
+}
+
+
+// Auth headers are operator-configurable, but they may not control proxy
+// authentication, routing or HTTP framing. Those names can leak credentials
+// outside the approved runtime destination or cause ambiguous message
+// parsing. RFC HTTP token syntax keeps other custom API-key names working.
+func safeAgentAuthHeader(name string) bool {
+ if name==""{return false}
+ switch strings.ToLower(name){
+ case "host","proxy-authorization","proxy-authenticate",
+  "connection","proxy-connection","keep-alive","te","trailer",
+  "transfer-encoding","upgrade","content-length":
+  return false
+ }
+ for i:=0;i<len(name);i++{
+  c:=name[i]
+  if (c>='0'&&c<='9')||(c>='a'&&c<='z')||(c>='A'&&c<='Z'){
+   continue
+  }
+  switch c{
+  case '!','#','$','%','&','\'','*','+','-','.','^','_','|','~',0x60:
+  default:return false
+  }
+ }
+ return true
 }

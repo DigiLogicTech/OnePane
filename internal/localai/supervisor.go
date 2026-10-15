@@ -304,6 +304,38 @@ type runtimeConfig struct {
 	ColibriTier    ColibriTierSettings `json:"colibri_tier,omitempty"`
 }
 
+// Explicit, minimal host variables necessary for managed Python/llama
+// subprocess launch, diagnostics and selected GPU drivers. Never inherit
+// arbitrary service/API secrets or network proxy credentials. Environment
+// values remain process-private and are not logged or returned to clients.
+func managedRuntimeHostEnvironment(host []string) []string {
+ allowed:=map[string]bool{
+  "PATH":true,"PATHEXT":true,"SYSTEMROOT":true,"WINDIR":true,
+  "COMSPEC":true,"TMP":true,"TEMP":true,"TMPDIR":true,
+  "LANG":true,"LANGUAGE":true,"LC_ALL":true,"LC_CTYPE":true,
+  "LC_MESSAGES":true,"TZ":true,
+  "CUDA_VISIBLE_DEVICES":true,"CUDA_PATH":true,
+  "HIP_VISIBLE_DEVICES":true,"ROCR_VISIBLE_DEVICES":true,
+  "ROCM_PATH":true,"HSA_OVERRIDE_GFX_VERSION":true,
+  "VK_ICD_FILENAMES":true,"VK_LAYER_PATH":true,"VULKAN_SDK":true,
+  "NVIDIA_VISIBLE_DEVICES":true,
+ }
+ result:=make([]string,0,12)
+ seen:=map[string]bool{}
+ for _,entry:=range host{
+  name,_,ok:=strings.Cut(entry,"=")
+  normalized:=strings.ToUpper(name)
+  if !ok||!allowed[normalized]||seen[normalized]{continue}
+  // Block malformed names rather than relying on platform-dependent
+  // subprocess environment parsing.
+  if name==""||strings.TrimSpace(name)!=name||
+   strings.ContainsAny(name,"\r\n\x00"){continue}
+  result=append(result,entry)
+  seen[normalized]=true
+ }
+ return result
+}
+
 type managedRefs struct{ RuntimeID, ModelID string }
 
 // A backend repair/update may replace the registered executable generation.
@@ -833,7 +865,10 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 		_ = s.markFailed(ctx, inst.ID, err.Error())
 		return RuntimeInstance{}, err
 	}
-	env := append([]string(nil), os.Environ()...)
+	// Never forward the OnePane service's full environment into managed
+ // third-party inference engines: it may contain cloud/API credentials,
+ // proxy passwords, service tokens and unrelated private application state.
+ env := managedRuntimeHostEnvironment(os.Environ())
 	env = append(env, "ONEPANE_MANAGED_RUNTIME=1", "HOME="+runtimeHome)
 	if runtime.GOOS != "windows" {
 		env = append(env, "LD_LIBRARY_PATH="+filepath.Dir(cfg.Executable))

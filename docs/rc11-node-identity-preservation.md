@@ -9,3 +9,7 @@ For installed existing pairs, `Lstat` rejects symlinks and non-regular credentia
 Tests cover stable same-Node fingerprint, different Node-ID denial, missing certificate, missing private key, public/group-readable private key, and linked private key with unchanged out-of-directory contents. No application model/project database, existing credentials, network service, machine process or installer is modified by the tests.
 
 **Remaining acceptance:** actual Windows NTFS ACL verification and installed upgrade recovery, host ownership and physical device/vantage identity, controlled reversible Level 5 actions, low-memory endurance, full source/security review and LAST human-focused UI/UX alignment before an approved QA build.
+
+## Node identity input discipline (2026-10-15)
+
+Before creating a new key directory, the federation identity loader validates that a Node ID is non-empty, at most 128 UTF-8 bytes, has no leading/trailing Unicode whitespace and contains no control characters. Invalid Node IDs fail without filesystem writes or permanent credentials; a specially crafted ID cannot make an unusable ten-year certificate that a later custody operation rejects. Regression confirms invalid IDs have no side effects. This guard does not prove an endpoint's ownership or the physical identity of the hosting device.

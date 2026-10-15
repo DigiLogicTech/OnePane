@@ -15,6 +15,8 @@ import (
 	"os"
 	"path/filepath"
  "runtime"
+ "strings"
+ "unicode"
 	"time"
 )
 
@@ -25,9 +27,10 @@ type Identity struct {
 }
 
 func EnsureIdentity(dataDir, nodeID string) (Identity, error) {
-	if nodeID == "" {
-		return Identity{}, fmt.Errorf("node id required")
-	}
+	if len(nodeID)<1||len(nodeID)>128||strings.TrimSpace(nodeID)!=nodeID||
+  strings.IndexFunc(nodeID,unicode.IsControl)>=0{
+  return Identity{},fmt.Errorf("invalid Node identity id")
+ }
 	dir := filepath.Join(dataDir, "keys")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return Identity{}, err

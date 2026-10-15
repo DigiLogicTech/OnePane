@@ -6,6 +6,7 @@ import (
  "os"
  "path/filepath"
  "runtime"
+ "strings"
 	"testing"
 )
 
@@ -88,5 +89,19 @@ func TestEnsureIdentityRejectsLinkedOrInsecureCredentialFiles(t *testing.T){
  after,err:=os.ReadFile(external)
  if err!=nil||!bytes.Equal(before,after){
   t.Fatalf("out-of-directory target changed: %v",err)
+ }
+}
+
+func TestEnsureIdentityRejectsUnusableNodeIDsBeforeDiskWrites(t *testing.T){
+ for _,nodeID:=range []string{
+  "", " node","node ","node\nother","node\x00other",strings.Repeat("x",129),
+ }{
+  dir:=t.TempDir()
+  if _,err:=EnsureIdentity(dir,nodeID);err==nil{
+   t.Fatalf("invalid Node id %q minted a permanent certificate",nodeID)
+  }
+  if _,err:=os.Stat(filepath.Join(dir,"keys"));!os.IsNotExist(err){
+   t.Fatalf("invalid Node id %q created credential files: %v",nodeID,err)
+  }
  }
 }

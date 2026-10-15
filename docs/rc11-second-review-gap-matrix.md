@@ -1219,3 +1219,9 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Fail closed on partial existing `federation.crt`/`federation.key` pairs rather than silently generate and truncate surviving Node credentials. Make new file creation exclusive and durable; never replace a concurrently created key. Reject existing linked/nonregular files and Unix group/world-accessible Node identity directory or private key.
 - [x] Add regression for both partial-pair cases preserving surviving credential bytes, and for linked/world-readable key denial without modifying an external file; keep original stable same-Node fingerprint and Node-ID mismatch checks. Exact-source CI pending.
 - [ ] Windows NTFS ACL/security descriptor physical installed QA, backfill or interactive restoration of incomplete installations, real Node/owned target/vantage proof, reversible L5 actions and low-resource endurance are NOT delivered. Source/security review then final LAST UI/UX alignment before explicitly approved installer.
+
+## RC11 P0-BF — reject unusable Node identity before key creation (2026-10-15)
+
+- [x] Align Node credential creation with existing custody ID bounds (1–128 bytes, no surrounding whitespace/control characters) BEFORE making key directories or generating a long-lived Ed25519 certificate.
+- [x] Add no-disk-side-effect regression for empty, newline/NUL, padded and overlong Node IDs. Actual physical device attestation and Windows installed ACL tests remain outstanding. Exact-head CI pending.
+- [ ] Continue separate owned-target proof, independently attested vantage, reversible narrowly approved Level 5 effects, low-memory/security review and final human-focused UI/UX LAST before approved QA build.

@@ -105,3 +105,57 @@ func TestEnsureIdentityRejectsUnusableNodeIDsBeforeDiskWrites(t *testing.T){
   }
  }
 }
+
+
+// Reading through the checked descriptor, rather than a later by-path open,
+// closes a symlink replacement window and bounds hostile credential inputs.
+// The unchanged valid identity must still load under its original fingerprint.
+func TestNodeIdentityBoundedCheckedFileRead(t *testing.T){
+ dir:=t.TempDir()
+ first,err:=EnsureIdentity(dir,"node-stable")
+ if err!=nil{t.Fatal(err)}
+ certPath:=filepath.Join(dir,"keys","federation.crt")
+ keyPath:=filepath.Join(dir,"keys","federation.key")
+ for _,p:=range []string{certPath,keyPath}{
+  contents,err:=readIdentityFile(p,p==keyPath)
+  if err!=nil||len(contents)==0{t.Fatalf("legitimate file %q: %v",p,err)}
+ }
+ second,err:=EnsureIdentity(dir,"node-stable")
+ if err!=nil||second.Fingerprint!=first.Fingerprint{
+  t.Fatalf("checked credential reader rotated a valid identity: %v",err)
+ }
+ for _,name:=range []string{"certificate","private_key"}{
+  t.Run(name,func(t *testing.T){
+   target:=certPath
+   private:=false
+   if name=="private_key"{target=keyPath;private=true}
+   original,err:=os.ReadFile(target)
+   if err!=nil{t.Fatal(err)}
+   t.Cleanup(func(){_ =os.WriteFile(target,original,0o600)})
+   oversized:=bytes.Repeat([]byte("x"),16*1024+1)
+   if err=os.WriteFile(target,oversized,0o600);err!=nil{t.Fatal(err)}
+   if _,err=readIdentityFile(target,private);err==nil{
+    t.Fatal("oversized Node credential was read")
+   }
+   if _,err=EnsureIdentity(dir,"node-stable");err==nil{
+    t.Fatal("oversized persistent Node credential was accepted")
+   }
+   if err=os.WriteFile(target,original,0o600);err!=nil{t.Fatal(err)}
+   third,err:=EnsureIdentity(dir,"node-stable")
+   if err!=nil||third.Fingerprint!=first.Fingerprint{
+    t.Fatalf("valid file restoration was not preserved: %v",err)
+   }
+  })
+ }
+ if runtime.GOOS!="windows"{
+  target:=filepath.Join(t.TempDir(),"outside.crt")
+  raw,err:=os.ReadFile(certPath)
+  if err!=nil{t.Fatal(err)}
+  if err=os.WriteFile(target,raw,0o600);err!=nil{t.Fatal(err)}
+  link:=filepath.Join(t.TempDir(),"linked.crt")
+  if err=os.Symlink(target,link);err!=nil{t.Fatal(err)}
+  if _,err=readIdentityFile(link,false);err==nil{
+   t.Fatal("linked Node certificate read despite file identity check")
+  }
+ }
+}

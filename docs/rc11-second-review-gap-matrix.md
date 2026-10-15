@@ -1225,3 +1225,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Align Node credential creation with existing custody ID bounds (1–128 bytes, no surrounding whitespace/control characters) BEFORE making key directories or generating a long-lived Ed25519 certificate.
 - [x] Add no-disk-side-effect regression for empty, newline/NUL, padded and overlong Node IDs. Actual physical device attestation and Windows installed ACL tests remain outstanding. Exact-head CI pending.
 - [ ] Continue separate owned-target proof, independently attested vantage, reversible narrowly approved Level 5 effects, low-memory/security review and final human-focused UI/UX LAST before approved QA build.
+
+
+## RC11 P0-BG — read stable bounded Node identities without second pathname race (2026-10-15)
+
+- [x] Replace unchecked subsequent `os.ReadFile` and `tls.LoadX509KeyPair` filesystem opens with a bounded descriptor-based `Lstat` + `SameFile` and `tls.X509KeyPair` over exactly read bytes. Check regular file, 16KiB cap, post-open Unix key permissions and reject linked/inconsistent certificates. No key rotation or automatic repair.
+- [x] Add valid-identity fingerprint preservation and oversized private key/certificate/linked certificate regression. Source hosted CI pending.
+- [ ] This is not equivalent to Windows NTFS ACL or simultaneous malicious same-account file mutation protection. Physical Node/owned device proof, independent vantage, safe human-approved Level 5 actions, measured resource endurance and security review remain; operator-first UI/UX is LAST before separately authorised QA build.

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
  "errors"
+ "io"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
@@ -86,14 +87,15 @@ func EnsureIdentity(dataDir, nodeID string) (Identity, error) {
 			return Identity{}, err
 		}
 	}
-	certPEM, err := os.ReadFile(certPath)
-	if err != nil {
-		return Identity{}, err
-	}
-	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
-	if err != nil {
-		return Identity{}, err
-	}
+	certPEM, err := readIdentityFile(certPath, false)
+ if err != nil { return Identity{}, err }
+ keyPEM, err := readIdentityFile(keyPath, true)
+ if err != nil { return Identity{}, err }
+ // Parse the exact bytes already checked and read from stable open files.
+ // Loading by pathname a second time permits path/symlink replacement
+ // between an Lstat permission check and the credential read.
+ cert, err := tls.X509KeyPair(certPEM, keyPEM)
+ if err != nil { return Identity{}, err }
 	if len(cert.Certificate) == 0 {
 		return Identity{}, fmt.Errorf("federation certificate empty")
 	}
@@ -119,4 +121,39 @@ func writeNewIdentityFile(path string, payload []byte, mode os.FileMode) error {
  if _,err=f.Write(payload);err!=nil{_ =f.Close();return err}
  if err=f.Sync();err!=nil{_ =f.Close();return err}
  return f.Close()
+}
+
+
+// readIdentityFile checks that the inode read is the same regular file that
+// passed lstat. Bound credential reads to avoid a hostile/accidental large
+// file exhausting a small host. A symlink swap before Open changes inode;
+// a swap after Open cannot change the already-open file descriptor.
+func readIdentityFile(path string, private bool) ([]byte, error) {
+ const maxIdentityFileBytes int64 = 16 * 1024
+ before, err := os.Lstat(path)
+ if err != nil { return nil, err }
+ if !before.Mode().IsRegular() || before.Size()<1 || before.Size()>maxIdentityFileBytes {
+  return nil, fmt.Errorf("Node credential must be an ordinary bounded file")
+ }
+ if private && runtime.GOOS != "windows" && before.Mode().Perm()&0o077 != 0 {
+  return nil, fmt.Errorf("Node private key must be owner-only")
+ }
+ f, err := os.Open(path)
+ if err != nil { return nil, err }
+ defer f.Close()
+ after, err := f.Stat()
+ if err != nil { return nil, err }
+ if !after.Mode().IsRegular() || !os.SameFile(before, after) ||
+  after.Size()<1 || after.Size()>maxIdentityFileBytes {
+  return nil, fmt.Errorf("Node credential changed before read")
+ }
+ if private && runtime.GOOS != "windows" && after.Mode().Perm()&0o077 != 0 {
+  return nil, fmt.Errorf("Node private key became accessible to other users")
+ }
+ contents, err := io.ReadAll(io.LimitReader(f, maxIdentityFileBytes+1))
+ if err != nil { return nil, err }
+ if len(contents)==0 || int64(len(contents))>maxIdentityFileBytes {
+  return nil, fmt.Errorf("Node credential exceeds safe file bounds")
+ }
+ return contents, nil
 }

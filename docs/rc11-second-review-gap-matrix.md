@@ -1175,3 +1175,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Extend last-boundary malformed-policy denial to explicitly present `null`, empty objects and unknown `destination_kind` values. A partial explicit policy cannot silently acquire an arbitrary HTTP destination; canonical Service still determines authorised capability, spend and tenant context. Preserve legacy missing-policy adapter-unit compatibility, never treat it as a grant.
 - [x] Add local interception no-dial regression cases for each ambiguous policy shape, building on P0-AW. Exact-head hosted CI pending.
 - [ ] Hardware/vantage proof, calibrated independent incident correlation, reversible bounded operator-approved L5 action permits, low-resource QA and complete security/code audit remain; comprehensive human-first UI/UX pass LAST before separately approved installers. Draft PR unmerged.
+
+
+## RC11 P0-AY — bounded operator visibility of signer disagreements (2026-10-15)
+
+- [x] Add bounded, human-only `signed_claim_consistency` and `distinct_signing_keys` metadata on historical incident review evidence. Multiple genuine signatures or even different software keys NEVER become independent-vantage proof, incident votes, target-device ownership or remediation authority. Contradictory outcomes remain descriptively visible, not automatically adjudicated.
+- [x] Add unit regression matrix for repeated same-key claims, same-key contradiction, multiple un-attested signing keys and absent evidence. Read path remains capped at eight claims with zero new network operations or data migrations.
+- [ ] Hosted exact-head Go/SQLite/Windows CI pending; actual separate physical observer custody/verified device identity and safe L5 reversible execution still require engineering and physical acceptance. Low-resource endurance/security audit then human-first UI/UX alignment LAST before approved QA installer.

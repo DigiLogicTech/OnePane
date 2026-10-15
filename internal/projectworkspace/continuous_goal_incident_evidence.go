@@ -15,6 +15,9 @@ type GoalIncidentEvidence struct {
  Review GoalIncidentReview `json:"review"`
  Alert TCPReachabilityAlert `json:"alert"`
  SignedEndpointClaims []GoalIncidentSignedEndpointClaim `json:"signed_endpoint_claims"`
+ // Descriptive metadata only; a signing key is NOT an independent vantage.
+ SignedClaimConsistency string `json:"signed_claim_consistency"`
+ DistinctSigningKeys int `json:"distinct_signing_keys"`
  EndpointAssociation string `json:"endpoint_association"`
  DeviceIdentityVerified bool `json:"device_identity_verified"`
  IndependentVantageVerified bool `json:"independent_vantage_verified"`
@@ -61,7 +64,7 @@ func(s *Service)GoalIncidentEvidence(ctx context.Context,projectID,goalID,review
  out:=GoalIncidentEvidence{
   Review:review,Alert:alert,
   SignedEndpointClaims:[]GoalIncidentSignedEndpointClaim{},
-  EndpointAssociation:"not_established",
+  EndpointAssociation:"not_established",SignedClaimConsistency:"no_signed_claims",
   Limitations:[]string{
    "tcp_connectivity_is_not_device_security",
    "signed_claim_is_instrument_self_report_without_vantage_attestation",
@@ -189,6 +192,23 @@ func(s *Service)GoalIncidentEvidence(ctx context.Context,projectID,goalID,review
  if err=rows.Err();err!=nil{return GoalIncidentEvidence{},err}
  if len(out.SignedEndpointClaims)>0{
   out.EndpointAssociation="historical_operator_declared_same_endpoint"
+  out.SignedClaimConsistency,out.DistinctSigningKeys=
+   summarizeInstrumentSelfReports(out.SignedEndpointClaims)
  }
  return out,nil
+}
+
+// Descriptive operator metadata ONLY: neither number of reports nor key
+// count authenticates physical devices, sensor independence or incident truth.
+func summarizeInstrumentSelfReports(claims []GoalIncidentSignedEndpointClaim)(string,int){
+ if len(claims)==0{return "no_signed_claims",0}
+ keys:=make(map[string]struct{},len(claims))
+ first:=claims[0].Outcome
+ disputed:=false
+ for _,claim:=range claims{
+  keys[claim.InstrumentKeyID]=struct{}{}
+  if claim.Outcome!=first{disputed=true}
+ }
+ if disputed{return "conflicting_unverified_self_reports",len(keys)}
+ return "consistent_unverified_self_reports",len(keys)
 }

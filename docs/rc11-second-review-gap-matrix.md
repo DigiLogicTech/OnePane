@@ -1168,3 +1168,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] The final built-in HTTP Agent Runtime transport no longer ignores an explicit malformed data policy and accidentally drops `destination_kind=origin_node` into an unrestricted remote HTTP path. Deny malformed/non-object/wrong-typed JSON prior to any dial and mark the denial outcome known. The canonical Service remains responsible for authorised complete policy and budget admission; this adapter is independent final defence, not an access grant.
 - [x] Direct adapter regression uses a local interception sink to verify zero requests under three malformed policy payloads. Exact-source CI pending.
 - [ ] Continue physical Node/device identity and independent-vantage proof, human-correlated incidents, reversible bounded Level 5 effects, low-resource soak and full security audit. Comprehensive human-first UI/UX review remains LAST before approved QA installer; branch stays draft/unmerged.
+
+
+## RC11 P0-AX — reject explicit ambiguous Agent Runtime destinations (2026-10-15)
+
+- [x] Extend last-boundary malformed-policy denial to explicitly present `null`, empty objects and unknown `destination_kind` values. A partial explicit policy cannot silently acquire an arbitrary HTTP destination; canonical Service still determines authorised capability, spend and tenant context. Preserve legacy missing-policy adapter-unit compatibility, never treat it as a grant.
+- [x] Add local interception no-dial regression cases for each ambiguous policy shape, building on P0-AW. Exact-head hosted CI pending.
+- [ ] Hardware/vantage proof, calibrated independent incident correlation, reversible bounded operator-approved L5 action permits, low-resource QA and complete security/code audit remain; comprehensive human-first UI/UX pass LAST before separately approved installers. Draft PR unmerged.

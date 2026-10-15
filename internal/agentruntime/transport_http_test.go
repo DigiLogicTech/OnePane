@@ -258,6 +258,9 @@ func TestAgentProtocolHTTPRejectsMalformedExplicitDataPolicyBeforeDial(t *testin
   `{"destination_kind":"origin_node"`,
   `{"destination_kind":123}`,
   `["origin_node"]`,
+  `null`,
+  `{}`,
+  `{"destination_kind":"unknown_remote"}`,
  } {
   c:=Connection{EndpointJSON:endpoint,AuthType:"none",
    DataPolicyJSON:json.RawMessage(raw)}

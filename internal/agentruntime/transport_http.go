@@ -37,8 +37,19 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
 	// also a final egress boundary. A malformed explicit policy must not
 	// silently lose its origin-only classification and default to remote
 	// HTTP dispatch when the transport is called directly.
-	if len(bytes.TrimSpace(c.DataPolicyJSON)) != 0 {
-		if err := json.Unmarshal(c.DataPolicyJSON, &dp); err != nil {
+	if raw := bytes.TrimSpace(c.DataPolicyJSON); len(raw) != 0 {
+		if raw[0] != '{' {
+			return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_data_policy", OutcomeKnown: true}
+		}
+		if err := json.Unmarshal(raw, &dp); err != nil {
+			return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_data_policy", OutcomeKnown: true}
+		}
+		// An explicit but empty, unknown, or mistyped destination is not
+		// permission to send content beyond the local Node. Canonical
+		// Service registration always normalises the destination kind.
+		switch dp.DestinationKind {
+		case "origin_node", "trusted_node", "cloud", "untrusted":
+		default:
 			return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_data_policy", OutcomeKnown: true}
 		}
 	}

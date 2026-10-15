@@ -4,6 +4,7 @@ import (
  "crypto/ed25519"
  "crypto/rand"
  "crypto/sha256"
+ "crypto/x509"
  "encoding/json"
  "fmt"
  "strings"
@@ -225,6 +226,19 @@ func TestNodeCustodyPreflightRejectsWrongSignerOrExpiredIdentity(t *testing.T){
  if err!=nil{t.Fatal(err)}
  if err=ValidateLocalInstrumentCustodyIdentity("peer",ident,time.Now());err!=nil{
   t.Fatalf("valid enrolled local Node signer rejected before effect: %v",err)
+ }
+ // A valid pinned identity must be an enrolled signing leaf, not a CA.
+ leaf,err:=x509.ParseCertificate(ident.Certificate.Certificate[0])
+ if err!=nil{t.Fatal(err)}
+ asCA:=*leaf
+ asCA.IsCA=true
+ if err=validateCustodyCert(&asCA,"peer",ident.Fingerprint,time.Now().UnixMilli());err==nil{
+  t.Fatal("CA credential was promoted to a Node leaf identity")
+ }
+ asCertSigner:=*leaf
+ asCertSigner.KeyUsage|=x509.KeyUsageCertSign
+ if err=validateCustodyCert(&asCertSigner,"peer",ident.Fingerprint,time.Now().UnixMilli());err==nil{
+  t.Fatal("certificate-signing credential was promoted to a Node leaf identity")
  }
  if err=ValidateLocalInstrumentCustodyIdentity("impostor",ident,time.Now());err==nil{
   t.Fatal("wrong Node ID accepted for pre-effect key signing")

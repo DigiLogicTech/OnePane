@@ -103,6 +103,9 @@ func ValidateLocalInstrumentCustodyIdentity(nodeID string,ident Identity,
 func validateCustodyCert(cert *x509.Certificate,nodeID,pin string,
  witnessedAt int64)error{
  if cert==nil||len(cert.Raw)==0||cert.Subject.CommonName!=nodeID||
+  // This must be an enrolled Node LEAF identity, not a CA/key-signing
+  // certificate that could be reused to impersonate subordinate nodes.
+  cert.IsCA||cert.KeyUsage&x509.KeyUsageCertSign!=0||
   !strings.HasPrefix(pin,"sha256:")||len(pin)!=71||
   CertificateFingerprint(cert.Raw)!=pin||
   cert.KeyUsage&x509.KeyUsageDigitalSignature==0{

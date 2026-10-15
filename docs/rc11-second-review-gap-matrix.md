@@ -1213,3 +1213,9 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Forbid CA and certificate-signing key-usage bits in separately pinned Node instrument custody identities. A certificate that can issue further certificates must never be accepted as the particular human-enrolled Node leaf.
 - [x] Add negative certificate-role regressions alongside existing real Ed25519 Node signer/self-test and independent pin/expiry tests. Exact-head hosted CI pending.
 - [ ] This does not physically attest the Node or target, establish an independent sensor vantage, or grant L5 remediation. Continue physical acceptance, bounded reversible human-approved effects, measured low-RAM endurance, code/security audit and final LAST user-focused UI/UX before approved QA installers.
+
+## RC11 P0-BE — Node private identity preservation and safe creation (2026-10-15)
+
+- [x] Fail closed on partial existing `federation.crt`/`federation.key` pairs rather than silently generate and truncate surviving Node credentials. Make new file creation exclusive and durable; never replace a concurrently created key. Reject existing linked/nonregular files and Unix group/world-accessible Node identity directory or private key.
+- [x] Add regression for both partial-pair cases preserving surviving credential bytes, and for linked/world-readable key denial without modifying an external file; keep original stable same-Node fingerprint and Node-ID mismatch checks. Exact-source CI pending.
+- [ ] Windows NTFS ACL/security descriptor physical installed QA, backfill or interactive restoration of incomplete installations, real Node/owned target/vantage proof, reversible L5 actions and low-resource endurance are NOT delivered. Source/security review then final LAST UI/UX alignment before explicitly approved installer.

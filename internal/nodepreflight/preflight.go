@@ -8,7 +8,7 @@ import (
  "crypto/sha256"
  "encoding/hex"
  "errors"
- "os"
+  "os"
  "os/exec"
  "regexp"
  "runtime"
@@ -69,15 +69,17 @@ func Check(ctx context.Context,inspector Inspector,getenv func(string)string,osN
   ImageChecks:make([]ImageCheck,0,len(variables)),
   PhysicalAcceptanceVerified:false}
  if inspector==nil||getenv==nil{return Report{},errors.New("Node inspector unavailable")}
+ if err:=ctx.Err();err!=nil{return Report{},err}
  if osName!="linux"{
   report.Podman="unsupported_platform"
  }else{
   // Bound command duration even if a broken rootless engine wedges.
   probeCtx,cancel:=context.WithTimeout(ctx,8*time.Second)
   ok,probeErr:=inspector.RootlessPodman(probeCtx)
+  timedOut:=probeCtx.Err()!=nil
   cancel()
   switch{
-  case probeErr!=nil:report.Podman="unavailable"
+  case timedOut||probeErr!=nil:report.Podman="unavailable"
   case !ok:report.Podman="not_rootless"
   default:report.Podman="rootless"
   }
@@ -96,8 +98,9 @@ func Check(ctx context.Context,inspector Inspector,getenv func(string)string,osN
    check.DigestFingerprint=fingerprint(ref)
    imageCtx,cancel:=context.WithTimeout(ctx,8*time.Second)
    exists,e:=inspector.ImagePresent(imageCtx,ref)
+   timedOut:=imageCtx.Err()!=nil
    cancel()
-   if e!=nil{check.State="image_check_failed"
+   if timedOut||e!=nil{check.State="image_check_failed"
    }else if !exists{check.State="image_not_present"
    }else{check.State="locally_present"}
   }
@@ -115,9 +118,14 @@ func(LocalPodman) RootlessPodman(ctx context.Context)(bool,error){
  }
  executable,err:=exec.LookPath("podman")
  if err!=nil{return false,err}
- out,err:=exec.CommandContext(ctx,executable,"info","--format","{{.Host.Security.Rootless}}").Output()
- if err!=nil{return false,err}
- return strings.TrimSpace(string(out))=="true",nil
+ // Podman diagnostics can be unexpectedly large. Never materialise
+ // unbounded CLI output on a low-RAM Node or expose host details.
+ output:=&boundedPodmanBoolean{}
+ cmd:=exec.CommandContext(ctx,executable,"info","--format","{{.Host.Security.Rootless}}")
+ cmd.Stdout=output
+ if err=cmd.Run();err!=nil{return false,err}
+ if output.overflow{return false,errors.New("Podman rootless status oversized")}
+ return strings.TrimSpace(string(output.value))=="true",nil
 }
 func(LocalPodman) ImagePresent(ctx context.Context,ref string)(bool,error){
  if !validReference(ref){return false,errors.New("immutable digest required")}
@@ -128,4 +136,22 @@ func(LocalPodman) ImagePresent(ctx context.Context,ref string)(bool,error){
  var status *exec.ExitError
  if errors.As(err,&status)&&status.ExitCode()==1{return false,nil}
  return false,err
+}
+
+
+// Podman should return one boolean. Retain at most 64 bytes even if a
+// broken/malicious local CLI prints unlimited stdout. Writing all bytes is
+// deliberately acknowledged to the child to avoid leaking output into Go.
+type boundedPodmanBoolean struct {
+ value []byte
+ overflow bool
+}
+func(b *boundedPodmanBoolean)Write(p []byte)(int,error){
+ const maxInfoBytes=64
+ if len(b.value)+len(p)>maxInfoBytes{
+  b.overflow=true
+  remaining:=maxInfoBytes-len(b.value)
+  if remaining>0{b.value=append(b.value,p[:remaining]...)}
+ }else if !b.overflow{b.value=append(b.value,p...)}
+ return len(p),nil
 }

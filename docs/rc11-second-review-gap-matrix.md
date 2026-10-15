@@ -1293,3 +1293,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Extend direct no-proxy/no-injected-dial Agent HTTP transport to literal loopback **plaintext-authenticated** requests, not only self-declared `origin_node` destinations. The bearer over HTTP exception must not be accidentally converted into proxy-credential leakage by caller transport hooks.
 - [x] Real `httptest` origin+proxy regression checks exact local Authorization value, one origin request and zero proxy requests under injected proxy. Exact-head hosted CI pending.
 - [ ] Remote HTTPS providers retain separate configured credential/policy admission. Physical Node/owned target and independent observer truth, controlled reversible L5 effects, long-running resource and security audit still block packaging; final comprehensive user-first UI/UX LAST.
+
+
+## RC11 P0-BQ — bounded, cancellation-aware read-only physical Node preflight (2026-10-15)
+
+- [x] Protect the rootless Podman capability check from unbounded stdout by keeping at most 64 status bytes, never exposing host/path diagnostics. Reject any partial oversized output as a failed prerequisite, not success; run only read-only Podman info/image-exists.
+- [x] Fail closed on already-cancelled checks or deadline-cancelled Podman/image inspectors even if a buggy inspector returns success after cancellation. Local fake inspectors exercise cancellation before entry and during both successful-looking checks; pure fake output writer verifies fixed memory bound.
+- [ ] Hosted exact-source CI pending. This only validates operator prerequisites: no container run/pull, physical device or vantage identity, hardware acceptance or remediation authority. Continue protected physical test gates, independent proofs, reversible authorised L5 effects, installed low-resource/Windows ACL acceptance and source audit; LAST human-centred UI/UX before packaging.

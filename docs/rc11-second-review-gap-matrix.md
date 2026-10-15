@@ -1396,3 +1396,9 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Before the local runtime supervisor stops **any** idle healthy model to admit a different GPU placement, compute whether all eligible idle models' *estimated* device allocations could free enough capacity. Busy/non-evictable models remain in the projected usage; impossible admission now fails without disrupting existing working models. Explicit experimental overrides still require every selected accelerator to be free of other model claims after prospective idle recovery.
 - [x] Pure regression matrix covers fully busy devices, adequate idle headroom, insufficient idle+busy mixed usage, multi-device placement and experimental override isolation. Existing placement, Colibri pin and active-request enforcement remain in hosted CI; exact-source check pending.
 - [ ] These are conservative declared allocations, not actual GPU memory pressure, so real VRAM/RAM telemetry, Windows/Ubuntu startup and sustained low-memory acceptance remain release gates. Full security audit and LAST UI/UX alignment remain before authorised QA installer.
+
+
+## RC11 P0-CF — concurrent workers cannot prematurely evict shared local model (2026-10-16)
+
+- [x] Add real SQLite regression with 24 simultaneous local-inference workers sharing one runtime. All acquire an active lease before any release, and the runtime must remain `busy` while any lease is outstanding; after all completions it returns to `healthy` with zero ghost leases. This is a deterministic low-memory software concurrency check and runs with hosted race detection.
+- [ ] Physical CPU/GPU scheduling and process teardown, long-run real-host performance and external Node proof remain distinct; exact-source hosted CI pending. Complete audit then LAST human-focused UI/UX before an approved build.

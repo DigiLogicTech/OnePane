@@ -4,6 +4,7 @@ import(
  "context"
  "database/sql"
  "testing"
+ "sync"
 
  "github.com/DigiLogicTech/OnePane/internal/clock"
  _ "modernc.org/sqlite"
@@ -69,5 +70,69 @@ func TestLocalRuntimeRequestLeasesStayCoherentWithSQLite(t *testing.T){
  }
  if err:=sup.SetBusy(ctx,"model",true);err==nil||sup.activeRequests["model"]!=1{
   t.Fatalf("failed database acquire created ghost lease: %v %v",err,sup.activeRequests)
+ }
+}
+
+
+// Twenty-four concurrent workers holding one local model must not make the
+// runtime appear idle when only some have returned their GPU/CPU leases.
+func TestConcurrentLocalInferenceLeasesWaitForLastWorker(t *testing.T){
+ db,err:=sql.Open("sqlite",":memory:")
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ db.SetMaxOpenConns(1)
+ ctx:=context.Background()
+ for _,q:=range []string{
+  `CREATE TABLE local_runtime_instances(
+   deployment_id TEXT PRIMARY KEY,status TEXT,last_seen_at INTEGER,
+   updated_at INTEGER,revision INTEGER NOT NULL)`,
+  `INSERT INTO local_runtime_instances VALUES('shared-local','healthy',0,0,1)`,
+ }{
+  if _,err=db.ExecContext(ctx,q);err!=nil{t.Fatal(err)}
+ }
+ svc:=&RuntimeSupervisor{db:db,clock:clock.Real{},activeRequests:map[string]int{}}
+ const workers=24
+ admitted:=make(chan error,workers)
+ released:=make(chan error,workers)
+ finish:=make(chan struct{})
+ var wg sync.WaitGroup
+ for i:=0;i<workers;i++{
+  wg.Add(1)
+  go func(){
+   defer wg.Done()
+   err:=svc.SetBusy(ctx,"shared-local",true)
+   admitted<-err
+   if err!=nil{return}
+   <-finish
+   released<-svc.Release(ctx,"shared-local")
+  }()
+ }
+ failedAdmission:=false
+ for i:=0;i<workers;i++{
+  if err:=<-admitted;err!=nil{
+   failedAdmission=true
+  }
+ }
+ count:=svc.activeRequests["shared-local"]
+ var state string
+ stateErr:=db.QueryRowContext(ctx,`SELECT status FROM local_runtime_instances
+   WHERE deployment_id='shared-local'`).Scan(&state)
+ close(finish)
+ wg.Wait()
+ close(released)
+ failedRelease:=false
+ nReleased:=0
+ for err:=range released{
+  nReleased++
+  if err!=nil{failedRelease=true}
+ }
+ if failedAdmission||stateErr!=nil||state!="busy"||count!=workers||
+  failedRelease||nReleased!=workers||len(svc.activeRequests)!=0{
+  t.Fatalf("shared worker lease accounting failed: admission=%v before=%d state=%s stateErr=%v release=%v count=%d remaining=%v",
+   failedAdmission,count,state,stateErr,failedRelease,nReleased,svc.activeRequests)
+ }
+ if err=db.QueryRowContext(ctx,`SELECT status FROM local_runtime_instances
+   WHERE deployment_id='shared-local'`).Scan(&state);err!=nil||state!="healthy"{
+  t.Fatalf("last worker release did not return model to idle: %s %v",state,err)
  }
 }

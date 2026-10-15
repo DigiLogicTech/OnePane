@@ -38,7 +38,7 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
 	// silently lose its origin-only classification and default to remote
 	// HTTP dispatch when the transport is called directly.
 	if raw := bytes.TrimSpace(c.DataPolicyJSON); len(raw) != 0 {
-		if raw[0] != '{' {
+		if raw[0] != '{' || hasAmbiguousPolicyKeys(raw) {
 			return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_data_policy", OutcomeKnown: true}
 		}
 		if err := json.Unmarshal(raw, &dp); err != nil {
@@ -180,4 +180,30 @@ func boundedRuntimeHTTPTimeout(configuredMillis int64, callerTimeout time.Durati
   return maximum
  }
  return callerTimeout
+}
+
+
+// Top-level duplicate policy keys are ambiguous: the later JSON value
+// can silently replace an original origin-only label. Never interpret
+// that as permission to send a prompt/credential to a different endpoint.
+// This accepts ordinary JSON field order and whitespace without requiring
+// canonical Service serialization; nested payloads are not unwrapped here.
+func hasAmbiguousPolicyKeys(raw []byte) bool {
+ decoder:=json.NewDecoder(bytes.NewReader(raw))
+ begin,err:=decoder.Token()
+ if err!=nil||begin!=json.Delim('{'){return true}
+ seen:=make(map[string]bool,8)
+ for decoder.More(){
+  keyToken,err:=decoder.Token()
+  if err!=nil{return true}
+  key,ok:=keyToken.(string)
+  if !ok||seen[key]{return true}
+  seen[key]=true
+  var value json.RawMessage
+  if err=decoder.Decode(&value);err!=nil{return true}
+ }
+ end,err:=decoder.Token()
+ if err!=nil||end!=json.Delim('}'){return true}
+ _,err=decoder.Token()
+ return err!=io.EOF
 }

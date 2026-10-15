@@ -1265,3 +1265,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Align native `SetColibriPin` update with case-insensitive `ColibriPin` read admission, allowing legacy registered mixed-case Colibri names/backends without weakening the one-pin-per-Node guard or allowing non-native llama.cpp/GGUF models.
 - [x] Extend SQLite migration/index integration fixture with mixed-case native deployment and successful durable pin on independent Node. Exact-head hosted verification pending.
 - [ ] Physical GPU model tear-down/VRAM admission, hardware acceptance, code audit and LAST human-first UI/UX still required before QA installer.
+
+
+## RC11 P0-BM — duplicate JSON egress policy keys denied before Agent transport (2026-10-15)
+
+- [x] Deny explicit Agent Protocol HTTP data policies with duplicate top-level properties before performing a request, including origin-only/remote destination overrides in either direction and duplicate authorisation flags. Preserve valid key order, whitespace, canonical Service normalization and host-side Origin isolation.
+- [x] Add a no-egress loopback interception regression covering ambiguous policies and a valid-policy unit matrix. Exact-head hosted CI pending.
+- [ ] Physical L5 Node trust/owned endpoint acceptance, audited reversible human-approved effects, low-resource endurance and security review remain; operator-first comprehensive UI/UX LAST before approved QA installers.

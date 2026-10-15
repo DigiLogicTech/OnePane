@@ -261,6 +261,9 @@ func TestAgentProtocolHTTPRejectsMalformedExplicitDataPolicyBeforeDial(t *testin
   `null`,
   `{}`,
   `{"destination_kind":"unknown_remote"}`,
+  `{"destination_kind":"origin_node","destination_kind":"cloud"}`,
+  `{"destination_kind":"cloud","destination_kind":"origin_node"}`,
+  `{"destination_kind":"origin_node","allow_raw_secrets":false,"allow_raw_secrets":false}`,
  } {
   c:=Connection{EndpointJSON:endpoint,AuthType:"none",
    DataPolicyJSON:json.RawMessage(raw)}
@@ -270,6 +273,19 @@ func TestAgentProtocolHTTPRejectsMalformedExplicitDataPolicyBeforeDial(t *testin
     !te.OutcomeKnown||calls!=0{
    t.Fatalf("malformed policy reached transport: raw=%q calls=%d err=%v",
     raw,calls,err)
+  }
+ }
+}
+
+
+func TestAgentHTTPPolicyKeyCheckerAcceptsUnambiguousJSON(t *testing.T) {
+ for _,raw:=range []string{
+  `{"destination_kind":"origin_node"}`,
+  ` { "allowed_residency": ["origin_node"], "destination_kind": "origin_node" } `,
+  `{"destination_kind":"cloud","max_confidentiality":"public"}`,
+ }{
+  if hasAmbiguousPolicyKeys([]byte(raw)){
+   t.Fatalf("unambiguous explicit policy rejected: %s",raw)
   }
  }
 }

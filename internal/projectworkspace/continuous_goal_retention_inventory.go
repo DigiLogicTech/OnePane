@@ -19,6 +19,9 @@ type GoalRetentionInventory struct {
  TCPReachabilityAlerts int64 `json:"tcp_reachability_alerts"`
  IncidentReviews int64 `json:"incident_reviews"`
  ResponseCandidates int64 `json:"response_candidates"`
+ // Count metadata only. The immutable source-signed receipts remain in SQLite
+ // and may consume significant disk on long-running resource-limited hosts.
+ SignedInstrumentClaims int64 `json:"signed_instrument_claims"`
  ObserverFenceEvents int64 `json:"observer_fence_events"`
  UnreconciledObserverOperations int64 `json:"unreconciled_observer_operations"`
  InFlightObserverOperations int64 `json:"in_flight_observer_operations"`
@@ -68,6 +71,11 @@ func(s *Service)GoalRetentionInventory(ctx context.Context,projectID,goalID stri
     WHERE project_id=? AND goal_id=? AND project_workspace_id=?`,&out.IncidentReviews},
   {`SELECT COUNT(*) FROM project_goal_response_candidates
     WHERE project_id=? AND goal_id=? AND project_workspace_id=?`,&out.ResponseCandidates},
+  {`SELECT COUNT(*) FROM project_goal_instrument_measurement_claims m
+    JOIN project_goal_instrument_keys k ON k.id=m.instrument_key_id
+     AND k.project_id=m.project_id AND k.goal_id=m.goal_id
+    WHERE m.project_id=? AND m.goal_id=?
+     AND k.project_workspace_id=?`,&out.SignedInstrumentClaims},
  }
  for _,v:=range tally{
   if err=tx.QueryRowContext(ctx,v.query,
@@ -126,6 +134,10 @@ func(s *Service)GoalRetentionInventory(ctx context.Context,projectID,goalID stri
  }
  if out.IncidentReviews>=1000||out.ResponseCandidates>=1000{
   out.StorageAttentionReasons=append(out.StorageAttentionReasons,"incident_review_history_growth")
+ }
+ if out.SignedInstrumentClaims>=1024{
+  out.StorageAttentionReasons=append(out.StorageAttentionReasons,
+   "signed_instrument_claim_history_growth")
  }
  if err=tx.Commit();err!=nil{return GoalRetentionInventory{},err}
  return out,nil

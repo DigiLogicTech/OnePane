@@ -134,6 +134,14 @@ func TestIncidentEvidenceAssociatesOnlyHumanDeclaredHistoricalEndpoint(t *testin
  cmd.Signature=ed25519.Sign(privateKey,payload.SigningPayload)
  claim,err:=svc.AcceptGoalInstrumentMeasurement(ctx,cmd)
  if err!=nil{t.Fatal(err)}
+ inventory,err:=svc.GoalRetentionInventory(ctx,p.ID,g.ID)
+ if err!=nil||inventory.SignedInstrumentClaims!=1||inventory.BytesMeasured||
+   inventory.AutomaticPruningEnabled{
+  t.Fatalf("metadata inventory omitted signed evidence or fabricated storage capacity: %+v %v",inventory,err)
+ }
+ if _,err:=svc.GoalRetentionInventory(ctx,"foreign",g.ID);err==nil{
+  t.Fatal("foreign Project accessed signed instrument retention inventory")
+ }
  evidence,err:=svc.GoalIncidentEvidence(ctx,p.ID,g.ID,caseReview.ID)
  if err!=nil{t.Fatal(err)}
  if evidence.EndpointAssociation!="historical_operator_declared_same_endpoint"||
@@ -181,6 +189,10 @@ func TestIncidentEvidenceAssociatesOnlyHumanDeclaredHistoricalEndpoint(t *testin
  clk.now=clk.now.Add(90*time.Second)
  delayedClaim,err:=svc.AcceptGoalInstrumentMeasurement(ctx,delayed)
  if err!=nil{t.Fatal(err)}
+ historicalInventory,err:=svc.GoalRetentionInventory(ctx,p.ID,g.ID)
+ if err!=nil||historicalInventory.SignedInstrumentClaims!=2{
+  t.Fatalf("immutable signed claim volume not accounted for: %+v %v",historicalInventory,err)
+ }
  clk.now=time.UnixMilli(alerts[0].DetectedAt).Add(30*time.Minute)
  g,err=svc.ContinuousGoal(ctx,g.ID);if err!=nil{t.Fatal(err)}
  secondTCP,err:=svc.runManualGoalTCPProbe(ctx,RunGoalTCPProbeCommand{
@@ -234,6 +246,10 @@ func TestIncidentEvidenceAssociatesOnlyHumanDeclaredHistoricalEndpoint(t *testin
   !bytes.Equal(afterBundle.SigningPayload,originalBundle.SigningPayload)||
   !bytes.Equal(afterBundle.PublicKey,originalBundle.PublicKey){
   t.Fatalf("signed original evidence changed after indexed upgrade: %+v %v",afterBundle.Claim,err)
+ }
+ postUpgradeInventory,err:=svc.GoalRetentionInventory(ctx,p.ID,g.ID)
+ if err!=nil||postUpgradeInventory.SignedInstrumentClaims!=2{
+  t.Fatalf("signed receipt inventory lost across schema upgrade: %+v %v",postUpgradeInventory,err)
  }
  afterMigration,err:=svc.GoalIncidentEvidence(ctx,p.ID,g.ID,caseReview.ID)
  if err!=nil||len(afterMigration.SignedEndpointClaims)!=1||

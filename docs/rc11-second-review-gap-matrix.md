@@ -1154,3 +1154,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Extend actual signed-instrument/incident SQLite fixture to reconstruct pre-index schema, apply normal embedded migration 0095 on populated history, verify original Ed25519 proof bytes and case link remain unchanged, plus validate target index restoration. No changes to prior migration file checksums or historical records.
 - [ ] Hosted exact-head CI still required; this tests staged SQLite upgrade, not installed Windows MSI/Ubuntu .deb replacement, Windows ACLs, large-dataset disk pressure, backup restore from failed upgrade or physical Node identity.
 - [ ] Continue Node identity/vantage proof, independently corroborated incidents, bounded reversible human-approved Level 5 playbooks, low-resource endurance and full security audit. Human-centred UI/UX alignment LAST before separately approved QA packaging; branch stays draft.
+
+
+## RC11 P1-AV — signed instrument evidence retention visibility (2026-10-15)
+
+- [x] Add metadata-only signed-instrument-claim counts to the existing read-only, human-authorised, canonical Goal retention inventory. Count only linked original instrument keys in the same approved Project Workspace, never raw signatures/targets. At 1,024 signed claims per Goal report an advisory; automatic pruning remains disabled, byte measurement unclaimed.
+- [x] SQLite integration checks nonzero receipt counts, foreign-Project denial and unchanged 2-receipt count after staged index migration. No monitoring, mutation, retention deletion or permission expansion; exact-head CI verification pending.
+- [ ] Continue physical Node and owned-target acceptance, independently corroborated incidents, bounded reversible human-approved L5 actions, measured low-memory/SQLite WAL endurance and source/security audit. Comprehensive human-first UI/UX and customisation review LAST before approved QA installers. Draft PR #227 unmerged.

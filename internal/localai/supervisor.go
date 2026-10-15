@@ -477,6 +477,35 @@ func isOperatorMemoryOverride(rec Recommendation) bool {
 // ensureCapacity performs per-device pressure-aware hot swapping. It never
 // treats heterogeneous accelerators as one fictional VRAM pool. Only healthy,
 // idle runtimes are evicted; busy runtimes are protected by the runtime lease.
+// Predict whether evicting ALL healthy, idle candidates could satisfy a
+// deployment. Refuse impossible placements before any process is signalled.
+// Actual stops, identity checks and resource accounting remain unchanged.
+func capacityCouldFitAfterIdleReclaim(used,target,capacity map[string]int64,
+ idle []residentRuntime, operatorOverride bool) bool {
+ projected:=make(map[string]int64,len(used))
+ for key,n:=range used{projected[key]=n}
+ for _,r:=range idle{
+  for _,device:=range r.Placement.Devices{
+   if device.Kind!="accelerator"{continue}
+   key:=placementKey(device)
+   projected[key]-=device.AllocatedBytes
+   if projected[key]<0{projected[key]=0}
+  }
+ }
+ if operatorOverride{
+  // Explicit over-budget launch can proceed only if no other resident
+  // retains a claim on any of the requested accelerators.
+  for key:=range target{
+   if projected[key]>0{return false}
+  }
+  return true
+ }
+ for key,n:=range target{
+  if projected[key]+n>capacity[key]{return false}
+ }
+ return true
+}
+
 func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, nodeID string) error {
 	var targetBytes int64
 	var targetPlanJSON string
@@ -564,6 +593,13 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 	}
 	if fits() {
 		return nil
+	}
+	// Predict the *best possible* memory recovery from idle residents
+	// before stopping anyone. Otherwise a busy model can make admission
+	// impossible, yet every healthy idle neighbour would be needlessly
+	// evicted first. This is conservative accounting, not VRAM telemetry.
+	if !capacityCouldFitAfterIdleReclaim(used,target,capacity,residents,operatorOverride){
+		return errors.New("insufficient reclaimable accelerator memory; working models preserved")
 	}
 	for _, x := range residents {
 		if err := s.Stop(ctx, x.DeploymentID); err != nil {

@@ -1258,3 +1258,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 
 - [x] Hosted #38690800829 exposed Go compile failure `undefined: err` in Colibri status's new out-of-block SQLite read; the earlier `if err:=` for node ownership had block scope. Declare the new query's `err` locally before subsequent reuse, retaining the same Node-scoped persisted status lookup and no mutation.
 - [ ] Confirm complete hosted Linux/Windows Go/SQLite and actual same-Node status isolation regression on this exact corrected source commit. A failed predecessor CI is not evidence of release readiness; PR stays draft and unmerged.
+
+
+## RC11 P1-BL — mixed-case native Colibri pin eligibility parity (2026-10-15)
+
+- [x] Align native `SetColibriPin` update with case-insensitive `ColibriPin` read admission, allowing legacy registered mixed-case Colibri names/backends without weakening the one-pin-per-Node guard or allowing non-native llama.cpp/GGUF models.
+- [x] Extend SQLite migration/index integration fixture with mixed-case native deployment and successful durable pin on independent Node. Exact-head hosted verification pending.
+- [ ] Physical GPU model tear-down/VRAM admission, hardware acceptance, code audit and LAST human-first UI/UX still required before QA installer.

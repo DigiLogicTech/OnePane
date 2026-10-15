@@ -151,7 +151,7 @@ func (s *Service) ColibriHotSwapStatus(ctx context.Context,deploymentID string) 
     // A failed local engine is not resident, but must be visible to the
     // operator instead of being incorrectly displayed as "stopped".
     var persistedStatus string
-    err=s.db.QueryRowContext(ctx,`SELECT status FROM local_runtime_instances
+    err:=s.db.QueryRowContext(ctx,`SELECT status FROM local_runtime_instances
       WHERE deployment_id=? AND node_id=?`,deploymentID,nodeID).Scan(&persistedStatus)
     if err!=nil && err!=sql.ErrNoRows{return state,err}
     if err==nil{

@@ -1140,3 +1140,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Include the original signed **source-asserted** `observed_at` alongside server `accepted_at` in human-only, bounded incident evidence projections. No device/vantage trust escalation, no raw endpoint or signer material, and no mutation or response grant. Real SQLite integration asserts exact claim timing and established non-attested proof status.
 - [ ] Source-level CI verification pending for this exact head. Independently signed observation time is *not* hardware-attested or proven physically accurate.
 - [ ] Continue physical Node/owned device/vantage acceptance and audited human-approved reversible L5 response development. Low-memory/security review before final comprehensive UI/UX customisation review LAST, then only explicitly authorised QA installer packaging; draft PR unmerged.
+
+
+## RC11 P0-AT — operator stop and reviewer-revocation visibility in Level 5 response intent (2026-10-15)
+
+- [x] Add effective human incident-reviewer membership and durable observer-pause-latch checks to the non-executable response candidate readiness view. These are only extra blockers: no execution approval, Node action, inferred independent evidence or Process/Network grant is created.
+- [x] SQLite integration validates the independent operator pause/resume and reviewer suspension/reactivation transitions with the historical candidate held fail-closed. Original monitor permit and human review decisions remain immutable; no synthetic network dispatch.
+- [ ] Exact-head hosted CI to confirm; physical Node/device validation, explicit user-scoped reversible L5 permits and verification, low-memory/retention and complete security audit remain. Comprehensive operator-customisable UI/UX review stays LAST before separately approved installers; draft PR remains unmerged.

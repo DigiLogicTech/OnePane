@@ -178,6 +178,37 @@ func TestTCPIncidentCaseIsOperatorReviewedNotAutonomousRemediation(t *testing.T)
   len(readiness.Blockers)<3{
   t.Fatalf("response readiness was not fail-closed: %+v %v",readiness,err)
  }
+ // Readiness must surface the operator's durable stop latch. The
+ // response candidate itself remains permanently non-executable.
+ latestGoal,err:=svc.ContinuousGoal(ctx,goal.ID)
+ if err!=nil{t.Fatal(err)}
+ pausedFence,err:=svc.SetGoalTCPObservationFence(ctx,SetGoalTCPObservationFenceCommand{
+  ProjectID:project.ID,GoalID:goal.ID,ActorPrincipalID:"human",
+  TargetStatus:"paused",ExpectedGoalRevision:latestGoal.Revision,
+  ExpectedFenceRevision:0,
+ })
+ if err!=nil{t.Fatal(err)}
+ pausedReadiness,err:=svc.GoalResponseCandidateReadiness(ctx,project.ID,goal.ID,candidate.ID)
+ if err!=nil{t.Fatal(err)}
+ pausedReason:=false
+ for _,reason:=range pausedReadiness.Blockers{
+  if reason=="observer_pause_active"{pausedReason=true}
+ }
+ if !pausedReason||pausedReadiness.ExecutionAuthorized||pausedReadiness.State!="blocked"{
+  t.Fatalf("operator observer pause omitted from response assessment: %+v",pausedReadiness)
+ }
+ resumedFence,err:=svc.SetGoalTCPObservationFence(ctx,SetGoalTCPObservationFenceCommand{
+  ProjectID:project.ID,GoalID:goal.ID,ActorPrincipalID:"human",
+  TargetStatus:"running",ExpectedGoalRevision:latestGoal.Revision,
+  ExpectedFenceRevision:pausedFence.Revision,
+ })
+ if err!=nil||resumedFence.Status!="running"{t.Fatalf("resume latch: %+v %v",resumedFence,err)}
+ resumedReadiness,err:=svc.GoalResponseCandidateReadiness(ctx,project.ID,goal.ID,candidate.ID)
+ if err!=nil{t.Fatal(err)}
+ for _,reason:=range resumedReadiness.Blockers{
+  if reason=="observer_pause_active"{t.Fatalf("stale pause diagnosis persisted after resume: %+v",resumedReadiness)}
+ }
+ if resumedReadiness.ExecutionAuthorized{t.Fatal("resume latch granted response execution")}
  if _,err:=svc.ProposeGoalResponseCandidate(ctx,propose);err==nil{
   t.Fatal("duplicate pending response intent admitted")
  }
@@ -232,6 +263,31 @@ func TestTCPIncidentCaseIsOperatorReviewedNotAutonomousRemediation(t *testing.T)
  if !foundRevocation||revokedReadiness.ExecutionAuthorized{
   t.Fatalf("revoked source authority survived as candidate approval: %+v",revokedReadiness)
  }
+ // Withdrawn status is immutable history. A human reviewer whose
+ // tenant membership is suspended cannot remain a *current* reviewer.
+ if _,err:=db.SQL().ExecContext(ctx,
+  `UPDATE workspace_memberships SET status='suspended',updated_at=updated_at+1
+   WHERE workspace_id='tenant' AND principal_id='human'`);err!=nil{t.Fatal(err)}
+ staleReviewer,err:=svc.GoalResponseCandidateReadiness(ctx,project.ID,goal.ID,candidate.ID)
+ if err!=nil{t.Fatal(err)}
+ inactiveReview:=false
+ for _,reason:=range staleReviewer.Blockers{
+  if reason=="incident_reviewer_inactive"{inactiveReview=true}
+ }
+ if !inactiveReview||staleReviewer.ExecutionAuthorized{
+  t.Fatalf("membership suspension preserved live incident reviewer endorsement: %+v",staleReviewer)
+ }
+ if _,err:=db.SQL().ExecContext(ctx,
+  `UPDATE workspace_memberships SET status='active',updated_at=updated_at+1
+   WHERE workspace_id='tenant' AND principal_id='human'`);err!=nil{t.Fatal(err)}
+ restoredReviewer,err:=svc.GoalResponseCandidateReadiness(ctx,project.ID,goal.ID,candidate.ID)
+ if err!=nil{t.Fatal(err)}
+ for _,reason:=range restoredReviewer.Blockers{
+  if reason=="incident_reviewer_inactive"{
+   t.Fatalf("reinstated human reviewer remained marked inactive: %+v",restoredReviewer)
+  }
+ }
+ if restoredReviewer.ExecutionAuthorized{t.Fatal("membership reinstatement granted execution")}
  var tasks int
  if err:=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM tasks").Scan(&tasks);
   err!=nil||tasks!=0{t.Fatalf("review created Tasks: %d %v",tasks,err)}

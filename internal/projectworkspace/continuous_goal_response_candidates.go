@@ -331,5 +331,35 @@ func(s *Service)GoalResponseCandidateReadiness(ctx context.Context,
   project.WorkspaceID,c.ProposedBy).Scan(&activeProposer)
  if err!=nil{return GoalResponseCandidateReadiness{},err}
  if activeProposer!=1{out.Blockers=append(out.Blockers,"proposing_operator_inactive")}
+ // The reviewing human's current authority is independent from the
+ // person who later proposed the intent. A historical decision must not
+ // silently look like active operator endorsement after membership loss.
+ var activeReviewer int
+ err=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_goal_incident_reviews review
+   JOIN principals human ON human.id=review.reviewed_by
+    AND human.principal_type='human' AND human.status='active'
+   JOIN workspace_memberships member ON member.principal_id=human.id
+    AND member.workspace_id=? AND member.status='active'
+   WHERE review.id=? AND review.project_id=? AND review.goal_id=?
+    AND review.project_workspace_id=?`,
+  project.WorkspaceID,c.IncidentReviewID,projectID,goalID,c.ProjectWorkspaceID).
+  Scan(&activeReviewer)
+ if err!=nil{return GoalResponseCandidateReadiness{},err}
+ if activeReviewer!=1{
+  out.Blockers=append(out.Blockers,"incident_reviewer_inactive")
+ }
+ // The separate observer pause latch prevents unattended checks, even
+ // if the original grant has not expired. A non-executable proposal
+ // must show that stop rather than suggesting the observer is runnable.
+ var observerPaused int
+ err=s.db.QueryRowContext(ctx,`SELECT COUNT(*)
+   FROM project_goal_tcp_observation_fences
+   WHERE project_id=? AND goal_id=? AND project_workspace_id=?
+    AND status='paused'`,projectID,goalID,c.ProjectWorkspaceID).
+  Scan(&observerPaused)
+ if err!=nil{return GoalResponseCandidateReadiness{},err}
+ if observerPaused!=0{
+  out.Blockers=append(out.Blockers,"observer_pause_active")
+ }
  return out,nil
 }

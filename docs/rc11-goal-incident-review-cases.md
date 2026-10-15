@@ -9,3 +9,7 @@
 - Real SQLite integration covers source-alert provenance, cross-Project denial, human-only decisions, duplicate/forged status rejection, CAS replay, immutable history and absence of Tasks.
 
 **Next gates:** later cross-source correlation requires independently attested common target/instrument identity and user-approved acceptance rules. Approved reversible playbook execution requires distinct granular permits, safe rollback and independent postconditions. Endurance, physical Node and installed Windows/Ubuntu QA, final code audit and the last-step UI/UX review are still open. Draft PR #227 remains unreleased.
+
+## Effective operator and observer-stop readiness (2026-10-15)
+
+The non-executable Level 5 response-candidate readiness view now reports `incident_reviewer_inactive` when the human who historically reviewed the originating incident is no longer an active tenant member, separately from `proposing_operator_inactive`. It also reports `observer_pause_active` when the operator has paused unattended TCP observation through the independent durable stop latch. These are *additional blockers*, not eligibility checks that ever grant execution: every response candidate remains `state=blocked`, `execution_authorized=false`, without a mutation adapter. SQLite integration exercises pause/resume and reviewer suspension/reactivation, checking the original proposed intent cannot be used as a process restart grant.

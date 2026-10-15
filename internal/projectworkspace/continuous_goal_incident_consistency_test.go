@@ -26,3 +26,19 @@ func TestSummarizeInstrumentSelfReportsNeverCountsIndependentVantages(t *testing
   })
  }
 }
+
+func TestIncidentSignerHistoryCapNeverPretendsToBeExhaustive(t *testing.T){
+ out:=GoalIncidentEvidence{SignedEndpointClaims:[]GoalIncidentSignedEndpointClaim{}}
+ for i:=0;i<9;i++{
+  appendBoundedIncidentClaim(&out,GoalIncidentSignedEndpointClaim{
+   ClaimID:"historical",InstrumentKeyID:"unattested-key",Outcome:"connected",
+  })
+ }
+ if len(out.SignedEndpointClaims)!=8||!out.SignedClaimsTruncated{
+  t.Fatalf("bounded history was represented as exhaustive: %+v",out)
+ }
+ consistency,keys:=summarizeInstrumentSelfReports(out.SignedEndpointClaims)
+ if consistency!="consistent_unverified_self_reports"||keys!=1{
+  t.Fatalf("truncated same-key history misclassified: %s %d",consistency,keys)
+ }
+}

@@ -18,6 +18,9 @@ type GoalIncidentEvidence struct {
  // Descriptive metadata only; a signing key is NOT an independent vantage.
  SignedClaimConsistency string `json:"signed_claim_consistency"`
  DistinctSigningKeys int `json:"distinct_signing_keys"`
+ // True when more than the eight most-recent historical signer claims
+ // matched. Consistency/key counts describe ONLY the returned eight.
+ SignedClaimsTruncated bool `json:"signed_claims_truncated"`
  EndpointAssociation string `json:"endpoint_association"`
  DeviceIdentityVerified bool `json:"device_identity_verified"`
  IndependentVantageVerified bool `json:"independent_vantage_verified"`
@@ -182,7 +185,7 @@ func(s *Service)GoalIncidentEvidence(ctx context.Context,projectID,goalID,review
     AND m.observed_at>=challenge.issued_at
     AND m.observed_at<=m.accepted_at
     AND m.accepted_at<=?
-   ORDER BY m.accepted_at DESC,m.id DESC LIMIT 8`,
+   ORDER BY m.accepted_at DESC,m.id DESC LIMIT 9`,
    projectID,goalID,declaredID,review.SourceID,from,
    alert.DetectedAt+windowMillis,from,
    alert.DetectedAt+windowMillis,s.clock.UnixMilli())
@@ -192,7 +195,7 @@ func(s *Service)GoalIncidentEvidence(ctx context.Context,projectID,goalID,review
   var claim GoalIncidentSignedEndpointClaim
   if err=rows.Scan(&claim.ClaimID,&claim.InstrumentKeyID,&claim.Outcome,
    &claim.ObservedAt,&claim.AcceptedAt,&claim.ProofClass);err!=nil{return GoalIncidentEvidence{},err}
-  out.SignedEndpointClaims=append(out.SignedEndpointClaims,claim)
+  appendBoundedIncidentClaim(&out,claim)
  }
  if err=rows.Err();err!=nil{return GoalIncidentEvidence{},err}
  if len(out.SignedEndpointClaims)>0{
@@ -217,4 +220,15 @@ func summarizeInstrumentSelfReports(claims []GoalIncidentSignedEndpointClaim)(st
  }
  if disputed{return "conflicting_unverified_self_reports",len(keys)}
  return "consistent_unverified_self_reports",len(keys)
+}
+
+
+// The DB reads at most one look-ahead row beyond the eight published
+// receipts. This is a bounded truncation indicator, NOT a total claim count.
+func appendBoundedIncidentClaim(out *GoalIncidentEvidence,claim GoalIncidentSignedEndpointClaim){
+ if len(out.SignedEndpointClaims)>=8{
+  out.SignedClaimsTruncated=true
+  return
+ }
+ out.SignedEndpointClaims=append(out.SignedEndpointClaims,claim)
 }

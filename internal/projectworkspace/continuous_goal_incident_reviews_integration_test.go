@@ -291,4 +291,43 @@ func TestTCPIncidentCaseIsOperatorReviewedNotAutonomousRemediation(t *testing.T)
  var tasks int
  if err:=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM tasks").Scan(&tasks);
   err!=nil||tasks!=0{t.Fatalf("review created Tasks: %d %v",tasks,err)}
+ // A pre-existing, human-scoped observer effect with an unknown outcome
+ // requires reconciliation; another executing operation is not a verified
+ // postcondition. These synthetic durable rows never invoke an adapter,
+ // socket, Tool Gateway or autonomous response.
+ taskID:="human-recovery-inspection"
+ now:=time.Now().UnixMilli()
+ _,err=db.SQL().ExecContext(ctx,`INSERT INTO tasks(
+  id,workspace_id,project_id,project_workspace_id,objective,state,
+  scheduling_class,priority,completion_json,revision,created_at,updated_at)
+  VALUES(?,?,?,?,?,'running','normal_task',0,'{}',1,?,?)`,
+  taskID,"tenant",project.ID,ws.ID,"Human reconciliation evidence",now,now)
+ if err!=nil{t.Fatal(err)}
+ for _,fixture:=range []struct{id,state string}{
+  {"effect-unknown","unknown_outcome"},
+  {"effect-executing","executing"},
+ }{
+  resource:="goal-tcp-observer://"+project.ID+"/"+goal.ID
+  _,err=db.SQL().ExecContext(ctx,`INSERT INTO operations(
+   id,workspace_id,task_id,principal_id,idempotency_key,state,capability_id,
+   resource_ref,tool_id,tool_version,adapter_id,adapter_version,
+   desired_state_json,precondition_json,reconciliation_json,
+   policy_revision,input_hash,revision,created_at,updated_at)
+   VALUES(?,?,?,?,?,?,?, ?,?,'1',?,'1','{}','{}','{}',1,'testhash',1,?,?)`,
+   fixture.id,"tenant",taskID,"human",fixture.id+"-unique",fixture.state,
+   "goal.tcp_observer.control",resource,"project.goal.tcp_observer.pause",
+   "onepane.goal.tcp_observer.control",now,now)
+  if err!=nil{t.Fatalf("durable operator effect fixture: %v",err)}
+ }
+ uncertain,err:=svc.GoalResponseCandidateReadiness(ctx,project.ID,goal.ID,candidate.ID)
+ if err!=nil{t.Fatal(err)}
+ needsReconciliation,inFlight:=false,false
+ for _,reason:=range uncertain.Blockers{
+  if reason=="observer_mutation_needs_reconciliation"{needsReconciliation=true}
+  if reason=="observer_mutation_in_flight"{inFlight=true}
+ }
+ if !needsReconciliation||!inFlight||uncertain.ExecutionAuthorized||
+  uncertain.State!="blocked"{
+  t.Fatalf("unknown or executing observer effects hidden from human review: %+v",uncertain)
+ }
 }

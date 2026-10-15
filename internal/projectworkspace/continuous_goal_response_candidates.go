@@ -385,6 +385,39 @@ func(s *Service)GoalResponseCandidateReadiness(ctx context.Context,
  if observerPaused!=0{
   out.Blockers=append(out.Blockers,"observer_pause_active")
  }
+ // A durable uncertain operator effect cannot be treated as a
+ // successfully verified postcondition. Even though this candidate is
+ // permanently non-executable, the operator needs to see outstanding
+ // observer mutations and concurrent effects before considering recovery.
+ var uncertainObserver,inFlightObserver int
+ resourceRef:="goal-tcp-observer://"+projectID+"/"+goalID
+ err=tx.QueryRowContext(ctx,`SELECT
+  COALESCE(MAX(CASE WHEN op.state IN
+   ('unknown_outcome','blocked_unknown_outcome','compensation_failed')
+   THEN 1 ELSE 0 END),0),
+  COALESCE(MAX(CASE WHEN op.state IN
+   ('executing','observing','verified','compensating')
+   THEN 1 ELSE 0 END),0)
+  FROM operations op
+  JOIN tasks task ON task.id=op.task_id
+   AND task.workspace_id=op.workspace_id
+   AND task.project_id=? AND task.project_workspace_id=?
+  WHERE op.workspace_id=?
+   AND op.resource_ref=?
+   AND op.tool_id IN ('project.goal.tcp_observer.pause',
+    'project.goal.tcp_observer.resume')
+   AND op.adapter_id='onepane.goal.tcp_observer.control'
+   AND op.state IN ('unknown_outcome','blocked_unknown_outcome',
+    'compensation_failed','executing','observing','verified','compensating')`,
+  projectID,c.ProjectWorkspaceID,project.WorkspaceID,resourceRef).
+  Scan(&uncertainObserver,&inFlightObserver)
+ if err!=nil{return GoalResponseCandidateReadiness{},err}
+ if uncertainObserver!=0{
+  out.Blockers=append(out.Blockers,"observer_mutation_needs_reconciliation")
+ }
+ if inFlightObserver!=0{
+  out.Blockers=append(out.Blockers,"observer_mutation_in_flight")
+ }
  if err=tx.Commit();err!=nil{return GoalResponseCandidateReadiness{},err}
  return out,nil
 }

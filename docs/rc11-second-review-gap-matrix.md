@@ -1307,3 +1307,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Extend the non-executable L5 response readiness snapshot with exact Goal, Project Workspace, Task and Tool-scoped persisted observer operation uncertainty. Label `observer_mutation_needs_reconciliation` for unknown/blocked/compensation-failed outcomes and `observer_mutation_in_flight` for executing/observing/verified/compensating effects; never infer success or silently grant response authority.
 - [x] Real SQLite integration inserts matching scoped historical operator operations (one unknown, one executing) and verifies both human-facing blockers remain alongside permanent execution denial. No adapter call, host/network mutation or Task creation by the readiness endpoint itself. Exact-source CI pending.
 - [ ] Actual independently verified physical Node and target, separately authorised reversible effect admission, postconditions/rollback, measured low-resource installed QA and full code/security review remain. Comprehensive operator-first UI/UX LAST before approved installers; branch stays unmerged.
+
+
+## RC11 P1-BS — refuse partial multi-Colibri eviction on one Node (2026-10-15)
+
+- [x] Reject abnormal states with more than one healthy idle Colibri candidate BEFORE stopping any model. OnePane's single-resident policy means sequentially draining multiple local engines can partially evict working models during a failed swap; require explicit operator reconciliation. Preserve pinned/busy/starting/draining/orphaned denial and regular empty/single-idle behavior.
+- [x] Unit regression tests one safe idle model and two abnormal healthy residents with empty eviction result; existing status and pinning regression remain. Exact-head hosted CI pending.
+- [ ] Physical low-RAM host/process-tree teardown, VRAM release and installed recovery tests remain, alongside verified Node/target and reversible L5 authority. Full code/security review and LAST human-first customisation pass precede approved QA build.

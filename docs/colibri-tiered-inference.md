@@ -110,3 +110,7 @@ The Colibri hot-swap status readout reports the selected deployment's **persiste
 ### Mixed-case native Colibri registration compatibility (RC11, 2026-10-15)
 
 Pin eligibility has always matched registered runtime name and backend case-insensitively, but pin persistence previously required lowercase `runtime_backend=colibri`. Saving a pin for a native deployment with older mixed-case metadata could fail after appearing eligible. The update now uses the same case-insensitive backend check, retaining the Node-scoped uniqueness rule, existing other settings, and no GGUF conversion or automatic VRAM guarantee. An actual SQLite test includes a mixed-case native Colibri deployment on a separate Node.
+
+### Abnormal multiple-resident state fails closed (RC11, 2026-10-15)
+
+The per-Node Colibri policy intentionally permits only one whole model resident. If a legacy session, crash or service recovery leaves **multiple idle healthy Colibri processes** visible at once, attempting to stop them sequentially could evict one functioning model and then fail to stop the next. The planner now rejects the whole automatic switch **before stopping any of them** and requests operator reconciliation; busy/pinned/starting/draining/orphaned protection remains stronger still. Only exactly one safely idle resident may be evicted during a switch; an empty resident list remains allowed. Unit regressions cover single idle, multiple idle and all unsafe states. This does not claim physical GPU VRAM reclamation, so hardware QA remains required.

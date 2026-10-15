@@ -42,6 +42,13 @@ func selectColibriEvictions(candidates []colibriSwapCandidate, active map[string
             return nil,fmt.Errorf("unexpected Colibri residency state %s",c.Status)
         }
     }
+    // Only one resident Colibri is allowed per Node. Earlier installs or
+    // recovery races can leave multiple healthy processes. Stopping more
+    // than one sequentially risks evicting an innocent working model when
+    // the later stop fails. Require human reconciliation instead.
+    if len(out)>1{
+        return nil,fmt.Errorf("multiple Colibri processes remain resident on this Node; stop or reconcile them individually before swapping")
+    }
     return out,nil
 }
 

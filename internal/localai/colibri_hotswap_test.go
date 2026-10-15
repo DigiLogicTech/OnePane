@@ -7,15 +7,22 @@ import (
     "testing"
 )
 
-func TestColibriHotSwapEvictsOnlyIdleModels(t *testing.T) {
-    idle:=[]colibriSwapCandidate{
+func TestColibriHotSwapEvictsOnlyOneIdleResident(t *testing.T) {
+    idle:=[]colibriSwapCandidate{{ID:"sole",Status:RuntimeHealthy,LastUsed:2}}
+    out,err:=selectColibriEvictions(idle,map[string]int{})
+    if err!=nil||!reflect.DeepEqual(out,[]string{"sole"}){
+        t.Fatalf("single safely idle Colibri not selected: %v %v",out,err)
+    }
+}
+
+func TestColibriHotSwapRefusesAbnormalMultipleIdleResidents(t *testing.T){
+    peers:=[]colibriSwapCandidate{
         {ID:"older",Status:RuntimeHealthy,LastUsed:2},
         {ID:"newer",Status:RuntimeHealthy,LastUsed:9},
     }
-    out,err:=selectColibriEvictions(idle,map[string]int{})
-    if err!=nil{t.Fatal(err)}
-    if !reflect.DeepEqual(out,[]string{"older","newer"}){
-        t.Fatalf("unexpected idle eviction order: %v",out)
+    out,err:=selectColibriEvictions(peers,map[string]int{})
+    if err==nil||!strings.Contains(err.Error(),"multiple Colibri")||len(out)!=0{
+        t.Fatalf("multiple resident Colibri would be evicted partially: %v %v",out,err)
     }
 }
 

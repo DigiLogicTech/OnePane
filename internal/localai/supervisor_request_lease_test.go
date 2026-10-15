@@ -55,6 +55,14 @@ func TestLocalRuntimeRequestLeasesStayCoherentWithSQLite(t *testing.T){
   t.Fatalf("replayed release changed lease state: %v %v",err,sup.activeRequests)
  }
  if err:=sup.SetBusy(ctx,"model",true);err!=nil{t.Fatal(err)}
+ // Defer-cleanup after a request cancellation must still release its
+ // SQLite and in-memory active-lease record using a bounded clean context.
+ cancelled,cancel:=context.WithCancel(ctx)
+ cancel()
+ if err:=sup.Release(cancelled,"model");err!=nil||sup.activeRequests["model"]!=0{
+  t.Fatalf("cancelled task stranded otherwise healthy runtime lease: %v %+v",err,sup.activeRequests)
+ }
+ if err:=sup.SetBusy(ctx,"model",true);err!=nil{t.Fatal(err)}
  if _,err=db.ExecContext(ctx,`DROP TABLE local_runtime_instances`);err!=nil{t.Fatal(err)}
  if err:=sup.SetBusy(ctx,"model",false);err==nil||sup.activeRequests["model"]!=1{
   t.Fatalf("failed database release discarded live request protection: %v %v",err,sup.activeRequests)

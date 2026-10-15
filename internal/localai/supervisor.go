@@ -921,7 +921,13 @@ func (s *RuntimeSupervisor) Acquire(ctx context.Context, deploymentID string) (R
 }
 
 func (s *RuntimeSupervisor) Release(ctx context.Context, deploymentID string) error {
-	return s.SetBusy(ctx, deploymentID, false)
+ // A cancelled chat/task context must not prevent a completed request's
+ // cleanup and strand its model as busy forever. Do not silently drop the
+ // in-memory lease on database failure: SetBusy preserves it until a
+ // persisted transition succeeds. Keep cleanup independently bounded.
+ releaseCtx,cancel:=context.WithTimeout(context.WithoutCancel(ctx),3*time.Second)
+ defer cancel()
+ return s.SetBusy(releaseCtx,deploymentID,false)
 }
 
 // Diagnoses failures without exposing arbitrary large runtime output to clients.

@@ -1375,3 +1375,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Local inference `SetBusy` now advances or releases the in-memory active-request lease **only after** the matching SQLite runtime state transition succeeds and affects exactly one deployed runtime. A failed or cancelled Acquire cannot create a ghost busy lease; a failed Release cannot drop its in-memory protection before the database acknowledges the change.
 - [x] Zero affected rows (stopped/starting/absent process) fail closed on lease acquisition; releasing an already-absent lease is a read-only no-op. A live request remains guarded against premature Colibri eviction on failed release. Exact SQLite regression and hosted CI pending.
 - [ ] This does not physically measure GPU RAM or solve crashes in the interval between any OS inference call and database persistence. Physical acceptance, genuine independently trusted owned-target evidence, authorised reversible Level 5 effects, full audit and FINAL user-centred UI/UX remain gating.
+
+
+## RC11 P0-CC — bounded inference lease release survives cancelled task context (2026-10-16)
+
+- [x] Give managed runtime `Release` a dedicated three-second cleanup context carrying the original request's values but not its cancellation. Otherwise cancelled chat/AgentCheck tasks can leave an idle model permanently marked busy even when SQLite is healthy.
+- [x] Real SQLite regression confirms cancellation still releases a completed request, while a later SQLite write failure leaves the lease conservatively protected against eviction. Source/hosted CI pending.
+- [ ] This does not bypass runtime stop/revocation, allow retries after failed release, or falsely mark a physical process healthy; explicit operator recovery is still required on storage failure. Full physical/low-resource/security validation and LAST UI/UX remain gates.

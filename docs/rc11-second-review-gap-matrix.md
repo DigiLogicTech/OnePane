@@ -1321,3 +1321,9 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] An already alive, healthy/busy or starting selected target returns/waits before attempting any automatic Colibri replacement. For actual switches check the required Python launcher path before evicting an idle predecessor; reuse preflight launcher instead of discovering it again later. No automatic fallback to llama.cpp, remote or another backend.
 - [x] Add startup-order source contract to prevent future regression that would interrupt a working local model when Python is missing. Exact-source CI pending.
 - [ ] Imported Python module health, executable preservation under concurrent uninstall, subprocess/GPU teardown, VRAM accounting and hardware acceptance require installed tests; physical identity, human-gated reversible L5 effects and last UI/UX gate remain.
+
+
+## RC11 P0-BU — reject foreign Project observer-operation contamination (2026-10-15)
+
+- [x] Extend actual SQLite response-intent readiness regression with a second active Project/Workspace in the same tenant. A fabricated foreign Operation references the **original** Goal's observer URI but is attached to the separate Project Task; non-executable diagnostics must never treat it as a target Goal's reconciliation debt. Later same-Goal unknown and executing operations must still surface both real blockers.
+- [ ] Exact-head hosted CI pending; this is sandbox isolation for operator evidence, not physical sensor truth or network remediation permission. Continue owned hardware/observer proof, approved reversible L5 actions, measured low-memory acceptance and final source audit with LAST human-centered UI/UX before authorised installer.

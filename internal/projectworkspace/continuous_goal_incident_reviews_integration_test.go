@@ -291,6 +291,47 @@ func TestTCPIncidentCaseIsOperatorReviewedNotAutonomousRemediation(t *testing.T)
  var tasks int
  if err:=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM tasks").Scan(&tasks);
   err!=nil||tasks!=0{t.Fatalf("review created Tasks: %d %v",tasks,err)}
+ // Even in the same tenant, a different Project's Task must not
+ // pollute this exact Goal's reconciliation diagnosis. Deliberately use
+ // the target Goal's resource string as hostile/corrupt external metadata;
+ // the canonical Task's Project/Workspace must still win.
+ otherProject,err:=svc.CreateProject(ctx,CreateProjectCommand{
+  WorkspaceID:"tenant",Name:"Other isolated observer",CreatedBy:"human",
+  ProjectPolicyJSON:json.RawMessage(`{"onepane_operations":{"version":1,"mode":"continuous_operations"}}`),
+ })
+ if err!=nil{t.Fatal(err)}
+ otherWorkspace,err:=svc.CreateWorkspaceView(ctx,CreateWorkspaceViewCommand{
+  ProjectID:otherProject.ID,Name:"Other sandbox",ActorPrincipalID:"human",
+ })
+ if err!=nil{t.Fatal(err)}
+ foreignTask:="different-project-observer"
+ nowForeign:=time.Now().UnixMilli()
+ _,err=db.SQL().ExecContext(ctx,`INSERT INTO tasks(
+  id,workspace_id,project_id,project_workspace_id,objective,state,
+  scheduling_class,priority,completion_json,revision,created_at,updated_at)
+  VALUES(?,?,?,?,?,'running','normal_task',0,'{}',1,?,?)`,
+  foreignTask,"tenant",otherProject.ID,otherWorkspace.ID,"Foreign evidence",nowForeign,nowForeign)
+ if err!=nil{t.Fatal(err)}
+ _,err=db.SQL().ExecContext(ctx,`INSERT INTO operations(
+   id,workspace_id,task_id,principal_id,idempotency_key,state,capability_id,
+   resource_ref,tool_id,tool_version,adapter_id,adapter_version,
+   desired_state_json,precondition_json,reconciliation_json,
+   policy_revision,input_hash,revision,created_at,updated_at)
+   VALUES(?,?,?,?,?,?,?, ?,?,'1',?,'1','{}','{}','{}',1,'testhash',1,?,?)`,
+   "foreign-uncertain","tenant",foreignTask,"human","foreign-unknown-unique",
+   "unknown_outcome","goal.tcp_observer.control",
+   "goal-tcp-observer://"+project.ID+"/"+goal.ID,
+   "project.goal.tcp_observer.pause","onepane.goal.tcp_observer.control",
+   nowForeign,nowForeign)
+ if err!=nil{t.Fatal(err)}
+ isolated,err:=svc.GoalResponseCandidateReadiness(ctx,project.ID,goal.ID,candidate.ID)
+ if err!=nil{t.Fatal(err)}
+ for _,reason:=range isolated.Blockers{
+  if reason=="observer_mutation_needs_reconciliation"||
+   reason=="observer_mutation_in_flight"{
+   t.Fatalf("another Project's observer contaminated exact Goal readiness: %+v",isolated)
+  }
+ }
  // A pre-existing, human-scoped observer effect with an unknown outcome
  // requires reconciliation; another executing operation is not a verified
  // postcondition. These synthetic durable rows never invoke an adapter,

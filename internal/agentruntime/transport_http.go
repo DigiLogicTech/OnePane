@@ -33,7 +33,15 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
 	// a self-declared origin_node must not send data to a remote service,
 	// even when the caller neglected the Service's canonical admission.
 	var dp DataPolicy
-	_ = json.Unmarshal(c.DataPolicyJSON, &dp)
+	// Service admission normally normalises this policy, but the adapter is
+	// also a final egress boundary. A malformed explicit policy must not
+	// silently lose its origin-only classification and default to remote
+	// HTTP dispatch when the transport is called directly.
+	if len(bytes.TrimSpace(c.DataPolicyJSON)) != 0 {
+		if err := json.Unmarshal(c.DataPolicyJSON, &dp); err != nil {
+			return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_data_policy", OutcomeKnown: true}
+		}
+	}
 	originOnly := dp.DestinationKind == "origin_node"
 	if originOnly && !runtimeendpoint.LiteralLoopbackHTTP(c.EndpointJSON) {
 		return agentprotocol.Response{},&RuntimeTransportError{

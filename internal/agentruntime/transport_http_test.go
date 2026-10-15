@@ -238,3 +238,35 @@ func TestAgentRuntimeHTTPTimeoutIsAlwaysBounded(t *testing.T) {
   })
  }
 }
+
+func TestAgentProtocolHTTPRejectsMalformedExplicitDataPolicyBeforeDial(t *testing.T) {
+ var calls int
+ srv:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+  calls++
+  t.Error("a malformed origin policy was sent to a network receiver")
+  w.WriteHeader(http.StatusBadGateway)
+ }))
+ defer srv.Close()
+ endpoint,_:=json.Marshal(map[string]string{"base_url":srv.URL})
+ req:=agentprotocol.Request{
+  ProtocolVersion:agentprotocol.Version,RequestID:"malformed-policy",
+  WorkspaceID:"ws",PrincipalID:"agent",Objective:"private-prompt",
+  Constraints:json.RawMessage(`{}`),ContextManifest:json.RawMessage(`{}`),
+  PermittedProposalTypes:[]agentprotocol.ProposalType{agentprotocol.ProposalComplete},
+ }
+ for _,raw:=range []string{
+  `{"destination_kind":"origin_node"`,
+  `{"destination_kind":123}`,
+  `["origin_node"]`,
+ } {
+  c:=Connection{EndpointJSON:endpoint,AuthType:"none",
+   DataPolicyJSON:json.RawMessage(raw)}
+  _,err:=(AgentProtocolHTTPTransport{}).Invoke(context.Background(),c,req,nil)
+  var te *RuntimeTransportError
+  if !errors.As(err,&te)||te.Code!="invalid_data_policy"||
+    !te.OutcomeKnown||calls!=0{
+   t.Fatalf("malformed policy reached transport: raw=%q calls=%d err=%v",
+    raw,calls,err)
+  }
+ }
+}

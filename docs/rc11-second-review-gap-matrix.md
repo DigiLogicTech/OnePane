@@ -1161,3 +1161,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Add metadata-only signed-instrument-claim counts to the existing read-only, human-authorised, canonical Goal retention inventory. Count only linked original instrument keys in the same approved Project Workspace, never raw signatures/targets. At 1,024 signed claims per Goal report an advisory; automatic pruning remains disabled, byte measurement unclaimed.
 - [x] SQLite integration checks nonzero receipt counts, foreign-Project denial and unchanged 2-receipt count after staged index migration. No monitoring, mutation, retention deletion or permission expansion; exact-head CI verification pending.
 - [ ] Continue physical Node and owned-target acceptance, independently corroborated incidents, bounded reversible human-approved L5 actions, measured low-memory/SQLite WAL endurance and source/security audit. Comprehensive human-first UI/UX and customisation review LAST before approved QA installers. Draft PR #227 unmerged.
+
+
+## RC11 P0-AW — fail-closed malformed origin HTTP adapter policy (2026-10-15)
+
+- [x] The final built-in HTTP Agent Runtime transport no longer ignores an explicit malformed data policy and accidentally drops `destination_kind=origin_node` into an unrestricted remote HTTP path. Deny malformed/non-object/wrong-typed JSON prior to any dial and mark the denial outcome known. The canonical Service remains responsible for authorised complete policy and budget admission; this adapter is independent final defence, not an access grant.
+- [x] Direct adapter regression uses a local interception sink to verify zero requests under three malformed policy payloads. Exact-source CI pending.
+- [ ] Continue physical Node/device identity and independent-vantage proof, human-correlated incidents, reversible bounded Level 5 effects, low-resource soak and full security audit. Comprehensive human-first UI/UX review remains LAST before approved QA installer; branch stays draft/unmerged.

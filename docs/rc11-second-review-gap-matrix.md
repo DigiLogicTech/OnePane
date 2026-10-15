@@ -1314,3 +1314,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Reject abnormal states with more than one healthy idle Colibri candidate BEFORE stopping any model. OnePane's single-resident policy means sequentially draining multiple local engines can partially evict working models during a failed swap; require explicit operator reconciliation. Preserve pinned/busy/starting/draining/orphaned denial and regular empty/single-idle behavior.
 - [x] Unit regression tests one safe idle model and two abnormal healthy residents with empty eviction result; existing status and pinning regression remain. Exact-head hosted CI pending.
 - [ ] Physical low-RAM host/process-tree teardown, VRAM release and installed recovery tests remain, alongside verified Node/target and reversible L5 authority. Full code/security review and LAST human-first customisation pass precede approved QA build.
+
+
+## RC11 P1-BT — preflight Colibri Python before any working-model eviction (2026-10-15)
+
+- [x] An already alive, healthy/busy or starting selected target returns/waits before attempting any automatic Colibri replacement. For actual switches check the required Python launcher path before evicting an idle predecessor; reuse preflight launcher instead of discovering it again later. No automatic fallback to llama.cpp, remote or another backend.
+- [x] Add startup-order source contract to prevent future regression that would interrupt a working local model when Python is missing. Exact-source CI pending.
+- [ ] Imported Python module health, executable preservation under concurrent uninstall, subprocess/GPU teardown, VRAM accounting and hardware acceptance require installed tests; physical identity, human-gated reversible L5 effects and last UI/UX gate remain.

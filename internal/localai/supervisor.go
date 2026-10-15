@@ -669,15 +669,7 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 	if err != nil {
 		return RuntimeInstance{}, err
 	}
-	// Colibri is memory-tiered internally, so its registered model's one-byte
-	// placeholder is not a meaningful host-memory admission estimate. Limit
-	// this node to one resident Colibri model unless another is still serving.
-	// This is shared by explicit hot swap AND ordinary inference acquisition.
-	if strings.EqualFold(cfg.RuntimeBackend, "colibri") {
-		if _, err := s.prepareColibriSwapLocked(ctx, nodeID, deploymentID); err != nil {
-			return RuntimeInstance{}, err
-		}
-	}
+	// An already-running target requires no eviction or new launcher.
 	var existing *RuntimeInstance
 	if old, err := s.Instance(ctx, deploymentID); err == nil {
 		existing = &old
@@ -686,6 +678,19 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 		}
 		if old.Status == RuntimeStarting && s.processes.Alive(old.PID) {
 			return s.waitHealthy(ctx, old.ID, 120*time.Second)
+		}
+	}
+	// Resolve the Colibri launcher BEFORE evicting a healthy predecessor.
+	// Otherwise ordinary inference acquisition could lose its working
+	// model merely because Python was missing, with no swap rollback.
+	var colibriPython string
+	if strings.EqualFold(cfg.RuntimeBackend, "colibri") {
+		colibriPython,err=findPythonExecutable()
+		if err!=nil{return RuntimeInstance{},err}
+		// Tiering uses Colibri's managed runtime; never replace it with
+		// another backend if its prerequisites are unavailable.
+		if _, err = s.prepareColibriSwapLocked(ctx, nodeID, deploymentID); err != nil {
+			return RuntimeInstance{}, err
 		}
 	}
 	if !strings.EqualFold(cfg.RuntimeBackend,"colibri"){
@@ -701,10 +706,7 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 	executable := cfg.Executable
 	args := []string{"-m", cfg.ModelPath, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "-c", strconv.FormatInt(cfg.ContextTokens, 10)}
 	if strings.EqualFold(cfg.RuntimeBackend, "colibri") {
-		py, err := findPythonExecutable()
-		if err != nil {
-			return RuntimeInstance{}, err
-		}
+		py := colibriPython
 		executable = py
 		args = nil
 		if strings.EqualFold(filepath.Base(py), "py.exe") {

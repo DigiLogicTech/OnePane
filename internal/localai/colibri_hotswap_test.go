@@ -2,6 +2,7 @@ package localai
 
 import (
     "reflect"
+ "os"
  "context"
     "strings"
     "testing"
@@ -99,5 +100,26 @@ func TestColibriSwapStatusPreservesFailedVersusStoppedInstance(t *testing.T){
  missing,err:=service.ColibriHotSwapStatus(ctx,"colibri-remote")
  if err!=nil||missing.Status!="stopped"||len(missing.ActiveDeploymentIDs)!=0{
   t.Fatalf("other Node's model was included in local Colibri status: %+v %v",missing,err)
+ }
+}
+
+
+// The source-level startup order is an intentionally reviewed pre-effect
+// contract. Missing Python must be detected before the old Colibri model
+// receives any stop signal, for explicit swaps AND ordinary chat acquisition.
+func TestColibriStartPreflightsPythonBeforeEvictingModels(t *testing.T){
+ raw,err:=os.ReadFile("supervisor.go")
+ if err!=nil{t.Fatal(err)}
+ source:=string(raw)
+ start:=strings.Index(source,"func (s *RuntimeSupervisor) startLocked(")
+ if start<0{t.Fatal("managed start path missing")}
+ scope:=source[start:]
+ prior:=strings.Index(scope,"colibriPython,err=findPythonExecutable()")
+ eviction:=strings.Index(scope,"s.prepareColibriSwapLocked(ctx, nodeID, deploymentID)")
+ if prior<0||eviction<=prior||strings.Index(scope,"var existing *RuntimeInstance")>prior{
+  t.Fatal("working Colibri could be evicted before existing-runtime check or Python preflight")
+ }
+ if strings.Contains(scope[eviction:],"py, err := findPythonExecutable()"){
+  t.Fatal("Python discovery repeated after healthy predecessor eviction")
  }
 }

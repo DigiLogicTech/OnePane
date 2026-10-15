@@ -22,6 +22,17 @@ func TestIncidentEvidenceAssociatesOnlyHumanDeclaredHistoricalEndpoint(t *testin
  if err!=nil{t.Fatal(err)}
  defer db.Close()
  if err=db.Migrate(ctx);err!=nil{t.Fatal(err)}
+ // The bounded case lookup must not scan unrelated historical sources
+ // as a Project's signed instrument receipts accumulate over time.
+ var boundedIndexDDL string
+ err=db.SQL().QueryRowContext(ctx,`SELECT sql FROM sqlite_master
+   WHERE type='index' AND name='idx_goal_incident_measurement_lookup'
+   AND tbl_name='project_goal_instrument_measurement_claims'`).Scan(&boundedIndexDDL)
+ if err!=nil||!strings.Contains(boundedIndexDDL,"declared_target_id")||
+    !strings.Contains(boundedIndexDDL,"accepted_at"){
+  t.Fatalf("target/source/time incident history index missing: %q %v",boundedIndexDDL,err)
+ }
+
  for _,q:=range []string{
   `INSERT INTO workspaces(id,name,status,revision,created_at,updated_at) VALUES('tenant','Tenant','active',1,1,1)`,
   `INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at) VALUES('human','human','Human','active',1,1,1)`,

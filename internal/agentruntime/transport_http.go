@@ -193,13 +193,20 @@ func hasAmbiguousPolicyKeys(raw []byte) bool {
  decoder:=json.NewDecoder(bytes.NewReader(raw))
  begin,err:=decoder.Token()
  if err!=nil||begin!=json.Delim('{'){return true}
- seen:=make(map[string]bool,8)
+ // encoding/json matches struct tags case-insensitively. A repeated
+ // property with alternate casing can override the intended egress label.
+ // Bound work even for directly invoked, non-Service adapters.
+ if len(raw)>16*1024{return true}
+ seen:=make([]string,0,8)
  for decoder.More(){
   keyToken,err:=decoder.Token()
   if err!=nil{return true}
   key,ok:=keyToken.(string)
-  if !ok||seen[key]{return true}
-  seen[key]=true
+  if !ok||len(seen)>=32{return true}
+  for _,prior:=range seen{
+   if strings.EqualFold(prior,key){return true}
+  }
+  seen=append(seen,key)
   var value json.RawMessage
   if err=decoder.Decode(&value);err!=nil{return true}
  }

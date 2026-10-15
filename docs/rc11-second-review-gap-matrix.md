@@ -1279,3 +1279,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Explicit Agent Runtime auth-header config remains customisable for normal HTTP token field names while rejecting proxy authentication, host routing, connection and framing headers or invalid field names. Reject CR/LF/NUL in auth prefix. Denial occurs before resolving a secret or any HTTP effect.
 - [x] No-egress interception regressions for reserved headers and invalid names, plus explicit allowlist regression of standard/custom API-token names. Exact-head hosted CI pending.
 - [ ] Continue owned Node and independent target/observer proof, bounded operator-granted reversible L5 effects, low-resource endurance and security/code audit. Final comprehensive human-first UI/UX LAST before authorised QA packaging.
+
+
+## RC11 P0-BO — case-insensitive Agent policy duplicate override denial (2026-10-15)
+
+- [x] Align duplicate-field detection with Go's case-insensitive JSON struct tag matching, rejecting duplicate destination/authority keys even when names differ in capitalization. Bound explicit raw policy body to 16KiB and at most 32 top-level attributes to avoid avoidable parser work on a tiny host.
+- [x] Extend before-egress interception with mixed-case endpoint policy conflicts both orders; accept unambiguous alternate-case names. Exact-head CI pending.
+- [ ] This prevents ambiguously sourced data-egress config; it is not physical Node attestation or an autonomous network protection grant. Low-RAM, Windows installed ACL/device acceptance and complete audit remain, then LAST operator-centred UI/UX before approved QA packaging.

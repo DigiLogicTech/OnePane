@@ -1368,3 +1368,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Managed model `/health` requests use a new direct `127.0.0.1` HTTP client with no caller proxy/dial hooks, blocked redirects, 3-second budget, valid port constraint and at most 1MiB of response data. Private health bytes cannot be misrouted by a caller-configured proxy.
 - [x] Empty, malformed, oversized or explicitly not-ready HTTP 200 responses no longer count as a healthy managed model or get relayed raw into error text. Recognised runtime readiness statuses `ok`, `ready`, `healthy`, and llama.cpp `no slot available` remain accepted. Hostile-content regression on actual loopback httptest pending hosted CI.
 - [ ] This protects software process readiness, NOT physical owned-device/observer identity or independently trusted network incident evidence. Reversible L5 permissions and effects, installed memory/WAL/GPU/Windows ACL acceptance, full security audit, and LAST comprehensive UI/UX before approved QA installer remain.
+
+
+## RC11 P0-CB — atomic model-request lease accounting on database failures (2026-10-16)
+
+- [x] Local inference `SetBusy` now advances or releases the in-memory active-request lease **only after** the matching SQLite runtime state transition succeeds and affects exactly one deployed runtime. A failed or cancelled Acquire cannot create a ghost busy lease; a failed Release cannot drop its in-memory protection before the database acknowledges the change.
+- [x] Zero affected rows (stopped/starting/absent process) fail closed on lease acquisition; releasing an already-absent lease is a read-only no-op. A live request remains guarded against premature Colibri eviction on failed release. Exact SQLite regression and hosted CI pending.
+- [ ] This does not physically measure GPU RAM or solve crashes in the interval between any OS inference call and database persistence. Physical acceptance, genuine independently trusted owned-target evidence, authorised reversible Level 5 effects, full audit and FINAL user-centred UI/UX remain gating.

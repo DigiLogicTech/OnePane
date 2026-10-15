@@ -264,31 +264,48 @@ func (s *RuntimeSupervisor) SetResidencyHeadroom(percent int) {
 
 // SetBusy reference-counts active inference requests so an idle reaper or
 // pressure eviction can never stop a runtime that is serving work.
+// SetBusy changes in-memory active request accounting ONLY after its
+// persisted runtime transition succeeds. On SQLite error, cancelled context,
+// or an unready deployment (zero updated rows), keep the old lease count.
+// Otherwise a failed Acquire can strand a permanent busy lease or a failed
+// Release can silently allow eviction while a request is still running.
 func (s *RuntimeSupervisor) SetBusy(ctx context.Context, deploymentID string, busy bool) error {
-	deploymentID = strings.TrimSpace(deploymentID)
-	if deploymentID == "" {
-		return errors.New("deployment id required")
-	}
-	s.activityMu.Lock()
-	defer s.activityMu.Unlock()
-	n := s.activeRequests[deploymentID]
-	if busy {
-		n++
-		s.activeRequests[deploymentID] = n
-	} else if n > 1 {
-		n--
-		s.activeRequests[deploymentID] = n
-	} else {
-		delete(s.activeRequests, deploymentID)
-		n = 0
-	}
-	now := s.clock.UnixMilli()
-	if n > 0 {
-		_, err := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET status='busy',last_seen_at=?,updated_at=?,revision=revision+1 WHERE deployment_id=? AND status IN ('healthy','busy')`, now, now, deploymentID)
-		return err
-	}
-	_, err := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET status='healthy',last_seen_at=?,updated_at=?,revision=revision+1 WHERE deployment_id=? AND status='busy'`, now, now, deploymentID)
-	return err
+ deploymentID=strings.TrimSpace(deploymentID)
+ if deploymentID==""{return errors.New("deployment id required")}
+ s.activityMu.Lock()
+ defer s.activityMu.Unlock()
+ previous:=s.activeRequests[deploymentID]
+ if !busy&&previous==0{
+  // An already-released request never changes the observed runtime state.
+  return nil
+ }
+ next:=previous
+ if busy{next++}else{next--}
+ now:=s.clock.UnixMilli()
+ var res sql.Result
+ var err error
+ if next>0{
+  res,err=s.db.ExecContext(ctx,`UPDATE local_runtime_instances
+   SET status='busy',last_seen_at=?,updated_at=?,revision=revision+1
+   WHERE deployment_id=? AND status IN ('healthy','busy')`,now,now,deploymentID)
+ }else{
+  res,err=s.db.ExecContext(ctx,`UPDATE local_runtime_instances
+   SET status='healthy',last_seen_at=?,updated_at=?,revision=revision+1
+   WHERE deployment_id=? AND status='busy'`,now,now,deploymentID)
+ }
+ if err!=nil{return err}
+ affected,err:=res.RowsAffected()
+ if err!=nil{return err}
+ if affected!=1{
+  return errors.New("managed runtime is not available for the requested lease transition")
+ }
+ if next==0{
+  delete(s.activeRequests,deploymentID)
+ }else{
+  if s.activeRequests==nil{s.activeRequests=make(map[string]int)}
+  s.activeRequests[deploymentID]=next
+ }
+ return nil
 }
 
 type runtimeConfig struct {

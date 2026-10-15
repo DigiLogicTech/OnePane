@@ -3,6 +3,7 @@ package goalobserveradapter
 import (
  "context"
  "encoding/json"
+ "strings"
  "testing"
 
  "github.com/DigiLogicTech/OnePane/internal/projectworkspace"
@@ -37,5 +38,28 @@ func TestAdapterRejectsSpoofedActorAndMalformedResourceBeforeAnyEffect(t *testin
   `{"project_id":"p","goal_id":"g","expected_goal_revision":1,"expected_fence_revision":-1}`,
  }{
   if _,err:=parseInput([]byte(v));err==nil{t.Fatalf("malformed unbounded scope accepted: %s",v)}
+ }
+}
+
+
+func TestObserverAdapterRequiresExactNonAmbiguousEffectScope(t *testing.T){
+ valid:=`{"project_id":"project","goal_id":"goal","expected_goal_revision":1,"expected_fence_revision":0}`
+ got,err:=parseInput([]byte(valid))
+ if err!=nil||got.ProjectID!="project"||got.ExpectedGoalRevision!=1{
+  t.Fatalf("valid human-scoped effect refused: %+v %v",got,err)
+ }
+ for _,raw:=range []string{
+  `{"project_id":"a","project_id":"b","goal_id":"goal","expected_goal_revision":1,"expected_fence_revision":0}`,
+  `{"project_id":"project","Project_ID":"b","goal_id":"goal","expected_goal_revision":1,"expected_fence_revision":0}`,
+  `{"project_id":"project","goal_id":"goal","expected_goal_revision":1,"expected_goal_revision":2,"expected_fence_revision":0}`,
+  `{"project_id":"project","goal_id":"goal","expected_goal_revision":1}`,
+  `{"project_id":"project","goal_id":"goal","expected_fence_revision":0}`,
+  `{"project_id":"project","goal_id":"goal","expected_goal_revision":1,"expected_fence_revision":0,"actor":"robot"}`,
+  `{"project_id":"project","goal_id":"goal","expected_goal_revision":1,"expected_fence_revision":0}{}`,
+  `{"project_id":"project","goal_id":"goal","expected_goal_revision":1,"expected_fence_revision":0,"padding":"`+strings.Repeat("X",4096)+`"}`,
+ }{
+  if _,err:=parseInput([]byte(raw));err==nil{
+   t.Fatalf("ambiguous or oversized observer effect accepted: %s",raw[:min(len(raw),120)])
+  }
  }
 }

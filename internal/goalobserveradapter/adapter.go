@@ -53,12 +53,45 @@ func ResourceRef(projectID,goalID string)string{
 
 func parseInput(raw []byte)(input,error){
  var v input
- d:=json.NewDecoder(bytes.NewReader(raw));d.DisallowUnknownFields()
- if err:=d.Decode(&v);err!=nil{return v,err}
+ // Effect admission may not guess missing revisions or accept duplicate
+ // JSON keys (including differently-cased aliases). Only the four exact
+ // canonical fields approved by the human Operation are admissible.
+ if len(raw)==0||len(raw)>4096{
+  return v,errors.New("observer effect input size invalid")
+ }
+ d:=json.NewDecoder(bytes.NewReader(raw))
+ tok,err:=d.Token()
+ if err!=nil||tok!=json.Delim('{'){
+  return v,errors.New("observer effect input must be a JSON object")
+ }
+ seen:=make(map[string]bool,4)
+ for d.More(){
+  nameToken,e:=d.Token()
+  if e!=nil{return v,e}
+  name,ok:=nameToken.(string)
+  if !ok||seen[name]{return v,errors.New("duplicate observer effect field")}
+  switch name{
+  case "project_id","goal_id","expected_goal_revision","expected_fence_revision":
+  default:return v,errors.New("unknown observer effect field")
+  }
+  seen[name]=true
+  var value json.RawMessage
+  if e=d.Decode(&value);e!=nil{return v,e}
+ }
+ end,e:=d.Token()
+ if e!=nil||end!=json.Delim('}'){
+  return v,errors.New("invalid observer effect object ending")
+ }
  var extra any
- if err:=d.Decode(&extra);!errors.Is(err,io.EOF){
+ if e=d.Decode(&extra);!errors.Is(e,io.EOF){
   return v,errors.New("one JSON object required")
  }
+ if len(seen)!=4{
+  return v,errors.New("observer effect revisions and scope must be explicit")
+ }
+ d=json.NewDecoder(bytes.NewReader(raw))
+ d.DisallowUnknownFields()
+ if err:=d.Decode(&v);err!=nil{return v,err}
  if strings.TrimSpace(v.ProjectID)!=v.ProjectID||
   strings.TrimSpace(v.GoalID)!=v.GoalID||
   v.ProjectID==""||v.GoalID==""||

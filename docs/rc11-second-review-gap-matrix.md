@@ -1382,3 +1382,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Give managed runtime `Release` a dedicated three-second cleanup context carrying the original request's values but not its cancellation. Otherwise cancelled chat/AgentCheck tasks can leave an idle model permanently marked busy even when SQLite is healthy.
 - [x] Real SQLite regression confirms cancellation still releases a completed request, while a later SQLite write failure leaves the lease conservatively protected against eviction. Source/hosted CI pending.
 - [ ] This does not bypass runtime stop/revocation, allow retries after failed release, or falsely mark a physical process healthy; explicit operator recovery is still required on storage failure. Full physical/low-resource/security validation and LAST UI/UX remain gates.
+
+
+## RC11 P0-CD — canonical explicit observer-mutation scope and revisions (2026-10-16)
+
+- [x] The human-gated observer pause/resume effect adapter now rejects duplicate, alternate-casing, unknown or omitted scope and optimistic revision fields, and caps input JSON to 4KiB before reading its trusted executing Operation. A missing `expected_fence_revision` may no longer silently mean zero, and later duplicate values cannot override original human scope.
+- [x] Unit tests exercise valid exact Project/Goal scope, explicit zero fence revision, duplicate IDs, case aliases, duplicate revisions, unknown fields, missing fields, multi-object payload and oversized input. Exact-source hosted CI pending.
+- [ ] Existing observer adapter only changes local scheduled TCP dispatch under approved human authority; it does not remotely repair devices, prove owned-target identity, supply independent physical postconditions or grant unattended L5 effects. All still block final build until rigorous validation and LAST user-first UI/UX.

@@ -59,3 +59,38 @@ func TestColibriSwapStatusRejectsMissingSupervisor(t *testing.T){
   t.Fatal("unavailable runtime supervisor caused a nil dereference")
  }
 }
+
+func TestColibriSwapStatusPreservesFailedVersusStoppedInstance(t *testing.T){
+ db:=colibriPinTestDB(t)
+ defer db.Close()
+ for _,query:=range []string{
+  `CREATE TABLE local_runtime_instances(
+   deployment_id TEXT PRIMARY KEY,node_id TEXT NOT NULL,
+   status TEXT NOT NULL,last_seen_at INTEGER,started_at INTEGER,
+   updated_at INTEGER NOT NULL)`,
+  `INSERT INTO local_runtime_instances
+   VALUES('colibri-a','node-1','failed',3,1,5)`,
+  `INSERT INTO local_runtime_instances
+   VALUES('colibri-b','node-1','healthy',4,2,6)`,
+ }{
+  if _,err:=db.Exec(query);err!=nil{t.Fatal(err)}
+ }
+ service:=&Service{db:db,supervisor:&RuntimeSupervisor{db:db}}
+ ctx:=context.Background()
+ failed,err:=service.ColibriHotSwapStatus(ctx,"colibri-a")
+ if err!=nil{t.Fatal(err)}
+ if failed.Status!="failed"||failed.Message==""||
+  !reflect.DeepEqual(failed.ActiveDeploymentIDs,[]string{"colibri-b"}){
+  t.Fatalf("failed engine was hidden or healthy neighbour misplaced: %+v",failed)
+ }
+ if _,err=db.Exec(`UPDATE local_runtime_instances SET status='stopped'
+   WHERE deployment_id='colibri-a'`);err!=nil{t.Fatal(err)}
+ stopped,err:=service.ColibriHotSwapStatus(ctx,"colibri-a")
+ if err!=nil||stopped.Status!="stopped"||stopped.Message!=""{
+  t.Fatalf("operator-requested stop was classified as failure: %+v %v",stopped,err)
+ }
+ missing,err:=service.ColibriHotSwapStatus(ctx,"colibri-remote")
+ if err!=nil||missing.Status!="stopped"||len(missing.ActiveDeploymentIDs)!=0{
+  t.Fatalf("other Node's model was included in local Colibri status: %+v %v",missing,err)
+ }
+}

@@ -1246,3 +1246,9 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] The Colibri hot-swap status endpoint now reads the selected model's exact persisted runtime status, including failed/stopped values outside the active-resident list. Previously a failed start appeared as a clean stop, making constrained-hardware recovery harder to diagnose. No automatic restart, fallback, model eviction or resource permission is added.
 - [x] Fail cleanly for nil/unavailable runtime supervisor; regression verifies it cannot panic. Existing Colibri pin/busy/hotswap regression remains in hosted CI. Exact-head hosted verification pending.
 - [ ] Real installation, GPU process teardown, low-RAM throughput/performance and crash recovery acceptance remain distinct; physical Node evidence, approved L5 defensive actions, code/security audit, then LAST comprehensive user-focused UI/UX before QA packaging.
+
+
+## RC11 P1-BJ — SQLite verified Colibri failed/stopped status isolation (2026-10-15)
+
+- [x] Extend the Colibri status regression beyond nil-supervisor checks: real SQLite registered deployments on two Nodes expose an actual failed target, healthy same-Node neighbour, stopped recovery and isolation of the other Node's residency list. Never leak launcher error text or automatically re-run the model.
+- [ ] Exact-head hosted CI pending; physical Windows/Ubuntu model teardown and memory/VRAM accounting remain separate acceptance. Continued human-controlled autonomy, safety audit, and LAST UI/UX customisation remain release gates.

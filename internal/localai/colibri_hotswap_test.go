@@ -126,3 +126,27 @@ func TestColibriStartPreflightsPythonBeforeEvictingModels(t *testing.T){
   t.Fatal("Python discovery repeated after healthy predecessor eviction")
  }
 }
+
+
+// A persisted healthy or starting row alone cannot authorise reusing a
+// possibly recycled PID. Require the same independent process identity
+// contract that guards termination before any reused runtime is returned.
+func TestRuntimeReuseMustVerifyPIDIdentityBeforeReturningOrHealth(t *testing.T){
+ raw,err:=os.ReadFile("supervisor.go")
+ if err!=nil{t.Fatal(err)}
+ source:=string(raw)
+ begin:=strings.Index(source,"func (s *RuntimeSupervisor) startLocked(")
+ if begin<0{t.Fatal("runtime admission entrypoint missing")}
+ scope:=source[begin:]
+ if end:=strings.Index(scope,"\nfunc ");end>0{scope=scope[:end]}
+ check:=strings.Index(scope,"s.VerifyIdentity(ctx,old)")
+ wait:=strings.Index(scope,"s.waitHealthy(ctx, old.ID, 120*time.Second)")
+ if check<0||wait<=check{
+  t.Fatal("reused starting local PID can be probed before identity validation")
+ }
+ start:=strings.Index(scope,"if (old.Status == RuntimeHealthy")
+ ret:=strings.Index(scope[check:],"return old, nil")
+ if start<0||ret<0||start>check{
+  t.Fatal("healthy or busy old PID not guarded by original process fingerprint")
+ }
+}

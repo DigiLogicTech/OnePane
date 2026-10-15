@@ -1333,3 +1333,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 
 - [x] Hosted run #38702275530 showed a false-positive source contract failure: test scanned all functions following `startLocked`, finding a legitimate unrelated Python lookup far beyond the launch implementation. Restrict source-order inspection to the `startLocked` body and keep the real order invariant (target already active → Python preflight → healthy predecessor eviction).
 - [ ] Exact-head hosted CI rerun required; no fallback, model switching or process mutation added by this test-only correction. Draft branch unmerged.
+
+
+## RC11 P0-BW — revalidate managed runtime PID before serving reused inference (2026-10-15)
+
+- [x] For existing healthy/busy/starting local runtime instances, verify the alive PID's executable/model/port identity before treating a stale SQLite row as an approved inference engine. A recycled unrelated PID must not be contacted, signalled or silently substituted. Fail closed if the process is uninspectable or no longer matches exact managed identity; no new fallback or restart.
+- [x] Add startLocked source-order regression ensuring identity verification precedes reuse and starting-instance health requests. Existing termination identity test remains. Exact-head CI pending.
+- [ ] Process identity is not hardware attestation. Windows process-wrapper/child identity and RAM/VRAM real-host acceptance, physical Node/owned-target and independent observation proofs, reversible human-approved L5 actions and last UI/UX review remain release gates.

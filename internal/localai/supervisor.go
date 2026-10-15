@@ -673,11 +673,19 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 	var existing *RuntimeInstance
 	if old, err := s.Instance(ctx, deploymentID); err == nil {
 		existing = &old
-		if (old.Status == RuntimeHealthy || old.Status == RuntimeBusy) && s.processes.Alive(old.PID) {
+		if (old.Status == RuntimeHealthy || old.Status == RuntimeBusy ||
+			old.Status == RuntimeStarting) && s.processes.Alive(old.PID) {
+			// PIDs are recycled. An old "healthy" SQLite row does not
+			// prove the PID still owns this exact approved executable,
+			// model path, loopback address and port. Do not send prompts
+			// to an unverified reused process or signal it on failure.
+			if verifyErr:=s.VerifyIdentity(ctx,old);verifyErr!=nil{
+				return RuntimeInstance{},fmt.Errorf("refusing to reuse unverified local runtime process: %w",verifyErr)
+			}
+			if old.Status == RuntimeStarting{
+				return s.waitHealthy(ctx, old.ID, 120*time.Second)
+			}
 			return old, nil
-		}
-		if old.Status == RuntimeStarting && s.processes.Alive(old.PID) {
-			return s.waitHealthy(ctx, old.ID, 120*time.Second)
 		}
 	}
 	// Resolve the Colibri launcher BEFORE evicting a healthy predecessor.

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 type runtimeStaticSecrets map[string]string
@@ -220,4 +221,20 @@ func TestAgentProtocolOriginLoopbackCannotUseInjectedDialContext(t *testing.T) {
 	if caller.Transport.(*http.Transport).DialContext == nil {
 		t.Fatal("caller-owned transport was mutated")
 	}
+}
+
+func TestAgentRuntimeHTTPTimeoutIsAlwaysBounded(t *testing.T) {
+ for _,tc:=range []struct{name string;configured int64;caller,want time.Duration}{
+  {"omitted config and unbounded client",0,0,10*time.Minute},
+  {"negative caller timeout",0,-time.Second,10*time.Minute},
+  {"excessive caller timeout",0,30*time.Minute,10*time.Minute},
+  {"short caller deadline preserved",0,30*time.Second,30*time.Second},
+  {"explicit runtime override",250,30*time.Second,250*time.Millisecond},
+  {"explicit maximum",int64((10*time.Minute)/time.Millisecond),0,10*time.Minute},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   got:=boundedRuntimeHTTPTimeout(tc.configured,tc.caller)
+   if got!=tc.want{t.Fatalf("timeout=%v want %v",got,tc.want)}
+  })
+ }
 }

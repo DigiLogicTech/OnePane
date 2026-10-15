@@ -118,9 +118,10 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
 		}
 	}
 	clone.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
-	if cfg.TimeoutMS > 0 {
-		clone.Timeout = time.Duration(cfg.TimeoutMS) * time.Millisecond
-	}
+	// Even a zero/omitted timeout must not pin an Agent Worker forever.
+	// Explicit per-runtime timeouts take precedence, while callers may
+	// supply a shorter bounded deadline through their HTTP client.
+	clone.Timeout = boundedRuntimeHTTPTimeout(cfg.TimeoutMS, clone.Timeout)
 	client = &clone
 	resp, err := client.Do(hr)
 	if err != nil {
@@ -146,4 +147,18 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
 		return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_agent_response", HTTPStatus: resp.StatusCode, OutcomeKnown: true, Err: err}
 	}
 	return out, nil
+}
+
+// The configured upper bound is shared by the default and any injected
+// http.Client. Unlimited or excessive caller timeouts would otherwise
+// keep a queued Worker and its budget reservation indefinitely occupied.
+func boundedRuntimeHTTPTimeout(configuredMillis int64, callerTimeout time.Duration) time.Duration {
+ const maximum = 10 * time.Minute
+ if configuredMillis > 0 {
+  return time.Duration(configuredMillis) * time.Millisecond
+ }
+ if callerTimeout <= 0 || callerTimeout > maximum {
+  return maximum
+ }
+ return callerTimeout
 }

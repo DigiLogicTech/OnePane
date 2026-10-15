@@ -261,8 +261,32 @@ func(s *Service)WithdrawGoalResponseCandidate(ctx context.Context,
 // independently scoped approval, not a conversion of this old record.
 func(s *Service)GoalResponseCandidateReadiness(ctx context.Context,
  projectID,goalID,id string)(GoalResponseCandidateReadiness,error){
- c,err:=s.GoalResponseCandidate(ctx,projectID,goalID,id)
+ projectID=strings.TrimSpace(projectID)
+ goalID=strings.TrimSpace(goalID)
+ id=strings.TrimSpace(id)
+ if projectID==""||goalID==""||id==""{
+  return GoalResponseCandidateReadiness{},ErrInvalidCommand
+ }
+ // A non-authorising diagnostic must still be internally consistent:
+ // candidate, Project, human memberships, permit, pause latch and review
+ // all come from one read-only SQLite snapshot.
+ tx,err:=s.db.BeginTx(ctx,&sql.TxOptions{ReadOnly:true})
  if err!=nil{return GoalResponseCandidateReadiness{},err}
+ defer tx.Rollback()
+ var active int
+ err=tx.QueryRowContext(ctx,`SELECT 1 FROM project_continuous_goals g
+  JOIN projects p ON p.id=g.project_id AND p.status='active'
+  JOIN workspaces tenant ON tenant.id=p.workspace_id AND tenant.status='active'
+  JOIN project_workspaces w ON w.id=g.project_workspace_id
+   AND w.project_id=p.id AND w.status='active'
+  WHERE g.project_id=? AND g.id=?`,projectID,goalID).Scan(&active)
+ if err!=nil{return GoalResponseCandidateReadiness{},err}
+ c,err:=scanGoalResponseCandidate(tx.QueryRowContext(ctx,
+  `SELECT `+goalResponseCandidateColumns+`
+   FROM project_goal_response_candidates
+   WHERE id=? AND project_id=? AND goal_id=?`,id,projectID,goalID))
+ if err!=nil{return GoalResponseCandidateReadiness{},err}
+ now:=s.clock.UnixMilli()
  out:=GoalResponseCandidateReadiness{
   CandidateID:id,State:"blocked",Blockers:[]string{
    "not_an_execution_grant",
@@ -271,10 +295,10 @@ func(s *Service)GoalResponseCandidateReadiness(ctx context.Context,
   },
  }
  if c.Status!="proposed"{out.Blockers=append(out.Blockers,"candidate_withdrawn")}
- if c.ExpiresAt<=s.clock.UnixMilli(){out.Blockers=append(out.Blockers,"candidate_expired")}
+ if c.ExpiresAt<=now{out.Blockers=append(out.Blockers,"candidate_expired")}
  var rawPlan,goalStatus,reviewStatus,reviewDecision string
  var planGeneration,reviewRevision int64
- err=s.db.QueryRowContext(ctx,`SELECT g.monitoring_plan_json,g.plan_generation,g.status,
+ err=tx.QueryRowContext(ctx,`SELECT g.monitoring_plan_json,g.plan_generation,g.status,
   r.status,r.decision,r.revision
   FROM project_continuous_goals g
   JOIN project_goal_incident_reviews r ON r.goal_id=g.id AND r.project_id=g.project_id
@@ -290,7 +314,7 @@ func(s *Service)GoalResponseCandidateReadiness(ctx context.Context,
   reviewRevision!=c.IncidentReviewRevision{
   out.Blockers=append(out.Blockers,"incident_review_changed")
  }
- project,err:=s.repo.Project(ctx,projectID)
+ project,err:=s.repo.ProjectTx(ctx,tx,projectID)
  if err!=nil{return GoalResponseCandidateReadiness{},err}
  if project.Status!="active"||project.OperatingMode!=OperatingContinuousOperations{
   out.Blockers=append(out.Blockers,"project_mode_changed")
@@ -299,7 +323,7 @@ func(s *Service)GoalResponseCandidateReadiness(ctx context.Context,
  // still show when the original probe authority has expired or been
  // withdrawn. The original permit cannot be revived by an old case.
  var livePermit int
- err=s.db.QueryRowContext(ctx,`SELECT COUNT(*)
+ err=tx.QueryRowContext(ctx,`SELECT COUNT(*)
    FROM project_goal_tcp_reachability_alerts alert
    JOIN project_goal_tcp_probe_attempts attempt ON attempt.id=alert.attempt_id
     AND attempt.project_id=alert.project_id AND attempt.goal_id=alert.goal_id
@@ -318,13 +342,13 @@ func(s *Service)GoalResponseCandidateReadiness(ctx context.Context,
     AND member.workspace_id=? AND member.status='active'
    WHERE alert.id=? AND alert.project_id=? AND alert.goal_id=?
     AND alert.project_workspace_id=? AND alert.source_id=?`,
-   c.GoalPlanHash,c.GoalPlanGeneration,s.clock.UnixMilli(),
+   c.GoalPlanHash,c.GoalPlanGeneration,now,
    project.WorkspaceID,c.TCPAlertID,projectID,goalID,
    c.ProjectWorkspaceID,c.SourceID).Scan(&livePermit)
  if err!=nil{return GoalResponseCandidateReadiness{},err}
  if livePermit!=1{out.Blockers=append(out.Blockers,"original_observation_permission_inactive")}
  var activeProposer int
- err=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM principals human
+ err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM principals human
   JOIN workspace_memberships member ON member.principal_id=human.id
    AND member.workspace_id=? AND member.status='active'
   WHERE human.id=? AND human.status='active' AND human.principal_type='human'`,
@@ -335,7 +359,7 @@ func(s *Service)GoalResponseCandidateReadiness(ctx context.Context,
  // person who later proposed the intent. A historical decision must not
  // silently look like active operator endorsement after membership loss.
  var activeReviewer int
- err=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_goal_incident_reviews review
+ err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_goal_incident_reviews review
    JOIN principals human ON human.id=review.reviewed_by
     AND human.principal_type='human' AND human.status='active'
    JOIN workspace_memberships member ON member.principal_id=human.id
@@ -352,7 +376,7 @@ func(s *Service)GoalResponseCandidateReadiness(ctx context.Context,
  // if the original grant has not expired. A non-executable proposal
  // must show that stop rather than suggesting the observer is runnable.
  var observerPaused int
- err=s.db.QueryRowContext(ctx,`SELECT COUNT(*)
+ err=tx.QueryRowContext(ctx,`SELECT COUNT(*)
    FROM project_goal_tcp_observation_fences
    WHERE project_id=? AND goal_id=? AND project_workspace_id=?
     AND status='paused'`,projectID,goalID,c.ProjectWorkspaceID).
@@ -361,5 +385,6 @@ func(s *Service)GoalResponseCandidateReadiness(ctx context.Context,
  if observerPaused!=0{
   out.Blockers=append(out.Blockers,"observer_pause_active")
  }
+ if err=tx.Commit();err!=nil{return GoalResponseCandidateReadiness{},err}
  return out,nil
 }

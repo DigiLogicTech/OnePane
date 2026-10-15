@@ -1232,3 +1232,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Replace unchecked subsequent `os.ReadFile` and `tls.LoadX509KeyPair` filesystem opens with a bounded descriptor-based `Lstat` + `SameFile` and `tls.X509KeyPair` over exactly read bytes. Check regular file, 16KiB cap, post-open Unix key permissions and reject linked/inconsistent certificates. No key rotation or automatic repair.
 - [x] Add valid-identity fingerprint preservation and oversized private key/certificate/linked certificate regression. Source hosted CI pending.
 - [ ] This is not equivalent to Windows NTFS ACL or simultaneous malicious same-account file mutation protection. Physical Node/owned device proof, independent vantage, safe human-approved Level 5 actions, measured resource endurance and security review remain; operator-first UI/UX is LAST before separately authorised QA build.
+
+
+## RC11 P0-BH — consistent one-snapshot operator response-readiness diagnostics (2026-10-15)
+
+- [x] Read the entire non-executable L5 response readiness from one transaction and one clock sample, including candidate, Project mode, incident review, original approved permit, human proposer/reviewer membership and durable observer pause. Prior read path sampled multiple changing database states. No Task, action or new grant.
+- [x] Existing real SQLite integration already covers proposed, withdrawn, revoked permit, human membership suspension/restoration and pause/resume, while asserting no Tasks and permanent execution denial. Exact-head hosted CI pending.
+- [ ] Next: independent owned device/vantage proof, truly bounded separately human-permitted reversible protective side effects, installed Windows/Ubuntu QA and low-memory endurance; full audit, then LAST human-centred UI/UX before explicitly approved installer.

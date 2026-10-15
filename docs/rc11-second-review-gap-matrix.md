@@ -1189,3 +1189,9 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Resolve a human-only incident review's Project/Workspace status, alert, historical TCP return-to-baseline and bounded signed claim list within one SQLite read transaction. Previously separate SQL statements could produce mixed-time records across concurrent case changes. Release snapshot on all returns including no-declaration and query errors; final success commits a read-only transaction.
 - [x] Existing real SQLite case regression covers first no-declaration read followed by independent signed-key/incident writes, successful historical reads, and source preservation across migration. Exact-head hosted CI pending.
 - [ ] This does NOT establish physical Node target identity/vantage, multi-sensor independence or Level 5 remediation safety. Continue user-scoped reversible permitted actions, physical tests, measured low-resource endurance/security audit and LAST human-first UI/UX review before approved installers.
+
+## RC11 P0-BA — admitted contradictory same-key claims (2026-10-15)
+
+- [x] Add a real SQLite, live human-admission, single-use challenge and Ed25519-signature regression proving opposite outcomes from one instrument signer are metadata only, not independent physical sensors, incident votes or L5 action authority.
+- [x] Check delayed third report remains outside a later incident window; retained history and staged migration now assert all 3 signed receipts, while original case association includes only two.
+- [ ] Exact-source hosted CI must pass. No claim of physically independent vantage, verified owned-device identity or safe autonomous remediation; those plus low-memory soak, source/security audit and final LAST user-focused UI/UX review still block authorised QA packaging.

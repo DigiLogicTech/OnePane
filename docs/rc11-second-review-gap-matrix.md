@@ -1207,3 +1207,9 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Extend realistic signed-source admission fixture with seven further separate signed challenges over bounded fake-clock intervals, yielding nine accepted same-key reports in the original ±15-minute incident window. Newer eight are consistent; oldest conflicts. A later tenth report is excluded from the original window after delayed receipt.
 - [x] Enforce an eight-item returned list and truthful `signed_claims_truncated=true` with a single software key, no physical-vantage or remediation flags, and all 10 persisted signed receipts surviving the real additive schema index migration.
 - [ ] Exact-head hosted CI must pass; physical multi-vantage/target ownership, real reversible independently permitted Level 5 response, low-end long-duration WAL/RSS disk tests, security review and final LAST human-first UI/UX still block QA packaging. Draft PR unmerged.
+
+## RC11 P0-BD — pinned Node custody must be an end-entity leaf (2026-10-15)
+
+- [x] Forbid CA and certificate-signing key-usage bits in separately pinned Node instrument custody identities. A certificate that can issue further certificates must never be accepted as the particular human-enrolled Node leaf.
+- [x] Add negative certificate-role regressions alongside existing real Ed25519 Node signer/self-test and independent pin/expiry tests. Exact-head hosted CI pending.
+- [ ] This does not physically attest the Node or target, establish an independent sensor vantage, or grant L5 remediation. Continue physical acceptance, bounded reversible human-approved effects, measured low-RAM endurance, code/security audit and final LAST user-focused UI/UX before approved QA installers.

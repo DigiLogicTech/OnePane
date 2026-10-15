@@ -1201,3 +1201,9 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Query up to nine metadata-only signed-instrument receipts, publish at most eight, and set `signed_claims_truncated` if a ninth exists. Human operators can now recognise when reported consistency and key counts are only a limited snapshot, not all historical self-report outcomes.
 - [x] Unit test checks fixed limit and positive truncation without inventing unique sensor votes, full-history confidence, physical target identity or remediation consent.
 - [ ] Exact-head hosted CI pending. Independently trusted physical Node/device-vantage proof, explicitly scoped reversible Level 5 actions, low-memory/SQLite endurance, full code/security review and LAST human-centred UI/UX remain outstanding before an authorised QA build.
+
+## RC11 P0-BC — SQLite-proven historical signature window saturation (2026-10-15)
+
+- [x] Extend realistic signed-source admission fixture with seven further separate signed challenges over bounded fake-clock intervals, yielding nine accepted same-key reports in the original ±15-minute incident window. Newer eight are consistent; oldest conflicts. A later tenth report is excluded from the original window after delayed receipt.
+- [x] Enforce an eight-item returned list and truthful `signed_claims_truncated=true` with a single software key, no physical-vantage or remediation flags, and all 10 persisted signed receipts surviving the real additive schema index migration.
+- [ ] Exact-head hosted CI must pass; physical multi-vantage/target ownership, real reversible independently permitted Level 5 response, low-end long-duration WAL/RSS disk tests, security review and final LAST human-first UI/UX still block QA packaging. Draft PR unmerged.

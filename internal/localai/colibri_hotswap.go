@@ -2,6 +2,7 @@ package localai
 
 import (
     "context"
+ "database/sql"
     "errors"
     "fmt"
     "strings"
@@ -142,10 +143,23 @@ func (s *Service) ColibriHotSwap(ctx context.Context,deploymentID string) (Colib
 }
 
 func (s *Service) ColibriHotSwapStatus(ctx context.Context,deploymentID string) (ColibriSwapState,error) {
+    if s==nil||s.db==nil||s.supervisor==nil{return ColibriSwapState{},errors.New("local runtime supervisor unavailable")}
     if _,err:=s.colibriTierSnapshot(ctx,deploymentID);err!=nil{return ColibriSwapState{},err}
     state:=ColibriSwapState{DeploymentID:deploymentID,Status:"stopped",ActiveDeploymentIDs:[]string{}}
     var nodeID string
     if err:=s.db.QueryRowContext(ctx,"SELECT node_id FROM model_deployments WHERE id=?",deploymentID).Scan(&nodeID);err!=nil{return state,err}
+    // A failed local engine is not resident, but must be visible to the
+    // operator instead of being incorrectly displayed as "stopped".
+    var persistedStatus string
+    err=s.db.QueryRowContext(ctx,`SELECT status FROM local_runtime_instances
+      WHERE deployment_id=? AND node_id=?`,deploymentID,nodeID).Scan(&persistedStatus)
+    if err!=nil && err!=sql.ErrNoRows{return state,err}
+    if err==nil{
+        state.Status=persistedStatus
+        if persistedStatus=="failed"{
+            state.Message="The managed Colibri process failed; inspect local runtime diagnostics before retrying."
+        }
+    }
     residents,err:=s.supervisor.colibriResidents(ctx,nodeID,"")
     if err!=nil{return state,err}
     for _,r:=range residents{

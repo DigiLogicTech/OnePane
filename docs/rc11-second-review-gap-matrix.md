@@ -1239,3 +1239,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Read the entire non-executable L5 response readiness from one transaction and one clock sample, including candidate, Project mode, incident review, original approved permit, human proposer/reviewer membership and durable observer pause. Prior read path sampled multiple changing database states. No Task, action or new grant.
 - [x] Existing real SQLite integration already covers proposed, withdrawn, revoked permit, human membership suspension/restoration and pause/resume, while asserting no Tasks and permanent execution denial. Exact-head hosted CI pending.
 - [ ] Next: independent owned device/vantage proof, truly bounded separately human-permitted reversible protective side effects, installed Windows/Ubuntu QA and low-memory endurance; full audit, then LAST human-centred UI/UX before explicitly approved installer.
+
+
+## RC11 P1-BI — distinguish failed local Colibri runtime from deliberate stop (2026-10-15)
+
+- [x] The Colibri hot-swap status endpoint now reads the selected model's exact persisted runtime status, including failed/stopped values outside the active-resident list. Previously a failed start appeared as a clean stop, making constrained-hardware recovery harder to diagnose. No automatic restart, fallback, model eviction or resource permission is added.
+- [x] Fail cleanly for nil/unavailable runtime supervisor; regression verifies it cannot panic. Existing Colibri pin/busy/hotswap regression remains in hosted CI. Exact-head hosted verification pending.
+- [ ] Real installation, GPU process teardown, low-RAM throughput/performance and crash recovery acceptance remain distinct; physical Node evidence, approved L5 defensive actions, code/security audit, then LAST comprehensive user-focused UI/UX before QA packaging.

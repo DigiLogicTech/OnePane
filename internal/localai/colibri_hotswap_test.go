@@ -2,6 +2,7 @@ package localai
 
 import (
     "reflect"
+ "context"
     "strings"
     "testing"
 )
@@ -45,4 +46,16 @@ func TestColibriHotSwapRefusesBusyBeforeAnyEviction(t *testing.T) {
 func TestColibriHotSwapNoConflictingModels(t *testing.T) {
     out,err:=selectColibriEvictions(nil,nil)
     if err!=nil||len(out)!=0 {t.Fatalf("unexpected result: out=%v err=%v",out,err)}
+}
+
+func TestColibriSwapStatusRejectsMissingSupervisor(t *testing.T){
+ ctx:=context.Background()
+ var missing *Service
+ if _,err:=missing.ColibriHotSwapStatus(ctx,"model");err==nil{
+  t.Fatal("nil local runtime service allowed status inspection")
+ }
+ svc:=&Service{}
+ if _,err:=svc.ColibriHotSwapStatus(ctx,"model");err==nil{
+  t.Fatal("unavailable runtime supervisor caused a nil dereference")
+ }
 }

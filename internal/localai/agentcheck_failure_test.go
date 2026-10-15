@@ -5,6 +5,7 @@ import (
  "database/sql"
  "errors"
  "io/fs"
+ "os"
  "path/filepath"
  "strings"
  "testing"
@@ -131,4 +132,38 @@ func TestLegacyAgentCheckErrorMigrationSelectivelyRedacts(t *testing.T){
  apply()
  if err:=db.QueryRowContext(ctx,`SELECT revision FROM model_spec_sheets WHERE deployment_id='legacy'`).Scan(&revision);err!=nil{t.Fatal(err)}
  if revision!=8{t.Fatalf("redaction migration must be idempotent, revision=%d",revision)}
+}
+
+
+func TestRuntimeLaunchFailureNeverEchoesRawLogOrUnsafePaths(t *testing.T){
+ dataDir:=t.TempDir()
+ logs:=filepath.Join(dataDir,"components","logs")
+ if err:=os.MkdirAll(logs,0o700);err!=nil{t.Fatal(err)}
+ secret:="Bearer VERY_PRIVATE_LOCAL_MODEL_TOKEN"
+ logPath:=filepath.Join(logs,"local-runtime-safe-id.log")
+ if err:=os.WriteFile(logPath,[]byte(secret+"\n/home/private/model/path"),0o600);err!=nil{
+  t.Fatal(err)
+ }
+ supervisor:=&RuntimeSupervisor{dataDir:dataDir}
+ hint:=supervisor.runtimeLogReviewHint("safe-id")
+ if hint==""||strings.Contains(hint,secret)||
+  strings.Contains(hint,"/home/private")||strings.Contains(hint,"log tail:"){
+  t.Fatalf("model launch error leaked private local log: %q",hint)
+ }
+ for _,id:=range []string{"../private","safe/id","safe\\id",".","",strings.Repeat("x",129)}{
+  if got:=supervisor.runtimeLogReviewHint(id);got!=""{
+   t.Fatalf("unsafe runtime ID %q found a local log: %q",id,got)
+  }
+ }
+ if got:=supervisor.runtimeLogReviewHint("no-log");got!=""{
+  t.Fatalf("nonexistent log was falsely advertised: %s",got)
+ }
+ if err:=os.Remove(logPath);err!=nil{t.Fatal(err)}
+ external:=filepath.Join(t.TempDir(),"external.log")
+ if err:=os.WriteFile(external,[]byte(secret),0o600);err!=nil{t.Fatal(err)}
+ if err:=os.Symlink(external,logPath);err==nil{
+  if got:=supervisor.runtimeLogReviewHint("safe-id");got!=""{
+   t.Fatalf("linked external logs were accepted: %s",got)
+  }
+ }
 }

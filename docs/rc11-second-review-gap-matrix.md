@@ -1340,3 +1340,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] For existing healthy/busy/starting local runtime instances, verify the alive PID's executable/model/port identity before treating a stale SQLite row as an approved inference engine. A recycled unrelated PID must not be contacted, signalled or silently substituted. Fail closed if the process is uninspectable or no longer matches exact managed identity; no new fallback or restart.
 - [x] Add startLocked source-order regression ensuring identity verification precedes reuse and starting-instance health requests. Existing termination identity test remains. Exact-head CI pending.
 - [ ] Process identity is not hardware attestation. Windows process-wrapper/child identity and RAM/VRAM real-host acceptance, physical Node/owned-target and independent observation proofs, reversible human-approved L5 actions and last UI/UX review remain release gates.
+
+
+## RC11 P0-BX — prevent raw local inference logs leaking via startup errors (2026-10-15)
+
+- [x] Replace appended raw process-log tails in failed/local managed runtime health/start errors with a generic local-log-available hint. Preserve original owner-accessible disk logs for future QA; no bearer tokens, model paths, user prompts or process arguments are copied to common UI/API error strings.
+- [x] Restrict runtime log lookup to short generated-style IDs and non-symlink regular local log files; test injected bearer/path canaries, hostile path IDs, missing logs and linked files. Exact-source hosted CI pending.
+- [ ] This is not a comprehensive QA debug feature or proof that all other diagnostic channels redact sensitive content. Complete source/security audit, physical Node/owned target acceptance, bounded reversible L5 actions and low-RAM installed tests remain. Human-first UI/UX customisation LAST before approved installer.

@@ -827,17 +827,23 @@ func (s *RuntimeSupervisor) Release(ctx context.Context, deploymentID string) er
 }
 
 // Diagnoses failures without exposing arbitrary large runtime output to clients.
-func (s *RuntimeSupervisor) runtimeStartLogTail(idv string) string {
+// Runtime process output may contain paths, prompt text, bearer tokens or
+// system diagnostics. Failure messages leave the host, so never put raw log
+// bytes into an API/AgentCheck error. Only reveal that an owner-reviewable
+// local log exists, and never follow a symlink or caller-chosen path.
+func (s *RuntimeSupervisor) runtimeLogReviewHint(idv string) string {
+ if len(idv)<1||len(idv)>128{return ""}
+ for _,ch:=range idv{
+  if (ch>='a'&&ch<='z')||(ch>='A'&&ch<='Z')||
+   (ch>='0'&&ch<='9')||ch=='_'||ch=='-'{
+   continue
+  }
+  return ""
+ }
  path:=filepath.Join(s.dataDir,"components","logs","local-runtime-"+idv+".log")
- f,err:=os.Open(path);if err!=nil{return ""}
- defer f.Close()
- st,err:=f.Stat();if err!=nil{return ""}
- start:=st.Size()-900;if start<0{start=0}
- if _,err=f.Seek(start,io.SeekStart);err!=nil{return ""}
- buf,err:=io.ReadAll(io.LimitReader(f,900));if err!=nil{return ""}
- tail:=strings.TrimSpace(string(buf))
- if tail==""{return ""}
- return " · runtime log tail: "+tail
+ st,err:=os.Lstat(path)
+ if err!=nil||!st.Mode().IsRegular()||st.Size()<1{return ""}
+ return " · a local runtime log is available for operator review"
 }
 func (s *RuntimeSupervisor) waitHealthy(ctx context.Context, idv string, timeout time.Duration) (RuntimeInstance, error) {
 	deadline := time.Now().Add(timeout)
@@ -847,7 +853,7 @@ func (s *RuntimeSupervisor) waitHealthy(ctx context.Context, idv string, timeout
 			return inst, err
 		}
 		if !s.processes.Alive(inst.PID) {
-			reason:="runtime exited before becoming healthy"+s.runtimeStartLogTail(idv)
+			reason:="runtime exited before becoming healthy"+s.runtimeLogReviewHint(idv)
    _ = s.markFailed(ctx,idv,reason)
    return RuntimeInstance{}, errors.New(reason)
 		}
@@ -866,7 +872,7 @@ func (s *RuntimeSupervisor) waitHealthy(ctx context.Context, idv string, timeout
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
-	reason:="managed runtime health check timed out"+s.runtimeStartLogTail(idv)
+	reason:="managed runtime health check timed out"+s.runtimeLogReviewHint(idv)
  _ = s.markFailed(ctx,idv,reason)
  return RuntimeInstance{}, errors.New(reason)
 }

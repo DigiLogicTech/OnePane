@@ -3,6 +3,7 @@
 package projectworkspace
 
 import (
+ "bytes"
  "context"
  "crypto/ed25519"
  "crypto/rand"
@@ -211,5 +212,41 @@ func TestIncidentEvidenceAssociatesOnlyHumanDeclaredHistoricalEndpoint(t *testin
    lateEvidence.IndependentVantageVerified{
   t.Fatalf("late-accepted report became contemporaneous incident evidence: %+v",lateEvidence)
  }
+ // Reproduce a pre-0095 database upgrade with signed history already
+ // present. Removing only the new index and its migration ledger entry
+ // reconstructs the preceding schema without rewriting evidence rows.
+ // Migrate must take its normal rollback backup, recreate the index, and
+ // retain the original detached signature and canonical challenge.
+ originalBundle,err:=svc.GetGoalInstrumentMeasurementBundle(ctx,p.ID,g.ID,claim.ID)
+ if err!=nil||!originalBundle.DetachedSignatureVerified{
+  t.Fatalf("original signed evidence invalid: %v",err)
+ }
+ if _,err:=db.SQL().ExecContext(ctx,
+  `DROP INDEX idx_goal_incident_measurement_lookup`);err!=nil{t.Fatal(err)}
+ if _,err:=db.SQL().ExecContext(ctx,
+  `DELETE FROM schema_migrations WHERE version=95`);err!=nil{t.Fatal(err)}
+ if err:=db.Migrate(ctx);err!=nil{t.Fatalf("v0094-to-0095 staged upgrade failed: %v",err)}
+ afterBundle,err:=svc.GetGoalInstrumentMeasurementBundle(ctx,p.ID,g.ID,claim.ID)
+ if err!=nil||!afterBundle.DetachedSignatureVerified||
+  afterBundle.Claim.ID!=originalBundle.Claim.ID||
+  afterBundle.Claim.ObservedAt!=originalBundle.Claim.ObservedAt||
+  !bytes.Equal(afterBundle.Signature,originalBundle.Signature)||
+  !bytes.Equal(afterBundle.SigningPayload,originalBundle.SigningPayload)||
+  !bytes.Equal(afterBundle.PublicKey,originalBundle.PublicKey){
+  t.Fatalf("signed original evidence changed after indexed upgrade: %+v %v",afterBundle.Claim,err)
+ }
+ afterMigration,err:=svc.GoalIncidentEvidence(ctx,p.ID,g.ID,caseReview.ID)
+ if err!=nil||len(afterMigration.SignedEndpointClaims)!=1||
+  afterMigration.SignedEndpointClaims[0].ClaimID!=claim.ID||
+  afterMigration.IncidentConfirmed||afterMigration.RemediationAuthorized{
+  t.Fatalf("scoped incident evidence drifted after migration: %+v %v",afterMigration,err)
+ }
+ var restoredIndex string
+ if err:=db.SQL().QueryRowContext(ctx,
+  `SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_goal_incident_measurement_lookup'`).
+  Scan(&restoredIndex);err!=nil||!strings.Contains(restoredIndex,"declared_target_id"){
+  t.Fatalf("reapplied target lookup index missing: %q %v",restoredIndex,err)
+ }
+
 
 }

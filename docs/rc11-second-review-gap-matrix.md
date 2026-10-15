@@ -1147,3 +1147,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Add effective human incident-reviewer membership and durable observer-pause-latch checks to the non-executable response candidate readiness view. These are only extra blockers: no execution approval, Node action, inferred independent evidence or Process/Network grant is created.
 - [x] SQLite integration validates the independent operator pause/resume and reviewer suspension/reactivation transitions with the historical candidate held fail-closed. Original monitor permit and human review decisions remain immutable; no synthetic network dispatch.
 - [ ] Exact-head hosted CI to confirm; physical Node/device validation, explicit user-scoped reversible L5 permits and verification, low-memory/retention and complete security audit remain. Comprehensive operator-customisable UI/UX review stays LAST before separately approved installers; draft PR remains unmerged.
+
+
+## RC11 P1-AU — populated SQLite 0094-to-0095 migration regression (2026-10-15)
+
+- [x] Extend actual signed-instrument/incident SQLite fixture to reconstruct pre-index schema, apply normal embedded migration 0095 on populated history, verify original Ed25519 proof bytes and case link remain unchanged, plus validate target index restoration. No changes to prior migration file checksums or historical records.
+- [ ] Hosted exact-head CI still required; this tests staged SQLite upgrade, not installed Windows MSI/Ubuntu .deb replacement, Windows ACLs, large-dataset disk pressure, backup restore from failed upgrade or physical Node identity.
+- [ ] Continue Node identity/vantage proof, independently corroborated incidents, bounded reversible human-approved Level 5 playbooks, low-resource endurance and full security audit. Human-centred UI/UX alignment LAST before separately approved QA packaging; branch stays draft.

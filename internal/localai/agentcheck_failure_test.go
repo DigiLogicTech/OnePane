@@ -6,6 +6,7 @@ import (
  "errors"
  "io/fs"
  "os"
+ "runtime"
  "path/filepath"
  "strings"
  "testing"
@@ -164,6 +165,42 @@ func TestRuntimeLaunchFailureNeverEchoesRawLogOrUnsafePaths(t *testing.T){
  if err:=os.Symlink(external,logPath);err==nil{
   if got:=supervisor.runtimeLogReviewHint("safe-id");got!=""{
    t.Fatalf("linked external logs were accepted: %s",got)
+  }
+ }
+}
+
+
+func TestManagedRuntimeLogNeverClobbersOrFollowsPrivateFiles(t *testing.T){
+ base:=t.TempDir()
+ p:=filepath.Join(base,"secure","managed.log")
+ first,err:=openManagedRuntimeLog(p)
+ if err!=nil{t.Fatal(err)}
+ secret:="PRIVATE_DIAGNOSTIC_DO_NOT_TRUNCATE"
+ if _,err=first.WriteString(secret);err!=nil{t.Fatal(err)}
+ if err=first.Close();err!=nil{t.Fatal(err)}
+ second,err:=openManagedRuntimeLog(p)
+ if err!=nil{t.Fatal(err)}
+ if _,err=second.WriteString(" next attempt");err!=nil{t.Fatal(err)}
+ if err=second.Close();err!=nil{t.Fatal(err)}
+ contents,err:=os.ReadFile(p)
+ if err!=nil||!strings.HasPrefix(string(contents),secret)||
+  !strings.HasSuffix(string(contents)," next attempt"){
+  t.Fatalf("log restart discarded original private diagnostics: %v",err)
+ }
+ if runtime.GOOS!="windows"{
+  external:=filepath.Join(t.TempDir(),"external-secret")
+  if err=os.WriteFile(external,[]byte(secret),0o600);err!=nil{t.Fatal(err)}
+  if err=os.Remove(p);err!=nil{t.Fatal(err)}
+  if err=os.Symlink(external,p);err!=nil{t.Fatal(err)}
+  if file,e:=openManagedRuntimeLog(p);e==nil{
+   _=file.Close();t.Fatal("runtime followed external symlink with write access")
+  }
+  preserved,e:=os.ReadFile(external)
+  if e!=nil||string(preserved)!=secret{t.Fatal("external secret was mutated via runtime log")}
+  if err=os.Remove(p);err!=nil{t.Fatal(err)}
+  if err=os.WriteFile(p,[]byte(secret),0o644);err!=nil{t.Fatal(err)}
+  if file,e:=openManagedRuntimeLog(p);e==nil{
+   _=file.Close();t.Fatal("shared-readable managed logs were admitted")
   }
  }
 }

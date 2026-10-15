@@ -1347,3 +1347,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Replace appended raw process-log tails in failed/local managed runtime health/start errors with a generic local-log-available hint. Preserve original owner-accessible disk logs for future QA; no bearer tokens, model paths, user prompts or process arguments are copied to common UI/API error strings.
 - [x] Restrict runtime log lookup to short generated-style IDs and non-symlink regular local log files; test injected bearer/path canaries, hostile path IDs, missing logs and linked files. Exact-source hosted CI pending.
 - [ ] This is not a comprehensive QA debug feature or proof that all other diagnostic channels redact sensitive content. Complete source/security audit, physical Node/owned target acceptance, bounded reversible L5 actions and low-RAM installed tests remain. Human-first UI/UX customisation LAST before approved installer.
+
+
+## RC11 P0-BY — preserve local logs and deny linked/unsafe startup log paths (2026-10-15)
+
+- [x] Managed engine launch no longer opens an existing diagnostic log with `O_TRUNC` or follows a symlink in the final log path. Owner-private log directories and existing regular log files are validated, an existing file is appended after an opened-inode identity check, and absent files use exclusive creation. Existing size-limited rollover behavior is retained.
+- [x] Unit regression verifies original diagnostics survive a subsequent launch, an external symlink destination cannot be written, and Unix shared-readable logs are denied. Exact-head hosted CI pending.
+- [ ] Audit still needs portable Windows reparse-point/ACL acceptance, physical subprocess and GPU lifetime validation, low-resource filesystem pressure and full security review, followed by LAST user-first UI/UX before authorised installers.

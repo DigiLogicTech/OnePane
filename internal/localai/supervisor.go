@@ -90,10 +90,10 @@ func (b *OSProcessBackend) Start(ctx context.Context, spec LaunchSpec) (int, err
 	}
 	// Preserve bounded startup diagnostics; the process owns no global stdout.
  if spec.LogPath != "" {
-  if err:=os.MkdirAll(filepath.Dir(spec.LogPath),0o700);err!=nil{return 0,err}
-  if st,err:=os.Stat(spec.LogPath);err==nil&&st.Size()>4<<20{_ = os.Rename(spec.LogPath,spec.LogPath+".previous")}
-  logFile,err:=os.OpenFile(spec.LogPath,os.O_CREATE|os.O_TRUNC|os.O_WRONLY,0o600);if err!=nil{return 0,err}
-  defer logFile.Close();cmd.Stdout,cmd.Stderr=logFile,logFile
+  logFile,err:=openManagedRuntimeLog(spec.LogPath)
+  if err!=nil{return 0,err}
+  defer logFile.Close()
+  cmd.Stdout,cmd.Stderr=logFile,logFile
  } else {cmd.Stdout, cmd.Stderr = io.Discard, io.Discard}
 	if err := cmd.Start(); err != nil {
 		return 0, err
@@ -105,6 +105,52 @@ func (b *OSProcessBackend) Start(ctx context.Context, spec LaunchSpec) (int, err
 	go func() { _ = cmd.Wait(); b.mu.Lock(); delete(b.cmds, pid); b.mu.Unlock() }()
 	return pid, nil
 }
+// Managed inference logs may contain private paths or request data. The
+// launcher must not truncate a previous log, follow a linked log file or
+// operate in a shared directory. All checks precede the subprocess spawn;
+// no existing arbitrary file is opened with O_TRUNC.
+func openManagedRuntimeLog(path string)(*os.File,error){
+ dir:=filepath.Dir(path)
+ if err:=os.MkdirAll(dir,0o700);err!=nil{return nil,err}
+ di,err:=os.Lstat(dir)
+ if err!=nil{return nil,err}
+ if !di.IsDir()||di.Mode()&os.ModeSymlink!=0||
+  (runtime.GOOS!="windows"&&di.Mode().Perm()&0o077!=0){
+  return nil,errors.New("unsafe managed runtime log directory")
+ }
+ st,err:=os.Lstat(path)
+ if err!=nil&&!errors.Is(err,os.ErrNotExist){return nil,err}
+ if err==nil{
+  if !st.Mode().IsRegular()||
+   (runtime.GOOS!="windows"&&st.Mode().Perm()&0o077!=0){
+   return nil,errors.New("unsafe existing managed runtime log")
+  }
+  // Preserve old bounded log rollover semantics without overwriting a
+  // file that was replaced or linked during the preflight.
+  if st.Size()>4<<20{
+   archive:=path+".previous"
+   if _,e:=os.Lstat(archive);e==nil{
+    if e=os.Remove(archive);e!=nil{return nil,e}
+   }else if !errors.Is(e,os.ErrNotExist){return nil,e}
+   if e:=os.Rename(path,archive);e!=nil{return nil,e}
+   st=nil
+  }
+ }
+ if st!=nil{
+  f,e:=os.OpenFile(path,os.O_WRONLY|os.O_APPEND,0o600)
+  if e!=nil{return nil,e}
+  fi,e:=f.Stat()
+  if e!=nil||!fi.Mode().IsRegular()||!os.SameFile(st,fi){
+   _=f.Close()
+   return nil,errors.New("managed runtime log changed before opening")
+  }
+  return f,nil
+ }
+ f,e:=os.OpenFile(path,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0o600)
+ if e!=nil{return nil,e}
+ return f,nil
+}
+
 func (b *OSProcessBackend) Signal(pid int, sig os.Signal) error {
 	if pid <= 1 {
 		return errors.New("invalid pid")

@@ -958,27 +958,54 @@ func (s *RuntimeSupervisor) waitHealthy(ctx context.Context, idv string, timeout
  return RuntimeInstance{}, errors.New(reason)
 }
 
+// Health is a bounded, direct-loopback readiness probe, not a general
+// HTTP client. Do not honour injected proxies, redirect hooks or dialers:
+// those could leak a local engine's health data to an unrelated endpoint.
 func (s *RuntimeSupervisor) Health(ctx context.Context, inst RuntimeInstance) (map[string]any, error) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/health", inst.Port), nil)
-	resp, err := s.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("health HTTP %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, err
-	}
-	var out map[string]any
-	if len(bytes.TrimSpace(body)) == 0 {
-		out = map[string]any{"status": "ok"}
-	} else if err := json.Unmarshal(body, &out); err != nil {
-		out = map[string]any{"status": "ok", "raw": string(body)}
-	}
-	return out, nil
+ if inst.Port<1024||inst.Port>65535{
+  return nil,errors.New("managed runtime health port invalid")
+ }
+ req,err:=http.NewRequestWithContext(ctx,http.MethodGet,
+  fmt.Sprintf("http://127.0.0.1:%d/health",inst.Port),nil)
+ if err!=nil{return nil,err}
+ transport:=&http.Transport{
+  Proxy:nil,
+  DialContext:(&net.Dialer{Timeout:3*time.Second}).DialContext,
+  ResponseHeaderTimeout:3*time.Second,
+ }
+ defer transport.CloseIdleConnections()
+ client:=&http.Client{Transport:transport,Timeout:3*time.Second,
+  CheckRedirect:func(_ *http.Request,_ []*http.Request)error{
+   return http.ErrUseLastResponse
+  },
+ }
+ resp,err:=client.Do(req)
+ if err!=nil{return nil,err}
+ defer resp.Body.Close()
+ if resp.StatusCode<200||resp.StatusCode>=300{
+  return nil,fmt.Errorf("managed runtime health HTTP %d",resp.StatusCode)
+ }
+ const maxHealthResponse=1<<20
+ body,err:=io.ReadAll(io.LimitReader(resp.Body,maxHealthResponse+1))
+ if err!=nil{return nil,err}
+ if len(body)>maxHealthResponse{
+  return nil,errors.New("managed runtime health response oversized")
+ }
+ if len(bytes.TrimSpace(body))==0{
+  return nil,errors.New("managed runtime health response empty")
+ }
+ var out map[string]any
+ if err=json.Unmarshal(body,&out);err!=nil||len(out)==0{
+  return nil,errors.New("managed runtime health response invalid JSON object")
+ }
+ status,ok:=out["status"].(string)
+ if !ok{return nil,errors.New("managed runtime health status missing")}
+ switch strings.ToLower(strings.TrimSpace(status)){
+ case "ok","ready","healthy","no slot available":
+  return out,nil
+ default:
+  return nil,errors.New("managed runtime not yet healthy")
+ }
 }
 
 func (s *RuntimeSupervisor) VerifyIdentity(ctx context.Context, inst RuntimeInstance) error {

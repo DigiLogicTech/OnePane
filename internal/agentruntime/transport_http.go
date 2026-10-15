@@ -85,7 +85,13 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
   strings.ContainsAny(cfg.AuthPrefix,"\r\n\x00") {
 		return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_auth_config", OutcomeKnown: true}
 	}
-	if cfg.TimeoutMS < 0 || cfg.TimeoutMS > int64((10*time.Minute)/time.Millisecond) {
+	// Plaintext credentials are allowed ONLY to a literal loopback socket.
+    // A caller-provided proxy or dial hook must not turn that exception
+    // into a request carrying the secret to a remote HTTP proxy.
+    localPlaintextCredential := strings.ToLower(c.AuthType)!="none" &&
+     u.Scheme=="http" && net.ParseIP(u.Hostname())!=nil &&
+     net.ParseIP(u.Hostname()).IsLoopback()
+    if cfg.TimeoutMS < 0 || cfg.TimeoutMS > int64((10*time.Minute)/time.Millisecond) {
 		return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_timeout", OutcomeKnown: true}
 	}
 	body, err := json.Marshal(req)
@@ -112,7 +118,7 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
 		client = &http.Client{}
 	}
 	clone := *client
-	if originOnly {
+	if originOnly || localPlaintextCredential {
 		// A literal loopback endpoint must also use an independently owned
 		// direct transport. Cloning a caller-supplied http.Transport and
 		// clearing Proxy is insufficient: custom DialContext/DialTLSContext,

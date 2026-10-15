@@ -324,3 +324,46 @@ func TestAgentHTTPAuthHeaderCannotBecomeProxyOrRoutingSecret(t *testing.T){
   if !safeAgentAuthHeader(allowed){t.Fatalf("valid custom auth header rejected: %s",allowed)}
  }
 }
+
+
+func TestAgentHTTPPlainLoopbackBearerCannotTravelViaInjectedProxy(t *testing.T){
+ var proxyCalls,originCalls int
+ origin:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+  originCalls++
+  if r.Header.Get("Authorization")!="Bearer PRIVATE_LOCAL_SECRET"{
+   t.Errorf("missing correct loopback-only bearer value")
+  }
+  var req agentprotocol.Request
+  if err:=json.NewDecoder(r.Body).Decode(&req);err!=nil{t.Error(err);return}
+  _=json.NewEncoder(w).Encode(agentprotocol.Response{
+   ProtocolVersion:agentprotocol.Version,RequestID:req.RequestID,
+   ProposalType:agentprotocol.ProposalComplete,
+   Proposal:json.RawMessage(`{"summary":"local"}`),
+  })
+ }))
+ defer origin.Close()
+ proxy:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+  proxyCalls++
+  t.Error("plain loopback credential or prompt reached configured proxy")
+  w.WriteHeader(http.StatusBadGateway)
+ }))
+ defer proxy.Close()
+ proxyURL,err:=url.Parse(proxy.URL)
+ if err!=nil{t.Fatal(err)}
+ endpoint,_:=json.Marshal(map[string]string{"base_url":origin.URL})
+ ref:="vault:loopback-local"
+ conn:=Connection{EndpointJSON:endpoint,AuthType:"bearer",SecretRef:&ref}
+ request:=agentprotocol.Request{ProtocolVersion:agentprotocol.Version,
+  RequestID:"non-origin-loopback-proxy",WorkspaceID:"ws",PrincipalID:"agent",
+  Objective:"private local query",Constraints:json.RawMessage(`{}`),
+  ContextManifest:json.RawMessage(`{}`),
+  PermittedProposalTypes:[]agentprotocol.ProposalType{agentprotocol.ProposalComplete},
+ }
+ client:=&http.Client{Transport:&http.Transport{Proxy:http.ProxyURL(proxyURL)}}
+ _,err=(AgentProtocolHTTPTransport{Client:client}).Invoke(context.Background(),conn,
+  request,runtimeStaticSecrets{"vault:loopback-local":"PRIVATE_LOCAL_SECRET"})
+ if err!=nil||originCalls!=1||proxyCalls!=0{
+  t.Fatalf("plain loopback credential was proxied: original=%d proxy=%d err=%v",
+   originCalls,proxyCalls,err)
+ }
+}

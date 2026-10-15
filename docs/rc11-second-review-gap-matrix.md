@@ -1286,3 +1286,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Align duplicate-field detection with Go's case-insensitive JSON struct tag matching, rejecting duplicate destination/authority keys even when names differ in capitalization. Bound explicit raw policy body to 16KiB and at most 32 top-level attributes to avoid avoidable parser work on a tiny host.
 - [x] Extend before-egress interception with mixed-case endpoint policy conflicts both orders; accept unambiguous alternate-case names. Exact-head CI pending.
 - [ ] This prevents ambiguously sourced data-egress config; it is not physical Node attestation or an autonomous network protection grant. Low-RAM, Windows installed ACL/device acceptance and complete audit remain, then LAST operator-centred UI/UX before approved QA packaging.
+
+
+## RC11 P0-BP — plaintext loopback bearer cannot be redirected by caller proxy (2026-10-15)
+
+- [x] Extend direct no-proxy/no-injected-dial Agent HTTP transport to literal loopback **plaintext-authenticated** requests, not only self-declared `origin_node` destinations. The bearer over HTTP exception must not be accidentally converted into proxy-credential leakage by caller transport hooks.
+- [x] Real `httptest` origin+proxy regression checks exact local Authorization value, one origin request and zero proxy requests under injected proxy. Exact-head hosted CI pending.
+- [ ] Remote HTTPS providers retain separate configured credential/policy admission. Physical Node/owned target and independent observer truth, controlled reversible L5 effects, long-running resource and security audit still block packaging; final comprehensive user-first UI/UX LAST.

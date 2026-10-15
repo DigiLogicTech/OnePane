@@ -114,6 +114,9 @@ func TestColibriStartPreflightsPythonBeforeEvictingModels(t *testing.T){
  start:=strings.Index(source,"func (s *RuntimeSupervisor) startLocked(")
  if start<0{t.Fatal("managed start path missing")}
  scope:=source[start:]
+ // Only inspect startLocked, not later supervisor functions that are
+ // independently allowed to discover Python for other purposes.
+ if end:=strings.Index(scope,"\nfunc ");end>0{scope=scope[:end]}
  prior:=strings.Index(scope,"colibriPython,err=findPythonExecutable()")
  eviction:=strings.Index(scope,"s.prepareColibriSwapLocked(ctx, nodeID, deploymentID)")
  if prior<0||eviction<=prior||strings.Index(scope,"var existing *RuntimeInstance")>prior{

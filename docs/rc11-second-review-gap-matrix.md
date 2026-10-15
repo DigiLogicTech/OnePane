@@ -1327,3 +1327,9 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 
 - [x] Extend actual SQLite response-intent readiness regression with a second active Project/Workspace in the same tenant. A fabricated foreign Operation references the **original** Goal's observer URI but is attached to the separate Project Task; non-executable diagnostics must never treat it as a target Goal's reconciliation debt. Later same-Goal unknown and executing operations must still surface both real blockers.
 - [ ] Exact-head hosted CI pending; this is sandbox isolation for operator evidence, not physical sensor truth or network remediation permission. Continue owned hardware/observer proof, approved reversible L5 actions, measured low-memory acceptance and final source audit with LAST human-centered UI/UX before authorised installer.
+
+
+## RC11 P1-BV — scope Colibri startup-order regression to its own function (2026-10-15)
+
+- [x] Hosted run #38702275530 showed a false-positive source contract failure: test scanned all functions following `startLocked`, finding a legitimate unrelated Python lookup far beyond the launch implementation. Restrict source-order inspection to the `startLocked` body and keep the real order invariant (target already active → Python preflight → healthy predecessor eviction).
+- [ ] Exact-head hosted CI rerun required; no fallback, model switching or process mutation added by this test-only correction. Draft branch unmerged.

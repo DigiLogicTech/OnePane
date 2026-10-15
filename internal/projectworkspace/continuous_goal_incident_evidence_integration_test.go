@@ -155,6 +155,35 @@ func TestIncidentEvidenceAssociatesOnlyHumanDeclaredHistoricalEndpoint(t *testin
   evidence.Alert.Status!="open"{
   t.Fatalf("historical bounded evidence misclassified: %+v",evidence)
  }
+ // Same enrolled key: two accepted signatures may disagree.
+ clk.now=clk.now.Add(time.Second)
+ g,err=svc.ContinuousGoal(ctx,g.ID);if err!=nil{t.Fatal(err)}
+ challenge2,err:=svc.IssueGoalInstrumentChallenge(ctx,IssueGoalInstrumentChallengeCommand{
+  ProjectID:p.ID,GoalID:g.ID,KeyID:key.ID,ActorPrincipalID:"human",
+  ExpectedGoalRevision:g.Revision,ExpectedKeyRevision:key.Revision,
+ })
+ if err!=nil{t.Fatal(err)}
+ report2:=SignedMeasurementCommand{
+  ProjectID:p.ID,GoalID:g.ID,KeyID:key.ID,ChallengeID:challenge2.ID,
+  ActorPrincipalID:"human",ExpectedGoalRevision:g.Revision,
+  Outcome:"connected",ObservedAt:clk.UnixMilli(),
+ }
+ signed2,err:=svc.PrepareGoalInstrumentMeasurement(ctx,report2)
+ if err!=nil{t.Fatal(err)}
+ report2.Signature=ed25519.Sign(privateKey,signed2.SigningPayload)
+ claim2,err:=svc.AcceptGoalInstrumentMeasurement(ctx,report2)
+ if err!=nil{t.Fatal(err)}
+ conflict,err:=svc.GoalIncidentEvidence(ctx,p.ID,g.ID,caseReview.ID)
+ if err!=nil{t.Fatal(err)}
+ if len(conflict.SignedEndpointClaims)!=2||
+  conflict.SignedEndpointClaims[0].ClaimID!=claim2.ID||
+  conflict.SignedEndpointClaims[1].ClaimID!=claim.ID||
+  conflict.DistinctSigningKeys!=1||
+  conflict.SignedClaimConsistency!="conflicting_unverified_self_reports"||
+  conflict.IndependentVantageVerified||conflict.DeviceIdentityVerified||
+  conflict.IncidentConfirmed||conflict.RemediationAuthorized{
+  t.Fatalf("same-key contradictory reports falsely corroborated: %+v",conflict)
+ }
  // The sensor's self-report of an opposite outcome is retained, not
  // automatically reconciled or promoted above an actual TCP socket record.
  latest,err:=svc.ContinuousGoal(ctx,g.ID)
@@ -190,7 +219,7 @@ func TestIncidentEvidenceAssociatesOnlyHumanDeclaredHistoricalEndpoint(t *testin
  delayedClaim,err:=svc.AcceptGoalInstrumentMeasurement(ctx,delayed)
  if err!=nil{t.Fatal(err)}
  historicalInventory,err:=svc.GoalRetentionInventory(ctx,p.ID,g.ID)
- if err!=nil||historicalInventory.SignedInstrumentClaims!=2{
+ if err!=nil||historicalInventory.SignedInstrumentClaims!=3{
   t.Fatalf("immutable signed claim volume not accounted for: %+v %v",historicalInventory,err)
  }
  clk.now=time.UnixMilli(alerts[0].DetectedAt).Add(30*time.Minute)
@@ -248,12 +277,12 @@ func TestIncidentEvidenceAssociatesOnlyHumanDeclaredHistoricalEndpoint(t *testin
   t.Fatalf("signed original evidence changed after indexed upgrade: %+v %v",afterBundle.Claim,err)
  }
  postUpgradeInventory,err:=svc.GoalRetentionInventory(ctx,p.ID,g.ID)
- if err!=nil||postUpgradeInventory.SignedInstrumentClaims!=2{
+ if err!=nil||postUpgradeInventory.SignedInstrumentClaims!=3{
   t.Fatalf("signed receipt inventory lost across schema upgrade: %+v %v",postUpgradeInventory,err)
  }
  afterMigration,err:=svc.GoalIncidentEvidence(ctx,p.ID,g.ID,caseReview.ID)
- if err!=nil||len(afterMigration.SignedEndpointClaims)!=1||
-  afterMigration.SignedEndpointClaims[0].ClaimID!=claim.ID||
+ if err!=nil||len(afterMigration.SignedEndpointClaims)!=2||
+  afterMigration.SignedEndpointClaims[1].ClaimID!=claim.ID||
   afterMigration.IncidentConfirmed||afterMigration.RemediationAuthorized{
   t.Fatalf("scoped incident evidence drifted after migration: %+v %v",afterMigration,err)
  }

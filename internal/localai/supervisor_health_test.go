@@ -46,6 +46,8 @@ func TestRuntimeHealthRequiresTrustedLoopbackReadinessEvidence(t *testing.T){
  }{
   {"ready",`{"status":"ok","slots_idle":1}`,200,true},
   {"healthy",`{"status":"healthy"}`,200,true},
+  {"response contains secret",`{"status":"ok","token":"SECRET_HEALTH_CANARY","path":"/private/secrets","slots_idle":2}`,200,true},
+  {"unbounded count",`{"status":"ok","slots_idle":99999999,"slots_processing":-1}`,200,true},
   {"llama busy ready",`{"status":"no slot available"}`,200,true},
   {"empty","",200,false},
   {"malformed","SECRET_HEALTH_CANARY",200,false},
@@ -62,6 +64,12 @@ func TestRuntimeHealthRequiresTrustedLoopbackReadinessEvidence(t *testing.T){
    got,e:=supervisor.Health(context.Background(),inst)
    if tc.ready{
     if e!=nil||got==nil{t.Fatalf("legitimate health unavailable: %v",e)}
+    if _,bad:=got["token"];bad{t.Fatal("private engine token persisted")}
+    if _,bad:=got["path"];bad{t.Fatal("private engine path persisted")}
+    if count,ok:=got["slots_idle"];ok{
+     n,valid:=count.(int64)
+     if !valid||n<0||n>4096{t.Fatalf("unbounded slots persisted: %#v",count)}
+    }
    }else{
     if e==nil||got!=nil{t.Fatalf("untrusted health accepted: %+v %v",got,e)}
     if strings.Contains(e.Error(),"SECRET_HEALTH_CANARY"){

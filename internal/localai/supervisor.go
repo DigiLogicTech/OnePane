@@ -1061,7 +1061,18 @@ func (s *RuntimeSupervisor) Health(ctx context.Context, inst RuntimeInstance) (m
  if !ok{return nil,errors.New("managed runtime health status missing")}
  switch strings.ToLower(strings.TrimSpace(status)){
  case "ok","ready","healthy","no slot available":
-  return out,nil
+  // A third-party engine's /health JSON is untrusted process output.
+  // Only explicitly reviewed scalar readiness data may become durable
+  // local_runtime_instances.health_json or leave the host through an API.
+  safe:=map[string]any{"status":strings.ToLower(strings.TrimSpace(status))}
+  for _,key:=range []string{"slots_idle","slots_processing"}{
+   if raw,exists:=out[key];exists{
+    if n,ok:=raw.(float64);ok&&n>=0&&n<=4096&&n==float64(int64(n)){
+     safe[key]=int64(n)
+    }
+   }
+  }
+  return safe,nil
  default:
   return nil,errors.New("managed runtime not yet healthy")
  }

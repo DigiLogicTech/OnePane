@@ -1402,3 +1402,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 
 - [x] Add real SQLite regression with 24 simultaneous local-inference workers sharing one runtime. All acquire an active lease before any release, and the runtime must remain `busy` while any lease is outstanding; after all completions it returns to `healthy` with zero ghost leases. This is a deterministic low-memory software concurrency check and runs with hosted race detection.
 - [ ] Physical CPU/GPU scheduling and process teardown, long-run real-host performance and external Node proof remain distinct; exact-source hosted CI pending. Complete audit then LAST human-focused UI/UX before an approved build.
+
+
+## RC11 P0-CG — only persist redacted local engine readiness metadata (2026-10-16)
+
+- [x] Existing direct-loopback health admission validated a safe status but still returned all arbitrary JSON fields from a third-party model runtime; `waitHealthy` stored those fields in durable `health_json`. Drop all unknown content and retain only canonical lower-cased status and bounded nonnegative integer idle/processing slot counts (0–4096). No raw credentials, private paths or oversized diagnostics from an engine response should become general UI/API state.
+- [x] Extend actual loopback HTTP tests with private token/path canaries and implausible slot counts. Source hosted CI pending.
+- [ ] This is software readiness only. Physical Node ownership/independent vantage, approved reversible protective effects, installed low-RAM/WAL/Windows ACL/GPU acceptance, full security audit and LAST user-centred UI/UX remain before authorised installer.

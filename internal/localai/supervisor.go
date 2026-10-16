@@ -597,6 +597,17 @@ func residentReclaimsConstrainedAccelerator(r residentRuntime,
  return false
 }
 
+// Compute retained accelerator capacity without multiplying full VRAM bytes
+// by a percentage first: extremely large or corrupt hardware estimates can
+// overflow int64 before division and fabricate a positive headroom value.
+func usableManagedVRAM(total int64,headroomPct int)(int64,bool){
+ if total<0||headroomPct<0||headroomPct>50{return 0,false}
+ keep:=int64(100-headroomPct)
+ // The quotient term cannot exceed total, and the remainder term is
+ // bounded by 99*100. Both operations are safe across full int64 range.
+ return (total/100)*keep+((total%100)*keep)/100,true
+}
+
 func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, nodeID string) error {
 	var targetBytes int64
 	var targetPlanJSON string
@@ -604,7 +615,9 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 		return err
 	}
 	var targetRec Recommendation
-	_ = json.Unmarshal([]byte(targetPlanJSON), &targetRec)
+	if err:=json.Unmarshal([]byte(targetPlanJSON),&targetRec);err!=nil{
+		return errors.New("managed model install plan JSON is invalid")
+	}
 	var raw,rawMemory string
 	if err := s.db.QueryRowContext(ctx, `SELECT accelerators_json,memory_json FROM local_hardware_profiles WHERE node_id=? ORDER BY detected_at DESC LIMIT 1`, nodeID).Scan(&raw,&rawMemory); err != nil {
 		return err
@@ -631,13 +644,12 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 		return nil
 	}
 	capacity := map[string]int64{}
-	for _, g := range gpus {
-		for _, b := range gpuBackends(g) {
-			k := placementKey(PlacementDevice{DeviceID: g.DeviceID, Backend: b, DeviceIndex: g.DeviceIndex})
-			usable := g.VRAMBytes * int64(100-s.residencyHeadroomPct) / 100
-			if usable > capacity[k] {
-				capacity[k] = usable
-			}
+	for _,g:=range gpus {
+		usable,ok:=usableManagedVRAM(g.VRAMBytes,s.residencyHeadroomPct)
+		if !ok{return errors.New("managed accelerator memory profile or reserve is invalid")}
+		for _,b:=range gpuBackends(g){
+			k:=placementKey(PlacementDevice{DeviceID:g.DeviceID,Backend:b,DeviceIndex:g.DeviceIndex})
+			if usable>capacity[k]{capacity[k]=usable}
 		}
 	}
 	target := map[string]int64{}
@@ -671,11 +683,10 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 			return err
 		}
 		var rec Recommendation
-		_ = json.Unmarshal([]byte(planJSON), &rec)
-		x.Placement = rec.Placement
-		if x.Placement.Mode == "" {
-			continue
+		if err:=json.Unmarshal([]byte(planJSON),&rec);err!=nil||rec.Placement.Mode==""{
+			return errors.New("active managed runtime placement is unverified; reconcile or reinstall model plan")
 		}
+		x.Placement=rec.Placement
 		for _, d := range x.Placement.Devices {
 			if d.Kind == "accelerator" {
 				key:=placementKey(d)

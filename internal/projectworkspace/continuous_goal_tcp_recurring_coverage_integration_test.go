@@ -86,6 +86,27 @@ func TestGoalCoverageSeparatesRecurringTCPAuthorizationFromVerifiedHealth(t *tes
  _,err=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships SET status='active'
   WHERE workspace_id='tenant' AND principal_id='owner'`)
  if err!=nil{t.Fatal(err)}
+ // An operator changes the actual source plan and then restores the
+ // identical JSON. Historical consent must NOT revive just because the
+ // SHA-256 plan hash matches its original value after the restore.
+ for _,plan:=range []string{
+  `{"version":1,"source_ids":["router","another-source"]}`,
+  `{"version":1,"source_ids":["router"]}`,
+ }{
+  if _,err=db.SQL().ExecContext(ctx,`UPDATE project_continuous_goals
+    SET monitoring_plan_json=? WHERE id=?`,plan,goal.ID);err!=nil{
+   t.Fatal(err)
+  }
+  valid,err:=service.TCPRecurringGrantAllowed(ctx,grant.ID)
+  if err!=nil||valid{
+   t.Fatalf("old recurring grant revived under edited/restored plan: valid=%v err=%v",valid,err)
+  }
+ }
+ coverage,err=service.GoalEvidenceCoverage(ctx,project.ID,goal.ID)
+ if err!=nil||coverage.RecurringTCPAuthorizedSources!=0||
+   len(coverage.Sources)!=1||coverage.Sources[0].TCPRecurringAuthorized{
+  t.Fatalf("restored plan falsely displayed historical consent as live: %+v %v",coverage,err)
+ }
  goal,err=service.ContinuousGoal(ctx,goal.ID)
  if err!=nil{t.Fatal(err)}
  _,err=service.RevokeTCPRecurringGrant(ctx,RevokeTCPRecurringGrantCommand{

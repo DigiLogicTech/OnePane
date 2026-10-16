@@ -292,18 +292,18 @@ func(s *Service)TCPRecurringGrantAllowed(ctx context.Context,grantID string)(boo
  if err!=nil{return false,err}
  if g.Status!="approved"||g.ExpiresAt<=s.clock.UnixMilli(){return false,nil}
  var status,raw string
- var rev,cadence int64
+ var rev,cadence,planGeneration int64
  err=s.db.QueryRowContext(ctx,`SELECT goal.status,goal.monitoring_plan_json,
-   goal.revision,goal.cadence_minutes FROM project_continuous_goals goal
+   goal.revision,goal.cadence_minutes,goal.plan_generation FROM project_continuous_goals goal
    JOIN project_workspaces w ON w.id=goal.project_workspace_id
      AND w.project_id=goal.project_id AND w.status='active'
    JOIN workspaces t ON t.id=? AND t.status='active'
    WHERE goal.id=? AND goal.project_id=?
    AND goal.project_workspace_id=?`,project.WorkspaceID,goalID,projectID,
-  g.ProjectWorkspaceID).Scan(&status,&raw,&rev,&cadence)
+  g.ProjectWorkspaceID).Scan(&status,&raw,&rev,&cadence,&planGeneration)
  if errors.Is(err,sql.ErrNoRows){return false,nil}
  if err!=nil{return false,err}
- if status!="configured"||cadence!=g.CadenceMinutes{return false,nil}
+ if status!="configured"||cadence!=g.CadenceMinutes||planGeneration<1{return false,nil}
  plan,hash,err:=goalReviewPlan(raw)
  if err!=nil||hash!=g.PlanHash{return false,nil}
  allowed:=false
@@ -314,9 +314,16 @@ func(s *Service)TCPRecurringGrantAllowed(ctx context.Context,grantID string)(boo
    AND project_id=?`,g.ManualPermitID,goalID,projectID))
  if errors.Is(err,sql.ErrNoRows){return false,nil}
  if err!=nil{return false,err}
+ // The approved plan hash can recur when a human edits and restores the
+ // same source list. Generation is monotonic: historical TCP permission
+ // must never reappear as live on an identical restored plan.
  if manual.Status!="approved"||manual.Revision!=g.ManualPermitRevision||
   manual.ExpiresAt<=s.clock.UnixMilli()||manual.PlanHash!=g.PlanHash||
+  manual.PlanGeneration!=planGeneration||manual.PlanGeneration<1||
   manual.ProjectWorkspaceID!=g.ProjectWorkspaceID||
+  manual.ProbeKind!="tcp_connect"||manual.EffectClass!="network_tcp_connect"||
+  manual.TargetPort<1||manual.TargetPort>65535||
+  manual.TimeoutMS<100||manual.TimeoutMS>1500||
   manual.SourceID!=g.SourceID||manual.TargetIPv4!=g.TargetIPv4||
   manual.TargetPort!=g.TargetPort||manual.TimeoutMS!=g.TimeoutMS{
   return false,nil

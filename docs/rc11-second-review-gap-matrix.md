@@ -1568,3 +1568,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] The bounded Level 5 TCP recurring worker now checks actual SQLite RowsAffected for its revision-fenced cursor update. A second poller using a stale revision receives `ErrRevisionConflict` instead of success after a zero-row UPDATE. Per-source/window atomic attempt admission remains the separate no-duplicate-socket authority.
 - [x] One-connection SQLite unit regression verifies monotonic cursor advancement, stale-poller denial, unchanged persisted pointer and cancelled updates without extra network effects.
 - [ ] Hosted exact-head CI, real multi-daemon scheduling, physical network proof, approved reversible L5 actions and installed QA remain separate. No privileged background operations or release permission are implied; final audit and LAST human-centric UI/UX are pending.
+
+
+## RC11 P0-DE — restored plan hash cannot revive historical recurring consent (2026-10-17)
+
+- [x] Live/read-only Level 5 TCP recurring-grant admission now checks the immutable manual permit's plan generation against the currently active Goal generation, in addition to the existing hash, permit revision, source/target and human approver checks. Also requires the exact permitted TCP effect class and bounded single-target port/timeout. An old grant cannot appear active when a changed source plan is restored to identical JSON.
+- [x] Real SQLite integration exercises human-approved recurring monitoring, two source-plan edits returning to the same plan hash, `TCPRecurringGrantAllowed` negative validation and `GoalEvidenceCoverage` refusing to display live authority, while preserving human revocation of the historical approval. The atomic socket claim already enforced generation; the new change closes status/projection parity.
+- [ ] Exact-source CI, last-boundary off-host transport proof, physical Node/target identity and approved reversible L5 effects remain incomplete. No implicit permissions, autonomous remediation or release authority are added. Final security audit and LAST user-centred UI/UX still gate packaging.

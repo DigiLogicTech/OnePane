@@ -997,6 +997,13 @@ func (s *RuntimeSupervisor) waitHealthy(ctx context.Context, idv string, timeout
    _ = s.markFailed(ctx,idv,reason)
    return RuntimeInstance{}, errors.New(reason)
 		}
+		// A model health server on a loopback port does not prove that
+		// the intended managed process still owns that server. First
+		// authenticate the expected executable/CLI model+port binding.
+		// No HTTP probe or process signal may follow an identity mismatch.
+		if verifyErr:=s.VerifyIdentity(ctx,inst);verifyErr!=nil{
+			return RuntimeInstance{},errors.New("managed runtime process identity unverified during startup")
+		}
 		health, err := s.Health(ctx, inst)
 		if err == nil {
 			now := s.clock.UnixMilli()

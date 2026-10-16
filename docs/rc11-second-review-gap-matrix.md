@@ -1409,3 +1409,9 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Existing direct-loopback health admission validated a safe status but still returned all arbitrary JSON fields from a third-party model runtime; `waitHealthy` stored those fields in durable `health_json`. Drop all unknown content and retain only canonical lower-cased status and bounded nonnegative integer idle/processing slot counts (0–4096). No raw credentials, private paths or oversized diagnostics from an engine response should become general UI/API state.
 - [x] Extend actual loopback HTTP tests with private token/path canaries and implausible slot counts. Source hosted CI pending.
 - [ ] This is software readiness only. Physical Node ownership/independent vantage, approved reversible protective effects, installed low-RAM/WAL/Windows ACL/GPU acceptance, full security audit and LAST user-centred UI/UX remain before authorised installer.
+
+
+## RC11 P0-CH — process provenance before startup health socket probe (2026-10-16)
+
+- [x] `waitHealthy` must validate the managed PID/executable, model and expected loopback-port launch arguments before each startup `/health` HTTP probe. A coincidental or hostile local listener reporting `status=ok` cannot be accepted merely because a stale PID is alive; failure returns a generic error without signalling/replacing the unverified process or spilling command-line/private-path data.
+- [x] Source-order safety test covers independent process-identity check BEFORE the first health socket request. Exact-source hosted CI pending. This is not proof that a separate local process cannot race for the socket or independent physical device identity; physical hardware acceptance stays blocked.

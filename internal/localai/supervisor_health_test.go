@@ -5,6 +5,7 @@ import (
  "net/http"
  "net/http/httptest"
  "net/url"
+ "os"
  "strconv"
  "strings"
  "testing"
@@ -90,5 +91,24 @@ func TestRuntimeHealthRequiresTrustedLoopbackReadinessEvidence(t *testing.T){
   if _,err:=supervisor.Health(context.Background(),RuntimeInstance{Port:p});err==nil{
    t.Fatalf("invalid process health port %d accepted",p)
   }
+ }
+}
+
+
+// Guard against a future refactor probing a recycled/unverified PID's
+// localhost HTTP listener before the supervisor checks process identity.
+// This is a safety-oriented source-order invariant, not physical attestation.
+func TestStartupHealthProbesVerifyManagedProcessBeforeSocket(t *testing.T) {
+ raw,err:=os.ReadFile("supervisor.go")
+ if err!=nil{t.Fatal(err)}
+ source:=string(raw)
+ begin:=strings.Index(source,"func (s *RuntimeSupervisor) waitHealthy(")
+ if begin<0{t.Fatal("start health path missing")}
+ scope:=source[begin:]
+ if end:=strings.Index(scope,"\nfunc ");end>0{scope=scope[:end]}
+ verified:=strings.Index(scope,"s.VerifyIdentity(ctx,inst)")
+ health:=strings.Index(scope,"s.Health(ctx, inst)")
+ if verified<0||health<0||verified>=health{
+  t.Fatal("managed localhost health request is not guarded by process identity")
  }
 }

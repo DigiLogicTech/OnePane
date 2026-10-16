@@ -1463,3 +1463,11 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Re-verify the same exact registered process identity *after* the 5–35 second graceful-stop window and immediately **before** force-kill escalation. A PID may have exited and been recycled during Colibri's drain; a stale `Alive(pid)` is not permission to SIGKILL an unrelated host process. On mismatch, deny signal, persist `orphaned` state with compare-and-swap revision and require operator reconciliation.
 - [x] Start/Stop source-order contract ensures initial SIGTERM occurs before a second explicit `VerifyIdentity` prior to SIGKILL, including fail-closed orphan path. Hosted exact-source CI pending.
 - [ ] Unix PID identity can still race between last inspection and signal; physical process handle/pidfd/Windows process-handle safeguards and installed acceptance remain separate. This change grants no autonomous security remediation, Node/target physical attestation or network-vantage proof. Full source audit and FINAL human-centred UI/UX remain build gates.
+
+
+## RC11 P0-CP — idle reaper cannot terminate active, recently used or newly pinned models (2026-10-16)
+
+- [x] Route cleanup through the same residency → activity lock ordering as inference acquisition, recheck actual active-request lease, pinned Colibri state, model status and most recent activity against the selected cutoff before stopping a process. A previously selected but now busy/starting/recently-used/pinned model must not be killed by the low-RAM idle reaper or Agent Check cleanup. User-invoked Stop remains explicit.
+- [x] Close the bounded SQLite idle candidate SELECT cursor before any process stop or state write, removing another single-connection SQLite deadlock and WAL-pinned reader scenario.
+- [x] Add one-connection SQLite tests for cursor closure, concurrent active worker guard and pin admission, with no actual network/process effects in hosted tests. Exact-source CI pending.
+- [ ] Installed physical model process lifetime and Windows/Ubuntu GPU/RAM teardown still require acceptance. This is not physical Node or independently verified network sensor proof, new Level 5 autonomous authority or completed source security audit; final holistic user-first UI/UX remains LAST before approved QA installer.

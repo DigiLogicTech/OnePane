@@ -1196,27 +1196,44 @@ func oneExactManagedOption(args []string,name,want string)bool{
 // Acquire takes residencyMu then SetBusy (activityMu), so a new inference
 // cannot enter between the safety check and process termination.
 func (s *RuntimeSupervisor) StopIfIdle(ctx context.Context, deploymentID string) (bool, error) {
- if s==nil {return false,nil}
+ return s.stopIfIdleBefore(ctx,deploymentID,0)
+}
+
+// Check liveness, the active inference lease, a current pin, and (for the
+// idle reaper) the last-observed activity before signalling a process. The
+// lock order matches Acquire: residencyMu, then activityMu.
+func (s *RuntimeSupervisor) stopIfIdleBefore(ctx context.Context, deploymentID string, cutoff int64)(bool,error){
+ if s==nil{return false,nil}
  deploymentID=strings.TrimSpace(deploymentID)
- if deploymentID=="" {return false,errors.New("deployment id required")}
+ if deploymentID==""{return false,errors.New("deployment id required")}
  s.residencyMu.Lock()
  defer s.residencyMu.Unlock()
  s.activityMu.Lock()
  defer s.activityMu.Unlock()
- if s.activeRequests[deploymentID]>0 {return false,nil}
+ if s.activeRequests[deploymentID]>0{return false,nil}
  inst,err:=s.Instance(ctx,deploymentID)
  if errors.Is(err,sql.ErrNoRows){return false,nil}
  if err!=nil{return false,err}
- switch inst.Status {
+ if cutoff>0{
+  // Do not reap a model touched, restarted or checked since selection.
+  last:=inst.UpdatedAt
+  if inst.StartedAt!=nil&&*inst.StartedAt>last{last=*inst.StartedAt}
+  if inst.LastSeenAt!=nil&&*inst.LastSeenAt>last{last=*inst.LastSeenAt}
+  if last>=cutoff{return false,nil}
+ }
+ var pinned int
+ if err=s.db.QueryRowContext(ctx,`SELECT CASE WHEN
+  COALESCE(json_extract(runtime_config_json,'$.colibri_pinned'),0)=1
+  THEN 1 ELSE 0 END FROM model_deployments WHERE id=?`,
+  deploymentID).Scan(&pinned);err!=nil{return false,err}
+ if pinned!=0{return false,nil}
+ switch inst.Status{
  case RuntimeHealthy,RuntimeStarting:
+  // An idle reaper never terminates a new model still starting up.
+  if cutoff>0&&inst.Status!=RuntimeHealthy{return false,nil}
   if err:=s.Stop(ctx,deploymentID);err!=nil{return false,err}
   return true,nil
- case RuntimeBusy:
-  // A stale busy marker is not proof that no other process owns the model.
-  return false,nil
- default:
-  // Already stopped, failed or orphaned: never signal an unknown process.
-  return false,nil
+ default:return false,nil
  }
 }
 
@@ -1479,38 +1496,43 @@ func (s *RuntimeSupervisor) Touch(ctx context.Context, deploymentID string) erro
 	return err
 }
 
-func (s *RuntimeSupervisor) ReapIdle(ctx context.Context, idle time.Duration, limit int) (int, error) {
-	if idle <= 0 {
-		return 0, nil
-	}
-	if limit <= 0 || limit > 100 {
-		limit = 10
-	}
-	cutoff := s.clock.UnixMilli() - idle.Milliseconds()
-	rows, err := s.db.QueryContext(ctx, `SELECT i.deployment_id FROM local_runtime_instances i JOIN model_deployments d ON d.id=i.deployment_id WHERE i.status='healthy' AND COALESCE(json_extract(d.runtime_config_json,'$.colibri_pinned'),0)<>1 AND COALESCE(i.last_seen_at,i.started_at,i.updated_at) < ? ORDER BY COALESCE(i.last_seen_at,i.started_at,i.updated_at) ASC LIMIT ?`, cutoff, limit)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var idv string
-		if err := rows.Scan(&idv); err != nil {
-			return 0, err
-		}
-		ids = append(ids, idv)
-	}
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-	stopped := 0
-	for _, idv := range ids {
-		if err := s.Stop(ctx, idv); err != nil {
-			continue
-		}
-		stopped++
-	}
-	return stopped, nil
+// Never hold a SQLite SELECT reader open while a reaper tries to update
+// process rows. Bounded snapshot selection is read-only; each candidate is
+// independently rechecked under model-residency and active-request locks.
+func (s *RuntimeSupervisor) idleReaperCandidates(ctx context.Context,cutoff int64,limit int)([]string,error){
+ rows,err:=s.db.QueryContext(ctx,`SELECT i.deployment_id
+  FROM local_runtime_instances i
+  JOIN model_deployments d ON d.id=i.deployment_id
+  WHERE i.status='healthy'
+   AND COALESCE(json_extract(d.runtime_config_json,'$.colibri_pinned'),0)<>1
+   AND COALESCE(i.last_seen_at,i.started_at,i.updated_at)<?
+  ORDER BY COALESCE(i.last_seen_at,i.started_at,i.updated_at) ASC LIMIT ?`,cutoff,limit)
+ if err!=nil{return nil,err}
+ ids:=make([]string,0,limit)
+ for rows.Next(){
+  var id string
+  if err=rows.Scan(&id);err!=nil{break}
+  ids=append(ids,id)
+ }
+ if err==nil{err=rows.Err()}
+ if closeErr:=rows.Close();err==nil{err=closeErr}
+ if err!=nil{return nil,err}
+ return ids,nil
+}
+
+func (s *RuntimeSupervisor) ReapIdle(ctx context.Context, idle time.Duration, limit int) (int,error){
+ if idle<=0{return 0,nil}
+ if limit<=0||limit>100{limit=10}
+ cutoff:=s.clock.UnixMilli()-idle.Milliseconds()
+ ids,err:=s.idleReaperCandidates(ctx,cutoff,limit)
+ if err!=nil{return 0,err}
+ stopped:=0
+ for _,id:=range ids{
+  didStop,e:=s.stopIfIdleBefore(ctx,id,cutoff)
+  if e!=nil{continue}
+  if didStop{stopped++}
+ }
+ return stopped,nil
 }
 
 func (s *RuntimeSupervisor) Shutdown(ctx context.Context) error {

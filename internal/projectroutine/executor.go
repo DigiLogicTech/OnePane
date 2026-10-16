@@ -17,6 +17,7 @@ var (
 	ErrBindingInactive   = errors.New("project routine binding is not active")
 	ErrUnsupportedAction = errors.New("project routine action is not implemented by the sandbox executor")
 	ErrRuntimeNotReady   = errors.New("project runtime/application is not in verified running state")
+	ErrBindingScopeMismatch = errors.New("project routine binding target does not match its canonical Project or runtime")
 )
 
 type projectService interface {
@@ -69,6 +70,12 @@ func (e *Executor) Execute(ctx context.Context, cmd ExecuteCommand) (tool.Invoca
 	if binding.Status != "active" {
 		return tool.Invocation{}, ErrBindingInactive
 	}
+	// A selected binding must never be silently replaced with a different
+	// binding or a missing canonical Project/runtime identity.
+	if binding.ID!=cmd.BindingID||strings.TrimSpace(binding.ProjectID)==""||
+		strings.TrimSpace(binding.ProjectRuntimeID)==""{
+		return tool.Invocation{},ErrBindingScopeMismatch
+	}
 	if err := e.projects.ValidateTaskProject(ctx, cmd.TaskID, binding.ProjectID); err != nil {
 		return tool.Invocation{}, err
 	}
@@ -79,11 +86,20 @@ func (e *Executor) Execute(ctx context.Context, cmd ExecuteCommand) (tool.Invoca
 	if err != nil {
 		return tool.Invocation{}, err
 	}
+	// The Task's Project was checked above. Check the actual resolved runtime
+	// again: a stale/broken RoutineBinding cannot cross into another Project,
+	// even if its application is healthy and the underlying tenant is shared.
+	if runtime.ID!=binding.ProjectRuntimeID||runtime.ProjectID!=binding.ProjectID{
+		return tool.Invocation{},ErrBindingScopeMismatch
+	}
 	app, err := e.projects.Application(ctx, *binding.ApplicationID)
 	if err != nil {
 		return tool.Invocation{}, err
 	}
-	if app.ProjectRuntimeID != runtime.ID || runtime.Status != projectworkspace.RuntimeRunning || app.Status != projectworkspace.AppRunning {
+	if app.ID!=*binding.ApplicationID||app.ProjectRuntimeID!=runtime.ID{
+		return tool.Invocation{},ErrBindingScopeMismatch
+	}
+	if runtime.Status != projectworkspace.RuntimeRunning || app.Status != projectworkspace.AppRunning {
 		return tool.Invocation{}, ErrRuntimeNotReady
 	}
 	var spec appCommandSpec

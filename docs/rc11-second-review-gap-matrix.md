@@ -1526,3 +1526,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Use quotient/remainder arithmetic for GPU VRAM headroom, avoiding full signed-64-bit bytes-times-percentage multiplication overflow. Invalid negative capacity or out-of-range reserve now denies placement instead of manufacturing safe GPU memory.
 - [x] Before hot-swap, refuse malformed target plan JSON and unverified/malformed placement for a still-active GPU or CPU resident instead of silently ignoring unknown resident claims. Never evict a working model when ledger trust is missing. Unit arithmetic vectors include max-int64 VRAM and source-order test confirms denial precedes eviction.
 - [ ] Exact-head full hosted CI and physical telemetry/device identity remain outstanding. This is static-plan safety, not real VRAM/RAM measurement, independent Node proof or L5 remediation authority. Final source/security audit and LAST operator-centred UI/UX still precede an approved QA installer.
+
+
+## RC11 P0-CY — routine action must resolve to its own Project and app identity (2026-10-17)
+
+- [x] The recurring Project Routine executor now requires exact selected RoutineBinding ID and nonempty canonical Project/runtime IDs, re-checks the resolved runtime's ID and Project ID against the binding after Task->Project validation, and requires the returned application ID and runtime ID to match. Any mismatch fails before the sandbox Tool Gateway, without issuing effects or relying on a tenant-only workspace label.
+- [x] Negative tests attempt stale binding replacement, empty Project identity, cross-Project runtime substitution and foreign app/runtime pairing; legitimate matching routines still execute through the existing governed Tool path.
+- [ ] Source-head CI and live Workspace/routine installed validation remain open. The existing independent Task/Project/runtime sandbox and capability boundaries still apply; this does not grant shell/Network/Secrets authority, independent Node identity, Level 5 remediation or release approval. Final security audit and LAST operator-first UI/UX remain gates.

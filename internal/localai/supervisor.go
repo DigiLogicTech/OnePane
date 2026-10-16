@@ -1126,31 +1126,47 @@ func (s *RuntimeSupervisor) VerifyIdentity(ctx context.Context, inst RuntimeInst
 		if err != nil {
 			return err
 		}
-		serverFound := false
 		allowed := []string{cfg.Executable}
 		if cfg.ColibriTier.Mode != "" {
 			if launcher := colibriLauncher(filepath.Dir(cfg.Executable)); launcher != "" {
 				allowed = append(allowed, launcher)
 			}
 		}
-		for _, a := range ident.Args {
-			for _, expected := range allowed {
-				if filepath.Clean(a) == filepath.Clean(expected) {
-					serverFound = true
-					break
-				}
-			}
-			if serverFound { break }
-		}
-		if filepath.Clean(ident.Executable) != filepath.Clean(py) || !serverFound || !argsContainPair(ident.Args, "--model", cfg.ModelPath) || !argsContainPair(ident.Args, "--host", "127.0.0.1") || !argsContainPair(ident.Args, "--port", strconv.Itoa(inst.Port)) {
+		if !managedProcessCLIIdentified("colibri",ident,py,allowed,cfg.ModelPath,inst.Port){
 			return errors.New("Colibri runtime process identity mismatch")
 		}
 		return nil
 	}
-	if filepath.Clean(ident.Executable) != filepath.Clean(cfg.Executable) || !argsContainPair(ident.Args, "-m", cfg.ModelPath) || !argsContainPair(ident.Args, "--host", "127.0.0.1") || !argsContainPair(ident.Args, "--port", strconv.Itoa(inst.Port)) {
+	if !managedProcessCLIIdentified(cfg.RuntimeBackend,ident,cfg.Executable,nil,cfg.ModelPath,inst.Port){
 		return errors.New("runtime process identity mismatch")
 	}
 	return nil
+}
+
+// Check exact managed process arguments independently from live host
+// introspection. This single backend-aware predicate is used for startup,
+// inference reuse, Stop and daemon recovery via VerifyIdentity. It is not
+// independent hardware/physical Node attestation.
+func managedProcessCLIIdentified(backend string,ident ProcessIdentity,
+ executable string,allowedColibriScripts []string,model string,port int)bool{
+ if port<1024||port>65535||filepath.Clean(ident.Executable)!=filepath.Clean(executable){
+  return false
+ }
+ modelFlag:="-m"
+ if strings.EqualFold(backend,"colibri"){
+  modelFlag="--model"
+  found:=false
+  for _,a:=range ident.Args{
+   for _,expected:=range allowedColibriScripts{
+    if filepath.Clean(a)==filepath.Clean(expected){found=true;break}
+   }
+   if found{break}
+  }
+  if !found{return false}
+ }
+ return argsContainPair(ident.Args,modelFlag,model)&&
+  argsContainPair(ident.Args,"--host","127.0.0.1")&&
+  argsContainPair(ident.Args,"--port",strconv.Itoa(port))
 }
 
 // StopIfIdle releases CPU/GPU memory after an Agent Check without evicting a

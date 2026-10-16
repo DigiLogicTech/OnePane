@@ -25,3 +25,22 @@ func TestCPUModelFootprintReservesRAMBeforeAdmission(t *testing.T){
   })
  }
 }
+
+func TestCPUConcurrentModelFootprintsDoNotOvercommitPhysicalRAM(t *testing.T){
+ gib:=int64(1)<<30
+ for _,tc:=range []struct{name string;need,total,resident int64;fit bool}{
+  {"single model",4*gib,8*gib,0,true},
+  {"second model fits",2*gib,8*gib,5*gib,true},
+  {"two models exceed budget",3*gib,8*gib,5*gib,false},
+  {"reserve matters",1*gib,8*gib,7*gib,false},
+  {"already over budget",1*gib,8*gib,8*gib,false},
+  {"invalid negative residency",1*gib,8*gib,-1,false},
+  {"overflow protected",1<<62,1<<62,1<<62,false},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   if got:=cpuModelFitsConcurrentRAM(tc.need,tc.total,tc.resident);got!=tc.fit{
+    t.Fatalf("need=%d total=%d resident=%d fit=%v want=%v",tc.need,tc.total,tc.resident,got,tc.fit)
+   }
+  })
+ }
+}

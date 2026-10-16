@@ -481,12 +481,55 @@ func isOperatorMemoryOverride(rec Recommendation) bool {
 // This bounds total memory only; simultaneous CPU residents and changing
 // available RAM still require installed host acceptance and monitoring.
 func cpuModelFitsPhysicalRAM(required,total int64)bool{
- if required<=0||total<=0{return false}
- // At least ten percent, capped at one GiB, is reserved for OS and
- // OnePane itself. Small machines retain a proportionate minimum.
+ return cpuModelFitsConcurrentRAM(required,total,0)
+}
+
+// Admission uses an aggregate physical-RAM ceiling, not per-model fit
+// alone. Subtract the same OS/OnePane reserve before evaluating existing
+// managed CPU-model estimates; never add signed sizes before checking fit.
+func cpuModelFitsConcurrentRAM(required,total,resident int64)bool{
+ if required<=0||total<=0||resident<0{return false}
  reserve:=total/10
  if reserve>1<<30{reserve=1<<30}
- return required<=total-reserve
+ available:=total-reserve
+ return resident<=available&&required<=available-resident
+}
+
+// Estimate still-resident CPU model commitments for a single local Node.
+// This does not claim precise RSS or unmanaged-process memory visibility.
+// Count unresolved live-PID failure states conservatively, and reject
+// malformed legacy placement plans rather than inventing free RAM.
+func (s *RuntimeSupervisor) estimatedResidentCPUMemory(ctx context.Context,nodeID,deploymentID string)(int64,error){
+ rows,err:=s.db.QueryContext(ctx,`SELECT p.memory_required_bytes,p.plan_json
+ FROM local_runtime_instances i
+ JOIN managed_local_models m ON m.deployment_id=i.deployment_id
+ JOIN local_model_install_plans p ON p.id=m.plan_id
+ WHERE i.node_id=? AND i.deployment_id<>?
+ AND (i.status IN ('starting','healthy','busy','draining')
+ OR (i.status IN ('failed','orphaned') AND i.pid>1))
+ ORDER BY i.deployment_id LIMIT 513`,nodeID,deploymentID)
+ if err!=nil{return 0,err}
+ defer rows.Close()
+ var resident int64
+ count:=0
+ for rows.Next(){
+  count++
+  if count>512{return 0,errors.New("too many resident managed model records for bounded RAM admission")}
+  var estimate int64
+  var planJSON string
+  if err=rows.Scan(&estimate,&planJSON);err!=nil{return 0,err}
+  var rec Recommendation
+  if err=json.Unmarshal([]byte(planJSON),&rec);err!=nil||rec.Placement.Mode==""{
+   return 0,errors.New("resident model memory placement is unverified")
+  }
+  if rec.Placement.Mode!=PlacementCPUOnly{continue}
+  next,ok:=addManagedMemoryBytes(resident,estimate)
+  if !ok{return 0,errors.New("invalid or overflowing resident CPU model memory estimate")}
+  resident=next
+ }
+ if err=rows.Err();err!=nil{return 0,err}
+ if err=rows.Close();err!=nil{return 0,err}
+ return resident,nil
 }
 
 // Hardware/plan memory quantities must never wrap signed int64 on a
@@ -580,8 +623,10 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 		// Cached *free* memory is volatile, so use the immutable total
 		// physical RAM as a conservative hard upper bound. Keep an OS
 		// reserve even when the model is the sole active local process.
-		if !cpuModelFitsPhysicalRAM(targetBytes,profileMemory.TotalBytes){
-			return errors.New("CPU model estimated memory exceeds physical system RAM budget; choose a smaller quantisation or Node")
+		resident,err:=s.estimatedResidentCPUMemory(ctx,nodeID,deploymentID)
+		if err!=nil{return err}
+		if !cpuModelFitsConcurrentRAM(targetBytes,profileMemory.TotalBytes,resident){
+			return errors.New("CPU model estimated memory exceeds remaining physical system RAM budget; wait for a model to unload or choose a smaller quantisation or Node")
 		}
 		return nil
 	}

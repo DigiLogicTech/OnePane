@@ -3,7 +3,9 @@ package goalobserveradapter
 import (
  "bytes"
  "context"
+ "crypto/sha256"
  "database/sql"
+ "encoding/hex"
  "encoding/json"
  "errors"
  "fmt"
@@ -119,6 +121,21 @@ func Register(reg *tool.Registry,a *Adapter)error{
  return nil
 }
 
+// The Tool Gateway hashes canonical JSON (sorted exact keys) at
+// invocation creation. The final effect adapter must check those same
+// bytes, rather than trusting a caller-provided AdapterRequest.Input for
+// an otherwise valid executing Operation.
+func canonicalFenceInputHash(v input)(string,error){
+ canonical,err:=json.Marshal(map[string]any{
+  "project_id":v.ProjectID,"goal_id":v.GoalID,
+  "expected_goal_revision":v.ExpectedGoalRevision,
+  "expected_fence_revision":v.ExpectedFenceRevision,
+ })
+ if err!=nil{return "",err}
+ sum:=sha256.Sum256(canonical)
+ return "sha256:"+hex.EncodeToString(sum[:]),nil
+}
+
 // Validate the actual persisted ToolInvocation, its EXECUTING Operation,
 // active human principal, membership and canonical tenant Project binding.
 // NEVER read an "actor" field out of untrusted adapter JSON. A registered
@@ -127,8 +144,10 @@ func(a *Adapter)actor(ctx context.Context,r tool.AdapterRequest,v input)(string,
  if r.TaskID==nil||strings.TrimSpace(*r.TaskID)==""{
   return "",errors.New("observer mutation requires canonical Project Task")
  }
+ requestedHash,err:=canonicalFenceInputHash(v)
+ if err!=nil{return "",err}
  var actor string
- err:=a.db.QueryRowContext(ctx,`SELECT inv.principal_id
+ err=a.db.QueryRowContext(ctx,`SELECT inv.principal_id
   FROM tool_invocations inv
   JOIN operations op ON op.id=inv.operation_id
    AND op.workspace_id=inv.workspace_id
@@ -154,9 +173,9 @@ func(a *Adapter)actor(ctx context.Context,r tool.AdapterRequest,v input)(string,
    AND op.adapter_id=inv.adapter_id AND op.adapter_version=inv.adapter_version
    AND inv.workspace_id=? AND inv.tool_id=? AND inv.tool_version=?
    AND inv.resource_ref=? AND inv.adapter_id=? AND inv.adapter_version=?
-   AND inv.operation_id IS NOT NULL`,
+   AND inv.operation_id IS NOT NULL AND inv.input_hash=?`,
   v.ProjectID,v.GoalID,r.InvocationID,*r.TaskID,r.WorkspaceID,
-  r.ToolID,r.ToolVersion,r.ResourceRef,AdapterID,AdapterVersion).Scan(&actor)
+  r.ToolID,r.ToolVersion,r.ResourceRef,AdapterID,AdapterVersion,requestedHash).Scan(&actor)
  if err!=nil{return "",fmt.Errorf("human-approved executing operation required: %w",err)}
  return actor,nil
 }

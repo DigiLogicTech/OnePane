@@ -4,6 +4,8 @@ package goalobserveradapter
 
 import (
  "context"
+ "crypto/sha256"
+ "encoding/hex"
  "encoding/json"
  "testing"
  "time"
@@ -74,18 +76,20 @@ func TestHumanBoundGoalTCPObserverAdapterPersistsAndRequiresActualInvocationPrin
    "op-"+id,"tenant",taskID,actor,"idem-"+id,CapabilityID,
    resource,toolID,AdapterID,now,now)
   if err!=nil{t.Fatal(err)}
-  _,err=db.SQL().ExecContext(ctx,`INSERT INTO tool_invocations(
-    id,workspace_id,task_id,principal_id,operation_id,tool_id,tool_version,
-    adapter_id,adapter_version,mode,resource_ref,input_hash,status,
-    created_at,updated_at)
-   VALUES(?,'tenant',?,?,?,?,'1',?,'1','mutate',?,'testhash','running',?,?)`,
-   "inv-"+id,taskID,actor,"op-"+id,toolID,AdapterID,resource,now,now)
-  if err!=nil{t.Fatal(err)}
   revInput,_:=json.Marshal(map[string]any{
    "project_id":p.ID,"goal_id":g.ID,
    "expected_goal_revision":g.Revision,
    "expected_fence_revision":rev,
   })
+  sum:=sha256.Sum256(revInput)
+  inputFingerprint:="sha256:"+hex.EncodeToString(sum[:])
+  _,err=db.SQL().ExecContext(ctx,`INSERT INTO tool_invocations(
+    id,workspace_id,task_id,principal_id,operation_id,tool_id,tool_version,
+    adapter_id,adapter_version,mode,resource_ref,input_hash,status,
+    created_at,updated_at)
+   VALUES(?,'tenant',?,?,?,?,'1',?,'1','mutate',?,?,'running',?,?)`,
+   "inv-"+id,taskID,actor,"op-"+id,toolID,AdapterID,resource,inputFingerprint,now,now)
+  if err!=nil{t.Fatal(err)}
   return tool.AdapterRequest{
    InvocationID:"inv-"+id,WorkspaceID:"tenant",TaskID:&taskID,ToolID:toolID,
    ToolVersion:"1",ResourceRef:resource,Input:revInput,
@@ -100,6 +104,21 @@ func TestHumanBoundGoalTCPObserverAdapterPersistsAndRequiresActualInvocationPrin
   t.Fatalf("robot changed observer state: %+v %v",initial,err)
  }
  human:=mk("human","owner",PauseToolID,0)
+ // The executing invoker has approval only for its original hashed
+ // revision/scope. Forged arguments may not reuse its invocation ID.
+ var forged map[string]any
+ if e:=json.Unmarshal(human.Input,&forged);e!=nil{t.Fatal(e)}
+ forged["expected_goal_revision"]=g.Revision+1
+ tampered,_:=json.Marshal(forged)
+ tamperedInvocation:=human
+ tamperedInvocation.Input=tampered
+ if _,e:=a.Invoke(ctx,tamperedInvocation);e==nil{
+  t.Fatal("approved invocation accepted altered optimistic Goal revision")
+ }
+ pristine,e:=svc.GetGoalTCPObservationFence(ctx,p.ID,g.ID)
+ if e!=nil||pristine.Revision!=0||pristine.Status!="running"{
+  t.Fatalf("tampered arguments mutated the fence: %+v %v",pristine,e)
+ }
  outcome,err:=a.Invoke(ctx,human)
  if err!=nil||len(outcome.Result)==0{t.Fatalf("approved human pause failed: %+v %v",outcome,err)}
  persisted,err:=svc.GetGoalTCPObservationFence(ctx,p.ID,g.ID)

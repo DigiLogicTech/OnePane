@@ -1415,3 +1415,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 
 - [x] `waitHealthy` must validate the managed PID/executable, model and expected loopback-port launch arguments before each startup `/health` HTTP probe. A coincidental or hostile local listener reporting `status=ok` cannot be accepted merely because a stale PID is alive; failure returns a generic error without signalling/replacing the unverified process or spilling command-line/private-path data.
 - [x] Source-order safety test covers independent process-identity check BEFORE the first health socket request. Exact-source hosted CI pending. This is not proof that a separate local process cannot race for the socket or independent physical device identity; physical hardware acceptance stays blocked.
+
+
+## RC11 P0-CI — bind exact observer effect input to approved Tool invocation hash (2026-10-16)
+
+- [x] The final human-governed observer pause/resume adapter independently recomputes the Tool Gateway's canonical four-field JSON SHA-256 and requires equality with the persisted `tool_invocations.input_hash` for its RUNNING invocation and EXECUTING operation. Possession of an otherwise valid invocation ID, tenant, Tool and Goal URI cannot authorise mutation with a different Goal/fence revision or other effect arguments.
+- [x] Real SQLite integration uses genuine canonical input fingerprints for pre-seeded test invocations, denies a changed optimistic revision without mutating the fence, and preserves the approved original pause/resume operation. Separate unit verifies canonical hash byte parity with Gateway. Exact-head hosted CI pending.
+- [ ] This does not supply physical owned-target identity, independent sensor vantage or authority to execute automatic device remediation; operator-only local observer fence is still the entire implemented effect. Physical/installed hardware, resource budgets, code/security audit and LAST UI/UX remain gates.

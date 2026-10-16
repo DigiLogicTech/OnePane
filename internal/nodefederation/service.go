@@ -283,7 +283,17 @@ func (s *Service) pinnedClient(fp string, withClientCert bool) *http.Client {
 	tlsCfg.VerifyConnection = func(cs tls.ConnectionState) error {
 		return validatePinnedPeerServerCertificate(cs,fp,time.Now())
 	}
-	return &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{TLSClientConfig: tlsCfg, ForceAttemptHTTP2: true}}
+	// Never follow federation redirects. On 307/308 the Go HTTP client
+	// can replay the entire POST body (private prompts, keys or approvals)
+	// to a Location outside the originally pinned TLS peer. Return the
+	// response untouched: postJSON treats every 3xx as a failed request.
+	return &http.Client{
+		Timeout:15*time.Second,
+		Transport:&http.Transport{TLSClientConfig:tlsCfg,ForceAttemptHTTP2:true},
+		CheckRedirect:func(_ *http.Request,_ []*http.Request)error{
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 func (s *Service) BeginPair(ctx context.Context, peerID string) (Pairing, string, error) {

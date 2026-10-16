@@ -1540,3 +1540,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Project Routine app-command execution rejects stored action-spec JSON larger than 64 KiB before parsing, refuses empty executable and NUL bytes, limits each argv element to 4 KiB, all argv bytes to 16 KiB and argv count to 128 before invoking the governed sandbox Tool Gateway. No process or network permission expansion.
 - [x] Tests cover empty command, blank argv0, embedded NUL, per-argument/aggregate/whole-JSON limits, excessive count, no-Gateway side effects and a valid bounded command. Exact-source hosted CI pending.
 - [ ] This is bounded parser/adapter admission, not independent container/tool hard isolation or a universal command allowlist. Installed sandbox QA, physical Node trust, Level 5 effects, full security audit and LAST human-centric UI/UX still block an approved release.
+
+
+## RC11 P0-DA — cancelled TCP observer request must durably finish claimed attempt (2026-10-17)
+
+- [x] Manual and separately human-consented recurring TCP observations now finalise already-claimed attempts through a three-second, cancellation-independent SQLite cleanup context, carrying original request values without extending network execution. This prevents a cancelled user request, daemon cancellation or an interrupted socket from silently leaving an indefinitely `claimed` attempt when SQLite is writable.
+- [x] End-to-end integration regression creates two separately approved RFC1918 targets and uses fake dialers that cancel the parent context in `DialContext`. Both must produce exactly one immutable cancelled terminal receipt and audit event, refuse a second completion, and remain non-retriable during the same cadence after a simulated worker restart. No external sockets or device-health claims.
+- [ ] A physical process kill, SQLite full/disk error or external socket outcome may still leave an `unknown_after_interruption` claim requiring reconciliation. This grants no L5 remediation privileges and does not prove paired-Node/device identity. Exact-head CI, real low-resource QA, source audit and LAST holistic UI/UX remain packaging gates.

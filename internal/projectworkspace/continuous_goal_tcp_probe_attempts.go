@@ -321,6 +321,18 @@ func(s *Service)completeTCPAttempt(ctx context.Context,a GoalTCPProbeAttempt,sta
   ` FROM project_goal_tcp_probe_attempts WHERE id=?`,a.ID))
 }
 
+// Once a network attempt has been claimed, its terminal evidence must not
+// disappear merely because an HTTP client or worker context was cancelled.
+// This cleanup context carries request values but never authorises another
+// dial or lease; it only writes the already-observed result and event.
+// Database failure remains visible as an unresolved immutable claim.
+func(s *Service)finishTCPAttemptAfterDial(ctx context.Context,
+ a GoalTCPProbeAttempt,status string)(GoalTCPProbeAttempt,error){
+ cleanup,cancel:=context.WithTimeout(context.WithoutCancel(ctx),3*time.Second)
+ defer cancel()
+ return s.completeTCPAttempt(cleanup,a,status)
+}
+
 // tcpDialOutcome is shared by the manual and separately consented recurring
 // TCP paths. A cancelled or timed-out caller never makes an endpoint appear
 // unreachable, and a broken adapter returning (nil, nil) cannot forge a
@@ -364,7 +376,7 @@ func(s *Service)runManualGoalTCPProbe(ctx context.Context,c RunGoalTCPProbeComma
  if e!=nil||!allowed{
   // Once claimed, never retry this window automatically on uncertain
   // admission: cancellation remains a durable, visible audit result.
-  return s.completeTCPAttempt(ctx,attempt,"cancelled")
+  return s.finishTCPAttemptAfterDial(ctx,attempt,"cancelled")
  }
  connectCtx,cancel:=context.WithTimeout(ctx,time.Duration(attempt.TimeoutMS)*time.Millisecond)
  defer cancel()
@@ -373,7 +385,7 @@ func(s *Service)runManualGoalTCPProbe(ctx context.Context,c RunGoalTCPProbeComma
  if conn!=nil{_ = conn.Close()}
  outcome:=tcpDialOutcome(ctx,connectCtx,conn,dialErr)
  // A failing outcome is not retried within this cadence window.
- return s.completeTCPAttempt(ctx,attempt,outcome)
+ return s.finishTCPAttemptAfterDial(ctx,attempt,outcome)
 }
 
 func(s *Service)ListGoalTCPProbeAttempts(ctx context.Context,projectID,goalID string)([]GoalTCPProbeAttempt,error){

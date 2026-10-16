@@ -127,7 +127,7 @@ func(s *Service)runRecurringGoalTCPProbe(ctx context.Context,
  if err!=nil{return GoalTCPProbeAttempt{},err}
  ok,err:=s.tcpRecurringClaimStillAuthorised(ctx,claim,c.grantID)
  if err!=nil||!ok{
-  return s.completeTCPAttempt(ctx,claim,"cancelled")
+  return s.finishTCPAttemptAfterDial(ctx,claim,"cancelled")
  }
  dialCtx,cancel:=context.WithTimeout(ctx,time.Duration(claim.TimeoutMS)*time.Millisecond)
  defer cancel()
@@ -135,7 +135,7 @@ func(s *Service)runRecurringGoalTCPProbe(ctx context.Context,
   net.JoinHostPort(claim.TargetIPv4,strconv.Itoa(claim.TargetPort)))
  if conn!=nil{_ = conn.Close()}
  outcome:=tcpDialOutcome(ctx,dialCtx,conn,dialErr)
- return s.completeTCPAttempt(ctx,claim,outcome)
+ return s.finishTCPAttemptAfterDial(ctx,claim,outcome)
 }
 
 // TickDueTCPRecurringProbes is deliberately bounded. No opt-in grant means

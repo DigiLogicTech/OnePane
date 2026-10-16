@@ -1456,3 +1456,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Serialize recovery with the supervisor's residency lock; do not reset in-memory active leases when the snapshot read itself fails. The recovery still rejects unknown PID/executable/model/port provenance and uses compare-and-swap revision guards.
 - [x] Add an actual single-connection SQLite cursor/lifecycle regression: snapshot returns before a subsequent state mutation, zero-row and >512-row behavior bounded, cancellation fails closed. Exact-commit hosted CI pending.
 - [ ] This is daemon startup recovery correctness, not a live hardware acceptance result, physical Node/owned-target trust, independent observer vantage or Level 5 device action authority. Complete those gates, low-RAM/GPU installed tests, source audit and LAST user-focused UI/UX before approved QA installer.
+
+
+## RC11 P0-CO — never escalate to SIGKILL using stale managed PID identity (2026-10-16)
+
+- [x] Re-verify the same exact registered process identity *after* the 5–35 second graceful-stop window and immediately **before** force-kill escalation. A PID may have exited and been recycled during Colibri's drain; a stale `Alive(pid)` is not permission to SIGKILL an unrelated host process. On mismatch, deny signal, persist `orphaned` state with compare-and-swap revision and require operator reconciliation.
+- [x] Start/Stop source-order contract ensures initial SIGTERM occurs before a second explicit `VerifyIdentity` prior to SIGKILL, including fail-closed orphan path. Hosted exact-source CI pending.
+- [ ] Unix PID identity can still race between last inspection and signal; physical process handle/pidfd/Windows process-handle safeguards and installed acceptance remain separate. This change grants no autonomous security remediation, Node/target physical attestation or network-vantage proof. Full source audit and FINAL human-centred UI/UX remain build gates.

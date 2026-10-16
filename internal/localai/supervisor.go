@@ -1278,6 +1278,16 @@ func (s *RuntimeSupervisor) Stop(ctx context.Context, deploymentID string) error
 		time.Sleep(100 * time.Millisecond)
 	}
 	if inst.PID > 1 && s.processes.Alive(inst.PID) {
+		// SIGTERM and drain may have taken 35 seconds for Colibri.
+		// Recheck identity before escalation: a recycled PID must NEVER
+		// receive SIGKILL merely because it was our managed process at
+		// the beginning of the stop attempt.
+		if err := s.VerifyIdentity(ctx, inst); err != nil {
+			if e := markOrphaned("refused forced termination of an unverified runtime PID"); e != nil {
+				return fmt.Errorf("forced termination denied; orphan-state persistence failed: %w", e)
+			}
+			return errors.New("forced termination denied: runtime process identity changed")
+		}
 		if err := s.processes.Signal(inst.PID, syscall.SIGKILL); err != nil && s.processes.Alive(inst.PID) {
 			return fmt.Errorf("kill managed runtime: %w", err)
 		}

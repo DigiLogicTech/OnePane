@@ -262,6 +262,9 @@ func validatePinnedPeerServerCertificate(cs tls.ConnectionState,
 	if leaf==nil||len(leaf.Raw)==0||
 	 !strings.HasPrefix(fingerprint,"sha256:")||len(fingerprint)!=71||
 	 CertificateFingerprint(leaf.Raw)!=fingerprint||
+	 // A Node endpoint must use a leaf identity, not a CA-capable
+	 // certificate which can sign a different remote TLS identity.
+	 leaf.IsCA||leaf.KeyUsage&x509.KeyUsageCertSign!=0||
 	 now.Before(leaf.NotBefore)||!now.Before(leaf.NotAfter) {
 		return ErrPeerCertificate
 	}

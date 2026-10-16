@@ -1596,3 +1596,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] The shared pinned-mTLS federation HTTP client now explicitly refuses all 3xx redirect following with `http.ErrUseLastResponse`. This protects private inference prompts, Pairing credentials, model-management inputs and approved Node measurement payloads from Go's 307/308 POST-body replay to an unapproved Location, including an HTTP downgrade or other unpinned origin.
 - [x] Synthetic HTTPS paired-leaf test sends representative JSON POSTs to a TLS-pinned server returning both 307 and 308 redirects to a separate HTTP receiver. A redirect must be reported as failure while the external capture endpoint remains untouched. No production network scan or scope expansion.
 - [ ] Hosted CI, real authenticated paired-Node TLS dispatch and browser/CLI installed acceptance still required. Other physical Node/Level 5 verification, security review and LAST user-first UI/UX remain release gates.
+
+
+## RC11 P0-DI — reject CA-capable federation peer certificates (2026-10-17)
+
+- [x] Pinned federation server-side TLS trust now requires the enrolled peer to present a leaf certificate that is neither marked as a CA nor capable of signing subordinate certificates. A matching SHA-256 fingerprint, server-auth EKU and valid dates are necessary but no longer sufficient for a CA-capable key to be used as the Node endpoint identity.
+- [x] Existing certificate-validation unit regression extended with explicit `IsCA` and `KeyUsageCertSign` negative cases. All approved normal OnePane Node leaf certificates still retain the required server-auth and digital-signature purpose.
+- [ ] Full hosted CI and actual physical peer certificate/rotation tests are separate gates; this strengthens software credential scoping, not hardware attestation or Level 5 external observation. Final audit and LAST human-first UI/UX remain pending.

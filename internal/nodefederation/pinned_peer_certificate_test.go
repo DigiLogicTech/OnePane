@@ -38,6 +38,8 @@ func TestPinnedNodeCertificateValidatesPurposeAndDates(t *testing.T){
   "wrong_purpose":func(c *x509.Certificate){c.ExtKeyUsage=[]x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}},
   "no_eku":func(c *x509.Certificate){c.ExtKeyUsage=nil},
   "no_digital_signature":func(c *x509.Certificate){c.KeyUsage=x509.KeyUsageKeyEncipherment},
+  "certificate_authority":func(c *x509.Certificate){c.IsCA=true},
+  "certificate_signing_key":func(c *x509.Certificate){c.KeyUsage|=x509.KeyUsageCertSign},
  }{
   t.Run(name,func(t *testing.T){
    bad:=*cert

@@ -1505,3 +1505,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] A managed runtime row in `orphaned`, `failed`, `stopped`, `draining` or unknown state must not be overwritten with a new PID while its previous process is still alive. Refuse the replacement before Colibri swap, memory eviction or engine launch. Preserve the original PID and revision for operator reconciliation without signalling an unverified process.
 - [x] Behavioural state-table regression covers live orphan/failed/stopped/draining processes, exited processes and healthy/busy/starting identity-gated reuse; source-order regression ensures the guard precedes all launch effects.
 - [ ] Exact-source hosted CI, installed Windows process-handle recovery and actual RAM/VRAM/process-tree measurement remain acceptance gates. No automatic recovery or Level 5 network remediation authority is granted. Physical paired-Node proof, independently corroborated observations, full source security audit and LAST human-centred UI/UX still block an authorised installer.
+
+
+## RC11 P0-CV — protect pinned and unrelated models from GPU pressure eviction (2026-10-17)
+
+- [x] Current Colibri pin flag is included in resident accelerator accounting: pinned/active models continue to occupy GPU memory but never enter the automatic idle eviction set. A plan cannot count their claimed memory as reclaimable.
+- [x] Reclaim only idle healthy residents on *constrained* target accelerators, not unrelated GPUs or CPU-only models. Before actual stop, recheck durable pin, recent use, active lease and runtime state under the same residency/activity lock order as inference acquisition; preserve live models when those states have changed. Single-connection SQLite and admission regressions added.
+- [ ] Exact-head hosted CI, actual VRAM/RAM reclaim on constrained Windows/Ubuntu hardware, physical Node identity, independently corroborated observations, separately approved Level 5 effects, final source audit and LAST human-centred UI/UX remain pending before installer authorisation.

@@ -538,6 +538,22 @@ func capacityCouldFitAfterIdleReclaim(used,target,capacity map[string]int64,
  return true
 }
 
+// Pressure eviction must free memory on the accelerator that is actually
+// constrained. An unrelated CPU model or different-GPU model is not a
+// legitimate victim merely because it is older.
+func residentReclaimsConstrainedAccelerator(r residentRuntime,
+ used,target,capacity map[string]int64) bool {
+ for _,d:=range r.Placement.Devices {
+  if d.Kind!="accelerator" || d.AllocatedBytes<=0 {continue}
+  key:=placementKey(d)
+  want:=target[key]
+  if want<=0 {continue}
+  occupied,limit:=used[key],capacity[key]
+  if occupied<0||limit<=0||occupied>limit||want>limit-occupied{return true}
+ }
+ return false
+}
+
 func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, nodeID string) error {
 	var targetBytes int64
 	var targetPlanJSON string
@@ -595,7 +611,7 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 		}
 	}
 
-	rows, err := s.db.QueryContext(ctx, `SELECT i.deployment_id,p.memory_required_bytes,p.plan_json,COALESCE(i.last_seen_at,i.started_at,i.updated_at),i.status FROM local_runtime_instances i JOIN managed_local_models m ON m.deployment_id=i.deployment_id JOIN local_model_install_plans p ON p.id=m.plan_id WHERE i.node_id=? AND i.deployment_id<>? AND i.status IN ('healthy','busy') ORDER BY COALESCE(i.last_seen_at,i.started_at,i.updated_at) ASC`, nodeID, deploymentID)
+	rows, err := s.db.QueryContext(ctx, `SELECT i.deployment_id,p.memory_required_bytes,p.plan_json,COALESCE(i.last_seen_at,i.started_at,i.updated_at),i.status,CASE WHEN COALESCE(json_extract(d.runtime_config_json,'$.colibri_pinned'),0)=1 THEN 1 ELSE 0 END FROM local_runtime_instances i JOIN model_deployments d ON d.id=i.deployment_id JOIN managed_local_models m ON m.deployment_id=i.deployment_id JOIN local_model_install_plans p ON p.id=m.plan_id WHERE i.node_id=? AND i.deployment_id<>? AND i.status IN ('healthy','busy') ORDER BY COALESCE(i.last_seen_at,i.started_at,i.updated_at) ASC`, nodeID, deploymentID)
 	if err != nil {
 		return err
 	}
@@ -605,7 +621,8 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 	for rows.Next() {
 		var x residentRuntime
 		var planJSON, status string
-		if err := rows.Scan(&x.DeploymentID, &x.MemoryBytes, &planJSON, &x.LastUsedAt, &status); err != nil {
+        var pinned int
+		if err := rows.Scan(&x.DeploymentID, &x.MemoryBytes, &planJSON, &x.LastUsedAt, &status, &pinned); err != nil {
 			return err
 		}
 		var rec Recommendation
@@ -622,7 +639,7 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 				used[key]=next
 			}
 		}
-		if status == string(RuntimeHealthy) {
+		if status == string(RuntimeHealthy) && pinned==0 {
 			residents = append(residents, x)
 		}
 	}
@@ -653,22 +670,20 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 	if !capacityCouldFitAfterIdleReclaim(used,target,capacity,residents,operatorOverride){
 		return errors.New("insufficient reclaimable accelerator memory; working models preserved")
 	}
-	for _, x := range residents {
-		if err := s.Stop(ctx, x.DeploymentID); err != nil {
-			continue
+	for _,x:=range residents {
+		if !residentReclaimsConstrainedAccelerator(x,used,target,capacity){continue}
+		// Reselect after the snapshot: an Agent Check, pin change, new lease
+		// or fresh use must prevent eviction. Caller holds residencyMu.
+		if x.LastUsedAt<0||x.LastUsedAt==int64(^uint64(0)>>1){continue}
+		stopped,stopErr:=s.stopIfIdleBeforeLocked(ctx,x.DeploymentID,x.LastUsedAt+1)
+		if stopErr!=nil||!stopped{continue}
+		for _,d:=range x.Placement.Devices {
+			if d.Kind!="accelerator"{continue}
+			k:=placementKey(d)
+			if used[k]<d.AllocatedBytes{return errors.New("resident accelerator ledger changed during eviction")}
+			used[k]-=d.AllocatedBytes
 		}
-		for _, d := range x.Placement.Devices {
-			if d.Kind == "accelerator" {
-				k := placementKey(d)
-				used[k] -= d.AllocatedBytes
-				if used[k] < 0 {
-					used[k] = 0
-				}
-			}
-		}
-		if fits() {
-			return nil
-		}
+		if fits(){return nil}
 	}
 	// A genuine explicit memory override may attempt an out-of-budget launch
 	// ONLY when no other resident uses its selected accelerators. This never
@@ -1261,6 +1276,12 @@ func (s *RuntimeSupervisor) stopIfIdleBefore(ctx context.Context, deploymentID s
  if deploymentID==""{return false,errors.New("deployment id required")}
  s.residencyMu.Lock()
  defer s.residencyMu.Unlock()
+ return s.stopIfIdleBeforeLocked(ctx,deploymentID,cutoff)
+}
+
+// Caller already owns residencyMu; retain the active-lease lock through
+// process stop so it cannot race with a new inference acquisition.
+func (s *RuntimeSupervisor) stopIfIdleBeforeLocked(ctx context.Context,deploymentID string,cutoff int64)(bool,error){
  s.activityMu.Lock()
  defer s.activityMu.Unlock()
  if s.activeRequests[deploymentID]>0{return false,nil}

@@ -74,7 +74,7 @@ func TestGPUEvictionClosesReadCursorBeforeAnyStop(t *testing.T){
  if end:=strings.Index(scope,"\nfunc ");end>0{scope=scope[:end]}
  query:=strings.Index(scope,"rows, err := s.db.QueryContext(")
  close:=strings.Index(scope,"if err := rows.Close(); err != nil {")
- stop:=strings.Index(scope,"s.Stop(ctx, x.DeploymentID)")
+ stop:=strings.Index(scope,"s.stopIfIdleBeforeLocked(ctx,x.DeploymentID")
  if query<0||close<query||stop<close{
   t.Fatal("GPU eviction may execute while a SQLite residency reader is open")
  }

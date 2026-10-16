@@ -1533,3 +1533,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] The recurring Project Routine executor now requires exact selected RoutineBinding ID and nonempty canonical Project/runtime IDs, re-checks the resolved runtime's ID and Project ID against the binding after Task->Project validation, and requires the returned application ID and runtime ID to match. Any mismatch fails before the sandbox Tool Gateway, without issuing effects or relying on a tenant-only workspace label.
 - [x] Negative tests attempt stale binding replacement, empty Project identity, cross-Project runtime substitution and foreign app/runtime pairing; legitimate matching routines still execute through the existing governed Tool path.
 - [ ] Source-head CI and live Workspace/routine installed validation remain open. The existing independent Task/Project/runtime sandbox and capability boundaries still apply; this does not grant shell/Network/Secrets authority, independent Node identity, Level 5 remediation or release approval. Final security audit and LAST operator-first UI/UX remain gates.
+
+
+## RC11 P0-CZ — bound persisted Routine shell command arguments (2026-10-17)
+
+- [x] Project Routine app-command execution rejects stored action-spec JSON larger than 64 KiB before parsing, refuses empty executable and NUL bytes, limits each argv element to 4 KiB, all argv bytes to 16 KiB and argv count to 128 before invoking the governed sandbox Tool Gateway. No process or network permission expansion.
+- [x] Tests cover empty command, blank argv0, embedded NUL, per-argument/aggregate/whole-JSON limits, excessive count, no-Gateway side effects and a valid bounded command. Exact-source hosted CI pending.
+- [ ] This is bounded parser/adapter admission, not independent container/tool hard isolation or a universal command allowlist. Installed sandbox QA, physical Node trust, Level 5 effects, full security audit and LAST human-centric UI/UX still block an approved release.

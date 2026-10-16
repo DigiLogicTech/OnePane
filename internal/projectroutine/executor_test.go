@@ -3,6 +3,7 @@ package projectroutine
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/DigiLogicTech/OnePane/internal/projectworkspace"
@@ -108,4 +109,56 @@ func TestExecutorRejectsCrossProjectOrSubstitutedRoutineTargetsBeforeToolGateway
  if _,err:=New(p,g).Execute(context.Background(),cmd);err!=nil||g.calls!=1{
   t.Fatalf("matched routine unable to execute: calls=%d err=%v",g.calls,err)
  }
+}
+
+
+func TestExecutorBoundsStoredRoutineCommandBeforeGateway(t *testing.T) {
+ appID:="app"
+ base:=func()(*fakeProjects,*fakeGateway){
+  p:=&fakeProjects{
+   workspace:"tenant",
+   binding:projectworkspace.RoutineBinding{
+    ID:"binding",ProjectID:"project",ProjectRuntimeID:"runtime",ApplicationID:&appID,
+    RoutineID:"routine",ActionKind:projectworkspace.ActionAppCommand,Status:"active",
+   },
+   runtime:projectworkspace.ProjectRuntime{
+    ID:"runtime",ProjectID:"project",Status:projectworkspace.RuntimeRunning,
+   },
+   app:projectworkspace.Application{
+    ID:"app",ProjectRuntimeID:"runtime",Status:projectworkspace.AppRunning,
+   },
+  }
+  return p,&fakeGateway{}
+ }
+ cmd:=ExecuteCommand{BindingID:"binding",TaskID:"task",PrincipalID:"worker",CapabilityLeaseID:"lease"}
+ for _,tc:=range []struct{name string;spec json.RawMessage}{
+  {"no command",json.RawMessage(`{"command":[]}`)},
+  {"empty executable",json.RawMessage(`{"command":["  ","arg"]}`)},
+  {"embedded nul",mustRoutineSpec(t,[]string{"app",string([]byte{0})})},
+  {"single huge argument",mustRoutineSpec(t,[]string{"run",strings.Repeat("x",4097)})},
+  {"aggregate huge arguments",mustRoutineSpec(t,[]string{"run",strings.Repeat("x",4096),strings.Repeat("x",4096),strings.Repeat("x",4096),strings.Repeat("x",4096)})},
+  {"more than 128 arguments",mustRoutineSpec(t,append([]string{"run"},make([]string,128)...))},
+  {"oversized raw JSON",json.RawMessage(`{"command":["run"],"unused":"`+strings.Repeat("x",65<<10)+`"}`)},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   p,g:=base()
+   p.binding.ActionSpecJSON=tc.spec
+   if _,err:=New(p,g).Execute(context.Background(),cmd);err!=ErrInvalidCommand{
+    t.Fatalf("unsafe routine argv admitted: %v",err)
+   }
+   if g.calls!=0{t.Fatal("oversized or malformed routine reached tool adapter")}
+  })
+ }
+ p,g:=base()
+ p.binding.ActionSpecJSON=mustRoutineSpec(t,[]string{"run",strings.Repeat("x",4096)})
+ if _,err:=New(p,g).Execute(context.Background(),cmd);err!=nil||g.calls!=1{
+  t.Fatalf("legitimate bounded command refused: calls=%d err=%v",g.calls,err)
+ }
+}
+
+func mustRoutineSpec(t *testing.T,argv []string)json.RawMessage{
+ t.Helper()
+ raw,err:=json.Marshal(map[string]any{"command":argv})
+ if err!=nil{t.Fatal(err)}
+ return raw
 }

@@ -102,14 +102,28 @@ func (e *Executor) Execute(ctx context.Context, cmd ExecuteCommand) (tool.Invoca
 	if runtime.Status != projectworkspace.RuntimeRunning || app.Status != projectworkspace.AppRunning {
 		return tool.Invocation{}, ErrRuntimeNotReady
 	}
+	// Bound persisted action-spec parsing before argv construction or any
+	// Tool Gateway effects. A stored binding cannot allocate huge arguments.
+	const maxRoutineSpecBytes=64<<10
+	const maxRoutineArgBytes=4096
+	const maxRoutineArgvBytes=16<<10
+	if len(binding.ActionSpecJSON)==0||len(binding.ActionSpecJSON)>maxRoutineSpecBytes{
+		return tool.Invocation{},ErrInvalidCommand
+	}
 	var spec appCommandSpec
 	if err := json.Unmarshal(binding.ActionSpecJSON, &spec); err != nil || len(spec.Command) == 0 || len(spec.Command) > 128 {
 		return tool.Invocation{}, ErrInvalidCommand
 	}
-	for _, arg := range spec.Command {
-		if strings.ContainsRune(arg, '\x00') {
-			return tool.Invocation{}, ErrInvalidCommand
+	argvBytes:=0
+	for i,arg:=range spec.Command {
+		if len(arg)>maxRoutineArgBytes||strings.ContainsRune(arg, '\x00')||
+			(i==0&&strings.TrimSpace(arg)==""){
+			return tool.Invocation{},ErrInvalidCommand
 		}
+		if argvBytes>maxRoutineArgvBytes-len(arg){
+			return tool.Invocation{},ErrInvalidCommand
+		}
+		argvBytes+=len(arg)
 	}
 	input, _ := json.Marshal(map[string]any{"runtime_id": runtime.ID, "application_id": app.ID, "command": spec.Command, "routine_binding_id": binding.ID, "routine_id": binding.RoutineID})
 	workspaceID, err := e.projects.TaskWorkspace(ctx, cmd.TaskID)

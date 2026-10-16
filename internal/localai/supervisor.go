@@ -489,6 +489,16 @@ func cpuModelFitsPhysicalRAM(required,total int64)bool{
  return required<=total-reserve
 }
 
+// Hardware/plan memory quantities must never wrap signed int64 on a
+// corrupt or exceptional hardware profile. Refuse the plan instead of
+// treating overflowed negative bytes as reclaimed capacity.
+func addManagedMemoryBytes(current,increment int64)(int64,bool){
+ if current<0||increment<=0||increment>int64(^uint64(0)>>1)-current{
+  return 0,false
+ }
+ return current+increment,true
+}
+
 // Predict whether evicting ALL healthy, idle candidates could satisfy a
 // deployment. Refuse impossible placements before any process is signalled.
 // Actual stops, identity checks and resource accounting remain unchanged.
@@ -507,13 +517,18 @@ func capacityCouldFitAfterIdleReclaim(used,target,capacity map[string]int64,
  if operatorOverride{
   // Explicit over-budget launch can proceed only if no other resident
   // retains a claim on any of the requested accelerators.
-  for key:=range target{
-   if projected[key]>0{return false}
+  for key,n:=range target{
+   if n<=0||projected[key]<0||projected[key]>0{return false}
   }
   return true
  }
  for key,n:=range target{
-  if projected[key]+n>capacity[key]{return false}
+  occupied,limit:=projected[key],capacity[key]
+  // Subtract from a verified positive budget instead of adding signed
+  // allocations that could overflow into an apparent free-memory fit.
+  if n<=0||occupied<0||limit<=0||occupied>limit||n>limit-occupied{
+   return false
+  }
  }
  return true
 }
@@ -562,7 +577,10 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 	target := map[string]int64{}
 	for _, d := range targetRec.Placement.Devices {
 		if d.Kind == "accelerator" {
-			target[placementKey(d)] += d.AllocatedBytes
+			key:=placementKey(d)
+			next,ok:=addManagedMemoryBytes(target[key],d.AllocatedBytes)
+			if !ok{return errors.New("invalid or overflowing managed accelerator memory allocation")}
+			target[key]=next
 		}
 	}
 	operatorOverride := isOperatorMemoryOverride(targetRec)
@@ -593,7 +611,10 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 		}
 		for _, d := range x.Placement.Devices {
 			if d.Kind == "accelerator" {
-				used[placementKey(d)] += d.AllocatedBytes
+				key:=placementKey(d)
+				next,ok:=addManagedMemoryBytes(used[key],d.AllocatedBytes)
+				if !ok{return errors.New("invalid or overflowing resident accelerator allocation")}
+				used[key]=next
 			}
 		}
 		if status == string(RuntimeHealthy) {
@@ -610,7 +631,8 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 	}
 	fits := func() bool {
 		for k, n := range target {
-			if used[k]+n > capacity[k] {
+			if n<=0||used[k]<0||capacity[k]<=0||
+				used[k]>capacity[k]||n>capacity[k]-used[k]{
 				return false
 			}
 		}

@@ -1485,3 +1485,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] A signal failure on a **still-living** managed local runtime previously left its durable state `draining` and simply returned an error. If SIGTERM or SIGKILL is refused, reclassify the unresolved process as `orphaned` using the original revision-checked transition, with an operator-reconciliation reason; never claim memory was freed. No extra signal retries, force escalation or unapproved network/device actions.
 - [x] Ensure no raw OS signal error or potentially private process command-line content is stored in the common durable failure reason. Source-order regressions verify both signal failure branches transition to an orphaned state before returning. Hosted CI pending.
 - [ ] Real Windows process-handle race avoidance, GPU process-tree cleanup, installed memory observability and physical Node/observer proof still require separate acceptance. L5 defensive authority, security audit, final holistic human-centred UI/UX remain release gates.
+
+
+## RC11 P0-CS — reject overflowing or negative accelerator memory estimates before eviction (2026-10-16)
+
+- [x] Managed GPU placement sums and resident memory accounting now refuse zero/negative and signed-int64 overflowing device allocations, rather than silently wrapping. Both immediate admission and best-case idle-reclaim checks compare requested bytes against the **remaining** positive device budget using subtraction, not potentially overflowing `used+target` arithmetic.
+- [x] Regression covers two 2^62-byte declared allocations that could overflow to a false fit, invalid signed allocations and unoccupied-only experimental overrides. No model is evicted for an invalid estimate. Exact-source hosted CI pending.
+- [ ] These are static estimates, not measured VRAM; real device telemetry and old-hardware QA are still required. Independently trusted physical network evidence, human-approved reversible L5 actions, source audit and LAST human-centred UI/UX remain build gates.

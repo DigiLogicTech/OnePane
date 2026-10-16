@@ -46,3 +46,25 @@ func TestCapacityPreflightProtectsExistingModelsOnImpossiblePlacement(t *testing
   })
  }
 }
+
+
+func TestManagedAcceleratorCapacityNeverFitsThroughSignedOverflow(t *testing.T){
+ const huge=int64(1)<<62
+ if capacityCouldFitAfterIdleReclaim(
+  map[string]int64{"gpu":huge},map[string]int64{"gpu":huge},
+  map[string]int64{"gpu":huge},nil,false){
+  t.Fatal("huge combined accelerator allocations overflowed to a false fit")
+ }
+ for _,tc:=range []struct{cur,inc int64;ok bool}{
+  {0,10,true},{10,0,false},{0,-10,false},{-1,10,false},
+  {huge,huge,false},
+ }{
+  _,ok:=addManagedMemoryBytes(tc.cur,tc.inc)
+  if ok!=tc.ok{t.Fatalf("memory accumulation %d + %d accepted=%v",tc.cur,tc.inc,ok)}
+ }
+ if capacityCouldFitAfterIdleReclaim(
+  map[string]int64{"gpu":-1},map[string]int64{"gpu":1},
+  map[string]int64{"gpu":1024},nil,true){
+  t.Fatal("experimental override accepted negative or invalid residency accounting")
+ }
+}

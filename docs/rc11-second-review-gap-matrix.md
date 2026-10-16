@@ -1448,3 +1448,11 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 
 - [x] Exact PID/executable/model/loopback verification previously used `argsContainPair`, allowing an approved `--model`/`-m`, `--host` or `--port` pair followed by a conflicting duplicate that the actual runtime might parse with last-wins precedence. The backend-aware identity predicate now requires **exactly one** expected model, host and port option and rejects an alternate model-flag alias within the same command line. No native process is signalled or repaired for a mismatch.
 - [x] Behavioural tests include same-value duplicates, later conflicting model, host/port and alias overrides for native llama.cpp and Colibri. Exact-head hosted CI pending; this is process CLI provenance, not physical owned-device or independent network-vantage attestation.
+
+
+## RC11 P0-CN — close bounded restart-recovery SQLite cursor before effects (2026-10-16)
+
+- [x] Separate managed runtime recovery's candidate read into a bounded (max 512) ordered cursor snapshot that explicitly checks `rows.Err` and closes the SQLite reader *before* any further read or state write. The old `defer rows.Close()` spanned recovery's loop of `instanceByID`, identity checks, HTTP probes, and SQL updates, potentially deadlocking when the DB uses a one-connection pool and pinning WAL growth on low-resource hardware.
+- [x] Serialize recovery with the supervisor's residency lock; do not reset in-memory active leases when the snapshot read itself fails. The recovery still rejects unknown PID/executable/model/port provenance and uses compare-and-swap revision guards.
+- [x] Add an actual single-connection SQLite cursor/lifecycle regression: snapshot returns before a subsequent state mutation, zero-row and >512-row behavior bounded, cancellation fails closed. Exact-commit hosted CI pending.
+- [ ] This is daemon startup recovery correctness, not a live hardware acceptance result, physical Node/owned-target trust, independent observer vantage or Level 5 device action authority. Complete those gates, low-RAM/GPU installed tests, source audit and LAST user-focused UI/UX before approved QA installer.

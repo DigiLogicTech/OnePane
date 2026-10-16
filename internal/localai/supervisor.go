@@ -1314,35 +1314,50 @@ func (s *RuntimeSupervisor) Stop(ctx context.Context, deploymentID string) error
 	return nil
 }
 
+// Recover snapshots candidate rows and closes their SQLite cursor before
+// inspecting any processes, reading another row, or applying a transition.
+// An open cursor can block those operations when the service has only one
+// SQLite connection (or retain an old WAL reader under sustained activity).
+type recoverableRuntime struct {
+ id string
+ pid int
+ revision int64
+}
+func recoverableRuntimeSnapshot(ctx context.Context,db *sql.DB)([]recoverableRuntime,error){
+ const maxRecoveryCandidates=512
+ rows,err:=db.QueryContext(ctx,`SELECT id,pid,revision
+  FROM local_runtime_instances
+  WHERE status IN ('starting','healthy','busy','draining')
+  ORDER BY id LIMIT 513`)
+ if err!=nil{return nil,err}
+ xs:=make([]recoverableRuntime,0,16)
+ for rows.Next(){
+  var x recoverableRuntime
+  var pid sql.NullInt64
+  if err=rows.Scan(&x.id,&pid,&x.revision);err!=nil{break}
+  if pid.Valid{x.pid=int(pid.Int64)}
+  xs=append(xs,x)
+  if len(xs)>maxRecoveryCandidates{
+   err=errors.New("too many managed model instances for bounded daemon recovery")
+   break
+  }
+ }
+ if err==nil{err=rows.Err()}
+ if closeErr:=rows.Close();err==nil{err=closeErr}
+ if err!=nil{return nil,err}
+ return xs,nil
+}
 func (s *RuntimeSupervisor) Recover(ctx context.Context) error {
-	s.activityMu.Lock()
-	s.activeRequests = map[string]int{}
-	s.activityMu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT i.id,i.pid,i.revision
-		FROM local_runtime_instances i
-		WHERE i.status IN ('starting','healthy','busy','draining')`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	type item struct {
-		id string
-		pid int
-		revision int64
-	}
-	var xs []item
-	for rows.Next() {
-		var x item
-		var pid sql.NullInt64
-		if err := rows.Scan(&x.id, &pid, &x.revision); err != nil {
-			return err
-		}
-		if pid.Valid {
-			x.pid = int(pid.Int64)
-		}
-		xs = append(xs, x)
-	}
-	now := s.clock.UnixMilli()
+ s.residencyMu.Lock()
+ defer s.residencyMu.Unlock()
+ // Do not discard live request counts if a recovery snapshot cannot even
+ // be read. Recovery is expected at daemon startup, never on active work.
+ xs,err:=recoverableRuntimeSnapshot(ctx,s.db)
+ if err!=nil{return err}
+ s.activityMu.Lock()
+ s.activeRequests=map[string]int{}
+ s.activityMu.Unlock()
+ now:=s.clock.UnixMilli()
 	for _, x := range xs {
 		// Recovery must use exactly the same checked process identity
 		// policy as local inference reuse and Stop. The old hard-coded

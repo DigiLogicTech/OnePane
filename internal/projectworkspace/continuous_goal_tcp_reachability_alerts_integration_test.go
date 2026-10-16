@@ -7,6 +7,7 @@ import (
  "encoding/json"
  "errors"
  "testing"
+ "time"
 
  "github.com/DigiLogicTech/OnePane/internal/clock"
  sqliteStore "github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
@@ -63,7 +64,13 @@ func TestTCPReachabilityDriftNoticeIsEvidenceBoundHumanAckOnly(t *testing.T){
   attempt.BaselineIDAtClaim!=baseline.ID{
   t.Fatalf("test evidence failed to retain baseline: %+v %v",attempt,err)
  }
- alerts,err:=svc.ListTCPReachabilityAlerts(ctx,project.ID,goal.ID)
+ // A one-connection SQLite pool reproduces the old N+1 lookup deadlock.
+ // The bounded context makes regression failures observable rather than
+ // hanging an entire CI run when the outer SELECT cursor stays open.
+ db.SQL().SetMaxOpenConns(1)
+ listCtx,cancel:=context.WithTimeout(ctx,2*time.Second)
+ defer cancel()
+ alerts,err:=svc.ListTCPReachabilityAlerts(listCtx,project.ID,goal.ID)
  if err!=nil||len(alerts)!=1{t.Fatalf("mismatch not recorded once: %+v %v",alerts,err)}
  a:=alerts[0]
  if a.SourceID!="router"||a.AttemptID!=attempt.ID||

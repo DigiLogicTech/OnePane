@@ -143,10 +143,19 @@ func(s *Service)ListTCPReachabilityAlerts(ctx context.Context,projectID,goalID s
   ORDER BY detected_at DESC,id DESC LIMIT 100`,projectID,goalID)
  if err!=nil{return nil,err}
  defer rows.Close()
- out:=[]TCPReachabilityAlert{}
+ // Snapshot a bounded number of alerts and release the SQLite read cursor
+ // BEFORE correlating historical receipts. A per-alert QueryRow while the
+ // first SELECT remains open can deadlock on a one-connection pool.
+ out:=make([]TCPReachabilityAlert,0,32)
  for rows.Next(){
-  a,err:=scanTCPReachabilityAlert(rows)
-  if err!=nil{return nil,err}
+  a,scanErr:=scanTCPReachabilityAlert(rows)
+  if scanErr!=nil{return nil,scanErr}
+  out=append(out,a)
+ }
+ if err=rows.Err();err!=nil{return nil,err}
+ if err=rows.Close();err!=nil{return nil,err}
+ for i:=range out{
+  a:=&out[i]
   a.ReturnToBaselineEvidenceState="not_observed"
   // Historical evidence is correlated only with the exact original
   // permit, its approved target, and the immutable baseline version.
@@ -184,9 +193,8 @@ func(s *Service)ListTCPReachabilityAlerts(ctx context.Context,projectID,goalID s
   }else if !errors.Is(recoveryErr,sql.ErrNoRows){
    return nil,recoveryErr
   }
-  out=append(out,a)
  }
- return out,rows.Err()
+ return out,nil
 }
 
 func(s *Service)AcknowledgeTCPReachabilityAlert(ctx context.Context,

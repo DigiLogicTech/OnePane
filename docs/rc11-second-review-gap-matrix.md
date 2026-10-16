@@ -1561,3 +1561,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Completing an existing manual or separately consented recurring TCP attempt now requires matching all canonical immutable fields in the SQLite UPDATE: exact Project/Workspace, Goal, permit, approved target, source, cadence, Goal/permit revisions, actor, claim timestamp, recurring grant and baseline claim snapshot. A claim ID alone can no longer finalise a forged/sibling-source observation or generate a false drift/audit notice.
 - [x] Real SQLite adversarial regression mutates target, Workspace, source, baseline, timestamp, grant and permit revision and verifies the actual claim stays `claimed` without a terminal effect, while a genuine human-authorised cancellation can still finish once. This does not change approvals, require automatic retries or enable device remediation.
 - [ ] Exact-head CI, physical consent/revocation concurrency, tamper-resistant cross-node evidence, independent observation and human-governed L5 effects remain open. Final code/security audit and LAST operator-centred UI/UX remain release gates.
+
+
+## RC11 P0-DD — competing recurring observers cannot claim false cursor progress (2026-10-17)
+
+- [x] The bounded Level 5 TCP recurring worker now checks actual SQLite RowsAffected for its revision-fenced cursor update. A second poller using a stale revision receives `ErrRevisionConflict` instead of success after a zero-row UPDATE. Per-source/window atomic attempt admission remains the separate no-duplicate-socket authority.
+- [x] One-connection SQLite unit regression verifies monotonic cursor advancement, stale-poller denial, unchanged persisted pointer and cancelled updates without extra network effects.
+- [ ] Hosted exact-head CI, real multi-daemon scheduling, physical network proof, approved reversible L5 actions and installed QA remain separate. No privileged background operations or release permission are implied; final audit and LAST human-centric UI/UX are pending.

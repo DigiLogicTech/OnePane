@@ -98,11 +98,19 @@ func(s *Service)dueTCPRecurringGrants(ctx context.Context,now int64,after string
 }
 
 func(s *Service)advanceTCPRecurringCursor(ctx context.Context,revision int64,after string)error{
- _,err:=s.db.ExecContext(ctx,`UPDATE goal_tcp_recurring_worker_cursors
+ result,err:=s.db.ExecContext(ctx,`UPDATE goal_tcp_recurring_worker_cursors
   SET after_grant_id=?,revision=revision+1,updated_at=?
   WHERE worker_id='exact_tcp_connect' AND revision=?`,
   after,s.clock.UnixMilli(),revision)
- return err // competing poller wins; pointer alone confers no authority
+ if err!=nil{return err}
+ updated,err:=result.RowsAffected()
+ if err!=nil{return err}
+ // A competing poller or daemon restart may already have moved the
+ // durable cursor. Never report progress under a stale revision.
+ // The separate per-source/window SQLite attempt fence still prevents
+ // duplicate network I/O, but honest CAS is needed for fair traversal.
+ if updated!=1{return ErrRevisionConflict}
+ return nil
 }
 
 // A named grant cannot silently become a general TCP scanner. Exactly one

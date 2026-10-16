@@ -1285,7 +1285,13 @@ func (s *RuntimeSupervisor) Stop(ctx context.Context, deploymentID string) error
 	inst.Revision++
 	if inst.PID > 1 && s.processes.Alive(inst.PID) {
 		if err := s.processes.Signal(inst.PID, syscall.SIGTERM); err != nil && s.processes.Alive(inst.PID) {
-			return fmt.Errorf("signal managed runtime: %w", err)
+			// The stop intent was durably set to draining, but the
+			// managed process is still alive. An unresolved signal must
+			// not be presented as normal drain/reclaimed capacity.
+			if e:=markOrphaned("managed runtime graceful stop failed; operator reconciliation required");e!=nil{
+				return fmt.Errorf("failed to persist unverified graceful-stop outcome: %w",e)
+			}
+			return errors.New("managed runtime graceful termination failed; process requires operator reconciliation")
 		}
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -1311,7 +1317,10 @@ func (s *RuntimeSupervisor) Stop(ctx context.Context, deploymentID string) error
 			return errors.New("forced termination denied: runtime process identity changed")
 		}
 		if err := s.processes.Signal(inst.PID, syscall.SIGKILL); err != nil && s.processes.Alive(inst.PID) {
-			return fmt.Errorf("kill managed runtime: %w", err)
+			if e:=markOrphaned("managed runtime forced stop failed; operator reconciliation required");e!=nil{
+				return fmt.Errorf("failed to persist unverified forced-stop outcome: %w",e)
+			}
+			return errors.New("managed runtime forced termination failed; process requires operator reconciliation")
 		}
 		deadline = time.Now().Add(2 * time.Second)
 		for s.processes.Alive(inst.PID) && time.Now().Before(deadline) {

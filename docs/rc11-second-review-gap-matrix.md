@@ -1478,3 +1478,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Both GPU `ensureCapacity` and service `Shutdown` previously used deferred `rows.Close` yet called `Stop` inside the same reader lifetime. Under SQLite single-connection limits this can deadlock while a still-open SELECT occupies the only pooled connection, and holds WAL read snapshots throughout long subprocess drains. Explicitly close the reader after checking `rows.Err` and **before** any stop/eviction; retain deferred closure for earlier scan failures.
 - [x] Actual one-connection SQLite test exercises real `Shutdown` of two in-memory already-exited managed models and verifies both are stopped, no signal sent and deployment residency synced. Source-order contract also guards capacity-reader closure before eviction. Hosted exact-source CI pending.
 - [ ] Real Windows/Ubuntu process-tree stop/GPU VRAM reclamation and app-host endurance still need physical acceptance; unrelated Node/observer proof, approved L5 reversible security effects and final source/UI review remain release gates.
+
+
+## RC11 P0-CR — unresolved process-stop failures must remain visibly orphaned (2026-10-16)
+
+- [x] A signal failure on a **still-living** managed local runtime previously left its durable state `draining` and simply returned an error. If SIGTERM or SIGKILL is refused, reclassify the unresolved process as `orphaned` using the original revision-checked transition, with an operator-reconciliation reason; never claim memory was freed. No extra signal retries, force escalation or unapproved network/device actions.
+- [x] Ensure no raw OS signal error or potentially private process command-line content is stored in the common durable failure reason. Source-order regressions verify both signal failure branches transition to an orphaned state before returning. Hosted CI pending.
+- [ ] Real Windows process-handle race avoidance, GPU process-tree cleanup, installed memory observability and physical Node/observer proof still require separate acceptance. L5 defensive authority, security audit, final holistic human-centred UI/UX remain release gates.

@@ -1164,9 +1164,31 @@ func managedProcessCLIIdentified(backend string,ident ProcessIdentity,
   }
   if !found{return false}
  }
- return argsContainPair(ident.Args,modelFlag,model)&&
-  argsContainPair(ident.Args,"--host","127.0.0.1")&&
-  argsContainPair(ident.Args,"--port",strconv.Itoa(port))
+ // Duplicated command-line options can be interpreted last-wins by
+ // the engine. Merely finding one matching pair could admit a later
+ // conflicting model, non-loopback address or listener port.
+ alternate:="--model"
+ if modelFlag=="--model"{alternate="-m"}
+ for _,arg:=range ident.Args{
+  if arg==alternate{return false}
+ }
+ return oneExactManagedOption(ident.Args,modelFlag,model)&&
+  oneExactManagedOption(ident.Args,"--host","127.0.0.1")&&
+  oneExactManagedOption(ident.Args,"--port",strconv.Itoa(port))
+}
+
+// Require a unique option occurrence; never trust one matching value
+// when another copy of the same flag can override it at runtime.
+func oneExactManagedOption(args []string,name,want string)bool{
+ count:=0
+ for i:=0;i<len(args);i++{
+  if args[i]!=name{continue}
+  count++
+  if i+1>=len(args)||filepath.Clean(args[i+1])!=filepath.Clean(want){
+   return false
+  }
+ }
+ return count==1
 }
 
 // StopIfIdle releases CPU/GPU memory after an Agent Check without evicting a

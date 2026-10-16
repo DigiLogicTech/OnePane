@@ -65,6 +65,37 @@ func TestManagedProcessIdentityWorksForColibriAndLlamaBackends(t *testing.T){
    }},
   },
   {
+   name:"second model overrides allowed model",backend:"cuda",exe:"/models/runtime/llama-server",model:"/models/weights/a.gguf",port:11001,
+   ident:ProcessIdentity{Executable:"/models/runtime/llama-server",Args:[]string{
+    "llama-server","-m","/models/weights/a.gguf","-m","/models/weights/other.gguf","--host","127.0.0.1","--port","11001",
+   }},
+  },
+  {
+   name:"duplicate same model is ambiguous",backend:"cuda",exe:"/models/runtime/llama-server",model:"/models/weights/a.gguf",port:11001,
+   ident:ProcessIdentity{Executable:"/models/runtime/llama-server",Args:[]string{
+    "llama-server","-m","/models/weights/a.gguf","-m","/models/weights/a.gguf","--host","127.0.0.1","--port","11001",
+   }},
+  },
+  {
+   name:"conflicting host override",backend:"colibri",exe:"/usr/bin/python3",model:"/models/cache/b",port:11003,
+   allowed:[]string{"/colibri/coli"},
+   ident:ProcessIdentity{Executable:"/usr/bin/python3",Args:[]string{
+    "/usr/bin/python3","/colibri/coli","--model","/models/cache/b","--host","127.0.0.1","--host","0.0.0.0","--port","11003",
+   }},
+  },
+  {
+   name:"duplicate port override",backend:"cuda",exe:"/models/runtime/llama-server",model:"/models/weights/a.gguf",port:11001,
+   ident:ProcessIdentity{Executable:"/models/runtime/llama-server",Args:[]string{
+    "llama-server","-m","/models/weights/a.gguf","--host","127.0.0.1","--port","11001","--port","11002",
+   }},
+  },
+  {
+   name:"alias model option override",backend:"cuda",exe:"/models/runtime/llama-server",model:"/models/weights/a.gguf",port:11001,
+   ident:ProcessIdentity{Executable:"/models/runtime/llama-server",Args:[]string{
+    "llama-server","-m","/models/weights/a.gguf","--model","/models/weights/other.gguf","--host","127.0.0.1","--port","11001",
+   }},
+  },
+  {
    name:"invalid port",backend:"cpu",exe:"/models/runtime/llama-server",model:"/models/weights/a.gguf",port:1,
    ident:ProcessIdentity{Executable:"/models/runtime/llama-server",Args:[]string{
     "llama-server","-m","/models/weights/a.gguf","--host","127.0.0.1","--port","1",

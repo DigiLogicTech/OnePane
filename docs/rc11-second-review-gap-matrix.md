@@ -1442,3 +1442,9 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 
 - [x] Extract a pure `managedProcessCLIIdentified` validator from the existing authoritative `VerifyIdentity` boundary, shared by startup, local inference reuse, process Stop and daemon recovery. Test the actual Colibri Python launcher with both legacy server and tiered `coli` entrypoint and llama.cpp native `-m` execution, requiring exact executable, model, loopback host and port; reject wrong model, alternate host and PID/port confusion.
 - [ ] Hosted exact-source CI pending. Process command-line matching is not proof of socket ownership under a hostile local user, physical device identity or independent network vantage. Real installed Node and Windows process-tree recovery tests still required, as are human-approved L5 effects, security review, and LAST UI/UX before authorised packaging.
+
+
+## RC11 P0-CM — deny duplicate or aliased managed process option overrides (2026-10-16)
+
+- [x] Exact PID/executable/model/loopback verification previously used `argsContainPair`, allowing an approved `--model`/`-m`, `--host` or `--port` pair followed by a conflicting duplicate that the actual runtime might parse with last-wins precedence. The backend-aware identity predicate now requires **exactly one** expected model, host and port option and rejects an alternate model-flag alias within the same command line. No native process is signalled or repaired for a mismatch.
+- [x] Behavioural tests include same-value duplicates, later conflicting model, host/port and alias overrides for native llama.cpp and Colibri. Exact-head hosted CI pending; this is process CLI provenance, not physical owned-device or independent network-vantage attestation.

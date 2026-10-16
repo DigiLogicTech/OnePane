@@ -223,10 +223,15 @@ func endpointFromNode(n NodeView) (string, string, error) {
 
 func (s *Service) pairedEndpoint(ctx context.Context, peerID string) (string, string, error) {
 	var raw, fp, state, pairStatus string
-	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(h.endpoint_json,''),p.peer_tls_fingerprint,h.trust_state,p.status FROM harness_nodes h JOIN node_pairings p ON p.peer_node_id=h.id WHERE h.id=?`, peerID).Scan(&raw, &fp, &state, &pairStatus); err != nil {
+	var localConfirmed,peerConfirmed int
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(h.endpoint_json,''),p.peer_tls_fingerprint,h.trust_state,p.status,p.local_confirmed,p.peer_confirmed FROM harness_nodes h JOIN node_pairings p ON p.peer_node_id=h.id WHERE h.id=? AND h.local=0`, peerID).Scan(&raw, &fp, &state, &pairStatus,&localConfirmed,&peerConfirmed); err != nil {
 		return "", "", err
 	}
-	if state != "paired" || pairStatus != "paired" {
+	// Endpoint lookup is a second, independent transport-boundary check
+	// after scheduling and capability admission. An old "paired" label is
+	// not sufficient when either direction of human confirmation is absent.
+	if state != "paired" || pairStatus != "paired" ||
+		localConfirmed!=1 || peerConfirmed!=1 {
 		return "", "", ErrNodeNotPaired
 	}
 	var ep struct {

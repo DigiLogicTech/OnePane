@@ -59,6 +59,23 @@ func TestRemoteInferenceRequiresCurrentExactPairedNodeManifestAtDispatch(t *test
   if _,err:=db.SQL().ExecContext(ctx,q,args...);err!=nil{t.Fatal(err)}
  }
  admit(true)
+ edit(`UPDATE harness_nodes SET endpoint_json='{"federation_url":"https://127.0.0.1:7443"}' WHERE id='peer'`)
+ if _,_,err:=svc.pairedEndpoint(ctx,"peer");err!=nil{
+  t.Fatalf("fully paired Node endpoint not available: %v",err)
+ }
+ edit(`UPDATE node_pairings SET local_confirmed=0 WHERE peer_node_id='peer'`)
+ if _,_,err:=svc.pairedEndpoint(ctx,"peer");err==nil{
+  t.Fatal("one-sided paired Node endpoint incorrectly allowed")
+ }
+ edit(`UPDATE node_pairings SET local_confirmed=1,peer_confirmed=0 WHERE peer_node_id='peer'`)
+ if _,_,err:=svc.pairedEndpoint(ctx,"peer");err==nil{
+  t.Fatal("reverse one-sided pairing incorrectly allowed endpoint")
+ }
+ edit(`UPDATE node_pairings SET peer_confirmed=1 WHERE peer_node_id='peer'`)
+ if _,_,err:=svc.pairedEndpoint(ctx,"peer");err!=nil{
+  t.Fatalf("restored two-way approved endpoint denied: %v",err)
+ }
+ admit(true)
  edit(`UPDATE node_capability_manifests SET expires_at=? WHERE peer_node_id='peer'`,now-1000)
  admit(false)
  // The remote transport itself must refuse before pairedEndpoint/network

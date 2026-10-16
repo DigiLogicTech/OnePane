@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/DigiLogicTech/OnePane/internal/inference"
 	"github.com/DigiLogicTech/OnePane/internal/localai"
@@ -163,9 +165,30 @@ func (s *Server) pairConfirm(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"peer_confirmed": local, "paired": paired, "certificate_pem": string(s.svc.identity.CertPEM)})
 }
 
+// tls.RequestClientCert collects a certificate without Go validating its
+// dates or permitted role. Check these properties before a paired fingerprint
+// can authorise inbound inference or remote model management.
+func validatePairedNodeClientCertificate(cert *x509.Certificate,now time.Time)error{
+ if cert==nil||len(cert.Raw)==0||
+  cert.IsCA||cert.KeyUsage&x509.KeyUsageCertSign!=0||
+  cert.KeyUsage&x509.KeyUsageDigitalSignature==0||
+  now.Before(cert.NotBefore)||!now.Before(cert.NotAfter){
+  return ErrPeerCertificate
+ }
+ clientAuth:=false
+ for _,usage:=range cert.ExtKeyUsage{
+  if usage==x509.ExtKeyUsageClientAuth{clientAuth=true;break}
+ }
+ if !clientAuth{return ErrPeerCertificate}
+ return nil
+}
+
 func (s *Service) peerFromTLS(r *http.Request) (string, error) {
 	if r.TLS == nil || len(r.TLS.PeerCertificates) != 1 {
 		return "", ErrPeerCertificate
+	}
+	if err:=validatePairedNodeClientCertificate(r.TLS.PeerCertificates[0],time.Now());err!=nil{
+		return "",err
 	}
 	fp := CertificateFingerprint(r.TLS.PeerCertificates[0].Raw)
 	var peer, state, stored string
@@ -173,7 +196,7 @@ func (s *Service) peerFromTLS(r *http.Request) (string, error) {
 	err := s.db.QueryRowContext(r.Context(), `SELECT np.peer_node_id,hn.trust_state,np.peer_tls_fingerprint,
 	 np.local_confirmed,np.peer_confirmed
 	 FROM node_pairings np JOIN harness_nodes hn ON hn.id=np.peer_node_id
-	 WHERE np.status='paired' AND np.peer_tls_fingerprint=?`, fp).
+	 WHERE np.status='paired' AND hn.local=0 AND np.peer_tls_fingerprint=?`, fp).
 	 Scan(&peer, &state, &stored, &localConfirmed, &peerConfirmed)
 	if err != nil {
 		return "", ErrPeerCertificate

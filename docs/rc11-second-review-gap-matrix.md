@@ -1603,3 +1603,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Pinned federation server-side TLS trust now requires the enrolled peer to present a leaf certificate that is neither marked as a CA nor capable of signing subordinate certificates. A matching SHA-256 fingerprint, server-auth EKU and valid dates are necessary but no longer sufficient for a CA-capable key to be used as the Node endpoint identity.
 - [x] Existing certificate-validation unit regression extended with explicit `IsCA` and `KeyUsageCertSign` negative cases. All approved normal OnePane Node leaf certificates still retain the required server-auth and digital-signature purpose.
 - [ ] Full hosted CI and actual physical peer certificate/rotation tests are separate gates; this strengthens software credential scoping, not hardware attestation or Level 5 external observation. Final audit and LAST human-first UI/UX remain pending.
+
+
+## RC11 P0-DJ — inbound mTLS peer must have an unexpired client-auth leaf (2026-10-17)
+
+- [x] Because the existing Go federation TLS listener uses `tls.RequestClientCert`, simply possessing a paired SHA-256 fingerprint did not enforce certificate validity time, client-auth EKU, leaf-only/non-CA purpose or digital-signature key usage on inbound inference and remote management requests. The `peerFromTLS` gate now validates all of these before database pairing lookup, and restricts the joined peer to a remote Node.
+- [x] Pinned-node tests use a real OnePane-generated Ed25519 client certificate, exercise current vs expired/not-yet-valid/wrong-purpose/CA/cert-signing variants and, with migrated SQLite paired records, deny an expired client at the actual request identity boundary. No new pairing permission or network scope.
+- [ ] Exact-head hosted CI and installed cross-Node TLS acceptance remain pending. A valid software certificate is not physical-device attestation or independently verified L5 observation; final code audit and LAST human-first UI/UX still block an approved installer.

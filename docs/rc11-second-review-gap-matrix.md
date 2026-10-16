@@ -1471,3 +1471,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Close the bounded SQLite idle candidate SELECT cursor before any process stop or state write, removing another single-connection SQLite deadlock and WAL-pinned reader scenario.
 - [x] Add one-connection SQLite tests for cursor closure, concurrent active worker guard and pin admission, with no actual network/process effects in hosted tests. Exact-source CI pending.
 - [ ] Installed physical model process lifetime and Windows/Ubuntu GPU/RAM teardown still require acceptance. This is not physical Node or independently verified network sensor proof, new Level 5 autonomous authority or completed source security audit; final holistic user-first UI/UX remains LAST before approved QA installer.
+
+
+## RC11 P0-CQ — release SQLite resident/shutdown readers before stopping models (2026-10-16)
+
+- [x] Both GPU `ensureCapacity` and service `Shutdown` previously used deferred `rows.Close` yet called `Stop` inside the same reader lifetime. Under SQLite single-connection limits this can deadlock while a still-open SELECT occupies the only pooled connection, and holds WAL read snapshots throughout long subprocess drains. Explicitly close the reader after checking `rows.Err` and **before** any stop/eviction; retain deferred closure for earlier scan failures.
+- [x] Actual one-connection SQLite test exercises real `Shutdown` of two in-memory already-exited managed models and verifies both are stopped, no signal sent and deployment residency synced. Source-order contract also guards capacity-reader closure before eviction. Hosted exact-source CI pending.
+- [ ] Real Windows/Ubuntu process-tree stop/GPU VRAM reclamation and app-host endurance still need physical acceptance; unrelated Node/observer proof, approved L5 reversible security effects and final source/UI review remain release gates.

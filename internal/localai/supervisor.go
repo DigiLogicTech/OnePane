@@ -603,6 +603,11 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	// No SQLite read cursor may remain open while stop/eviction causes
+	// another instance lookup, state write or model process operation.
+	if err := rows.Close(); err != nil {
+		return err
+	}
 	fits := func() bool {
 		for k, n := range target {
 			if used[k]+n > capacity[k] {
@@ -1550,6 +1555,11 @@ func (s *RuntimeSupervisor) Shutdown(ctx context.Context) error {
 		ids = append(ids, idv)
 	}
 	if err := rows.Err(); err != nil {
+		return err
+	}
+	// Shutdown must work with a single SQLite connection. Stop performs
+	// other reads and CAS writes; leave no SELECT cursor pinned.
+	if err := rows.Close(); err != nil {
 		return err
 	}
 	var first error

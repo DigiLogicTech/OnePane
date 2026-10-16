@@ -513,6 +513,19 @@ func inboundRequestHash(in RemoteInferenceRequest)(string,error){
  return hex.EncodeToString(sum[:]),nil
 }
 
+// Inbound inference may complete AFTER its HTTP request has been cancelled.
+// A bounded, cancellation-independent receipt write prevents completed work
+// from becoming a permanent 'executing' tombstone due solely to cancellation.
+// It never retries or launches the model: only the result of the original
+// invocation may be written, and DB failure is propagated for reconciliation.
+func (s *Service)finishInboundInferenceReceipt(ctx context.Context,
+ query string,args ...any)error{
+ cleanup,cancel:=context.WithTimeout(context.WithoutCancel(ctx),3*time.Second)
+ defer cancel()
+ _,err:=s.db.ExecContext(cleanup,query,args...)
+ return err
+}
+
 func (s *Service) executeInbound(ctx context.Context,peer string,in RemoteInferenceRequest,exec LocalInferenceExecutor)(RemoteInferenceResponse,error){
  digest,err:=inboundRequestHash(in)
  if err!=nil{return RemoteInferenceResponse{},err}
@@ -574,23 +587,32 @@ func (s *Service) executeInbound(ctx context.Context,peer string,in RemoteInfere
   if errors.As(dispatchErr,&te){
    known=te.OutcomeKnown
    if te.Code!=""{code=te.Code}
+  }else if errors.Is(dispatchErr,context.Canceled)||
+   errors.Is(dispatchErr,context.DeadlineExceeded){
+   // Request cancellation cannot prove that inference did not happen.
+   known=false
+   code="remote_inference_outcome_unknown"
   }
   st:="failed"
   if !known{st="unknown"}
-  _,_ = s.db.ExecContext(ctx,`UPDATE node_federated_inference_receipts
+  if err:=s.finishInboundInferenceReceipt(ctx,`UPDATE node_federated_inference_receipts
    SET status=?,error_code=?,completed_at=? WHERE id=? AND request_hash=?`,
-   st,code,completed,idv,digest)
+   st,code,completed,idv,digest);err!=nil{
+   return RemoteInferenceResponse{},err
+  }
   return RemoteInferenceResponse{ErrorCode:code,OutcomeKnown:known},nil
  }
  if !json.Valid(result.ResponseJSON){
-  _,_ = s.db.ExecContext(ctx,`UPDATE node_federated_inference_receipts
+  if err:=s.finishInboundInferenceReceipt(ctx,`UPDATE node_federated_inference_receipts
    SET status='failed',error_code='invalid_remote_response',completed_at=?
-   WHERE id=? AND request_hash=?`,completed,idv,digest)
+   WHERE id=? AND request_hash=?`,completed,idv,digest);err!=nil{
+   return RemoteInferenceResponse{},err
+  }
   return RemoteInferenceResponse{ErrorCode:"invalid_remote_response",OutcomeKnown:true},nil
  }
  usageJSON:=result.UsageJSON
  if len(usageJSON)==0{usageJSON=json.RawMessage(`{}`)}
- _,err=s.db.ExecContext(ctx,`UPDATE node_federated_inference_receipts
+ err=s.finishInboundInferenceReceipt(ctx,`UPDATE node_federated_inference_receipts
   SET status='succeeded',response_json=?,usage_json=?,completed_at=?
   WHERE id=? AND request_hash=?`,
   string(result.ResponseJSON),string(usageJSON),completed,idv,digest)

@@ -477,6 +477,18 @@ func isOperatorMemoryOverride(rec Recommendation) bool {
 // ensureCapacity performs per-device pressure-aware hot swapping. It never
 // treats heterogeneous accelerators as one fictional VRAM pool. Only healthy,
 // idle runtimes are evicted; busy runtimes are protected by the runtime lease.
+// Reject obviously impossible CPU-only allocations on low-resource hosts.
+// This bounds total memory only; simultaneous CPU residents and changing
+// available RAM still require installed host acceptance and monitoring.
+func cpuModelFitsPhysicalRAM(required,total int64)bool{
+ if required<=0||total<=0{return false}
+ // At least ten percent, capped at one GiB, is reserved for OS and
+ // OnePane itself. Small machines retain a proportionate minimum.
+ reserve:=total/10
+ if reserve>1<<30{reserve=1<<30}
+ return required<=total-reserve
+}
+
 // Predict whether evicting ALL healthy, idle candidates could satisfy a
 // deployment. Refuse impossible placements before any process is signalled.
 // Actual stops, identity checks and resource accounting remain unchanged.
@@ -514,8 +526,8 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 	}
 	var targetRec Recommendation
 	_ = json.Unmarshal([]byte(targetPlanJSON), &targetRec)
-	var raw string
-	if err := s.db.QueryRowContext(ctx, `SELECT accelerators_json FROM local_hardware_profiles WHERE node_id=? ORDER BY detected_at DESC LIMIT 1`, nodeID).Scan(&raw); err != nil {
+	var raw,rawMemory string
+	if err := s.db.QueryRowContext(ctx, `SELECT accelerators_json,memory_json FROM local_hardware_profiles WHERE node_id=? ORDER BY detected_at DESC LIMIT 1`, nodeID).Scan(&raw,&rawMemory); err != nil {
 		return err
 	}
 	var gpus []GPU
@@ -527,6 +539,14 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 		targetRec.Placement, _, _, _ = bestPlacement(p, targetBytes, "")
 	}
 	if targetRec.Placement.Mode == PlacementCPUOnly {
+		var profileMemory Memory
+		if err:=json.Unmarshal([]byte(rawMemory),&profileMemory);err!=nil{return err}
+		// Cached *free* memory is volatile, so use the immutable total
+		// physical RAM as a conservative hard upper bound. Keep an OS
+		// reserve even when the model is the sole active local process.
+		if !cpuModelFitsPhysicalRAM(targetBytes,profileMemory.TotalBytes){
+			return errors.New("CPU model estimated memory exceeds physical system RAM budget; choose a smaller quantisation or Node")
+		}
 		return nil
 	}
 	capacity := map[string]int64{}

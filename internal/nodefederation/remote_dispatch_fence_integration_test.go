@@ -80,6 +80,20 @@ func TestRemoteInferenceRequiresCurrentExactPairedNodeManifestAtDispatch(t *test
  edit(`UPDATE node_pairings SET status='revoked' WHERE peer_node_id='peer'`)
  admit(false)
  edit(`UPDATE node_pairings SET status='paired' WHERE peer_node_id='peer'`)
+ admit(true)
+ // A stored "paired" label cannot substitute for BOTH confirmed consent
+ // directions. A revoked confirmation must stop prompt dispatch pre-send.
+ edit(`UPDATE node_pairings SET local_confirmed=0 WHERE peer_node_id='peer'`)
+ admit(false)
+ _,err=(RemoteTransport{Service:svc}).Dispatch(ctx,request,nil)
+ if !errors.As(err,&denied)||!denied.OutcomeKnown||
+  denied.Code!="remote_node_not_admitted"{
+  t.Fatalf("unconfirmed Node got inference request: %v",err)
+ }
+ edit(`UPDATE node_pairings SET local_confirmed=1,peer_confirmed=0 WHERE peer_node_id='peer'`)
+ admit(false)
+ edit(`UPDATE node_pairings SET peer_confirmed=1 WHERE peer_node_id='peer'`)
+ admit(true)
  edit(`UPDATE harness_nodes SET trust_state='unavailable' WHERE id='peer'`)
  admit(false)
  edit(`UPDATE harness_nodes SET trust_state='paired' WHERE id='peer'`)

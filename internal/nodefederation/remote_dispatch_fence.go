@@ -25,11 +25,12 @@ func(s *Service) authorizeRemoteModelDispatch(
  }
  var status,trust,nodeTrust,pairStatus,manifestNode,manifestProtocol string
  var expiresAt int64
+ var localConfirmed,peerConfirmed,remoteNodeLocal int
  var claimedRemoteID,claimedPeerID string
  var listed int
  err:=s.db.QueryRowContext(ctx,`SELECT
   d.status,m.trust_state,h.trust_state,p.status,
-  cm.expires_at,
+  cm.expires_at,p.local_confirmed,p.peer_confirmed,h.local,
   COALESCE(json_extract(d.runtime_config_json,'$.federation.remote_deployment_id'),''),
   COALESCE(json_extract(d.runtime_config_json,'$.federation.peer_node_id'),''),
   COALESCE(json_extract(cm.manifest_json,'$.node_id'),''),
@@ -44,12 +45,14 @@ func(s *Service) authorizeRemoteModelDispatch(
   WHERE d.id=? AND d.node_id=? AND d.provider_connection_id IS NULL`,
   remoteDeploymentID,localDeploymentID,peerID).
   Scan(&status,&trust,&nodeTrust,&pairStatus,&expiresAt,
+   &localConfirmed,&peerConfirmed,&remoteNodeLocal,
    &claimedRemoteID,&claimedPeerID,&manifestNode,&manifestProtocol,&listed)
  if errors.Is(err,sql.ErrNoRows){return ErrFederatedDispatchNotAdmitted}
  if err!=nil{return err}
  if (status!="ready"&&status!="degraded")||
   (trust!="trusted"&&trust!="user_trusted")||
   nodeTrust!="paired"||pairStatus!="paired"||
+  localConfirmed!=1||peerConfirmed!=1||remoteNodeLocal!=0||
   expiresAt<=s.clock.UnixMilli()||
   claimedRemoteID!=remoteDeploymentID||
   claimedPeerID!=peerID||

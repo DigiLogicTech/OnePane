@@ -1492,3 +1492,9 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Managed GPU placement sums and resident memory accounting now refuse zero/negative and signed-int64 overflowing device allocations, rather than silently wrapping. Both immediate admission and best-case idle-reclaim checks compare requested bytes against the **remaining** positive device budget using subtraction, not potentially overflowing `used+target` arithmetic.
 - [x] Regression covers two 2^62-byte declared allocations that could overflow to a false fit, invalid signed allocations and unoccupied-only experimental overrides. No model is evicted for an invalid estimate. Exact-source hosted CI pending.
 - [ ] These are static estimates, not measured VRAM; real device telemetry and old-hardware QA are still required. Independently trusted physical network evidence, human-approved reversible L5 actions, source audit and LAST human-centred UI/UX remain build gates.
+
+
+## RC11 P0-CT — inconsistent idle-device allocations cannot fabricate free memory (2026-10-16)
+
+- [x] Protect best-case prospective GPU reclaim from malformed idle records (negative/zero allocations or an idle model claiming more bytes than the current ledger says are resident). Reject admission rather than clamping an underflow to zero and claiming an impossible model swap can fit. Regression covers contradictory memory accounting; no process mutation.
+- [ ] Exact-source hosted CI and actual GPU RAM readings remain separate acceptance, along with physical Node verification, safe human-governed L5 effects, code audit and LAST operator-first UI/UX.

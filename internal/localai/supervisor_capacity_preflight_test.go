@@ -49,6 +49,16 @@ func TestCapacityPreflightProtectsExistingModelsOnImpossiblePlacement(t *testing
 
 
 func TestManagedAcceleratorCapacityNeverFitsThroughSignedOverflow(t *testing.T){
+ if capacityCouldFitAfterIdleReclaim(
+  map[string]int64{"gpu":1},map[string]int64{"gpu":9},
+  map[string]int64{"gpu":10},[]residentRuntime{{
+   Placement:PlacementPlan{Devices:[]PlacementDevice{{
+    Kind:"accelerator",DeviceID:"gpu",AllocatedBytes:2,
+   }}},
+  }},false){
+  t.Fatal("inconsistent resident accounting fabricated GPU capacity")
+ }
+
  const huge=int64(1)<<62
  if capacityCouldFitAfterIdleReclaim(
   map[string]int64{"gpu":huge},map[string]int64{"gpu":huge},

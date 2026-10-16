@@ -510,8 +510,13 @@ func capacityCouldFitAfterIdleReclaim(used,target,capacity map[string]int64,
   for _,device:=range r.Placement.Devices{
    if device.Kind!="accelerator"{continue}
    key:=placementKey(device)
+   // A malformed idle model cannot reclaim more memory than was
+   // counted as resident. Do not let negative or inconsistent records
+   // fabricate free GPU capacity.
+   if device.AllocatedBytes<=0||projected[key]<device.AllocatedBytes{
+    return false
+   }
    projected[key]-=device.AllocatedBytes
-   if projected[key]<0{projected[key]=0}
   }
  }
  if operatorOverride{

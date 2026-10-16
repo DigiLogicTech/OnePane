@@ -1280,27 +1280,23 @@ func (s *RuntimeSupervisor) Recover(ctx context.Context) error {
 	s.activityMu.Lock()
 	s.activeRequests = map[string]int{}
 	s.activityMu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT i.id,i.pid,i.port,i.revision,r.executable_path,m.local_path,d.runtime_config_json
+	rows, err := s.db.QueryContext(ctx, `SELECT i.id,i.pid,i.revision
 		FROM local_runtime_instances i
-		JOIN managed_local_runtimes r ON r.id=i.runtime_id
-		JOIN managed_local_models m ON m.id=i.managed_model_id
-		JOIN model_deployments d ON d.id=i.deployment_id
 		WHERE i.status IN ('starting','healthy','busy','draining')`)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	type item struct {
-		id                 string
-		pid, port          int
-		revision           int64
-		exe, model, config string
+		id string
+		pid int
+		revision int64
 	}
 	var xs []item
 	for rows.Next() {
 		var x item
 		var pid sql.NullInt64
-		if err := rows.Scan(&x.id, &pid, &x.port, &x.revision, &x.exe, &x.model, &x.config); err != nil {
+		if err := rows.Scan(&x.id, &pid, &x.revision); err != nil {
 			return err
 		}
 		if pid.Valid {
@@ -1309,15 +1305,15 @@ func (s *RuntimeSupervisor) Recover(ctx context.Context) error {
 		xs = append(xs, x)
 	}
 	now := s.clock.UnixMilli()
-	inspector, canInspect := s.processes.(ProcessInspector)
 	for _, x := range xs {
-		trusted := false
-		if x.pid > 1 && s.processes.Alive(x.pid) && canInspect {
-			ident, ierr := inspector.Identity(x.pid)
-			if ierr == nil && filepath.Clean(ident.Executable) == filepath.Clean(x.exe) && argsContainPair(ident.Args, "-m", x.model) && argsContainPair(ident.Args, "--host", "127.0.0.1") && argsContainPair(ident.Args, "--port", strconv.Itoa(x.port)) {
-				trusted = true
-			}
-		}
+		// Recovery must use exactly the same checked process identity
+		// policy as local inference reuse and Stop. The old hard-coded
+		// "-m" flag only matched llama.cpp, wrongly orphaning Colibri's
+		// Python server after a daemon restart. Never contact a health
+		// socket or signal an unverified/recycled PID.
+		inst, ierr := s.instanceByID(ctx, x.id)
+		trusted := ierr==nil && inst.PID==x.pid && inst.Revision==x.revision &&
+			s.VerifyIdentity(ctx, inst)==nil
 		if !trusted {
 			res, e := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET status='orphaned',failure_reason='runtime process identity could not be re-established after daemon restart',updated_at=?,revision=revision+1 WHERE id=? AND revision=?`, now, x.id, x.revision)
 			if e != nil {
@@ -1330,10 +1326,6 @@ func (s *RuntimeSupervisor) Recover(ctx context.Context) error {
 				return fmt.Errorf("runtime recovery state conflict")
 			}
 			continue
-		}
-		inst, ierr := s.instanceByID(ctx, x.id)
-		if ierr != nil {
-			return ierr
 		}
 		health, herr := s.Health(ctx, inst)
 		if herr != nil {

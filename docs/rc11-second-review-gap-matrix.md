@@ -1554,3 +1554,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Bound and fully materialise the at-most-100 TCP reachability alert rows, check scan errors and close the initial SQLite reader *before* issuing per-alert historical return-to-baseline lookups. Previously the nested QueryRow could block on the outer read cursor when OnePane runs with a one-connection SQLite pool, hanging the Level 5 diagnostic/Inspector view.
 - [x] Real SQLite integration regression creates a scoped mismatch alert, switches to `SetMaxOpenConns(1)`, reads the alert under a bounded two-second request context and retains human-only acknowledgement and append-only evidence behaviour. No new network probes or runtime changes.
 - [ ] Exact-commit hosted CI, physical low-memory/WAL acceptance, physical Node verification and independent L5 health/effect proof remain. Final security audit and LAST operator-first UI/UX still precede any approved installer.
+
+
+## RC11 P0-DC — TCP terminal evidence bound to immutable claimed metadata (2026-10-17)
+
+- [x] Completing an existing manual or separately consented recurring TCP attempt now requires matching all canonical immutable fields in the SQLite UPDATE: exact Project/Workspace, Goal, permit, approved target, source, cadence, Goal/permit revisions, actor, claim timestamp, recurring grant and baseline claim snapshot. A claim ID alone can no longer finalise a forged/sibling-source observation or generate a false drift/audit notice.
+- [x] Real SQLite adversarial regression mutates target, Workspace, source, baseline, timestamp, grant and permit revision and verifies the actual claim stays `claimed` without a terminal effect, while a genuine human-authorised cancellation can still finish once. This does not change approvals, require automatic retries or enable device remediation.
+- [ ] Exact-head CI, physical consent/revocation concurrency, tamper-resistant cross-node evidence, independent observation and human-governed L5 effects remain open. Final code/security audit and LAST operator-centred UI/UX remain release gates.

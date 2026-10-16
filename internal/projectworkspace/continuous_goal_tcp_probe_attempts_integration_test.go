@@ -227,6 +227,33 @@ func TestManualTCPProbeRechecksRevocationAndNeverDialsAfterClaim(t *testing.T){
   ActorPrincipalID:"human",
  })
  if err!=nil{t.Fatal(err)}
+ // The completion writer is an independent integrity boundary. It must
+ // not trust a caller's modified snapshot to create false cross-target
+ // audit evidence even if the immutable claim ID is still valid.
+ for _,tc:=range []struct{
+  name string
+  mutate func(*GoalTCPProbeAttempt)
+ }{
+  {"wrong target",func(a *GoalTCPProbeAttempt){a.TargetPort++}},
+  {"wrong workspace",func(a *GoalTCPProbeAttempt){a.ProjectWorkspaceID="sibling"}},
+  {"wrong source",func(a *GoalTCPProbeAttempt){a.SourceID="other-source"}},
+  {"wrong baseline",func(a *GoalTCPProbeAttempt){a.BaselineIDAtClaim="other-baseline"}},
+  {"wrong claimed time",func(a *GoalTCPProbeAttempt){a.ClaimedAt++}},
+  {"forged grant",func(a *GoalTCPProbeAttempt){g:="unapproved";a.RecurringGrantID=&g}},
+  {"wrong policy revision",func(a *GoalTCPProbeAttempt){a.PermitRevision++}},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   forged:=claim
+   tc.mutate(&forged)
+   if _,err:=svc.completeTCPAttempt(ctx,forged,"connected");!errors.Is(err,ErrInvalidTransition){
+    t.Fatalf("forged claim metadata finalised: %v",err)
+   }
+   var status string
+   if err:=db.SQL().QueryRowContext(ctx,`SELECT status FROM project_goal_tcp_probe_attempts WHERE id=?`,claim.ID).Scan(&status);err!=nil||status!="claimed"{
+    t.Fatalf("forged finalisation mutated original claim: %s %v",status,err)
+   }
+  })
+ }
  // Even an unexpired permit must stop authorising a queued socket
  // if its human approver loses the tenant Workspace membership.
  if _,err:=db.SQL().ExecContext(ctx,`UPDATE workspace_memberships

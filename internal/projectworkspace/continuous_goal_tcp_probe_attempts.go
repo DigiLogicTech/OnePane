@@ -295,8 +295,24 @@ func(s *Service)completeTCPAttempt(ctx context.Context,a GoalTCPProbeAttempt,sta
   if err:=tx.QueryRowContext(ctx,
    "SELECT workspace_id FROM projects WHERE id=?",a.ProjectID).
    Scan(&tenantWorkspaceID);err!=nil{return err}
+  // Completion must correspond to the exact immutable claim, not merely
+  // an ID. An accidentally substituted or forged in-memory observation
+  // must not write an alert/event against another Project, target, baseline
+  // or consent grant. Do not accept edited attempt data at finalisation.
+  recurringID:=""
+  if a.RecurringGrantID!=nil{recurringID=*a.RecurringGrantID}
   change,err:=tx.ExecContext(ctx,`UPDATE project_goal_tcp_probe_attempts
-    SET status=?,completed_at=? WHERE id=? AND status='claimed'`,status,now,a.ID)
+    SET status=?,completed_at=? WHERE id=? AND status='claimed'
+    AND project_id=? AND goal_id=? AND permit_id=?
+    AND project_workspace_id=? AND source_id=? AND target_ipv4=?
+    AND target_port=? AND timeout_ms=? AND cadence_window=?
+    AND goal_revision=? AND permit_revision=? AND requested_by=?
+    AND claimed_at=? AND COALESCE(recurring_grant_id,'')=?
+    AND COALESCE(baseline_id_at_claim,'')=? AND baseline_revision_at_claim=?`,
+    status,now,a.ID,a.ProjectID,a.GoalID,a.PermitID,a.ProjectWorkspaceID,
+    a.SourceID,a.TargetIPv4,a.TargetPort,a.TimeoutMS,a.CadenceWindow,
+    a.GoalRevision,a.PermitRevision,a.RequestedBy,a.ClaimedAt,
+    recurringID,a.BaselineIDAtClaim,a.BaselineRevisionAtClaim)
   if err!=nil{return err}
   n,err:=change.RowsAffected();if err!=nil{return err}
   if n!=1{return ErrInvalidTransition}

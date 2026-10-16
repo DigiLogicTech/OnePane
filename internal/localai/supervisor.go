@@ -841,6 +841,19 @@ func findPythonExecutable() (string, error) {
 	return "", errors.New("Colibri serve mode requires Python 3.10+; install the Colibri component from Models")
 }
 
+// A durable non-running state is not evidence that its OS process exited.
+// No replacement is permitted while that PID is still alive, even when
+// the process identity cannot be re-established safely.
+func requiresOperatorReconciliationBeforeRestart(inst RuntimeInstance, alive bool) bool {
+ if inst.PID <= 1 || !alive { return false }
+ switch inst.Status {
+ case RuntimeHealthy, RuntimeBusy, RuntimeStarting:
+  return false // reusable only after the separate VerifyIdentity boundary
+ default:
+  return true
+ }
+}
+
 func (s *RuntimeSupervisor) Start(ctx context.Context, deploymentID string) (RuntimeInstance, error) {
 	s.residencyMu.Lock()
 	defer s.residencyMu.Unlock()
@@ -856,8 +869,16 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 	var existing *RuntimeInstance
 	if old, err := s.Instance(ctx, deploymentID); err == nil {
 		existing = &old
+		alive := old.PID > 1 && s.processes.Alive(old.PID)
+		// A failed, stopped, draining or orphaned instance may still own a
+		// process and GPU/CPU memory. Never overwrite its original PID or
+		// spawn a second engine until the operator reconciles that process.
+		// In particular, a restart must not erase a recovered orphan's PID.
+		if requiresOperatorReconciliationBeforeRestart(old, alive) {
+			return RuntimeInstance{}, errors.New("previous managed runtime process is still alive in a non-running state; operator reconciliation required before restart")
+		}
 		if (old.Status == RuntimeHealthy || old.Status == RuntimeBusy ||
-			old.Status == RuntimeStarting) && s.processes.Alive(old.PID) {
+			old.Status == RuntimeStarting) && alive {
 			// PIDs are recycled. An old "healthy" SQLite row does not
 			// prove the PID still owns this exact approved executable,
 			// model path, loopback address and port. Do not send prompts

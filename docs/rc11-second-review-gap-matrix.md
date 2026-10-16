@@ -1498,3 +1498,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 
 - [x] Protect best-case prospective GPU reclaim from malformed idle records (negative/zero allocations or an idle model claiming more bytes than the current ledger says are resident). Reject admission rather than clamping an underflow to zero and claiming an impossible model swap can fit. Regression covers contradictory memory accounting; no process mutation.
 - [ ] Exact-source hosted CI and actual GPU RAM readings remain separate acceptance, along with physical Node verification, safe human-governed L5 effects, code audit and LAST operator-first UI/UX.
+
+
+## RC11 P0-CU — deny duplicate engine launch while failed/orphaned PID lives (2026-10-17)
+
+- [x] A managed runtime row in `orphaned`, `failed`, `stopped`, `draining` or unknown state must not be overwritten with a new PID while its previous process is still alive. Refuse the replacement before Colibri swap, memory eviction or engine launch. Preserve the original PID and revision for operator reconciliation without signalling an unverified process.
+- [x] Behavioural state-table regression covers live orphan/failed/stopped/draining processes, exited processes and healthy/busy/starting identity-gated reuse; source-order regression ensures the guard precedes all launch effects.
+- [ ] Exact-source hosted CI, installed Windows process-handle recovery and actual RAM/VRAM/process-tree measurement remain acceptance gates. No automatic recovery or Level 5 network remediation authority is granted. Physical paired-Node proof, independently corroborated observations, full source security audit and LAST human-centred UI/UX still block an authorised installer.

@@ -5,6 +5,7 @@ package nodefederation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -199,6 +200,66 @@ func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {
 	}
 	if string(out.ResponseJSON) != string(out2.ResponseJSON) {
 		t.Fatal("idempotent replay changed response")
+	}
+	// Complete local scheduling -> source imported model -> pinned mTLS ->
+	// receiver admission -> original one-shot SQLite receipt -> reply decode.
+	// This remains hosted loopback, not an independently possessed device.
+	if _,err:=dbA.SQL().ExecContext(ctx,`INSERT INTO models(id,model_ref,
+	 modalities_json,static_metadata_json,trust_state,created_at,updated_at)
+	 VALUES('imported-model','example/remote','["text"]','{}','user_trusted',?,?)`,
+	 now,now);err!=nil{t.Fatal(err)}
+	cfg:=`{"federation":{"peer_node_id":"node-b","remote_deployment_id":"local-dep"}}`
+	if _,err:=dbA.SQL().ExecContext(ctx,`INSERT INTO model_deployments(
+	 id,model_id,node_id,runtime_name,runtime_config_json,status,
+	 deployment_fingerprint,revision,discovered_at,updated_at)
+	 VALUES('imported-dep','imported-model','node-b','remote-node',?,
+	 'ready','imported-fp',1,?,?)`,cfg,now,now);err!=nil{t.Fatal(err)}
+	if _,err:=dbA.SQL().ExecContext(ctx,`INSERT INTO node_capability_manifests(
+	 peer_node_id,sequence,manifest_json,received_at,expires_at,revision,updated_at)
+	 VALUES('node-b',1,?,?,?,1,?)`,
+	 `{"node_id":"node-b","protocol":"onepane-federation-v1","models":[{"deployment_id":"local-dep"}]}`,
+	 now,now+3600000,now);err!=nil{t.Fatal(err)}
+	sent:=inference.DispatchRequest{
+	 RequestID:"routed-through-transport",
+	 Deployment:inference.ModelDeployment{ID:"imported-dep",
+	  RuntimeConfigJSON:json.RawMessage(cfg)},
+	 RequestJSON:json.RawMessage(`{"prompt":"private once"}`),
+	}
+	modelTransport:=RemoteTransport{Service:svcA}
+	first,err:=modelTransport.Dispatch(ctx,sent,nil)
+	if err!=nil||!strings.Contains(string(first.ResponseJSON),"private once"){
+	 t.Fatalf("model transport failed genuine dual Node loopback: %v %+v",err,first)
+	}
+	cached,err:=modelTransport.Dispatch(ctx,sent,nil)
+	if err!=nil||string(cached.ResponseJSON)!=string(first.ResponseJSON){
+	 t.Fatalf("remote replay did not preserve exact result: %v %+v",err,cached)
+	}
+	var receipts int
+	if err:=dbB.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM
+	 node_federated_inference_receipts WHERE peer_node_id='node-a'
+	 AND remote_request_id='routed-through-transport'`).Scan(&receipts);err!=nil{
+	 t.Fatal(err)
+	}
+	if receipts!=1{t.Fatalf("replayed remote call made %d receipts",receipts)}
+	// In-flight routing decisions are not consent. The last outbound
+	// transport must recheck CURRENT pairing before sending a new prompt.
+	if _,err:=dbA.SQL().ExecContext(ctx,`UPDATE node_pairings
+	 SET local_confirmed=0 WHERE peer_node_id='node-b'`);err!=nil{t.Fatal(err)}
+	denied:=sent
+	denied.RequestID="withdrawn-consent-never-sent"
+	_,err=modelTransport.Dispatch(ctx,denied,nil)
+	var transportDenied *inference.TransportError
+	if !errors.As(err,&transportDenied)||!transportDenied.OutcomeKnown||
+	 transportDenied.Code!="remote_node_not_admitted"{
+	 t.Fatalf("withdrawn local pairing did not block pre-network: %v",err)
+	}
+	if _,err:=dbA.SQL().ExecContext(ctx,`UPDATE node_pairings
+	 SET local_confirmed=1 WHERE peer_node_id='node-b'`);err!=nil{t.Fatal(err)}
+	if _,err:=dbB.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM
+	 node_federated_inference_receipts
+	 WHERE remote_request_id='withdrawn-consent-never-sent'`).Scan(&receipts);
+	 err!=nil||receipts!=0{
+	 t.Fatalf("revoked transfer unexpectedly reached remote execution: count=%d err=%v",receipts,err)
 	}
 	// A live paired mTLS peer must not gain inference authority if the
 	// receiver's local admission manager disappears after startup.

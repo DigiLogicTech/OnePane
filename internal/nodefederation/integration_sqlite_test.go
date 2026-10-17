@@ -249,7 +249,43 @@ func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {
 	  RuntimeConfigJSON:json.RawMessage(cfg)},
 	 RequestJSON:json.RawMessage(`{"prompt":"private once"}`),
 	}
+	// Persist the exact origin inference work before the remote adapter can
+	// export its bytes. Retained requests used by revocation tests must
+	// independently satisfy source request identity, not just grant scope.
+	for _,requestID:=range []string{sent.RequestID,
+	 "workspace-revoked-no-send","project-revoked-no-send",
+	 "taskless-never-send","withdrawn-consent-never-sent"}{
+	 if _,err:=dbA.SQL().ExecContext(ctx,`INSERT INTO inference_requests(
+	  id,workspace_id,task_id,principal_id,deployment_id,status,
+	  capability_json,context_manifest_json,classification_json,
+	  request_json,created_at,updated_at)
+	  VALUES(?,'tenant','task','owner','imported-dep','executing',
+	   '{}','{}','{}',?,?,?)`,
+	  requestID,string(sent.RequestJSON),now,now);err!=nil{t.Fatal(err)}
+	}
 	modelTransport:=RemoteTransport{Service:svcA}
+	assertOriginDenied:=func(name string,r inference.DispatchRequest){
+	 t.Helper()
+	 _,err:=modelTransport.Dispatch(ctx,r,nil)
+	 var te *inference.TransportError
+	 if !errors.As(err,&te)||!te.OutcomeKnown||
+	  te.Code!="remote_node_not_admitted"{
+	  t.Fatalf("%s: unbound inference admitted: %v",name,err)
+	 }
+	}
+	missing:=sent
+	missing.RequestID="unrecorded-inference"
+	assertOriginDenied("absent origin request",missing)
+	altered:=sent
+	altered.RequestJSON=json.RawMessage(`{"prompt":"modified"}`)
+	assertOriginDenied("different request bytes",altered)
+	wrongWorkspace:=sent
+	wrongWorkspace.WorkspaceID="foreign"
+	assertOriginDenied("wrong inference workspace",wrongWorkspace)
+	wrongTask:=sent
+	otherTask:="foreign-task"
+	wrongTask.TaskID=&otherTask
+	assertOriginDenied("wrong inference Task",wrongTask)
 	first,err:=modelTransport.Dispatch(ctx,sent,nil)
 	if err!=nil||!strings.Contains(string(first.ResponseJSON),"private once"){
 	 t.Fatalf("model transport failed genuine dual Node loopback: %v %+v",err,first)
@@ -265,6 +301,9 @@ func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {
 	 t.Fatal(err)
 	}
 	if receipts!=1{t.Fatalf("replayed remote call made %d receipts",receipts)}
+	if _,err:=dbA.SQL().ExecContext(ctx,`UPDATE inference_requests
+	 SET status='succeeded' WHERE id=?`,sent.RequestID);err!=nil{t.Fatal(err)}
+	assertOriginDenied("terminal source inference",sent)
 	// Independent human Project and Project Workspace grants must BOTH
 	// remain live at the moment the next private prompt leaves the origin.
 	assertNoRemoteEffect:=func(requestID string){

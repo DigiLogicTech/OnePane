@@ -340,17 +340,21 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 			// A model-resource wait is a real persisted suspension, not a
 			// dependency-free Task that should resume on every worker tick.
 			// Retain the same pinned model and local-only routing after wake.
-			if hasModelWaitField(json.RawMessage(cont))&&decodeModelWait(json.RawMessage(cont))==nil {
-                return fmt.Errorf("corrupt persisted local model wait for Worker run %s",v.run)
-            }
-			if modelWait:=decodeModelWait(json.RawMessage(cont));modelWait!=nil &&
-				s.clock.UnixMilli()<modelWait.RetryAtMS {
-				ready=false
+			// Parse only the wait category actually present. Most active
+			// attempts have no resource wait; avoid repeatedly rescanning the
+			// same JSON document on every tick of a low-power host.
+			if hasModel{
+				modelWait:=decodeModelWait(json.RawMessage(cont))
+				if modelWait==nil{
+					return fmt.Errorf("corrupt persisted local model wait for Worker run %s",v.run)
+				}
+				if s.clock.UnixMilli()<modelWait.RetryAtMS{ready=false}
 			}
-			if hasToolchainWaitField(json.RawMessage(cont))&&decodeToolchainWait(json.RawMessage(cont))==nil{
-				return fmt.Errorf("corrupt persisted Workspace toolchain wait for Worker run %s",v.run)
-			}
-			if toolchainWait:=decodeToolchainWait(json.RawMessage(cont));toolchainWait!=nil{
+			if hasToolchain{
+				toolchainWait:=decodeToolchainWait(json.RawMessage(cont))
+				if toolchainWait==nil{
+					return fmt.Errorf("corrupt persisted Workspace toolchain wait for Worker run %s",v.run)
+				}
 				ready=false
 				if s.clock.UnixMilli()>=toolchainWait.RetryAtMS{
 					registered,checkErr:=isApprovedToolchainRegisteredRunning(ctx,s.db,toolchainWait)

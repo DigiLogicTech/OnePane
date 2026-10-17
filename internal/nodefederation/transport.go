@@ -1,6 +1,7 @@
 package nodefederation
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/DigiLogicTech/OnePane/internal/inference"
 	"github.com/DigiLogicTech/OnePane/internal/localai"
+	"github.com/DigiLogicTech/OnePane/internal/observation"
 )
 
 type LocalInferenceExecutor interface {
@@ -124,9 +126,16 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
-	d := json.NewDecoder(r.Body)
-	d.DisallowUnknownFields()
+ // Every model, pairing and management request is a single, size-bounded
+ // unambiguous JSON document. Decode-only admission silently accepted
+ // repeated keys (last wins), including escaped field-name aliases.
+ raw,err:=io.ReadAll(http.MaxBytesReader(w,r.Body,4<<20))
+ if err!=nil||observation.ValidateUnambiguousJSON(raw)!=nil{
+  writeJSON(w,400,map[string]string{"error":"invalid request"})
+  return false
+ }
+ d:=json.NewDecoder(bytes.NewReader(raw))
+ d.DisallowUnknownFields()
 	if err := d.Decode(v); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "invalid request"})
 		return false

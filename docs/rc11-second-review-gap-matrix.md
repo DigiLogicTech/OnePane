@@ -1631,3 +1631,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Refuse empty, malformed or greater-than-3-MiB federated model response JSON and malformed or greater-than-64-KiB usage JSON before terminal success. Persist explicit `invalid_remote_response`/`invalid_remote_usage` known-error receipts with the original executing-claim CAS instead of storing non-replayable or oversized success JSON on low-memory Nodes. Preserve the existing one-time model execution contract.
 - [x] Non-network unit regression covers valid response/optional usage, malformed JSON and both oversized response/metadata classes. Historical large streaming results require a separately designed chunked protocol rather than silently increasing HTTP/SQLite resource use.
 - [ ] Hosted CI and installed model stress acceptance remain open; physical pairing, independently trusted Level 5 observation, separately approved remediation, final audit and LAST operator-first UI/UX remain release gates.
+
+
+## RC11 P0-DN — reject duplicate JSON fields on every federation API request (2026-10-17)
+
+- [x] Shared paired-Node federation request decoder now reads at most 4 MiB before parsing, applies existing depth-limited Unicode-alias-aware `ValidateUnambiguousJSON`, and then applies the current strict unknown-field and single-document EOF checks. Repeated or escaped-equivalent request keys (including in nested inference JSON) cannot silently override previously authorised fields. Failures remain generic `400 invalid request`, without echoing payloads.
+- [x] Decoder regression covers two root documents, duplicate root keys, escaped aliases, nested repeated keys in allowed raw message envelopes and oversized requests; valid requests continue to decode. No new network rights, agents or pairing paths.
+- [ ] Hosted source CI, real paired-Node payload compatibility, and independent physical Node/Level 5 trust remain acceptance gates, along with code audit and LAST operator-first UI/UX before an authorised installer.

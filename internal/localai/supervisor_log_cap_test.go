@@ -39,7 +39,7 @@ func TestManagedRuntimeLogIsBoundedEvenWhenProcessNeverRestarts(t *testing.T){
  stat,_=f.Stat()
  if stat.Size()!=maxManagedRuntimeLogBytes{t.Fatal("runtime log grew after cap")}
  if _,err:=f.Seek(0,0);err!=nil{t.Fatal(err)}
- first:=make([]byte,9)
+ first:=make([]byte,10)
  if _,err:=f.Read(first);err!=nil{t.Fatal(err)}
  if string(first)!="existing p"{t.Fatalf("old diagnostic bytes were replaced: %q",first)}
 }

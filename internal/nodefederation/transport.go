@@ -57,7 +57,11 @@ func (t RemoteTransport) Dispatch(ctx context.Context, req inference.DispatchReq
 	// Scheduling is not a durable authority: a peer can expire, revoke or
 	// withdraw the advertised model after routing but before transport.
 	// Fail before sending any prompt or starting a network request.
-	if err := t.Service.authorizeRemoteModelDispatchForTask(ctx,cfg.Federation.PeerNodeID,
+	if err := t.Service.requirePersistedInferenceDispatch(ctx,req);err!=nil{
+        return inference.DispatchResult{},&inference.TransportError{
+            Code:"remote_node_not_admitted",OutcomeKnown:true,Err:err}
+    }
+    if err := t.Service.authorizeRemoteModelDispatchForTask(ctx,cfg.Federation.PeerNodeID,
         req.Deployment.ID,cfg.Federation.RemoteDeploymentID,req.TaskID,req.WorkspaceID);err!=nil{
 		return inference.DispatchResult{},&inference.TransportError{
 			Code:"remote_node_not_admitted",OutcomeKnown:true,Err:err}

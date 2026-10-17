@@ -6,6 +6,7 @@ import (
  "errors"
 
  "github.com/DigiLogicTech/OnePane/internal/featurepolicy"
+ "github.com/DigiLogicTech/OnePane/internal/inference"
 )
 
 // ErrFederatedDispatchNotAdmitted means no remote inference payload was
@@ -30,6 +31,25 @@ func(s *Service) authorizeRemoteModelDispatch(
  // Historical internal snapshot helper: no export, no network authority.
  return s.authorizeRemoteModelDispatchSnapshot(ctx,peerID,
   localDeploymentID,remoteDeploymentID,nil,"")
+}
+
+// requirePersistedInferenceDispatch ensures this exact inference request
+// is still executing and belongs to its claimed Task and deployment.
+func(s *Service) requirePersistedInferenceDispatch(ctx context.Context,
+ req inference.DispatchRequest)error{
+ if s==nil||s.db==nil||req.TaskID==nil||*req.TaskID==""||
+  req.RequestID==""||req.WorkspaceID==""||req.Deployment.ID==""||
+  len(req.RequestJSON)==0{return ErrFederatedDispatchNotAdmitted}
+ var present int
+ err:=s.db.QueryRowContext(ctx,`SELECT 1 FROM inference_requests i
+  JOIN tasks t ON t.id=i.task_id AND t.workspace_id=i.workspace_id
+  WHERE i.id=? AND i.task_id=? AND i.workspace_id=?
+   AND i.deployment_id=? AND i.provider_connection_id IS NULL
+   AND i.status='executing' AND i.request_json=?`,
+  req.RequestID,*req.TaskID,req.WorkspaceID,req.Deployment.ID,
+  string(req.RequestJSON)).Scan(&present)
+ if err!=nil||present!=1{return ErrFederatedDispatchNotAdmitted}
+ return nil
 }
 
 // Actual remote network dispatch MUST pass both persisted Project and

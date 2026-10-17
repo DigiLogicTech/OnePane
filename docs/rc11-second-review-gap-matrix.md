@@ -1624,3 +1624,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] After an already admitted inbound inference effect, every terminal receipt writer requires the original `executing` state and exact immutable row identity (receipt ID, request digest, peer Node, remote request ID and deployment ID), and checks SQLite RowsAffected=1. A reconciled, superseded or missing receipt cannot be silently overwritten or returned as a successful inference. Retains the prior bounded cancellation-independent receipt-only cleanup.
 - [x] Real SQLite integration injects an intervening independent `unknown/operator_reconciliation_pending` receipt transition *during* a simulated model execution. Success, error and invalid-output branches must all return a conflict without overwriting the original unknown evidence or running the effect a second time.
 - [ ] Exact-head hosted CI and real host interruption / distributed receipt reconciliation remain unverified. This does not add a retry, grant physical Node identity or L5 remediation authority. Final integrated security audit, physical Windows/Linux QA and LAST human-first UI/UX remain release gates.
+
+
+## RC11 P0-DM — bound federated inference success payloads (2026-10-17)
+
+- [x] Refuse empty, malformed or greater-than-3-MiB federated model response JSON and malformed or greater-than-64-KiB usage JSON before terminal success. Persist explicit `invalid_remote_response`/`invalid_remote_usage` known-error receipts with the original executing-claim CAS instead of storing non-replayable or oversized success JSON on low-memory Nodes. Preserve the existing one-time model execution contract.
+- [x] Non-network unit regression covers valid response/optional usage, malformed JSON and both oversized response/metadata classes. Historical large streaming results require a separately designed chunked protocol rather than silently increasing HTTP/SQLite resource use.
+- [ ] Hosted CI and installed model stress acceptance remain open; physical pairing, independently trusted Level 5 observation, separately approved remediation, final audit and LAST operator-first UI/UX remain release gates.

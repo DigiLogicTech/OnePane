@@ -513,6 +513,19 @@ func inboundRequestHash(in RemoteInferenceRequest)(string,error){
  return hex.EncodeToString(sum[:]),nil
 }
 
+// Keep one-shot inference payloads below the current four-MiB federation
+// response transport bound, with a separate small metadata budget. This is
+// not a substitute for a future chunked/streamed federation protocol.
+func classifyFederatedOutput(r inference.DispatchResult)string{
+ if len(r.ResponseJSON)==0||len(r.ResponseJSON)>3<<20||
+  !json.Valid(r.ResponseJSON){return "invalid_remote_response"}
+ if len(r.UsageJSON)>64<<10||
+  (len(r.UsageJSON)>0&&!json.Valid(r.UsageJSON)){
+  return "invalid_remote_usage"
+ }
+ return ""
+}
+
 // ErrFederatedReceiptConflict means an already executing operation did not
 // successfully commit its exact terminal receipt. Do not retry that effect.
 var ErrFederatedReceiptConflict=errors.New("federated inference receipt is not in the original executing state")
@@ -612,15 +625,16 @@ func (s *Service) executeInbound(ctx context.Context,peer string,in RemoteInfere
   }
   return RemoteInferenceResponse{ErrorCode:code,OutcomeKnown:known},nil
  }
- if !json.Valid(result.ResponseJSON){
+ code:=classifyFederatedOutput(result)
+ if code!=""{
   if err:=s.finishInboundInferenceReceipt(ctx,`UPDATE node_federated_inference_receipts
-   SET status='failed',error_code='invalid_remote_response',completed_at=?
+   SET status='failed',error_code=?,completed_at=?
    WHERE id=? AND request_hash=? AND status='executing'
     AND peer_node_id=? AND remote_request_id=? AND deployment_id=?`,
-   completed,idv,digest,peer,in.RequestID,in.DeploymentID);err!=nil{
+   code,completed,idv,digest,peer,in.RequestID,in.DeploymentID);err!=nil{
    return RemoteInferenceResponse{},err
   }
-  return RemoteInferenceResponse{ErrorCode:"invalid_remote_response",OutcomeKnown:true},nil
+  return RemoteInferenceResponse{ErrorCode:code,OutcomeKnown:true},nil
  }
  usageJSON:=result.UsageJSON
  if len(usageJSON)==0{usageJSON=json.RawMessage(`{}`)}

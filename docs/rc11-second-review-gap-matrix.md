@@ -1679,3 +1679,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 
 - [x] The integration fixture no longer attempts an impossible `node_capability_manifests.sequence=0` update. Migration 0016 already enforces `sequence >= 1` and `json_valid(manifest_json)` in SQLite. Continue testing caller-level source/protocol/receipt provenance, expiration and permission revocation as independent reasons for denial; keep the service-side positive-sequence predicate as defence in depth.
 - [ ] Hosted exact-head CI is the acceptance check; actual independently paired physical-Node verification and separate L5 effects remain unavailable without authorised physical QA. No installer.
+
+
+## RC11 P0-DU — sender-side strict inference JSON preflight before network transport (2026-10-17)
+
+- [x] A federated model request now locally validates the supported protocol, exact nonblank request and deployment identifiers, and ambiguity-free JSON in its model request, context and classification envelopes before opening a remote HTTP transport. Unicode-escaped duplicate object field names, nested duplicate keys and malformed input fail as `invalid_federated_payload` with `OutcomeKnown=true`: no remote model invocation has occurred, and the untrusted content is not echoed in error text.
+- [x] Pure deterministic regression verifies legitimate JSON, missing/padded request identifiers, missing deployment, repeated/escaped keys, malformed body, duplicate context/classification data and wrong protocol. Receiver-side decoding and exact one-time idempotent receipts remain separate checks.
+- [ ] The real Node still requires human pairing, transport pins and model authority; this check grants none. Hosted full source CI, physical paired-Node and L5 verified postconditions, security audit, installed QA and LAST user-first UI/UX remain release gates.

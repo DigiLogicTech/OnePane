@@ -67,6 +67,10 @@ func (t RemoteTransport) Dispatch(ctx context.Context, req inference.DispatchReq
 		return inference.DispatchResult{}, &inference.TransportError{Code: "peer_endpoint_invalid", OutcomeKnown: true, Err: err}
 	}
 	in := RemoteInferenceRequest{Protocol: ProtocolVersion, RequestID: req.RequestID, DeploymentID: cfg.Federation.RemoteDeploymentID, RequestJSON: req.RequestJSON}
+ if err:=validateOutboundFederatedInference(in);err!=nil{
+  return inference.DispatchResult{},&inference.TransportError{
+   Code:"invalid_federated_payload",OutcomeKnown:true,Err:err}
+ }
 	var out RemoteInferenceResponse
 	err = postJSON(ctx, t.Service.pinnedClient(fp, true), endpoint+"/federation/v1/inference", in, &out)
 	if err != nil {
@@ -89,6 +93,27 @@ func classifyFederationTransportFailure(err error)*inference.TransportError{
  }
  return &inference.TransportError{Code:"remote_transport_error",
   OutcomeKnown:false,Err:err}
+}
+
+// The receiver's strict decoder rejects ambiguous JSON at every depth.
+ // Reject the same unsafe request locally, BEFORE opening a peer socket,
+ // so a malformed client payload is not misclassified as an uncertain
+ // network-side model effect. No Project/Node authority comes from fields
+ // inside the untrusted model request JSON itself.
+var ErrInvalidOutboundFederatedInference=errors.New("invalid outbound federation inference envelope")
+func validateOutboundFederatedInference(in RemoteInferenceRequest)error{
+ if in.Protocol!=ProtocolVersion||in.RequestID==""||
+  strings.TrimSpace(in.RequestID)!=in.RequestID||in.DeploymentID==""||
+  observation.ValidateUnambiguousJSON(in.RequestJSON)!=nil{
+  return ErrInvalidOutboundFederatedInference
+ }
+ if (len(in.ContextManifest)>0&&
+  observation.ValidateUnambiguousJSON(in.ContextManifest)!=nil)||
+  (len(in.ClassificationJSON)>0&&
+   observation.ValidateUnambiguousJSON(in.ClassificationJSON)!=nil){
+  return ErrInvalidOutboundFederatedInference
+ }
+ return nil
 }
 
 // An authenticated Node response is still untrusted *data*. A 200 response

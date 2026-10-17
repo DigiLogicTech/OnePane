@@ -17,6 +17,10 @@ func TestTrustedNodeGrantMustBeExplicitAndExact(t *testing.T){
         {"empty",`{"onepane_routing":{"trusted_node_compute":{"enabled":true,"allowed_node_ids":[]}}}`,false,true},
         {"string grant",`{"onepane_routing":{"trusted_node_compute":"all"}}`,false,true},
         {"invalid routing",`{"onepane_routing":true}`,false,true},
+        {"duplicate root routing",`{"onepane_routing":{},"onepane_routing":{"trusted_node_compute":{"enabled":true,"allowed_node_ids":["node-a"]}}}`,false,true},
+        {"duplicate enabled",`{"onepane_routing":{"trusted_node_compute":{"enabled":false,"enabled":true,"allowed_node_ids":["node-a"]}}}`,false,true},
+        {"Unicode-alias grant key",`{"onepane_routing":{"trusted_node_compute":{},"trusted_node_comput\u0065":{"enabled":true,"allowed_node_ids":["node-a"]}}}`,false,true},
+        {"duplicate unrelated settings",`{"other":{"value":false,"value":true},"onepane_routing":{"trusted_node_compute":{"enabled":true,"allowed_node_ids":["node-a"]}}}`,false,true},
     }
     for _,tc:=range cases{
         t.Run(tc.name,func(t *testing.T){

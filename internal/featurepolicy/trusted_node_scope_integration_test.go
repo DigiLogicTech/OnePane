@@ -61,6 +61,21 @@ func TestTrustedNodeGrantRequiresPersistedProjectAndWorkspaceIntersection(t *tes
     }
     if other,err:=scopes.TrustedNodesForTask(ctx,"other-tenant",row.ID);
         err!=nil||len(other)!=0{t.Fatalf("cross-tenant grant=%v err=%v",other,err)}
+    // Duplicate keys in either persisted half of the human transfer
+    // grant may be parsed differently by another consumer: fail closed.
+    ambiguous:=`{"onepane_routing":{},"onepane_routing":{"trusted_node_compute":{"enabled":true,"allowed_node_ids":["node-b"]}}}`
+    if _,err:=db.SQL().ExecContext(ctx,
+        "UPDATE projects SET project_policy_json=? WHERE id=?",ambiguous,p.ID);err!=nil{t.Fatal(err)}
+    if got,err:=scopes.TrustedNodesForTask(ctx,"tenant",row.ID);
+        err==nil||len(got)>0{t.Fatalf("ambiguous Project granted remote access: %v %v",got,err)}
+    if _,err:=db.SQL().ExecContext(ctx,
+        "UPDATE projects SET project_policy_json=? WHERE id=?",pairPolicy,p.ID);err!=nil{t.Fatal(err)}
+    if _,err:=db.SQL().ExecContext(ctx,
+        "UPDATE project_workspaces SET ai_settings_json=? WHERE id=?",ambiguous,w.ID);err!=nil{t.Fatal(err)}
+    if got,err:=scopes.TrustedNodesForTask(ctx,"tenant",row.ID);
+        err==nil||len(got)>0{t.Fatalf("ambiguous Workspace granted remote access: %v %v",got,err)}
+    if _,err:=db.SQL().ExecContext(ctx,
+        "UPDATE project_workspaces SET ai_settings_json=? WHERE id=?",narrowedPolicy,w.ID);err!=nil{t.Fatal(err)}
     if _,err:=db.SQL().ExecContext(ctx,
         "UPDATE project_workspaces SET ai_settings_json='{}' WHERE id=?",w.ID);err!=nil{t.Fatal(err)}
     ids,err=scopes.TrustedNodesForTask(ctx,"tenant",row.ID)

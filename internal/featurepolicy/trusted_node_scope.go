@@ -10,6 +10,8 @@ import (
     "regexp"
     "sort"
     "strings"
+
+    "github.com/DigiLogicTech/OnePane/internal/observation"
 )
 
 // Trusted Node execution requires independently persisted, explicit grants
@@ -27,6 +29,12 @@ type trustedNodeComputeGrant struct {
 var validTrustedNodeID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
 
 func decodeTrustedNodeGrant(raw string) (trustedNodeComputeGrant, error) {
+    // A dual-consent document must have exactly one interpretation.
+    // encoding/json silently accepts duplicate (including Unicode-alias)
+    // keys. Validate the ENTIRE stored document before extracting grants.
+    if err:=observation.ValidateUnambiguousJSON(json.RawMessage(raw));err!=nil{
+        return trustedNodeComputeGrant{},fmt.Errorf("ambiguous stored Node transfer policy")
+    }
     var doc map[string]json.RawMessage
     if err := json.Unmarshal([]byte(raw), &doc); err != nil || doc == nil {
         return trustedNodeComputeGrant{}, fmt.Errorf("invalid stored policy document")

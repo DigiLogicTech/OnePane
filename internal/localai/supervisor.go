@@ -84,6 +84,10 @@ func (b *OSProcessBackend) Start(ctx context.Context, spec LaunchSpec) (int, err
 		return 0, errors.New("managed runtime executable must be an absolute path")
 	}
 	cmd := exec.CommandContext(ctx, spec.Executable, spec.Args...)
+    // A Colibri Python server can exit while a child engine still holds
+    // inherited stdout/stderr pipes open. Bound Wait's I/O pump cleanup
+    // so a dead parent does not appear alive forever in the supervisor.
+    cmd.WaitDelay=5*time.Second
 	cmd.Env = append([]string(nil), spec.Env...)
 	if spec.Dir != "" {
 		cmd.Dir = spec.Dir

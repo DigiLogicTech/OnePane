@@ -1742,3 +1742,16 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] The last `RemoteTransport.Dispatch` now requires a durable, currently `executing` origin `inference_requests` row before sending remote model bytes. It must match the exact request ID, canonical Task and Workspace IDs, deployment ID, provider-free route, and byte-identical stored JSON payload; a direct caller cannot borrow an authorised Task's transfer grants for unrelated work.
 - [x] Real dual-Node mTLS + independent SQLite integration seeds the original inference records, confirms live authorised one-shot inference and replay, rejects a missing origin, changed model-request bytes, mismatched Task/Workspace and terminal `succeeded` request, and still requires Project and Workspace grant revocation to prevent new receiver receipts.
 - [ ] Hosted exact-source CI in progress. Queued-model and process-restart evidence must still be checked on actual constrained hardware; no physical Node action or remote network scan was performed. Independently verified reversible Level 5 effects, final integrated security audit and LAST operator-first UI/UX remain release gates.
+
+
+## RC11 P0-ED — Colibri planner output bounded during process execution (2026-10-17)
+
+- [x] The read-only native Colibri placement planner no longer accumulates arbitrary stdout+stderr using `exec.Command.CombinedOutput` before performing an after-the-fact 128-KiB size check. A concurrency-safe writer drains the subprocess while retaining at most 128 KiB in OnePane RAM and reports oversized output without leaking the launcher output into errors. The existing 20-second context timeout remains in place.
+- [x] Deterministic unit regression covers normal output, a large burst of planner output, and continued output after the limit. This preserves existing Colibri native package and model-pool restrictions and changes no runtime backend selection.
+- [ ] Hosted exact-head CI and real constrained-hardware Colibri model-plan acceptance remain pending. This limits OnePane's memory capture, not the native subprocess's independent RAM/VRAM allocation or peak RSS.
+
+## RC11 P0-EE — Colibri automatic context reads cannot allocate unbounded metadata (2026-10-17)
+
+- [x] Automatic Colibri context detection now requires a regular non-symlinked `config.json`, rejects files statically over 1 MiB, and uses `io.LimitReader` for a hard 1 MiB + 1 bound even if the metadata file changes after `Lstat`. Oversize, inaccessible or invalid metadata falls back to the existing conservative 8192-token initial context.
+- [x] Regression covers a legitimate model context declaration, oversize metadata and a symlinked config. Other model-discovery limits are preserved; nothing silently promotes declared context to verified inference capacity.
+- [ ] Hosted source CI, actual Windows/Ubuntu SSD/model install, full Colibri-native executable QA and independent peak-RSS measurements on low-memory hardware remain release acceptance work.

@@ -1762,3 +1762,22 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] `ColibriPoolModels` now uses the same `readBoundedColibriConfig` helper as automatic context inference. Both read at most 1 MiB + 1 from model metadata, check regular-file status and decline oversize or symlinked `config.json` values. Model-pool discovery previously performed `os.ReadFile` after a bounded `Lstat`, allowing a replaced or expanding file to allocate unbounded RAM between those operations.
 - [x] Unit regression independently calls the common bounded helper with an oversized file, confirms automatic context fallback to 8192 and keeps a legitimate declared context. This is read-only; it does not change model routing, downloaded model artifacts, installer storage or Colibri's native memory manager.
 - [ ] Exact-head full source CI, externally invoked package robustness and peak memory proof on the Windows/Ubuntu constrained hosts remain pending, as do physical Node and Level 5 effectiveness gates, final code/security audit and LAST UI/UX review.
+
+
+## RC11 P0-EG — atomic Colibri tier/pin changes under shared runtime residency lock (2026-10-18)
+
+- [x] `SetColibriTier` now owns the supervisor residency lock continuously while reading the current managed Colibri deployment, checking whether the engine is busy, safely stopping an idle engine and persisting the new tier. A concurrent inference `Acquire`, model start/swap or idle reaper cannot interleave between the idle check and the config write. A missing supervisor is an explicit refusal.
+- [x] Tier persistence uses SQLite `json_set` on the `colibri_tier` field rather than rewriting a stale full `runtime_config_json` snapshot; independent deployment properties and the operator's pin preference survive. `SetColibriPin` shares the same residency lock when a supervisor is present, removing the pin/eviction window. Regression holds the residency mutex, verifies tier/pin updates block until released, and checks the exact resulting settings. Source [CI #39059608276](https://github.com/DigiLogicTech/OnePane/actions/runs/39059608276) passed.
+- [ ] Real Colibri backends, Windows/Ubuntu model swap, post-crash pin/residency and CPU/GPU resource pressure are not established by synthetic tests.
+
+## RC11 P0-EH — cap live managed-model runtime logs while inference continues (2026-10-18)
+
+- [x] The managed subprocess launcher now drains stdout/stderr into one concurrency-safe writer with a 4-MiB total on-disk limit for the active runtime log. The old `openManagedRuntimeLog` initial rollover alone could not prevent a long-running, verbose engine from exhausting a small SSD/C: partition. Rejected surplus bytes are acknowledged and discarded rather than blocking inference.
+- [x] File descriptors are closed after the process has exited and the logging pumps finish (`cmd.Wait`), not immediately after `Start`. Regression writes concurrent oversized streams against the protected log and an actual child process writes over 24 MiB through the production `OSProcessBackend.Start` path. Existing diagnostic prefix and the strict 4-MiB bound must survive.
+- [x] On Windows, verified process-tree termination via `taskkill.exe` no longer buffers unbounded utility output or includes raw command stdout/stderr in surfaced errors. Exit errors remain visible without private utility output.
+- [ ] Hosted exact-head full CI [#39059928089](https://github.com/DigiLogicTech/OnePane/actions/runs/39059928089) pending at this checkpoint; physical Windows model logs, process-tree cleanup and installer storage location must be independently tested. Bounded OnePane log growth is not a limit on upstream model cache or memory allocation.
+
+## RC11 release gates unchanged
+
+- [ ] Independent physical paired-Node source/observer trust and actual local model runtime acceptance; human-approved reversible Level 5 actions with independent verified postconditions; deployed constrained-host Colibri CPU/GPU/RAM and Windows x64 + Ubuntu amd64 installed QA; complete integrated code/security audit. The human-focused UI/UX review is LAST before user-authorised MSI/release packaging.
+- [ ] No merge or installer authorisation from this hosted source-only batch. Preserve Project, model, secret and operator-selected non-C: data locations.

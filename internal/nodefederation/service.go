@@ -597,12 +597,13 @@ func (s *Service) Revoke(ctx context.Context, peer string) error {
 }
 
 var ErrFederationPayloadTooLarge=errors.New("federation JSON envelope exceeds transport limit")
+var ErrFederationPayloadInvalid=errors.New("federation request cannot be JSON encoded")
 var ErrFederationResponseTooLarge=errors.New("federation response exceeds transport limit")
 var ErrFederationResponseInvalid=errors.New("federation response is missing or ambiguous")
 
 func postJSON(ctx context.Context, c *http.Client, urlv string, in, out any) error {
  b,err:=json.Marshal(in)
- if err!=nil{return fmt.Errorf("invalid federation request payload: %w",err)}
+ if err!=nil{return ErrFederationPayloadInvalid}
  if len(b)>4<<20{return ErrFederationPayloadTooLarge}
  req,err:=http.NewRequestWithContext(ctx,http.MethodPost,urlv,strings.NewReader(string(b)))
  if err!=nil{return err}

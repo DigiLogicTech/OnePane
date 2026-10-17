@@ -70,9 +70,25 @@ func (t RemoteTransport) Dispatch(ctx context.Context, req inference.DispatchReq
 	var out RemoteInferenceResponse
 	err = postJSON(ctx, t.Service.pinnedClient(fp, true), endpoint+"/federation/v1/inference", in, &out)
 	if err != nil {
-		return inference.DispatchResult{}, &inference.TransportError{Code: "remote_transport_error", OutcomeKnown: false, Err: err}
-	}
-	return validateRemoteInferenceReply(out)
+  return inference.DispatchResult{},classifyFederationTransportFailure(err)
+ }
+ return validateRemoteInferenceReply(out)
+}
+
+// Only serialization and admission-size errors are provably pre-network.
+ // A TLS error, timeout, invalid acknowledgement or failed read MAY have
+ // followed execution on the other Node and remains outcome-unknown.
+func classifyFederationTransportFailure(err error)*inference.TransportError{
+ if errors.Is(err,ErrFederationPayloadTooLarge){
+  return &inference.TransportError{Code:"remote_payload_too_large",
+   OutcomeKnown:true,Err:err}
+ }
+ if errors.Is(err,ErrFederationPayloadInvalid){
+  return &inference.TransportError{Code:"remote_payload_invalid",
+   OutcomeKnown:true,Err:err}
+ }
+ return &inference.TransportError{Code:"remote_transport_error",
+  OutcomeKnown:false,Err:err}
 }
 
 // An authenticated Node response is still untrusted *data*. A 200 response

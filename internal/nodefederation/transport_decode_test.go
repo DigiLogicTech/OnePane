@@ -22,7 +22,7 @@ func TestFederationDecodeRequiresSingleJSONDocument(t *testing.T) {
 		{name: "garbage suffix", body: `{"request_id":"id"} trailing`},
 		{name: "unknown field", body: `{"request_id":"id","admin":true}`},
 		{name: "duplicate top-level key", body: `{"request_id":"id","request_id":"different"}`},
-		{name: "duplicate escaped key alias", body: `{"request_id":"id","request\\u005fid":"different"}`},
+		{name: "duplicate escaped key alias", body: `{"request_id":"id","request\u005fid":"different"}`},
 		{name: "oversized request", body: `{"request_id":"id","unused":"`+strings.Repeat("x",4<<20)+`"}`},
 		{name: "deep nested duplicate", body: `{"request_id":"id","nested":{"a":1,"a":2}}`},
 		{name: "malformed first document", body: `{"request_id":`},
@@ -51,7 +51,7 @@ func TestFederationDecodeRequiresSingleJSONDocument(t *testing.T) {
 func TestFederationDecoderRejectsNestedDuplicateInAllowedEnvelope(t *testing.T){
  for _,raw:=range []string{
   `{"request_json":{"model":"alpha","model":"beta"}}`,
-  `{"request_json":{"name":"alpha","na\\u006de":"beta"}}`,
+  `{"request_json":{"name":"alpha","na\u006de":"beta"}}`,
  }{
   req:=httptest.NewRequest(http.MethodPost,"/federation/v1/inference",strings.NewReader(raw))
   recorder:=httptest.NewRecorder()

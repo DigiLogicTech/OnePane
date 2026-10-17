@@ -88,23 +88,69 @@ func (b *OSProcessBackend) Start(ctx context.Context, spec LaunchSpec) (int, err
 	if spec.Dir != "" {
 		cmd.Dir = spec.Dir
 	}
-	// Preserve bounded startup diagnostics; the process owns no global stdout.
+	// A managed runtime may write indefinitely without restarting. Route
+	// both streams through one capped writer while continuing to drain their
+	// pipes; rotating only on the NEXT launch did not protect a small disk.
+ var logFile *os.File
  if spec.LogPath != "" {
-  logFile,err:=openManagedRuntimeLog(spec.LogPath)
+  var err error
+  logFile,err=openManagedRuntimeLog(spec.LogPath)
   if err!=nil{return 0,err}
-  defer logFile.Close()
-  cmd.Stdout,cmd.Stderr=logFile,logFile
- } else {cmd.Stdout, cmd.Stderr = io.Discard, io.Discard}
+  capWriter,err:=newBoundedRuntimeLogWriter(logFile)
+  if err!=nil{_ = logFile.Close();return 0,err}
+  cmd.Stdout,cmd.Stderr=capWriter,capWriter
+ } else {cmd.Stdout, cmd.Stderr=io.Discard,io.Discard}
 	if err := cmd.Start(); err != nil {
+        if logFile!=nil{_ = logFile.Close()}
 		return 0, err
 	}
 	pid := cmd.Process.Pid
 	b.mu.Lock()
 	b.cmds[pid] = cmd
 	b.mu.Unlock()
-	go func() { _ = cmd.Wait(); b.mu.Lock(); delete(b.cmds, pid); b.mu.Unlock() }()
+	go func() {
+  _=cmd.Wait()
+  // Only close after Wait has drained all stdout/stderr pumps.
+  if logFile!=nil{_ = logFile.Close()}
+  b.mu.Lock();delete(b.cmds,pid);b.mu.Unlock()
+ }()
 	return pid, nil
 }
+// Stream a model's diagnostics without ever letting a long-lived process
+// grow the current log beyond 4 MiB. Writes beyond the cap are acknowledged
+// and discarded, so a noisy model cannot block inference or fill the disk.
+const maxManagedRuntimeLogBytes int64=4<<20
+type boundedRuntimeLogWriter struct{
+ mu sync.Mutex
+ file *os.File
+ remaining int64
+}
+func newBoundedRuntimeLogWriter(file *os.File)(*boundedRuntimeLogWriter,error){
+ if file==nil{return nil,errors.New("managed runtime log unavailable")}
+ info,err:=file.Stat()
+ if err!=nil{return nil,err}
+ if !info.Mode().IsRegular()||info.Size()<0{
+  return nil,errors.New("invalid managed runtime log target")
+ }
+ remaining:=maxManagedRuntimeLogBytes-info.Size()
+ if remaining<0{remaining=0}
+ return &boundedRuntimeLogWriter{file:file,remaining:remaining},nil
+}
+func(w *boundedRuntimeLogWriter)Write(p []byte)(int,error){
+ if w==nil{return 0,errors.New("managed runtime log writer unavailable")}
+ w.mu.Lock()
+ defer w.mu.Unlock()
+ original:=len(p)
+ if w.remaining<=0{return original,nil}
+ permitted:=original
+ if int64(permitted)>w.remaining{permitted=int(w.remaining)}
+ n,err:=w.file.Write(p[:permitted])
+ w.remaining-=int64(n)
+ if err!=nil{return n,err}
+ if n!=permitted{return n,io.ErrShortWrite}
+ return original,nil
+}
+
 // Managed inference logs may contain private paths or request data. The
 // launcher must not truncate a previous log, follow a linked log file or
 // operate in a shared directory. All checks precede the subprocess spawn;

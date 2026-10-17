@@ -270,7 +270,7 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 		return s.finishTransportError(ctx,q.ID,nil,
 			&TransportError{Code:"task_agent_profile_revoked",OutcomeKnown:true,Err:err},cmd)
 	}
-	result, dispatchErr := transport.Dispatch(ctx, DispatchRequest{RequestID: q.ID, Model: m, Deployment: d, Provider: p, RequestJSON: requestJSON}, s.secrets)
+	result, dispatchErr := transport.Dispatch(ctx, DispatchRequest{WorkspaceID:cmd.WorkspaceID,TaskID:cmd.TaskID,RequestID: q.ID, Model: m, Deployment: d, Provider: p, RequestJSON: requestJSON}, s.secrets)
 	if dispatchErr != nil {
 		if cmd.BudgetReservationID != nil && s.budgets != nil {
 			// Once transport dispatch was attempted, account conservatively: the

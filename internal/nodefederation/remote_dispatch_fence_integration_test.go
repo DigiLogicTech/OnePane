@@ -59,6 +59,41 @@ func TestRemoteInferenceRequiresCurrentExactPairedNodeManifestAtDispatch(t *test
   if _,err:=db.SQL().ExecContext(ctx,q,args...);err!=nil{t.Fatal(err)}
  }
  admit(true)
+ // Operator selected-Project compute is never general-purpose access.
+ // The last network boundary must recheck the canonical active Task
+ // project even when called directly, bypassing the usual Task gateway.
+ edit(`INSERT INTO workspaces(id,name,status,revision,created_at,updated_at)
+  VALUES('tenant','Tenant','active',1,1,1)`)
+ edit(`INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at)
+  VALUES('owner','human','Owner','active',1,1,1)`)
+ edit(`INSERT INTO projects(id,workspace_id,name,status,project_policy_json,indexing_config_json,
+  created_by,created_at,updated_at)
+  VALUES('project','tenant','Project','active','{}','{}','owner',1,1)`)
+ edit(`INSERT INTO tasks(id,workspace_id,project_id,objective,state,completion_json,
+  created_at,updated_at)
+  VALUES('work','tenant','project','Scoped work','ready','{}',1,1)`)
+ edit(`INSERT INTO remote_node_compute_policies(node_id,enabled,project_scope,
+  allowed_projects_json,created_at,updated_at)
+  VALUES('peer',1,'selected','["other"]',?,?)`,now,now)
+ admit(false)
+ scopedTask:="work"
+ if err:=svc.authorizeRemoteModelDispatchForTask(ctx,"peer",
+  "imported-deployment","remote-dep",&scopedTask,"tenant");err==nil{
+  t.Fatal("nonmember selected Task project admitted by last adapter")
+ }
+ edit(`UPDATE remote_node_compute_policies
+  SET allowed_projects_json='["project"]' WHERE node_id='peer'`)
+ admit(false) // Without canonical Task provenance, selected Project stays denied.
+ if err:=svc.authorizeRemoteModelDispatchForTask(ctx,"peer",
+  "imported-deployment","remote-dep",&scopedTask,"tenant");err!=nil{
+  t.Fatalf("exact selected Task Project denied: %v",err)
+ }
+ if err:=svc.authorizeRemoteModelDispatchForTask(ctx,"peer",
+  "imported-deployment","remote-dep",&scopedTask,"wrong-tenant");err==nil{
+  t.Fatal("cross-tenant Task identity was accepted")
+ }
+ edit(`UPDATE remote_node_compute_policies SET project_scope='all' WHERE node_id='peer'`)
+ admit(true)
  edit(`UPDATE harness_nodes SET endpoint_json='{"federation_url":"https://127.0.0.1:7443"}' WHERE id='peer'`)
  if _,_,err:=svc.pairedEndpoint(ctx,"peer");err!=nil{
   t.Fatalf("fully paired Node endpoint not available: %v",err)

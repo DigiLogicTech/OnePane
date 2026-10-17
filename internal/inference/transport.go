@@ -16,6 +16,10 @@ type SecretResolver interface {
 }
 
 type DispatchRequest struct {
+    // Immutable, canonical Task identity from the inference admission gate.
+    // A model's routing JSON never grants off-host Project authority.
+    WorkspaceID string
+    TaskID *string
 	RequestID   string
 	Model       Model
 	Deployment  ModelDeployment

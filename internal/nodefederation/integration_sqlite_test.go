@@ -265,6 +265,48 @@ func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {
 	 t.Fatal(err)
 	}
 	if receipts!=1{t.Fatalf("replayed remote call made %d receipts",receipts)}
+	// Independent human Project and Project Workspace grants must BOTH
+	// remain live at the moment the next private prompt leaves the origin.
+	assertNoRemoteEffect:=func(requestID string){
+	 t.Helper()
+	 deniedRequest:=sent
+	 deniedRequest.RequestID=requestID
+	 _,err:=modelTransport.Dispatch(ctx,deniedRequest,nil)
+	 var deniedErr *inference.TransportError
+	 if !errors.As(err,&deniedErr)||!deniedErr.OutcomeKnown||
+	  deniedErr.Code!="remote_node_not_admitted"{
+	  t.Fatalf("%s: revoked off-host scope still reached Node: %v",requestID,err)
+	 }
+	 var transmitted int
+	 if err:=dbB.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM
+	  node_federated_inference_receipts WHERE peer_node_id='node-a'
+	  AND remote_request_id=?`,requestID).Scan(&transmitted);err!=nil||
+	  transmitted!=0{
+	  t.Fatalf("%s: revoked scope created %d remote receipts, error=%v",
+	   requestID,transmitted,err)
+	 }
+	}
+	if _,err:=dbA.SQL().ExecContext(ctx,`UPDATE project_workspaces
+	 SET ai_settings_json='{}' WHERE id='project-view'`);err!=nil{t.Fatal(err)}
+	assertNoRemoteEffect("workspace-revoked-no-send")
+	if _,err:=dbA.SQL().ExecContext(ctx,`UPDATE project_workspaces
+	 SET ai_settings_json=? WHERE id='project-view'`,grants);err!=nil{t.Fatal(err)}
+	if _,err:=dbA.SQL().ExecContext(ctx,`UPDATE projects
+	 SET project_policy_json='{}' WHERE id='project'`);err!=nil{t.Fatal(err)}
+	assertNoRemoteEffect("project-revoked-no-send")
+	if _,err:=dbA.SQL().ExecContext(ctx,`UPDATE projects
+	 SET project_policy_json=? WHERE id='project'`,grants);err!=nil{t.Fatal(err)}
+	// An explicitly taskless caller cannot inherit the selected model's
+	// Project grants just because a previous Task used the same deployment.
+	taskless:=sent
+	taskless.RequestID="taskless-never-send"
+	taskless.TaskID=nil
+	_,err=modelTransport.Dispatch(ctx,taskless,nil)
+	var tasklessError *inference.TransportError
+	if !errors.As(err,&tasklessError)||!tasklessError.OutcomeKnown||
+	 tasklessError.Code!="remote_node_not_admitted"{
+	 t.Fatalf("taskless off-host model request bypassed Task authority: %v",err)
+	}
 	// In-flight routing decisions are not consent. The last outbound
 	// transport must recheck CURRENT pairing before sending a new prompt.
 	if _,err:=dbA.SQL().ExecContext(ctx,`UPDATE node_pairings

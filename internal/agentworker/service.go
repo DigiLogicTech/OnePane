@@ -285,25 +285,39 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 	// Parent Tasks waiting on delegated children resume only after all hard
 	// dependencies complete. Human/capability waits resume when another trusted
 	// control-plane action moves the Task back to RUNNING.
-	rows, err := s.db.QueryContext(ctx, `SELECT r.id,t.id,t.revision,t.state FROM agent_worker_runs r JOIN tasks t ON t.id=r.task_id WHERE r.status='waiting'`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
+	// Keep the queue reconciler bounded on low-memory hosts. A keyset
+	// cursor is stable while successful wakeups remove rows from the waiting
+	// set; OFFSET would skip still-waiting runs after each mutation.
+	const pageSize=256
 	type x struct {
 		run, task, state string
 		rev              int64
 	}
-	var xs []x
-	for rows.Next() {
-		var v x
-		if err := rows.Scan(&v.run, &v.task, &v.rev, &v.state); err != nil {
-			return err
-		}
-		xs = append(xs, v)
-	}
 	var problems []error
-	for _, v := range xs {
+	lastRunID:=""
+	for {
+		rows,err:=s.db.QueryContext(ctx,`SELECT r.id,t.id,t.revision,t.state
+		 FROM agent_worker_runs r JOIN tasks t ON t.id=r.task_id
+		 WHERE r.status='waiting' AND r.id>?
+		 ORDER BY r.id LIMIT ?`,lastRunID,pageSize)
+		if err!=nil{return errors.Join(append(problems,err)...)}
+		xs:=make([]x,0,pageSize)
+		var scanErr error
+		for rows.Next(){
+			var v x
+			if scanErr=rows.Scan(&v.run,&v.task,&v.rev,&v.state);scanErr!=nil{break}
+			xs=append(xs,v)
+		}
+		if scanErr==nil{scanErr=rows.Err()}
+		closeErr:=rows.Close()
+		if scanErr!=nil||closeErr!=nil{
+			return errors.Join(append(problems,scanErr,closeErr)...)
+		}
+		if len(xs)==0{break}
+		// Advance over every inspected run, including ones with malformed
+		// continuations, so a single corrupt wait cannot starve later pages.
+		lastRunID=xs[len(xs)-1].run
+		for _, v := range xs {
 		// One corrupt Worker continuation must not prevent independent
 		// waiting Tasks from being reconciled on the same daemon tick.
 		if runErr:=func()error{
@@ -409,8 +423,10 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 		}();runErr!=nil{
 			problems=append(problems,fmt.Errorf("reconcile waiting Worker %s Task %s: %w",v.run,v.task,runErr))
 		}
+		}
+		if len(xs)<pageSize{break}
 	}
-	return errors.Join(append(problems,rows.Err())...)
+	return errors.Join(problems...)
 }
 
 // resumeWaitingWorkerAndAttempt is the atomic counterpart of

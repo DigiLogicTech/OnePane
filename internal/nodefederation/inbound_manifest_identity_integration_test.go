@@ -4,6 +4,7 @@ package nodefederation
 import (
  "context"
  "testing"
+ "time"
 
  "github.com/DigiLogicTech/OnePane/internal/clock"
 )

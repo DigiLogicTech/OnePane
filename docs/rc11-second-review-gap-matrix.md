@@ -1645,3 +1645,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Shared federation outbound JSON sender now rejects marshal failures and requests larger than 4 MiB before network dispatch, refuses successful peer responses larger than 4 MiB (rather than silently truncating), and never includes remote HTTP error response bodies in local errors/logs. Those bodies may reflect private prompts, pairing tokens or device metadata. A non-2xx status preserves only its HTTP code.
 - [x] In-process HTTP regression verifies a legitimate reply, private-marker 403 rejection without text disclosure, oversized successful response denial, over-budget request pre-network admission and failed marshal pre-network admission. No change to human grants or paired TLS policy.
 - [ ] Hosted exact-source CI, installed mTLS tests and final human-centred UI/UX remain open. This is bounded transport hygiene, not physical Node identity or independent L5 verification; no release packaging or new privileges implied.
+
+
+## RC11 P0-DP — bind inbound compute authority to exact live peer manifest (2026-10-17)
+
+- [x] Inbound federated inference now checks a positive sequence, persisted reception timestamp, syntactically valid manifest whose `node_id` matches the paired Node and whose protocol matches the supported federation version, as well as current two-way pairing and expiry. A misattributed, empty or stale heartbeat no longer admits local model execution.
+- [x] Migrated SQLite integration covers valid pairing, a different Node's claim, wrong/missing protocol, absent origin, zero sequence/reception provenance, expiration, revoked confirmation and unavailable peer.
+- [ ] Hosted exact-source CI, real independent Node/device execution and scoped Level 5 postconditions remain pending, along with security review, installed Windows/Linux QA and LAST user-centred UI/UX before authorised packaging.

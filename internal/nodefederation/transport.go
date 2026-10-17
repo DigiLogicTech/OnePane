@@ -469,7 +469,10 @@ func (s *Service) peerAdmittedForInboundInference(ctx context.Context,peer strin
 	 JOIN node_capability_manifests m ON m.peer_node_id=n.id
 	 WHERE n.id=? AND n.local=0 AND n.trust_state='paired'
 	  AND p.status='paired' AND p.local_confirmed=1 AND p.peer_confirmed=1
-	  AND m.expires_at>?)`,peer,s.clock.UnixMilli()).Scan(&eligible)
+	  AND m.expires_at>? AND m.sequence>0 AND m.received_at>0
+	  AND json_valid(m.manifest_json)=1
+	  AND json_extract(m.manifest_json,'$.node_id')=n.id
+	  AND json_extract(m.manifest_json,'$.protocol')=?)`,peer,s.clock.UnixMilli(),ProtocolVersion).Scan(&eligible)
 	return err==nil&&eligible==1
 }
 

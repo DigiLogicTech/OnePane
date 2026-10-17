@@ -1755,3 +1755,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Automatic Colibri context detection now requires a regular non-symlinked `config.json`, rejects files statically over 1 MiB, and uses `io.LimitReader` for a hard 1 MiB + 1 bound even if the metadata file changes after `Lstat`. Oversize, inaccessible or invalid metadata falls back to the existing conservative 8192-token initial context.
 - [x] Regression covers a legitimate model context declaration, oversize metadata and a symlinked config. Other model-discovery limits are preserved; nothing silently promotes declared context to verified inference capacity.
 - [ ] Hosted source CI, actual Windows/Ubuntu SSD/model install, full Colibri-native executable QA and independent peak-RSS measurements on low-memory hardware remain release acceptance work.
+
+
+## RC11 P0-EF — one bounded Colibri config reader for auto-context and model discovery (2026-10-17)
+
+- [x] `ColibriPoolModels` now uses the same `readBoundedColibriConfig` helper as automatic context inference. Both read at most 1 MiB + 1 from model metadata, check regular-file status and decline oversize or symlinked `config.json` values. Model-pool discovery previously performed `os.ReadFile` after a bounded `Lstat`, allowing a replaced or expanding file to allocate unbounded RAM between those operations.
+- [x] Unit regression independently calls the common bounded helper with an oversized file, confirms automatic context fallback to 8192 and keeps a legitimate declared context. This is read-only; it does not change model routing, downloaded model artifacts, installer storage or Colibri's native memory manager.
+- [ ] Exact-head full source CI, externally invoked package robustness and peak memory proof on the Windows/Ubuntu constrained hosts remain pending, as do physical Node and Level 5 effectiveness gates, final code/security audit and LAST UI/UX review.

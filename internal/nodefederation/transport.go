@@ -72,10 +72,36 @@ func (t RemoteTransport) Dispatch(ctx context.Context, req inference.DispatchReq
 	if err != nil {
 		return inference.DispatchResult{}, &inference.TransportError{Code: "remote_transport_error", OutcomeKnown: false, Err: err}
 	}
-	if out.ErrorCode != "" {
-		return inference.DispatchResult{}, &inference.TransportError{Code: out.ErrorCode, OutcomeKnown: out.OutcomeKnown}
-	}
-	return inference.DispatchResult{ResponseJSON: out.ResponseJSON, UsageJSON: out.UsageJSON}, nil
+	return validateRemoteInferenceReply(out)
+}
+
+// An authenticated Node response is still untrusted *data*. A 200 response
+// containing {}, null, a contradictory status or invalid usage must never
+// become an empty successful model completion. Its effect may already have
+// occurred on the peer, so ambiguous acknowledgements remain unknown, not
+// safe-to-retry failures.
+func validateRemoteInferenceReply(out RemoteInferenceResponse)(
+ inference.DispatchResult,error){
+ invalid:=func()(inference.DispatchResult,error){
+  return inference.DispatchResult{},&inference.TransportError{
+   Code:"invalid_federation_reply",OutcomeKnown:false}
+ }
+ if out.ErrorCode!=""{
+  if len(out.ErrorCode)>128||len(out.ResponseJSON)!=0||
+   len(out.UsageJSON)!=0{return invalid()}
+  for _,r:=range out.ErrorCode{
+   if !((r>='a'&&r<='z')||(r>='A'&&r<='Z')||
+    (r>='0'&&r<='9')||r=='_'||r=='-'||r=='.'){return invalid()}
+  }
+  return inference.DispatchResult{},&inference.TransportError{
+   Code:out.ErrorCode,OutcomeKnown:out.OutcomeKnown}
+ }
+ if !out.OutcomeKnown||classifyFederatedOutput(inference.DispatchResult{
+  ResponseJSON:out.ResponseJSON,UsageJSON:out.UsageJSON})!=""{
+  return invalid()
+ }
+ return inference.DispatchResult{
+  ResponseJSON:out.ResponseJSON,UsageJSON:out.UsageJSON},nil
 }
 
 type Server struct {

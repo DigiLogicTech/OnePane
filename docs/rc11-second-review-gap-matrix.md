@@ -1652,3 +1652,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Inbound federated inference now checks a positive sequence, persisted reception timestamp, syntactically valid manifest whose `node_id` matches the paired Node and whose protocol matches the supported federation version, as well as current two-way pairing and expiry. A misattributed, empty or stale heartbeat no longer admits local model execution.
 - [x] Migrated SQLite integration covers valid pairing, a different Node's claim, wrong/missing protocol, absent origin, zero sequence/reception provenance, expiration, revoked confirmation and unavailable peer.
 - [ ] Hosted exact-source CI, real independent Node/device execution and scoped Level 5 postconditions remain pending, along with security review, installed Windows/Linux QA and LAST user-centred UI/UX before authorised packaging.
+
+
+## RC11 P0-DQ — reject empty, contradictory or unbounded peer inference acknowledgements (2026-10-17)
+
+- [x] The final remote-inference transport no longer treats a syntactically successful HTTP response with no valid model payload as an inference success. Explicit error codes require no success/usage fields and a bounded simple identifier; positive replies require a known outcome and valid bounded response+usage JSON. Ambiguous, contradictory, empty or malformed peer replies are `invalid_federation_reply` with `OutcomeKnown=false`, so routing cannot silently interpret them as successful work or safely retry a potentially executed effect.
+- [x] Pure transport-contract regression exercises valid success, empty response, missing outcome, malformed usage, positive/negative error states, contradictory payloads, oversized and unsafe error-code metadata. No additional Node or model privileges.
+- [ ] Hosted exact-source CI, real independently owned paired devices, L5 observation/response postconditions, installed constrained-host QA, final integrated security audit and LAST user-first UI/UX remain before installer authorisation.

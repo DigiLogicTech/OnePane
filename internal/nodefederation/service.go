@@ -594,29 +594,29 @@ func (s *Service) Revoke(ctx context.Context, peer string) error {
 	})
 }
 
+var ErrFederationPayloadTooLarge=errors.New("federation JSON envelope exceeds transport limit")
+var ErrFederationResponseTooLarge=errors.New("federation response exceeds transport limit")
+
 func postJSON(ctx context.Context, c *http.Client, urlv string, in, out any) error {
-	b, _ := json.Marshal(in)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, urlv, strings.NewReader(string(b)))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("peer http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	if out != nil && len(body) > 0 {
-		return json.Unmarshal(body, out)
-	}
-	return nil
+ b,err:=json.Marshal(in)
+ if err!=nil{return fmt.Errorf("invalid federation request payload: %w",err)}
+ if len(b)>4<<20{return ErrFederationPayloadTooLarge}
+ req,err:=http.NewRequestWithContext(ctx,http.MethodPost,urlv,strings.NewReader(string(b)))
+ if err!=nil{return err}
+ req.Header.Set("Content-Type","application/json")
+ resp,err:=c.Do(req)
+ if err!=nil{return err}
+ defer resp.Body.Close()
+ // Do not materialise or surface remote error bodies in local logs:
+ // they can reflect private prompts, tokens, or device metadata.
+ if resp.StatusCode<200||resp.StatusCode>=300{
+  return fmt.Errorf("peer HTTP %d",resp.StatusCode)
+ }
+ body,err:=io.ReadAll(io.LimitReader(resp.Body,(4<<20)+1))
+ if err!=nil{return err}
+ if len(body)>4<<20{return ErrFederationResponseTooLarge}
+ if out!=nil&&len(body)>0{return json.Unmarshal(body,out)}
+ return nil
 }
 
 func (s *Service) Manifest(ctx context.Context, peerID string) (CapabilityManifest, error) {

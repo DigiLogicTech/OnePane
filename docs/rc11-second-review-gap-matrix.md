@@ -1638,3 +1638,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Shared paired-Node federation request decoder now reads at most 4 MiB before parsing, applies existing depth-limited Unicode-alias-aware `ValidateUnambiguousJSON`, and then applies the current strict unknown-field and single-document EOF checks. Repeated or escaped-equivalent request keys (including in nested inference JSON) cannot silently override previously authorised fields. Failures remain generic `400 invalid request`, without echoing payloads.
 - [x] Decoder regression covers two root documents, duplicate root keys, escaped aliases, nested repeated keys in allowed raw message envelopes and oversized requests; valid requests continue to decode. No new network rights, agents or pairing paths.
 - [ ] Hosted source CI, real paired-Node payload compatibility, and independent physical Node/Level 5 trust remain acceptance gates, along with code audit and LAST operator-first UI/UX before an authorised installer.
+
+
+## RC11 P0-DO — bound peer JSON transport and redact untrusted error bodies (2026-10-17)
+
+- [x] Shared federation outbound JSON sender now rejects marshal failures and requests larger than 4 MiB before network dispatch, refuses successful peer responses larger than 4 MiB (rather than silently truncating), and never includes remote HTTP error response bodies in local errors/logs. Those bodies may reflect private prompts, pairing tokens or device metadata. A non-2xx status preserves only its HTTP code.
+- [x] In-process HTTP regression verifies a legitimate reply, private-marker 403 rejection without text disclosure, oversized successful response denial, over-budget request pre-network admission and failed marshal pre-network admission. No change to human grants or paired TLS policy.
+- [ ] Hosted exact-source CI, installed mTLS tests and final human-centred UI/UX remain open. This is bounded transport hygiene, not physical Node identity or independent L5 verification; no release packaging or new privileges implied.

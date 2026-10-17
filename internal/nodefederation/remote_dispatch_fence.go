@@ -4,6 +4,8 @@ import (
  "context"
  "database/sql"
  "errors"
+
+ "github.com/DigiLogicTech/OnePane/internal/featurepolicy"
 )
 
 // ErrFederatedDispatchNotAdmitted means no remote inference payload was
@@ -25,14 +27,31 @@ var ErrFederatedDispatchNotAdmitted=errors.New("remote Node model is not admitte
 func(s *Service) authorizeRemoteModelDispatch(
  ctx context.Context,peerID,localDeploymentID,remoteDeploymentID string,
 )error{
- return s.authorizeRemoteModelDispatchForTask(ctx,peerID,
+ // Historical internal snapshot helper: no export, no network authority.
+ return s.authorizeRemoteModelDispatchSnapshot(ctx,peerID,
   localDeploymentID,remoteDeploymentID,nil,"")
 }
 
-// Final pre-send policy includes canonical Task/Project identity. This is
-// re-read directly from the authenticated Task store rather than trusting
-// any Task/Project field supplied by a peer or model.
+// Actual remote network dispatch MUST pass both persisted Project and
+// canonical Workspace transfer grants; model/config metadata alone cannot
+// grant off-host inference or select a different tenant Task.
 func(s *Service) authorizeRemoteModelDispatchForTask(
+ ctx context.Context,peerID,localDeploymentID,remoteDeploymentID string,
+ taskID *string,workspaceID string,
+)error{
+ if s==nil||s.db==nil||taskID==nil||*taskID==""||workspaceID==""{
+  return ErrFederatedDispatchNotAdmitted
+ }
+ allowed,err:=(featurepolicy.StoredScopes{DB:s.db}).AuthorizeNodeTransfer(
+  ctx,workspaceID,*taskID,peerID)
+ if err!=nil||!allowed{return ErrFederatedDispatchNotAdmitted}
+ return s.authorizeRemoteModelDispatchSnapshot(ctx,peerID,
+  localDeploymentID,remoteDeploymentID,taskID,workspaceID)
+}
+
+// Internal snapshot tests do not transmit prompts. Only the authorising
+// adapter above can enter a remote transport with this result.
+func(s *Service) authorizeRemoteModelDispatchSnapshot(
  ctx context.Context,peerID,localDeploymentID,remoteDeploymentID string,
  taskID *string,workspaceID string,
 )error{

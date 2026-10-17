@@ -66,12 +66,15 @@ func TestRemoteInferenceRequiresCurrentExactPairedNodeManifestAtDispatch(t *test
   VALUES('tenant','Tenant','active',1,1,1)`)
  edit(`INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at)
   VALUES('owner','human','Owner','active',1,1,1)`)
+ scopes:=`{"onepane_routing":{"trusted_node_compute":{"enabled":true,"allowed_node_ids":["peer"]}}}`
  edit(`INSERT INTO projects(id,workspace_id,name,status,project_policy_json,indexing_config_json,
   created_by,created_at,updated_at)
-  VALUES('project','tenant','Project','active','{}','{}','owner',1,1)`)
- edit(`INSERT INTO tasks(id,workspace_id,project_id,objective,state,completion_json,
+  VALUES('project','tenant','Project','active',?,'{}','owner',1,1)`,scopes)
+ edit(`INSERT INTO project_workspaces(id,project_id,name,ai_settings_json,created_at,updated_at)
+  VALUES('project-view','project','Project View',?,1,1)`,scopes)
+ edit(`INSERT INTO tasks(id,workspace_id,project_id,project_workspace_id,objective,state,completion_json,
   created_at,updated_at)
-  VALUES('work','tenant','project','Scoped work','ready','{}',1,1)`)
+  VALUES('work','tenant','project','project-view','Scoped work','ready','{}',1,1)`)
  edit(`INSERT INTO remote_node_compute_policies(node_id,enabled,project_scope,
   allowed_projects_json,created_at,updated_at)
   VALUES('peer',1,'selected','["other"]',?,?)`,now,now)
@@ -88,6 +91,19 @@ func TestRemoteInferenceRequiresCurrentExactPairedNodeManifestAtDispatch(t *test
   "imported-deployment","remote-dep",&scopedTask,"tenant");err!=nil{
   t.Fatalf("exact selected Task Project denied: %v",err)
  }
+ // Operator revocation on either side must stop the actual transport.
+ edit(`UPDATE project_workspaces SET ai_settings_json='{}' WHERE id='project-view'`)
+ if err:=svc.authorizeRemoteModelDispatchForTask(ctx,"peer",
+  "imported-deployment","remote-dep",&scopedTask,"tenant");err==nil{
+  t.Fatal("revoked Project Workspace transfer grant was bypassed")
+ }
+ edit(`UPDATE project_workspaces SET ai_settings_json=? WHERE id='project-view'`,scopes)
+ edit(`UPDATE projects SET project_policy_json='{}' WHERE id='project'`)
+ if err:=svc.authorizeRemoteModelDispatchForTask(ctx,"peer",
+  "imported-deployment","remote-dep",&scopedTask,"tenant");err==nil{
+  t.Fatal("revoked Project transfer grant was bypassed")
+ }
+ edit(`UPDATE projects SET project_policy_json=? WHERE id='project'`,scopes)
  if err:=svc.authorizeRemoteModelDispatchForTask(ctx,"peer",
   "imported-deployment","remote-dep",&scopedTask,"wrong-tenant");err==nil{
   t.Fatal("cross-tenant Task identity was accepted")

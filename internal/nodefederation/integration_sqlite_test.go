@@ -219,7 +219,31 @@ func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {
 	 VALUES('node-b',1,?,?,?,1,?)`,
 	 `{"node_id":"node-b","protocol":"onepane-federation-v1","models":[{"deployment_id":"local-dep"}]}`,
 	 now,now+3600000,now);err!=nil{t.Fatal(err)}
+	// Root Project AND its active Workspace must both approve this exact
+	// off-host Node; a direct transport call is not a substitute.
+	grants:=`{"onepane_routing":{"trusted_node_compute":{"enabled":true,"allowed_node_ids":["node-b"]}}}`
+	for _,q:=range []struct{sql string; args []any}{
+	 {`INSERT INTO workspaces(id,name,status,revision,created_at,updated_at)
+	   VALUES('tenant','Tenant','active',1,?,?)`,[]any{now,now}},
+	 {`INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at)
+	   VALUES('owner','human','Owner','active',1,?,?)`,[]any{now,now}},
+	 {`INSERT INTO projects(id,workspace_id,name,status,project_policy_json,
+	   indexing_config_json,created_by,created_at,updated_at)
+	   VALUES('project','tenant','Project','active',?,'{}','owner',?,?)`,
+	   []any{grants,now,now}},
+	 {`INSERT INTO project_workspaces(id,project_id,name,ai_settings_json,
+	   created_at,updated_at) VALUES('project-view','project','Workspace',?,?,?)`,
+	   []any{grants,now,now}},
+	 {`INSERT INTO tasks(id,workspace_id,project_id,project_workspace_id,
+	   objective,state,completion_json,created_at,updated_at)
+	   VALUES('task','tenant','project','project-view','Scoped inference',
+	   'ready','{}',?,?)`,[]any{now,now}},
+	}{
+	 if _,err:=dbA.SQL().ExecContext(ctx,q.sql,q.args...);err!=nil{t.Fatal(err)}
+	}
+	taskID:="task"
 	sent:=inference.DispatchRequest{
+	 WorkspaceID:"tenant",TaskID:&taskID,
 	 RequestID:"routed-through-transport",
 	 Deployment:inference.ModelDeployment{ID:"imported-dep",
 	  RuntimeConfigJSON:json.RawMessage(cfg)},

@@ -85,16 +85,16 @@ func TestRemoteInferenceRequiresCurrentExactPairedNodeManifestAtDispatch(t *test
  edit(`UPDATE remote_node_compute_policies SET enabled=1 WHERE node_id='peer'`)
  admit(true)
  edit(`UPDATE remote_node_compute_policies SET enabled=0 WHERE node_id='peer'`)
- _,err=(RemoteTransport{Service:svc}).Dispatch(ctx,inference.DispatchRequest{
+ _,policyErr:=(RemoteTransport{Service:svc}).Dispatch(ctx,inference.DispatchRequest{
   RequestID:"policy-revoked-no-send",
   Deployment:inference.ModelDeployment{ID:"imported-deployment",
    RuntimeConfigJSON:json.RawMessage(cfg)},
   RequestJSON:json.RawMessage(`{"prompt":"never exported"}`),
  },nil)
  var policyDenied *inference.TransportError
- if !errors.As(err,&policyDenied)||!policyDenied.OutcomeKnown||
+ if !errors.As(policyErr,&policyDenied)||!policyDenied.OutcomeKnown||
   policyDenied.Code!="remote_node_not_admitted"{
-  t.Fatalf("disabled Node compute policy was bypassed by transport: %v",err)
+  t.Fatalf("disabled Node compute policy was bypassed by transport: %v",policyErr)
  }
  edit(`UPDATE remote_node_compute_policies SET enabled=1 WHERE node_id='peer'`)
  admit(true)

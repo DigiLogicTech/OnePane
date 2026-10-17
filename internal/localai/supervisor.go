@@ -177,7 +177,9 @@ func openManagedRuntimeLog(path string)(*os.File,error){
   }
   // Preserve old bounded log rollover semantics without overwriting a
   // file that was replaced or linked during the preflight.
-  if st.Size()>4<<20{
+  // A log already at the live-write cap must rotate too; reopening
+  // it would silently discard every diagnostic from the next launch.
+  if st.Size()>=maxManagedRuntimeLogBytes{
    archive:=path+".previous"
    if _,e:=os.Lstat(archive);e==nil{
     if e=os.Remove(archive);e!=nil{return nil,e}

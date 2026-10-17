@@ -43,3 +43,24 @@ func TestManagedRuntimeLogIsBoundedEvenWhenProcessNeverRestarts(t *testing.T){
  if _,err:=f.Read(first);err!=nil{t.Fatal(err)}
  if string(first)!="existing p"{t.Fatalf("old diagnostic bytes were replaced: %q",first)}
 }
+
+
+func TestManagedRuntimeLogRotatesAtExactCapBeforeNextStart(t *testing.T){
+ path:=filepath.Join(t.TempDir(),"runtime","local-runtime.log")
+ f,err:=openManagedRuntimeLog(path)
+ if err!=nil{t.Fatal(err)}
+ w,err:=newBoundedRuntimeLogWriter(f)
+ if err!=nil{t.Fatal(err)}
+ p:=[]byte(strings.Repeat("R",int(maxManagedRuntimeLogBytes)))
+ if n,err:=w.Write(p);err!=nil||n!=len(p){t.Fatalf("first log limit: %d %v",n,err)}
+ if err:=f.Close();err!=nil{t.Fatal(err)}
+ next,err:=openManagedRuntimeLog(path)
+ if err!=nil{t.Fatalf("cannot reopen a full log for next run: %v",err)}
+ defer next.Close()
+ current,err:=next.Stat()
+ if err!=nil||current.Size()!=0{t.Fatalf("next run log not reset: %+v err=%v",current,err)}
+ prev,err:=os.Stat(path+".previous")
+ if err!=nil||prev.Size()!=maxManagedRuntimeLogBytes{
+  t.Fatalf("full log archive was not retained: %+v err=%v",prev,err)
+ }
+}

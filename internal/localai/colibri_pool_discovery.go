@@ -4,6 +4,7 @@ import (
     "context"
     "encoding/json"
     "fmt"
+    "io"
     "io/fs"
     "os"
     "path/filepath"
@@ -104,8 +105,19 @@ func (s *Service) ColibriPoolModels(ctx context.Context) ([]ColibriPoolModel, er
 // An omitted context means automatic model-config selection, capped to prevent
 // pathological allocations. Actual capability is never promoted without checks.
 func colibriAutoContext(path string) int64 {
-    data, err := os.ReadFile(filepath.Join(path, "config.json"))
-    if err != nil || len(data) > 1<<20 { return 8192 }
+    file:=filepath.Join(path,"config.json")
+    info,err:=os.Lstat(file)
+    if err!=nil||!info.Mode().IsRegular()||info.Size()>1<<20{
+        return 8192
+    }
+    f,err:=os.Open(file)
+    if err!=nil{return 8192}
+    defer f.Close()
+    // A metadata file may be replaced or expanded between stat and open.
+    // Read at most 1 MiB + 1; never load arbitrary model-pool file sizes
+    // into RAM just to determine a default context length.
+    data,err:=io.ReadAll(io.LimitReader(f,(1<<20)+1))
+    if err!=nil||len(data)>1<<20{return 8192}
     return initialColibriContext(colibriDeclaredContext(data))
 }
 

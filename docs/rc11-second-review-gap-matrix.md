@@ -1781,3 +1781,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 
 - [ ] Independent physical paired-Node source/observer trust and actual local model runtime acceptance; human-approved reversible Level 5 actions with independent verified postconditions; deployed constrained-host Colibri CPU/GPU/RAM and Windows x64 + Ubuntu amd64 installed QA; complete integrated code/security audit. The human-focused UI/UX review is LAST before user-authorised MSI/release packaging.
 - [ ] No merge or installer authorisation from this hosted source-only batch. Preserve Project, model, secret and operator-selected non-C: data locations.
+
+
+## RC11 P0-EI — bounded Colibri descendant pipe-drain lifetime (2026-10-18)
+
+- [x] The managed local model process now sets an explicit five-second `exec.Cmd.WaitDelay` after the launcher exits, so inherited stdout/stderr pipes held open by a Python Colibri child engine cannot keep the supervisor's parent PID bookkeeping apparently alive forever. Together with the runtime log writer cap, this bounds Go-side log-copy lifetime while retaining normal full stream draining for healthy processes.
+- [x] The real subprocess log regression on P0-EH exercises normal launch/exit and >24 MiB emitted output. The WaitDelay behavior itself still requires installed child-engine process-tree acceptance, especially on Windows, because the hosted helper process does not model Colibri's specific child inheritance.
+- [ ] Full exact-head hosted CI [#39060121768](https://github.com/DigiLogicTech/OnePane/actions/runs/39060121768) pending at documentation time. No physical runtime, Node, network or L5 side effect was invoked. All existing user-approved security/code, native Colibri resource, UI/UX LAST and installer gates remain.

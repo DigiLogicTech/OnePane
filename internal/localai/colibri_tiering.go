@@ -141,7 +141,14 @@ func (s *Service) SetColibriTier(ctx context.Context, cmd ColibriTierCommand) (C
     if strings.TrimSpace(cmd.DeploymentID)=="" { return ColibriTierState{},errors.New("deployment id required") }
     settings,err:=validateColibriTier(cmd.Settings)
     if err!=nil { return ColibriTierState{},err }
-    cfg,err:=s.colibriTierSnapshot(ctx,cmd.DeploymentID)
+    if s==nil||s.db==nil||s.supervisor==nil{
+        return ColibriTierState{},errors.New("local runtime supervisor unavailable")
+    }
+    // Serialize the entire idle check, optional drain and configuration
+    // persistence with model Acquire, hot-swap and the idle reaper.
+    s.supervisor.residencyMu.Lock()
+    defer s.supervisor.residencyMu.Unlock()
+    _,err=s.colibriTierSnapshot(ctx,cmd.DeploymentID)
     if err!=nil { return ColibriTierState{},err }
     var status string
     err=s.db.QueryRowContext(ctx,"SELECT status FROM local_runtime_instances WHERE deployment_id=?",cmd.DeploymentID).Scan(&status)
@@ -150,17 +157,27 @@ func (s *Service) SetColibriTier(ctx context.Context, cmd ColibriTierCommand) (C
         return ColibriTierState{},errors.New("Colibri deployment is serving a request; change tier settings after it becomes idle")
     }
     if err==nil && (status=="healthy"||status=="starting") {
-        stopped,stopErr:=s.supervisor.StopIfIdle(ctx,cmd.DeploymentID)
+        stopped,stopErr:=s.supervisor.stopIfIdleBeforeLocked(ctx,cmd.DeploymentID,0)
         if stopErr!=nil{return ColibriTierState{},fmt.Errorf("stop idle Colibri runtime: %w",stopErr)}
         if !stopped {return ColibriTierState{},errors.New("Colibri runtime became busy; retry after it is idle")}
     }
-    raw,_:=json.Marshal(settings)
-    cfg["colibri_tier"]=raw
-    updated,err:=json.Marshal(cfg)
+    raw,err:=json.Marshal(settings)
     if err!=nil{return ColibriTierState{},err}
     now:=s.clock.UnixMilli()
-    _,err=s.db.ExecContext(ctx,"UPDATE model_deployments SET runtime_config_json=?,updated_at=?,revision=revision+1 WHERE id=?",string(updated),now,cmd.DeploymentID)
-    if err!=nil { return ColibriTierState{},err }
+    // Update ONLY the Colibri profile. Never replace a previously read
+    // runtime_config_json object and accidentally discard a pin or newer
+    // approved execution configuration.
+    result,err:=s.db.ExecContext(ctx,`UPDATE model_deployments
+      SET runtime_config_json=json_set(runtime_config_json,'$.colibri_tier',json(?)),
+          updated_at=?,revision=revision+1
+      WHERE id=? AND LOWER(runtime_name)='colibri'
+       AND EXISTS(SELECT 1 FROM managed_local_models m
+        WHERE m.deployment_id=model_deployments.id AND m.status<>'removed')`,
+      string(raw),now,cmd.DeploymentID)
+    if err!=nil{return ColibriTierState{},err}
+    changed,err:=result.RowsAffected()
+    if err!=nil{return ColibriTierState{},err}
+    if changed!=1{return ColibriTierState{},errors.New("Colibri deployment changed before settings could be saved")}
     return s.ColibriTier(ctx,cmd.DeploymentID)
 }
 

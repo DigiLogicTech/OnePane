@@ -4,6 +4,10 @@ import (
     "reflect"
     "strings"
     "testing"
+    "context"
+    "time"
+
+    "github.com/DigiLogicTech/OnePane/internal/clock"
 )
 
 func TestColibriTierDefaultsAndValidation(t *testing.T) {
@@ -73,4 +77,70 @@ func TestColibriPlacementOutputBoundedDuringWrites(t *testing.T){
  if !overflow||len(data)!=maxColibriPlanOutputBytes{
   t.Fatalf("capture grew after overflow: %d %v",len(data),overflow)
  }
+}
+
+func TestColibriTierAndPinWaitForRuntimeResidencyLock(t *testing.T){
+ db:=colibriPinTestDB(t)
+ defer db.Close()
+ if _,err:=db.Exec(`CREATE TABLE local_runtime_instances(
+  deployment_id TEXT PRIMARY KEY,status TEXT)`);err!=nil{t.Fatal(err)}
+ sup:=&RuntimeSupervisor{db:db,clock:clock.Real{}}
+ svc:=&Service{db:db,clock:clock.Real{},supervisor:sup}
+ ctx:=context.Background()
+ sup.residencyMu.Lock()
+ entered:=make(chan struct{})
+ completed:=make(chan error,1)
+ go func(){
+  close(entered)
+  _,err:=svc.SetColibriTier(ctx,ColibriTierCommand{
+   DeploymentID:"colibri-a",
+   Settings:ColibriTierSettings{Mode:"manual",Backend:"cpu",RAMGB:4},
+  })
+  completed<-err
+ }()
+ <-entered
+ select{
+ case err:=<-completed:
+  sup.residencyMu.Unlock()
+  t.Fatalf("Colibri config changed while residency lock held: %v",err)
+ case <-time.After(60*time.Millisecond):
+ }
+ var before string
+ if err:=db.QueryRow(`SELECT json_extract(runtime_config_json,'$.colibri_tier.ram_gb')
+   FROM model_deployments WHERE id='colibri-a'`).Scan(&before);err!=nil{t.Fatal(err)}
+ if before!="8"{t.Fatalf("tier modified while hot-swap owns lock: %s",before)}
+ sup.residencyMu.Unlock()
+ select{
+ case err:=<-completed:if err!=nil{t.Fatalf("Colibri tier update failed: %v",err)}
+ case <-time.After(3*time.Second):t.Fatal("Colibri tier update stayed blocked")
+ }
+ var after string
+ if err:=db.QueryRow(`SELECT json_extract(runtime_config_json,'$.colibri_tier.ram_gb')
+   FROM model_deployments WHERE id='colibri-a'`).Scan(&after);err!=nil{t.Fatal(err)}
+ if after!="4"{t.Fatalf("Colibri tier update did not persist: %s",after)}
+ // Pin update shares the same lock and preserves the new tier profile.
+ sup.residencyMu.Lock()
+ pinDone:=make(chan error,1)
+ pinStarted:=make(chan struct{})
+ go func(){
+  close(pinStarted)
+  _,err:=svc.SetColibriPin(ctx,"colibri-a",true)
+  pinDone<-err
+ }()
+ <-pinStarted
+ select{
+ case err:=<-pinDone:
+  sup.residencyMu.Unlock()
+  t.Fatalf("pin modified while hot-swap owns lock: %v",err)
+ case <-time.After(60*time.Millisecond):
+ }
+ sup.residencyMu.Unlock()
+ select{
+ case err:=<-pinDone:if err!=nil{t.Fatalf("pin update failed: %v",err)}
+ case <-time.After(3*time.Second):t.Fatal("pin update stayed blocked")
+ }
+ var pinned int
+ if err:=db.QueryRow(`SELECT json_extract(runtime_config_json,'$.colibri_pinned')
+  FROM model_deployments WHERE id='colibri-a'`).Scan(&pinned);err!=nil{t.Fatal(err)}
+ if pinned!=1{t.Fatal("Colibri pin lost during tier update")}
 }

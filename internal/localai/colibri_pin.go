@@ -38,6 +38,12 @@ func (s *Service) ColibriPin(ctx context.Context,deploymentID string)(ColibriPin
 
 func (s *Service) SetColibriPin(ctx context.Context,deploymentID string,pin bool)(ColibriPinState,error){
  if strings.TrimSpace(deploymentID)==""{return ColibriPinState{},errors.New("deployment is required")}
+ // Pin updates must not race a Colibri eviction between its old pin
+ // snapshot and Stop. Share the residency lock with the model scheduler.
+ if s!=nil&&s.supervisor!=nil{
+  s.supervisor.residencyMu.Lock()
+  defer s.supervisor.residencyMu.Unlock()
+ }
  before,err:=s.ColibriPin(ctx,deploymentID)
  if err!=nil{return ColibriPinState{},err}
  if !before.Eligible{return ColibriPinState{},errors.New("Colibri pinning requires a registered native Colibri model; GGUF/llama.cpp is unsupported")}

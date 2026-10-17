@@ -1,6 +1,7 @@
 package nodefederation
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -22,6 +23,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/event"
 	"github.com/DigiLogicTech/OnePane/internal/id"
+	"github.com/DigiLogicTech/OnePane/internal/observation"
 	"github.com/DigiLogicTech/OnePane/internal/storage"
 )
 
@@ -596,6 +598,7 @@ func (s *Service) Revoke(ctx context.Context, peer string) error {
 
 var ErrFederationPayloadTooLarge=errors.New("federation JSON envelope exceeds transport limit")
 var ErrFederationResponseTooLarge=errors.New("federation response exceeds transport limit")
+var ErrFederationResponseInvalid=errors.New("federation response is missing or ambiguous")
 
 func postJSON(ctx context.Context, c *http.Client, urlv string, in, out any) error {
  b,err:=json.Marshal(in)
@@ -615,7 +618,15 @@ func postJSON(ctx context.Context, c *http.Client, urlv string, in, out any) err
  body,err:=io.ReadAll(io.LimitReader(resp.Body,(4<<20)+1))
  if err!=nil{return err}
  if len(body)>4<<20{return ErrFederationResponseTooLarge}
- if out!=nil&&len(body)>0{return json.Unmarshal(body,out)}
+ if out!=nil{
+  if len(body)==0||bytes.Equal(bytes.TrimSpace(body),[]byte("null"))||
+   observation.ValidateUnambiguousJSON(body)!=nil{
+   return ErrFederationResponseInvalid
+  }
+  // Payload was already depth bounded, size limited and checked for
+  // duplicate nested JSON members, including Unicode-escaped aliases.
+  if err:=json.Unmarshal(body,out);err!=nil{return ErrFederationResponseInvalid}
+ }
  return nil
 }
 

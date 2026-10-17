@@ -1693,3 +1693,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Extend real TLS 1.3 two-Node + two SQLite stores integration beyond direct HTTP request testing: the actual `RemoteTransport.Dispatch` now routes one imported trust-scoped remote deployment through final local manifest/consent admission, pinned two-way mTLS, B-side model admission and persisted idempotent inference receipt. A repeated matching request reuses the same response and retains one original receipt.
 - [x] Withdraw the source Node's local pairing confirmation between requests; the next remote model request must be denied as a known `remote_node_not_admitted` pre-network failure and may not add any B-side receipt. No external discovery, privileged sandbox or cloud network required.
 - [ ] Hosted exact-head CI pending. This synthetic loopback demonstrates software transport and idempotency only; a real independent physical Node/device, measured L5 outcomes, operator-approved reversals, final integrated security audit and LAST user-first UI/UX remain installer gates.
+
+
+## RC11 P0-DW — enforce live Node compute-policy disable at the last network send (2026-10-17)
+
+- [x] Federated model final pre-network admission now checks the current `remote_node_compute_policies.enabled` alongside exact destination, two-way pairing, manifest and deployment/model trust. An explicitly disabled Node is denied before a prompt can leave the host even when previously imported, ready and scheduled. A missing policy preserves the existing default; no new network grant is created.
+- [x] Migrated SQLite integration disables/restores the remote policy, verifies the eligibility transitions and demands that direct `RemoteTransport.Dispatch` return known `remote_node_not_admitted` for a sensitive prompt when policy is disabled. This closes a last-adapter bypass of the earlier Task-side compute policy guard.
+- [ ] Exact-source CI, selected-Project policy provenance at final transport, real paired physical Node acceptance, human-approved L5 effects, independent postconditions, integrated audit and LAST operator-first UI/UX remain release blockers.

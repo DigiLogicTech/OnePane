@@ -76,6 +76,28 @@ func TestRemoteInferenceRequiresCurrentExactPairedNodeManifestAtDispatch(t *test
   t.Fatalf("restored two-way approved endpoint denied: %v",err)
  }
  admit(true)
+ // An operator can disable remote compute after the model was imported,
+ // verified and scheduled. The last transport must still stop pre-network.
+ edit(`INSERT INTO remote_node_compute_policies(
+   node_id,enabled,updated_by,created_at,updated_at)
+   VALUES('peer',0,'operator',?,?)`,now,now)
+ admit(false)
+ edit(`UPDATE remote_node_compute_policies SET enabled=1 WHERE node_id='peer'`)
+ admit(true)
+ edit(`UPDATE remote_node_compute_policies SET enabled=0 WHERE node_id='peer'`)
+ _,err=(RemoteTransport{Service:svc}).Dispatch(ctx,inference.DispatchRequest{
+  RequestID:"policy-revoked-no-send",
+  Deployment:inference.ModelDeployment{ID:"imported-deployment",
+   RuntimeConfigJSON:json.RawMessage(cfg)},
+  RequestJSON:json.RawMessage(`{"prompt":"never exported"}`),
+ },nil)
+ var policyDenied *inference.TransportError
+ if !errors.As(err,&policyDenied)||!policyDenied.OutcomeKnown||
+  policyDenied.Code!="remote_node_not_admitted"{
+  t.Fatalf("disabled Node compute policy was bypassed by transport: %v",err)
+ }
+ edit(`UPDATE remote_node_compute_policies SET enabled=1 WHERE node_id='peer'`)
+ admit(true)
  edit(`UPDATE node_capability_manifests SET expires_at=? WHERE peer_node_id='peer'`,now-1000)
  admit(false)
  // The remote transport itself must refuse before pairedEndpoint/network

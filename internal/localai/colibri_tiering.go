@@ -12,6 +12,7 @@ import (
     "runtime"
     "strconv"
     "strings"
+    "sync"
     "time"
 )
 
@@ -163,6 +164,35 @@ func (s *Service) SetColibriTier(ctx context.Context, cmd ColibriTierCommand) (C
     return s.ColibriTier(ctx,cmd.DeploymentID)
 }
 
+// boundedColibriPlanOutput retains at most one modest diagnostic document.
+// An external runtime may write arbitrarily many bytes before it exits. A
+// post-CombinedOutput length check is NOT an acceptable memory budget.
+const maxColibriPlanOutputBytes=128<<10
+type boundedColibriPlanOutput struct{
+ mu sync.Mutex
+ data []byte
+ overflow bool
+}
+func(b *boundedColibriPlanOutput)Write(p []byte)(int,error){
+ b.mu.Lock()
+ defer b.mu.Unlock()
+ available:=maxColibriPlanOutputBytes-len(b.data)
+ if available<0{available=0}
+ count:=len(p)
+ if count>available{
+  b.data=append(b.data,p[:available]...)
+  b.overflow=true
+ }else{
+  b.data=append(b.data,p...)
+ }
+ return count,nil
+}
+func(b *boundedColibriPlanOutput)Result()([]byte,bool){
+ b.mu.Lock()
+ defer b.mu.Unlock()
+ return append([]byte(nil),b.data...),b.overflow
+}
+
 // ColibriPlan runs only a managed in-root launcher with a fixed argument set.
 // It is read-only and bounded; absent launchers are reported, never guessed.
 func (s *Service) ColibriPlan(ctx context.Context, deploymentID string) (json.RawMessage,error) {
@@ -188,9 +218,13 @@ func (s *Service) ColibriPlan(ctx context.Context, deploymentID string) (json.Ra
     command:=exec.CommandContext(cctx,python,args...)
     command.Dir=root
     command.Env=append(os.Environ(),colibriTierEnv(settings)...)
-    output,err:=command.CombinedOutput()
-    if err!=nil { return nil,fmt.Errorf("Colibri placement plan unavailable: %w: %s",err,strings.TrimSpace(string(output[:min(len(output),1000)]))) }
-    if len(output)>128<<10 {return nil,errors.New("Colibri plan exceeds response limit")}
+    capture:=&boundedColibriPlanOutput{}
+    command.Stdout=capture
+    command.Stderr=capture
+    err=command.Run()
+    output,overflow:=capture.Result()
+    if overflow {return nil,errors.New("Colibri plan exceeds response limit")}
+    if err!=nil {return nil,fmt.Errorf("Colibri placement plan unavailable: %w",err)}
     if !json.Valid(output) {return nil,errors.New("Colibri launcher did not return machine-readable JSON")}
     return json.RawMessage(output),nil
 }

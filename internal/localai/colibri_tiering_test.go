@@ -50,3 +50,27 @@ func TestColibriTierConfigBackwardsCompatible(t *testing.T) {
     settings:=tierSettingsFromConfig(nil)
     if settings.Mode!="automatic"||settings.Backend!="auto" {t.Fatalf("legacy profile: %+v",settings)}
 }
+
+
+func TestColibriPlacementOutputBoundedDuringWrites(t *testing.T){
+ capture:=&boundedColibriPlanOutput{}
+ message:=[]byte(`{"budget":"normal"}`)
+ if n,err:=capture.Write(message);err!=nil||n!=len(message){
+  t.Fatalf("normal captured bytes=%d error=%v",n,err)
+ }
+ data,overflow:=capture.Result()
+ if overflow||string(data)!=string(message){t.Fatalf("normal output corrupted")}
+ huge:=[]byte(strings.Repeat("x",maxColibriPlanOutputBytes*4))
+ n,err:=capture.Write(huge)
+ if err!=nil||n!=len(huge){t.Fatalf("oversized stdout should drain: %d %v",n,err)}
+ data,overflow=capture.Result()
+ if !overflow||len(data)!=maxColibriPlanOutputBytes{
+  t.Fatalf("external stdout escaped bound: len=%d overflow=%v",len(data),overflow)
+ }
+ n,err=capture.Write(huge)
+ if err!=nil||n!=len(huge){t.Fatalf("after limit output not drained: %d %v",n,err)}
+ data,overflow=capture.Result()
+ if !overflow||len(data)!=maxColibriPlanOutputBytes{
+  t.Fatalf("capture grew after overflow: %d %v",len(data),overflow)
+ }
+}

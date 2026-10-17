@@ -129,15 +129,15 @@ func TestRemoteInferenceRequiresCurrentExactPairedNodeManifestAtDispatch(t *test
  admit(true)
  // An operator can disable remote compute after the model was imported,
  // verified and scheduled. The last transport must still stop pre-network.
- edit(`INSERT INTO remote_node_compute_policies(
-   node_id,enabled,updated_by,created_at,updated_at)
-   VALUES('peer',0,'operator',?,?)`,now,now)
+ edit(`UPDATE remote_node_compute_policies SET enabled=0,updated_by='operator'
+   WHERE node_id='peer'`)
  admit(false)
  edit(`UPDATE remote_node_compute_policies SET enabled=1 WHERE node_id='peer'`)
  admit(true)
  edit(`UPDATE remote_node_compute_policies SET enabled=0 WHERE node_id='peer'`)
  _,policyErr:=(RemoteTransport{Service:svc}).Dispatch(ctx,inference.DispatchRequest{
   RequestID:"policy-revoked-no-send",
+  WorkspaceID:"tenant",TaskID:&scopedTask,
   Deployment:inference.ModelDeployment{ID:"imported-deployment",
    RuntimeConfigJSON:json.RawMessage(cfg)},
   RequestJSON:json.RawMessage(`{"prompt":"never exported"}`),

@@ -95,6 +95,8 @@ func TestNamedWorkspaceModelWaitSurvivesWorkerRestartWithoutDuplicateAttempt(t *
   `{"model_wait":{"attempt":1,"retry_at_ms":1,"attempt":2}}`,
   `{"model_wait":{"attempt":1,"retry_at_ms":1},"model_w\u0061it":null}`,
   `{"operation_id":"a","operation_id":"b"}`,
+  `{"operation_id":null}`,
+  `{"operation_id":""}`,
   `{"model_wait":{"attempt":1,"retry_at_ms":1},"operation_id":"approved"}`,
  }{
   if _,err:=db.SQL().ExecContext(ctx,

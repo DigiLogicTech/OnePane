@@ -112,3 +112,14 @@ func TestWaitContinuationRejectsNullAndDuplicateJSON(t *testing.T){
   }
  }
 }
+
+
+func TestOperationWaitMustHaveOneNonemptyIdentifier(t *testing.T){
+ for _,raw:=range []string{`{"operation_id":null}`,`{"operation_id":""}`} {
+  fields,ok:=readWorkerContinuationFields(json.RawMessage(raw))
+  if !ok{t.Fatalf("unexpectedly invalid JSON object: %s",raw)}
+  if _,present:=fields["operation_id"];!present{
+   t.Fatalf("missing explicit Operation field: %s",raw)
+  }
+ }
+}

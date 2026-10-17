@@ -334,6 +334,9 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 			if (hasModel&&hasToolchain)||((hasModel||hasToolchain)&&hasOperation){
 				return fmt.Errorf("conflicting durable Worker wait conditions for run %s",v.run)
 			}
+			if hasOperation&&strings.TrimSpace(c.OperationID)==""{
+				return fmt.Errorf("invalid persisted Operation wait for Worker run %s",v.run)
+			}
 			// A model-resource wait is a real persisted suspension, not a
 			// dependency-free Task that should resume on every worker tick.
 			// Retain the same pinned model and local-only routing after wake.

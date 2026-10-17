@@ -1788,3 +1788,10 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] The managed local model process now sets an explicit five-second `exec.Cmd.WaitDelay` after the launcher exits, so inherited stdout/stderr pipes held open by a Python Colibri child engine cannot keep the supervisor's parent PID bookkeeping apparently alive forever. Together with the runtime log writer cap, this bounds Go-side log-copy lifetime while retaining normal full stream draining for healthy processes.
 - [x] The real subprocess log regression on P0-EH exercises normal launch/exit and >24 MiB emitted output. The WaitDelay behavior itself still requires installed child-engine process-tree acceptance, especially on Windows, because the hosted helper process does not model Colibri's specific child inheritance.
 - [ ] Full exact-head hosted CI [#39060121768](https://github.com/DigiLogicTech/OnePane/actions/runs/39060121768) pending at documentation time. No physical runtime, Node, network or L5 side effect was invoked. All existing user-approved security/code, native Colibri resource, UI/UX LAST and installer gates remain.
+
+
+## RC11 P0-EJ — rollover at an exact filled managed runtime log (2026-10-18)
+
+- [x] The next managed model launch rotates a current diagnostic log as soon as it reaches the live 4-MiB limit, including equality. Previously a full 4-MiB log was reopened but the new bounded writer had zero available bytes, so the next model run's entirely new startup diagnostics were silently lost. The old full log is retained as `.previous` while a new empty protected log begins.
+- [x] Regression writes precisely 4 MiB through the real capped writer, closes and reopens via `openManagedRuntimeLog`, and verifies preserved archived diagnostics and a new zero-length writable log. No installer paths, secrets or model configurations are modified.
+- [ ] Exact-head CI, actual long-lived Colibri child-engine storage acceptance and disk-volume selection QA remain outstanding, alongside independently approved physical Node/L5 effects, final code/security review and LAST UI/UX before authorised packaging.

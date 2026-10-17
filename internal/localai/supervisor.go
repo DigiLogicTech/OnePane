@@ -210,9 +210,12 @@ func (b *OSProcessBackend) Signal(pid int, sig os.Signal) error {
 		// Killing only the parent on Windows leaks the child and its VRAM.
 		// This is called only after VerifyIdentity authenticates the managed
 		// process, and taskkill's /T closes its descendants as well.
-		result, killErr := exec.Command("taskkill.exe", "/PID", strconv.Itoa(pid), "/T", "/F").CombinedOutput()
+        // taskkill output is not an authority or diagnostic stream.
+        // Do not buffer potentially unbounded OS utility stdout/stderr or
+        // echo it into UI-visible errors when stopping a model process.
+        killErr := exec.Command("taskkill.exe", "/PID", strconv.Itoa(pid), "/T", "/F").Run()
 		if killErr != nil && b.Alive(pid) {
-			return fmt.Errorf("stop verified managed process tree: %w: %s", killErr, strings.TrimSpace(string(result)))
+			return fmt.Errorf("stop verified managed process tree: %w", killErr)
 		}
 		return nil
 	}

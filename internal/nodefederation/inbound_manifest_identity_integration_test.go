@@ -56,9 +56,10 @@ func TestInboundInferenceRequiresExactPairedPeerManifest(t *testing.T){
  set(`UPDATE node_capability_manifests SET manifest_json=?
       WHERE peer_node_id='peer'`,
       `{"node_id":"peer","protocol":"onepane-federation-v1","models":[]}`)
- set(`UPDATE node_capability_manifests SET sequence=0 WHERE peer_node_id='peer'`)
- check("zero sequence",false)
- set(`UPDATE node_capability_manifests SET sequence=1,received_at=0 WHERE peer_node_id='peer'`)
+ // SQLite already rejects sequence<1 at the table constraint, so a
+ // forged zero sequence cannot be materialised through the normal store.
+ // Keep admission's own fail-closed predicate as defence in depth.
+ set(`UPDATE node_capability_manifests SET received_at=0 WHERE peer_node_id='peer'`)
  check("no reception timestamp",false)
  set(`UPDATE node_capability_manifests SET received_at=?,expires_at=? WHERE peer_node_id='peer'`,now,now-1000)
  check("expired",false)

@@ -1673,3 +1673,9 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] The outbound federated-model transport now classifies only bounded JSON-serialization and oversize-request rejections that occur **before creating a network request** as `OutcomeKnown=true`, using explicit typed sentinels. Timeout, TLS, peer 429, invalid peer acknowledgement and oversized received response remain outcome-unknown; an already executed remote model must not be silently repeated.
 - [x] Non-network classification regression verifies direct and wrapped pre-send refusals, transport failures, cancellation, and malformed or overlarge peer replies. Failed JSON marshalling no longer embeds a possibly sensitive marshaler error in externally propagated messages.
 - [ ] This is a local certainty taxonomy, not a new retry policy or proof of physical effects. Exact-head hosted CI, real two-Node interruption acceptance, independently verified L5 action postconditions, code/security audit, installed QA and LAST human-first UI/UX remain open.
+
+
+## RC11 P0-DT — negative manifest test respects the migration's storage constraints (2026-10-17)
+
+- [x] The integration fixture no longer attempts an impossible `node_capability_manifests.sequence=0` update. Migration 0016 already enforces `sequence >= 1` and `json_valid(manifest_json)` in SQLite. Continue testing caller-level source/protocol/receipt provenance, expiration and permission revocation as independent reasons for denial; keep the service-side positive-sequence predicate as defence in depth.
+- [ ] Hosted exact-head CI is the acceptance check; actual independently paired physical-Node verification and separate L5 effects remain unavailable without authorised physical QA. No installer.

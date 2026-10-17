@@ -26,15 +26,15 @@ type modelWaitEnvelope struct {
 // dependency with no resource precondition. In particular, JSON null or a
 // wrong-type model_wait must never let a Task wake on the next Worker tick.
 func hasModelWaitField(raw json.RawMessage) bool {
- var fields map[string]json.RawMessage
- if err:=json.Unmarshal(raw,&fields);err!=nil{return true}
+ fields,valid:=readWorkerContinuationFields(raw)
+ if !valid{return true}
  _,ok:=fields["model_wait"]
  return ok
 }
 
 func decodeModelWait(raw json.RawMessage) *modelWaitRecord {
  var state modelWaitEnvelope
- if len(raw)==0||json.Unmarshal(raw,&state)!=nil{return nil}
+ if _,valid:=readWorkerContinuationFields(raw);!valid||json.Unmarshal(raw,&state)!=nil{return nil}
  if state.ModelWait==nil||state.ModelWait.Attempt<1||state.ModelWait.RetryAtMS<1{return nil}
  return state.ModelWait
 }

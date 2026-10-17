@@ -323,8 +323,16 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 			var c struct {
 				OperationID string `json:"operation_id"`
 			}
-			if json.Unmarshal([]byte(cont), &c) != nil {
+			fields,valid:=readWorkerContinuationFields(json.RawMessage(cont))
+			if !valid||json.Unmarshal([]byte(cont), &c)!=nil{
 				return fmt.Errorf("invalid durable Agent Worker continuation for run %s",v.run)
+			}
+			// Only one of model, toolchain or operation may gate this Attempt.
+			_,hasModel:=fields["model_wait"]
+			_,hasToolchain:=fields["toolchain_wait"]
+			_,hasOperation:=fields["operation_id"]
+			if (hasModel&&hasToolchain)||((hasModel||hasToolchain)&&hasOperation){
+				return fmt.Errorf("conflicting durable Worker wait conditions for run %s",v.run)
 			}
 			// A model-resource wait is a real persisted suspension, not a
 			// dependency-free Task that should resume on every worker tick.

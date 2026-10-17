@@ -89,6 +89,13 @@ func TestNamedWorkspaceModelWaitSurvivesWorkerRestartWithoutDuplicateAttempt(t *
   `{"model_wait":"invalid"}`,
   `{"model_wait":{"attempt":0,"retry_at_ms":1}}`,
   `{"model_wait":{"attempt":1,"retry_at_ms":0}}`,
+  `null`,
+  `[]`,
+  `{"model_wait":{"attempt":1,"retry_at_ms":1},"model_wait":null}`,
+  `{"model_wait":{"attempt":1,"retry_at_ms":1,"attempt":2}}`,
+  `{"model_wait":{"attempt":1,"retry_at_ms":1},"model_w\u0061it":null}`,
+  `{"operation_id":"a","operation_id":"b"}`,
+  `{"model_wait":{"attempt":1,"retry_at_ms":1},"operation_id":"approved"}`,
  }{
   if _,err:=db.SQL().ExecContext(ctx,
    `UPDATE agent_worker_runs SET continuation_json=? WHERE id=?`,

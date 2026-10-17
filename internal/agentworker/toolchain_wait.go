@@ -28,14 +28,14 @@ type toolchainWaitEnvelope struct {
 }
 // Corrupt persisted wait data cannot silently become a dependency-free wait.
 func hasToolchainWaitField(raw json.RawMessage)bool{
- var fields map[string]json.RawMessage
- if json.Unmarshal(raw,&fields)!=nil{return true} // Fail closed on malformed persisted JSON.
+ fields,valid:=readWorkerContinuationFields(raw)
+ if !valid{return true} // Corrupt envelope cannot become an ordinary dependency.
  _,ok:=fields["toolchain_wait"]
  return ok
 }
 func decodeToolchainWait(raw json.RawMessage)*toolchainWaitRecord{
  var env toolchainWaitEnvelope
- if json.Unmarshal(raw,&env)!=nil||env.ToolchainWait==nil{return nil}
+ if _,valid:=readWorkerContinuationFields(raw);!valid||json.Unmarshal(raw,&env)!=nil||env.ToolchainWait==nil{return nil}
  r:=env.ToolchainWait
  if r.ProjectID==""||r.ProjectWorkspaceID==""||r.RuntimeID==""||
   r.ApplicationID==""||len(r.ManifestSHA256)!=64||r.RetryAtMS<=0{return nil}

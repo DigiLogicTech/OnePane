@@ -67,10 +67,47 @@ func TestTrustedNodeGatewayEnforcesPersistedGrantsAndFreshPairing(t *testing.T){
    'sha256:dead','',?,?,1,?,?)`,now+60000,now,now,now);err!=nil{t.Fatal(err)}
  if _,err=db.SQL().ExecContext(ctx,
   `INSERT INTO node_capability_manifests(peer_node_id,sequence,manifest_json,received_at,
-   expires_at,revision,updated_at) VALUES('peer',1,'{}',?,?,1,?)`,
+   expires_at,revision,updated_at) VALUES('peer',1,'{"node_id":"peer","protocol":"onepane-federation-v1","models":[]}',?,?,1,?)`,
    now,now+3600000,now);err!=nil{t.Fatal(err)}
  if err=infer.authorizeTrustedNodeTaskDispatch(ctx,cmd,dep);err!=nil{
   t.Fatalf("explicitly allowed paired Node denied: %v",err)
+ }
+ // Selected Project compute policy is additive to canonical Task consent.
+ if _,err=db.SQL().ExecContext(ctx,`INSERT INTO remote_node_compute_policies(
+  node_id,enabled,project_scope,allowed_projects_json,created_at,updated_at)
+  VALUES('peer',1,'selected','["another-project"]',?,?)`,now,now);err!=nil{
+  t.Fatal(err)
+ }
+ if err=infer.authorizeTrustedNodeTaskDispatch(ctx,cmd,dep);!errors.Is(err,ErrRemoteNodeUnsupported){
+  t.Fatalf("selected Project outside allowlist escaped Node policy: %v",err)
+ }
+ allowedProjects,_:=json.Marshal([]string{p.ID})
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE remote_node_compute_policies
+  SET allowed_projects_json=? WHERE node_id='peer'`,string(allowedProjects));err!=nil{t.Fatal(err)}
+ if err=infer.authorizeTrustedNodeTaskDispatch(ctx,cmd,dep);err!=nil{
+  t.Fatalf("explicitly selected Task Project was denied: %v",err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE remote_node_compute_policies SET enabled=0 WHERE node_id='peer'`);err!=nil{t.Fatal(err)}
+ if err=infer.authorizeTrustedNodeTaskDispatch(ctx,cmd,dep);!errors.Is(err,ErrRemoteNodeUnsupported){
+  t.Fatalf("disabled Node still exported Task data: %v",err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE remote_node_compute_policies SET enabled=1,project_scope='all' WHERE node_id='peer'`);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE node_pairings SET peer_confirmed=0 WHERE peer_node_id='peer'`);err!=nil{t.Fatal(err)}
+ if err=infer.authorizeTrustedNodeTaskDispatch(ctx,cmd,dep);!errors.Is(err,ErrRemoteNodeUnsupported){
+  t.Fatalf("one-sided pairing admitted off-host Task: %v",err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE node_pairings SET peer_confirmed=1 WHERE peer_node_id='peer'`);err!=nil{t.Fatal(err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE node_capability_manifests
+  SET manifest_json='{"node_id":"different","protocol":"onepane-federation-v1","models":[]}'
+  WHERE peer_node_id='peer'`);err!=nil{t.Fatal(err)}
+ if err=infer.authorizeTrustedNodeTaskDispatch(ctx,cmd,dep);!errors.Is(err,ErrRemoteNodeUnsupported){
+  t.Fatalf("wrong origin manifest admitted Task transfer: %v",err)
+ }
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE node_capability_manifests
+  SET manifest_json='{"node_id":"peer","protocol":"onepane-federation-v1","models":[]}'
+  WHERE peer_node_id='peer'`);err!=nil{t.Fatal(err)}
+ if err=infer.authorizeTrustedNodeTaskDispatch(ctx,cmd,dep);err!=nil{
+  t.Fatalf("restored trusted Node admission rejected: %v",err)
  }
  cloudProvider:="provider"
  bad:=dep

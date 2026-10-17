@@ -513,6 +513,10 @@ func inboundRequestHash(in RemoteInferenceRequest)(string,error){
  return hex.EncodeToString(sum[:]),nil
 }
 
+// ErrFederatedReceiptConflict means an already executing operation did not
+// successfully commit its exact terminal receipt. Do not retry that effect.
+var ErrFederatedReceiptConflict=errors.New("federated inference receipt is not in the original executing state")
+
 // Inbound inference may complete AFTER its HTTP request has been cancelled.
 // A bounded, cancellation-independent receipt write prevents completed work
 // from becoming a permanent 'executing' tombstone due solely to cancellation.
@@ -522,8 +526,12 @@ func (s *Service)finishInboundInferenceReceipt(ctx context.Context,
  query string,args ...any)error{
  cleanup,cancel:=context.WithTimeout(context.WithoutCancel(ctx),3*time.Second)
  defer cancel()
- _,err:=s.db.ExecContext(cleanup,query,args...)
- return err
+ result,err:=s.db.ExecContext(cleanup,query,args...)
+ if err!=nil{return err}
+ changed,err:=result.RowsAffected()
+ if err!=nil{return err}
+ if changed!=1{return ErrFederatedReceiptConflict}
+ return nil
 }
 
 func (s *Service) executeInbound(ctx context.Context,peer string,in RemoteInferenceRequest,exec LocalInferenceExecutor)(RemoteInferenceResponse,error){
@@ -596,8 +604,10 @@ func (s *Service) executeInbound(ctx context.Context,peer string,in RemoteInfere
   st:="failed"
   if !known{st="unknown"}
   if err:=s.finishInboundInferenceReceipt(ctx,`UPDATE node_federated_inference_receipts
-   SET status=?,error_code=?,completed_at=? WHERE id=? AND request_hash=?`,
-   st,code,completed,idv,digest);err!=nil{
+   SET status=?,error_code=?,completed_at=?
+   WHERE id=? AND request_hash=? AND status='executing'
+    AND peer_node_id=? AND remote_request_id=? AND deployment_id=?`,
+   st,code,completed,idv,digest,peer,in.RequestID,in.DeploymentID);err!=nil{
    return RemoteInferenceResponse{},err
   }
   return RemoteInferenceResponse{ErrorCode:code,OutcomeKnown:known},nil
@@ -605,7 +615,9 @@ func (s *Service) executeInbound(ctx context.Context,peer string,in RemoteInfere
  if !json.Valid(result.ResponseJSON){
   if err:=s.finishInboundInferenceReceipt(ctx,`UPDATE node_federated_inference_receipts
    SET status='failed',error_code='invalid_remote_response',completed_at=?
-   WHERE id=? AND request_hash=?`,completed,idv,digest);err!=nil{
+   WHERE id=? AND request_hash=? AND status='executing'
+    AND peer_node_id=? AND remote_request_id=? AND deployment_id=?`,
+   completed,idv,digest,peer,in.RequestID,in.DeploymentID);err!=nil{
    return RemoteInferenceResponse{},err
   }
   return RemoteInferenceResponse{ErrorCode:"invalid_remote_response",OutcomeKnown:true},nil
@@ -614,8 +626,10 @@ func (s *Service) executeInbound(ctx context.Context,peer string,in RemoteInfere
  if len(usageJSON)==0{usageJSON=json.RawMessage(`{}`)}
  err=s.finishInboundInferenceReceipt(ctx,`UPDATE node_federated_inference_receipts
   SET status='succeeded',response_json=?,usage_json=?,completed_at=?
-  WHERE id=? AND request_hash=?`,
-  string(result.ResponseJSON),string(usageJSON),completed,idv,digest)
+  WHERE id=? AND request_hash=? AND status='executing'
+   AND peer_node_id=? AND remote_request_id=? AND deployment_id=?`,
+  string(result.ResponseJSON),string(usageJSON),completed,idv,digest,
+  peer,in.RequestID,in.DeploymentID)
  if err!=nil{return RemoteInferenceResponse{},err}
  return RemoteInferenceResponse{ResponseJSON:result.ResponseJSON,UsageJSON:usageJSON,OutcomeKnown:true},nil
 }

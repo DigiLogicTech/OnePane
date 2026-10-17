@@ -245,9 +245,9 @@ func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {
 	// transport must recheck CURRENT pairing before sending a new prompt.
 	if _,err:=dbA.SQL().ExecContext(ctx,`UPDATE node_pairings
 	 SET local_confirmed=0 WHERE peer_node_id='node-b'`);err!=nil{t.Fatal(err)}
-	denied:=sent
-	denied.RequestID="withdrawn-consent-never-sent"
-	_,err=modelTransport.Dispatch(ctx,denied,nil)
+	revokedRequest:=sent
+	revokedRequest.RequestID="withdrawn-consent-never-sent"
+	_,err=modelTransport.Dispatch(ctx,revokedRequest,nil)
 	var transportDenied *inference.TransportError
 	if !errors.As(err,&transportDenied)||!transportDenied.OutcomeKnown||
 	 transportDenied.Code!="remote_node_not_admitted"{
@@ -255,7 +255,7 @@ func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {
 	}
 	if _,err:=dbA.SQL().ExecContext(ctx,`UPDATE node_pairings
 	 SET local_confirmed=1 WHERE peer_node_id='node-b'`);err!=nil{t.Fatal(err)}
-	if _,err:=dbB.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM
+	if err:=dbB.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM
 	 node_federated_inference_receipts
 	 WHERE remote_request_id='withdrawn-consent-never-sent'`).Scan(&receipts);
 	 err!=nil||receipts!=0{

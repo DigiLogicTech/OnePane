@@ -328,6 +328,8 @@ func (s *Server) Handler() http.Handler { return s.securityHeaders(s.qaCaptureMi
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/system/metrics", s.hostMetricsRequest)
+	// Node-admin only, point-in-time SQLite/WAL storage diagnostic.
+	s.mux.HandleFunc("GET /v1/qa/sqlite-footprint", s.qaSQLiteFootprintHandler)
 	s.mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 	})
@@ -350,6 +352,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/agent-profiles", s.createAgentProfile)
 	s.mux.HandleFunc("GET /v1/agent-profiles/{profileID}", s.getAgentProfile)
 	s.mux.HandleFunc("PATCH /v1/agent-profiles/{profileID}", s.updateAgentProfile)
+	s.mux.HandleFunc("GET /v1/agent-profiles/{profileID}/policy", s.getAgentPolicy)
+	s.mux.HandleFunc("GET /v1/agent-profiles/{profileID}/policy/history", s.listAgentPolicyHistory)
+	s.mux.HandleFunc("PUT /v1/agent-profiles/{profileID}/policy", s.putAgentPolicy)
 	s.mux.HandleFunc("POST /v1/agent-profiles/{profileID}/archive", s.archiveAgentProfile)
 	s.mux.HandleFunc("GET /v1/agent-sessions", s.listAgentSessions)
 	// RC11 QA diagnostic foundation: explicitly requested, scoped and read-only.
@@ -525,6 +530,86 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/projects", s.createProject)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}", s.getProject)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces", s.listProjectWorkspaces)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals", s.listProjectContinuousGoals)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals", s.configureProjectContinuousGoal)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/{transition}", s.transitionProjectContinuousGoal)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/observations", s.listProjectGoalObservations)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations", s.listProjectGoalSignedObservations)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/node-measurement-grants", s.listProjectGoalNodeMeasurements)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/node-measurements", s.listProjectGoalNodeMeasurementReceipts)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/node-measurement-grants", s.approveProjectGoalNodeMeasurement)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/node-measurement-grants/{grantID}/revoke", s.revokeProjectGoalNodeMeasurement)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/node-probe-execution-permits", s.listProjectGoalNodeProbeExecutions)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/node-probe-execution-permits", s.approveProjectGoalNodeProbeExecution)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/node-probe-execution-permits/{permitID}/revoke", s.revokeProjectGoalNodeProbeExecution)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/node-probe-execution-permits/{permitID}/seal", s.sealProjectGoalNodeProbeExecution)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers", s.listProjectGoalSourceSigners)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers", s.approveProjectGoalSourceSigner)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers/{signerID}/revoke", s.revokeProjectGoalSourceSigner)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers/{signerID}/credentials", s.issueProjectGoalSourceCredential)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers/{signerID}/credentials", s.listProjectGoalSourceCredentials)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/source-signers/{signerID}/credentials/{credentialID}/revoke", s.revokeProjectGoalSourceCredential)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations/submit", s.submitProjectGoalSignedObservation)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations/record", s.recordProjectGoalSourceReading)
+	// Override the generic /{transition} POST route: this read-only
+	// evidence metadata endpoint must never be interpreted as a Goal action.
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations", func(w http.ResponseWriter,r *http.Request){
+		w.Header().Set("Allow","GET")
+		writeError(w,http.StatusMethodNotAllowed,"signed Observation proofs are read-only")
+	})
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/coverage", s.getProjectGoalEvidenceCoverage)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/signal-triage", s.getProjectGoalSignalTriage)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/evidence-review-permits", s.listProjectGoalReviewPermits)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/evidence-review-permits", s.approveProjectGoalReviewPermit)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/evidence-review-permits/{permitID}/revoke", s.revokeProjectGoalReviewPermit)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/evidence-review-permits/{permitID}/review", s.runProjectGoalEvidenceReview)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/evidence-reviews", s.listProjectGoalEvidenceReviews)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tls-pins", s.approveProjectGoalTLSPin)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-keys", s.approveProjectGoalInstrumentKey)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-keys", s.listProjectGoalInstrumentKeys)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-keys/{keyID}/revoke", s.revokeProjectGoalInstrumentKey)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-keys/{keyID}/challenge", s.issueProjectGoalInstrumentChallenge)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-keys/{keyID}/prove", s.acceptProjectGoalInstrumentChallenge)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-keys/{keyID}/probe-plan", s.prepareProjectGoalInstrumentProbePlan)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-keys/{keyID}/measurement/prepare", s.prepareProjectGoalInstrumentMeasurement)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-keys/{keyID}/measurement/accept", s.acceptProjectGoalInstrumentMeasurement)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-measurements", s.listProjectGoalInstrumentMeasurements)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-measurements/{claimID}/verification-bundle", s.getProjectGoalInstrumentMeasurementBundle)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-proofs", s.listProjectGoalInstrumentProofs)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/instrument-proofs/{proofID}/verification-bundle", s.getProjectGoalInstrumentVerificationBundle)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tls-pins", s.listProjectGoalTLSPins)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tls-pins/{pinID}/revoke", s.revokeProjectGoalTLSPin)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tls-pins/{pinID}/verify", s.runProjectGoalTLSPinCheck)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tls-checks", s.listProjectGoalTLSPinChecks)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-declared-targets", s.listProjectGoalTCPTargets)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-declared-targets", s.declareProjectGoalTCPTarget)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-declared-targets/{targetID}/revoke", s.revokeProjectGoalTCPTarget)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-probe-permits", s.listProjectGoalTCPProbePermits)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-probe-permits", s.approveProjectGoalTCPProbe)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-probe-permits/{permitID}/revoke", s.revokeProjectGoalTCPProbe)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-recurring-grants", s.listProjectGoalTCPRecurringGrants)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-recurring-grants", s.approveProjectGoalTCPRecurringGrant)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-recurring-grants/{grantID}/revoke", s.revokeProjectGoalTCPRecurringGrant)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-probe-permits/{permitID}/test", s.runProjectGoalTCPProbe)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-probe-attempts", s.listProjectGoalTCPProbeAttempts)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-baselines", s.setProjectGoalTCPBaseline)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-baselines", s.listProjectGoalTCPBaselines)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-assessment/{sourceID}", s.getProjectGoalTCPReachabilityAssessment)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-alerts", s.listProjectGoalTCPReachabilityAlerts)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/incident-reviews", s.listProjectGoalIncidentReviews)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/response-candidates", s.listProjectGoalResponseCandidates)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-observer-fence", s.getProjectGoalTCPObserverFence)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/retention-inventory", s.getProjectGoalRetentionInventory)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/observer-recovery-cases", s.listProjectGoalObserverRecoveryCases)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-observer-fence", s.setProjectGoalTCPObserverFence)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/response-candidates", s.proposeProjectGoalResponseCandidate)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/response-candidates/{candidateID}/readiness", s.getProjectGoalResponseCandidateReadiness)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/response-candidates/{candidateID}/withdraw", s.withdrawProjectGoalResponseCandidate)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/incident-reviews/{reviewID}/evidence", s.getProjectGoalIncidentEvidence)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/incident-reviews", s.openProjectGoalIncidentReview)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/incident-reviews/{reviewID}/review", s.completeProjectGoalIncidentReview)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/tcp-alerts/{alertID}/acknowledge", s.acknowledgeProjectGoalTCPReachabilityAlert)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/observations", s.attachProjectGoalObservation)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces", s.createCanonicalProjectWorkspace)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/library", s.listProjectLibrary)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/library", s.uploadProjectLibrary)
@@ -771,6 +856,7 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		Description        string          `json:"description"`
 		ProjectPolicyJSON  json.RawMessage `json:"project_policy"`
 		IndexingConfigJSON json.RawMessage `json:"indexing_config"`
+		CreateStarterWorkspace bool `json:"create_starter_workspace"`
 	}
 	if !decodeJSON(w, r, &in) {
 		return
@@ -778,7 +864,7 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	if !s.authorize(w, r, i, in.WorkspaceID, "project.write") {
 		return
 	}
-	p, err := s.projects.CreateProject(r.Context(), projectworkspace.CreateProjectCommand{WorkspaceID: in.WorkspaceID, Name: in.Name, Description: in.Description, CreatedBy: i.PrincipalID, ProjectPolicyJSON: in.ProjectPolicyJSON, IndexingConfigJSON: in.IndexingConfigJSON, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
+	p, err := s.projects.CreateProject(r.Context(), projectworkspace.CreateProjectCommand{WorkspaceID: in.WorkspaceID, Name: in.Name, Description: in.Description, CreatedBy: i.PrincipalID, CreateStarterWorkspace:in.CreateStarterWorkspace, ProjectPolicyJSON: in.ProjectPolicyJSON, IndexingConfigJSON: in.IndexingConfigJSON, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
 	respondDomain(w, p, err, http.StatusCreated)
 }
 func (s *Server) updateProjectPolicy(w http.ResponseWriter, r *http.Request) {
@@ -1256,6 +1342,21 @@ func respondDomain(w http.ResponseWriter, v any, err error, success int) {
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		writeError(w, http.StatusNotFound, "not found")
+	case errors.Is(err, projectworkspace.ErrSourceRequestRateLimited):
+		w.Header().Set("Retry-After", "60")
+		writeError(w, http.StatusTooManyRequests, "source request attempt limit reached")
+	case errors.Is(err, projectworkspace.ErrSourceReadingRateLimited):
+		w.Header().Set("Retry-After", "60")
+		writeError(w, http.StatusTooManyRequests, "source reading rate limit reached")
+	case errors.Is(err, projectworkspace.ErrSourceProofRateLimited):
+		w.Header().Set("Retry-After", "60")
+		writeError(w, http.StatusTooManyRequests, "source proof rate limit reached")
+	case errors.Is(err, projectworkspace.ErrInstrumentProjectFiveMinuteRateLimited):
+		w.Header().Set("Retry-After", "300")
+		writeError(w, http.StatusTooManyRequests, "instrument Project five-minute challenge budget reached")
+	case errors.Is(err, projectworkspace.ErrInstrumentProjectDailyRateLimited):
+		w.Header().Set("Retry-After", "86400")
+		writeError(w, http.StatusTooManyRequests, "instrument Project daily challenge budget reached")
 	case errors.Is(err, projectworkspace.ErrInvalidCommand), errors.Is(err, projectworkspace.ErrInvalidTransition):
 		writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, projectworkspace.ErrRevisionConflict):
@@ -2037,6 +2138,7 @@ func (s *Server) listSchedulerCandidates(w http.ResponseWriter, r *http.Request)
 		out = append(out, map[string]any{
 			"id": c.ID, "kind": c.Kind, "display_name": c.DisplayName, "provider": c.Provider,
 			"status": c.Status, "local": c.Local, "cost_class": c.CostClass,
+            "hard_zero_incremental_cost": c.HardZeroIncrementalCost,
 			"qualification": c.Qualification, "schedulable": c.Schedulable,
 			"role_names": c.RoleNames, "capability_ids": c.CapabilityIDs, "context_max": c.ContextMax,
 		})

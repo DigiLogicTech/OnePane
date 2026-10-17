@@ -260,3 +260,12 @@ func TestExplicitRootCloudGrantPropagatesOnlyUntilDenied(t *testing.T) {
 		t.Fatal("agent overrode Workspace cloud denial")
 	}
 }
+
+func TestDefaultExecutionPolicyDeniesUnknownActions(t *testing.T) {
+	p := AssistedDefaults()
+	for _, action := range []string{"", "network.open", "secrets.export", "shell.exec", "model.cloud"} {
+		if p.ValidateExecution(action) {
+			t.Fatalf("unrecognised action %q was granted", action)
+		}
+	}
+}

@@ -2,19 +2,28 @@ package localai
 
 import (
     "reflect"
+ "os"
+ "context"
     "strings"
     "testing"
 )
 
-func TestColibriHotSwapEvictsOnlyIdleModels(t *testing.T) {
-    idle:=[]colibriSwapCandidate{
+func TestColibriHotSwapEvictsOnlyOneIdleResident(t *testing.T) {
+    idle:=[]colibriSwapCandidate{{ID:"sole",Status:RuntimeHealthy,LastUsed:2}}
+    out,err:=selectColibriEvictions(idle,map[string]int{})
+    if err!=nil||!reflect.DeepEqual(out,[]string{"sole"}){
+        t.Fatalf("single safely idle Colibri not selected: %v %v",out,err)
+    }
+}
+
+func TestColibriHotSwapRefusesAbnormalMultipleIdleResidents(t *testing.T){
+    peers:=[]colibriSwapCandidate{
         {ID:"older",Status:RuntimeHealthy,LastUsed:2},
         {ID:"newer",Status:RuntimeHealthy,LastUsed:9},
     }
-    out,err:=selectColibriEvictions(idle,map[string]int{})
-    if err!=nil{t.Fatal(err)}
-    if !reflect.DeepEqual(out,[]string{"older","newer"}){
-        t.Fatalf("unexpected idle eviction order: %v",out)
+    out,err:=selectColibriEvictions(peers,map[string]int{})
+    if err==nil||!strings.Contains(err.Error(),"multiple Colibri")||len(out)!=0{
+        t.Fatalf("multiple resident Colibri would be evicted partially: %v %v",out,err)
     }
 }
 
@@ -45,4 +54,99 @@ func TestColibriHotSwapRefusesBusyBeforeAnyEviction(t *testing.T) {
 func TestColibriHotSwapNoConflictingModels(t *testing.T) {
     out,err:=selectColibriEvictions(nil,nil)
     if err!=nil||len(out)!=0 {t.Fatalf("unexpected result: out=%v err=%v",out,err)}
+}
+
+func TestColibriSwapStatusRejectsMissingSupervisor(t *testing.T){
+ ctx:=context.Background()
+ var missing *Service
+ if _,err:=missing.ColibriHotSwapStatus(ctx,"model");err==nil{
+  t.Fatal("nil local runtime service allowed status inspection")
+ }
+ svc:=&Service{}
+ if _,err:=svc.ColibriHotSwapStatus(ctx,"model");err==nil{
+  t.Fatal("unavailable runtime supervisor caused a nil dereference")
+ }
+}
+
+func TestColibriSwapStatusPreservesFailedVersusStoppedInstance(t *testing.T){
+ db:=colibriPinTestDB(t)
+ defer db.Close()
+ for _,query:=range []string{
+  `CREATE TABLE local_runtime_instances(
+   deployment_id TEXT PRIMARY KEY,node_id TEXT NOT NULL,
+   status TEXT NOT NULL,last_seen_at INTEGER,started_at INTEGER,
+   updated_at INTEGER NOT NULL)`,
+  `INSERT INTO local_runtime_instances
+   VALUES('colibri-a','node-1','failed',3,1,5)`,
+  `INSERT INTO local_runtime_instances
+   VALUES('colibri-b','node-1','healthy',4,2,6)`,
+ }{
+  if _,err:=db.Exec(query);err!=nil{t.Fatal(err)}
+ }
+ service:=&Service{db:db,supervisor:&RuntimeSupervisor{db:db}}
+ ctx:=context.Background()
+ failed,err:=service.ColibriHotSwapStatus(ctx,"colibri-a")
+ if err!=nil{t.Fatal(err)}
+ if failed.Status!="failed"||failed.Message==""||
+  !reflect.DeepEqual(failed.ActiveDeploymentIDs,[]string{"colibri-b"}){
+  t.Fatalf("failed engine was hidden or healthy neighbour misplaced: %+v",failed)
+ }
+ if _,err=db.Exec(`UPDATE local_runtime_instances SET status='stopped'
+   WHERE deployment_id='colibri-a'`);err!=nil{t.Fatal(err)}
+ stopped,err:=service.ColibriHotSwapStatus(ctx,"colibri-a")
+ if err!=nil||stopped.Status!="stopped"||stopped.Message!=""{
+  t.Fatalf("operator-requested stop was classified as failure: %+v %v",stopped,err)
+ }
+ missing,err:=service.ColibriHotSwapStatus(ctx,"colibri-remote")
+ if err!=nil||missing.Status!="stopped"||len(missing.ActiveDeploymentIDs)!=0{
+  t.Fatalf("other Node's model was included in local Colibri status: %+v %v",missing,err)
+ }
+}
+
+
+// The source-level startup order is an intentionally reviewed pre-effect
+// contract. Missing Python must be detected before the old Colibri model
+// receives any stop signal, for explicit swaps AND ordinary chat acquisition.
+func TestColibriStartPreflightsPythonBeforeEvictingModels(t *testing.T){
+ raw,err:=os.ReadFile("supervisor.go")
+ if err!=nil{t.Fatal(err)}
+ source:=string(raw)
+ start:=strings.Index(source,"func (s *RuntimeSupervisor) startLocked(")
+ if start<0{t.Fatal("managed start path missing")}
+ scope:=source[start:]
+ // Only inspect startLocked, not later supervisor functions that are
+ // independently allowed to discover Python for other purposes.
+ if end:=strings.Index(scope,"\nfunc ");end>0{scope=scope[:end]}
+ prior:=strings.Index(scope,"colibriPython,err=findPythonExecutable()")
+ eviction:=strings.Index(scope,"s.prepareColibriSwapLocked(ctx, nodeID, deploymentID)")
+ if prior<0||eviction<=prior||strings.Index(scope,"var existing *RuntimeInstance")>prior{
+  t.Fatal("working Colibri could be evicted before existing-runtime check or Python preflight")
+ }
+ if strings.Contains(scope[eviction:],"py, err := findPythonExecutable()"){
+  t.Fatal("Python discovery repeated after healthy predecessor eviction")
+ }
+}
+
+
+// A persisted healthy or starting row alone cannot authorise reusing a
+// possibly recycled PID. Require the same independent process identity
+// contract that guards termination before any reused runtime is returned.
+func TestRuntimeReuseMustVerifyPIDIdentityBeforeReturningOrHealth(t *testing.T){
+ raw,err:=os.ReadFile("supervisor.go")
+ if err!=nil{t.Fatal(err)}
+ source:=string(raw)
+ begin:=strings.Index(source,"func (s *RuntimeSupervisor) startLocked(")
+ if begin<0{t.Fatal("runtime admission entrypoint missing")}
+ scope:=source[begin:]
+ if end:=strings.Index(scope,"\nfunc ");end>0{scope=scope[:end]}
+ check:=strings.Index(scope,"s.VerifyIdentity(ctx,old)")
+ wait:=strings.Index(scope,"s.waitHealthy(ctx, old.ID, 120*time.Second)")
+ if check<0||wait<=check{
+  t.Fatal("reused starting local PID can be probed before identity validation")
+ }
+ start:=strings.Index(scope,"if (old.Status == RuntimeHealthy")
+ ret:=strings.Index(scope[check:],"return old, nil")
+ if start<0||ret<0||start>check{
+  t.Fatal("healthy or busy old PID not guarded by original process fingerprint")
+ }
 }

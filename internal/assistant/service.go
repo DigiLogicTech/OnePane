@@ -52,6 +52,7 @@ type SubmitCommand struct {
 	Content         string
 	ActorPrincipalID string
 	ProjectID       *string
+	ProjectWorkspaceID string
 	ForceTask       bool
 	AllowTaskCreation bool
 }
@@ -133,6 +134,13 @@ func (s *Service) SetModel(ctx context.Context, threadID string, deploymentID *s
    if !candidate.Schedulable||candidate.Qualification==scheduler.QualIncompatible{
     return Thread{},fmt.Errorf("%w: selected model is not admitted or available for Assistant inference",ErrInvalid)
    }
+   // A pin is not an authorisation to transmit chat context to a provider.
+   // Verify scheduling provenance rather than relying on the UI's filters
+   // or on a deployment's friendly name.
+   if !candidate.Local||!candidate.HardZeroIncrementalCost||
+      (candidate.CostClass!=scheduler.CostLocal&&candidate.CostClass!=scheduler.CostFree){
+    return Thread{},fmt.Errorf("%w: general Assistant model must be verified host-local and zero-cost",ErrInvalid)
+   }
    found=true;break
   }
   if !found{return Thread{},fmt.Errorf("%w: selected model is not available to this workspace",ErrInvalid)}
@@ -197,7 +205,11 @@ func(s *Service) reasonGlobal(ctx context.Context,workspaceID,actor,content stri
 	label:=policy.DataLabel{WorkspaceID:workspaceID,Confidentiality:policy.ConfidentialityInternal,Residency:policy.ResidencyAny,Trust:policy.TrustUserInstruction}
 	selected:=""
  if pin!=nil{selected=strings.TrimSpace(*pin)}
- route:=scheduler.RouteRequest{WorkspaceID:workspaceID,CapabilityID:"inference.general",RoleName:"onepane-assistant",ProtocolLevel:"L1",ContextTokens:8192,DataLabel:label,AllowUntested:true,AllowLimited:true,AllowMediated:true,AllowDegraded:true,PreferZeroIncrementalCost:true,AllowedKinds:[]scheduler.CandidateKind{scheduler.CandidateModel}}
+ // General Assistant context includes Project names and operational counts.
+ // No approved off-host data transfer or paid inference grant exists at this
+ // taskless-chat boundary. Both automatic and pinned routes must fail closed
+ // to verified local, zero-incremental-cost compute; no cloud substitution.
+ route:=scheduler.RouteRequest{WorkspaceID:workspaceID,CapabilityID:"inference.general",RoleName:"onepane-assistant",ProtocolLevel:"L1",ContextTokens:8192,DataLabel:label,AllowUntested:true,AllowLimited:true,AllowMediated:true,AllowDegraded:true,PreferZeroIncrementalCost:true,RequireZeroIncrementalCost:true,LocalOnly:true,AllowedKinds:[]scheduler.CandidateKind{scheduler.CandidateModel}}
  if selected!=""{
   route.IncludeCandidateIDs=[]string{selected}
   // Manual model selection may use a smaller verified context than the
@@ -209,6 +221,11 @@ func(s *Service) reasonGlobal(ctx context.Context,workspaceID,actor,content stri
   if selected!=""{return "",nil,fmt.Errorf("selected Assistant model is unavailable or disallowed (no substitution): %w",err)}
   return "",nil,fmt.Errorf("route OnePane Assistant: %w",err)
  }
+	// A malformed/stale scheduler result cannot override the host-local
+	// zero-cost restriction, even if its RouteRequest asked for LocalOnly.
+	if !scheduler.VerifiedHostLocalZeroCost(decision.Selected.Candidate){
+		return "",nil,fmt.Errorf("unverified remote or paid model refused for general Assistant")
+	}
 	dep:=decision.Selected.Candidate.ID;snapshot:=s.globalSnapshot(ctx,workspaceID)
 	system:=`You are the global OnePane Assistant. You may explain global OnePane state and help navigate. Do not claim direct tool, filesystem, secret, node, or approval authority. Project-specific work must be delegated to that Project's Orchestrator. Use only the supplied bounded global context.`
 	req,_:=json.Marshal(map[string]any{"messages":[]map[string]string{{"role":"system","content":system},{"role":"user","content":"Global context:\n"+string(snapshot)+"\n\nUser:\n"+content}},"max_tokens":1000,"temperature":0.2})
@@ -217,10 +234,26 @@ func(s *Service) reasonGlobal(ctx context.Context,workspaceID,actor,content stri
 	rc,_,err:=s.artifacts.Open(ctx,*inf.ResponseArtifactID);if err!=nil{return "",&dep,err};defer rc.Close();b,err:=io.ReadAll(io.LimitReader(rc,4<<20));if err!=nil{return "",&dep,err};return extractText(b),&dep,nil
 }
 
-func (s *Service) resolveProject(ctx context.Context,t Thread,content string,explicit *string)(*string,error){
-	if explicit!=nil&&strings.TrimSpace(*explicit)!=""{var idv string;err:=s.db.QueryRowContext(ctx,`SELECT id FROM projects WHERE id=? AND workspace_id=? AND status='active'`,strings.TrimSpace(*explicit),t.WorkspaceID).Scan(&idv);if err!=nil{return nil,err};return &idv,nil}
-	if t.ActiveProjectID!=nil{return t.ActiveProjectID,nil}
-	rows,err:=s.db.QueryContext(ctx,`SELECT id,name FROM projects WHERE workspace_id=? AND status='active' ORDER BY length(name) DESC`,t.WorkspaceID);if err!=nil{return nil,err};defer rows.Close();low:=strings.ToLower(content);for rows.Next(){var idv,name string;if rows.Scan(&idv,&name)==nil&&strings.Contains(low,strings.ToLower(name)){return &idv,nil}};return nil,nil
+func (s *Service) resolveProject(ctx context.Context,t Thread,_ string,explicit *string)(*string,error){
+ var selected string
+ if explicit!=nil{
+  selected=strings.TrimSpace(*explicit)
+  // An explicit empty Project is a per-turn general conversation override;
+  // it must not silently reuse the thread's previously selected Project.
+  if selected=="" {return nil,nil}
+ }else if t.ActiveProjectID!=nil{
+  selected=strings.TrimSpace(*t.ActiveProjectID)
+ }
+ if selected==""{
+  // Mentioning a Project in ordinary chat does not grant execution context.
+  // A user must select the Project directly or via the thread scope.
+  return nil,nil
+ }
+ var canonical string
+ err:=s.db.QueryRowContext(ctx,`SELECT id FROM projects WHERE id=? AND workspace_id=? AND status='active'`,
+  selected,t.WorkspaceID).Scan(&canonical)
+ if err!=nil{return nil,err}
+ return &canonical,nil
 }
 
 func (s *Service) ProjectHandoffs(ctx context.Context, projectID string, limit int) ([]Handoff,error) {
@@ -240,13 +273,38 @@ func (s *Service) ProjectHandoffs(ctx context.Context, projectID string, limit i
 func (s *Service) Submit(ctx context.Context,c SubmitCommand)(SubmitResult,error){
 	c.ThreadID,c.Content,c.ActorPrincipalID=strings.TrimSpace(c.ThreadID),strings.TrimSpace(c.Content),strings.TrimSpace(c.ActorPrincipalID);if c.ThreadID==""||c.Content==""||c.ActorPrincipalID==""{return SubmitResult{},ErrInvalid}
 	thread,err:=s.Thread(ctx,c.ThreadID);if err!=nil{return SubmitResult{},err}
-	userID,_:=s.ids.New("aturn");now:=s.clock.UnixMilli();projectID,err:=s.resolveProject(ctx,thread,c.Content,c.ProjectID);if err!=nil{return SubmitResult{},err}
+	projectID,err:=s.resolveProject(ctx,thread,c.Content,c.ProjectID);if err!=nil{return SubmitResult{},err}
+	// The UI's disabled Run button is not an authorization boundary.
+	// Explicit Task requests require a canonical selected Project even when
+	// they arrive via a direct API call or a stale/replayed Assistant client.
+	if projectID==nil&&(c.ForceTask||c.AllowTaskCreation){
+		return SubmitResult{},fmt.Errorf("%w: select a Project before running Tasks",ErrInvalid)
+	}
+	selectedWorkspace:=strings.TrimSpace(c.ProjectWorkspaceID)
+	if selectedWorkspace!="" {
+		if projectID==nil {
+			return SubmitResult{},fmt.Errorf("%w: Project Workspace requires a selected Project",ErrInvalid)
+		}
+		var canonical string
+		err=s.db.QueryRowContext(ctx,`SELECT id FROM project_workspaces WHERE id=? AND project_id=? AND status='active'`,selectedWorkspace,*projectID).Scan(&canonical)
+		if errors.Is(err,sql.ErrNoRows) {return SubmitResult{},fmt.Errorf("%w: requested Project Workspace is not active in the selected Project",ErrInvalid)}
+		if err!=nil{return SubmitResult{},err}
+	}
+	userID,_:=s.ids.New("aturn");now:=s.clock.UnixMilli()
 	_,err=s.db.ExecContext(ctx,`INSERT INTO assistant_turns(id,thread_id,role,content,project_id,task_id,provenance_json,created_at) VALUES(?,?,'user',?,?,NULL,'{}',?)`,userID,thread.ID,c.Content,projectID,now);if err!=nil{return SubmitResult{},err}
 	if projectID!=nil{
 		o,err:=s.orchestrators.Ensure(ctx,*projectID);if err!=nil{return SubmitResult{},err}
 		hid,_:=s.ids.New("ahandoff");_,err=s.db.ExecContext(ctx,`INSERT INTO assistant_project_handoffs(id,assistant_thread_id,assistant_turn_id,project_id,orchestrator_id,orchestrator_turn_id,task_id,status,objective,created_at,updated_at) VALUES(?,?,?,?,?,NULL,NULL,'delegated',?,?,?)`,hid,thread.ID,userID,*projectID,o.ID,c.Content,now,now);if err!=nil{return SubmitResult{},err}
-		res,err:=s.orchestrators.Turn(ctx,projectorchestrator.TurnCommand{ProjectID:*projectID,AssistantThreadID:&thread.ID,Objective:c.Content,ActorPrincipalID:c.ActorPrincipalID,ForceTask:c.ForceTask,AllowTaskCreation:c.AllowTaskCreation});if err!=nil{_,_=s.db.ExecContext(ctx,`UPDATE assistant_project_handoffs SET status='failed',updated_at=? WHERE id=?`,s.clock.UnixMilli(),hid);return SubmitResult{},err}
-		turnID,_:=s.ids.New("aturn");prov:=map[string]any{"assistant_thread_id":thread.ID,"assistant_turn_id":userID,"project_id":*projectID,"orchestrator_id":o.ID,"orchestrator_turn_id":res.Turn.ID};if res.TaskID!=nil{prov["task_id"]=*res.TaskID};provRaw,_:=json.Marshal(prov);created:=s.clock.UnixMilli()
+		res,err:=s.orchestrators.Turn(ctx,projectorchestrator.TurnCommand{ProjectID:*projectID,AssistantThreadID:&thread.ID,Objective:c.Content,ActorPrincipalID:c.ActorPrincipalID,ProjectWorkspaceID:selectedWorkspace,ForceTask:c.ForceTask,AllowTaskCreation:c.AllowTaskCreation});if err!=nil{_,_=s.db.ExecContext(ctx,`UPDATE assistant_project_handoffs SET status='failed',updated_at=? WHERE id=?`,s.clock.UnixMilli(),hid);return SubmitResult{},err}
+		turnID,_:=s.ids.New("aturn");prov:=map[string]any{"assistant_thread_id":thread.ID,"assistant_turn_id":userID,"project_id":*projectID,"orchestrator_id":o.ID,"orchestrator_turn_id":res.Turn.ID};if res.TaskID!=nil{prov["task_id"]=*res.TaskID}
+		if res.TaskGraphID!=nil{
+			// The unified Assistant must retain the canonical graph reference
+			// in its own persisted Turn, not only in Orchestrator history.
+			// No model-authored graph ID is accepted from the client.
+			prov["task_graph_id"]=*res.TaskGraphID
+			prov["task_origin"]="standing_L4_autonomy_policy"
+		}
+		provRaw,_:=json.Marshal(prov);created:=s.clock.UnixMilli()
 		_,err=s.db.ExecContext(ctx,`INSERT INTO assistant_turns(id,thread_id,role,content,project_id,task_id,provenance_json,created_at) VALUES(?,?,'assistant',?,?,?,?,?)`,turnID,thread.ID,res.Turn.Content,*projectID,res.TaskID,string(provRaw),created);if err!=nil{return SubmitResult{},err}
 		status:="completed";if res.Disposition=="waiting"||res.Disposition=="blocked"{status="waiting"};_,_=s.db.ExecContext(ctx,`UPDATE assistant_project_handoffs SET orchestrator_turn_id=?,task_id=?,status=?,updated_at=? WHERE id=?`,res.Turn.ID,res.TaskID,status,created,hid)
 		_,_=s.db.ExecContext(ctx,`UPDATE assistant_threads SET active_project_id=?,revision=revision+1,updated_at=? WHERE id=?`,*projectID,created,thread.ID)

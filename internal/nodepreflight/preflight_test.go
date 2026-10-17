@@ -106,3 +106,56 @@ func TestCheckSeparatesMissingImageAndProbeFailure(t *testing.T){
  if _,err:=Check(context.Background(),&stubInspector{rootless:true},env(nil),"linux","UNAPPROVED_NAME");
   !errors.Is(err,ErrInvalidVariable){t.Fatalf("arbitrary environment key read: %v",err)}
 }
+
+
+// A stalled or malicious inspector may return "success" after a
+// deadline/cancellation. The preflight report must not turn that into
+// a physical QA prerequisite pass.
+type cancelingInspector struct {cancel context.CancelFunc;imageCalls int}
+func(s *cancelingInspector)RootlessPodman(context.Context)(bool,error){
+ s.cancel()
+ return true,nil
+}
+func(s *cancelingInspector)ImagePresent(context.Context,string)(bool,error){
+ s.imageCalls++
+ return true,nil
+}
+type cancelOnImageInspector struct{ cancel context.CancelFunc }
+func(s *cancelOnImageInspector)RootlessPodman(context.Context)(bool,error){return true,nil}
+func(s *cancelOnImageInspector)ImagePresent(context.Context,string)(bool,error){
+ s.cancel()
+ return true,nil
+}
+func TestPreflightCannotPassAfterContextCancellation(t *testing.T){
+ ctx,cancel:=context.WithCancel(context.Background())
+ p:=&cancelingInspector{cancel:cancel}
+ report,err:=Check(ctx,p,env(map[string]string{PythonImageEnv:imageRef()}),"linux",PythonImageEnv)
+ if err!=nil||report.ReadyForPhysicalTest||report.Podman!="unavailable"||p.imageCalls!=0{
+  t.Fatalf("cancelled preflight yielded false readiness: %+v %v",report,err)
+ }
+ ctx2,cancel2:=context.WithCancel(context.Background())
+ i:=&cancelOnImageInspector{cancel:cancel2}
+ r,err:=Check(ctx2,i,env(map[string]string{PythonImageEnv:imageRef()}),"linux",PythonImageEnv)
+ if err!=nil||r.ReadyForPhysicalTest||r.ImageChecks[0].State!="image_check_failed"{
+  t.Fatalf("image cancelled after success marked ready: %+v %v",r,err)
+ }
+ ctx3,cancel3:=context.WithCancel(context.Background())
+ cancel3()
+ if _,err=Check(ctx3,&stubInspector{},env(nil),"linux","");!errors.Is(err,context.Canceled){
+  t.Fatalf("already cancelled physical preflight was run: %v",err)
+ }
+}
+func TestPodmanBooleanStdoutIsSizeBounded(t *testing.T){
+ b:=&boundedPodmanBoolean{}
+ for n:=0;n<100;n++{
+  if count,err:=b.Write([]byte(strings.Repeat("true",200)));err!=nil||count!=800{
+   t.Fatalf("unexpected Podman output interception: %d %v",count,err)
+  }
+ }
+ if !b.overflow||len(b.value)>64{t.Fatalf("unbounded Podman stdout: %+v",b)}
+ single:=&boundedPodmanBoolean{}
+ if _,err:=single.Write([]byte("true\n"));err!=nil||single.overflow||
+  strings.TrimSpace(string(single.value))!="true"{
+  t.Fatalf("valid rootless boolean output denied: %+v %v",single,err)
+ }
+}

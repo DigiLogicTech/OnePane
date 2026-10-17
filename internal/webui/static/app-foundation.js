@@ -880,9 +880,46 @@ async function renderProjects(){
   try{const rows=await apiRequest('/v1/projects?workspace_id='+encodeURIComponent(onepaneWorkspace));uiProjects=Array.isArray(rows)?rows:[];$('#projectsBody').innerHTML=`<table class="data-table"><thead><tr><th>Project</th><th>ID</th><th>Description</th><th>Status</th></tr></thead><tbody>${uiProjects.length?uiProjects.map(p=>`<tr><td><strong>${escapeHtml(p.name||'Project')}</strong></td><td>${escapeHtml(p.id||'')}</td><td>${escapeHtml(p.description||'')}</td><td><span class="pill ${p.status==='active'?'good':''}">${escapeHtml(p.status||'configured')}</span></td></tr>`).join(''):'<tr><td colspan="4" class="muted-cell">No projects configured.</td></tr>'}</tbody></table>`;}catch(ex){$('#projectsBody').innerHTML=`<div class="widget-body error">${escapeHtml(ex.message)}</div>`;}
 }
 
-function openProjectDialog(){
-  openModal('Configure project',`<form id="projectForm" class="qa-form"><label>Name<input name="name" required placeholder="My project"></label><label>Description<textarea name="description" rows="3"></textarea></label><div class="error" id="projectError"></div><button class="btn primary" type="submit">Create project</button></form>`);
-  $('#projectForm').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.currentTarget));try{const p=await apiRequest('/v1/projects',{method:'POST',body:JSON.stringify({workspace_id:onepaneWorkspace,name:f.name,description:f.description})});uiProjects.unshift(p);closeModal();renderProjects();notice('Project configured.');}catch(ex){$('#projectError').textContent=ex.message;}};
+function openProjectDialog(initialObjective=''){
+  // Keep both old click handlers and explicit user drafts safe.
+  const suggestedObjective=typeof initialObjective==='string'?
+    initialObjective.trim().slice(0,4096):'';
+  openModal('Configure project',`<form id="projectForm" class="qa-form"><label>Name<input name="name" required placeholder="My project"></label><label>Description<textarea name="description" rows="3"></textarea></label><label>Initial objective (optional)<textarea name="initial_objective" rows="3" maxlength="4096" placeholder="Describe the first deliverable or project task">${escapeHtml(suggestedObjective)}</textarea></label><label class="inline-check"><input type="checkbox" name="queue_initial_task" checked> Queue the initial objective in the starter Workspace</label><label>Operating mode<select name="operating_mode"><option value="autonomous_project" selected>Autonomous Project (Level 4 — default)</option><option value="continuous_operations">Continuous Operations (Level 5)</option></select></label><label class="inline-check"><input type="checkbox" name="autonomous_local_tasks" checked> Allow automatic local Task execution within existing Project/Workspace grants</label><p class="page-subtitle">Level 4 defaults to local autonomous Task execution. This does not enable shell, network, secret access or provider spending. Level 5 requires separate monitoring and remediation approval. You can disable automatic Task execution here.</p><div class="error" id="projectError"></div><button class="btn primary" type="submit">Create project</button></form>`);
+  $('#projectForm').onsubmit=async e=>{
+    e.preventDefault();
+    const button=e.currentTarget.querySelector('button[type="submit"]');
+    button.disabled=true;
+    const f=Object.fromEntries(new FormData(e.currentTarget));
+    try{
+      const p=await apiRequest('/v1/projects',{method:'POST',body:JSON.stringify({
+        workspace_id:onepaneWorkspace,name:f.name,description:f.description,
+        create_starter_workspace:true,
+        project_policy:{onepane_operations:{version:1,mode:f.operating_mode||'autonomous_project'},
+          feature_policy:{AutonomousRoutines:f.autonomous_local_tasks?'enabled':'disabled'}}
+      })});
+      uiProjects.unshift(p);closeModal();renderProjects();
+      const objective=String(f.initial_objective||'').trim();
+      if(objective&&f.queue_initial_task){
+        // Project and Workspace creation has already committed. A failed
+        // Task handoff must never delete those user-owned assets; surface
+        // the partial state so the operator can retry the existing Project.
+        try{
+          const scope=await apiRequest('/v1/projects/'+encodeURIComponent(p.id)+'/workspaces');
+          const starter=Array.isArray(scope)?scope.find(w=>w.name==='Development'&&w.status==='active'):null;
+          if(!starter)throw new Error('Canonical Development Workspace unavailable');
+          const turn=await apiRequest('/v1/projects/'+encodeURIComponent(p.id)+'/orchestrator/turns',{
+            method:'POST',body:JSON.stringify({objective,project_workspace_id:starter.id,
+              force_task:true,allow_task_creation:true})
+          });
+          if(!turn.task_id)throw new Error('Task was not queued; inspect the Orchestrator turn');
+          notice('Project established; initial Task queued in its Development Workspace.');
+        }catch(ex){notice('Project created, but initial Task was not queued: '+ex.message,'bad')}
+      }else notice('Project and starter Workspace configured.');
+    }catch(ex){
+      const field=$('#projectError');
+      if(field)field.textContent=ex.message;
+    }finally{if(button.isConnected)button.disabled=false}
+  };
 }
 
 async function renderNodes(){
@@ -1354,7 +1391,7 @@ function qa4InspectorTabs(){let extra=[];try{extra=JSON.parse(localStorage.getIt
 function qa4Inspect(kind,id,title,data){qa4Inspector={kind,id,title:title||id,data:data||{}};qa4InspectorTab='overview';setInspectorOpen(true);renderInspector();if(kind==='task')a32LoadResearchIntegrity(id);}
 function qa4FindEntity(kind,id){if(kind==='task')return liveOps.tasks.find(x=>x.id===id)||{};if(kind==='routine')return qa4ProjectHub.routines.find(x=>x.id===id)||{};if(kind==='node')return liveOps.nodes.find(x=>(x.id||x.node_id)===id)||{};if(kind==='provider')return liveOps.providers.find(x=>x.id===id)||{};if(kind==='event')return liveOps.events.find(x=>String(x.id||x.sequence)===String(id))||{};if(kind==='attention')return ATTENTION_ITEMS[Number(id)]||{};return qa4Inspector.data||{};}
 function qa4InspectorOverview(){const d=qa4FindEntity(qa4Inspector.kind,qa4Inspector.id);if(qa4Inspector.kind==='workspace'){const w=d.workspace||{},p=d.project||{},sb=qa4ProjectSandbox(p);return `<dl class="definition-grid"><dt>Project</dt><dd>${escapeHtml(p.name||p.id||'')}</dd><dt>Workspace</dt><dd>${escapeHtml(w.name||w.id||'')}</dd><dt>Project sandbox</dt><dd>${sb.internet?'Internet allowed':'Internet blocked'} · ${sb.computer?'Computer allowed':'Computer blocked'}</dd><dt>Mode</dt><dd>${escapeHtml(titleCase(w.orchestration?.mode||'supervisor'))}</dd></dl>`;}if(qa4Inspector.kind==='project'){return `<dl class="definition-grid"><dt>Name</dt><dd>${escapeHtml(d.name||'')}</dd><dt>Status</dt><dd>${escapeHtml(d.status||'')}</dd><dt>Revision</dt><dd>${Number(d.revision||0)}</dd><dt>ID</dt><dd class="mono-cell">${escapeHtml(d.id||'')}</dd></dl>`;}const entries=Object.entries(d||{}).filter(([,v])=>['string','number','boolean'].includes(typeof v)).slice(0,14);return entries.length?`<dl class="definition-grid">${entries.map(([k,v])=>`<dt>${escapeHtml(titleCase(k))}</dt><dd>${escapeHtml(v)}</dd>`).join('')}</dl>`:'<div class="page-subtitle">No additional structured detail is available for this item.</div>';}
-function qa4InspectorConfiguration(){const d=qa4Inspector.data||{};let project=d.project||d,workspace=d.workspace;if(qa4Inspector.kind==='project'){return `<div class="inspector-section"><strong>Project policy</strong><p class="page-subtitle">Workspace-specific sandbox and model/agent routing is configured per workspace. Project policy is durable and revision controlled.</p><button class="btn" id="qa4OpenFirstWorkspaceConfig">Configure first workspace</button></div>`;}if(!workspace||!project)return '<div class="page-subtitle">Workspace configuration unavailable.</div>';const s=qa4ProjectSandbox(project),o=workspace.orchestration||{},models=qa4ModelOptions(),agents=qa4AgentOptions();const role=(key,label)=>{const x=o[key]||{};return `<fieldset class="inspector-fieldset"><legend>${label}</legend><label>Model<select data-qa4-route-model="${key}">${qa4OptionRows(models,x.model||'auto')}</select></label><label>Agent<select data-qa4-route-agent="${key}">${qa4OptionRows(agents,x.agent||'onepane-default')}</select></label></fieldset>`;};return `<div class="inspector-config"><label>Workspace name<input id="qa4WorkspaceName" value="${escapeHtml(workspace.name||'Workspace')}"></label><fieldset class="inspector-fieldset"><legend>Project sandbox (shared by all project workspaces)</legend>${[['network','Project network'],['internet','Internet'],['lan','LAN'],['computer','Computer control'],['browser','Browser']].map(([k,l])=>`<label class="inline-check"><input type="checkbox" data-qa4-sandbox="${k}" ${s[k]?'checked':''}> ${l}</label>`).join('')}<label>Host files<select id="qa4HostFiles"><option value="workspace-only" selected>Project workspace only</option></select></label><div class="page-subtitle">Extra host mounts, Docker socket and device passthrough remain blocked by the sandbox. Internet/LAN currently share the same explicit external-network boundary on the rootless backend.</div><label>Secrets<select id="qa4SecretPolicy"><option value="none" ${s.secrets==='none'?'selected':''}>None</option><option value="selected" ${s.secrets!=='none'?'selected':''}>Selected Vault handles</option></select></label></fieldset><label>Orchestration mode<select id="qa4Mode">${['direct','team','council'].map(x=>`<option value="${x}" ${o.mode===x?'selected':''}>${titleCase(x)}</option>`).join('')}</select></label>${role('supervisor','Direct')}${role('team','Team')}${role('council','Council')}<button class="btn primary" id="qa4SaveWorkspaceConfig">Save workspace policy</button><div class="page-subtitle" id="qa4WorkspaceConfigStatus"></div></div>`;}
+function qa4InspectorConfiguration(){const d=qa4Inspector.data||{};let project=d.project||d,workspace=d.workspace;if(qa4Inspector.kind==='project'){const savedMode=project.operating_mode||qa4ProjectPolicy(project).onepane_operations?.mode||'autonomous_project';const autonomousEnabled=qa4ProjectPolicy(project).feature_policy?.AutonomousRoutines==='enabled';return `<div class="inspector-section"><strong>Project operating mode</strong><label>Mode<select id="qa4ProjectOperatingMode"><option value="autonomous_project" ${savedMode==='autonomous_project'?'selected':''}>Level 4 — Autonomous Project</option><option value="continuous_operations" ${savedMode==='continuous_operations'?'selected':''}>Level 5 — Continuous Operations</option></select></label><label class="inline-check"><input id="qa4ProjectAutonomousTasks" type="checkbox" ${autonomousEnabled?'checked':''}> Allow local autonomous Task execution within Project/Workspace grants</label><p class="page-subtitle">Task autonomy controls whether queued Worker tasks can make progress. It does not enable shell, LAN, internet, secrets, paid models or monitoring. The mode changes Project lifecycle intent, not sandbox permissions. Level 5 monitoring and remediation require separately authorised setup; no background monitoring is activated by this selection alone.</p><button class="btn primary" id="qa4SaveProjectOperatingMode">Save operating mode</button><div id="qa4OperatingModeStatus" class="page-subtitle" role="status"></div><p class="page-subtitle">Workspace-specific sandbox, model and Agent routing settings remain separately governed.</p><button class="btn" id="qa4OpenFirstWorkspaceConfig">Configure first workspace</button>${savedMode==='continuous_operations'?'<fieldset class="inspector-fieldset"><legend>Level 5 ongoing objectives — configuration only</legend><p class="page-subtitle">Creating an objective does not start monitoring, scan the network or authorise remediation. Sources and automation require separate setup.</p><div id="qa4L5GoalList" class="page-subtitle">Loading configured objectives…</div><form id="qa4L5GoalForm" class="qa-form"><label>Canonical Workspace<select name="project_workspace_id" id="qa4L5Workspace" required></select></label><label>Ongoing objective<textarea name="objective" rows="3" required maxlength="8192" placeholder="Protect authorised devices and services"></textarea></label><label>Planned review cadence (minutes)<input name="cadence_minutes" type="number" min="5" max="10080" value="60" required></label><label>Approved observation source IDs (comma separated)<input name="source_ids" placeholder="uptime,dns" maxlength="4096"></label><p class="page-subtitle">These must match registered observation probe-tool IDs. Listing a source does not enable probes or network access.</p><button class="btn primary" type="submit">Configure objective</button><div id="qa4L5GoalStatus" class="page-subtitle" role="status"></div></form></fieldset>':''}</div>`;}if(!workspace||!project)return '<div class="page-subtitle">Workspace configuration unavailable.</div>';const s=qa4ProjectSandbox(project),o=workspace.orchestration||{},models=qa4ModelOptions(),agents=qa4AgentOptions();const role=(key,label)=>{const x=o[key]||{};return `<fieldset class="inspector-fieldset"><legend>${label}</legend><label>Model<select data-qa4-route-model="${key}">${qa4OptionRows(models,x.model||'auto')}</select></label><label>Agent<select data-qa4-route-agent="${key}">${qa4OptionRows(agents,x.agent||'onepane-default')}</select></label></fieldset>`;};return `<div class="inspector-config"><label>Workspace name<input id="qa4WorkspaceName" value="${escapeHtml(workspace.name||'Workspace')}"></label><fieldset class="inspector-fieldset"><legend>Project sandbox (shared by all project workspaces)</legend>${[['network','Project network'],['internet','Internet'],['lan','LAN'],['computer','Computer control'],['browser','Browser']].map(([k,l])=>`<label class="inline-check"><input type="checkbox" data-qa4-sandbox="${k}" ${s[k]?'checked':''}> ${l}</label>`).join('')}<label>Host files<select id="qa4HostFiles"><option value="workspace-only" selected>Project workspace only</option></select></label><div class="page-subtitle">Extra host mounts, Docker socket and device passthrough remain blocked by the sandbox. Internet/LAN currently share the same explicit external-network boundary on the rootless backend.</div><label>Secrets<select id="qa4SecretPolicy"><option value="none" ${s.secrets==='none'?'selected':''}>None</option><option value="selected" ${s.secrets!=='none'?'selected':''}>Selected Vault handles</option></select></label></fieldset><label>Orchestration mode<select id="qa4Mode">${['direct','team','council'].map(x=>`<option value="${x}" ${o.mode===x?'selected':''}>${titleCase(x)}</option>`).join('')}</select></label>${role('supervisor','Direct')}${role('team','Team')}${role('council','Council')}<button class="btn primary" id="qa4SaveWorkspaceConfig">Save workspace policy</button><div class="page-subtitle" id="qa4WorkspaceConfigStatus"></div></div>`;}
 function qa4InspectorExtras(){let extra=[];try{extra=JSON.parse(localStorage.getItem(QA4_INSPECTOR_TAB_KEY)||'[]')}catch{}return extra.filter(x=>['notes','chat'].includes(x)).filter((x,i,a)=>a.indexOf(x)===i);}
 function qa4SaveInspectorExtras(extra){localStorage.setItem(QA4_INSPECTOR_TAB_KEY,JSON.stringify(extra.filter(x=>['notes','chat'].includes(x))));}
 function qa4DragInspectorTab(from,to){
@@ -1372,7 +1409,7 @@ function renderInspector(){const tabs=qa4InspectorTabs();if(!tabs.includes(qa4In
   el.addEventListener('drop',e=>{e.preventDefault();qa4DragInspectorTab(e.dataTransfer.getData('text/plain'),el.dataset.qa4InspectorDrag);});
 });$('#qa4InspectorAddTab').onclick=qa4AddInspectorTab;const c=$('#qa4InspectorContent');if(qa4InspectorTab==='overview')c.innerHTML=qa4InspectorOverview();else if(qa4InspectorTab==='research'){c.innerHTML=a32ResearchIntegrity(qa4Inspector.id);$('#a32RetryResearchRound')?.addEventListener('click',e=>a32RetryResearchRound(qa4Inspector.id,e.currentTarget.dataset.sessionId));}else if(qa4InspectorTab==='configuration')c.innerHTML=qa4InspectorConfiguration();else if(qa4InspectorTab==='notes'){const key=qa4ContextKey(qa4Inspector.kind,qa4Inspector.id);c.innerHTML=`<textarea id="qa4InspectorNotes" class="inspector-notes" rows="14" placeholder="Notes for this item…">${escapeHtml(qa4ContextNote(key))}</textarea>`;$('#qa4InspectorNotes').oninput=e=>qa4SetContextNote(key,e.target.value);}else if(qa4InspectorTab==='chat'){c.innerHTML=`<div class="page-subtitle">Send a governed interactive Task from this context. No direct unmanaged model call is made.</div><div id="qa4InspectorChatHistory" class="mini-chat-history"></div><form id="qa4InspectorChatForm" class="mini-chat-form"><textarea rows="3" id="qa4InspectorChatInput" placeholder="Ask OnePane…"></textarea><button class="btn primary">Send</button></form>`;$('#qa4InspectorChatForm').onsubmit=e=>{e.preventDefault();qa4SendInspectorChat($('#qa4InspectorChatInput').value.trim());};}qa4BindInspectorConfig();syncPanelRestoreButtons();}
 function qa4AddInspectorTab(){const tabs=qa4InspectorTabs();openModal('Add Inspector tab',`<div class="component-picker-grid">${!tabs.includes('notes')?'<button class="component-choice" data-add-inspector-tab="notes"><strong>Notepad</strong><span>Context-specific notes stored locally.</span></button>':''}${!tabs.includes('chat')?'<button class="component-choice" data-add-inspector-tab="chat"><strong>Model chat</strong><span>Governed task-based chat from the selected context.</span></button>':''}${tabs.includes('notes')&&tabs.includes('chat')?'<div class="empty-state compact">All optional Inspector tabs are enabled. Drag optional tabs to reorder them, or use × to close a tab.</div>':''}</div>`);$$('[data-add-inspector-tab]').forEach(b=>b.onclick=()=>{const extra=qa4InspectorExtras();if(!extra.includes(b.dataset.addInspectorTab))extra.push(b.dataset.addInspectorTab);qa4SaveInspectorExtras(extra);qa4InspectorTab=b.dataset.addInspectorTab;closeModal();renderInspector();});}
-function qa4BindInspectorConfig(){if(qa4Inspector.kind==='project')$('#qa4OpenFirstWorkspaceConfig')?.addEventListener('click',()=>{const p=qa4Inspector.data,w=qa4Workspaces(p)[0];qa4Inspect('workspace',w.id,`${p.name} / ${w.name}`,{project:p,workspace:w});});if(qa4Inspector.kind!=='workspace'||qa4InspectorTab!=='configuration')return;const {project,workspace}=qa4Inspector.data;const extBoxes=$$('[data-qa4-sandbox="internet"],[data-qa4-sandbox="lan"]');extBoxes.forEach(x=>x.onchange=()=>{extBoxes.forEach(y=>y.checked=x.checked);});$('#qa4SaveWorkspaceConfig').onclick=async()=>{workspace.name=$('#qa4WorkspaceName').value.trim()||workspace.name;const sandbox=qa4ProjectSandbox(project);$$('[data-qa4-sandbox]').forEach(x=>sandbox[x.dataset.qa4Sandbox]=x.checked);if(sandbox.internet||sandbox.lan){sandbox.internet=true;sandbox.lan=true;}sandbox.host_files='workspace-only';sandbox.secrets=$('#qa4SecretPolicy').value;workspace.orchestration=workspace.orchestration||{};workspace.orchestration.mode=$('#qa4Mode').value;for(const key of ['supervisor','workers','team','council']){workspace.orchestration[key]=workspace.orchestration[key]||{};workspace.orchestration[key].model=$(`[data-qa4-route-model="${key}"]`).value;workspace.orchestration[key].agent=$(`[data-qa4-route-agent="${key}"]`).value;}workspace.orchestration.workers.count=Number($('[data-qa4-worker-count]').value||2);try{const updated=await qa4SaveProjectUI(project,{workspaces:qa4Workspaces(project),sandbox});qa4Inspector.data.project=updated;$('#qa4WorkspaceConfigStatus').innerHTML='<span class="good">Workspace preferences saved; shared Project runtime permissions unchanged.</span>';notice('Workspace preferences saved without mutating the shared Project runtime.');}catch(ex){$('#qa4WorkspaceConfigStatus').innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`;}};}
+function qa4BindInspectorConfig(){if(qa4Inspector.kind==='project')$('#qa4OpenFirstWorkspaceConfig')?.addEventListener('click',()=>{const p=qa4Inspector.data,w=qa4Workspaces(p)[0];qa4Inspect('workspace',w.id,`${p.name} / ${w.name}`,{project:p,workspace:w});});if(qa4Inspector.kind==='project'&&qa4InspectorTab==='configuration'){$('#qa4SaveProjectOperatingMode')?.addEventListener('click',async e=>{const button=e.currentTarget,mode=$('#qa4ProjectOperatingMode')?.value,status=$('#qa4OperatingModeStatus'),autonomyEnabled=!!$('#qa4ProjectAutonomousTasks')?.checked;if(!['autonomous_project','continuous_operations'].includes(mode))return;button.disabled=true;try{const active=qa4ProjectHub.projects.find(p=>p.id===qa4Inspector.id)||qa4Inspector.data;const updated=await apiRequest('/v1/projects/'+encodeURIComponent(active.id),{method:'PATCH',body:JSON.stringify({expected_revision:Number(active.revision||1),project_policy:{...qa4ProjectPolicy(active),onepane_operations:{version:1,mode},feature_policy:{...(qa4ProjectPolicy(active).feature_policy||{}),AutonomousRoutines:autonomyEnabled?'enabled':'disabled'}}})});const i=qa4ProjectHub.projects.findIndex(p=>p.id===updated.id);if(i>=0)qa4ProjectHub.projects[i]=updated;qa4Inspector.data=updated;qa4Inspector.title=updated.name||updated.id;if(status)status.textContent=mode==='continuous_operations'?'Level 5 saved. Monitoring and remediation remain unconfigured.':'Level 4 saved.';notice('Project operating mode saved.');}catch(ex){if(status)status.textContent='Save failed. Refresh the Project and retry: '+ex.message;notice('Operating mode save failed: '+ex.message,'bad');}finally{button.disabled=false;}});}if(qa4Inspector.kind==='project'&&qa4InspectorTab==='configuration')qa4BindL5GoalConfigurator(qa4Inspector.data);if(qa4Inspector.kind!=='workspace'||qa4InspectorTab!=='configuration')return;const {project,workspace}=qa4Inspector.data;const extBoxes=$$('[data-qa4-sandbox="internet"],[data-qa4-sandbox="lan"]');extBoxes.forEach(x=>x.onchange=()=>{extBoxes.forEach(y=>y.checked=x.checked);});$('#qa4SaveWorkspaceConfig').onclick=async()=>{workspace.name=$('#qa4WorkspaceName').value.trim()||workspace.name;const sandbox=qa4ProjectSandbox(project);$$('[data-qa4-sandbox]').forEach(x=>sandbox[x.dataset.qa4Sandbox]=x.checked);if(sandbox.internet||sandbox.lan){sandbox.internet=true;sandbox.lan=true;}sandbox.host_files='workspace-only';sandbox.secrets=$('#qa4SecretPolicy').value;workspace.orchestration=workspace.orchestration||{};workspace.orchestration.mode=$('#qa4Mode').value;for(const key of ['supervisor','workers','team','council']){workspace.orchestration[key]=workspace.orchestration[key]||{};workspace.orchestration[key].model=$(`[data-qa4-route-model="${key}"]`).value;workspace.orchestration[key].agent=$(`[data-qa4-route-agent="${key}"]`).value;}workspace.orchestration.workers.count=Number($('[data-qa4-worker-count]').value||2);try{const updated=await qa4SaveProjectUI(project,{workspaces:qa4Workspaces(project),sandbox});qa4Inspector.data.project=updated;$('#qa4WorkspaceConfigStatus').innerHTML='<span class="good">Workspace preferences saved; shared Project runtime permissions unchanged.</span>';notice('Workspace preferences saved without mutating the shared Project runtime.');}catch(ex){$('#qa4WorkspaceConfigStatus').innerHTML=`<span class="error">${escapeHtml(ex.message)}</span>`;}};}
 async function qa4SendInspectorChat(text){if(!text)return;const d=qa4Inspector.data||{},project=d.project||(qa4Inspector.kind==='project'?d:null),workspace=d.workspace||null;const payload={workspace_id:onepaneWorkspace,objective:text,priority:10,scheduling_class:'user_interactive'};if(project?.id)payload.project_id=project.id;if(workspace){const mode=workspace.orchestration?.mode||'supervisor',role=mode==='direct'?'supervisor':mode,selected=qa4RouteSelection(workspace,role);payload.completion={type:'operator_review',onepane_routing:{mode,role,candidate_id:selected.candidate_id,agent_profile:selected.agent_profile,project_workspace_id:workspace.id}};}const h=$('#qa4InspectorChatHistory');h.insertAdjacentHTML('beforeend',`<div class="workspace-chat-message user"><span>${escapeHtml(text)}</span></div>`);$('#qa4InspectorChatInput').value='';try{const t=await apiRequest('/v1/tasks',{method:'POST',body:JSON.stringify(payload)});h.insertAdjacentHTML('beforeend',`<div class="workspace-chat-message system"><span>Queued ${escapeHtml(t.id||'task')} through OnePane policy.</span></div>`);}catch(ex){h.insertAdjacentHTML('beforeend',`<div class="workspace-chat-message system error"><span>${escapeHtml(ex.message)}</span></div>`);}}
 function qa4BindProjectNotes(root){$$('[data-project-note]',root).forEach(x=>x.oninput=()=>qa4SetContextNote(x.dataset.projectNote,x.value));}
 
@@ -1776,3 +1813,506 @@ const qa7FollowContentBase=qa6FollowContent;
 qa6FollowContent=function(w,project){const html=qa7FollowContentBase(w,project),task=qa6ActiveTask(project,w);if(!task)return html;const events=[...liveOps.events].filter(e=>qa6EventMatchesTask(e,task.id)),route=[...events].reverse().find(e=>{const p=qa6Payload(e);return p.candidate_id||p.candidate_kind;});if(!route)return html;const p=qa6Payload(route),target=[p.candidate_kind,p.candidate_id].filter(Boolean).join(' · ');return html.replace('<div class="qa6-follow-events">',`<div class="qa7-follow-target"><span>Execution target</span><strong>${escapeHtml(target||'OnePane-managed')}</strong></div><div class="qa6-follow-events">`);};
 
 pages.settings.title='Settings';
+
+async function qa4BindL5GoalConfigurator(project){
+  const form=$('#qa4L5GoalForm'),select=$('#qa4L5Workspace'),list=$('#qa4L5GoalList');
+  if(!project||!form||!select||!list)return;
+  const base='/v1/projects/'+encodeURIComponent(project.id);
+  const refresh=async()=>{
+    const goals=await apiRequest(base+'/continuous-goals');
+    if(!list.isConnected)return;
+    const rows=Array.isArray(goals)?goals:[];
+    list.innerHTML=rows.length?rows.map(g=>{
+      const stopped=g.status==='paused'||g.status==='retired';
+      const actions=g.status==='retired'?'':`<div class="toolbar">
+        ${g.status!=='paused'?`<button class="btn" type="button" data-goal-transition="paused" data-goal-id="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">Pause</button>`:''}
+        <button class="btn" type="button" data-goal-transition="retired" data-goal-id="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">Retire…</button>
+      </div>`;
+      const sourceIDs=Array.isArray(g.monitoring_plan?.source_ids)?g.monitoring_plan.source_ids:[];
+      const evidence=g.status==='configured'&&sourceIDs.length?
+        `<div class="page-subtitle">Approved sources: ${escapeHtml(sourceIDs.join(', '))}. Evidence is metadata-only, not a health verification.</div>
+         <div class="toolbar"><input type="text" aria-label="Existing observation ID" data-goal-observation-id placeholder="Existing observation ID" maxlength="160">
+         <button type="button" class="btn" data-goal-attach="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">Attach evidence</button>
+         <button type="button" class="btn" data-goal-list-evidence="${escapeHtml(g.id)}">View evidence</button>
+         <button type="button" class="btn" data-goal-coverage="${escapeHtml(g.id)}">Evidence coverage</button></div>
+         <div data-goal-evidence-results></div>`: '';
+      // Permits approve only repeatable review of PREEXISTING receipt metadata.
+      // No selection enables a sensor, external probe or remediation action.
+      const review=g.status==='configured'&&sourceIDs.length?
+        `<div class="page-subtitle"><strong>Evidence review permission</strong> · Approved sources are reviewed each goal cadence using existing receipt timestamps only; no probes or device changes.</div>
+         <div class="toolbar">
+           <select aria-label="Evidence source for review" data-goal-review-source>
+             ${sourceIDs.map(id=>`<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`).join('')}
+           </select>
+           <select aria-label="Review permit expiry" data-goal-review-duration>
+             <option value="1">1 hour</option>
+             <option value="24" selected>24 hours</option>
+             <option value="168">7 days</option>
+           </select>
+           <button type="button" class="btn" data-goal-review-approve="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">Approve recurring receipt review</button>
+           <button type="button" class="btn" data-goal-review-list="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">Review / revoke permits</button>
+           <button type="button" class="btn" data-goal-review-history="${escapeHtml(g.id)}">Review history</button>
+         </div>
+         <div data-goal-review-results></div>`:'';
+      // TCP permissions have a separate, explicit network effect class.
+      // Target registration does not execute a TCP connect or start sensors.
+      const probe=g.status==='configured'&&sourceIDs.length?
+        `<div class="page-subtitle"><strong>Network source permission (advanced)</strong> · One exact private IPv4 address and TCP port. Registration does not run a probe, claim health or grant remediation.</div>
+         <div class="toolbar">
+           <select aria-label="Network observation source" data-goal-probe-source>
+             ${sourceIDs.map(id=>`<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`).join('')}
+           </select>
+           <input data-goal-probe-ipv4 aria-label="Approved private IPv4 address" placeholder="192.168.1.1" maxlength="15" autocomplete="off">
+           <input type="number" data-goal-probe-port aria-label="Approved TCP port" placeholder="443" min="1" max="65535">
+           <select aria-label="TCP timeout" data-goal-probe-timeout><option value="300">300 ms</option><option value="500" selected>500 ms</option><option value="1000">1000 ms</option></select>
+           <select aria-label="Network source permit expiry" data-goal-probe-duration><option value="1">1 hour</option><option value="12" selected>12 hours</option><option value="24">24 hours</option></select>
+           <button class="btn" type="button" data-goal-probe-approve="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">Approve exact TCP target…</button>
+           <button class="btn" type="button" data-goal-probe-list="${escapeHtml(g.id)}" data-goal-revision="${Number(g.revision)||0}">View / revoke network grants</button>
+           <button class="btn" type="button" data-goal-probe-history="${escapeHtml(g.id)}">Reachability history</button>
+         </div>
+         <div data-goal-probe-results></div>`:'';
+      return `<div class="list-row"><strong>${escapeHtml(g.objective||'Objective')}</strong> <span class="pill">${escapeHtml(g.status||'configured')}</span>
+        <div class="page-subtitle">Health: ${escapeHtml(g.health||'unobserved')} · ${stopped?'No future monitoring due':'Device monitoring not activated; automatic receipt review only where separately approved'}</div>
+        ${evidence}${review}${probe}${actions}</div>`;
+    }).join(''):'<p class="page-subtitle">No ongoing objectives configured.</p>';
+  };
+  try{
+    const views=await apiRequest(base+'/workspaces');
+    if(!select.isConnected)return;
+    const rows=Array.isArray(views)?views.filter(w=>w.status==='active'):[];
+    select.innerHTML=rows.map(w=>`<option value="${escapeHtml(w.id)}">${escapeHtml(w.name||w.id)}</option>`).join('');
+    if(!rows.length){form.querySelector('button[type="submit"]').disabled=true;$('#qa4L5GoalStatus').textContent='Create an active canonical Workspace before configuring an objective.';}
+    await refresh();
+  }catch(ex){if(list.isConnected)list.textContent='Unable to load goal configuration: '+ex.message;return}
+  // A two-click confirmation is required for terminal retirement. The
+  // backend independently requires human authority and a current revision.
+  list.onclick=async event=>{
+    const reviewBase=base+'/continuous-goals/';
+    const reviewStatus=()=>$('#qa4L5GoalStatus');
+    const approveTCP=event.target.closest('button[data-goal-probe-approve]');
+    if(approveTCP&&list.contains(approveTCP)){
+      event.preventDefault();
+      const row=approveTCP.closest('.list-row');
+      const sourceID=String(row?.querySelector('[data-goal-probe-source]')?.value||'');
+      const ip=String(row?.querySelector('[data-goal-probe-ipv4]')?.value||'');
+      const port=Number(row?.querySelector('[data-goal-probe-port]')?.value);
+      const timeout=Number(row?.querySelector('[data-goal-probe-timeout]')?.value);
+      const hours=Number(row?.querySelector('[data-goal-probe-duration]')?.value);
+      // No URL, DNS name, CIDR, alternate protocol, or broad port range.
+      const exact=/^(10\.(?:\d{1,3}\.){2}\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})$/.test(ip);
+      if(!exact||!Number.isInteger(port)||port<1||port>65535||
+        ![300,500,1000].includes(timeout)||![1,12,24].includes(hours)){
+        if(reviewStatus())reviewStatus().textContent='Enter one private IPv4 address, a single valid TCP port, and a bounded permit duration.';
+        return;
+      }
+      const requestedTarget=JSON.stringify([sourceID,ip,port,timeout,hours,
+        Number(approveTCP.dataset.goalRevision)]);
+      if(approveTCP.dataset.confirmedTarget!==requestedTarget){
+        // A changed source/target/port/expiry must receive a fresh second
+        // click; never carry a prior confirmation to a different endpoint.
+        approveTCP.dataset.confirmedTarget=requestedTarget;
+        approveTCP.textContent='Confirm network target '+ip+':'+port;
+        return;
+      }
+      approveTCP.disabled=true;
+      try{
+        await apiRequest(reviewBase+encodeURIComponent(approveTCP.dataset.goalProbeApprove)+'/tcp-probe-permits',{
+          method:'POST',body:JSON.stringify({
+            source_id:sourceID,target_ipv4:ip,target_port:port,
+            timeout_ms:timeout,expires_at:Date.now()+hours*60*60*1000,
+            expected_goal_revision:Number(approveTCP.dataset.goalRevision)
+          })
+        });
+        if(reviewStatus())reviewStatus().textContent='Exact-target TCP grant registered. No network probe has executed or been scheduled.';
+        await refresh();
+      }catch(ex){
+        if(reviewStatus())reviewStatus().textContent='Network source grant denied: '+ex.message;
+        approveTCP.disabled=false;
+        approveTCP.dataset.confirmedTarget='';
+        approveTCP.textContent='Approve exact TCP target…';
+      }
+      return;
+    }
+    const listTCP=event.target.closest('button[data-goal-probe-list]');
+    if(listTCP&&list.contains(listTCP)){
+      event.preventDefault();
+      const holder=listTCP.closest('.list-row')?.querySelector('[data-goal-probe-results]');
+      if(!holder)return;
+      holder.textContent='Reading approved network targets…';
+      try{
+        const goalURL=reviewBase+encodeURIComponent(listTCP.dataset.goalProbeList);
+        const [permits,baselines]=await Promise.all([
+          apiRequest(goalURL+'/tcp-probe-permits'),
+          apiRequest(goalURL+'/tcp-baselines')
+        ]);
+        if(!holder.isConnected)return;
+        const latestBaseline={};
+        for(const b of Array.isArray(baselines)?baselines:[]){
+          if(!latestBaseline[b.source_id]||Number(b.revision)>Number(latestBaseline[b.source_id].revision))
+            latestBaseline[b.source_id]=b;
+        }
+        holder.innerHTML=Array.isArray(permits)&&permits.length?
+          permits.map(p=>`<div class="page-subtitle">
+            <strong>${escapeHtml(p.source_id||'Source')}</strong> ·
+            ${escapeHtml(p.target_ipv4||'')}:${Number(p.target_port)||0}
+            · ${escapeHtml(p.status==='approved'&&Number(p.expires_at)<=Date.now()?'expired':p.status||'unknown')}
+            · expires ${escapeHtml(new Date(p.expires_at).toLocaleString())}
+            · not active monitoring
+            ${p.status==='approved'&&Number(p.expires_at)>Date.now()?`<select aria-label="Expected TCP state" data-goal-tcp-expected>
+               <option value="connected">Expected reachable</option>
+               <option value="not_connected">Expected not reachable</option>
+             </select><button type="button" class="btn"
+               data-goal-tcp-baseline-save="${escapeHtml(p.id)}"
+               data-goal-id="${escapeHtml(listTCP.dataset.goalProbeList)}"
+               data-goal-revision="${Number(listTCP.dataset.goalRevision)||0}"
+               data-baseline-revision="${Number(latestBaseline[p.source_id]?.revision)||0}">Save TCP expectation</button>`:''}
+            ${latestBaseline[p.source_id]?`<button type="button" class="btn"
+              data-goal-tcp-assess="${escapeHtml(p.source_id)}"
+              data-goal-id="${escapeHtml(listTCP.dataset.goalProbeList)}">Compare last test</button>`:''}
+            ${p.status==='approved'&&Number(p.expires_at)>Date.now()?`<button type="button" class="btn"
+              data-goal-probe-test="${escapeHtml(p.id)}"
+              data-goal-id="${escapeHtml(listTCP.dataset.goalProbeList)}"
+              data-goal-revision="${Number(listTCP.dataset.goalRevision)||0}"
+              data-permit-revision="${Number(p.revision)||0}">Test TCP connection…</button>`:''}
+            ${p.status==='approved'?`<button type="button" class="btn" data-goal-probe-revoke="${escapeHtml(p.id)}"
+              data-goal-id="${escapeHtml(listTCP.dataset.goalProbeList)}"
+              data-goal-revision="${Number(listTCP.dataset.goalRevision)||0}"
+              data-permit-revision="${Number(p.revision)||0}">Revoke network permission</button>`:''}
+          </div>`).join(''):
+          '<div class="page-subtitle">No approved network sources.</div>';
+      }catch(ex){if(holder.isConnected)holder.textContent='Network source list unavailable: '+ex.message}
+      return;
+    }
+    const saveTCPBaseline=event.target.closest('button[data-goal-tcp-baseline-save]');
+    if(saveTCPBaseline&&list.contains(saveTCPBaseline)){
+      event.preventDefault();saveTCPBaseline.disabled=true;
+      const wanted=String(saveTCPBaseline.closest('.page-subtitle')?.
+        querySelector('[data-goal-tcp-expected]')?.value||'');
+      try{
+        await apiRequest(reviewBase+encodeURIComponent(saveTCPBaseline.dataset.goalId)+'/tcp-baselines',{
+          method:'POST',body:JSON.stringify({
+            permit_id:String(saveTCPBaseline.dataset.goalTcpBaselineSave),
+            expected_tcp:wanted,
+            expected_goal_revision:Number(saveTCPBaseline.dataset.goalRevision),
+            expected_baseline_revision:Number(saveTCPBaseline.dataset.baselineRevision)
+          })
+        });
+        if(reviewStatus())reviewStatus().textContent='TCP reachability expectation saved. This does not verify device health.';
+        await refresh();
+      }catch(ex){
+        if(reviewStatus())reviewStatus().textContent='Unable to save TCP expectation: '+ex.message;
+        saveTCPBaseline.disabled=false;
+      }
+      return;
+    }
+    const assessTCP=event.target.closest('button[data-goal-tcp-assess]');
+    if(assessTCP&&list.contains(assessTCP)){
+      event.preventDefault();
+      const holder=assessTCP.closest('.list-row')?.querySelector('[data-goal-probe-results]');
+      if(!holder)return;
+      holder.textContent='Comparing last TCP handshake to operator expectation…';
+      try{
+        const outcome=await apiRequest(reviewBase+encodeURIComponent(assessTCP.dataset.goalId)+
+          '/tcp-assessment/'+encodeURIComponent(assessTCP.dataset.goalTcpAssess));
+        if(holder.isConnected){
+          holder.textContent='Source '+String(outcome.source_id||'')+
+            ' · expected '+String(outcome.expected_tcp||'unset')+
+            ' · last result '+String(outcome.observed_tcp||'none')+
+            ' · '+String(outcome.assessment||'unknown')+
+            ' · Device health remains UNVERIFIED. No remediation executed.';
+        }
+      }catch(ex){if(holder.isConnected)holder.textContent='TCP assessment unavailable: '+ex.message}
+      return;
+    }
+    const testTCP=event.target.closest('button[data-goal-probe-test]');
+    if(testTCP&&list.contains(testTCP)){
+      event.preventDefault();
+      if(testTCP.dataset.confirmed!=='yes'){
+        testTCP.dataset.confirmed='yes';
+        testTCP.textContent='Confirm one TCP connect';
+        return;
+      }
+      testTCP.disabled=true;
+      try{
+        const result=await apiRequest(reviewBase+encodeURIComponent(testTCP.dataset.goalId)+
+          '/tcp-probe-permits/'+encodeURIComponent(testTCP.dataset.goalProbeTest)+'/test',{
+            method:'POST',body:JSON.stringify({
+              expected_goal_revision:Number(testTCP.dataset.goalRevision),
+              expected_permit_revision:Number(testTCP.dataset.permitRevision)
+            })
+          });
+        if(reviewStatus())reviewStatus().textContent='TCP reachability: '+
+          String(result.status||'unknown')+' at '+String(result.target_ipv4||'')+
+          ':'+String(result.target_port||'')+
+          '. This does NOT establish service security, health or trust.';
+        await refresh();
+      }catch(ex){
+        if(reviewStatus())reviewStatus().textContent='TCP test denied or failed: '+ex.message;
+        testTCP.disabled=false;
+        testTCP.dataset.confirmed='';
+        testTCP.textContent='Test TCP connection…';
+      }
+      return;
+    }
+    const tcpHistory=event.target.closest('button[data-goal-probe-history]');
+    if(tcpHistory&&list.contains(tcpHistory)){
+      event.preventDefault();
+      const holder=tcpHistory.closest('.list-row')?.querySelector('[data-goal-probe-results]');
+      if(!holder)return;
+      holder.textContent='Reading bounded TCP reachability audit…';
+      try{
+        const runs=await apiRequest(reviewBase+encodeURIComponent(tcpHistory.dataset.goalProbeHistory)+
+          '/tcp-probe-attempts');
+        if(!holder.isConnected)return;
+        holder.innerHTML=Array.isArray(runs)&&runs.length?
+          '<div class="page-subtitle"><strong>TCP handshakes only — not verified device health.</strong></div>'+
+          runs.map(r=>`<div class="page-subtitle">${escapeHtml(r.source_id||'Source')}
+            · ${escapeHtml(r.target_ipv4||'')}:${Number(r.target_port)||0}
+            · ${escapeHtml(r.status==='claimed'?'unknown after interruption':r.status||'unknown')}
+            · ${escapeHtml(new Date(r.claimed_at).toLocaleString())}</div>`).join(''):
+          '<div class="page-subtitle">No TCP tests have been performed.</div>';
+      }catch(ex){if(holder.isConnected)holder.textContent='TCP test history unavailable: '+ex.message}
+      return;
+    }
+    const revokeTCP=event.target.closest('button[data-goal-probe-revoke]');
+    if(revokeTCP&&list.contains(revokeTCP)){
+      event.preventDefault();
+      revokeTCP.disabled=true;
+      try{
+        await apiRequest(reviewBase+encodeURIComponent(revokeTCP.dataset.goalId)+
+          '/tcp-probe-permits/'+encodeURIComponent(revokeTCP.dataset.goalProbeRevoke)+'/revoke',{
+          method:'POST',body:JSON.stringify({
+            expected_goal_revision:Number(revokeTCP.dataset.goalRevision),
+            expected_permit_revision:Number(revokeTCP.dataset.permitRevision)
+          })
+        });
+        if(reviewStatus())reviewStatus().textContent='Exact-target TCP network permission revoked.';
+        await refresh();
+      }catch(ex){
+        if(reviewStatus())reviewStatus().textContent='Network grant revocation denied: '+ex.message;
+        revokeTCP.disabled=false;
+      }
+      return;
+    }
+    const grant=event.target.closest('button[data-goal-review-approve]');
+    if(grant&&list.contains(grant)){
+      event.preventDefault();
+      const row=grant.closest('.list-row');
+      const sourceID=String(row?.querySelector('[data-goal-review-source]')?.value||'');
+      const hours=Number(row?.querySelector('[data-goal-review-duration]')?.value||0);
+      if(!sourceID||![1,24,168].includes(hours))return;
+      grant.disabled=true;
+      try{
+        await apiRequest(reviewBase+encodeURIComponent(grant.dataset.goalReviewApprove)+'/evidence-review-permits',{
+          method:'POST',
+          body:JSON.stringify({source_id:sourceID,expected_goal_revision:Number(grant.dataset.goalRevision),
+            expires_at:Date.now()+hours*60*60*1000})
+        });
+        if(reviewStatus())reviewStatus().textContent='Recurring receipt review approved for '+hours+' hour(s). Device probes and fixes remain disabled.';
+        await refresh();
+      }catch(ex){
+        if(reviewStatus())reviewStatus().textContent='Receipt review approval denied: '+ex.message;
+        grant.disabled=false;
+      }
+      return;
+    }
+    const showPermits=event.target.closest('button[data-goal-review-list]');
+    if(showPermits&&list.contains(showPermits)){
+      event.preventDefault();
+      const holder=showPermits.closest('.list-row')?.querySelector('[data-goal-review-results]');
+      if(!holder)return;
+      holder.textContent='Loading scoped receipt-review permissions…';
+      try{
+        const permits=await apiRequest(reviewBase+encodeURIComponent(showPermits.dataset.goalReviewList)+'/evidence-review-permits');
+        if(!holder.isConnected)return;
+        holder.innerHTML=Array.isArray(permits)&&permits.length?
+          permits.map(p=>`<div class="page-subtitle">
+            <strong>${escapeHtml(p.source_id||'Source')}</strong> ·
+            ${escapeHtml(p.status==='approved'&&Number(p.expires_at)<=Date.now()?'expired':(p.status||'unknown'))} ·
+            expires ${escapeHtml(new Date(p.expires_at).toLocaleString())} ·
+            existing receipt metadata only
+            ${p.status==='approved' && Number(p.expires_at)>Date.now()?`<button type="button" class="btn"
+              data-goal-review-run="${escapeHtml(p.id)}"
+              data-goal-id="${escapeHtml(showPermits.dataset.goalReviewList)}"
+              data-goal-revision="${Number(showPermits.dataset.goalRevision)||0}"
+              data-permit-revision="${Number(p.revision)||0}">Review existing receipts</button>`:''}
+            ${p.status==='approved'?`<button type="button" class="btn" data-goal-review-revoke="${escapeHtml(p.id)}"
+              data-goal-id="${escapeHtml(showPermits.dataset.goalReviewList)}"
+              data-goal-revision="${Number(showPermits.dataset.goalRevision)||0}"
+              data-permit-revision="${Number(p.revision)||0}">Revoke</button>`:''}
+          </div>`).join(''):
+          '<div class="page-subtitle">No receipt-review permits. Monitoring is not activated.</div>';
+      }catch(ex){if(holder.isConnected)holder.textContent='Unable to list review permits: '+ex.message}
+      return;
+    }
+    const runReview=event.target.closest('button[data-goal-review-run]');
+    if(runReview&&list.contains(runReview)){
+      event.preventDefault();runReview.disabled=true;
+      try{
+        const reviewed=await apiRequest(reviewBase+encodeURIComponent(runReview.dataset.goalId)+
+          '/evidence-review-permits/'+encodeURIComponent(runReview.dataset.goalReviewRun)+'/review',{
+          method:'POST',body:JSON.stringify({
+            expected_goal_revision:Number(runReview.dataset.goalRevision),
+            expected_permit_revision:Number(runReview.dataset.permitRevision)
+          })
+        });
+        const holder=runReview.closest('[data-goal-review-results]');
+        if(holder&&holder.isConnected){
+          holder.textContent='Receipt metadata reviewed: '+String(reviewed.source_id||'Source')+
+            ' · '+String(reviewed.evidence_state||'unknown')+
+            '. No probes, device health verification, or fixes were performed.';
+        }
+      }catch(ex){
+        if(reviewStatus())reviewStatus().textContent='Receipt review denied: '+ex.message;
+        runReview.disabled=false;
+      }
+      return;
+    }
+    const historyButton=event.target.closest('button[data-goal-review-history]');
+    if(historyButton&&list.contains(historyButton)){
+      event.preventDefault();
+      const holder=historyButton.closest('.list-row')?.querySelector('[data-goal-review-results]');
+      if(!holder)return;
+      holder.textContent='Reading retained metadata-only review history…';
+      try{
+        const reviews=await apiRequest(reviewBase+encodeURIComponent(historyButton.dataset.goalReviewHistory)+'/evidence-reviews');
+        if(!holder.isConnected)return;
+        holder.innerHTML=Array.isArray(reviews)&&reviews.length?
+          '<div class="page-subtitle"><strong>Historical receipt assessments — not verified device health.</strong></div>'+
+          reviews.map(item=>`<div class="page-subtitle">${escapeHtml(item.source_id||'Source')}
+             · ${escapeHtml(item.evidence_state||'unknown')}
+             · ${escapeHtml(new Date(item.reviewed_at).toLocaleString())}
+             · no monitoring activated</div>`).join(''):
+          '<div class="page-subtitle">No receipt reviews recorded.</div>';
+      }catch(ex){if(holder.isConnected)holder.textContent='Review history unavailable: '+ex.message}
+      return;
+    }
+    const revoke=event.target.closest('button[data-goal-review-revoke]');
+    if(revoke&&list.contains(revoke)){
+      event.preventDefault();
+      revoke.disabled=true;
+      try{
+        await apiRequest(reviewBase+encodeURIComponent(revoke.dataset.goalId)+'/evidence-review-permits/'+
+          encodeURIComponent(revoke.dataset.goalReviewRevoke)+'/revoke',{
+          method:'POST',
+          body:JSON.stringify({expected_goal_revision:Number(revoke.dataset.goalRevision),
+            expected_permit_revision:Number(revoke.dataset.permitRevision)})
+        });
+        if(reviewStatus())reviewStatus().textContent='Receipt-review permission revoked. No sensors or remediations were started.';
+        await refresh();
+      }catch(ex){
+        if(reviewStatus())reviewStatus().textContent='Unable to revoke review permit: '+ex.message;
+        revoke.disabled=false;
+      }
+      return;
+    }
+    const coverageButton=event.target.closest('button[data-goal-coverage]');
+    if(coverageButton&&list.contains(coverageButton)){
+      event.preventDefault();
+      const holder=coverageButton.closest('.list-row')?.querySelector('[data-goal-evidence-results]');
+      if(!holder)return;
+      holder.textContent='Checking attached observation timestamps…';
+      try{
+        const result=await apiRequest(base+'/continuous-goals/'+encodeURIComponent(coverageButton.dataset.goalCoverage)+'/coverage');
+        if(!holder.isConnected)return;
+        const entries=Array.isArray(result.sources)?result.sources:[];
+        holder.innerHTML='<div class="page-subtitle"><strong>Evidence coverage only — not verified health.</strong> No monitoring is activated by this check.</div>'+
+          (entries.length?entries.map(x=>`<div class="page-subtitle">${escapeHtml(x.source_id||'Source')}: ${escapeHtml(x.evidence_state||'missing')}
+            ${x.last_observed_at?' · observed '+escapeHtml(new Date(x.last_observed_at).toLocaleString()):''}
+            ${x.tcp_reachability?' · separate TCP test: '+escapeHtml(x.tcp_reachability):''}
+            ${x.last_tcp_test_at?' at '+escapeHtml(new Date(x.last_tcp_test_at).toLocaleString()):''}
+            ${x.tcp_reachability?' (not verified health)':''}</div>`).join(''):
+          '<div class="page-subtitle">No approved observation sources configured.</div>');
+      }catch(ex){if(holder.isConnected)holder.textContent='Coverage unavailable: '+ex.message}
+      return;
+    }
+    const attach=event.target.closest('button[data-goal-attach]');
+    if(attach&&list.contains(attach)){
+      event.preventDefault();
+      const id=String(attach.dataset.goalAttach),revision=Number(attach.dataset.goalRevision);
+      const input=attach.closest('.list-row')?.querySelector('[data-goal-observation-id]');
+      const observationID=String(input?.value||'').trim();
+      if(!observationID){if(input)input.focus();return}
+      attach.disabled=true;
+      try{
+        await apiRequest(base+'/continuous-goals/'+encodeURIComponent(id)+'/observations',{
+          method:'POST',body:JSON.stringify({observation_id:observationID,expected_revision:revision})
+        });
+        const status=$('#qa4L5GoalStatus');
+        if(status)status.textContent='Existing evidence linked. Goal health remains unobserved; no probes or fixes started.';
+        await refresh();
+      }catch(ex){
+        const status=$('#qa4L5GoalStatus');
+        if(status)status.textContent='Evidence attachment denied: '+ex.message;
+        attach.disabled=false;
+      }
+      return;
+    }
+    const inspect=event.target.closest('button[data-goal-list-evidence]');
+    if(inspect&&list.contains(inspect)){
+      event.preventDefault();
+      const holder=inspect.closest('.list-row')?.querySelector('[data-goal-evidence-results]');
+      if(!holder)return;
+      holder.textContent='Loading observation references…';
+      try{
+        const records=await apiRequest(base+'/continuous-goals/'+encodeURIComponent(inspect.dataset.goalListEvidence)+'/observations');
+        if(!holder.isConnected)return;
+        holder.innerHTML=Array.isArray(records)&&records.length?
+          records.map(item=>`<div class="page-subtitle"><strong>${escapeHtml(item.source_id||'Source')}</strong>
+            · observation ${escapeHtml(item.observation_id||'')}
+            · ${escapeHtml(new Date(item.observed_at).toLocaleString())}
+            · integrity ${escapeHtml(item.integrity_hash||'unknown')}
+            · not a verified health result</div>`).join(''):
+          '<div class="page-subtitle">No evidence references attached.</div>';
+      }catch(ex){if(holder.isConnected)holder.textContent='Unable to read evidence: '+ex.message}
+      return;
+    }
+    const button=event.target.closest('button[data-goal-transition]');
+    if(!button||!list.contains(button))return;
+    event.preventDefault();event.stopPropagation();
+    const action=String(button.dataset.goalTransition||'');
+    if(action==='retired'&&button.dataset.confirmed!=='yes'){
+      button.dataset.confirmed='yes';
+      button.textContent='Confirm retirement';
+      return;
+    }
+    button.disabled=true;
+    try{
+      await apiRequest(base+'/continuous-goals/'+encodeURIComponent(button.dataset.goalId)+'/'+encodeURIComponent(action),{
+        method:'POST',body:JSON.stringify({expected_revision:Number(button.dataset.goalRevision)})
+      });
+      const status=$('#qa4L5GoalStatus');
+      if(status)status.textContent=action==='paused'?'Goal paused; no future checks scheduled.':'Goal retired; this objective cannot be reactivated.';
+      await refresh();
+    }catch(ex){
+      const status=$('#qa4L5GoalStatus');
+      if(status)status.textContent='Unable to change goal: '+ex.message;
+      await refresh();
+    }
+  };
+  form.onsubmit=async event=>{
+    event.preventDefault();
+    const button=form.querySelector('button[type="submit"]'),status=$('#qa4L5GoalStatus');
+    if(!select.value)return;
+    const data=Object.fromEntries(new FormData(form));
+    const sourceIDs=String(data.source_ids||'').split(',').map(x=>x.trim()).filter(Boolean);
+    if(sourceIDs.length>32||sourceIDs.some(x=>!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(x))||
+      new Set(sourceIDs).size!==sourceIDs.length){
+      const status=$('#qa4L5GoalStatus');
+      if(status)status.textContent='Enter up to 32 unique, valid observation probe-tool IDs.';
+      return;
+    }
+    button.disabled=true;
+    try{
+      await apiRequest(base+'/continuous-goals',{method:'POST',body:JSON.stringify({
+        project_workspace_id:String(data.project_workspace_id),
+        objective:String(data.objective||'').trim(),
+        cadence_minutes:Number(data.cadence_minutes||60),
+        monitoring_plan:{version:1,source_ids:sourceIDs}
+      })});
+      if(status)status.textContent='Objective configured. Monitoring and remediation are still inactive.';
+      await refresh();form.querySelector('textarea[name="objective"]').value='';
+    }catch(ex){if(status)status.textContent='Objective was not configured: '+ex.message;}
+    finally{button.disabled=false;}
+  };
+}

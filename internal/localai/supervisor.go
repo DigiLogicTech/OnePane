@@ -84,27 +84,125 @@ func (b *OSProcessBackend) Start(ctx context.Context, spec LaunchSpec) (int, err
 		return 0, errors.New("managed runtime executable must be an absolute path")
 	}
 	cmd := exec.CommandContext(ctx, spec.Executable, spec.Args...)
+    // A Colibri Python server can exit while a child engine still holds
+    // inherited stdout/stderr pipes open. Bound Wait's I/O pump cleanup
+    // so a dead parent does not appear alive forever in the supervisor.
+    cmd.WaitDelay=5*time.Second
 	cmd.Env = append([]string(nil), spec.Env...)
 	if spec.Dir != "" {
 		cmd.Dir = spec.Dir
 	}
-	// Preserve bounded startup diagnostics; the process owns no global stdout.
+	// A managed runtime may write indefinitely without restarting. Route
+	// both streams through one capped writer while continuing to drain their
+	// pipes; rotating only on the NEXT launch did not protect a small disk.
+ var logFile *os.File
  if spec.LogPath != "" {
-  if err:=os.MkdirAll(filepath.Dir(spec.LogPath),0o700);err!=nil{return 0,err}
-  if st,err:=os.Stat(spec.LogPath);err==nil&&st.Size()>4<<20{_ = os.Rename(spec.LogPath,spec.LogPath+".previous")}
-  logFile,err:=os.OpenFile(spec.LogPath,os.O_CREATE|os.O_TRUNC|os.O_WRONLY,0o600);if err!=nil{return 0,err}
-  defer logFile.Close();cmd.Stdout,cmd.Stderr=logFile,logFile
- } else {cmd.Stdout, cmd.Stderr = io.Discard, io.Discard}
+  var err error
+  logFile,err=openManagedRuntimeLog(spec.LogPath)
+  if err!=nil{return 0,err}
+  capWriter,err:=newBoundedRuntimeLogWriter(logFile)
+  if err!=nil{_ = logFile.Close();return 0,err}
+  cmd.Stdout,cmd.Stderr=capWriter,capWriter
+ } else {cmd.Stdout, cmd.Stderr=io.Discard,io.Discard}
 	if err := cmd.Start(); err != nil {
+        if logFile!=nil{_ = logFile.Close()}
 		return 0, err
 	}
 	pid := cmd.Process.Pid
 	b.mu.Lock()
 	b.cmds[pid] = cmd
 	b.mu.Unlock()
-	go func() { _ = cmd.Wait(); b.mu.Lock(); delete(b.cmds, pid); b.mu.Unlock() }()
+	go func() {
+  _=cmd.Wait()
+  // Only close after Wait has drained all stdout/stderr pumps.
+  if logFile!=nil{_ = logFile.Close()}
+  b.mu.Lock();delete(b.cmds,pid);b.mu.Unlock()
+ }()
 	return pid, nil
 }
+// Stream a model's diagnostics without ever letting a long-lived process
+// grow the current log beyond 4 MiB. Writes beyond the cap are acknowledged
+// and discarded, so a noisy model cannot block inference or fill the disk.
+const maxManagedRuntimeLogBytes int64=4<<20
+type boundedRuntimeLogWriter struct{
+ mu sync.Mutex
+ file *os.File
+ remaining int64
+}
+func newBoundedRuntimeLogWriter(file *os.File)(*boundedRuntimeLogWriter,error){
+ if file==nil{return nil,errors.New("managed runtime log unavailable")}
+ info,err:=file.Stat()
+ if err!=nil{return nil,err}
+ if !info.Mode().IsRegular()||info.Size()<0{
+  return nil,errors.New("invalid managed runtime log target")
+ }
+ remaining:=maxManagedRuntimeLogBytes-info.Size()
+ if remaining<0{remaining=0}
+ return &boundedRuntimeLogWriter{file:file,remaining:remaining},nil
+}
+func(w *boundedRuntimeLogWriter)Write(p []byte)(int,error){
+ if w==nil{return 0,errors.New("managed runtime log writer unavailable")}
+ w.mu.Lock()
+ defer w.mu.Unlock()
+ original:=len(p)
+ if w.remaining<=0{return original,nil}
+ permitted:=original
+ if int64(permitted)>w.remaining{permitted=int(w.remaining)}
+ n,err:=w.file.Write(p[:permitted])
+ w.remaining-=int64(n)
+ if err!=nil{return n,err}
+ if n!=permitted{return n,io.ErrShortWrite}
+ return original,nil
+}
+
+// Managed inference logs may contain private paths or request data. The
+// launcher must not truncate a previous log, follow a linked log file or
+// operate in a shared directory. All checks precede the subprocess spawn;
+// no existing arbitrary file is opened with O_TRUNC.
+func openManagedRuntimeLog(path string)(*os.File,error){
+ dir:=filepath.Dir(path)
+ if err:=os.MkdirAll(dir,0o700);err!=nil{return nil,err}
+ di,err:=os.Lstat(dir)
+ if err!=nil{return nil,err}
+ if !di.IsDir()||di.Mode()&os.ModeSymlink!=0||
+  (runtime.GOOS!="windows"&&di.Mode().Perm()&0o077!=0){
+  return nil,errors.New("unsafe managed runtime log directory")
+ }
+ st,err:=os.Lstat(path)
+ if err!=nil&&!errors.Is(err,os.ErrNotExist){return nil,err}
+ if err==nil{
+  if !st.Mode().IsRegular()||
+   (runtime.GOOS!="windows"&&st.Mode().Perm()&0o077!=0){
+   return nil,errors.New("unsafe existing managed runtime log")
+  }
+  // Preserve old bounded log rollover semantics without overwriting a
+  // file that was replaced or linked during the preflight.
+  // A log already at the live-write cap must rotate too; reopening
+  // it would silently discard every diagnostic from the next launch.
+  if st.Size()>=maxManagedRuntimeLogBytes{
+   archive:=path+".previous"
+   if _,e:=os.Lstat(archive);e==nil{
+    if e=os.Remove(archive);e!=nil{return nil,e}
+   }else if !errors.Is(e,os.ErrNotExist){return nil,e}
+   if e:=os.Rename(path,archive);e!=nil{return nil,e}
+   st=nil
+  }
+ }
+ if st!=nil{
+  f,e:=os.OpenFile(path,os.O_WRONLY|os.O_APPEND,0o600)
+  if e!=nil{return nil,e}
+  fi,e:=f.Stat()
+  if e!=nil||!fi.Mode().IsRegular()||!os.SameFile(st,fi){
+   _=f.Close()
+   return nil,errors.New("managed runtime log changed before opening")
+  }
+  return f,nil
+ }
+ f,e:=os.OpenFile(path,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0o600)
+ if e!=nil{return nil,e}
+ return f,nil
+}
+
 func (b *OSProcessBackend) Signal(pid int, sig os.Signal) error {
 	if pid <= 1 {
 		return errors.New("invalid pid")
@@ -118,9 +216,12 @@ func (b *OSProcessBackend) Signal(pid int, sig os.Signal) error {
 		// Killing only the parent on Windows leaks the child and its VRAM.
 		// This is called only after VerifyIdentity authenticates the managed
 		// process, and taskkill's /T closes its descendants as well.
-		result, killErr := exec.Command("taskkill.exe", "/PID", strconv.Itoa(pid), "/T", "/F").CombinedOutput()
+        // taskkill output is not an authority or diagnostic stream.
+        // Do not buffer potentially unbounded OS utility stdout/stderr or
+        // echo it into UI-visible errors when stopping a model process.
+        killErr := exec.Command("taskkill.exe", "/PID", strconv.Itoa(pid), "/T", "/F").Run()
 		if killErr != nil && b.Alive(pid) {
-			return fmt.Errorf("stop verified managed process tree: %w: %s", killErr, strings.TrimSpace(string(result)))
+			return fmt.Errorf("stop verified managed process tree: %w", killErr)
 		}
 		return nil
 	}
@@ -218,31 +319,48 @@ func (s *RuntimeSupervisor) SetResidencyHeadroom(percent int) {
 
 // SetBusy reference-counts active inference requests so an idle reaper or
 // pressure eviction can never stop a runtime that is serving work.
+// SetBusy changes in-memory active request accounting ONLY after its
+// persisted runtime transition succeeds. On SQLite error, cancelled context,
+// or an unready deployment (zero updated rows), keep the old lease count.
+// Otherwise a failed Acquire can strand a permanent busy lease or a failed
+// Release can silently allow eviction while a request is still running.
 func (s *RuntimeSupervisor) SetBusy(ctx context.Context, deploymentID string, busy bool) error {
-	deploymentID = strings.TrimSpace(deploymentID)
-	if deploymentID == "" {
-		return errors.New("deployment id required")
-	}
-	s.activityMu.Lock()
-	defer s.activityMu.Unlock()
-	n := s.activeRequests[deploymentID]
-	if busy {
-		n++
-		s.activeRequests[deploymentID] = n
-	} else if n > 1 {
-		n--
-		s.activeRequests[deploymentID] = n
-	} else {
-		delete(s.activeRequests, deploymentID)
-		n = 0
-	}
-	now := s.clock.UnixMilli()
-	if n > 0 {
-		_, err := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET status='busy',last_seen_at=?,updated_at=?,revision=revision+1 WHERE deployment_id=? AND status IN ('healthy','busy')`, now, now, deploymentID)
-		return err
-	}
-	_, err := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET status='healthy',last_seen_at=?,updated_at=?,revision=revision+1 WHERE deployment_id=? AND status='busy'`, now, now, deploymentID)
-	return err
+ deploymentID=strings.TrimSpace(deploymentID)
+ if deploymentID==""{return errors.New("deployment id required")}
+ s.activityMu.Lock()
+ defer s.activityMu.Unlock()
+ previous:=s.activeRequests[deploymentID]
+ if !busy&&previous==0{
+  // An already-released request never changes the observed runtime state.
+  return nil
+ }
+ next:=previous
+ if busy{next++}else{next--}
+ now:=s.clock.UnixMilli()
+ var res sql.Result
+ var err error
+ if next>0{
+  res,err=s.db.ExecContext(ctx,`UPDATE local_runtime_instances
+   SET status='busy',last_seen_at=?,updated_at=?,revision=revision+1
+   WHERE deployment_id=? AND status IN ('healthy','busy')`,now,now,deploymentID)
+ }else{
+  res,err=s.db.ExecContext(ctx,`UPDATE local_runtime_instances
+   SET status='healthy',last_seen_at=?,updated_at=?,revision=revision+1
+   WHERE deployment_id=? AND status='busy'`,now,now,deploymentID)
+ }
+ if err!=nil{return err}
+ affected,err:=res.RowsAffected()
+ if err!=nil{return err}
+ if affected!=1{
+  return errors.New("managed runtime is not available for the requested lease transition")
+ }
+ if next==0{
+  delete(s.activeRequests,deploymentID)
+ }else{
+  if s.activeRequests==nil{s.activeRequests=make(map[string]int)}
+  s.activeRequests[deploymentID]=next
+ }
+ return nil
 }
 
 type runtimeConfig struct {
@@ -256,6 +374,38 @@ type runtimeConfig struct {
 	EnginePath     string        `json:"engine_path,omitempty"`
 	ModelRef       string        `json:"model_ref,omitempty"`
 	ColibriTier    ColibriTierSettings `json:"colibri_tier,omitempty"`
+}
+
+// Explicit, minimal host variables necessary for managed Python/llama
+// subprocess launch, diagnostics and selected GPU drivers. Never inherit
+// arbitrary service/API secrets or network proxy credentials. Environment
+// values remain process-private and are not logged or returned to clients.
+func managedRuntimeHostEnvironment(host []string) []string {
+ allowed:=map[string]bool{
+  "PATH":true,"PATHEXT":true,"SYSTEMROOT":true,"WINDIR":true,
+  "COMSPEC":true,"TMP":true,"TEMP":true,"TMPDIR":true,
+  "LANG":true,"LANGUAGE":true,"LC_ALL":true,"LC_CTYPE":true,
+  "LC_MESSAGES":true,"TZ":true,
+  "CUDA_VISIBLE_DEVICES":true,"CUDA_PATH":true,
+  "HIP_VISIBLE_DEVICES":true,"ROCR_VISIBLE_DEVICES":true,
+  "ROCM_PATH":true,"HSA_OVERRIDE_GFX_VERSION":true,
+  "VK_ICD_FILENAMES":true,"VK_LAYER_PATH":true,"VULKAN_SDK":true,
+  "NVIDIA_VISIBLE_DEVICES":true,
+ }
+ result:=make([]string,0,12)
+ seen:=map[string]bool{}
+ for _,entry:=range host{
+  name,_,ok:=strings.Cut(entry,"=")
+  normalized:=strings.ToUpper(name)
+  if !ok||!allowed[normalized]||seen[normalized]{continue}
+  // Block malformed names rather than relying on platform-dependent
+  // subprocess environment parsing.
+  if name==""||strings.TrimSpace(name)!=name||
+   strings.ContainsAny(name,"\r\n\x00"){continue}
+  result=append(result,entry)
+  seen[normalized]=true
+ }
+ return result
 }
 
 type managedRefs struct{ RuntimeID, ModelID string }
@@ -382,6 +532,137 @@ func isOperatorMemoryOverride(rec Recommendation) bool {
 // ensureCapacity performs per-device pressure-aware hot swapping. It never
 // treats heterogeneous accelerators as one fictional VRAM pool. Only healthy,
 // idle runtimes are evicted; busy runtimes are protected by the runtime lease.
+// Reject obviously impossible CPU-only allocations on low-resource hosts.
+// This bounds total memory only; simultaneous CPU residents and changing
+// available RAM still require installed host acceptance and monitoring.
+func cpuModelFitsPhysicalRAM(required,total int64)bool{
+ return cpuModelFitsConcurrentRAM(required,total,0)
+}
+
+// Admission uses an aggregate physical-RAM ceiling, not per-model fit
+// alone. Subtract the same OS/OnePane reserve before evaluating existing
+// managed CPU-model estimates; never add signed sizes before checking fit.
+func cpuModelFitsConcurrentRAM(required,total,resident int64)bool{
+ if required<=0||total<=0||resident<0{return false}
+ reserve:=total/10
+ if reserve>1<<30{reserve=1<<30}
+ available:=total-reserve
+ return resident<=available&&required<=available-resident
+}
+
+// Estimate still-resident CPU model commitments for a single local Node.
+// This does not claim precise RSS or unmanaged-process memory visibility.
+// Count unresolved live-PID failure states conservatively, and reject
+// malformed legacy placement plans rather than inventing free RAM.
+func (s *RuntimeSupervisor) estimatedResidentCPUMemory(ctx context.Context,nodeID,deploymentID string)(int64,error){
+ rows,err:=s.db.QueryContext(ctx,`SELECT p.memory_required_bytes,p.plan_json
+ FROM local_runtime_instances i
+ JOIN managed_local_models m ON m.deployment_id=i.deployment_id
+ JOIN local_model_install_plans p ON p.id=m.plan_id
+ WHERE i.node_id=? AND i.deployment_id<>?
+ AND (i.status IN ('starting','healthy','busy','draining')
+ OR (i.status IN ('failed','orphaned') AND i.pid>1))
+ ORDER BY i.deployment_id LIMIT 513`,nodeID,deploymentID)
+ if err!=nil{return 0,err}
+ defer rows.Close()
+ var resident int64
+ count:=0
+ for rows.Next(){
+  count++
+  if count>512{return 0,errors.New("too many resident managed model records for bounded RAM admission")}
+  var estimate int64
+  var planJSON string
+  if err=rows.Scan(&estimate,&planJSON);err!=nil{return 0,err}
+  var rec Recommendation
+  if err=json.Unmarshal([]byte(planJSON),&rec);err!=nil||rec.Placement.Mode==""{
+   return 0,errors.New("resident model memory placement is unverified")
+  }
+  if rec.Placement.Mode!=PlacementCPUOnly{continue}
+  next,ok:=addManagedMemoryBytes(resident,estimate)
+  if !ok{return 0,errors.New("invalid or overflowing resident CPU model memory estimate")}
+  resident=next
+ }
+ if err=rows.Err();err!=nil{return 0,err}
+ if err=rows.Close();err!=nil{return 0,err}
+ return resident,nil
+}
+
+// Hardware/plan memory quantities must never wrap signed int64 on a
+// corrupt or exceptional hardware profile. Refuse the plan instead of
+// treating overflowed negative bytes as reclaimed capacity.
+func addManagedMemoryBytes(current,increment int64)(int64,bool){
+ if current<0||increment<=0||increment>int64(^uint64(0)>>1)-current{
+  return 0,false
+ }
+ return current+increment,true
+}
+
+// Predict whether evicting ALL healthy, idle candidates could satisfy a
+// deployment. Refuse impossible placements before any process is signalled.
+// Actual stops, identity checks and resource accounting remain unchanged.
+func capacityCouldFitAfterIdleReclaim(used,target,capacity map[string]int64,
+ idle []residentRuntime, operatorOverride bool) bool {
+ projected:=make(map[string]int64,len(used))
+ for key,n:=range used{projected[key]=n}
+ for _,r:=range idle{
+  for _,device:=range r.Placement.Devices{
+   if device.Kind!="accelerator"{continue}
+   key:=placementKey(device)
+   // A malformed idle model cannot reclaim more memory than was
+   // counted as resident. Do not let negative or inconsistent records
+   // fabricate free GPU capacity.
+   if device.AllocatedBytes<=0||projected[key]<device.AllocatedBytes{
+    return false
+   }
+   projected[key]-=device.AllocatedBytes
+  }
+ }
+ if operatorOverride{
+  // Explicit over-budget launch can proceed only if no other resident
+  // retains a claim on any of the requested accelerators.
+  for key,n:=range target{
+   if n<=0||projected[key]<0||projected[key]>0{return false}
+  }
+  return true
+ }
+ for key,n:=range target{
+  occupied,limit:=projected[key],capacity[key]
+  // Subtract from a verified positive budget instead of adding signed
+  // allocations that could overflow into an apparent free-memory fit.
+  if n<=0||occupied<0||limit<=0||occupied>limit||n>limit-occupied{
+   return false
+  }
+ }
+ return true
+}
+
+// Pressure eviction must free memory on the accelerator that is actually
+// constrained. An unrelated CPU model or different-GPU model is not a
+// legitimate victim merely because it is older.
+func residentReclaimsConstrainedAccelerator(r residentRuntime,
+ used,target,capacity map[string]int64) bool {
+ for _,d:=range r.Placement.Devices {
+  if d.Kind!="accelerator" || d.AllocatedBytes<=0 {continue}
+  key:=placementKey(d)
+  want:=target[key]
+  if want<=0 {continue}
+  occupied,limit:=used[key],capacity[key]
+  if occupied<0||limit<=0||occupied>limit||want>limit-occupied{return true}
+ }
+ return false
+}
+
+// Compute retained accelerator capacity without multiplying full VRAM bytes
+// by a percentage first: extremely large or corrupt hardware estimates can
+// overflow int64 before division and fabricate a positive headroom value.
+func usableManagedVRAM(total int64,headroomPct int)(int64,bool){
+ if total<0||headroomPct<0||headroomPct>50{return 0,false}
+ keep:=int64(100-headroomPct)
+ // The quotient term cannot exceed total, and the remainder term is
+ // bounded by 99*100. Both operations are safe across full int64 range.
+ return (total/100)*keep+((total%100)*keep)/100,true
+}
+
 func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, nodeID string) error {
 	var targetBytes int64
 	var targetPlanJSON string
@@ -389,9 +670,11 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 		return err
 	}
 	var targetRec Recommendation
-	_ = json.Unmarshal([]byte(targetPlanJSON), &targetRec)
-	var raw string
-	if err := s.db.QueryRowContext(ctx, `SELECT accelerators_json FROM local_hardware_profiles WHERE node_id=? ORDER BY detected_at DESC LIMIT 1`, nodeID).Scan(&raw); err != nil {
+	if err:=json.Unmarshal([]byte(targetPlanJSON),&targetRec);err!=nil{
+		return errors.New("managed model install plan JSON is invalid")
+	}
+	var raw,rawMemory string
+	if err := s.db.QueryRowContext(ctx, `SELECT accelerators_json,memory_json FROM local_hardware_profiles WHERE node_id=? ORDER BY detected_at DESC LIMIT 1`, nodeID).Scan(&raw,&rawMemory); err != nil {
 		return err
 	}
 	var gpus []GPU
@@ -403,22 +686,34 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 		targetRec.Placement, _, _, _ = bestPlacement(p, targetBytes, "")
 	}
 	if targetRec.Placement.Mode == PlacementCPUOnly {
+		var profileMemory Memory
+		if err:=json.Unmarshal([]byte(rawMemory),&profileMemory);err!=nil{return err}
+		// Cached *free* memory is volatile, so use the immutable total
+		// physical RAM as a conservative hard upper bound. Keep an OS
+		// reserve even when the model is the sole active local process.
+		resident,err:=s.estimatedResidentCPUMemory(ctx,nodeID,deploymentID)
+		if err!=nil{return err}
+		if !cpuModelFitsConcurrentRAM(targetBytes,profileMemory.TotalBytes,resident){
+			return errors.New("CPU model estimated memory exceeds remaining physical system RAM budget; wait for a model to unload or choose a smaller quantisation or Node")
+		}
 		return nil
 	}
 	capacity := map[string]int64{}
-	for _, g := range gpus {
-		for _, b := range gpuBackends(g) {
-			k := placementKey(PlacementDevice{DeviceID: g.DeviceID, Backend: b, DeviceIndex: g.DeviceIndex})
-			usable := g.VRAMBytes * int64(100-s.residencyHeadroomPct) / 100
-			if usable > capacity[k] {
-				capacity[k] = usable
-			}
+	for _,g:=range gpus {
+		usable,ok:=usableManagedVRAM(g.VRAMBytes,s.residencyHeadroomPct)
+		if !ok{return errors.New("managed accelerator memory profile or reserve is invalid")}
+		for _,b:=range gpuBackends(g){
+			k:=placementKey(PlacementDevice{DeviceID:g.DeviceID,Backend:b,DeviceIndex:g.DeviceIndex})
+			if usable>capacity[k]{capacity[k]=usable}
 		}
 	}
 	target := map[string]int64{}
 	for _, d := range targetRec.Placement.Devices {
 		if d.Kind == "accelerator" {
-			target[placementKey(d)] += d.AllocatedBytes
+			key:=placementKey(d)
+			next,ok:=addManagedMemoryBytes(target[key],d.AllocatedBytes)
+			if !ok{return errors.New("invalid or overflowing managed accelerator memory allocation")}
+			target[key]=next
 		}
 	}
 	operatorOverride := isOperatorMemoryOverride(targetRec)
@@ -428,7 +723,7 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 		}
 	}
 
-	rows, err := s.db.QueryContext(ctx, `SELECT i.deployment_id,p.memory_required_bytes,p.plan_json,COALESCE(i.last_seen_at,i.started_at,i.updated_at),i.status FROM local_runtime_instances i JOIN managed_local_models m ON m.deployment_id=i.deployment_id JOIN local_model_install_plans p ON p.id=m.plan_id WHERE i.node_id=? AND i.deployment_id<>? AND i.status IN ('healthy','busy') ORDER BY COALESCE(i.last_seen_at,i.started_at,i.updated_at) ASC`, nodeID, deploymentID)
+	rows, err := s.db.QueryContext(ctx, `SELECT i.deployment_id,p.memory_required_bytes,p.plan_json,COALESCE(i.last_seen_at,i.started_at,i.updated_at),i.status,CASE WHEN COALESCE(json_extract(d.runtime_config_json,'$.colibri_pinned'),0)=1 THEN 1 ELSE 0 END FROM local_runtime_instances i JOIN model_deployments d ON d.id=i.deployment_id JOIN managed_local_models m ON m.deployment_id=i.deployment_id JOIN local_model_install_plans p ON p.id=m.plan_id WHERE i.node_id=? AND i.deployment_id<>? AND i.status IN ('healthy','busy') ORDER BY COALESCE(i.last_seen_at,i.started_at,i.updated_at) ASC`, nodeID, deploymentID)
 	if err != nil {
 		return err
 	}
@@ -438,30 +733,39 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 	for rows.Next() {
 		var x residentRuntime
 		var planJSON, status string
-		if err := rows.Scan(&x.DeploymentID, &x.MemoryBytes, &planJSON, &x.LastUsedAt, &status); err != nil {
+        var pinned int
+		if err := rows.Scan(&x.DeploymentID, &x.MemoryBytes, &planJSON, &x.LastUsedAt, &status, &pinned); err != nil {
 			return err
 		}
 		var rec Recommendation
-		_ = json.Unmarshal([]byte(planJSON), &rec)
-		x.Placement = rec.Placement
-		if x.Placement.Mode == "" {
-			continue
+		if err:=json.Unmarshal([]byte(planJSON),&rec);err!=nil||rec.Placement.Mode==""{
+			return errors.New("active managed runtime placement is unverified; reconcile or reinstall model plan")
 		}
+		x.Placement=rec.Placement
 		for _, d := range x.Placement.Devices {
 			if d.Kind == "accelerator" {
-				used[placementKey(d)] += d.AllocatedBytes
+				key:=placementKey(d)
+				next,ok:=addManagedMemoryBytes(used[key],d.AllocatedBytes)
+				if !ok{return errors.New("invalid or overflowing resident accelerator allocation")}
+				used[key]=next
 			}
 		}
-		if status == string(RuntimeHealthy) {
+		if status == string(RuntimeHealthy) && pinned==0 {
 			residents = append(residents, x)
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	// No SQLite read cursor may remain open while stop/eviction causes
+	// another instance lookup, state write or model process operation.
+	if err := rows.Close(); err != nil {
+		return err
+	}
 	fits := func() bool {
 		for k, n := range target {
-			if used[k]+n > capacity[k] {
+			if n<=0||used[k]<0||capacity[k]<=0||
+				used[k]>capacity[k]||n>capacity[k]-used[k]{
 				return false
 			}
 		}
@@ -470,22 +774,27 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 	if fits() {
 		return nil
 	}
-	for _, x := range residents {
-		if err := s.Stop(ctx, x.DeploymentID); err != nil {
-			continue
+	// Predict the *best possible* memory recovery from idle residents
+	// before stopping anyone. Otherwise a busy model can make admission
+	// impossible, yet every healthy idle neighbour would be needlessly
+	// evicted first. This is conservative accounting, not VRAM telemetry.
+	if !capacityCouldFitAfterIdleReclaim(used,target,capacity,residents,operatorOverride){
+		return errors.New("insufficient reclaimable accelerator memory; working models preserved")
+	}
+	for _,x:=range residents {
+		if !residentReclaimsConstrainedAccelerator(x,used,target,capacity){continue}
+		// Reselect after the snapshot: an Agent Check, pin change, new lease
+		// or fresh use must prevent eviction. Caller holds residencyMu.
+		if x.LastUsedAt<0||x.LastUsedAt==int64(^uint64(0)>>1){continue}
+		stopped,stopErr:=s.stopIfIdleBeforeLocked(ctx,x.DeploymentID,x.LastUsedAt+1)
+		if stopErr!=nil||!stopped{continue}
+		for _,d:=range x.Placement.Devices {
+			if d.Kind!="accelerator"{continue}
+			k:=placementKey(d)
+			if used[k]<d.AllocatedBytes{return errors.New("resident accelerator ledger changed during eviction")}
+			used[k]-=d.AllocatedBytes
 		}
-		for _, d := range x.Placement.Devices {
-			if d.Kind == "accelerator" {
-				k := placementKey(d)
-				used[k] -= d.AllocatedBytes
-				if used[k] < 0 {
-					used[k] = 0
-				}
-			}
-		}
-		if fits() {
-			return nil
-		}
+		if fits(){return nil}
 	}
 	// A genuine explicit memory override may attempt an out-of-budget launch
 	// ONLY when no other resident uses its selected accelerators. This never
@@ -658,6 +967,19 @@ func findPythonExecutable() (string, error) {
 	return "", errors.New("Colibri serve mode requires Python 3.10+; install the Colibri component from Models")
 }
 
+// A durable non-running state is not evidence that its OS process exited.
+// No replacement is permitted while that PID is still alive, even when
+// the process identity cannot be re-established safely.
+func requiresOperatorReconciliationBeforeRestart(inst RuntimeInstance, alive bool) bool {
+ if inst.PID <= 1 || !alive { return false }
+ switch inst.Status {
+ case RuntimeHealthy, RuntimeBusy, RuntimeStarting:
+  return false // reusable only after the separate VerifyIdentity boundary
+ default:
+  return true
+ }
+}
+
 func (s *RuntimeSupervisor) Start(ctx context.Context, deploymentID string) (RuntimeInstance, error) {
 	s.residencyMu.Lock()
 	defer s.residencyMu.Unlock()
@@ -669,23 +991,44 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 	if err != nil {
 		return RuntimeInstance{}, err
 	}
-	// Colibri is memory-tiered internally, so its registered model's one-byte
-	// placeholder is not a meaningful host-memory admission estimate. Limit
-	// this node to one resident Colibri model unless another is still serving.
-	// This is shared by explicit hot swap AND ordinary inference acquisition.
-	if strings.EqualFold(cfg.RuntimeBackend, "colibri") {
-		if _, err := s.prepareColibriSwapLocked(ctx, nodeID, deploymentID); err != nil {
-			return RuntimeInstance{}, err
-		}
-	}
+	// An already-running target requires no eviction or new launcher.
 	var existing *RuntimeInstance
 	if old, err := s.Instance(ctx, deploymentID); err == nil {
 		existing = &old
-		if (old.Status == RuntimeHealthy || old.Status == RuntimeBusy) && s.processes.Alive(old.PID) {
+		alive := old.PID > 1 && s.processes.Alive(old.PID)
+		// A failed, stopped, draining or orphaned instance may still own a
+		// process and GPU/CPU memory. Never overwrite its original PID or
+		// spawn a second engine until the operator reconciles that process.
+		// In particular, a restart must not erase a recovered orphan's PID.
+		if requiresOperatorReconciliationBeforeRestart(old, alive) {
+			return RuntimeInstance{}, errors.New("previous managed runtime process is still alive in a non-running state; operator reconciliation required before restart")
+		}
+		if (old.Status == RuntimeHealthy || old.Status == RuntimeBusy ||
+			old.Status == RuntimeStarting) && alive {
+			// PIDs are recycled. An old "healthy" SQLite row does not
+			// prove the PID still owns this exact approved executable,
+			// model path, loopback address and port. Do not send prompts
+			// to an unverified reused process or signal it on failure.
+			if verifyErr:=s.VerifyIdentity(ctx,old);verifyErr!=nil{
+				return RuntimeInstance{},fmt.Errorf("refusing to reuse unverified local runtime process: %w",verifyErr)
+			}
+			if old.Status == RuntimeStarting{
+				return s.waitHealthy(ctx, old.ID, 120*time.Second)
+			}
 			return old, nil
 		}
-		if old.Status == RuntimeStarting && s.processes.Alive(old.PID) {
-			return s.waitHealthy(ctx, old.ID, 120*time.Second)
+	}
+	// Resolve the Colibri launcher BEFORE evicting a healthy predecessor.
+	// Otherwise ordinary inference acquisition could lose its working
+	// model merely because Python was missing, with no swap rollback.
+	var colibriPython string
+	if strings.EqualFold(cfg.RuntimeBackend, "colibri") {
+		colibriPython,err=findPythonExecutable()
+		if err!=nil{return RuntimeInstance{},err}
+		// Tiering uses Colibri's managed runtime; never replace it with
+		// another backend if its prerequisites are unavailable.
+		if _, err = s.prepareColibriSwapLocked(ctx, nodeID, deploymentID); err != nil {
+			return RuntimeInstance{}, err
 		}
 	}
 	if !strings.EqualFold(cfg.RuntimeBackend,"colibri"){
@@ -701,10 +1044,7 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 	executable := cfg.Executable
 	args := []string{"-m", cfg.ModelPath, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "-c", strconv.FormatInt(cfg.ContextTokens, 10)}
 	if strings.EqualFold(cfg.RuntimeBackend, "colibri") {
-		py, err := findPythonExecutable()
-		if err != nil {
-			return RuntimeInstance{}, err
-		}
+		py := colibriPython
 		executable = py
 		args = nil
 		if strings.EqualFold(filepath.Base(py), "py.exe") {
@@ -777,7 +1117,10 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 		_ = s.markFailed(ctx, inst.ID, err.Error())
 		return RuntimeInstance{}, err
 	}
-	env := append([]string(nil), os.Environ()...)
+	// Never forward the OnePane service's full environment into managed
+ // third-party inference engines: it may contain cloud/API credentials,
+ // proxy passwords, service tokens and unrelated private application state.
+ env := managedRuntimeHostEnvironment(os.Environ())
 	env = append(env, "ONEPANE_MANAGED_RUNTIME=1", "HOME="+runtimeHome)
 	if runtime.GOOS != "windows" {
 		env = append(env, "LD_LIBRARY_PATH="+filepath.Dir(cfg.Executable))
@@ -813,21 +1156,33 @@ func (s *RuntimeSupervisor) Acquire(ctx context.Context, deploymentID string) (R
 }
 
 func (s *RuntimeSupervisor) Release(ctx context.Context, deploymentID string) error {
-	return s.SetBusy(ctx, deploymentID, false)
+ // A cancelled chat/task context must not prevent a completed request's
+ // cleanup and strand its model as busy forever. Do not silently drop the
+ // in-memory lease on database failure: SetBusy preserves it until a
+ // persisted transition succeeds. Keep cleanup independently bounded.
+ releaseCtx,cancel:=context.WithTimeout(context.WithoutCancel(ctx),3*time.Second)
+ defer cancel()
+ return s.SetBusy(releaseCtx,deploymentID,false)
 }
 
 // Diagnoses failures without exposing arbitrary large runtime output to clients.
-func (s *RuntimeSupervisor) runtimeStartLogTail(idv string) string {
+// Runtime process output may contain paths, prompt text, bearer tokens or
+// system diagnostics. Failure messages leave the host, so never put raw log
+// bytes into an API/AgentCheck error. Only reveal that an owner-reviewable
+// local log exists, and never follow a symlink or caller-chosen path.
+func (s *RuntimeSupervisor) runtimeLogReviewHint(idv string) string {
+ if len(idv)<1||len(idv)>128{return ""}
+ for _,ch:=range idv{
+  if (ch>='a'&&ch<='z')||(ch>='A'&&ch<='Z')||
+   (ch>='0'&&ch<='9')||ch=='_'||ch=='-'{
+   continue
+  }
+  return ""
+ }
  path:=filepath.Join(s.dataDir,"components","logs","local-runtime-"+idv+".log")
- f,err:=os.Open(path);if err!=nil{return ""}
- defer f.Close()
- st,err:=f.Stat();if err!=nil{return ""}
- start:=st.Size()-900;if start<0{start=0}
- if _,err=f.Seek(start,io.SeekStart);err!=nil{return ""}
- buf,err:=io.ReadAll(io.LimitReader(f,900));if err!=nil{return ""}
- tail:=strings.TrimSpace(string(buf))
- if tail==""{return ""}
- return " · runtime log tail: "+tail
+ st,err:=os.Lstat(path)
+ if err!=nil||!st.Mode().IsRegular()||st.Size()<1{return ""}
+ return " · a local runtime log is available for operator review"
 }
 func (s *RuntimeSupervisor) waitHealthy(ctx context.Context, idv string, timeout time.Duration) (RuntimeInstance, error) {
 	deadline := time.Now().Add(timeout)
@@ -837,9 +1192,16 @@ func (s *RuntimeSupervisor) waitHealthy(ctx context.Context, idv string, timeout
 			return inst, err
 		}
 		if !s.processes.Alive(inst.PID) {
-			reason:="runtime exited before becoming healthy"+s.runtimeStartLogTail(idv)
+			reason:="runtime exited before becoming healthy"+s.runtimeLogReviewHint(idv)
    _ = s.markFailed(ctx,idv,reason)
    return RuntimeInstance{}, errors.New(reason)
+		}
+		// A model health server on a loopback port does not prove that
+		// the intended managed process still owns that server. First
+		// authenticate the expected executable/CLI model+port binding.
+		// No HTTP probe or process signal may follow an identity mismatch.
+		if verifyErr:=s.VerifyIdentity(ctx,inst);verifyErr!=nil{
+			return RuntimeInstance{},errors.New("managed runtime process identity unverified during startup")
 		}
 		health, err := s.Health(ctx, inst)
 		if err == nil {
@@ -856,32 +1218,70 @@ func (s *RuntimeSupervisor) waitHealthy(ctx context.Context, idv string, timeout
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
-	reason:="managed runtime health check timed out"+s.runtimeStartLogTail(idv)
+	reason:="managed runtime health check timed out"+s.runtimeLogReviewHint(idv)
  _ = s.markFailed(ctx,idv,reason)
  return RuntimeInstance{}, errors.New(reason)
 }
 
+// Health is a bounded, direct-loopback readiness probe, not a general
+// HTTP client. Do not honour injected proxies, redirect hooks or dialers:
+// those could leak a local engine's health data to an unrelated endpoint.
 func (s *RuntimeSupervisor) Health(ctx context.Context, inst RuntimeInstance) (map[string]any, error) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/health", inst.Port), nil)
-	resp, err := s.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("health HTTP %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, err
-	}
-	var out map[string]any
-	if len(bytes.TrimSpace(body)) == 0 {
-		out = map[string]any{"status": "ok"}
-	} else if err := json.Unmarshal(body, &out); err != nil {
-		out = map[string]any{"status": "ok", "raw": string(body)}
-	}
-	return out, nil
+ if inst.Port<1024||inst.Port>65535{
+  return nil,errors.New("managed runtime health port invalid")
+ }
+ req,err:=http.NewRequestWithContext(ctx,http.MethodGet,
+  fmt.Sprintf("http://127.0.0.1:%d/health",inst.Port),nil)
+ if err!=nil{return nil,err}
+ transport:=&http.Transport{
+  Proxy:nil,
+  DialContext:(&net.Dialer{Timeout:3*time.Second}).DialContext,
+  ResponseHeaderTimeout:3*time.Second,
+ }
+ defer transport.CloseIdleConnections()
+ client:=&http.Client{Transport:transport,Timeout:3*time.Second,
+  CheckRedirect:func(_ *http.Request,_ []*http.Request)error{
+   return http.ErrUseLastResponse
+  },
+ }
+ resp,err:=client.Do(req)
+ if err!=nil{return nil,err}
+ defer resp.Body.Close()
+ if resp.StatusCode<200||resp.StatusCode>=300{
+  return nil,fmt.Errorf("managed runtime health HTTP %d",resp.StatusCode)
+ }
+ const maxHealthResponse=1<<20
+ body,err:=io.ReadAll(io.LimitReader(resp.Body,maxHealthResponse+1))
+ if err!=nil{return nil,err}
+ if len(body)>maxHealthResponse{
+  return nil,errors.New("managed runtime health response oversized")
+ }
+ if len(bytes.TrimSpace(body))==0{
+  return nil,errors.New("managed runtime health response empty")
+ }
+ var out map[string]any
+ if err=json.Unmarshal(body,&out);err!=nil||len(out)==0{
+  return nil,errors.New("managed runtime health response invalid JSON object")
+ }
+ status,ok:=out["status"].(string)
+ if !ok{return nil,errors.New("managed runtime health status missing")}
+ switch strings.ToLower(strings.TrimSpace(status)){
+ case "ok","ready","healthy","no slot available":
+  // A third-party engine's /health JSON is untrusted process output.
+  // Only explicitly reviewed scalar readiness data may become durable
+  // local_runtime_instances.health_json or leave the host through an API.
+  safe:=map[string]any{"status":strings.ToLower(strings.TrimSpace(status))}
+  for _,key:=range []string{"slots_idle","slots_processing"}{
+   if raw,exists:=out[key];exists{
+    if n,ok:=raw.(float64);ok&&n>=0&&n<=4096&&n==float64(int64(n)){
+     safe[key]=int64(n)
+    }
+   }
+  }
+  return safe,nil
+ default:
+  return nil,errors.New("managed runtime not yet healthy")
+ }
 }
 
 func (s *RuntimeSupervisor) VerifyIdentity(ctx context.Context, inst RuntimeInstance) error {
@@ -905,31 +1305,69 @@ func (s *RuntimeSupervisor) VerifyIdentity(ctx context.Context, inst RuntimeInst
 		if err != nil {
 			return err
 		}
-		serverFound := false
 		allowed := []string{cfg.Executable}
 		if cfg.ColibriTier.Mode != "" {
 			if launcher := colibriLauncher(filepath.Dir(cfg.Executable)); launcher != "" {
 				allowed = append(allowed, launcher)
 			}
 		}
-		for _, a := range ident.Args {
-			for _, expected := range allowed {
-				if filepath.Clean(a) == filepath.Clean(expected) {
-					serverFound = true
-					break
-				}
-			}
-			if serverFound { break }
-		}
-		if filepath.Clean(ident.Executable) != filepath.Clean(py) || !serverFound || !argsContainPair(ident.Args, "--model", cfg.ModelPath) || !argsContainPair(ident.Args, "--host", "127.0.0.1") || !argsContainPair(ident.Args, "--port", strconv.Itoa(inst.Port)) {
+		if !managedProcessCLIIdentified("colibri",ident,py,allowed,cfg.ModelPath,inst.Port){
 			return errors.New("Colibri runtime process identity mismatch")
 		}
 		return nil
 	}
-	if filepath.Clean(ident.Executable) != filepath.Clean(cfg.Executable) || !argsContainPair(ident.Args, "-m", cfg.ModelPath) || !argsContainPair(ident.Args, "--host", "127.0.0.1") || !argsContainPair(ident.Args, "--port", strconv.Itoa(inst.Port)) {
+	if !managedProcessCLIIdentified(cfg.RuntimeBackend,ident,cfg.Executable,nil,cfg.ModelPath,inst.Port){
 		return errors.New("runtime process identity mismatch")
 	}
 	return nil
+}
+
+// Check exact managed process arguments independently from live host
+// introspection. This single backend-aware predicate is used for startup,
+// inference reuse, Stop and daemon recovery via VerifyIdentity. It is not
+// independent hardware/physical Node attestation.
+func managedProcessCLIIdentified(backend string,ident ProcessIdentity,
+ executable string,allowedColibriScripts []string,model string,port int)bool{
+ if port<1024||port>65535||filepath.Clean(ident.Executable)!=filepath.Clean(executable){
+  return false
+ }
+ modelFlag:="-m"
+ if strings.EqualFold(backend,"colibri"){
+  modelFlag="--model"
+  found:=false
+  for _,a:=range ident.Args{
+   for _,expected:=range allowedColibriScripts{
+    if filepath.Clean(a)==filepath.Clean(expected){found=true;break}
+   }
+   if found{break}
+  }
+  if !found{return false}
+ }
+ // Duplicated command-line options can be interpreted last-wins by
+ // the engine. Merely finding one matching pair could admit a later
+ // conflicting model, non-loopback address or listener port.
+ alternate:="--model"
+ if modelFlag=="--model"{alternate="-m"}
+ for _,arg:=range ident.Args{
+  if arg==alternate{return false}
+ }
+ return oneExactManagedOption(ident.Args,modelFlag,model)&&
+  oneExactManagedOption(ident.Args,"--host","127.0.0.1")&&
+  oneExactManagedOption(ident.Args,"--port",strconv.Itoa(port))
+}
+
+// Require a unique option occurrence; never trust one matching value
+// when another copy of the same flag can override it at runtime.
+func oneExactManagedOption(args []string,name,want string)bool{
+ count:=0
+ for i:=0;i<len(args);i++{
+  if args[i]!=name{continue}
+  count++
+  if i+1>=len(args)||filepath.Clean(args[i+1])!=filepath.Clean(want){
+   return false
+  }
+ }
+ return count==1
 }
 
 // StopIfIdle releases CPU/GPU memory after an Agent Check without evicting a
@@ -937,27 +1375,50 @@ func (s *RuntimeSupervisor) VerifyIdentity(ctx context.Context, inst RuntimeInst
 // Acquire takes residencyMu then SetBusy (activityMu), so a new inference
 // cannot enter between the safety check and process termination.
 func (s *RuntimeSupervisor) StopIfIdle(ctx context.Context, deploymentID string) (bool, error) {
- if s==nil {return false,nil}
+ return s.stopIfIdleBefore(ctx,deploymentID,0)
+}
+
+// Check liveness, the active inference lease, a current pin, and (for the
+// idle reaper) the last-observed activity before signalling a process. The
+// lock order matches Acquire: residencyMu, then activityMu.
+func (s *RuntimeSupervisor) stopIfIdleBefore(ctx context.Context, deploymentID string, cutoff int64)(bool,error){
+ if s==nil{return false,nil}
  deploymentID=strings.TrimSpace(deploymentID)
- if deploymentID=="" {return false,errors.New("deployment id required")}
+ if deploymentID==""{return false,errors.New("deployment id required")}
  s.residencyMu.Lock()
  defer s.residencyMu.Unlock()
+ return s.stopIfIdleBeforeLocked(ctx,deploymentID,cutoff)
+}
+
+// Caller already owns residencyMu; retain the active-lease lock through
+// process stop so it cannot race with a new inference acquisition.
+func (s *RuntimeSupervisor) stopIfIdleBeforeLocked(ctx context.Context,deploymentID string,cutoff int64)(bool,error){
  s.activityMu.Lock()
  defer s.activityMu.Unlock()
- if s.activeRequests[deploymentID]>0 {return false,nil}
+ if s.activeRequests[deploymentID]>0{return false,nil}
  inst,err:=s.Instance(ctx,deploymentID)
  if errors.Is(err,sql.ErrNoRows){return false,nil}
  if err!=nil{return false,err}
- switch inst.Status {
+ if cutoff>0{
+  // Do not reap a model touched, restarted or checked since selection.
+  last:=inst.UpdatedAt
+  if inst.StartedAt!=nil&&*inst.StartedAt>last{last=*inst.StartedAt}
+  if inst.LastSeenAt!=nil&&*inst.LastSeenAt>last{last=*inst.LastSeenAt}
+  if last>=cutoff{return false,nil}
+ }
+ var pinned int
+ if err=s.db.QueryRowContext(ctx,`SELECT CASE WHEN
+  COALESCE(json_extract(runtime_config_json,'$.colibri_pinned'),0)=1
+  THEN 1 ELSE 0 END FROM model_deployments WHERE id=?`,
+  deploymentID).Scan(&pinned);err!=nil{return false,err}
+ if pinned!=0{return false,nil}
+ switch inst.Status{
  case RuntimeHealthy,RuntimeStarting:
+  // An idle reaper never terminates a new model still starting up.
+  if cutoff>0&&inst.Status!=RuntimeHealthy{return false,nil}
   if err:=s.Stop(ctx,deploymentID);err!=nil{return false,err}
   return true,nil
- case RuntimeBusy:
-  // A stale busy marker is not proof that no other process owns the model.
-  return false,nil
- default:
-  // Already stopped, failed or orphaned: never signal an unknown process.
-  return false,nil
+ default:return false,nil
  }
 }
 
@@ -1004,7 +1465,13 @@ func (s *RuntimeSupervisor) Stop(ctx context.Context, deploymentID string) error
 	inst.Revision++
 	if inst.PID > 1 && s.processes.Alive(inst.PID) {
 		if err := s.processes.Signal(inst.PID, syscall.SIGTERM); err != nil && s.processes.Alive(inst.PID) {
-			return fmt.Errorf("signal managed runtime: %w", err)
+			// The stop intent was durably set to draining, but the
+			// managed process is still alive. An unresolved signal must
+			// not be presented as normal drain/reclaimed capacity.
+			if e:=markOrphaned("managed runtime graceful stop failed; operator reconciliation required");e!=nil{
+				return fmt.Errorf("failed to persist unverified graceful-stop outcome: %w",e)
+			}
+			return errors.New("managed runtime graceful termination failed; process requires operator reconciliation")
 		}
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -1019,8 +1486,21 @@ func (s *RuntimeSupervisor) Stop(ctx context.Context, deploymentID string) error
 		time.Sleep(100 * time.Millisecond)
 	}
 	if inst.PID > 1 && s.processes.Alive(inst.PID) {
+		// SIGTERM and drain may have taken 35 seconds for Colibri.
+		// Recheck identity before escalation: a recycled PID must NEVER
+		// receive SIGKILL merely because it was our managed process at
+		// the beginning of the stop attempt.
+		if err := s.VerifyIdentity(ctx, inst); err != nil {
+			if e := markOrphaned("refused forced termination of an unverified runtime PID"); e != nil {
+				return fmt.Errorf("forced termination denied; orphan-state persistence failed: %w", e)
+			}
+			return errors.New("forced termination denied: runtime process identity changed")
+		}
 		if err := s.processes.Signal(inst.PID, syscall.SIGKILL); err != nil && s.processes.Alive(inst.PID) {
-			return fmt.Errorf("kill managed runtime: %w", err)
+			if e:=markOrphaned("managed runtime forced stop failed; operator reconciliation required");e!=nil{
+				return fmt.Errorf("failed to persist unverified forced-stop outcome: %w",e)
+			}
+			return errors.New("managed runtime forced termination failed; process requires operator reconciliation")
 		}
 		deadline = time.Now().Add(2 * time.Second)
 		for s.processes.Alive(inst.PID) && time.Now().Before(deadline) {
@@ -1055,48 +1535,59 @@ func (s *RuntimeSupervisor) Stop(ctx context.Context, deploymentID string) error
 	return nil
 }
 
+// Recover snapshots candidate rows and closes their SQLite cursor before
+// inspecting any processes, reading another row, or applying a transition.
+// An open cursor can block those operations when the service has only one
+// SQLite connection (or retain an old WAL reader under sustained activity).
+type recoverableRuntime struct {
+ id string
+ pid int
+ revision int64
+}
+func recoverableRuntimeSnapshot(ctx context.Context,db *sql.DB)([]recoverableRuntime,error){
+ const maxRecoveryCandidates=512
+ rows,err:=db.QueryContext(ctx,`SELECT id,pid,revision
+  FROM local_runtime_instances
+  WHERE status IN ('starting','healthy','busy','draining')
+  ORDER BY id LIMIT 513`)
+ if err!=nil{return nil,err}
+ xs:=make([]recoverableRuntime,0,16)
+ for rows.Next(){
+  var x recoverableRuntime
+  var pid sql.NullInt64
+  if err=rows.Scan(&x.id,&pid,&x.revision);err!=nil{break}
+  if pid.Valid{x.pid=int(pid.Int64)}
+  xs=append(xs,x)
+  if len(xs)>maxRecoveryCandidates{
+   err=errors.New("too many managed model instances for bounded daemon recovery")
+   break
+  }
+ }
+ if err==nil{err=rows.Err()}
+ if closeErr:=rows.Close();err==nil{err=closeErr}
+ if err!=nil{return nil,err}
+ return xs,nil
+}
 func (s *RuntimeSupervisor) Recover(ctx context.Context) error {
-	s.activityMu.Lock()
-	s.activeRequests = map[string]int{}
-	s.activityMu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT i.id,i.pid,i.port,i.revision,r.executable_path,m.local_path,d.runtime_config_json
-		FROM local_runtime_instances i
-		JOIN managed_local_runtimes r ON r.id=i.runtime_id
-		JOIN managed_local_models m ON m.id=i.managed_model_id
-		JOIN model_deployments d ON d.id=i.deployment_id
-		WHERE i.status IN ('starting','healthy','busy','draining')`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	type item struct {
-		id                 string
-		pid, port          int
-		revision           int64
-		exe, model, config string
-	}
-	var xs []item
-	for rows.Next() {
-		var x item
-		var pid sql.NullInt64
-		if err := rows.Scan(&x.id, &pid, &x.port, &x.revision, &x.exe, &x.model, &x.config); err != nil {
-			return err
-		}
-		if pid.Valid {
-			x.pid = int(pid.Int64)
-		}
-		xs = append(xs, x)
-	}
-	now := s.clock.UnixMilli()
-	inspector, canInspect := s.processes.(ProcessInspector)
+ s.residencyMu.Lock()
+ defer s.residencyMu.Unlock()
+ // Do not discard live request counts if a recovery snapshot cannot even
+ // be read. Recovery is expected at daemon startup, never on active work.
+ xs,err:=recoverableRuntimeSnapshot(ctx,s.db)
+ if err!=nil{return err}
+ s.activityMu.Lock()
+ s.activeRequests=map[string]int{}
+ s.activityMu.Unlock()
+ now:=s.clock.UnixMilli()
 	for _, x := range xs {
-		trusted := false
-		if x.pid > 1 && s.processes.Alive(x.pid) && canInspect {
-			ident, ierr := inspector.Identity(x.pid)
-			if ierr == nil && filepath.Clean(ident.Executable) == filepath.Clean(x.exe) && argsContainPair(ident.Args, "-m", x.model) && argsContainPair(ident.Args, "--host", "127.0.0.1") && argsContainPair(ident.Args, "--port", strconv.Itoa(x.port)) {
-				trusted = true
-			}
-		}
+		// Recovery must use exactly the same checked process identity
+		// policy as local inference reuse and Stop. The old hard-coded
+		// "-m" flag only matched llama.cpp, wrongly orphaning Colibri's
+		// Python server after a daemon restart. Never contact a health
+		// socket or signal an unverified/recycled PID.
+		inst, ierr := s.instanceByID(ctx, x.id)
+		trusted := ierr==nil && inst.PID==x.pid && inst.Revision==x.revision &&
+			s.VerifyIdentity(ctx, inst)==nil
 		if !trusted {
 			res, e := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET status='orphaned',failure_reason='runtime process identity could not be re-established after daemon restart',updated_at=?,revision=revision+1 WHERE id=? AND revision=?`, now, x.id, x.revision)
 			if e != nil {
@@ -1109,10 +1600,6 @@ func (s *RuntimeSupervisor) Recover(ctx context.Context) error {
 				return fmt.Errorf("runtime recovery state conflict")
 			}
 			continue
-		}
-		inst, ierr := s.instanceByID(ctx, x.id)
-		if ierr != nil {
-			return ierr
 		}
 		health, herr := s.Health(ctx, inst)
 		if herr != nil {
@@ -1203,38 +1690,43 @@ func (s *RuntimeSupervisor) Touch(ctx context.Context, deploymentID string) erro
 	return err
 }
 
-func (s *RuntimeSupervisor) ReapIdle(ctx context.Context, idle time.Duration, limit int) (int, error) {
-	if idle <= 0 {
-		return 0, nil
-	}
-	if limit <= 0 || limit > 100 {
-		limit = 10
-	}
-	cutoff := s.clock.UnixMilli() - idle.Milliseconds()
-	rows, err := s.db.QueryContext(ctx, `SELECT i.deployment_id FROM local_runtime_instances i JOIN model_deployments d ON d.id=i.deployment_id WHERE i.status='healthy' AND COALESCE(json_extract(d.runtime_config_json,'$.colibri_pinned'),0)<>1 AND COALESCE(i.last_seen_at,i.started_at,i.updated_at) < ? ORDER BY COALESCE(i.last_seen_at,i.started_at,i.updated_at) ASC LIMIT ?`, cutoff, limit)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var idv string
-		if err := rows.Scan(&idv); err != nil {
-			return 0, err
-		}
-		ids = append(ids, idv)
-	}
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-	stopped := 0
-	for _, idv := range ids {
-		if err := s.Stop(ctx, idv); err != nil {
-			continue
-		}
-		stopped++
-	}
-	return stopped, nil
+// Never hold a SQLite SELECT reader open while a reaper tries to update
+// process rows. Bounded snapshot selection is read-only; each candidate is
+// independently rechecked under model-residency and active-request locks.
+func (s *RuntimeSupervisor) idleReaperCandidates(ctx context.Context,cutoff int64,limit int)([]string,error){
+ rows,err:=s.db.QueryContext(ctx,`SELECT i.deployment_id
+  FROM local_runtime_instances i
+  JOIN model_deployments d ON d.id=i.deployment_id
+  WHERE i.status='healthy'
+   AND COALESCE(json_extract(d.runtime_config_json,'$.colibri_pinned'),0)<>1
+   AND COALESCE(i.last_seen_at,i.started_at,i.updated_at)<?
+  ORDER BY COALESCE(i.last_seen_at,i.started_at,i.updated_at) ASC LIMIT ?`,cutoff,limit)
+ if err!=nil{return nil,err}
+ ids:=make([]string,0,limit)
+ for rows.Next(){
+  var id string
+  if err=rows.Scan(&id);err!=nil{break}
+  ids=append(ids,id)
+ }
+ if err==nil{err=rows.Err()}
+ if closeErr:=rows.Close();err==nil{err=closeErr}
+ if err!=nil{return nil,err}
+ return ids,nil
+}
+
+func (s *RuntimeSupervisor) ReapIdle(ctx context.Context, idle time.Duration, limit int) (int,error){
+ if idle<=0{return 0,nil}
+ if limit<=0||limit>100{limit=10}
+ cutoff:=s.clock.UnixMilli()-idle.Milliseconds()
+ ids,err:=s.idleReaperCandidates(ctx,cutoff,limit)
+ if err!=nil{return 0,err}
+ stopped:=0
+ for _,id:=range ids{
+  didStop,e:=s.stopIfIdleBefore(ctx,id,cutoff)
+  if e!=nil{continue}
+  if didStop{stopped++}
+ }
+ return stopped,nil
 }
 
 func (s *RuntimeSupervisor) Shutdown(ctx context.Context) error {
@@ -1252,6 +1744,11 @@ func (s *RuntimeSupervisor) Shutdown(ctx context.Context) error {
 		ids = append(ids, idv)
 	}
 	if err := rows.Err(); err != nil {
+		return err
+	}
+	// Shutdown must work with a single SQLite connection. Stop performs
+	// other reads and CAS writes; leave no SELECT cursor pinned.
+	if err := rows.Close(); err != nil {
 		return err
 	}
 	var first error

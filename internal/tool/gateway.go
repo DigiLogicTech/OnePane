@@ -15,6 +15,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/authority"
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/id"
+	"github.com/DigiLogicTech/OnePane/internal/featurepolicy"
 	"github.com/DigiLogicTech/OnePane/internal/policy"
 	"github.com/DigiLogicTech/OnePane/internal/storage"
 )
@@ -32,6 +33,8 @@ type Gateway struct {
 	policy          policyEvaluator
 	authority       authorityConsumer
 	registry        *Registry
+	scopes          featurepolicy.StoredScopes
+
 	mutationPermits MutationPermitValidator
 	sandboxAdapters map[string]struct{}
 	ids             id.Generator
@@ -39,7 +42,7 @@ type Gateway struct {
 }
 
 func NewGateway(db *sql.DB, tx storage.Transactor, p policyEvaluator, a authorityConsumer, registry *Registry, clk clock.Clock) *Gateway {
-	return &Gateway{store: newSQLInvocationStore(db, tx), policy: p, authority: a, registry: registry, sandboxAdapters: map[string]struct{}{}, ids: id.Generator{}, clock: clk}
+	return &Gateway{store: newSQLInvocationStore(db, tx), scopes:featurepolicy.StoredScopes{DB:db}, policy: p, authority: a, registry: registry, sandboxAdapters: map[string]struct{}{}, ids: id.Generator{}, clock: clk}
 }
 
 func newGateway(store invocationStore, p policyEvaluator, a authorityConsumer, registry *Registry, clk clock.Clock) *Gateway {
@@ -139,10 +142,22 @@ func (g *Gateway) Invoke(ctx context.Context, cmd InvokeCommand) (Invocation, er
 		return g.fail(ctx, inv, meta, "policy_denied", "policy denied: "+strings.Join(reasons, ","), ErrPolicyDenied)
 	}
 
+	// Authoritative feature policy restrictions are additional to the existing
+	// lease, approval, adapter and Workspace sandbox checks. Never trust
+	// a tool payload as the source of Project/Workspace permissions.
+	if err := g.authorizeToolFeatureActions(ctx, cmd, binding.Definition); err != nil {
+		return g.fail(ctx, inv, meta, "feature_policy_denied", "scoped tool action is unavailable or denied", ErrPolicyDenied)
+	}
 	if err := g.store.ValidateExecutionContext(ctx, cmd.WorkspaceID, cmd.PrincipalID, cmd.TaskID, cmd.AttemptID); err != nil {
 		return g.fail(ctx, inv, meta, "execution_context_invalid", err.Error(), fmt.Errorf("%w: %v", ErrExecutionContext, err))
 	}
-	if decision.RequiredApproval != policy.ApprovalNone {
+	// A mutating/external-send action can satisfy mandatory approval ONLY
+	// through an executing Operation Coordinator permit whose consumed human
+	// approval is revalidated by the MutationGate. Nonmutation Tools have no
+	// such channel and continue to fail closed.
+	mutationMode := binding.Definition.Mode == authority.ActionMutate ||
+		binding.Definition.Mode == authority.ActionExternalSend
+	if decision.RequiredApproval != policy.ApprovalNone && !mutationMode {
 		return g.fail(ctx, inv, meta, "approval_required", "required approval: "+string(decision.RequiredApproval), ErrApprovalRequired)
 	}
 	switch binding.Definition.Mode {
@@ -151,6 +166,7 @@ func (g *Gateway) Invoke(ctx context.Context, cmd InvokeCommand) (Invocation, er
 			return g.fail(ctx, inv, meta, "operation_coordinator_required", "mutating/external-send tools require an OperationCoordinator execution permit", ErrOperationCoordinatorRequired)
 		}
 		if err := g.mutationPermits.ValidateAndConsume(ctx, MutationPermitCheck{
+			RequiredApproval:decision.RequiredApproval,PolicyRevision:decision.PolicyRevision,
 			OperationID: *cmd.OperationID, Permit: cmd.ExecutionPermit, WorkspaceID: cmd.WorkspaceID,
 			TaskID: cmd.TaskID, AttemptID: cmd.AttemptID, PrincipalID: cmd.PrincipalID, LeaseID: cmd.LeaseID,
 			ToolID: binding.Definition.ID, ToolVersion: binding.Definition.Version,
@@ -182,6 +198,13 @@ func (g *Gateway) Invoke(ctx context.Context, cmd InvokeCommand) (Invocation, er
 	}
 	if err := g.transition(ctx, &inv, meta, StatusRunning, nil, nil, nil); err != nil {
 		return inv, err
+	}
+
+	// Re-evaluate revocable grants immediately before side effects. A policy
+	// change while consuming permits or an authority lease must not be bypassed.
+	if err := g.authorizeToolFeatureActions(ctx, cmd, binding.Definition); err != nil {
+		return g.failFrom(ctx, inv, meta, StatusRunning, "feature_policy_revoked",
+			"scoped tool permission revoked before adapter invocation", ErrPolicyDenied)
 	}
 
 	result, callErr := callAdapter(ctx, binding.Adapter, AdapterRequest{
@@ -265,12 +288,14 @@ func canonicalJSON(raw json.RawMessage) (json.RawMessage, error) {
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
-	var v any
-	if err := dec.Decode(&v); err != nil {
+	// Enforce one unambiguous interpretation before hashing, authorising
+	// and dispatching Tool inputs or persisting adapter result payloads.
+	// Unicode-escaped duplicate object keys must not silently overwrite.
+	v, err := decodeUniqueJSONValue(dec, 0)
+	if err != nil {
 		return nil, err
 	}
-	var extra any
-	if err := dec.Decode(&extra); err != io.EOF {
+	if _, err := dec.Token(); err != io.EOF {
 		if err == nil {
 			return nil, fmt.Errorf("multiple JSON values")
 		}

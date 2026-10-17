@@ -11,6 +11,7 @@ import (
  "strings"
 
  "github.com/DigiLogicTech/OnePane/internal/event"
+ "github.com/DigiLogicTech/OnePane/internal/featurepolicy"
  "github.com/DigiLogicTech/OnePane/internal/storage"
  "github.com/DigiLogicTech/OnePane/internal/task"
 )
@@ -31,6 +32,11 @@ type CreateTaskGraphCommand struct {
  IdempotencyKey string `json:"idempotency_key"`
  Nodes []TaskGraphNodeSpec `json:"nodes"`
  ActorPrincipalID string `json:"-"`
+ // These are internal-only, never decoded from a public REST payload.
+ // The originating human's standing L4 grant is checked transactionally.
+ AutonomousModelDraft bool `json:"-"`
+ AuthorizedWorkspaceID string `json:"-"`
+ UserObjective string `json:"-"`
 }
 type TaskGraphNode struct {
  Key string `json:"key"`
@@ -146,6 +152,23 @@ func(s *Service) CreateTaskGraph(ctx context.Context,c CreateTaskGraphCommand)(T
  }
  order,hash,err:=graphCreationPlan(c)
  if err!=nil{return TaskGraph{},err}
+ if c.AutonomousModelDraft {
+  if len(c.Nodes)>8||strings.TrimSpace(c.AuthorizedWorkspaceID)==""||
+   strings.TrimSpace(c.UserObjective)==""||len(c.UserObjective)>4096{
+   return TaskGraph{},ErrInvalid
+  }
+  for _,n:=range c.Nodes{
+   if n.ProjectWorkspaceID!=c.AuthorizedWorkspaceID||
+      n.ComputePreference!="auto"||n.Priority>10{
+    return TaskGraph{},ErrInvalid
+   }
+  }
+  // Distinguish model-origin plans from historical, individually reviewed
+  // graph manifests, including idempotent retries and their evidence hash.
+  digest:=sha256.Sum256([]byte(hash+"\x00autonomous-local-draft-v1\x00"+
+   c.AuthorizedWorkspaceID+"\x00"+c.UserObjective))
+  hash="sha256:"+hex.EncodeToString(digest[:])
+ }
  if s==nil||s.db==nil||s.tx==nil{return TaskGraph{},ErrInvalid}
  creator,ok:=s.tasks.(graphTaskCreator)
  if !ok{return TaskGraph{},ErrInvalid}
@@ -156,17 +179,35 @@ func(s *Service) CreateTaskGraph(ctx context.Context,c CreateTaskGraphCommand)(T
  now:=s.clock.UnixMilli()
  resolvedID:=""
  err=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
-  var tenant,principalType string
-  err:=tx.QueryRowContext(ctx,`SELECT p.workspace_id,principals.principal_type
+  var tenant,principalType,projectPolicyJSON string
+  err:=tx.QueryRowContext(ctx,`SELECT p.workspace_id,principals.principal_type,p.project_policy_json
    FROM projects p
    JOIN workspaces w ON w.id=p.workspace_id AND w.status='active'
    JOIN workspace_memberships m ON m.workspace_id=w.id
     AND m.principal_id=? AND m.status='active'
    JOIN principals ON principals.id=m.principal_id AND principals.status='active'
    WHERE p.id=? AND p.status='active'`,c.ActorPrincipalID,c.ProjectID).
-    Scan(&tenant,&principalType)
+    Scan(&tenant,&principalType,&projectPolicyJSON)
   if err!=nil{return err}
   if principalType!="human"{return ErrInvalid}
+  if c.AutonomousModelDraft{
+   var doc struct{
+    Operations *struct{Version int `json:"version"`; Mode string `json:"mode"`} `json:"onepane_operations"`
+   }
+   if err:=json.Unmarshal([]byte(projectPolicyJSON),&doc);err!=nil{return ErrInvalid}
+   if doc.Operations!=nil&&(doc.Operations.Version!=1||doc.Operations.Mode!="autonomous_project"){
+    return ErrInvalid // Level 5 never borrows L4 graph autonomy
+   }
+   decision,err:=(featurepolicy.StoredScopes{}).ForProjectWorkspaceTx(ctx,tx,
+    tenant,c.ProjectID,c.AuthorizedWorkspaceID)
+   if err!=nil{return err}
+   p:=decision.Effective
+   if p.AutonomousRoutines!=featurepolicy.Enabled||
+    p.ProjectAI!=featurepolicy.Enabled||p.ModelRouting!=featurepolicy.Enabled||
+    p.CapabilityRouting!=featurepolicy.Enabled{
+    return ErrInvalid // explicit standing Level 4 grant is required
+   }
+  }
   var existingID,existingDigest string
   lookup:=tx.QueryRowContext(ctx,`SELECT id,manifest_sha256
    FROM project_orchestrator_task_graphs WHERE project_id=? AND idempotency_key=?`,
@@ -190,15 +231,24 @@ func(s *Service) CreateTaskGraph(ctx context.Context,c CreateTaskGraphCommand)(T
    graphID,c.ProjectID,tenant,c.Name,c.IdempotencyKey,hash,
    len(c.Nodes),c.ActorPrincipalID,now)
   if err!=nil{return err}
+  operatorApproved:=!c.AutonomousModelDraft
+  taskSource:="project-orchestrator-task-graph"
+  dependencySource:="operator_approved_project_graph"
+  if c.AutonomousModelDraft{
+   taskSource="project-orchestrator-autonomous-graph"
+   dependencySource="standing_autonomous_project_policy"
+  }
   tasksByKey:=map[string]string{}
   for position,index:=range order{
    n:=c.Nodes[index]
    approvedDependencies,_:=json.Marshal(append([]string{},n.DependsOn...))
    completion,_:=json.Marshal(map[string]any{
-    "source":"project-orchestrator-task-graph",
+    "source":taskSource,
     "graph_id":graphID,"node_key":n.Key,
     "dependency_policy":"hard_all",
-    "operator_approved":true,
+    "operator_approved":operatorApproved,
+    "standing_autonomy_policy":c.AutonomousModelDraft,
+    "user_objective":c.UserObjective,
     "routing_intent":"local_first",
     "onepane_routing":map[string]any{"compute_preference":n.ComputePreference},
    })
@@ -221,13 +271,14 @@ func(s *Service) CreateTaskGraph(ctx context.Context,c CreateTaskGraphCommand)(T
     _,err=tx.ExecContext(ctx,`INSERT INTO task_dependencies(
       task_id,depends_on_task_id,dependency_type,dependency_mode,metadata_json)
       VALUES(?,?,'hard','all',?)`,tasksByKey[n.Key],tasksByKey[predecessor],
-      `{"source":"operator_approved_project_graph"}`)
+      string(func()[]byte{b,_:=json.Marshal(map[string]string{"source":dependencySource});return b}()))
     if err!=nil{return err}
    }
   }
   payload,_:=json.Marshal(map[string]any{
    "graph_id":graphID,"project_id":c.ProjectID,"manifest_sha256":hash,
-   "node_count":len(c.Nodes),"operator_approved":true,
+   "node_count":len(c.Nodes),"operator_approved":operatorApproved,
+   "standing_autonomy_policy":c.AutonomousModelDraft,
   })
   if err=s.events.Append(ctx,tx,event.Event{
    ID:eventID,WorkspaceID:&tenant,Type:"project.task_graph.created",

@@ -17,6 +17,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/authority"
 	"github.com/DigiLogicTech/OnePane/internal/budget"
 	"github.com/DigiLogicTech/OnePane/internal/contextcompiler"
+	"github.com/DigiLogicTech/OnePane/internal/featurepolicy"
 	"github.com/DigiLogicTech/OnePane/internal/inference"
 	"github.com/DigiLogicTech/OnePane/internal/observation"
 	"github.com/DigiLogicTech/OnePane/internal/operation"
@@ -78,9 +79,23 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	if err:=s.requireActiveWorkerExecutionBinding(ctx,run);err!=nil{
 		return failedResult(res,err)
 	}
+	// Preserve the Task/Attempt binding error before any policy revocation
+	// can mutate Worker state or consume a step.
+	// Re-read autonomy on every Worker tick so a live policy revocation
+	// blocks reasoning before model/tool selection.
+	autonomyAllowed,policyErr:= (featurepolicy.StoredScopes{DB:s.db}).AuthorizeTask(ctx,t.WorkspaceID,t.ID,"tasks.autonomous")
+	if policyErr!=nil||!autonomyAllowed {
+		return s.blockRun(ctx,run,res,"effective feature policy no longer permits autonomous Worker execution")
+	}
+
 	if run.StepCount >= run.MaxSteps {
 		return s.failRun(ctx, run, res, ErrStepLimit)
 	}
+	// Bind an explicitly chosen Agent's active revision before constructing
+	// any context. A missing/archived custom Agent cannot fall back to default.
+	agentBinding,err:=resolveTaskAgentProfileBinding(ctx,s.db,run.WorkspaceID,
+		routingPolicyFromCompletion(t.Completion).AgentProfile)
+	if err!=nil{return s.blockRun(ctx,run,res,"pinned Agent profile unavailable or revoked: "+err.Error())}
 
 	compiled, err := s.compileContext(ctx, run, t)
 	if err != nil {
@@ -96,7 +111,14 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	if tokens < 1 {
 		tokens = 1
 	}
-	decision, err := s.scheduler.Route(ctx, scheduler.RouteRequest{WorkspaceID: run.WorkspaceID, CapabilityID: run.CapabilityID, RoleName: run.RoleName, ProtocolLevel: run.ProtocolLevel, ContextTokens: tokens, DataLabel: label, AllowUntested: rp.AllowUntested, AllowLimited: rp.AllowLimited, AllowMediated: rp.AllowMediated, AllowDegraded: rp.AllowDegraded, RequireZeroIncrementalCost: rp.RequireZeroIncrementalCost, PreferZeroIncrementalCost: rp.PreferZeroIncrementalCost, AllowSubscriptionUsage: rp.AllowSubscriptionUsage, AllowPotentialMonetarySpend: rp.AllowPotentialMonetarySpend, LocalOnly: !rp.AllowRemote, ComputePreference:rp.ComputePreference, IncludeCandidateIDs: rp.IncludeCandidateIDs, ExcludeCandidateIDs: rp.ExcludedCandidateIDs})
+	// Refresh the authorised Node allowlist from canonical persisted Project
+	// and Workspace policy on every Worker tick. Never trust Task JSON,
+	// model-created routing metadata or an old saved routePolicy grant.
+	trustedNodes, trustErr := (featurepolicy.StoredScopes{DB:s.db}).TrustedNodesForTask(ctx,run.WorkspaceID,run.TaskID)
+	if trustErr!=nil {
+		return s.blockRun(ctx,run,res,"canonical trusted Node policy unavailable")
+	}
+	decision, err := s.scheduler.Route(ctx, scheduler.RouteRequest{WorkspaceID: run.WorkspaceID, CapabilityID: run.CapabilityID, RoleName: run.RoleName, ProtocolLevel: run.ProtocolLevel, ContextTokens: tokens, DataLabel: label, AllowUntested: rp.AllowUntested, AllowLimited: rp.AllowLimited, AllowMediated: rp.AllowMediated, AllowDegraded: rp.AllowDegraded, RequireZeroIncrementalCost: rp.RequireZeroIncrementalCost, PreferZeroIncrementalCost: rp.PreferZeroIncrementalCost, AllowSubscriptionUsage: rp.AllowSubscriptionUsage, AllowPotentialMonetarySpend: rp.AllowPotentialMonetarySpend, LocalOnly: !rp.AllowRemote, AllowTrustedNodes:len(trustedNodes)>0, AllowedTrustedNodeIDs:trustedNodes, ComputePreference:rp.ComputePreference, IncludeCandidateIDs: rp.IncludeCandidateIDs, ExcludeCandidateIDs: rp.ExcludedCandidateIDs})
 	if err != nil || decision.Selected == nil {
 		if err == nil {
 			err = scheduler.ErrNoEligibleCandidate
@@ -119,6 +141,12 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	if reservationID != "" {
 		_ = s.journal(ctx, run.ID, "budget", "reserved", &kind, &cid, nil, &reservationID, map[string]any{"budget_account_id": rp.BudgetAccountID})
 	}
+	// A human may update or archive an Agent during model queue selection.
+	// Do not dispatch inference with stale prompt/Agent provenance.
+	if err:=enforceTaskAgentProfileBinding(ctx,s.db,run.WorkspaceID,agentBinding);err!=nil{
+		s.releaseBudgetIfReserved(ctx,reservationID)
+		return s.blockRun(ctx,run,res,"pinned Agent profile changed during model selection: "+err.Error())
+	}
 	if err := s.markReasoningDispatch(ctx, &run, kind, cid); err != nil {
 		s.releaseBudgetIfReserved(ctx, reservationID)
 		// Dispatch ownership may have changed while selecting a model.
@@ -127,6 +155,12 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	}
 
 	constraints, _ := json.Marshal(map[string]any{"completion": json.RawMessage(t.Completion), "worker": map[string]any{"max_steps": run.MaxSteps, "steps_used": run.StepCount, "max_replans": run.MaxReplans, "replans_used": run.ReplanCount, "max_escalations": run.MaxEscalations, "escalations_used": run.EscalationCount}})
+	// Repeat the revision check at the last Worker-owned call boundary.
+	// Inference and gateway paths must still enforce their own revocations.
+	if err:=enforceTaskAgentProfileBinding(ctx,s.db,run.WorkspaceID,agentBinding);err!=nil{
+		s.releaseBudgetIfReserved(ctx,reservationID)
+		return s.blockRun(ctx,run,res,"pinned Agent profile changed before dispatch: "+err.Error())
+	}
 	response, ref, dispatchErr := s.dispatch(ctx, run, t, cand, compiled, constraints, label, reservationID)
 	stepKind := "model"
 	if cand.Kind == scheduler.CandidateAgentRuntime {
@@ -136,6 +170,12 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 		s.releaseBudgetIfReserved(ctx, reservationID)
 		_ = s.journal(ctx, run.ID, stepKind, "failed", &kind, &cid, nil, &ref, map[string]any{"error": dispatchErr.Error()})
 		return s.handleDispatchFailure(ctx, run, res, cid, dispatchErr)
+	}
+	// A running inference may finish after its Agent's instructions have
+	// changed or the profile has been archived. Discard its proposal before
+	// any tool, file, network or delegation effect is interpreted.
+	if err:=enforceTaskAgentProfileBinding(ctx,s.db,run.WorkspaceID,agentBinding);err!=nil{
+		return s.blockRun(ctx,run,res,"pinned Agent profile revoked before proposal application: "+err.Error())
 	}
 	pt := string(response.ProposalType)
 	res.Proposal = pt
@@ -154,7 +194,12 @@ func (s *Service) compileContext(ctx context.Context, run Run, t task.Task) (con
 	if err := s.db.QueryRowContext(ctx, `SELECT name,instructions_md,default_role,revision FROM agent_profiles WHERE id=? AND status='active' AND (workspace_id=? OR workspace_id IS NULL) ORDER BY CASE WHEN workspace_id=? THEN 0 ELSE 1 END LIMIT 1`, profileID, run.WorkspaceID, run.WorkspaceID).Scan(&profileName,&profileInstructions,&profileRole,&profileRevision); err == nil {
 		profileRaw,_:=json.Marshal(map[string]any{"profile_id":profileID,"name":profileName,"role":profileRole,"revision":profileRevision,"instructions":profileInstructions,"authority":false,"note":"Profile instructions affect reasoning only and grant no capabilities or permissions."})
 		sections=append(sections,contextcompiler.Section{ID:"agent-profile",Kind:"agent_profile",Trust:"USER_INSTRUCTION",Authoritative:false,Required:true,Priority:99,Content:profileRaw})
-	} else if !errors.Is(err,sql.ErrNoRows) { return contextcompiler.Result{},err }
+	} else if errors.Is(err,sql.ErrNoRows) {
+		explicit:=strings.TrimSpace(routing.AgentProfile)
+		if explicit!=""&&!strings.EqualFold(explicit,"onepane-default")&&explicit!="agent.md"{
+			return contextcompiler.Result{},fmt.Errorf("explicit custom Agent profile is unavailable or revoked")
+		}
+	} else { return contextcompiler.Result{},err }
 	// Resource backoff is internal scheduler bookkeeping, not an instruction
 	// to the model. Once it becomes available, don't tell the model that it is
 	// still unavailable or let historical wait data bias tool selection.
@@ -331,6 +376,11 @@ func (s *Service) handleDispatchFailure(ctx context.Context, run Run, res TickRe
 	if !rp.RoutingEnabled {
 		return s.blockRun(ctx, run, res, "single-path dispatch failed: "+cause.Error())
 	}
+	fallbackAllowed,fallbackErr:=(featurepolicy.StoredScopes{DB:s.db}).AuthorizeTask(ctx,run.WorkspaceID,run.TaskID,"inference.fallback")
+	if fallbackErr!=nil||!fallbackAllowed {
+		return s.blockRun(ctx,run,res,"automatic model fallback is not permitted by effective feature policy")
+	}
+
 	if run.EscalationCount < run.MaxEscalations {
 		if !contains(rp.ExcludedCandidateIDs, candidateID) {
 			rp.ExcludedCandidateIDs = append(rp.ExcludedCandidateIDs, candidateID)

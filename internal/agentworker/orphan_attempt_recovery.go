@@ -17,6 +17,8 @@ type orphanAgentAttempt struct {
  TaskID string
  AttemptID string
  Revision int64
+ CreatedAt int64
+ AttemptNumber int64
 }
 
 // recoverOrphanedAgentAttempts runs only during a known Worker startup.
@@ -28,7 +30,19 @@ func(s *Service) recoverOrphanedAgentAttempts(ctx context.Context)(int,error){
  if s==nil||s.db==nil||s.tx==nil||s.tasks==nil{
   return 0,ErrInvalidWorkerState
  }
- rows,err:=s.db.QueryContext(ctx,`SELECT t.id,a.id,t.revision
+ // Bounded keyset traversal: the old single LIMIT 256 silently left
+ // later orphaned Tasks unresolved after large crashes. Never OFFSET
+ // over rows that recovery changes, and always move the cursor past a
+ // malformed/individually unrecoverable Attempt so it cannot starve the
+ // remaining independent work.
+ const pageSize=256
+ var problems []error
+ recovered:=0
+ var lastCreated,lastAttemptNumber int64
+ var lastTask,lastAttempt string
+ firstPage:=true
+ for {
+ rows,err:=s.db.QueryContext(ctx,`SELECT t.id,a.id,t.revision,t.created_at,a.attempt_number
  FROM task_attempts a
  JOIN tasks t ON t.id=a.task_id
  WHERE a.worker_principal_id=?
@@ -43,20 +57,25 @@ func(s *Service) recoverOrphanedAgentAttempts(ctx context.Context)(int,error){
     AND r.workspace_id=t.workspace_id
     AND r.status IN ('running','waiting')
   )
- ORDER BY t.created_at,t.id,a.attempt_number LIMIT 256`,WorkerPrincipal)
- if err!=nil{return 0,err}
- candidates:=[]orphanAgentAttempt{}
+  AND (?=1 OR (t.created_at,t.id,a.attempt_number,a.id)>(?,?,?,?))
+ ORDER BY t.created_at,t.id,a.attempt_number,a.id LIMIT ?`,
+ WorkerPrincipal,firstPage,lastCreated,lastTask,lastAttemptNumber,lastAttempt,pageSize)
+ if err!=nil{return recovered,errors.Join(append(problems,err)...)}
+ candidates:=make([]orphanAgentAttempt,0,pageSize)
  for rows.Next(){
   var orphan orphanAgentAttempt
-  if err=rows.Scan(&orphan.TaskID,&orphan.AttemptID,&orphan.Revision);err!=nil{break}
+  if err=rows.Scan(&orphan.TaskID,&orphan.AttemptID,&orphan.Revision,
+   &orphan.CreatedAt,&orphan.AttemptNumber);err!=nil{break}
   candidates=append(candidates,orphan)
  }
  if err==nil{err=rows.Err()}
  closeErr:=rows.Close()
- if err!=nil{return 0,err}
- if closeErr!=nil{return 0,closeErr}
- var problems []error
- recovered:=0
+ if err!=nil||closeErr!=nil{return recovered,errors.Join(append(problems,err,closeErr)...)}
+ if len(candidates)==0{break}
+ last:=candidates[len(candidates)-1]
+ lastCreated,lastTask,lastAttemptNumber,lastAttempt=
+  last.CreatedAt,last.TaskID,last.AttemptNumber,last.AttemptID
+ firstPage=false
  for _,c:=range candidates{
   err=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
    // Repeat *all* ownership and live-run exclusions under a write lock.
@@ -95,6 +114,8 @@ func(s *Service) recoverOrphanedAgentAttempts(ctx context.Context)(int,error){
    continue
   }
   recovered++
+ }
+ if len(candidates)<pageSize{break}
  }
  return recovered,errors.Join(problems...)
 }

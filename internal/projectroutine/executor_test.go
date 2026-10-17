@@ -3,6 +3,7 @@ package projectroutine
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/DigiLogicTech/OnePane/internal/projectworkspace"
@@ -30,16 +31,17 @@ func (f *fakeProjects) TaskWorkspace(context.Context, string) (string, error) {
 	return f.workspace, nil
 }
 
-type fakeGateway struct{ cmd tool.InvokeCommand }
+type fakeGateway struct{ cmd tool.InvokeCommand; calls int }
 
 func (f *fakeGateway) Invoke(_ context.Context, cmd tool.InvokeCommand) (tool.Invocation, error) {
 	f.cmd = cmd
+	f.calls++
 	return tool.Invocation{ID: "inv", Status: tool.StatusSucceeded}, nil
 }
 
 func TestExecutorRunsBoundCommandThroughSandboxTool(t *testing.T) {
 	appID := "app"
-	p := &fakeProjects{workspace: "ws", binding: projectworkspace.RoutineBinding{ID: "bind", ProjectID: "proj", ProjectRuntimeID: "runtime", ApplicationID: &appID, RoutineID: "routine", ActionKind: projectworkspace.ActionAppCommand, Status: "active", ActionSpecJSON: json.RawMessage(`{"command":["backup","--compact"]}`)}, runtime: projectworkspace.ProjectRuntime{ID: "runtime", Status: projectworkspace.RuntimeRunning}, app: projectworkspace.Application{ID: "app", ProjectRuntimeID: "runtime", Status: projectworkspace.AppRunning}}
+	p := &fakeProjects{workspace: "ws", binding: projectworkspace.RoutineBinding{ID: "bind", ProjectID: "proj", ProjectRuntimeID: "runtime", ApplicationID: &appID, RoutineID: "routine", ActionKind: projectworkspace.ActionAppCommand, Status: "active", ActionSpecJSON: json.RawMessage(`{"command":["backup","--compact"]}`)}, runtime: projectworkspace.ProjectRuntime{ID: "runtime", ProjectID:"proj", Status: projectworkspace.RuntimeRunning}, app: projectworkspace.Application{ID: "app", ProjectRuntimeID: "runtime", Status: projectworkspace.AppRunning}}
 	g := &fakeGateway{}
 	e := New(p, g)
 	inv, err := e.Execute(context.Background(), ExecuteCommand{BindingID: "bind", TaskID: "task", PrincipalID: "worker", CapabilityLeaseID: "lease"})
@@ -53,9 +55,110 @@ func TestExecutorRunsBoundCommandThroughSandboxTool(t *testing.T) {
 
 func TestExecutorRequiresObservedRunningState(t *testing.T) {
 	appID := "app"
-	p := &fakeProjects{workspace: "ws", binding: projectworkspace.RoutineBinding{ID: "bind", ProjectID: "proj", ProjectRuntimeID: "runtime", ApplicationID: &appID, RoutineID: "routine", ActionKind: projectworkspace.ActionAppCommand, Status: "active", ActionSpecJSON: json.RawMessage(`{"command":["job"]}`)}, runtime: projectworkspace.ProjectRuntime{ID: "runtime", Status: projectworkspace.RuntimeDefined}, app: projectworkspace.Application{ID: "app", ProjectRuntimeID: "runtime", Status: projectworkspace.AppRunning}}
+	p := &fakeProjects{workspace: "ws", binding: projectworkspace.RoutineBinding{ID: "bind", ProjectID: "proj", ProjectRuntimeID: "runtime", ApplicationID: &appID, RoutineID: "routine", ActionKind: projectworkspace.ActionAppCommand, Status: "active", ActionSpecJSON: json.RawMessage(`{"command":["job"]}`)}, runtime: projectworkspace.ProjectRuntime{ID: "runtime", ProjectID:"proj", Status: projectworkspace.RuntimeDefined}, app: projectworkspace.Application{ID: "app", ProjectRuntimeID: "runtime", Status: projectworkspace.AppRunning}}
 	_, err := New(p, &fakeGateway{}).Execute(context.Background(), ExecuteCommand{BindingID: "bind", TaskID: "task", PrincipalID: "worker", CapabilityLeaseID: "lease"})
 	if err != ErrRuntimeNotReady {
 		t.Fatalf("err=%v", err)
 	}
+}
+
+
+func TestExecutorRejectsCrossProjectOrSubstitutedRoutineTargetsBeforeToolGateway(t *testing.T) {
+ appID:="app"
+ base:=func()*fakeProjects{
+  return &fakeProjects{
+   workspace:"tenant",
+   binding:projectworkspace.RoutineBinding{
+    ID:"binding",ProjectID:"project-a",ProjectRuntimeID:"runtime-a",
+    ApplicationID:&appID,RoutineID:"routine",ActionKind:projectworkspace.ActionAppCommand,
+    Status:"active",ActionSpecJSON:json.RawMessage(`{"command":["backup"]}`),
+   },
+   runtime:projectworkspace.ProjectRuntime{
+    ID:"runtime-a",ProjectID:"project-a",Status:projectworkspace.RuntimeRunning,
+   },
+   app:projectworkspace.Application{
+    ID:"app",ProjectRuntimeID:"runtime-a",Status:projectworkspace.AppRunning,
+   },
+  }
+ }
+ cmd:=ExecuteCommand{BindingID:"binding",TaskID:"task",PrincipalID:"worker",CapabilityLeaseID:"lease"}
+ for _,tc:=range []struct{name string;change func(*fakeProjects)}{
+  {"binding id substituted",func(f *fakeProjects){f.binding.ID="another-binding"}},
+  {"binding project missing",func(f *fakeProjects){f.binding.ProjectID=""}},
+  {"binding runtime missing",func(f *fakeProjects){f.binding.ProjectRuntimeID=""}},
+  {"runtime id mismatched",func(f *fakeProjects){f.runtime.ID="runtime-b"}},
+  {"runtime belongs to another Project",func(f *fakeProjects){f.runtime.ProjectID="project-b"}},
+  {"runtime Project missing",func(f *fakeProjects){f.runtime.ProjectID=""}},
+  {"application id substituted",func(f *fakeProjects){f.app.ID="another-app"}},
+  {"app targets another runtime",func(f *fakeProjects){f.app.ProjectRuntimeID="runtime-b"}},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   p:=base()
+   tc.change(p)
+   g:=&fakeGateway{}
+   if _,err:=New(p,g).Execute(context.Background(),cmd);err!=ErrBindingScopeMismatch{
+    t.Fatalf("mismatched Routine target allowed: %v",err)
+   }
+   if g.calls!=0{t.Fatal("mismatched Project/Runtime reached the execution gateway")}
+  })
+ }
+ // A fully matched project/routine/application remains executable through
+ // the ordinary governed Tool Gateway; the guard must not deny valid work.
+ p:=base()
+ g:=&fakeGateway{}
+ if _,err:=New(p,g).Execute(context.Background(),cmd);err!=nil||g.calls!=1{
+  t.Fatalf("matched routine unable to execute: calls=%d err=%v",g.calls,err)
+ }
+}
+
+
+func TestExecutorBoundsStoredRoutineCommandBeforeGateway(t *testing.T) {
+ appID:="app"
+ base:=func()(*fakeProjects,*fakeGateway){
+  p:=&fakeProjects{
+   workspace:"tenant",
+   binding:projectworkspace.RoutineBinding{
+    ID:"binding",ProjectID:"project",ProjectRuntimeID:"runtime",ApplicationID:&appID,
+    RoutineID:"routine",ActionKind:projectworkspace.ActionAppCommand,Status:"active",
+   },
+   runtime:projectworkspace.ProjectRuntime{
+    ID:"runtime",ProjectID:"project",Status:projectworkspace.RuntimeRunning,
+   },
+   app:projectworkspace.Application{
+    ID:"app",ProjectRuntimeID:"runtime",Status:projectworkspace.AppRunning,
+   },
+  }
+  return p,&fakeGateway{}
+ }
+ cmd:=ExecuteCommand{BindingID:"binding",TaskID:"task",PrincipalID:"worker",CapabilityLeaseID:"lease"}
+ for _,tc:=range []struct{name string;spec json.RawMessage}{
+  {"no command",json.RawMessage(`{"command":[]}`)},
+  {"empty executable",json.RawMessage(`{"command":["  ","arg"]}`)},
+  {"embedded nul",mustRoutineSpec(t,[]string{"app",string([]byte{0})})},
+  {"single huge argument",mustRoutineSpec(t,[]string{"run",strings.Repeat("x",4097)})},
+  {"aggregate huge arguments",mustRoutineSpec(t,[]string{"run",strings.Repeat("x",4096),strings.Repeat("x",4096),strings.Repeat("x",4096),strings.Repeat("x",4096)})},
+  {"more than 128 arguments",mustRoutineSpec(t,append([]string{"run"},make([]string,128)...))},
+  {"oversized raw JSON",json.RawMessage(`{"command":["run"],"unused":"`+strings.Repeat("x",65<<10)+`"}`)},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   p,g:=base()
+   p.binding.ActionSpecJSON=tc.spec
+   if _,err:=New(p,g).Execute(context.Background(),cmd);err!=ErrInvalidCommand{
+    t.Fatalf("unsafe routine argv admitted: %v",err)
+   }
+   if g.calls!=0{t.Fatal("oversized or malformed routine reached tool adapter")}
+  })
+ }
+ p,g:=base()
+ p.binding.ActionSpecJSON=mustRoutineSpec(t,[]string{"run",strings.Repeat("x",4096)})
+ if _,err:=New(p,g).Execute(context.Background(),cmd);err!=nil||g.calls!=1{
+  t.Fatalf("legitimate bounded command refused: calls=%d err=%v",g.calls,err)
+ }
+}
+
+func mustRoutineSpec(t *testing.T,argv []string)json.RawMessage{
+ t.Helper()
+ raw,err:=json.Marshal(map[string]any{"command":argv})
+ if err!=nil{t.Fatal(err)}
+ return raw
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/budget"
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/event"
+	"github.com/DigiLogicTech/OnePane/internal/featurepolicy"
 	"github.com/DigiLogicTech/OnePane/internal/id"
 	"github.com/DigiLogicTech/OnePane/internal/inference"
 	"github.com/DigiLogicTech/OnePane/internal/observation"
@@ -101,7 +102,7 @@ func (s *Service) ensureWorkspaceAccess(ctx context.Context, workspaceID string)
 		return fmt.Errorf("load Workspace %s status: %w", workspaceID, err)
 	}
 	if currentStatus != "active" {
-		return fmt.Errorf("Workspace %s is not active", workspaceID)
+		return fmt.Errorf("Workspace %s is not active (state=%s)", workspaceID, currentStatus)
 	}
 	if err := s.EnsureSystemPrincipals(ctx); err != nil {
 		return err
@@ -322,23 +323,38 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 			var c struct {
 				OperationID string `json:"operation_id"`
 			}
-			if json.Unmarshal([]byte(cont), &c) != nil {
+			fields,valid:=readWorkerContinuationFields(json.RawMessage(cont))
+			if !valid||json.Unmarshal([]byte(cont), &c)!=nil{
 				return fmt.Errorf("invalid durable Agent Worker continuation for run %s",v.run)
+			}
+			// Only one of model, toolchain or operation may gate this Attempt.
+			_,hasModel:=fields["model_wait"]
+			_,hasToolchain:=fields["toolchain_wait"]
+			_,hasOperation:=fields["operation_id"]
+			if (hasModel&&hasToolchain)||((hasModel||hasToolchain)&&hasOperation){
+				return fmt.Errorf("conflicting durable Worker wait conditions for run %s",v.run)
+			}
+			if hasOperation&&strings.TrimSpace(c.OperationID)==""{
+				return fmt.Errorf("invalid persisted Operation wait for Worker run %s",v.run)
 			}
 			// A model-resource wait is a real persisted suspension, not a
 			// dependency-free Task that should resume on every worker tick.
 			// Retain the same pinned model and local-only routing after wake.
-			if hasModelWaitField(json.RawMessage(cont))&&decodeModelWait(json.RawMessage(cont))==nil {
-                return fmt.Errorf("corrupt persisted local model wait for Worker run %s",v.run)
-            }
-			if modelWait:=decodeModelWait(json.RawMessage(cont));modelWait!=nil &&
-				s.clock.UnixMilli()<modelWait.RetryAtMS {
-				ready=false
+			// Parse only the wait category actually present. Most active
+			// attempts have no resource wait; avoid repeatedly rescanning the
+			// same JSON document on every tick of a low-power host.
+			if hasModel{
+				modelWait:=decodeModelWait(json.RawMessage(cont))
+				if modelWait==nil{
+					return fmt.Errorf("corrupt persisted local model wait for Worker run %s",v.run)
+				}
+				if s.clock.UnixMilli()<modelWait.RetryAtMS{ready=false}
 			}
-			if hasToolchainWaitField(json.RawMessage(cont))&&decodeToolchainWait(json.RawMessage(cont))==nil{
-				return fmt.Errorf("corrupt persisted Workspace toolchain wait for Worker run %s",v.run)
-			}
-			if toolchainWait:=decodeToolchainWait(json.RawMessage(cont));toolchainWait!=nil{
+			if hasToolchain{
+				toolchainWait:=decodeToolchainWait(json.RawMessage(cont))
+				if toolchainWait==nil{
+					return fmt.Errorf("corrupt persisted Workspace toolchain wait for Worker run %s",v.run)
+				}
 				ready=false
 				if s.clock.UnixMilli()>=toolchainWait.RetryAtMS{
 					registered,checkErr:=isApprovedToolchainRegisteredRunning(ctx,s.db,toolchainWait)
@@ -421,6 +437,11 @@ func (s *Service) resumeWaitingWorkerAndAttempt(
   if errors.Is(err,sql.ErrNoRows){return task.ErrRevisionConflict}
   if err!=nil{return err}
   if taskWorkspace!=workspaceID{return ErrInvalidWorkerState}
+  // Resume is a new admission decision. A suspended Task cannot regain
+  // model/tool execution after Project or Workspace autonomy was revoked.
+  allowed,policyErr:=(featurepolicy.StoredScopes{DB:s.db}).AuthorizeTaskTx(ctx,tx,workspaceID,taskID,"tasks.autonomous")
+  if policyErr!=nil{return fmt.Errorf("Worker resume scope unavailable: %w",policyErr)}
+  if !allowed{return fmt.Errorf("autonomous Worker permission revoked before resume")}
   changed,err:=tx.ExecContext(ctx,`UPDATE agent_worker_runs
    SET status='running',revision=revision+1,updated_at=?
    WHERE id=? AND task_id=? AND workspace_id=? AND attempt_id=?
@@ -529,6 +550,20 @@ func scanRun(row rowScanner) (Run, error) {
 
 func (s *Service) startRun(ctx context.Context, t task.Task) (Run, TickResult) {
  res:=TickResult{TaskID:t.ID,Status:"failed"}
+ // Agent Worker admission must not turn a disabled autonomy policy into
+ // a new Task/Attempt or a model dispatch.
+ scopes:=featurepolicy.StoredScopes{DB:s.db}
+ allowed,scopeErr:=scopes.AuthorizeTask(ctx,t.WorkspaceID,t.ID,"tasks.autonomous")
+ if scopeErr!=nil{
+  res.Error="stored Project or Workspace feature policy scope unavailable: "+scopeErr.Error()
+  return Run{},res
+ }
+ if !allowed{
+  res.Error="stored Project or Workspace feature policy denied autonomous Worker admission"
+  return Run{},res
+ }
+ fallbackAllowed,fbErr:=scopes.AuthorizeTask(ctx,t.WorkspaceID,t.ID,"inference.fallback")
+ if fbErr!=nil{res.Error="stored feature policy fallback scope unavailable";return Run{},res}
  if err:=s.ensureWorkspaceAccess(ctx,t.WorkspaceID);err!=nil{
   res.Error=err.Error();return Run{},res
  }
@@ -562,14 +597,14 @@ func (s *Service) startRun(ctx context.Context, t task.Task) (Run, TickResult) {
  if v:=strings.TrimSpace(workspaceRouting.CandidateID);v!=""{
   ids=append(ids,v)
  }
- if route.RoutingEnabled{
+ if route.RoutingEnabled && fallbackAllowed{
   for _,id:=range workspaceRouting.FallbackCandidateIDs{
    if id=strings.TrimSpace(id);id!=""&&!contains(ids,id){ids=append(ids,id)}
   }
  }
  route.IncludeCandidateIDs=ids
  maxEscalations:=s.cfg.MaxEscalations
- if !route.RoutingEnabled{maxEscalations=0}
+ if !route.RoutingEnabled || !fallbackAllowed{maxEscalations=0}
  rp,err:=json.Marshal(route)
  if err!=nil{res.Error=err.Error();return Run{},res}
  var r Run
@@ -579,8 +614,14 @@ func (s *Service) startRun(ctx context.Context, t task.Task) (Run, TickResult) {
  // and both audit/outbox events must now commit together or not at all.
  err=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
   var workspaceStatus string
-  if err:=tx.QueryRowContext(ctx,`SELECT status FROM workspaces WHERE id=?`,t.WorkspaceID).Scan(&workspaceStatus);err!=nil{return fmt.Errorf("verify Worker Workspace state: %w",err)}
-  if workspaceStatus!="active"{return fmt.Errorf("Workspace %s is not active",t.WorkspaceID)}
+  if err:=tx.QueryRowContext(ctx,`SELECT status FROM workspaces WHERE id=?`,t.WorkspaceID).Scan(&workspaceStatus);err!=nil{return fmt.Errorf("verify Worker Workspace %s state: %w",t.WorkspaceID,err)}
+  if workspaceStatus!="active"{return fmt.Errorf("Workspace %s is not active (state=%s)",t.WorkspaceID,workspaceStatus)}
+  granted,grantErr:=scopes.AuthorizeTaskTx(ctx,tx,t.WorkspaceID,t.ID,"tasks.autonomous")
+  if grantErr!=nil{return fmt.Errorf("transactional Worker policy unavailable: %w",grantErr)}
+  if !granted{return fmt.Errorf("autonomous Worker execution revoked before admission")}
+  currentFallback,fbCheckErr:=scopes.AuthorizeTaskTx(ctx,tx,t.WorkspaceID,t.ID,"inference.fallback")
+  if fbCheckErr!=nil{return fmt.Errorf("transactional fallback policy unavailable: %w",fbCheckErr)}
+  if currentFallback!=fallbackAllowed{return fmt.Errorf("Worker routing policy changed during admission")}
   started,attempt,startErr:=s.tasks.StartInTransaction(ctx,tx,cmd)
   if startErr!=nil{return startErr}
   r=Run{

@@ -1,6 +1,7 @@
 package nodefederation
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -22,6 +23,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/event"
 	"github.com/DigiLogicTech/OnePane/internal/id"
+	"github.com/DigiLogicTech/OnePane/internal/observation"
 	"github.com/DigiLogicTech/OnePane/internal/storage"
 )
 
@@ -223,10 +225,15 @@ func endpointFromNode(n NodeView) (string, string, error) {
 
 func (s *Service) pairedEndpoint(ctx context.Context, peerID string) (string, string, error) {
 	var raw, fp, state, pairStatus string
-	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(h.endpoint_json,''),p.peer_tls_fingerprint,h.trust_state,p.status FROM harness_nodes h JOIN node_pairings p ON p.peer_node_id=h.id WHERE h.id=?`, peerID).Scan(&raw, &fp, &state, &pairStatus); err != nil {
+	var localConfirmed,peerConfirmed int
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(h.endpoint_json,''),p.peer_tls_fingerprint,h.trust_state,p.status,p.local_confirmed,p.peer_confirmed FROM harness_nodes h JOIN node_pairings p ON p.peer_node_id=h.id WHERE h.id=? AND h.local=0`, peerID).Scan(&raw, &fp, &state, &pairStatus,&localConfirmed,&peerConfirmed); err != nil {
 		return "", "", err
 	}
-	if state != "paired" || pairStatus != "paired" {
+	// Endpoint lookup is a second, independent transport-boundary check
+	// after scheduling and capability admission. An old "paired" label is
+	// not sufficient when either direction of human confirmation is absent.
+	if state != "paired" || pairStatus != "paired" ||
+		localConfirmed!=1 || peerConfirmed!=1 {
 		return "", "", ErrNodeNotPaired
 	}
 	var ep struct {
@@ -242,21 +249,56 @@ func (s *Service) pairedEndpoint(ctx context.Context, peerID string) (string, st
 	return strings.TrimRight(ep.FederationURL, "/"), fp, nil
 }
 
+// Pinned trust is a direct operator-approved certificate identity, not a
+// public CA chain. InsecureSkipVerify disables Go's default expiration/EKU
+// checks as well as chain verification; restore those checks explicitly.
+// A correct fingerprint alone must never admit an expired or not-yet-valid
+// peer certificate. Enrollment handshake expiry is a different concept:
+// established Node pairings do not expire on that short bootstrap deadline.
+func validatePinnedPeerServerCertificate(cs tls.ConnectionState,
+ fingerprint string, now time.Time) error {
+	if len(cs.PeerCertificates) != 1 {
+		return ErrPeerCertificate
+	}
+	leaf:=cs.PeerCertificates[0]
+	if leaf==nil||len(leaf.Raw)==0||
+	 !strings.HasPrefix(fingerprint,"sha256:")||len(fingerprint)!=71||
+	 CertificateFingerprint(leaf.Raw)!=fingerprint||
+	 // A Node endpoint must use a leaf identity, not a CA-capable
+	 // certificate which can sign a different remote TLS identity.
+	 leaf.IsCA||leaf.KeyUsage&x509.KeyUsageCertSign!=0||
+	 now.Before(leaf.NotBefore)||!now.Before(leaf.NotAfter) {
+		return ErrPeerCertificate
+	}
+	serverAuth:=false
+	for _,purpose:=range leaf.ExtKeyUsage{
+		if purpose==x509.ExtKeyUsageServerAuth{serverAuth=true;break}
+	}
+	if !serverAuth || leaf.KeyUsage&x509.KeyUsageDigitalSignature==0 {
+		return ErrPeerCertificate
+	}
+	return nil
+}
+
 func (s *Service) pinnedClient(fp string, withClientCert bool) *http.Client {
 	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true}
 	if withClientCert {
 		tlsCfg.Certificates = []tls.Certificate{s.identity.Certificate}
 	}
 	tlsCfg.VerifyConnection = func(cs tls.ConnectionState) error {
-		if len(cs.PeerCertificates) != 1 {
-			return ErrPeerCertificate
-		}
-		if CertificateFingerprint(cs.PeerCertificates[0].Raw) != fp {
-			return ErrPeerCertificate
-		}
-		return nil
+		return validatePinnedPeerServerCertificate(cs,fp,time.Now())
 	}
-	return &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{TLSClientConfig: tlsCfg, ForceAttemptHTTP2: true}}
+	// Never follow federation redirects. On 307/308 the Go HTTP client
+	// can replay the entire POST body (private prompts, keys or approvals)
+	// to a Location outside the originally pinned TLS peer. Return the
+	// response untouched: postJSON treats every 3xx as a failed request.
+	return &http.Client{
+		Timeout:15*time.Second,
+		Transport:&http.Transport{TLSClientConfig:tlsCfg,ForceAttemptHTTP2:true},
+		CheckRedirect:func(_ *http.Request,_ []*http.Request)error{
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 func (s *Service) BeginPair(ctx context.Context, peerID string) (Pairing, string, error) {
@@ -554,29 +596,39 @@ func (s *Service) Revoke(ctx context.Context, peer string) error {
 	})
 }
 
+var ErrFederationPayloadTooLarge=errors.New("federation JSON envelope exceeds transport limit")
+var ErrFederationPayloadInvalid=errors.New("federation request cannot be JSON encoded")
+var ErrFederationResponseTooLarge=errors.New("federation response exceeds transport limit")
+var ErrFederationResponseInvalid=errors.New("federation response is missing or ambiguous")
+
 func postJSON(ctx context.Context, c *http.Client, urlv string, in, out any) error {
-	b, _ := json.Marshal(in)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, urlv, strings.NewReader(string(b)))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("peer http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	if out != nil && len(body) > 0 {
-		return json.Unmarshal(body, out)
-	}
-	return nil
+ b,err:=json.Marshal(in)
+ if err!=nil{return ErrFederationPayloadInvalid}
+ if len(b)>4<<20{return ErrFederationPayloadTooLarge}
+ req,err:=http.NewRequestWithContext(ctx,http.MethodPost,urlv,strings.NewReader(string(b)))
+ if err!=nil{return err}
+ req.Header.Set("Content-Type","application/json")
+ resp,err:=c.Do(req)
+ if err!=nil{return err}
+ defer resp.Body.Close()
+ // Do not materialise or surface remote error bodies in local logs:
+ // they can reflect private prompts, tokens, or device metadata.
+ if resp.StatusCode<200||resp.StatusCode>=300{
+  return fmt.Errorf("peer HTTP %d",resp.StatusCode)
+ }
+ body,err:=io.ReadAll(io.LimitReader(resp.Body,(4<<20)+1))
+ if err!=nil{return err}
+ if len(body)>4<<20{return ErrFederationResponseTooLarge}
+ if out!=nil{
+  if len(body)==0||bytes.Equal(bytes.TrimSpace(body),[]byte("null"))||
+   observation.ValidateUnambiguousJSON(body)!=nil{
+   return ErrFederationResponseInvalid
+  }
+  // Payload was already depth bounded, size limited and checked for
+  // duplicate nested JSON members, including Unicode-escaped aliases.
+  if err:=json.Unmarshal(body,out);err!=nil{return ErrFederationResponseInvalid}
+ }
+ return nil
 }
 
 func (s *Service) Manifest(ctx context.Context, peerID string) (CapabilityManifest, error) {

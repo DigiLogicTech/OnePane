@@ -290,6 +290,56 @@ func main() {
 		}
 	}()
 
+	// Level 5 receipt-only review is deliberately cheaper than inference:
+	// one bounded SQLite cadence pass each minute, with no external probes,
+	// model residency, device changes or automatic remediation. A human must
+	// approve exact source permits before this loop has any eligible work.
+	go func(){
+		run:=func(){
+			results,err:=runtime.ProjectWorkspaces.TickDueGoalEvidenceReviews(ctx,8)
+			if err!=nil&&ctx.Err()==nil{
+				log.Printf("goal receipt-review tick: %v",err)
+			}else if len(results)>0{
+				log.Printf("goal receipt-review tick: recorded %d metadata assessments (not monitored health)",len(results))
+			}
+		}
+		run()
+		ticker:=time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for{
+			select{
+			case <-ctx.Done():return
+			case <-ticker.C:run()
+			}
+		}
+	}()
+
+	// Independent Level 5 LAN observation: this loop is inert unless a
+	// human specifically approved a short-lived recurring TCP grant that
+	// references an exact-IP manual probe permit for a canonical Workspace.
+	// Never infer network authority from source names or receipt review.
+	// At most ONE 100–1500ms handshake per minute tick; SQLite deduplicates
+	// each source/cadence window across restarts and competing workers.
+	go func(){
+		run:=func(){
+			results,err:=runtime.ProjectWorkspaces.TickDueTCPRecurringProbes(ctx,1)
+			if err!=nil&&ctx.Err()==nil{
+				log.Printf("consented tcp observation tick: %v",err)
+			}else if len(results)>0{
+				log.Printf("consented tcp observation tick: %d source handshake attempt(s); security health UNVERIFIED",len(results))
+			}
+		}
+		run()
+		ticker:=time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for{
+			select{
+			case <-ctx.Done():return
+			case <-ticker.C:run()
+			}
+		}
+	}()
+
 	// Budget reservations are durable but time-bounded. Expiring abandoned
 	// reservations returns capacity without relying on a caller to clean up.
 	go func() {

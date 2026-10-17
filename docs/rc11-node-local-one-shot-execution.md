@@ -1,0 +1,13 @@
+RC11 P0-AC - explicitly invoked Node-local one-shot instrument execution
+
+Status: opt-in manual CLI and software source tests. Physical network-vantage verification and external install QA remain unproven.
+
+New command: onepane-node-custody probe-and-witness. It requires an existing Node data directory and ID, independently enrolled Node certificate SHA256 fingerprint, an existing owner-only instrument private key and separately enrolled public key, original owner-only OnePane challenge and human-approved exact v2 probe plan, and two distinct fresh owner-only receipt/witness output paths.
+
+The original challenge/plan are human-supplied via a separately trusted channel. They are not themselves server-signed, and a local attacker with both signing keys or authority over this channel can still forge output. The command never provisions/rotates a Node identity, discovers targets, polls, imports server evidence, edits Workspace health, scores incidents or undertakes remediation.
+
+The command validates the original challenge, exact RFC1918 IPv4 socket and 100-1500ms timeout before network effects. It reserves both output files exclusively/durably, spends the original challenge in the same durable per-key nonce ledger used by the original standalone instrument CLI, then invokes ProbeApprovedPlan with exactly one TCP4 connection attempt and no DNS, retries, HTTP writes, scanning or redirects. It saves the instrument signed outcome (including connection refusal) and the in-memory Node federation identity's time-bounded countersignature. Failed saves, crashes or nonce collisions never trigger automatic retries. Existing sign and verify subcommands remain offline.
+
+New tests inject a fake dialer to verify exact socket and both independently verified signatures, cross-tool replay refusal, wrong Node pin, mismatched instrument key, invalid endpoint, false vantage claim, overlapping or existing outputs, fail-closed preflight, cancelled request and connection-refusal nonce consumption. Source-level functionality is not physical hardware execution or independent target identity attestation. Local POSIX 0600 and fsync do not prove owner-only NTFS ACLs or durability on Windows. Real hardware proof, explicit Node runtime grant, incident calibration, reversibility and security audit remain outstanding.
+
+Comprehensive human-focused UI/UX and customisation alignment is reserved as the LAST development step before any approved installed Windows/Ubuntu QA build.

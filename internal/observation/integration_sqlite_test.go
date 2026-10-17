@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,6 +112,58 @@ func TestSQLiteObservationRejectsCrossWorkspaceSourceAndRollsBackOnEventFailure(
 	if count != 0 {
 		t.Fatalf("observation was not rolled back, count=%d", count)
 	}
+}
+
+func TestObservationRejectsAmbiguousRecordingAndLegacyMatchingHash(t *testing.T){
+ ctx:=context.Background()
+ db:=openObservationTestDB(t)
+ now:=int64(1_700_000_000_000)
+ seedObservationFixture(t,db.SQL(),now)
+ clk:=&observationTestClock{ms:now}
+ svc:=NewService(db.SQL(),db,clk)
+ source:="agent1"
+ raw:=[]byte(`{"status":"ok","status":"SENSITIVE_DISAGREEMENT"}`)
+ cmd:=RecordCommand{
+  WorkspaceID:"ws1",SubjectRef:"sensor://secret",ObservationType:"health.sample",
+  ProbeToolID:"sensor",ProbeToolVersion:"1",
+  SourcePrincipalID:&source,ActorPrincipalID:&source,
+  Value:raw,
+  Label:policy.DataLabel{WorkspaceID:"ws1",
+   Confidentiality:policy.ConfidentialityInternal,
+   Residency:policy.ResidencyAny,Trust:policy.TrustUnverifiedDerived},
+ }
+ if _,err:=svc.Record(ctx,cmd);!errors.Is(err,ErrInvalidCommand)||
+  strings.Contains(err.Error(),"SENSITIVE_DISAGREEMENT"){
+  t.Fatalf("ambiguous sensor record was accepted or leaked: %v",err)
+ }
+ var count int
+ if err:=db.SQL().QueryRowContext(ctx,"SELECT COUNT(*) FROM observations").
+  Scan(&count);err!=nil||count!=0{
+  t.Fatalf("ambiguous record changed database: %d %v",count,err)
+ }
+ // An older database might contain JSON that passed json_valid and SHA-256
+ // integrity checks before strict admission existed. It must not become
+ // signed/verified evidence merely because its self-consistent hash matches.
+ legacy:=Observation{
+  ID:"legacy-ambiguous",WorkspaceID:"ws1",SubjectRef:"sensor://secret",
+  ObservationType:"health.sample",ProbeToolID:"sensor",
+  ProbeToolVersion:"1",SourcePrincipalID:&source,Value:raw,
+  Label:cmd.Label,ObservedAt:now,CreatedAt:now,
+ }
+ hash,err:=IntegrityHash(legacy)
+ if err!=nil{t.Fatal(err)}
+ _,err=db.SQL().ExecContext(ctx,`INSERT INTO observations(
+  id,workspace_id,subject_ref,observation_type,probe_tool_id,probe_tool_version,
+  source_principal_id,adapter_id,adapter_version,value_json,
+  confidentiality,residency,trust,origin_node_id,integrity_hash,observed_at,created_at)
+  VALUES(?,?,?,?,?,?,?,NULL,NULL,?,'internal','any','unverified_derived',NULL,?,?,?)`,
+  legacy.ID,legacy.WorkspaceID,legacy.SubjectRef,legacy.ObservationType,
+  legacy.ProbeToolID,legacy.ProbeToolVersion,source,string(raw),hash,now,now)
+ if err!=nil{t.Fatal(err)}
+ if err=svc.VerifyIntegrity(ctx,legacy.ID);err==nil||
+  strings.Contains(err.Error(),"SENSITIVE_DISAGREEMENT"){
+  t.Fatalf("matching hash upgraded ambiguous historical evidence: %v",err)
+ }
 }
 
 func openObservationTestDB(t *testing.T) *sqlite.DB {

@@ -1,6 +1,7 @@
 package nodefederation
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,6 +21,10 @@ func TestFederationDecodeRequiresSingleJSONDocument(t *testing.T) {
 		{name: "second array", body: `{"request_id":"id"} []`},
 		{name: "garbage suffix", body: `{"request_id":"id"} trailing`},
 		{name: "unknown field", body: `{"request_id":"id","admin":true}`},
+		{name: "duplicate top-level key", body: `{"request_id":"id","request_id":"different"}`},
+		{name: "duplicate escaped key alias", body: `{"request_id":"id","request\u005fid":"different"}`},
+		{name: "oversized request", body: `{"request_id":"id","unused":"`+strings.Repeat("x",4<<20)+`"}`},
+		{name: "deep nested duplicate", body: `{"request_id":"id","nested":{"a":1,"a":2}}`},
 		{name: "malformed first document", body: `{"request_id":`},
 	}
 	for _, tt := range tests {
@@ -41,4 +46,18 @@ func TestFederationDecodeRequiresSingleJSONDocument(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFederationDecoderRejectsNestedDuplicateInAllowedEnvelope(t *testing.T){
+ for _,raw:=range []string{
+  `{"request_json":{"model":"alpha","model":"beta"}}`,
+  `{"request_json":{"name":"alpha","na\u006de":"beta"}}`,
+ }{
+  req:=httptest.NewRequest(http.MethodPost,"/federation/v1/inference",strings.NewReader(raw))
+  recorder:=httptest.NewRecorder()
+  var envelope struct{Request json.RawMessage `json:"request_json"`}
+  if decode(recorder,req,&envelope)||recorder.Code!=http.StatusBadRequest{
+   t.Fatalf("ambiguous nested fields were accepted: status=%d",recorder.Code)
+  }
+ }
 }

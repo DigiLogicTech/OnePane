@@ -3,8 +3,11 @@ package inference
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"sync/atomic"
 	"strings"
 	"testing"
 )
@@ -118,4 +121,70 @@ func TestLocalOpenAITransportPrefersAtomicRuntimeLease(t *testing.T) {
 	if r.acquired != 1 || r.released != 1 {
 		t.Fatalf("lease acquired=%d released=%d", r.acquired, r.released)
 	}
+}
+
+
+func TestLocalOpenAITransportRejectsUserInfoSSRFAndMalformedLoopbackOrigins(t *testing.T){
+ for _,tc:=range []struct{url string;valid bool}{
+  {"http://127.0.0.1:8123",true},
+  {"http://[::1]:8123",true},
+  {"http://127.0.0.1:8080@evil.example",false},
+  {"http://[::1]:8080@evil.example",false},
+  {"http://127.0.0.1:8080:99",false},
+  {"http://127.0.0.1:0",false},
+  {"http://127.0.0.1:65536",false},
+  {"http://127.0.0.1",false},
+  {"http://127.0.0.1:abc",false},
+  {"http://127.0.0.1:8080/v1",false},
+  {"http://127.0.0.1:8080?redirect=https://evil.example",false},
+  {"http://127.0.0.1:8080#token",false},
+  {"http://localhost:8080",false},
+  {"http://127.0.0.2:8080",false},
+  {"https://127.0.0.1:8080",false},
+  {"http://127.0.0.1:8080.evil.example",false},
+ }{
+  _,err:=validatedLoopbackBase(tc.url)
+  if (err==nil)!=tc.valid{t.Fatalf("endpoint %q validity=%v err=%v",tc.url,tc.valid,err)}
+  if tc.valid{continue}
+  tr:=LocalOpenAITransport{Resolver:endpointResolverFunc(func(context.Context,string)(string,error){return tc.url,nil})}
+  _,err=tr.Dispatch(context.Background(),DispatchRequest{Deployment:ModelDeployment{ID:"d"},
+   Model:Model{ModelRef:"m"},RequestJSON:json.RawMessage(`{"messages":[{"role":"user","content":"private prompt"}]}`)},nil)
+  var transportErr *TransportError
+  if !errors.As(err,&transportErr)||transportErr.Code!="unsafe_local_endpoint"{
+   t.Fatalf("unsafe URL %q was accepted or misclassified: %v",tc.url,err)
+  }
+ }
+}
+
+
+func TestLocalOpenAITransportNeverUsesAnExplicitHTTPProxy(t *testing.T){
+ var proxyHits atomic.Int32
+ proxy:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+  proxyHits.Add(1)
+  w.WriteHeader(http.StatusBadGateway)
+ }))
+ defer proxy.Close()
+ proxyURL,err:=url.Parse(proxy.URL)
+ if err!=nil{t.Fatal(err)}
+ var localHits atomic.Int32
+ local:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+  localHits.Add(1)
+  w.Header().Set("Content-Type","application/json")
+  _,_ = w.Write([]byte(`{"choices":[{"message":{"content":"local"}}]}`))
+ }))
+ defer local.Close()
+ tr:=LocalOpenAITransport{
+  Resolver:endpointResolverFunc(func(context.Context,string)(string,error){return local.URL,nil}),
+  Client:&http.Client{Transport:&http.Transport{Proxy:http.ProxyURL(proxyURL)}},
+ }
+ _,err=tr.Dispatch(context.Background(),DispatchRequest{
+  Model:Model{ModelRef:"local-model"},
+  Deployment:ModelDeployment{ID:"local-deployment"},
+  RequestJSON:json.RawMessage(`{"messages":[{"role":"user","content":"private"}]}`),
+ },nil)
+ if err!=nil{t.Fatal(err)}
+ if proxyHits.Load()!=0||localHits.Load()!=1{
+  t.Fatalf("local inference crossed a configured proxy: proxy=%d local=%d",
+   proxyHits.Load(),localHits.Load())
+ }
 }

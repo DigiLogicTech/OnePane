@@ -14,12 +14,14 @@ import (
 type assistantModelScheduler struct {
  options []scheduler.Candidate
  last scheduler.RouteRequest
+ selected *scheduler.Candidate
 }
 func(m *assistantModelScheduler) Candidates(_ context.Context,_,_,_ string)([]scheduler.Candidate,error){
  return m.options,nil
 }
 func(m *assistantModelScheduler) Route(_ context.Context,req scheduler.RouteRequest)(scheduler.Decision,error){
  m.last=req
+ if m.selected!=nil{return scheduler.Decision{Selected:&scheduler.RankedCandidate{Candidate:*m.selected}},nil}
  return scheduler.Decision{},scheduler.ErrNoEligibleCandidate
 }
 
@@ -37,7 +39,7 @@ func TestAssistantThreadModelChoicePersistsAndPinsRouting(t *testing.T){
  }
  for _,query:=range seed{if _,err:=db.SQL().ExecContext(ctx,query);err!=nil{t.Fatal(err)}}
  fake:=&assistantModelScheduler{options:[]scheduler.Candidate{
-  {ID:"deployment",Kind:scheduler.CandidateModel,Schedulable:true,Status:"ready"},
+  {ID:"deployment",Kind:scheduler.CandidateModel,Schedulable:true,Status:"ready",Local:true,CostClass:scheduler.CostLocal,HardZeroIncrementalCost:true},
  }}
  svc:=NewService(db.SQL(),clock.Real{},fake,nil,nil,nil)
  thread,err:=svc.CreateThread(ctx,"ws","OnePane Assistant","admin");if err!=nil{t.Fatal(err)}
@@ -51,8 +53,57 @@ func TestAssistantThreadModelChoicePersistsAndPinsRouting(t *testing.T){
  if err==nil||!strings.Contains(err.Error(),"no substitution"){t.Fatalf("expected a hard failure on pinned model: %v",err)}
  if len(fake.last.IncludeCandidateIDs)!=1||fake.last.IncludeCandidateIDs[0]!=chosen{t.Fatalf("pinned route did not constrain deployment: %+v",fake.last)}
  if fake.last.ContextTokens!=2048{t.Fatalf("expected bounded manual context, got %d",fake.last.ContextTokens)}
+ if !fake.last.LocalOnly||!fake.last.RequireZeroIncrementalCost {
+  t.Fatalf("pinned Assistant inference could move global context off-host or incur paid spend: %+v",fake.last)
+ }
  fake.options[0].Schedulable=false
  if _,err=svc.SetModel(ctx,thread.ID,&chosen);!errors.Is(err,ErrInvalid){t.Fatalf("inactive deployment accepted: %v",err)}
+ fake.options[0].Schedulable=true
+ for _,test:=range []struct{name string;mutate func(*scheduler.Candidate)}{
+  {"cloud",func(c *scheduler.Candidate){c.Local=false;c.CostClass=scheduler.CostFree}},
+  {"paid",func(c *scheduler.Candidate){c.CostClass=scheduler.CostPaid}},
+  {"unverified zero-cost",func(c *scheduler.Candidate){c.HardZeroIncrementalCost=false}},
+ } {
+  saved:=fake.options[0]
+  test.mutate(&fake.options[0])
+  if _,err=svc.SetModel(ctx,thread.ID,&chosen);!errors.Is(err,ErrInvalid){
+   t.Fatalf("%s candidate accepted as general Assistant pin: %v",test.name,err)
+  }
+  fake.options[0]=saved
+ }
  reset,err:=svc.SetModel(ctx,thread.ID,nil);if err!=nil{t.Fatal(err)}
  if reset.PreferredModelDeploymentID!=nil{t.Fatalf("Auto did not remove pin: %+v",reset)}
+ _,_,err=svc.reasonGlobal(ctx,"ws","admin","general question",nil)
+ if err==nil{t.Fatal("test scheduler should have denied automatic routing")}
+ if !fake.last.LocalOnly||!fake.last.RequireZeroIncrementalCost||len(fake.last.IncludeCandidateIDs)>0{
+  t.Fatalf("automatic Assistant inference permitted off-host, paid or pinned fallback: %+v",fake.last)
+ }
+}
+
+
+func TestGeneralAssistantRefusesUnsafeSchedulerSelectionsBeforeInference(t *testing.T){
+ for _,tc:=range []struct{
+  name string
+  change func(*scheduler.Candidate)
+ }{
+  {"remote",func(c *scheduler.Candidate){c.Local=false}},
+  {"paid",func(c *scheduler.Candidate){c.CostClass=scheduler.CostPaid}},
+  {"unverified",func(c *scheduler.Candidate){c.HardZeroIncrementalCost=false}},
+  {"provider runtime",func(c *scheduler.Candidate){c.Kind=scheduler.CandidateAgentRuntime}},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   candidate:=scheduler.Candidate{ID:"candidate",Kind:scheduler.CandidateModel,Local:true,
+    CostClass:scheduler.CostLocal,HardZeroIncrementalCost:true}
+   tc.change(&candidate)
+   route:=&assistantModelScheduler{selected:&candidate}
+   svc:=NewService(nil,clock.Real{},route,nil,nil,nil)
+   _,_,err:=svc.reasonGlobal(context.Background(),"tenant","operator","private request",nil)
+   if err==nil||!strings.Contains(err.Error(),"remote or paid"){
+    t.Fatalf("untrusted scheduler output reached global snapshot/inference: %v",err)
+   }
+   if !route.last.LocalOnly||!route.last.RequireZeroIncrementalCost{
+    t.Fatalf("route admission was weakened: %+v",route.last)
+   }
+  })
+ }
 }

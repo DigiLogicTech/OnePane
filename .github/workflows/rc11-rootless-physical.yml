@@ -1,11 +1,19 @@
 name: RC11 Trusted Rootless Node Acceptance
 
-# Self-hosted Node code must never run from a pull_request event.
-# Only an authorised push to the RC11 integration branch can schedule it.
+# No push or PR event may schedule physical jobs on user-managed hardware.
+# Dispatch is deliberately disabled until a trusted admin configures BOTH
+# the repository approval variable and the protected reviewer environment.
 on:
-  push:
-    branches:
-      - feature/project-workspace-development-environments
+  workflow_dispatch:
+    inputs:
+      expected_commit_sha:
+        description: 'Full 40-hex SHA of the reviewed RC11 integration head'
+        required: true
+        type: string
+      operator_confirmation:
+        description: 'Type AUTHORIZE_RC11_ROOTLESS_PHYSICAL_ACCEPTANCE'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -13,17 +21,21 @@ permissions:
 jobs:
   physical-rootless-node:
     name: Rootless Workspace physical Node smoke (opt-in)
-    # Never run self-hosted physical tests from untrusted pull requests.
+    # Never run self-hosted physical tests from untrusted pull requests or pushes.
     # This gate is intentionally skipped until a repo administrator sets an
     # approved immutable digest already present in the unprivileged runner's
     # local OCI image pool. A skipped gate is not a physical QA pass.
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feature/project-workspace-development-environments' && vars.ONEPANE_ROOTLESS_SMOKE_IMAGE != '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/rc11-policy-worker-diagnostics-integration-20261011' && inputs.expected_commit_sha == github.sha && inputs.operator_confirmation == 'AUTHORIZE_RC11_ROOTLESS_PHYSICAL_ACCEPTANCE' && vars.ONEPANE_PHYSICAL_ACCEPTANCE_ENABLED == 'approved' && vars.ONEPANE_ROOTLESS_SMOKE_IMAGE != '' }}
     runs-on: [self-hosted, linux, x64]
+    environment: rc11-physical-node-approval
     timeout-minutes: 12
     env:
       ONEPANE_SANDBOX_SMOKE_IMAGE: ${{ vars.ONEPANE_ROOTLESS_SMOKE_IMAGE }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
@@ -56,13 +68,17 @@ jobs:
     # Never run self-hosted physical tests from untrusted pull requests.
     # Never pull unspecified/mutable engine images onto user-managed Nodes.
     # Approval means a pre-pulled digest and deliberate repository variable.
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feature/project-workspace-development-environments' && vars.ONEPANE_GODOT_SMOKE_IMAGE != '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/rc11-policy-worker-diagnostics-integration-20261011' && inputs.expected_commit_sha == github.sha && inputs.operator_confirmation == 'AUTHORIZE_RC11_ROOTLESS_PHYSICAL_ACCEPTANCE' && vars.ONEPANE_PHYSICAL_ACCEPTANCE_ENABLED == 'approved' && vars.ONEPANE_GODOT_SMOKE_IMAGE != '' }}
     runs-on: [self-hosted, linux, x64]
+    environment: rc11-physical-node-approval
     timeout-minutes: 12
     env:
       ONEPANE_GODOT_SMOKE_IMAGE: ${{ vars.ONEPANE_GODOT_SMOKE_IMAGE }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
@@ -95,13 +111,17 @@ jobs:
     # Never execute physical Node workflows from untrusted pull requests.
     # The approved immutable Python 3 + POSIX sh image must already exist
     # under the self-hosted unprivileged runner's OCI image identity.
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feature/project-workspace-development-environments' && vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE != '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/rc11-policy-worker-diagnostics-integration-20261011' && inputs.expected_commit_sha == github.sha && inputs.operator_confirmation == 'AUTHORIZE_RC11_ROOTLESS_PHYSICAL_ACCEPTANCE' && vars.ONEPANE_PHYSICAL_ACCEPTANCE_ENABLED == 'approved' && vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE != '' }}
     runs-on: [self-hosted, linux, x64]
+    environment: rc11-physical-node-approval
     timeout-minutes: 12
     env:
       ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE: ${{ vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
@@ -133,13 +153,17 @@ jobs:
     name: Real rootless build to immutable Project Library (opt-in)
     # The existing large-transfer smoke uses a mock publisher. This one
     # checks real SQLite, blob persistence, source-only grants and revocation.
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feature/project-workspace-development-environments' && vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE != '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/rc11-policy-worker-diagnostics-integration-20261011' && inputs.expected_commit_sha == github.sha && inputs.operator_confirmation == 'AUTHORIZE_RC11_ROOTLESS_PHYSICAL_ACCEPTANCE' && vars.ONEPANE_PHYSICAL_ACCEPTANCE_ENABLED == 'approved' && vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE != '' }}
     runs-on: [self-hosted, linux, x64]
+    environment: rc11-physical-node-approval
     timeout-minutes: 12
     env:
       ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE: ${{ vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
@@ -170,13 +194,17 @@ jobs:
   physical-rootless-workspace-service:
     name: Real rootless Workspace HTTP broker (opt-in)
     # Isolated from PR triggers; no approved digest => skipped, not passed.
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feature/project-workspace-development-environments' && vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE != '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/rc11-policy-worker-diagnostics-integration-20261011' && inputs.expected_commit_sha == github.sha && inputs.operator_confirmation == 'AUTHORIZE_RC11_ROOTLESS_PHYSICAL_ACCEPTANCE' && vars.ONEPANE_PHYSICAL_ACCEPTANCE_ENABLED == 'approved' && vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE != '' }}
     runs-on: [self-hosted, linux, x64]
+    environment: rc11-physical-node-approval
     timeout-minutes: 12
     env:
       ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE: ${{ vars.ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
@@ -186,3 +214,41 @@ jobs:
         run: go run ./cmd/onepane-node-preflight -require ONEPANE_LARGE_ARTIFACT_SMOKE_IMAGE -strict
       - name: Verify real OCI health response, sibling denial and revocation
         run: go test -tags integration ./internal/workspacebroker -run '^TestRealRootlessWorkspaceHealthBroker$' -v -count=1 -timeout 9m
+
+  physical-acceptance-summary:
+    name: Physical acceptance outcome (fail closed if Node skipped)
+    if: ${{ always() }}
+    needs:
+      - physical-rootless-node
+      - physical-rootless-godot
+      - physical-rootless-large-artifact
+      - physical-rootless-library-e2e
+      - physical-rootless-workspace-service
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require completed physical rootless Node before calling run successful
+        shell: bash
+        env:
+          NODE_RESULT: ${{ needs.physical-rootless-node.result }}
+          GODOT_RESULT: ${{ needs.physical-rootless-godot.result }}
+          ARTIFACT_RESULT: ${{ needs.physical-rootless-large-artifact.result }}
+          LIBRARY_RESULT: ${{ needs.physical-rootless-library-e2e.result }}
+          BROKER_RESULT: ${{ needs.physical-rootless-workspace-service.result }}
+        run: |
+          set -euo pipefail
+          echo "Physical rootless Node: $NODE_RESULT"
+          echo "Optional Godot: $GODOT_RESULT"
+          echo "Optional artifact: $ARTIFACT_RESULT"
+          echo "Optional Library: $LIBRARY_RESULT"
+          echo "Optional broker: $BROKER_RESULT"
+          if [[ "$NODE_RESULT" != "success" ]]; then
+            echo '::error::No successfully completed primary physical rootless Node job: physical acceptance FAILED'
+            exit 1
+          fi
+          for result in "$GODOT_RESULT" "$ARTIFACT_RESULT" "$LIBRARY_RESULT" "$BROKER_RESULT"; do
+            if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
+              echo '::error::An additional physical acceptance job failed or was cancelled'
+              exit 1
+            fi
+          done
+          echo '::notice::Primary physical rootless Node test passed; skipped optional jobs are UNVERIFIED, not accepted'

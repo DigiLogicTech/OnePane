@@ -146,27 +146,43 @@ func (s *Service) ensureWorkspaceAccess(ctx context.Context, workspaceID string)
 // consumed paid/subscription inference or initiated a gateway-mediated action;
 // after restart we do not infer that an in-flight step never happened.
 func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT r.id,t.id,t.revision FROM agent_worker_runs r JOIN tasks t ON t.id=r.task_id WHERE r.status='running' ORDER BY r.started_at,r.id`)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-	type x struct {
-		run, task string
-		rev       int64
-	}
-	var xs []x
-	for rows.Next() {
-		var v x
-		if err := rows.Scan(&v.run, &v.task, &v.rev); err != nil {
-			return 0, err
-		}
-		xs = append(xs, v)
-	}
- if err:=rows.Err();err!=nil{return 0,err}
- n:=0
+ // Startup may encounter thousands of interrupted model jobs. Process
+ // bounded keyset pages, and close the SQLite cursor before opening any
+ // recovery write transaction. OFFSET would skip work as status changes.
+ const pageSize=256
+ type x struct {
+  run,task string
+  rev,startedAt int64
+ }
+ recovered:=0
  var problems []error
- for _,v:=range xs {
+ var lastStartedAt int64
+ var lastRunID string
+ firstPage:=true
+ for{
+  rows,err:=s.db.QueryContext(ctx,`SELECT r.id,t.id,t.revision,r.started_at
+    FROM agent_worker_runs r JOIN tasks t ON t.id=r.task_id
+    WHERE r.status='running'
+      AND (?=1 OR (r.started_at,r.id)>(?,?))
+    ORDER BY r.started_at,r.id LIMIT ?`,
+    firstPage,lastStartedAt,lastRunID,pageSize)
+  if err!=nil{return recovered,errors.Join(append(problems,err)...)}
+  xs:=make([]x,0,pageSize)
+  for rows.Next(){
+   var v x
+   if err=rows.Scan(&v.run,&v.task,&v.rev,&v.startedAt);err!=nil{break}
+   xs=append(xs,v)
+  }
+  if err==nil{err=rows.Err()}
+  closeErr:=rows.Close()
+  if err!=nil||closeErr!=nil{
+   return recovered,errors.Join(append(problems,err,closeErr)...)
+  }
+  if len(xs)==0{break}
+  last:=xs[len(xs)-1]
+  lastStartedAt,lastRunID=last.startedAt,last.run
+  firstPage=false
+  for _,v:=range xs {
   // A crash is NOT evidence an external mutation failed or can be retried.
   // Hold the Task/Attempt transition, recovery audit/outbox and run
   // interruption in one durable commit. A revision race or missing attempt
@@ -197,14 +213,15 @@ func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
    problems=append(problems,fmt.Errorf("run %s: %w",v.run,err))
    continue
   }
-  n++
+  recovered++
+  }
  }
  // Historical partially persisted admissions and externally corrupted
  // records may have no live Agent Worker row. Reconcile those separately,
  // after known in-flight runs, without touching other Task executors.
  orphans,orphanErr:=s.recoverOrphanedAgentAttempts(ctx)
  if orphanErr!=nil{problems=append(problems,orphanErr)}
- return n+orphans,errors.Join(problems...)
+ return recovered+orphans,errors.Join(problems...)
 }
 
 func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {

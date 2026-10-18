@@ -107,8 +107,13 @@ func (s *Service) SetConfig(cfg Config) error {
 	default:
 		return fmt.Errorf("invalid protocol level")
 	}
-	s.cfg = cfg
-	return nil
+ // A config change during a model/tool step could change future context
+ // limits and authority expectations midway through one execution cycle.
+ // Require an idle Worker rather than mutate settings concurrently.
+ if !s.workerCycleMu.TryLock(){return ErrWorkerCycleInProgress}
+ defer s.workerCycleMu.Unlock()
+ s.cfg=cfg
+ return nil
 }
 
 func (s *Service) EnsureSystemPrincipals(ctx context.Context) error {

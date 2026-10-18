@@ -109,3 +109,18 @@ func TestVerifiedV0StaleAttemptCannotCompleteOriginalTask(t *testing.T){
  if err:=w.db.QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=?`,r.ID).Scan(&runState);err!=nil{t.Fatal(err)}
  if taskState!="verifying"||runState!="running"{t.Fatalf("stale Attempt yielded success: %s / %s",taskState,runState)}
 }
+
+func TestPublicTaskCompleteVerifiedPreservesJSONTextColumn(t *testing.T){
+ w,ctx,r,revision,checkpoint,cleanup:=prepareVerifiedWorkerCompletion(t)
+ defer cleanup()
+ verifier:=VerifierPrincipal
+ stored,err:=w.tasks.CompleteVerified(ctx,task.CompleteCommand{
+  TaskID:r.TaskID,ExpectedRevision:revision,CheckpointID:checkpoint,
+  Result:json.RawMessage(`{"public_api":"works"}`),
+  ActorPrincipalID:&verifier,
+ })
+ if err!=nil{t.Fatalf("existing public completion still writes BLOB: %v",err)}
+ if stored.State!=task.StateComplete||string(stored.Result)!=`{"public_api":"works"}`{
+  t.Fatalf("Task public completion did not round-trip JSON TEXT: state=%s result=%s",stored.State,stored.Result)
+ }
+}

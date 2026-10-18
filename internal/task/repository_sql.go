@@ -213,6 +213,13 @@ WHERE id = ? AND revision = ?`, archivedAt, updatedAt, taskID, expectedRevision)
 }
 
 func (r *sqlRepository) Transition(ctx context.Context, tx storage.Tx, tr transitionRecord) error {
+	// SQLite STRICT result_json is TEXT, while transitionRecord.Result holds
+	// JSON bytes. database/sql binds []byte as BLOB, so successful completion
+	// would otherwise roll back every valid checkpoint-backed Task result.
+	var resultText any
+	if tr.Result != nil {
+		resultText = string(tr.Result)
+	}
 	res, err := tx.ExecContext(ctx, `
 UPDATE tasks
 SET state = ?,
@@ -225,7 +232,7 @@ WHERE id = ? AND revision = ? AND state = ?`,
 		tr.To,
 		tr.ReadyAt, tr.ReadyAt,
 		tr.CancelRequestedAt, tr.CancelRequestedAt,
-		tr.Result, tr.Result,
+		resultText, resultText,
 		tr.UpdatedAt,
 		tr.TaskID, tr.ExpectedRevision, tr.From,
 	)

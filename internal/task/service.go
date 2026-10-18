@@ -687,70 +687,80 @@ func IsRevisionConflict(err error) bool { return errors.Is(err, ErrRevisionConfl
 // CompleteVerified is the only task-completion command. It requires a valid
 // checkpoint backed by a passed Verification and refuses completion while an
 // unknown mutation outcome exists for the Task.
+// CompleteVerified preserves the public Task completion contract while
+// sharing the exact durable transition with Agent Worker verified completion.
 func (s *Service) CompleteVerified(ctx context.Context, cmd CompleteCommand) (Task, error) {
-	if strings.TrimSpace(cmd.TaskID) == "" || cmd.ExpectedRevision < 1 || strings.TrimSpace(cmd.CheckpointID) == "" {
-		return Task{}, fmt.Errorf("%w: task id, expected revision and checkpoint id are required", ErrInvalidCommand)
-	}
-	if len(cmd.Result) == 0 {
-		cmd.Result = json.RawMessage(`{}`)
-	}
-	if !json.Valid(cmd.Result) {
-		return Task{}, fmt.Errorf("%w: result must be valid JSON", ErrInvalidCommand)
-	}
-	eventID, err := s.ids.New("evt")
-	if err != nil {
-		return Task{}, err
-	}
-	now := s.clock.UnixMilli()
-
-	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		t, err := s.repo.GetForUpdate(ctx, tx, cmd.TaskID)
-		if err != nil {
-			return err
-		}
-		if t.Revision != cmd.ExpectedRevision {
-			return ErrRevisionConflict
-		}
-		if t.State != StateVerifying || !CanTransition(t.State, StateComplete) {
-			return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, t.State, StateComplete)
-		}
-		valid, err := s.repo.ValidCompletionEvidence(ctx, tx, t.ID, cmd.CheckpointID)
-		if err != nil {
-			return err
-		}
-		if !valid {
-			return ErrVerificationRequired
-		}
-		active, err := s.repo.ActiveAttempt(ctx, tx, t.ID)
-		if err != nil {
-			return err
-		}
-		if active != nil {
-			if active.State != AttemptWaiting {
-				return ErrActiveAttempt
-			}
-			if err := s.repo.TransitionAttempt(ctx, tx, active.ID, active.State, AttemptSucceeded, now); err != nil {
-				return err
-			}
-		}
-		if err := s.repo.Transition(ctx, tx, transitionRecord{
-			TaskID: t.ID, ExpectedRevision: t.Revision, From: t.State, To: StateComplete,
-			UpdatedAt: now, Result: append([]byte(nil), cmd.Result...),
-		}); err != nil {
-			return err
-		}
-		payload, _ := json.Marshal(map[string]any{
-			"task_id": t.ID, "from": t.State, "to": StateComplete,
-			"checkpoint_id": cmd.CheckpointID, "revision": t.Revision + 1,
-		})
-		return s.events.Append(ctx, tx, event.Event{
-			ID: eventID, WorkspaceID: &t.WorkspaceID, Type: "task.completed",
-			AggregateType: "task", AggregateID: t.ID, ActorPrincipalID: cmd.ActorPrincipalID,
-			RequestID: cmd.RequestID, TraceID: cmd.TraceID, Payload: payload, OccurredAt: now,
-		})
+	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		return s.completeVerifiedInTransaction(ctx, tx, cmd, "", "")
 	})
-	if err != nil {
-		return Task{}, err
-	}
+	if err != nil { return Task{}, err }
 	return s.repo.Get(ctx, cmd.TaskID)
+}
+
+// CompleteVerifiedWorkerInTransaction requires the exact original Agent
+// Attempt and principal. The caller also commits its Worker terminal state
+// and verification journal inside the SAME transaction. Model tools cannot
+// invoke this trusted control-plane primitive directly.
+func (s *Service) CompleteVerifiedWorkerInTransaction(
+	ctx context.Context, tx storage.Tx, cmd CompleteCommand,
+	attemptID, workerPrincipalID string,
+) error {
+	if strings.TrimSpace(attemptID)=="" || strings.TrimSpace(workerPrincipalID)=="" {
+		return fmt.Errorf("%w: Worker completion requires original Attempt ownership",ErrInvalidCommand)
+	}
+	return s.completeVerifiedInTransaction(ctx,tx,cmd,attemptID,workerPrincipalID)
+}
+
+func (s *Service) completeVerifiedInTransaction(
+	ctx context.Context, tx storage.Tx, cmd CompleteCommand,
+	expectedAttemptID, workerPrincipalID string,
+) error {
+	if s==nil||tx==nil||strings.TrimSpace(cmd.TaskID)==""||
+		cmd.ExpectedRevision<1||strings.TrimSpace(cmd.CheckpointID)==""{
+		return fmt.Errorf("%w: task id, revision and checkpoint id required",ErrInvalidCommand)
+	}
+	if len(cmd.Result)==0{cmd.Result=json.RawMessage(`{}`)}
+	if !json.Valid(cmd.Result){return fmt.Errorf("%w: result must be valid JSON",ErrInvalidCommand)}
+	t,err:=s.repo.GetForUpdate(ctx,tx,cmd.TaskID)
+	if err!=nil{return err}
+	if t.Revision!=cmd.ExpectedRevision{return ErrRevisionConflict}
+	if t.State!=StateVerifying||!CanTransition(t.State,StateComplete){
+		return fmt.Errorf("%w: %s -> %s",ErrInvalidTransition,t.State,StateComplete)
+	}
+	valid,err:=s.repo.ValidCompletionEvidence(ctx,tx,t.ID,cmd.CheckpointID)
+	if err!=nil{return err}
+	if !valid{return ErrVerificationRequired}
+	active,err:=s.repo.ActiveAttempt(ctx,tx,t.ID)
+	if err!=nil{return err}
+	if expectedAttemptID!=""{
+		if active==nil||active.ID!=expectedAttemptID||active.WorkerPrincipalID==nil||
+			*active.WorkerPrincipalID!=workerPrincipalID {
+			return ErrInvalidAttempt
+		}
+		var count int
+		err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM task_attempts
+			WHERE task_id=? AND status IN ('created','queued','running','waiting')`,t.ID).Scan(&count)
+		if err!=nil{return err}
+		if count!=1{return ErrInvalidAttempt}
+	}
+	now:=s.clock.UnixMilli()
+	if active!=nil{
+		if active.State!=AttemptWaiting{return ErrActiveAttempt}
+		if err:=s.repo.TransitionAttempt(ctx,tx,active.ID,active.State,AttemptSucceeded,now);err!=nil{return err}
+	}
+	if err:=s.repo.Transition(ctx,tx,transitionRecord{
+		TaskID:t.ID,ExpectedRevision:t.Revision,From:t.State,To:StateComplete,
+		UpdatedAt:now,Result:append([]byte(nil),cmd.Result...),
+	});err!=nil{return err}
+	eventID,err:=s.ids.New("evt")
+	if err!=nil{return err}
+	payload,_:=json.Marshal(map[string]any{
+		"task_id":t.ID,"from":t.State,"to":StateComplete,
+		"checkpoint_id":cmd.CheckpointID,"revision":t.Revision+1,
+	})
+	return s.events.Append(ctx,tx,event.Event{
+		ID:eventID,WorkspaceID:&t.WorkspaceID,Type:"task.completed",
+		AggregateType:"task",AggregateID:t.ID,ActorPrincipalID:cmd.ActorPrincipalID,
+		RequestID:cmd.RequestID,TraceID:cmd.TraceID,Payload:payload,OccurredAt:now,
+	})
 }

@@ -763,12 +763,8 @@ func (s *Service) handleComplete(ctx context.Context, run Run, t task.Task, resp
 	if err != nil {
 		return s.failRun(ctx, run, res, err)
 	}
-	_, err = s.tasks.CompleteVerified(ctx, task.CompleteCommand{TaskID: cur.ID, ExpectedRevision: cur.Revision, CheckpointID: cp.ID, Result: p.Result, ActorPrincipalID: &verifier})
-	if err != nil {
-		return s.failRun(ctx, run, res, err)
-	}
-	_ = s.finishRun(ctx, run.ID, RunSucceeded, "")
-	_ = s.journal(ctx, run.ID, "verification", "succeeded", nil, nil, strPtr("complete"), strPtr(cp.ID), map[string]any{"verification_id": v.ID, "checkpoint_id": cp.ID, "level": "V0"})
-	res.Status = "complete"
-	return res
+	// Durable V0 completion is one Task/Attempt/Worker/audit commit.
+	// A partially committed completion must never be presented as success.
+	return s.completeVerifiedWorkerRun(ctx,run,res,cur.Revision,
+		cp.ID,p.Result,v.ID)
 }

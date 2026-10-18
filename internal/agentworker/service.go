@@ -234,33 +234,38 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
 	// Continue independent work after a corrupt waiting continuation.
 	// Return the actionable per-run error with any completed tick results.
 	wakeErr:=s.syncResumedRuns(ctx)
-	_, admissionErr := s.admitCreated(ctx, limit)
-	runs, err := s.activeRuns(ctx, limit)
-	if err != nil {
-		return nil, errors.Join(wakeErr,admissionErr,err)
+	_,admissionErr:=s.admitCreated(ctx,limit)
+	// Per-Task admissions are independent. A corrupt CREATED Task cannot
+	// starve already running Workers or eligible siblings in this tick.
+	runs,activeErr:=s.activeRuns(ctx,limit)
+	// Preserve the exact corrupt Worker IDs for operator recovery, but do
+	// not strand independent running/ready Tasks in the same tick.
+	tickErrors:=errors.Join(wakeErr,admissionErr,activeErr)
+	out:=make([]TickResult,0,limit)
+	for _,r:=range runs{
+		out=append(out,s.step(ctx,r))
+		if len(out)>=limit{return out,tickErrors}
 	}
-	out := make([]TickResult, 0, limit)
-	for _, r := range runs {
-		out = append(out, s.step(ctx, r))
-		if len(out) >= limit {
-			return out,errors.Join(wakeErr,admissionErr)
-		}
-	}
-	ready, err := s.readyTasks(ctx, limit-len(out))
-	if err != nil {
-		return out,errors.Join(wakeErr,admissionErr,err)
-	}
-	for _, t := range ready {
-		r, res := s.startRun(ctx, t)
-		if res.Error != "" {
-			out = append(out, res)
+	ready,readyErr:=s.readyTasks(ctx,limit-len(out))
+	// A corrupt eligible Task is not authority to stall healthy READY Tasks.
+	// Retain its ID in the Tick error while admitting independent siblings.
+	tickErrors=errors.Join(tickErrors,readyErr)
+	for _,t:=range ready{
+		r,res:=s.startRun(ctx,t)
+		if res.Error!=""{
+			out=append(out,res)
 			continue
 		}
-		out = append(out, s.step(ctx, r))
+		out=append(out,s.step(ctx,r))
 	}
-	return out,errors.Join(wakeErr,admissionErr)
+	return out,tickErrors
 }
 
+// admitCreated pages independently eligible CREATED Tasks by stable priority
+// cursor until LIMIT successful admissions are found. The old LIMIT-before-
+// transition behavior repeatedly selected the same corrupt high-priority
+// records, starving all healthy lower-priority Tasks on every Tick.
+// Failed Tasks are never silently marked READY, and their IDs remain visible.
 func (s *Service) admitCreated(ctx context.Context,limit int)(int,error){
  if limit<=0{return 0,nil}
  const pageSize=64
@@ -539,38 +544,67 @@ func (s *Service) activeRuns(ctx context.Context, limit int) ([]Run, error) {
 	return out, rows.Err()
 }
 
-func (s *Service) readyTasks(ctx context.Context, limit int) ([]task.Task, error) {
-	if limit <= 0 {
-		return nil, nil
-	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id FROM tasks t WHERE state='ready'
-AND NOT EXISTS (SELECT 1 FROM task_attempts a WHERE a.task_id=t.id AND a.status IN ('created','queued','running','waiting'))
-AND NOT EXISTS (SELECT 1 FROM routine_occurrences ro JOIN project_routine_bindings b ON b.routine_id=ro.routine_id AND b.status='active' AND b.action_kind='app_command' WHERE ro.task_id=t.id)
-AND NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks dep ON dep.id=d.depends_on_task_id
- WHERE d.task_id=t.id AND d.dependency_type='hard'
- AND (dep.state<>'complete' OR dep.archived_at IS NOT NULL))
-ORDER BY priority DESC,COALESCE(ready_at,created_at),id LIMIT ?`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	out := make([]task.Task, 0, len(ids))
-	for _, id := range ids {
-		t, err := s.tasks.Get(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, t)
-	}
-	return out, rows.Err()
+func (s *Service) readyTasks(ctx context.Context,limit int)([]task.Task,error){
+ if limit<=0{return nil,nil}
+ const pageSize=64
+ first:=1
+ lastPriority:=0
+ var lastTime int64
+ lastID:=""
+ out:=make([]task.Task,0,limit)
+ var problems []error
+ var overflow int
+ for len(out)<limit{
+  rows,err:=s.db.QueryContext(ctx,`SELECT t.id,t.priority,
+   COALESCE(t.ready_at,t.created_at)
+   FROM tasks t WHERE t.state='ready'
+   AND NOT EXISTS(SELECT 1 FROM task_attempts a WHERE a.task_id=t.id
+    AND a.status IN ('created','queued','running','waiting'))
+   AND NOT EXISTS(SELECT 1 FROM routine_occurrences ro
+    JOIN project_routine_bindings b ON b.routine_id=ro.routine_id
+     AND b.status='active' AND b.action_kind='app_command'
+    WHERE ro.task_id=t.id)
+   AND NOT EXISTS(SELECT 1 FROM task_dependencies d
+    JOIN tasks dep ON dep.id=d.depends_on_task_id
+    WHERE d.task_id=t.id AND d.dependency_type='hard'
+     AND (dep.state<>'complete' OR dep.archived_at IS NOT NULL))
+   AND (?=1 OR t.priority<? OR
+    (t.priority=? AND (COALESCE(t.ready_at,t.created_at)>? OR
+     (COALESCE(t.ready_at,t.created_at)=? AND t.id>?))))
+   ORDER BY t.priority DESC,COALESCE(t.ready_at,t.created_at),t.id
+   LIMIT ?`,first,lastPriority,lastPriority,lastTime,lastTime,lastID,pageSize)
+  if err!=nil{return out,errors.Join(append(problems,err)...)}
+  type row struct{id string;priority int;at int64}
+  page:=make([]row,0,pageSize)
+  for rows.Next(){
+   var v row
+   if err=rows.Scan(&v.id,&v.priority,&v.at);err!=nil{break}
+   page=append(page,v)
+  }
+  if err==nil{err=rows.Err()}
+  closeErr:=rows.Close()
+  if err==nil{err=closeErr}
+  if err!=nil{return out,errors.Join(append(problems,err)...)}
+  if len(page)==0{break}
+  first=0
+  for _,item:=range page{
+   lastID,lastPriority,lastTime=item.id,item.priority,item.at
+   t,loadErr:=s.tasks.Get(ctx,item.id)
+   if loadErr!=nil{
+    if len(problems)<32{
+     problems=append(problems,fmt.Errorf("read eligible Task %s: %w",item.id,loadErr))
+    }else{overflow++}
+    continue
+   }
+   if t.State!=task.StateReady{continue}
+   out=append(out,t)
+   if len(out)>=limit{break}
+  }
+  if len(page)<pageSize{break}
+ }
+ if overflow>0{problems=append(problems,
+  fmt.Errorf("%d additional corrupt READY Tasks require operator review",overflow))}
+ return out,errors.Join(problems...)
 }
 
 const runSelect = `SELECT r.id,r.workspace_id,r.task_id,r.attempt_id,r.worker_principal_id,r.status,r.role_name,r.capability_id,r.protocol_level,r.max_steps,r.step_count,r.max_replans,r.replan_count,r.max_escalations,r.escalation_count,r.route_policy_json,r.continuation_json,r.last_candidate_kind,r.last_candidate_id,r.last_error,r.revision,r.started_at,r.updated_at,r.completed_at FROM agent_worker_runs r`

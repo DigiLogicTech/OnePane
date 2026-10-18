@@ -48,6 +48,11 @@ type readyQueuePosition struct {
 }
 
 type Service struct {
+ // Serialize complete scheduler cycles, including slow inference and
+ // proposal application. Merely CASing the dispatch revision cannot
+ // prevent a second Tick from starting another step while a previous
+ // inference request is still in flight.
+ workerCycleMu sync.Mutex
  // One-slot scheduler calls alternate Active and READY work when both are
  // present. The mutex protects only the preference, never executes a step.
  tickFairnessMu sync.Mutex
@@ -188,6 +193,10 @@ func (s *Service) ensureWorkspaceAccess(ctx context.Context, workspaceID string)
 // consumed paid/subscription inference or initiated a gateway-mediated action;
 // after restart we do not infer that an in-flight step never happened.
 func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
+ // Startup crash recovery must not interrupt a live scheduler step in
+ // this process. Refuse concurrent recovery rather than guess outcome.
+ if !s.workerCycleMu.TryLock(){return 0,ErrWorkerCycleInProgress}
+ defer s.workerCycleMu.Unlock()
  // Startup may encounter thousands of interrupted model jobs. Process
  // bounded keyset pages, and close the SQLite cursor before opening any
  // recovery write transaction. OFFSET would skip work as status changes.
@@ -267,6 +276,10 @@ func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
 }
 
 func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
+ // Do not overlap read/route/inference/proposal cycles on the same Service.
+ // The StepCount revision CAS is not an in-flight execution lease.
+ if !s.workerCycleMu.TryLock(){return nil,ErrWorkerCycleInProgress}
+ defer s.workerCycleMu.Unlock()
  if limit<=0||limit>100 {limit=10}
  if err:=s.EnsureSystemPrincipals(ctx);err!=nil{return nil,err}
 

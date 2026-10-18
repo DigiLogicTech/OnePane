@@ -345,16 +345,28 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
  out:=make([]TickResult,0,limit)
  for _,r:=range runs{
   out=append(out,s.step(ctx,r))
+  // A terminal/wait/completion persistence failure may have left this
+  // Attempt running. Do not dispatch the NEXT selected Task in this
+  // same cycle after a step has armed the recovery halt.
+  if s.dispatchReconciliationFailed{
+   return out,errors.Join(tickErrors,ErrDispatchRequiresReconciliation)
+  }
   if len(out)>=limit{return out,tickErrors}
  }
  for _,t:=range ready{
   if len(out)>=limit{break}
+  if s.dispatchReconciliationFailed{
+   return out,errors.Join(tickErrors,ErrDispatchRequiresReconciliation)
+  }
   r,res:=s.startRun(ctx,t)
   if res.Error!=""{
    out=append(out,res)
    continue
   }
   out=append(out,s.step(ctx,r))
+  if s.dispatchReconciliationFailed{
+   return out,errors.Join(tickErrors,ErrDispatchRequiresReconciliation)
+  }
  }
  return out,tickErrors
 }

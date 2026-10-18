@@ -667,34 +667,18 @@ func (s *Service) handleEscalate(ctx context.Context, run Run, resp agentprotoco
 func (s *Service) handleHuman(ctx context.Context, run Run, t task.Task, resp agentprotocol.Response, res TickResult) TickResult {
 	var p humanProposal
 	_ = json.Unmarshal(resp.Proposal, &p)
-	cont, _ := json.Marshal(map[string]any{"human_input_required": p.Question})
-	if err := s.updateRun(ctx, run.ID, run.Revision, RunWaiting, cont, nil, 0, 0, nil, nil, nil); err != nil {
-		return failedResult(res, err)
-	}
-	cur, _ := s.tasks.Get(ctx, t.ID)
-	actor := WorkerPrincipal
-	_, err := s.tasks.WaitApproval(ctx, task.TransitionCommand{TaskID: cur.ID, ExpectedRevision: cur.Revision, ActorPrincipalID: &actor, Reason: "human input required: " + boundedString(p.Question, 512)})
-	if err != nil {
-		return s.failRun(ctx, run, res, err)
-	}
-	res.Status = "waiting_human"
-	return res
+	question := boundedString(p.Question, 512)
+	cont, _ := json.Marshal(map[string]any{"human_input_required": question})
+	return s.waitRunAtomically(ctx, run, res, task.StateWaitingApproval,
+		"human input required", cont, "human", "waiting_human")
 }
 func (s *Service) handleWait(ctx context.Context, run Run, t task.Task, resp agentprotocol.Response, res TickResult) TickResult {
 	var p waitProposal
 	_ = json.Unmarshal(resp.Proposal, &p)
-	cont, _ := json.Marshal(map[string]any{"wait_reason": p.Reason})
-	if err := s.updateRun(ctx, run.ID, run.Revision, RunWaiting, cont, nil, 0, 0, nil, nil, nil); err != nil {
-		return failedResult(res, err)
-	}
-	cur, _ := s.tasks.Get(ctx, t.ID)
-	actor := WorkerPrincipal
-	_, err := s.tasks.Pause(ctx, task.TransitionCommand{TaskID: cur.ID, ExpectedRevision: cur.Revision, ActorPrincipalID: &actor, Reason: boundedString(p.Reason, 512)})
-	if err != nil {
-		return s.failRun(ctx, run, res, err)
-	}
-	res.Status = "paused"
-	return res
+	reason := boundedString(p.Reason, 512)
+	cont, _ := json.Marshal(map[string]any{"wait_reason": reason})
+	return s.waitRunAtomically(ctx, run, res, task.StatePaused,
+		reason, cont, "wait", "paused")
 }
 func (s *Service) handleFail(ctx context.Context, run Run, t task.Task, resp agentprotocol.Response, res TickResult) TickResult {
 	var p failProposal

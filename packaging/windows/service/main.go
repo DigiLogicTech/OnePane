@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"crypto/rand"
+	"errors"
 	"encoding/hex"
 	"strconv"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
  "strings"
  "gopkg.in/yaml.v3"
+	"golang.org/x/sys/windows/registry"
  "github.com/DigiLogicTech/OnePane/internal/config"
 	"sync"
 	"syscall"
@@ -95,7 +97,12 @@ func main() {
 func serviceEvidence(stage startupevidence.Stage, outcome startupevidence.Outcome) {
  programData:=os.Getenv("ProgramData")
  if programData==""{programData=`C:\ProgramData`}
- root:=configuredOnePaneDataRoot(filepath.Join(programData,"OnePane"))
+ root,err:=configuredOnePaneDataRoot(filepath.Join(programData,"OnePane"))
+ if err!=nil {
+  // Do not write private diagnostic material into the wrong data root.
+  fmt.Fprintf(os.Stderr,"OnePane service startup evidence unavailable: %v\n",err)
+  return
+ }
  _=startupevidence.Record(root,startupevidence.WindowsService,stage,outcome)
 }
 
@@ -249,9 +256,36 @@ func onePaneRegistryValue(name string) string {
  }
  return ""
 }
-func configuredOnePaneDataRoot(fallback string) string {
- if value:=strings.TrimSpace(onePaneRegistryValue("DataRoot"));value!="" && filepath.IsAbs(value){return filepath.Clean(value)}
- return fallback
+// A DataRoot explicitly written by the installer is authoritative. Never
+// launch a second, empty OnePane on C: when that registry value is corrupt,
+// unreadable, or relative; the legacy default is used only if the setting is
+// genuinely absent. This function does not create directories or change data.
+func configuredOnePaneDataRoot(fallback string) (string, error) {
+ key, err := registry.OpenKey(registry.LOCAL_MACHINE,
+  `SOFTWARE\DigiLogic\OnePane`, registry.QUERY_VALUE|registry.WOW64_64KEY)
+ if errors.Is(err, registry.ErrNotExist) {
+  return resolveOnePaneDataRoot(fallback, "", false)
+ }
+ if err != nil { return "", fmt.Errorf("open installer data-root configuration: %w", err) }
+ defer key.Close()
+
+ value, _, err := key.GetStringValue("DataRoot")
+ if errors.Is(err, registry.ErrNotExist) {
+  return resolveOnePaneDataRoot(fallback, "", false)
+ }
+ if err != nil { return "", fmt.Errorf("read installer DataRoot: %w", err) }
+ return resolveOnePaneDataRoot(fallback, value, true)
+}
+
+// Separated for Windows-native deterministic regression without touching
+// HKLM, service registrations or the operator's selected storage drive.
+func resolveOnePaneDataRoot(fallback, configured string, present bool) (string, error) {
+ if !present { return filepath.Clean(fallback), nil }
+ value := strings.TrimSpace(configured)
+ if value == "" || !filepath.IsAbs(value) {
+  return "", fmt.Errorf("invalid installer DataRoot: expected absolute persistent path")
+ }
+ return filepath.Clean(value), nil
 }
 func ensureOnePaneConfig(root string)error{
  path:=filepath.Join(root,"config.yaml")
@@ -286,7 +320,8 @@ func runBackend() (retErr error) {
 	if programData == "" {
 		programData = `C:\ProgramData`
 	}
-	dataDir := configuredOnePaneDataRoot(filepath.Join(programData,"OnePane"))
+	dataDir, err := configuredOnePaneDataRoot(filepath.Join(programData,"OnePane"))
+ if err != nil { return fmt.Errorf("resolve persistent installer data root: %w", err) }
 	logDir := filepath.Join(dataDir, "logs")
 	if err:=ensureOnePaneConfig(dataDir);err!=nil{return fmt.Errorf("prepare OnePane persistent configuration: %w",err)}
 	if err := os.MkdirAll(logDir, 0o755); err != nil {

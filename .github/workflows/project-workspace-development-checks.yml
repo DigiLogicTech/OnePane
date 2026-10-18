@@ -268,6 +268,12 @@ jobs:
           # Windows. Does not replace a populated RC10->RC11 installer upgrade
           # or verify persistence on the operator's selected data drive.
           go test -count=1 -timeout 5m ./internal/storage/sqlite ./internal/startupevidence
+      - name: Native Windows persistent drive-root resolution
+        shell: pwsh
+        run: |
+          # Must not create an accidental empty C: instance when an explicitly
+          # configured non-C installer path is corrupt or unreadable.
+          go test -count=1 -timeout 3m ./packaging/windows/service
       - name: Test allowlisted MSI analysis against synthetic secret-bearing logs
         shell: powershell
         run: .\scripts\test_offline_msi_evidence.ps1

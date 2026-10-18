@@ -57,14 +57,20 @@ const uncertainDispatchRecoveryReason = "agent_worker_dispatch_outcome_requires_
 // safely interrupted the still-running Worker. Never guess external outcome.
 func (s *Service) interruptDispatchForReconciliation(
 	ctx context.Context, run Run, res TickResult,
-	stepKind, candidateKind, candidateID, resultRef string, cause error,
+	stepKind, candidateKind, candidateID, resultRef string, _ error,
 ) TickResult {
 	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
 		var revision int64
 		var runStatus, taskState string
 		err := tx.QueryRowContext(ctx, `SELECT r.status,t.state,t.revision
-			FROM agent_worker_runs r JOIN tasks t ON t.id=r.task_id
-			WHERE r.id=? AND r.task_id=? AND r.attempt_id=? AND r.revision=?`,
+			FROM agent_worker_runs r
+			JOIN tasks t ON t.id=r.task_id
+			JOIN task_attempts a ON a.id=r.attempt_id AND a.task_id=t.id
+				AND a.status IN ('created','queued','running','waiting')
+			WHERE r.id=? AND r.task_id=? AND r.attempt_id=? AND r.revision=?
+				AND NOT EXISTS (SELECT 1 FROM task_attempts other
+					WHERE other.task_id=t.id AND other.id<>r.attempt_id
+						AND other.status IN ('created','queued','running','waiting'))`,
 			run.ID, run.TaskID, run.AttemptID, run.Revision,
 		).Scan(&runStatus, &taskState, &revision)
 		if err != nil { return err }
@@ -92,7 +98,7 @@ func (s *Service) interruptDispatchForReconciliation(
 			&candidateKind, &candidateID, nil, &resultRef,
 			map[string]any{
 				"reason": uncertainDispatchRecoveryReason,
-				"error": boundedString(cause.Error(), 2048),
+				"outcome": "unknown_or_response_unreadable",
 				"action": "operator_reconciliation_required",
 			})
 	})

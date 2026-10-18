@@ -81,3 +81,26 @@ func TestUnknownDispatchFailedCommitHaltsSchedulingUntilRecovery(t *testing.T){
   t.Fatalf("startup did not hold uncertain work: task=%s attempt=%s run=%s",state,attempt,runState)
  }
 }
+
+func TestUnknownDispatchRefusesStaleAttemptOwnership(t *testing.T){
+ worker,ctx,run,cleanup:=prepareUnknownDispatch(t);defer cleanup()
+ // Synthetic corruption: the durable Worker still claims this Attempt,
+ // but it is no longer active. Do not interrupt a different Attempt.
+ if _,err:=worker.db.ExecContext(ctx,`UPDATE task_attempts
+  SET status='failed' WHERE id=?`,run.AttemptID);err!=nil{t.Fatal(err)}
+ result:=worker.interruptDispatchForReconciliation(ctx,run,
+  TickResult{TaskID:run.TaskID,RunID:run.ID},"model","model_deployment",
+  "candidate-1","inference-1",errors.New("unknown transport outcome"))
+ if result.Status!="failed"||!worker.dispatchReconciliationFailed{
+  t.Fatalf("stale original Attempt was accepted: %+v",result)
+ }
+ var state,runState string
+ if err:=worker.db.QueryRowContext(ctx,`SELECT state FROM tasks WHERE id=?`,run.TaskID).Scan(&state);err!=nil{t.Fatal(err)}
+ if err:=worker.db.QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=?`,run.ID).Scan(&runState);err!=nil{t.Fatal(err)}
+ if state!="running"||runState!="running"{
+  t.Fatalf("invalid Attempt partially mutated durable records: task=%s run=%s",state,runState)
+ }
+ if _,err:=worker.Tick(ctx,1);!errors.Is(err,ErrDispatchRequiresReconciliation){
+  t.Fatalf("corrupt in-flight result was retried: %v",err)
+ }
+}

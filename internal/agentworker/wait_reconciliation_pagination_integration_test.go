@@ -56,9 +56,23 @@ func TestWaitingWorkerReconciliationAcrossPagesWithOneDBConnection(t *testing.T)
    "waiting for local model resources","route",
    map[string]any{"kind":"resource_wait"},nil);err!=nil{t.Fatal(err)}
  }
- err=worker.syncResumedRuns(ctx)
- if err==nil||!strings.Contains(err.Error(),badRunID){
-  t.Fatalf("corrupt wait was not separately reported: %v",err)
+ // A single Tick may inspect only 128 of 261 waiting runs. With one
+ // connection, processing must still close each page cursor before writes.
+ // Three cycles reach the full backlog; the fourth/fifth verify safe wrap.
+ sawCorrupt:=false
+ for cycle:=0;cycle<3;cycle++ {
+  err=worker.syncResumedRuns(ctx)
+  if err!=nil && strings.Contains(err.Error(),badRunID){sawCorrupt=true}
+  var resumed int
+  if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*)
+   FROM agent_worker_runs r JOIN tasks t ON t.id=r.task_id
+   JOIN task_attempts a ON a.id=r.attempt_id
+   WHERE r.status='running' AND t.state='running' AND a.status='running'`).
+   Scan(&resumed);err!=nil{t.Fatal(err)}
+  if resumed>(cycle+1)*128{
+   t.Fatalf("waiting reconciler exceeded its 128-row tick budget: cycle=%d resumed=%d",
+    cycle,resumed)
+  }
  }
  var resumed,parked int
  if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM agent_worker_runs r
@@ -72,11 +86,15 @@ func TestWaitingWorkerReconciliationAcrossPagesWithOneDBConnection(t *testing.T)
  if resumed!=healthy||parked!=1{
   t.Fatalf("paged wake lost independent work: resumed=%d parked=%d",resumed,parked)
  }
- // Another tick must be idempotent: no duplicate Attempts or second wake.
- if err:=worker.syncResumedRuns(ctx);err==nil||
-  !strings.Contains(err.Error(),badRunID){
-  t.Fatalf("corrupt wait was silently skipped on repeat: %v",err)
+ for cycle:=0;cycle<2;cycle++{
+  err=worker.syncResumedRuns(ctx)
+  if err!=nil && strings.Contains(err.Error(),badRunID){sawCorrupt=true}
  }
+ if !sawCorrupt{
+  t.Fatalf("corrupt wait was silently skipped over all bounded cycles")
+ }
+ // None of the completed waiting Tasks may create a new Attempt as the
+ // cursor wraps around a queue now containing one unresolved record.
  var attempts int
  if err:=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM task_attempts`).
   Scan(&attempts);err!=nil{t.Fatal(err)}

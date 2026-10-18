@@ -75,7 +75,8 @@ func TestLockHolderChild(t *testing.T) {
 	if _, err := os.Stdout.WriteString("ONEPANE_LOCK_HELD\n"); err != nil { t.Fatal(err) }
 	// Parent terminates this helper without running defers to simulate a
 	// daemon crash while a model is active. No PID or TTL cleanup is needed.
-	select {}
+	// Sleep (rather than a bare select) avoids a Go test helper deadlock panic.
+	time.Sleep(time.Hour)
 }
 
 func TestKernelReleasesInstanceLockAfterProcessCrash(t *testing.T) {

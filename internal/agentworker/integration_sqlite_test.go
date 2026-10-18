@@ -285,3 +285,34 @@ func TestRunningWorkerCannotReasonAfterProjectOrWorkspaceArchived(t *testing.T){
 	  WHERE task_id IN (?,?)`,worldRun.TaskID,storyRun.TaskID).Scan(&inferences);err!=nil{t.Fatal(err)}
 	if inferences!=0{t.Fatalf("archived scope dispatched %d inference requests",inferences)}
 }
+
+func TestRestartRecoveryRequiresOriginalAttemptPrincipal(t *testing.T) {
+ ctx:=context.Background()
+ db,err:=sqlite.Open(filepath.Join(t.TempDir(),"owner-recovery.db"))
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ if err:=db.Migrate(ctx);err!=nil{t.Fatal(err)}
+ now:=clock.Real{}.UnixMilli()
+ if _,err:=db.SQL().ExecContext(ctx,`INSERT INTO workspaces(id,name,status,revision,created_at,updated_at)
+  VALUES('ws','Workspace','active',1,?,?)`,now,now);err!=nil{t.Fatal(err)}
+ tasks:=task.NewService(db.SQL(),db,clock.Real{})
+ worker:=New(db.SQL(),db,clock.Real{},"local",tasks,nil,nil,nil,nil,nil,nil,nil,nil,nil,nil)
+ if err:=worker.ensureWorkspaceAccess(ctx,"ws");err!=nil{t.Fatal(err)}
+ created,err:=tasks.Create(ctx,task.CreateCommand{WorkspaceID:"ws",Objective:"original Attempt owner"})
+ if err!=nil{t.Fatal(err)}
+ ready,err:=tasks.MarkReady(ctx,task.TransitionCommand{TaskID:created.ID,ExpectedRevision:created.Revision})
+ if err!=nil{t.Fatal(err)}
+ run,res:=worker.startRun(ctx,ready)
+ if res.Error!=""{t.Fatal(res.Error)}
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE task_attempts SET worker_principal_id=? WHERE id=?`,AuthorityPrincipal,run.AttemptID);err!=nil{t.Fatal(err)}
+ if n,err:=worker.RecoverLostRuns(ctx);err==nil||n!=0{
+  t.Fatalf("foreign Attempt owner accepted: recovered=%d err=%v",n,err)
+ }
+ var ts,rs string
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT state FROM tasks WHERE id=?`,run.TaskID).Scan(&ts);err!=nil{t.Fatal(err)}
+ if err:=db.SQL().QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=?`,run.ID).Scan(&rs);err!=nil{t.Fatal(err)}
+ if ts!="running"||rs!="running"{t.Fatalf("foreign ownership mutated: %s/%s",ts,rs)}
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE task_attempts SET worker_principal_id=? WHERE id=?`,WorkerPrincipal,run.AttemptID);err!=nil{t.Fatal(err)}
+ n,err:=worker.RecoverLostRuns(ctx)
+ if err!=nil||n!=1{t.Fatalf("original owner recovery failed: n=%d err=%v",n,err)}
+}

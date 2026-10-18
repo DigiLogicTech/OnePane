@@ -247,9 +247,27 @@ func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
   // interruption in one durable commit. A revision race or missing attempt
   // rolls back *all* records, leaving an explicit recovery error.
   err:=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx) error{
-   var status string
-   if err:=tx.QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=? AND task_id=?`,v.run,v.task).Scan(&status);err!=nil{return err}
-   if status!=string(RunRunning){return fmt.Errorf("worker recovery run %s is no longer running",v.run)}
+   // Recheck the exact active original Attempt rather than allowing
+   // the Task recovery primitive to select another Attempt.
+   var status, attemptStatus string
+   var attemptPrincipal sql.NullString
+   var activeCount int
+   err:=tx.QueryRowContext(ctx,`SELECT r.status,a.status,a.worker_principal_id,
+     (SELECT COUNT(*) FROM task_attempts other
+       WHERE other.task_id=r.task_id
+         AND other.status IN ('created','queued','running','waiting'))
+     FROM agent_worker_runs r
+     JOIN tasks t ON t.id=r.task_id AND t.workspace_id=r.workspace_id
+     JOIN task_attempts a ON a.id=r.attempt_id AND a.task_id=t.id
+     WHERE r.id=? AND r.task_id=? AND t.revision=?`,
+     v.run,v.task,v.rev).Scan(&status,&attemptStatus,&attemptPrincipal,&activeCount)
+   if err!=nil{return fmt.Errorf("Worker recovery identity unavailable: %w",err)}
+   if status!=string(RunRunning)||activeCount!=1||
+     (attemptStatus!="created"&&attemptStatus!="queued"&&
+      attemptStatus!="running"&&attemptStatus!="waiting")||
+     !attemptPrincipal.Valid||attemptPrincipal.String!=WorkerPrincipal{
+     return ErrInvalidWorkerState
+   }
    actor:=AuthorityPrincipal
    if err:=s.tasks.InterruptForRecoveryInTransaction(ctx,tx,task.TransitionCommand{
     TaskID:v.task,ExpectedRevision:v.rev,ActorPrincipalID:&actor,

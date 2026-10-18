@@ -55,7 +55,7 @@ func(s *Service) recoverOrphanedAgentAttempts(ctx context.Context)(int,error){
    SELECT 1 FROM agent_worker_runs r
    WHERE r.attempt_id=a.id AND r.task_id=a.task_id
     AND r.workspace_id=t.workspace_id
-    AND r.status IN ('running','waiting')
+    AND r.status IN ('running','waiting','blocked')
   )
   AND (?=1 OR (t.created_at,t.id,a.attempt_number,a.id)>(?,?,?,?))
  ORDER BY t.created_at,t.id,a.attempt_number,a.id LIMIT ?`,
@@ -92,7 +92,7 @@ func(s *Service) recoverOrphanedAgentAttempts(ctx context.Context)(int,error){
     AND NOT EXISTS(
      SELECT 1 FROM agent_worker_runs r WHERE r.attempt_id=a.id
       AND r.task_id=t.id AND r.workspace_id=t.workspace_id
-      AND r.status IN ('running','waiting')
+      AND r.status IN ('running','waiting','blocked')
     )`,c.AttemptID,c.TaskID,c.Revision,WorkerPrincipal).
     Scan(&currentAttemptID)
    if errors.Is(err,sql.ErrNoRows){return task.ErrRevisionConflict}

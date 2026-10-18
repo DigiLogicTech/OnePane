@@ -64,3 +64,24 @@ func TestIndependentAssuranceStaleAttemptRejected(t *testing.T){
   t.Fatalf("stale Attempt silently parked: %+v",out)
  }
 }
+
+func TestPendingIndependentAssuranceIsNotRecoveredAsOrphan(t *testing.T) {
+ w,ctx,r,_,_,cleanup:=prepareVerifiedWorkerCompletion(t)
+ defer cleanup()
+ out:=w.parkWorkerForIndependentAssurance(ctx,r,
+  TickResult{TaskID:r.TaskID,RunID:r.ID},json.RawMessage(`{"verification_id":"pending"}`),
+  "verification-pending","V2")
+ if out.Status!="blocked_verification"{t.Fatalf("cannot establish pending assurance: %+v",out)}
+ n,err:=w.RecoverLostRuns(ctx)
+ if err!=nil||n!=0{t.Fatalf("pending assurance misclassified as orphan: n=%d err=%v",n,err)}
+ var ts,as,rs string
+ if err:=w.db.QueryRowContext(ctx,`SELECT state FROM tasks WHERE id=?`,r.TaskID).Scan(&ts);err!=nil{t.Fatal(err)}
+ if err:=w.db.QueryRowContext(ctx,`SELECT status FROM task_attempts WHERE id=?`,r.AttemptID).Scan(&as);err!=nil{t.Fatal(err)}
+ if err:=w.db.QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=?`,r.ID).Scan(&rs);err!=nil{t.Fatal(err)}
+ if ts!="verifying"||as!="waiting"||rs!="blocked"{
+  t.Fatalf("pending assurance was interrupted: Task=%s Attempt=%s Worker=%s",ts,as,rs)
+ }
+ var events int
+ if err:=w.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM events WHERE aggregate_id=? AND event_type='task.attempt_interrupted'`,r.TaskID).Scan(&events);err!=nil{t.Fatal(err)}
+ if events!=0{t.Fatalf("unexpected recovery event: %d",events)}
+}

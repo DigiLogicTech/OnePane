@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+ "sync"
 
 	"github.com/DigiLogicTech/OnePane/internal/agentruntime"
 	"github.com/DigiLogicTech/OnePane/internal/artifact"
@@ -26,7 +27,19 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/verification"
 )
 
+type createdAdmissionPosition struct {
+ priority int
+ createdAt int64
+ taskID string
+ valid bool
+}
+
 type Service struct {
+ // A long queue of failing CREATED Tasks must never monopolise the CPU on
+ // older hosts. This process-local cursor rotates through that queue over
+ // consecutive Ticks, and the mutex serializes concurrent scheduler calls.
+ createdAdmissionMu sync.Mutex
+ createdAdmissionPosition createdAdmissionPosition
 	db           *sql.DB
 	tx           storage.Transactor
 	clock        clock.Clock
@@ -266,18 +279,28 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
 // transition behavior repeatedly selected the same corrupt high-priority
 // records, starving all healthy lower-priority Tasks on every Tick.
 // Failed Tasks are never silently marked READY, and their IDs remain visible.
-func (s *Service) admitCreated(ctx context.Context,limit int)(int,error){
- if limit<=0{return 0,nil}
+// admitCreated admits up to limit successful Tasks without probing every
+// corrupt CREATED Task on the same scheduler tick. The stable priority
+// cursor survives subsequent calls within this Service process, so healthy
+// work after an unhealthy page is not starved. A restart safely resets to the
+// beginning, but never silently promotes or discards an uncertain Task.
+func (s *Service) admitCreated(ctx context.Context, limit int) (int,error) {
+ if limit<=0 {return 0,nil}
  const pageSize=64
- first:=1
- lastPriority:=0
- var lastCreated int64
- lastID:=""
+ const maxInspectedPerTick=128
+ s.createdAdmissionMu.Lock()
+ defer s.createdAdmissionMu.Unlock()
+
+ first:=!s.createdAdmissionPosition.valid
+ lastPriority:=s.createdAdmissionPosition.priority
+ lastCreated:=s.createdAdmissionPosition.createdAt
+ lastID:=s.createdAdmissionPosition.taskID
  admitted:=0
+ inspected:=0
  var problems []error
- var overflow int
+ overflow:=0
  actor:=AuthorityPrincipal
- for admitted<limit{
+ for admitted<limit && inspected<maxInspectedPerTick {
   rows,err:=s.db.QueryContext(ctx,`SELECT t.id,t.revision,t.priority,t.created_at
    FROM tasks t WHERE t.state='created'
    AND NOT EXISTS(SELECT 1 FROM task_execution_profiles ep
@@ -310,25 +333,48 @@ func (s *Service) admitCreated(ctx context.Context,limit int)(int,error){
   closeErr:=rows.Close()
   if err==nil{err=closeErr}
   if err!=nil{return admitted,errors.Join(append(problems,err)...)}
-  if len(page)==0{break}
-  first=0
-  for _,candidate:=range page{
+  if len(page)==0 {
+   // At the saved end from a previous tick, wrap once to inspect newer
+   // high-priority Tasks rather than wasting a scheduler cycle.
+   s.createdAdmissionPosition.valid=false
+   if !first && inspected==0 {
+    first=true
+    lastPriority=0
+    lastCreated=0
+    lastID=""
+    continue
+   }
+   break
+  }
+  first=false
+  for _,candidate:=range page {
+   inspected++
    lastPriority,lastCreated,lastID=candidate.priority,candidate.created,candidate.id
+   s.createdAdmissionPosition=createdAdmissionPosition{
+    priority:lastPriority,createdAt:lastCreated,taskID:lastID,valid:true}
    _,promoteErr:=s.tasks.MarkReady(ctx,task.TransitionCommand{
     TaskID:candidate.id,ExpectedRevision:candidate.revision,
-    ActorPrincipalID:&actor,Reason:"autonomous worker admission",
-   })
-   if promoteErr==nil{admitted++}else if !task.IsRevisionConflict(promoteErr){
-    if len(problems)<32{
-     problems=append(problems,fmt.Errorf("admit created Task %s: %w",candidate.id,promoteErr))
-    }else{overflow++}
+    ActorPrincipalID:&actor,Reason:"autonomous worker admission"})
+   if promoteErr==nil {
+    admitted++
+   } else if !task.IsRevisionConflict(promoteErr) {
+    if len(problems)<32 {
+     problems=append(problems,fmt.Errorf("admit created Task %s: %w",
+      candidate.id,promoteErr))
+    } else {overflow++}
    }
-   if admitted>=limit{break}
+   if admitted>=limit || inspected>=maxInspectedPerTick {break}
   }
-  if len(page)<pageSize{break}
+  if len(page)<pageSize {
+   // End of queue: start the next Tick from highest priority again.
+   s.createdAdmissionPosition.valid=false
+   break
+  }
  }
- if overflow>0{problems=append(problems,
-  fmt.Errorf("%d additional failed CREATED Task admissions require operator review",overflow))}
+ if overflow>0 {
+  problems=append(problems,fmt.Errorf(
+   "%d additional failed CREATED Task admissions require operator review",overflow))
+ }
  return admitted,errors.Join(problems...)
 }
 

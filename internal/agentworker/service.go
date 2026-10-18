@@ -48,6 +48,10 @@ type readyQueuePosition struct {
 }
 
 type Service struct {
+ // One-slot scheduler calls alternate Active and READY work when both are
+ // present. The mutex protects only the preference, never executes a step.
+ tickFairnessMu sync.Mutex
+ nextSingleSlotReady bool
  // This process-local position bounds wait reconciliation CPU/SQLite per
  // Tick without altering durable run/Attempt identity or authority.
  waitingReconcileMu sync.Mutex
@@ -263,40 +267,54 @@ func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
 }
 
 func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 10
-	}
-	if err := s.EnsureSystemPrincipals(ctx); err != nil {
-		return nil, err
-	}
-	// Continue independent work after a corrupt waiting continuation.
-	// Return the actionable per-run error with any completed tick results.
-	wakeErr:=s.syncResumedRuns(ctx)
-	_,admissionErr:=s.admitCreated(ctx,limit)
-	// Per-Task admissions are independent. A corrupt CREATED Task cannot
-	// starve already running Workers or eligible siblings in this tick.
-	runs,activeErr:=s.activeRuns(ctx,limit)
-	// Preserve the exact corrupt Worker IDs for operator recovery, but do
-	// not strand independent running/ready Tasks in the same tick.
-	tickErrors:=errors.Join(wakeErr,admissionErr,activeErr)
-	out:=make([]TickResult,0,limit)
-	for _,r:=range runs{
-		out=append(out,s.step(ctx,r))
-		if len(out)>=limit{return out,tickErrors}
-	}
-	ready,readyErr:=s.readyTasks(ctx,limit-len(out))
-	// A corrupt eligible Task is not authority to stall healthy READY Tasks.
-	// Retain its ID in the Tick error while admitting independent siblings.
-	tickErrors=errors.Join(tickErrors,readyErr)
-	for _,t:=range ready{
-		r,res:=s.startRun(ctx,t)
-		if res.Error!=""{
-			out=append(out,res)
-			continue
-		}
-		out=append(out,s.step(ctx,r))
-	}
-	return out,tickErrors
+ if limit<=0||limit>100 {limit=10}
+ if err:=s.EnsureSystemPrincipals(ctx);err!=nil{return nil,err}
+
+ // Both reconciliation and CREATED promotion retain bounded budgets and
+ // independent failure reports. Neither may hide healthy runnable work.
+ wakeErr:=s.syncResumedRuns(ctx)
+ _,admissionErr:=s.admitCreated(ctx,limit)
+
+ // Query READY eligibility read-only *before* consuming the whole step
+ // quota with long-lived ACTIVE Workers. This guarantees a READY Task can
+ // make progress even while active models remain queued for many Ticks.
+ // The ordinary startRun CAS and Workspace/lease checks remain authoritative.
+ ready,readyErr:=s.readyTasks(ctx,limit)
+ activeQuota:=limit
+ if len(ready)>0 {
+  if limit==1{
+   // With a single available step, alternate opportunities; malformed
+   // or inadmissible READY Tasks cannot permanently starve active Workers.
+   s.tickFairnessMu.Lock()
+   preferReady:=s.nextSingleSlotReady
+   s.nextSingleSlotReady=!s.nextSingleSlotReady
+   s.tickFairnessMu.Unlock()
+   if preferReady{activeQuota=0}
+  }else{
+   // Reserve one READY attempt while retaining at least one active slot.
+   // If active work is sparse, all spare slots may still run READY Tasks.
+   activeQuota=limit-1
+  }
+ }
+ var runs []Run
+ var activeErr error
+ if activeQuota>0{runs,activeErr=s.activeRuns(ctx,activeQuota)}
+ tickErrors:=errors.Join(wakeErr,admissionErr,readyErr,activeErr)
+ out:=make([]TickResult,0,limit)
+ for _,r:=range runs{
+  out=append(out,s.step(ctx,r))
+  if len(out)>=limit{return out,tickErrors}
+ }
+ for _,t:=range ready{
+  if len(out)>=limit{break}
+  r,res:=s.startRun(ctx,t)
+  if res.Error!=""{
+   out=append(out,res)
+   continue
+  }
+  out=append(out,s.step(ctx,r))
+ }
+ return out,tickErrors
 }
 
 // admitCreated pages independently eligible CREATED Tasks by stable priority

@@ -686,16 +686,10 @@ func (s *Service) handleFail(ctx context.Context, run Run, t task.Task, resp age
 	if strings.TrimSpace(p.Reason) == "" {
 		p.Reason = "worker model proposed failure"
 	}
-	cur, _ := s.tasks.Get(ctx, t.ID)
-	actor := WorkerPrincipal
-	_, err := s.tasks.Fail(ctx, task.TransitionCommand{TaskID: cur.ID, ExpectedRevision: cur.Revision, ActorPrincipalID: &actor, Reason: boundedString(p.Reason, 1024)})
-	if err != nil {
-		return s.failRun(ctx, run, res, err)
-	}
-	_ = s.finishRun(ctx, run.ID, RunFailed, p.Reason)
-	res.Status = "failed"
-	res.Error = p.Reason
-	return res
+	// A model-proposed terminal failure is subject to the same exact
+	// Task/Attempt/Worker atomicity and durable error handling as other
+	// failures. No Task.Fail followed by an unchecked Worker status update.
+	return s.failRun(ctx, run, res, fmt.Errorf("%s", boundedString(p.Reason, 1024)))
 }
 
 func (s *Service) handleComplete(ctx context.Context, run Run, t task.Task, resp agentprotocol.Response, res TickResult) TickResult {

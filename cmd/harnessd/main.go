@@ -26,6 +26,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/event"
 	"github.com/DigiLogicTech/OnePane/internal/ingress"
 	"github.com/DigiLogicTech/OnePane/internal/nodefederation"
+	"github.com/DigiLogicTech/OnePane/internal/processlock"
 	"github.com/DigiLogicTech/OnePane/internal/sandboxrunner"
 	"github.com/DigiLogicTech/OnePane/internal/startupevidence"
 	"github.com/DigiLogicTech/OnePane/internal/webui"
@@ -67,6 +68,21 @@ func main() {
 		evidenceRoot = cfg.Storage.DataDir
 	}
 	record(startupevidence.Config, startupevidence.OK)
+
+	// Single active backend per canonical data root. The kernel holds the
+	// ownership lock for the whole daemon lifetime, including migrations,
+	// restart recovery, slow inference and shutdown. A second backend must
+	// not run recovery against another live worker using this SQLite state.
+	instance, err := processlock.Acquire(cfg.Storage.DataDir)
+	if err != nil {
+		record(startupevidence.Bootstrap, startupevidence.Failed)
+		log.Fatalf("harnessd data-root ownership: %v", err)
+	}
+	defer func() {
+		if err := instance.Close(); err != nil {
+			log.Printf("release harnessd data-root ownership: %v", err)
+		}
+	}()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

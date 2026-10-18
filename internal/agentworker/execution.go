@@ -737,11 +737,10 @@ func (s *Service) handleComplete(ctx context.Context, run Run, t task.Task, resp
 			return s.failRun(ctx, run, res, err)
 		}
 		cont, _ := json.Marshal(map[string]any{"completion_proposal": json.RawMessage(resp.Proposal), "required_verification": required, "verification_id": v.ID})
-		_ = s.updateRun(ctx, run.ID, run.Revision, RunBlocked, cont, nil, 0, 0, nil, nil, strPtr(ErrHigherVerification.Error()))
-		_ = s.journal(ctx, run.ID, "verification", "queued", nil, nil, strPtr("complete"), strPtr(v.ID), map[string]any{"verification_id": v.ID, "required_level": required})
-		res.Status = "blocked_verification"
-		res.Error = fmt.Sprintf("completion requires %s; independent assurance queued", required)
-		return res
+		// A pending independent assurance is not a completed Task. Persist
+		// Worker suspension and the schema-valid WAITING journal together.
+		// Failed persistence must not pretend higher verification was parked.
+		return s.parkWorkerForIndependentAssurance(ctx,run,res,cont,v.ID,string(required))
 	}
 	spec, _ := json.Marshal(map[string]any{"source": "agent_completion_proposal", "worker_run_id": run.ID, "rule": "V0 is declaration only; no independent factual claim is inferred"})
 	v, err := s.verification.Create(ctx, verification.CreateCommand{WorkspaceID: run.WorkspaceID, TaskID: &cur.ID, SubjectRef: "agent_worker_run:" + run.ID, RequiredLevel: policy.VerificationV0, Spec: spec, ActorPrincipalID: &verifier})

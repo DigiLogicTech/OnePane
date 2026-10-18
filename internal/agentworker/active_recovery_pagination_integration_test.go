@@ -49,8 +49,12 @@ func TestRecoverLostRunsPagesEveryLiveAttemptWithOneSQLiteConnection(t *testing.
   if res.Error!=""{t.Fatalf("start %d: %s",n,res.Error)}
   active=append(active,running{created.ID,run.AttemptID,run.ID})
  }
- // Make the first Task independently unrecoverable, but leave its Worker
- // in running state. It must NOT suppress later recovery pages.
+ // Force 259 equal-timestamp rows across the 256-record page
+ // boundary; the run ID must be the stable secondary cursor key.
+ if _,err:=db.SQL().ExecContext(ctx,`UPDATE agent_worker_runs
+  SET started_at=? WHERE status='running'`,now);err!=nil{t.Fatal(err)}
+ // Make one earliest Task independently unrecoverable, but leave its
+ // Worker running. It must NOT suppress later recovery pages.
  corrupt:=active[0]
  if _,err:=db.SQL().ExecContext(ctx,`UPDATE agent_worker_runs
   SET started_at=1 WHERE id=?`,corrupt.runID);err!=nil{t.Fatal(err)}

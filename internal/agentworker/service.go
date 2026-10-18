@@ -40,7 +40,18 @@ type activeQueuePosition struct {
  valid bool
 }
 
+type readyQueuePosition struct {
+ priority int
+ at int64
+ taskID string
+ valid bool
+}
+
 type Service struct {
+ // A malformed early READY Task cannot permanently occupy the available
+ // queue slots or use an unbounded number of SQLite reads on a small host.
+ readyQueueMu sync.Mutex
+ readyQueuePosition readyQueuePosition
  // Active Worker decode must not repeatedly traverse an unlimited corrupt
  // prefix on an older CPU. This bounded rotating cursor is process-local.
  activeQueueMu sync.Mutex
@@ -670,21 +681,27 @@ func (s *Service) activeRuns(ctx context.Context,limit int)([]Run,error){
  return out,errors.Join(problems...)
 }
 
-// readyTasks scans the READY queue in bounded pages and collects up to
-// limit HEALTHY Tasks. Previously LIMIT applied before validating each Task;
-// one damaged high-priority record caused every later Task to starve forever.
-// Record corrupt IDs for operator repair, without admitting/substituting them.
+// readyTasks returns up to limit valid Tasks while reading at most 128
+// candidate rows. Later ticks resume after damaged higher-priority rows;
+// only a Task state transition in startRun may create a real Attempt.
 func (s *Service) readyTasks(ctx context.Context,limit int)([]task.Task,error){
  if limit<=0{return nil,nil}
  const pageSize=64
- first:=1
- lastPriority:=0
- var lastTime int64
- lastID:=""
+ const maxInspectedPerTick=128
+ s.readyQueueMu.Lock()
+ defer s.readyQueueMu.Unlock()
+
+ first:=!s.readyQueuePosition.valid
+ lastPriority:=s.readyQueuePosition.priority
+ lastTime:=s.readyQueuePosition.at
+ lastID:=s.readyQueuePosition.taskID
+ inspected:=0
  out:=make([]task.Task,0,limit)
  var problems []error
- var overflow int
- for len(out)<limit{
+ overflow:=0
+ for len(out)<limit && inspected<maxInspectedPerTick{
+  fetchLimit:=pageSize
+  if remain:=maxInspectedPerTick-inspected;remain<fetchLimit{fetchLimit=remain}
   rows,err:=s.db.QueryContext(ctx,`SELECT t.id,t.priority,
    COALESCE(t.ready_at,t.created_at)
    FROM tasks t WHERE t.state='ready'
@@ -702,10 +719,10 @@ func (s *Service) readyTasks(ctx context.Context,limit int)([]task.Task,error){
     (t.priority=? AND (COALESCE(t.ready_at,t.created_at)>? OR
      (COALESCE(t.ready_at,t.created_at)=? AND t.id>?))))
    ORDER BY t.priority DESC,COALESCE(t.ready_at,t.created_at),t.id
-   LIMIT ?`,first,lastPriority,lastPriority,lastTime,lastTime,lastID,pageSize)
+   LIMIT ?`,first,lastPriority,lastPriority,lastTime,lastTime,lastID,fetchLimit)
   if err!=nil{return out,errors.Join(append(problems,err)...)}
   type row struct{id string;priority int;at int64}
-  page:=make([]row,0,pageSize)
+  page:=make([]row,0,fetchLimit)
   for rows.Next(){
    var v row
    if err=rows.Scan(&v.id,&v.priority,&v.at);err!=nil{break}
@@ -715,25 +732,45 @@ func (s *Service) readyTasks(ctx context.Context,limit int)([]task.Task,error){
   closeErr:=rows.Close()
   if err==nil{err=closeErr}
   if err!=nil{return out,errors.Join(append(problems,err)...)}
-  if len(page)==0{break}
-  first=0
+  if len(page)==0{
+   s.readyQueuePosition.valid=false
+   if !first && inspected==0{
+    // A now-empty suffix is not a reason to waste this Tick. Retry the
+    // current queue from the head, at most once.
+    first=true
+    lastPriority=0
+    lastTime=0
+    lastID=""
+    continue
+   }
+   break
+  }
+  first=false
   for _,item:=range page{
+   inspected++
    lastID,lastPriority,lastTime=item.id,item.priority,item.at
-   t,loadErr:=s.tasks.Get(ctx,item.id)
+   s.readyQueuePosition=readyQueuePosition{
+    priority:lastPriority,at:lastTime,taskID:lastID,valid:true}
+   candidate,loadErr:=s.tasks.Get(ctx,item.id)
    if loadErr!=nil{
     if len(problems)<32{
      problems=append(problems,fmt.Errorf("read eligible Task %s: %w",item.id,loadErr))
     }else{overflow++}
-    continue
+   }else if candidate.State==task.StateReady{
+    out=append(out,candidate)
    }
-   if t.State!=task.StateReady{continue}
-   out=append(out,t)
-   if len(out)>=limit{break}
+   if len(out)>=limit||inspected>=maxInspectedPerTick{break}
   }
-  if len(page)<pageSize{break}
+  if len(page)<fetchLimit{
+   // End reached: return to high-priority Tasks at the next opportunity.
+   s.readyQueuePosition.valid=false
+   break
+  }
  }
- if overflow>0{problems=append(problems,
-  fmt.Errorf("%d additional corrupt READY Tasks require operator review",overflow))}
+ if overflow>0{
+  problems=append(problems,fmt.Errorf(
+   "%d additional corrupt READY Tasks require operator review",overflow))
+ }
  return out,errors.Join(problems...)
 }
 

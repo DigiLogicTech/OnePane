@@ -34,7 +34,17 @@ type createdAdmissionPosition struct {
  valid bool
 }
 
+type activeQueuePosition struct {
+ updatedAt int64
+ runID string
+ valid bool
+}
+
 type Service struct {
+ // Active Worker decode must not repeatedly traverse an unlimited corrupt
+ // prefix on an older CPU. This bounded rotating cursor is process-local.
+ activeQueueMu sync.Mutex
+ activeQueuePosition activeQueuePosition
  // A long queue of failing CREATED Tasks must never monopolise the CPU on
  // older hosts. This process-local cursor rotates through that queue over
  // consecutive Ticks, and the mutex serializes concurrent scheduler calls.
@@ -573,67 +583,91 @@ func (s *Service) resumeWaitingWorkerAndAttempt(
  })
 }
 
+// activeRuns bounds both decoded Workers returned and database candidates
+// inspected. A damaged earlier Worker cannot starve healthy later Workers,
+// even with >128 damaged rows and one SQLite connection. The cursor makes
+// progress between Ticks but never alters stored state or retries effects.
 func (s *Service) activeRuns(ctx context.Context,limit int)([]Run,error){
-	if limit<=0||limit>100{limit=10}
-	const pageSize=64
-	lastTime:=int64(0)
-	lastID:=""
-	first:=true
-	out:=make([]Run,0,limit)
-	var problems []error
-	var moreFailures int
-	for len(out)<limit{
-		var rows *sql.Rows
-		var err error
-		if first{
-			rows,err=s.db.QueryContext(ctx,`SELECT r.id,r.updated_at
-			 FROM agent_worker_runs r WHERE r.status='running'
-			 ORDER BY r.updated_at,r.id LIMIT ?`,pageSize)
-			first=false
-		}else{
-			rows,err=s.db.QueryContext(ctx,`SELECT r.id,r.updated_at
-			 FROM agent_worker_runs r WHERE r.status='running'
-			 AND (r.updated_at>? OR (r.updated_at=? AND r.id>?))
-			 ORDER BY r.updated_at,r.id LIMIT ?`,
-			 lastTime,lastTime,lastID,pageSize)
-		}
-		if err!=nil{return out,errors.Join(append(problems,err)...)}
-		type candidate struct{id string;timestamp int64}
-		page:=make([]candidate,0,pageSize)
-		for rows.Next(){
-			var row candidate
-			if scanErr:=rows.Scan(&row.id,&row.timestamp);scanErr!=nil{
-				err=scanErr
-				break
-			}
-			page=append(page,row)
-		}
-		if err==nil{err=rows.Err()}
-		closeErr:=rows.Close()
-		if err==nil{err=closeErr}
-		if err!=nil{return out,errors.Join(append(problems,err)...)}
-		if len(page)==0{break}
-		for _,candidate:=range page{
-			lastTime,lastID=candidate.timestamp,candidate.id
-			run,getErr:=s.getRun(ctx,candidate.id)
-			if getErr!=nil{
-				// Cap diagnostic allocation even with thousands of damaged
-				// rows; a count still flags additional failed identities.
-				if len(problems)<32{
-					problems=append(problems,fmt.Errorf("decode active Worker %s: %w",candidate.id,getErr))
-				}else{moreFailures++}
-				continue
-			}
-			if run.Status!=RunRunning{continue}
-			out=append(out,run)
-			if len(out)>=limit{break}
-		}
-		if len(page)<pageSize{break}
-	}
-	if moreFailures>0{
-		problems=append(problems,fmt.Errorf("%d additional corrupt active Workers require operator review",moreFailures))
-	}
-	return out,errors.Join(problems...)
+ if limit<=0||limit>100{limit=10}
+ const pageSize=64
+ const maxInspectedPerTick=128
+ s.activeQueueMu.Lock()
+ defer s.activeQueueMu.Unlock()
+ lastTime:=s.activeQueuePosition.updatedAt
+ lastID:=s.activeQueuePosition.runID
+ first:=!s.activeQueuePosition.valid
+ inspected:=0
+ out:=make([]Run,0,limit)
+ var problems []error
+ moreFailures:=0
+ for len(out)<limit && inspected<maxInspectedPerTick{
+  fetchLimit:=pageSize
+  if remain:=maxInspectedPerTick-inspected;remain<fetchLimit{fetchLimit=remain}
+  var rows *sql.Rows
+  var err error
+  if first{
+   rows,err=s.db.QueryContext(ctx,`SELECT r.id,r.updated_at
+    FROM agent_worker_runs r WHERE r.status='running'
+    ORDER BY r.updated_at,r.id LIMIT ?`,fetchLimit)
+  }else{
+   rows,err=s.db.QueryContext(ctx,`SELECT r.id,r.updated_at
+    FROM agent_worker_runs r WHERE r.status='running'
+    AND (r.updated_at>? OR (r.updated_at=? AND r.id>?))
+    ORDER BY r.updated_at,r.id LIMIT ?`,
+    lastTime,lastTime,lastID,fetchLimit)
+  }
+  if err!=nil{return out,errors.Join(append(problems,err)...)}
+  type candidate struct{id string;timestamp int64}
+  page:=make([]candidate,0,fetchLimit)
+  for rows.Next(){
+   var row candidate
+   if scanErr:=rows.Scan(&row.id,&row.timestamp);scanErr!=nil{
+    err=scanErr
+    break
+   }
+   page=append(page,row)
+  }
+  if err==nil{err=rows.Err()}
+  closeErr:=rows.Close()
+  if err==nil{err=closeErr}
+  if err!=nil{return out,errors.Join(append(problems,err)...)}
+  if len(page)==0{
+   s.activeQueuePosition.valid=false
+   if !first && inspected==0{
+    // Reach a saved tail after state changes: restart once at the head.
+    first=true
+    lastTime=0
+    lastID=""
+    continue
+   }
+   break
+  }
+  first=false
+  for _,item:=range page{
+   inspected++
+   lastTime,lastID=item.timestamp,item.id
+   s.activeQueuePosition=activeQueuePosition{
+    updatedAt:lastTime,runID:lastID,valid:true}
+   run,getErr:=s.getRun(ctx,item.id)
+   if getErr!=nil{
+    if len(problems)<32{
+     problems=append(problems,fmt.Errorf("decode active Worker %s: %w",item.id,getErr))
+    }else{moreFailures++}
+   }else if run.Status==RunRunning{
+    out=append(out,run)
+   }
+   if len(out)>=limit||inspected>=maxInspectedPerTick{break}
+  }
+  if len(page)<fetchLimit{
+   // End reached; look from highest-priority (oldest updated) next Tick.
+   s.activeQueuePosition.valid=false
+   break
+  }
+ }
+ if moreFailures>0{
+  problems=append(problems,fmt.Errorf("%d additional corrupt active Workers require operator review",moreFailures))
+ }
+ return out,errors.Join(problems...)
 }
 
 // readyTasks scans the READY queue in bounded pages and collects up to

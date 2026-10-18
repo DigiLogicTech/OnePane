@@ -1841,3 +1841,17 @@ Source head before this documentation checkpoint: 675030d8c44bab9ed60313e42b98a7
 - [x] Ported the original real-SQLite regressions for 66 broken high-priority Tasks ahead of a healthy Task and multiple independent broken siblings; the 66-Task test now enforces a single database connection and confirms the healthy Task's ready event is not duplicated after another reconciliation.
 - [ ] Full hosted exact-head Go/SQLite and Windows source CI is required before calling this validated. Physical constrained-host routing, model queue, failed-worker isolation and recovery throughput are separate acceptance gates.
 - [ ] No alteration to model/cloud/Node grants, physical remediation authority, RC10 baseline, installer or release approval. Independently paired physical Nodes, authorised reversible L5 verification, final integrated security/code audit and LAST user-first UI/UX remain blocking.
+
+
+## RC11 P0-EP — READY queue corruption isolation and single-connection progress (2026-10-18)
+
+- [x] Ported bounded 64-row priority/time/Task-ID keyset pagination for the READY queue. Instead of `LIMIT` selecting a malformed first Task repeatedly, each candidate is read independently after the SQLite cursor is closed, so healthy lower-priority Tasks may proceed under a single database connection. Invalid records remain unmodified and their IDs are reported (first 32 errors plus an overflow count).
+- [x] Worker `Tick` now preserves eligible healthy results from READY admission even when independent Task decodes fail, while reporting the failures. No invented tool, model, cloud or external effect is considered successful.
+- [x] A migrated-SQLite regression seeds a damaged legacy Task JSON with a healthy lower-priority sibling and verifies queue isolation and Tick's safe blocked result after the Project Workspace is archived; no new Attempts are granted.
+- [ ] Full exact-head Go/SQLite CI and real low-memory local-host acceptance outstanding.
+
+## RC11 P0-EQ — active Worker decode isolation (2026-10-18)
+
+- [x] Active Worker selection no longer stops on the first malformed persisted Worker JSON and hides every healthy Worker behind it. Scan bounded 64-row `(updated_at,id)` keyset pages, close the reader before loading and validating each run independently, recheck current running state and cap diagnostic allocation at 32 individual failures plus overflow count. A corrupt record is not retried, repaired or executed automatically.
+- [x] Migrated-SQLite integration seeds one corrupt high-priority active Worker and one healthy sibling, verifies the second is returned with the first's ID in diagnostics, and ensures archived-Project admission blocks unsafe execution on Tick. The fixture limits SQLite to one connection.
+- [ ] Exact-head hosted CI, actual crash-recovery/Colibri/Windows process observations, security and final human-centred UI/UX audit remain gates. Existing RC10 build and operator-selected non-C: model/project storage are untouched. No installer/merge has been authorised.

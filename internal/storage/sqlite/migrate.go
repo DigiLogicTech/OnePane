@@ -156,7 +156,7 @@ func (d *DB) createMigrationBackup(ctx context.Context, targetVersion int) (stri
 	if _, err := d.db.ExecContext(ctx, "VACUUM INTO '"+escaped+"'"); err != nil {
 		return "", err
 	}
-	if err := os.Chmod(backup, 0o600); err != nil {
+	if err := secureBackupFile(backup); err != nil {
 		_ = os.Remove(backup)
 		return "", err
 	}
@@ -210,7 +210,7 @@ func RestoreMigrationBackup(targetPath, backupPath string) error {
 			_ = os.Remove(tmpPath)
 		}
 	}()
-	if err := tmp.Chmod(0o600); err != nil {
+	if err := secureBackupFile(tmpPath); err != nil {
 		return err
 	}
 	if _, err := io.Copy(tmp, in); err != nil {
@@ -273,7 +273,7 @@ func RestoreMigrationBackup(targetPath, backupPath string) error {
 		return fmt.Errorf("activate migration rollback snapshot: %w", err)
 	}
 	cleanupTmp = false
-	if err := os.Chmod(targetAbs, 0o600); err != nil {
+	if err := secureBackupFile(targetAbs); err != nil {
 		rollbackOriginal()
 		return err
 	}

@@ -24,12 +24,8 @@ func TestCreateMigrationBackupProducesConsistentCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Stat(backup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm()&0o077 != 0 {
-		t.Fatalf("backup permissions too broad: %o", info.Mode().Perm())
+	if err := verifyPrivateBackupFile(backup); err != nil {
+		t.Fatalf("migration backup must be private: %v", err)
 	}
 	copyDB, err := Open(backup)
 	if err != nil {

@@ -48,6 +48,10 @@ type readyQueuePosition struct {
 }
 
 type Service struct {
+ // This process-local position bounds wait reconciliation CPU/SQLite per
+ // Tick without altering durable run/Attempt identity or authority.
+ waitingReconcileMu sync.Mutex
+ waitingReconcileCursor string
  // A malformed early READY Task cannot permanently occupy the available
  // queue slots or use an unbounded number of SQLite reads on a small host.
  readyQueueMu sync.Mutex
@@ -407,18 +411,26 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 	// Keep the queue reconciler bounded on low-memory hosts. A keyset
 	// cursor is stable while successful wakeups remove rows from the waiting
 	// set; OFFSET would skip still-waiting runs after each mutation.
-	const pageSize=256
+	const pageSize=64
+ const maxInspectedPerTick=128
+ s.waitingReconcileMu.Lock()
+ defer s.waitingReconcileMu.Unlock()
 	type x struct {
 		run, task, state string
 		rev              int64
 	}
 	problems := boundedWorkerRecoveryErrors{category:"waiting Worker reconciliation failures"}
-	lastRunID:=""
-	for {
+ lastRunID:=s.waitingReconcileCursor
+ inspected:=0
+ for inspected<maxInspectedPerTick{
+  // Fully close the SQLite cursor before any per-Run write transaction.
+  fetchLimit:=pageSize
+  if remaining:=maxInspectedPerTick-inspected;remaining<fetchLimit{fetchLimit=remaining}
+  if err:=ctx.Err();err!=nil{return problems.result(err)}
 		rows,err:=s.db.QueryContext(ctx,`SELECT r.id,t.id,t.revision,t.state
 		 FROM agent_worker_runs r JOIN tasks t ON t.id=r.task_id
 		 WHERE r.status='waiting' AND r.id>?
-		 ORDER BY r.id LIMIT ?`,lastRunID,pageSize)
+		 ORDER BY r.id LIMIT ?`,lastRunID,fetchLimit)
 		if err!=nil{return problems.result(err)}
 		xs:=make([]x,0,pageSize)
 		var scanErr error
@@ -432,11 +444,20 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 		if scanErr!=nil||closeErr!=nil{
 			return problems.result(scanErr,closeErr)
 		}
-		if len(xs)==0{break}
-		// Advance over every inspected run, including ones with malformed
-		// continuations, so a single corrupt wait cannot starve later pages.
-		lastRunID=xs[len(xs)-1].run
-		for _, v := range xs {
+  if len(xs)==0{
+   s.waitingReconcileCursor=""
+   if lastRunID!="" && inspected==0{
+    // The previous tick ended on a full page at the end; try the
+    // queue head once without consuming another whole queue per Tick.
+    lastRunID=""
+    continue
+   }
+   break
+  }
+		// Advance after processing each record, never past uninspected
+  // continuations during a failure or scheduler budget boundary.
+  for _, v := range xs {
+   if err:=ctx.Err();err!=nil{return problems.result(err)}
 		// One corrupt Worker continuation must not prevent independent
 		// waiting Tasks from being reconciled on the same daemon tick.
 		if runErr:=func()error{
@@ -541,9 +562,17 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 		return nil
 		}();runErr!=nil{
 			problems.add(fmt.Errorf("reconcile waiting Worker %s Task %s: %w",v.run,v.task,runErr))
-		}
-		}
-		if len(xs)<pageSize{break}
+  }
+   inspected++
+   lastRunID=v.run
+   s.waitingReconcileCursor=lastRunID
+  }
+  if len(xs)<fetchLimit{
+   // A fully inspected short page reaches the tail. Revisit remaining
+   // waiting approval/resource gates from the head on the next Tick.
+   s.waitingReconcileCursor=""
+   break
+  }
 	}
 	return problems.result()
 }

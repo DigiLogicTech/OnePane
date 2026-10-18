@@ -527,23 +527,73 @@ func (s *Service) resumeWaitingWorkerAndAttempt(
  })
 }
 
-func (s *Service) activeRuns(ctx context.Context, limit int) ([]Run, error) {
-	rows, err := s.db.QueryContext(ctx, runSelect+` WHERE r.status='running' ORDER BY r.updated_at,r.id LIMIT ?`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Run
-	for rows.Next() {
-		r, err := scanRun(rows)
-		if err != nil {
-			return nil, err
+func (s *Service) activeRuns(ctx context.Context,limit int)([]Run,error){
+	if limit<=0||limit>100{limit=10}
+	const pageSize=64
+	lastTime:=int64(0)
+	lastID:=""
+	first:=true
+	out:=make([]Run,0,limit)
+	var problems []error
+	var moreFailures int
+	for len(out)<limit{
+		var rows *sql.Rows
+		var err error
+		if first{
+			rows,err=s.db.QueryContext(ctx,`SELECT r.id,r.updated_at
+			 FROM agent_worker_runs r WHERE r.status='running'
+			 ORDER BY r.updated_at,r.id LIMIT ?`,pageSize)
+			first=false
+		}else{
+			rows,err=s.db.QueryContext(ctx,`SELECT r.id,r.updated_at
+			 FROM agent_worker_runs r WHERE r.status='running'
+			 AND (r.updated_at>? OR (r.updated_at=? AND r.id>?))
+			 ORDER BY r.updated_at,r.id LIMIT ?`,
+			 lastTime,lastTime,lastID,pageSize)
 		}
-		out = append(out, r)
+		if err!=nil{return out,errors.Join(append(problems,err)...)}
+		type candidate struct{id string;timestamp int64}
+		page:=make([]candidate,0,pageSize)
+		for rows.Next(){
+			var row candidate
+			if scanErr:=rows.Scan(&row.id,&row.timestamp);scanErr!=nil{
+				err=scanErr
+				break
+			}
+			page=append(page,row)
+		}
+		if err==nil{err=rows.Err()}
+		closeErr:=rows.Close()
+		if err==nil{err=closeErr}
+		if err!=nil{return out,errors.Join(append(problems,err)...)}
+		if len(page)==0{break}
+		for _,candidate:=range page{
+			lastTime,lastID=candidate.timestamp,candidate.id
+			run,getErr:=s.getRun(ctx,candidate.id)
+			if getErr!=nil{
+				// Cap diagnostic allocation even with thousands of damaged
+				// rows; a count still flags additional failed identities.
+				if len(problems)<32{
+					problems=append(problems,fmt.Errorf("decode active Worker %s: %w",candidate.id,getErr))
+				}else{moreFailures++}
+				continue
+			}
+			if run.Status!=RunRunning{continue}
+			out=append(out,run)
+			if len(out)>=limit{break}
+		}
+		if len(page)<pageSize{break}
 	}
-	return out, rows.Err()
+	if moreFailures>0{
+		problems=append(problems,fmt.Errorf("%d additional corrupt active Workers require operator review",moreFailures))
+	}
+	return out,errors.Join(problems...)
 }
 
+// readyTasks scans the READY queue in bounded pages and collects up to
+// limit HEALTHY Tasks. Previously LIMIT applied before validating each Task;
+// one damaged high-priority record caused every later Task to starve forever.
+// Record corrupt IDs for operator repair, without admitting/substituting them.
 func (s *Service) readyTasks(ctx context.Context,limit int)([]task.Task,error){
  if limit<=0{return nil,nil}
  const pageSize=64

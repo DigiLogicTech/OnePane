@@ -77,6 +77,7 @@ on:
       - 'migrations/**'
       - 'internal/api/**'
       - 'internal/startupevidence/**'
+      - 'internal/processlock/**'
       - 'cmd/harnessd/**'
       - 'packaging/windows/service/**'
       - 'packaging/windows/setup/**'
@@ -243,11 +244,23 @@ jobs:
           bash -n scripts/install-ubuntu.sh
 
   offline-msi-evidence:
-    name: Validate opt-in Windows MSI log reader
+    name: Validate Windows instance lock and offline MSI evidence
     runs-on: windows-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Native Windows LockFileEx ownership and crash-recovery regressions
+        shell: pwsh
+        run: |
+          # Native Windows (not cross-compilation): verifies LockFileEx denial
+          # for a competing backend, stale lock-file reuse, unsafe paths, and
+          # OS-held lock release after forcibly killing a holder process.
+          # Hosted test only; does not assert installed Windows SCM readiness.
+          go test -count=1 -timeout 3m ./internal/processlock
       - name: Test allowlisted MSI analysis against synthetic secret-bearing logs
         shell: powershell
         run: .\scripts\test_offline_msi_evidence.ps1

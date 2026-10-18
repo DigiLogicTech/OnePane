@@ -386,8 +386,9 @@ func (s *Service) admitCreated(ctx context.Context, limit int) (int,error) {
    }
    if admitted>=limit || inspected>=maxInspectedPerTick {break}
   }
-  if len(page)<pageSize {
-   // End of queue: start the next Tick from highest priority again.
+  if len(page)<pageSize && admitted<limit {
+   // Retain the cursor if the successful-admission quota stopped us
+   // midway through a short page; those candidates remain eligible.
    s.createdAdmissionPosition.valid=false
    break
   }
@@ -669,8 +670,10 @@ func (s *Service) activeRuns(ctx context.Context,limit int)([]Run,error){
    }
    if len(out)>=limit||inspected>=maxInspectedPerTick{break}
   }
-  if len(page)<fetchLimit{
-   // End reached; look from highest-priority (oldest updated) next Tick.
+  if len(page)<fetchLimit && len(out)<limit{
+   // Only wrap after exhausting every inspected candidate. If selection
+   // filled LIMIT midway through a short page, later records must retain
+   // their turn on the next Tick.
    s.activeQueuePosition.valid=false
    break
   }
@@ -761,8 +764,9 @@ func (s *Service) readyTasks(ctx context.Context,limit int)([]task.Task,error){
    }
    if len(out)>=limit||inspected>=maxInspectedPerTick{break}
   }
-  if len(page)<fetchLimit{
-   // End reached: return to high-priority Tasks at the next opportunity.
+  if len(page)<fetchLimit && len(out)<limit{
+   // A short page is not exhausted when LIMIT stops iteration early.
+   // Preserve the cursor for the uninspected Tasks on the next Tick.
    s.readyQueuePosition.valid=false
    break
   }

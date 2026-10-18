@@ -36,7 +36,7 @@ func(s *Service) recoverOrphanedAgentAttempts(ctx context.Context)(int,error){
  // malformed/individually unrecoverable Attempt so it cannot starve the
  // remaining independent work.
  const pageSize=256
- var problems []error
+ problems := boundedWorkerRecoveryErrors{category:"orphan Agent Attempt recovery failures"}
  recovered:=0
  var lastCreated,lastAttemptNumber int64
  var lastTask,lastAttempt string
@@ -60,7 +60,7 @@ func(s *Service) recoverOrphanedAgentAttempts(ctx context.Context)(int,error){
   AND (?=1 OR (t.created_at,t.id,a.attempt_number,a.id)>(?,?,?,?))
  ORDER BY t.created_at,t.id,a.attempt_number,a.id LIMIT ?`,
  WorkerPrincipal,firstPage,lastCreated,lastTask,lastAttemptNumber,lastAttempt,pageSize)
- if err!=nil{return recovered,errors.Join(append(problems,err)...)}
+ if err!=nil{return recovered,problems.result(err)}
  candidates:=make([]orphanAgentAttempt,0,pageSize)
  for rows.Next(){
   var orphan orphanAgentAttempt
@@ -70,7 +70,7 @@ func(s *Service) recoverOrphanedAgentAttempts(ctx context.Context)(int,error){
  }
  if err==nil{err=rows.Err()}
  closeErr:=rows.Close()
- if err!=nil||closeErr!=nil{return recovered,errors.Join(append(problems,err,closeErr)...)}
+ if err!=nil||closeErr!=nil{return recovered,problems.result(err,closeErr)}
  if len(candidates)==0{break}
  last:=candidates[len(candidates)-1]
  lastCreated,lastTask,lastAttemptNumber,lastAttempt=
@@ -109,7 +109,7 @@ func(s *Service) recoverOrphanedAgentAttempts(ctx context.Context)(int,error){
    // A competing successful recovery is not a second failure. All other
    // errors are returned after healthy independent orphans are inspected.
    if !errors.Is(err,task.ErrRevisionConflict){
-    problems=append(problems,fmt.Errorf("orphan Task %s Attempt %s: %w",c.TaskID,c.AttemptID,err))
+    problems.add(fmt.Errorf("orphan Task %s Attempt %s: %w",c.TaskID,c.AttemptID,err))
    }
    continue
   }
@@ -117,5 +117,5 @@ func(s *Service) recoverOrphanedAgentAttempts(ctx context.Context)(int,error){
  }
  if len(candidates)<pageSize{break}
  }
- return recovered,errors.Join(problems...)
+ return recovered,problems.result()
 }

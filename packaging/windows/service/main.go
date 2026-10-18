@@ -252,35 +252,27 @@ func setStatus(state, accepted, checkpoint, waitHint, exitCode uint32) {
 // Registry configuration is written by the MSI, not by the desktop user.
 // A service launched under LocalSystem must use the same root selected by
 // the installation wizard and never fall back after a configured drive fails.
-func onePaneRegistryValue(name string) string {
- output,err:=exec.Command("reg.exe","query",`HKLM\SOFTWARE\DigiLogic\OnePane`,"/v",name,"/reg:64").Output()
- if err!=nil{return ""}
- for _,line:=range strings.Split(string(output),"\n"){
-  if !strings.Contains(line,"REG_SZ"){continue}
-  columns:=strings.SplitN(line,"REG_SZ",2)
-  if len(columns)==2{return strings.TrimSpace(columns[1])}
- }
- return ""
+// A missing legacy value is different from a present but malformed or
+// unreadable value. Typed lookup avoids parsing reg.exe's localized stdout.
+func onePaneRegistryPathValue(name string) (string, bool, error) {
+ key, err := registry.OpenKey(registry.LOCAL_MACHINE,
+  `SOFTWARE\DigiLogic\OnePane`, registry.QUERY_VALUE|registry.WOW64_64KEY)
+ if errors.Is(err,registry.ErrNotExist){ return "",false,nil }
+ if err!=nil{return "",false,fmt.Errorf("open installer storage registry key: %w",err)}
+ defer key.Close()
+ value, _, err := key.GetStringValue(name)
+ if errors.Is(err,registry.ErrNotExist){ return "",false,nil }
+ if err!=nil{return "",false,fmt.Errorf("read installer %s: %w",name,err)}
+ return value,true,nil
 }
 // A DataRoot explicitly written by the installer is authoritative. Never
 // launch a second, empty OnePane on C: when that registry value is corrupt,
 // unreadable, or relative; the legacy default is used only if the setting is
 // genuinely absent. This function does not create directories or change data.
 func configuredOnePaneDataRoot(fallback string) (string, error) {
- key, err := registry.OpenKey(registry.LOCAL_MACHINE,
-  `SOFTWARE\DigiLogic\OnePane`, registry.QUERY_VALUE|registry.WOW64_64KEY)
- if errors.Is(err, registry.ErrNotExist) {
-  return resolveOnePaneDataRoot(fallback, "", false)
- }
- if err != nil { return "", fmt.Errorf("open installer data-root configuration: %w", err) }
- defer key.Close()
-
- value, _, err := key.GetStringValue("DataRoot")
- if errors.Is(err, registry.ErrNotExist) {
-  return resolveOnePaneDataRoot(fallback, "", false)
- }
- if err != nil { return "", fmt.Errorf("read installer DataRoot: %w", err) }
- return resolveOnePaneDataRoot(fallback, value, true)
+ value,present,err:=onePaneRegistryPathValue("DataRoot")
+ if err!=nil{return "",err}
+ return resolveOnePaneDataRoot(fallback,value,present)
 }
 
 // Separated for Windows-native deterministic regression without touching
@@ -289,7 +281,7 @@ func resolveOnePaneDataRoot(fallback, configured string, present bool) (string, 
  if !present { return filepath.Clean(fallback), nil }
  value := strings.TrimSpace(configured)
  if value == "" || !filepath.IsAbs(value) {
-  return "", fmt.Errorf("invalid installer DataRoot: expected absolute persistent path")
+  return "", fmt.Errorf("invalid installer storage path: expected absolute persistent path")
  }
  return filepath.Clean(value), nil
 }
@@ -301,10 +293,14 @@ func ensureOnePaneConfig(root string)error{
  cfg.Server.Listen="127.0.0.1:18181"
  cfg.Server.PreviewListen="127.0.0.1:18182"
  cfg.Storage.DataDir=filepath.Join(root,"data")
- cfg.Storage.ProjectRoot=onePaneRegistryValue("ProjectRoot")
- if cfg.Storage.ProjectRoot==""{cfg.Storage.ProjectRoot=filepath.Join(root,"Projects")}
- cfg.LocalAI.ModelPoolPath=onePaneRegistryValue("ModelRoot")
- if cfg.LocalAI.ModelPoolPath==""{cfg.LocalAI.ModelPoolPath=filepath.Join(root,"models")}
+ projectRoot,projectPresent,err:=onePaneRegistryPathValue("ProjectRoot")
+ if err!=nil{return err}
+ cfg.Storage.ProjectRoot,err=resolveOnePaneDataRoot(filepath.Join(root,"Projects"),projectRoot,projectPresent)
+ if err!=nil{return fmt.Errorf("invalid installer ProjectRoot: %w",err)}
+ modelRoot,modelPresent,err:=onePaneRegistryPathValue("ModelRoot")
+ if err!=nil{return err}
+ cfg.LocalAI.ModelPoolPath,err=resolveOnePaneDataRoot(filepath.Join(root,"models"),modelRoot,modelPresent)
+ if err!=nil{return fmt.Errorf("invalid installer ModelRoot: %w",err)}
  if !filepath.IsAbs(cfg.Storage.ProjectRoot)||!filepath.IsAbs(cfg.LocalAI.ModelPoolPath){
   return fmt.Errorf("installer configured relative model or project directory")
  }

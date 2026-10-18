@@ -177,7 +177,13 @@ func recordStartupError(startupErr error) {
 	if programData == "" {
 		programData = `C:\\ProgramData`
 	}
-	logPath := filepath.Join(configuredOnePaneDataRoot(filepath.Join(programData,"OnePane")),"logs","onepane.log")
+	root, resolveErr := configuredOnePaneDataRoot(filepath.Join(programData,"OnePane"))
+ if resolveErr != nil {
+  // An invalid installer path cannot make us log failures to C: instead.
+  fmt.Fprintf(os.Stderr,"OnePane service startup failure (persistent log unavailable): %v; data root: %v\n",startupErr,resolveErr)
+  return
+ }
+ logPath := filepath.Join(root,"logs","onepane.log")
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return

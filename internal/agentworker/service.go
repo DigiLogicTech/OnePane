@@ -155,7 +155,7 @@ func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
   rev,startedAt int64
  }
  recovered:=0
- var problems []error
+ problems := boundedWorkerRecoveryErrors{category:"lost running Worker recoveries"}
  var lastStartedAt int64
  var lastRunID string
  firstPage:=true
@@ -166,7 +166,7 @@ func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
       AND (?=1 OR (r.started_at,r.id)>(?,?))
     ORDER BY r.started_at,r.id LIMIT ?`,
     firstPage,lastStartedAt,lastRunID,pageSize)
-  if err!=nil{return recovered,errors.Join(append(problems,err)...)}
+  if err!=nil{return recovered,problems.result(err)}
   xs:=make([]x,0,pageSize)
   for rows.Next(){
    var v x
@@ -176,7 +176,7 @@ func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
   if err==nil{err=rows.Err()}
   closeErr:=rows.Close()
   if err!=nil||closeErr!=nil{
-   return recovered,errors.Join(append(problems,err,closeErr)...)
+   return recovered,problems.result(err,closeErr)
   }
   if len(xs)==0{break}
   last:=xs[len(xs)-1]
@@ -210,7 +210,7 @@ func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
   if err!=nil{
    // Continue with independent Workers: a corrupt Task must never prevent
    // other lost attempts from being safely blocked and journalled.
-   problems=append(problems,fmt.Errorf("run %s: %w",v.run,err))
+   problems.add(fmt.Errorf("run %s: %w",v.run,err))
    continue
   }
   recovered++
@@ -220,8 +220,8 @@ func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
  // records may have no live Agent Worker row. Reconcile those separately,
  // after known in-flight runs, without touching other Task executors.
  orphans,orphanErr:=s.recoverOrphanedAgentAttempts(ctx)
- if orphanErr!=nil{problems=append(problems,orphanErr)}
- return recovered+orphans,errors.Join(problems...)
+ if orphanErr!=nil{problems.add(orphanErr)}
+ return recovered+orphans,problems.result()
 }
 
 func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
@@ -344,14 +344,14 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 		run, task, state string
 		rev              int64
 	}
-	var problems []error
+	problems := boundedWorkerRecoveryErrors{category:"waiting Worker reconciliation failures"}
 	lastRunID:=""
 	for {
 		rows,err:=s.db.QueryContext(ctx,`SELECT r.id,t.id,t.revision,t.state
 		 FROM agent_worker_runs r JOIN tasks t ON t.id=r.task_id
 		 WHERE r.status='waiting' AND r.id>?
 		 ORDER BY r.id LIMIT ?`,lastRunID,pageSize)
-		if err!=nil{return errors.Join(append(problems,err)...)}
+		if err!=nil{return problems.result(err)}
 		xs:=make([]x,0,pageSize)
 		var scanErr error
 		for rows.Next(){
@@ -362,7 +362,7 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 		if scanErr==nil{scanErr=rows.Err()}
 		closeErr:=rows.Close()
 		if scanErr!=nil||closeErr!=nil{
-			return errors.Join(append(problems,scanErr,closeErr)...)
+			return problems.result(scanErr,closeErr)
 		}
 		if len(xs)==0{break}
 		// Advance over every inspected run, including ones with malformed
@@ -472,12 +472,12 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
         }
 		return nil
 		}();runErr!=nil{
-			problems=append(problems,fmt.Errorf("reconcile waiting Worker %s Task %s: %w",v.run,v.task,runErr))
+			problems.add(fmt.Errorf("reconcile waiting Worker %s Task %s: %w",v.run,v.task,runErr))
 		}
 		}
 		if len(xs)<pageSize{break}
 	}
-	return errors.Join(problems...)
+	return problems.result()
 }
 
 // resumeWaitingWorkerAndAttempt is the atomic counterpart of

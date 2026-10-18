@@ -53,6 +53,9 @@ type Service struct {
  // prevent a second Tick from starting another step while a previous
  // inference request is still in flight.
  workerCycleMu sync.Mutex
+ // An unresolved dispatch must never be retried if recovery persistence failed.
+ // Access is serialized by workerCycleMu, including startup recovery.
+ dispatchReconciliationFailed bool
  // One-slot scheduler calls alternate Active and READY work when both are
  // present. The mutex protects only the preference, never executes a step.
  tickFairnessMu sync.Mutex
@@ -277,7 +280,9 @@ func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
  // after known in-flight runs, without touching other Task executors.
  orphans,orphanErr:=s.recoverOrphanedAgentAttempts(ctx)
  if orphanErr!=nil{problems.add(orphanErr)}
- return recovered+orphans,problems.result()
+ recoveryErr:=problems.result()
+ if recoveryErr==nil{s.dispatchReconciliationFailed=false}
+ return recovered+orphans,recoveryErr
 }
 
 func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
@@ -285,6 +290,7 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
  // The StepCount revision CAS is not an in-flight execution lease.
  if !s.workerCycleMu.TryLock(){return nil,ErrWorkerCycleInProgress}
  defer s.workerCycleMu.Unlock()
+ if s.dispatchReconciliationFailed{return nil,ErrDispatchRequiresReconciliation}
  if limit<=0||limit>100 {limit=10}
  if err:=s.EnsureSystemPrincipals(ctx);err!=nil{return nil,err}
 

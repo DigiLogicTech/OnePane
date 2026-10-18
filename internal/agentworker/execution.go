@@ -168,12 +168,9 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	}
 	if dispatchErr != nil {
 		if errors.Is(dispatchErr, ErrDispatchRequiresReconciliation) {
-			// The model/Agent may have consumed quota or performed effects.
-			// Keep the existing reservation for operator accounting rather
-			// than release a potentially spent budget and silently retry.
-			_ = s.journal(ctx, run.ID, stepKind, "unknown", &kind, &cid, nil, &ref,
-				map[string]any{"error": boundedString(dispatchErr.Error(), 2048), "action": "operator_reconciliation_required"})
-			return s.blockRun(ctx, run, res, "dispatch outcome or persisted response requires operator reconciliation; automatic fallback disabled")
+			// Do not release potentially spent quota or route a fallback.
+			// Atomically interrupt the Task, Attempt and Worker with evidence.
+			return s.interruptDispatchForReconciliation(ctx, run, res, stepKind, kind, cid, ref, dispatchErr)
 		}
 		s.releaseBudgetIfReserved(ctx, reservationID)
 		_ = s.journal(ctx, run.ID, stepKind, "failed", &kind, &cid, nil, &ref, map[string]any{"error": dispatchErr.Error()})

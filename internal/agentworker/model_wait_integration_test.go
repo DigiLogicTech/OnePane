@@ -259,7 +259,12 @@ func TestWorkerWakeIsAtomicAcrossAttemptTaskAndRun(t *testing.T) {
  });err!=nil{t.Fatal(err)}
  if _,err:=db.SQL().ExecContext(ctx,`UPDATE task_attempts
    SET status='waiting' WHERE id=?`,run.AttemptID);err!=nil{t.Fatal(err)}
- if err:=worker.syncResumedRuns(ctx);err!=nil{t.Fatal(err)}
+ // The original Worker remains parked. A Task-only resume is no longer
+ // silently treated as healthy: the mismatched Attempt is reported for
+ // operator review without dispatching any second model request.
+ if err:=worker.syncResumedRuns(ctx);err==nil{
+  t.Fatal("Task-only resume must report invalid original Attempt")
+ }
  heldRun,err=worker.getRun(ctx,run.ID)
  if err!=nil||heldRun.Status!=RunWaiting{
   t.Fatalf("Worker resumed without original running Attempt: %+v %v",heldRun,err)

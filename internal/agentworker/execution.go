@@ -167,6 +167,14 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 		stepKind = "agent_runtime"
 	}
 	if dispatchErr != nil {
+		if errors.Is(dispatchErr, ErrDispatchRequiresReconciliation) {
+			// The model/Agent may have consumed quota or performed effects.
+			// Keep the existing reservation for operator accounting rather
+			// than release a potentially spent budget and silently retry.
+			_ = s.journal(ctx, run.ID, stepKind, "unknown", &kind, &cid, nil, &ref,
+				map[string]any{"error": boundedString(dispatchErr.Error(), 2048), "action": "operator_reconciliation_required"})
+			return s.blockRun(ctx, run, res, "dispatch outcome or persisted response requires operator reconciliation; automatic fallback disabled")
+		}
 		s.releaseBudgetIfReserved(ctx, reservationID)
 		_ = s.journal(ctx, run.ID, stepKind, "failed", &kind, &cid, nil, &ref, map[string]any{"error": dispatchErr.Error()})
 		return s.handleDispatchFailure(ctx, run, res, cid, dispatchErr)
@@ -252,10 +260,11 @@ func (s *Service) dispatch(ctx context.Context, run Run, t task.Task, c schedule
 		taskID, attemptID := t.ID, run.AttemptID
 		result, err := s.runtimes.Invoke(ctx, agentruntime.InvokeCommand{WorkspaceID: run.WorkspaceID, TaskID: &taskID, AttemptID: &attemptID, PrincipalID: WorkerPrincipal, ConnectionID: c.ID, Role: run.RoleName, Objective: t.Objective, Constraints: constraints, Context: compiled.Sections, ContextManifest: compiled.ManifestJSON, PermittedProposalTypes: permitted, InputLabel: label, ActorPrincipalID: strPtr(WorkerPrincipal), BudgetReservationID: optionalString(reservationID)})
 		if err != nil {
-			return agentprotocol.Response{}, result.Invocation.ID, err
+			return agentprotocol.Response{}, result.Invocation.ID, reconcileRuntimeDispatchError(result, err)
 		}
 		if result.Response == nil {
-			return agentprotocol.Response{}, result.Invocation.ID, fmt.Errorf("external runtime returned no AgentResponse")
+			return agentprotocol.Response{}, result.Invocation.ID,
+				dispatchReconciliationError(fmt.Errorf("external runtime returned no AgentResponse"))
 		}
 		return *result.Response, result.Invocation.ID, nil
 	}
@@ -273,33 +282,34 @@ func (s *Service) dispatch(ctx context.Context, run Run, t task.Task, c schedule
 	taskID := t.ID
 	q, err := s.inference.Execute(ctx, inference.ExecuteCommand{WorkspaceID: run.WorkspaceID, TaskID: &taskID, PrincipalID: WorkerPrincipal, DeploymentID: c.ID, CapabilityJSON: capJSON, ContextManifestJSON: compiled.ManifestJSON, ClassificationMetadata: json.RawMessage(`{"agent_worker":true}`), InputLabel: label, RequestJSON: body, ActorPrincipalID: strPtr(WorkerPrincipal), BudgetReservationID: optionalString(reservationID)})
 	if err != nil {
-		return agentprotocol.Response{}, q.ID, err
+		return agentprotocol.Response{}, q.ID, reconcileInferenceDispatchError(q, err)
 	}
-	if q.ResponseArtifactID == nil {
-		return agentprotocol.Response{}, q.ID, fmt.Errorf("inference succeeded without response artifact")
+	if q.Status != inference.RequestSucceeded || q.ResponseArtifactID == nil {
+		return agentprotocol.Response{}, q.ID,
+			dispatchReconciliationError(fmt.Errorf("inference request %s completed without a usable response (status %s)", q.ID, q.Status))
 	}
 	if err := s.artifacts.VerifyContent(ctx, *q.ResponseArtifactID); err != nil {
-		return agentprotocol.Response{}, q.ID, err
+		return agentprotocol.Response{}, q.ID, dispatchReconciliationError(err)
 	}
 	rc, _, err := s.artifacts.Open(ctx, *q.ResponseArtifactID)
 	if err != nil {
-		return agentprotocol.Response{}, q.ID, err
+		return agentprotocol.Response{}, q.ID, dispatchReconciliationError(err)
 	}
 	defer rc.Close()
 	raw, err := io.ReadAll(io.LimitReader(rc, 32<<20))
 	if err != nil {
-		return agentprotocol.Response{}, q.ID, err
+		return agentprotocol.Response{}, q.ID, dispatchReconciliationError(err)
 	}
 	resp, err := decodeModelResponse(raw, areq)
 	if err != nil {
-		return agentprotocol.Response{}, q.ID, err
+		return agentprotocol.Response{}, q.ID, dispatchReconciliationError(err)
 	}
 	canonical, _ := json.Marshal(resp)
 	outLabel, _ := policy.InheritLabels(label)
 	meta, _ := json.Marshal(map[string]any{"inference_request_id": q.ID, "agent_request_id": reqID, "proposal_type": resp.ProposalType})
 	a, err := s.artifacts.Create(ctx, artifact.CreateCommand{WorkspaceID: run.WorkspaceID, MediaType: "application/vnd.onepane.agent-response+json", Label: outLabel, Status: artifact.StatusActive, Metadata: meta, CreatedBy: strPtr(WorkerPrincipal), ActorPrincipalID: strPtr(WorkerPrincipal)}, bytes.NewReader(canonical))
 	if err != nil {
-		return agentprotocol.Response{}, q.ID, err
+		return agentprotocol.Response{}, q.ID, dispatchReconciliationError(err)
 	}
 	return resp, a.ID, nil
 }

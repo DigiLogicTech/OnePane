@@ -2,6 +2,8 @@ package processlock
 
 import (
 	"context"
+	"bufio"
+	"strings"
 	"errors"
 	"os"
 	"os/exec"
@@ -62,4 +64,45 @@ func TestIndependentProcessCannotClaimSameRoot(t *testing.T) {
 	output, err := cmd.CombinedOutput()
 	if err != nil { t.Fatalf("independent child owner check failed: %v: %s", err, output) }
 	if ctx.Err() != nil { t.Fatalf("child OS lock probe exceeded deadline: %v", ctx.Err()) }
+}
+
+func TestLockHolderChild(t *testing.T) {
+	root := os.Getenv("ONEPANE_LOCK_TEST_HOLDER")
+	if root == "" { return }
+	held, err := Acquire(root)
+	if err != nil { t.Fatalf("child cannot acquire lock: %v", err) }
+	defer held.Close()
+	if _, err := os.Stdout.WriteString("ONEPANE_LOCK_HELD\n"); err != nil { t.Fatal(err) }
+	// Parent terminates this helper without running defers to simulate a
+	// daemon crash while a model is active. No PID or TTL cleanup is needed.
+	select {}
+}
+
+func TestKernelReleasesInstanceLockAfterProcessCrash(t *testing.T) {
+	root := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestLockHolderChild$", "-test.v")
+	cmd.Env = append(os.Environ(), "ONEPANE_LOCK_TEST_HOLDER="+root)
+	pipe, err := cmd.StdoutPipe()
+	if err != nil { t.Fatal(err) }
+	if err := cmd.Start(); err != nil { t.Fatal(err) }
+	reader := bufio.NewReader(pipe)
+	ready := false
+	for !ready {
+		line, err := reader.ReadString('\n')
+		if err != nil { _ = cmd.Process.Kill(); _ = cmd.Wait(); t.Fatalf("child startup: %v", err) }
+		ready = strings.Contains(line, "ONEPANE_LOCK_HELD")
+	}
+	if _, err := Acquire(root); !errors.Is(err, ErrBusy) {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Fatalf("live child must still own lock: %v", err)
+	}
+	if err := cmd.Process.Kill(); err != nil { t.Fatal(err) }
+	_ = cmd.Wait()
+	if ctx.Err()!=nil { t.Fatalf("child timed out: %v",ctx.Err()) }
+	taken, err := Acquire(root)
+	if err != nil { t.Fatalf("crashed child retained stale lock: %v", err) }
+	defer taken.Close()
 }

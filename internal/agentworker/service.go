@@ -620,17 +620,29 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 			return err
 		}
 		if state == string(task.StateRunning) {
-            // Externally authorised Task resume: require its matching
-            // original Attempt to be running before reconciling the Worker.
-            if _,err:=s.db.ExecContext(ctx,`UPDATE agent_worker_runs
-             SET status='running',revision=revision+1,updated_at=?
-             WHERE id=? AND task_id=? AND status='waiting'
-             AND EXISTS(SELECT 1 FROM tasks t WHERE t.id=agent_worker_runs.task_id
-               AND t.workspace_id=agent_worker_runs.workspace_id AND t.state='running')
-             AND EXISTS(SELECT 1 FROM task_attempts a WHERE a.id=agent_worker_runs.attempt_id
-               AND a.task_id=agent_worker_runs.task_id AND a.status='running')`,
-               s.clock.UnixMilli(),v.run,v.task);err!=nil{return err}
-        }
+			// External Task resumption is not authority to revive a
+			// different, stale, duplicate or unapproved Worker Attempt.
+			// Reuse the exact dispatch ownership predicate under CAS.
+			updated,err:=s.db.ExecContext(ctx,`UPDATE agent_worker_runs AS r
+			 SET status='running',revision=revision+1,updated_at=?
+			 WHERE r.id=? AND r.task_id=? AND r.status='waiting'
+			 AND `+activeWorkerExecutionBindingPredicate,
+			 s.clock.UnixMilli(),v.run,v.task)
+			if err!=nil{return err}
+			n,err:=updated.RowsAffected()
+			if err!=nil{return err}
+			if n!=1{
+				var stranded int
+				err=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM agent_worker_runs r
+				 JOIN tasks t ON t.id=r.task_id WHERE r.id=? AND r.task_id=?
+				 AND r.status='waiting' AND t.state='running'`,
+				 v.run,v.task).Scan(&stranded)
+				if err!=nil{return err}
+				if stranded==1 {
+					return fmt.Errorf("%w: resumed Task has no valid original Worker Attempt; operator reconciliation required",ErrInvalidWorkerState)
+				}
+			}
+		}
 		return nil
 		}();runErr!=nil{
 			problems.add(fmt.Errorf("reconcile waiting Worker %s Task %s: %w",v.run,v.task,runErr))

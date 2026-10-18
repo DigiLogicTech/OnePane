@@ -64,3 +64,35 @@ func TestWorkerWaitStaleAttemptRefusedBeforeStateChange(t *testing.T){
  if err:=w.db.QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=?`,r.ID).Scan(&runState);err!=nil{t.Fatal(err)}
  if runState!="running"{t.Fatalf("stale Attempt parked Worker anyway: %s",runState)}
 }
+
+func TestExternalWorkerWakeRejectsMismatchedOriginalAttempt(t *testing.T) {
+ w,ctx,r,cleanup:=prepareUnknownDispatch(t);defer cleanup()
+ out:=w.waitRunAtomically(ctx,r,TickResult{TaskID:r.TaskID,RunID:r.ID},
+  task.StatePaused,"human pause",[]byte(`{}`),"wait","paused")
+ if out.Status!="paused"{t.Fatalf("fixture did not pause: %+v",out)}
+ // Corrupt legacy Task-only resume, without resuming its Attempt.
+ if _,err:=w.db.ExecContext(ctx,`UPDATE tasks SET state='running',revision=revision+1 WHERE id=?`,r.TaskID);err!=nil{t.Fatal(err)}
+ if err:=w.syncResumedRuns(ctx);err==nil{t.Fatal("mismatched original Attempt was silently accepted")}
+ var state string
+ if err:=w.db.QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=?`,r.ID).Scan(&state);err!=nil{t.Fatal(err)}
+ if state!="waiting"{t.Fatalf("corrupt Worker woke: %s",state)}
+ // A repaired original Attempt may resume; no new Attempt is created.
+ if _,err:=w.db.ExecContext(ctx,`UPDATE task_attempts SET status='running' WHERE id=?`,r.AttemptID);err!=nil{t.Fatal(err)}
+ if err:=w.syncResumedRuns(ctx);err!=nil{t.Fatalf("valid Attempt still blocked: %v",err)}
+ if err:=w.db.QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=?`,r.ID).Scan(&state);err!=nil{t.Fatal(err)}
+ if state!="running"{t.Fatalf("legitimate Worker did not wake: %s",state)}
+}
+
+func TestExternalWorkerWakeRejectsForeignPrincipal(t *testing.T) {
+ w,ctx,r,cleanup:=prepareUnknownDispatch(t);defer cleanup()
+ out:=w.waitRunAtomically(ctx,r,TickResult{TaskID:r.TaskID,RunID:r.ID},
+  task.StatePaused,"human pause",[]byte(`{}`),"wait","paused")
+ if out.Status!="paused"{t.Fatalf("fixture did not pause: %+v",out)}
+ if _,err:=w.db.ExecContext(ctx,`UPDATE tasks SET state='running',revision=revision+1 WHERE id=?`,r.TaskID);err!=nil{t.Fatal(err)}
+ if _,err:=w.db.ExecContext(ctx,`UPDATE task_attempts SET status='running',worker_principal_id=? WHERE id=?`,
+  AuthorityPrincipal,r.AttemptID);err!=nil{t.Fatal(err)}
+ if err:=w.syncResumedRuns(ctx);err==nil{t.Fatal("foreign Attempt was promoted")}
+ var state string
+ if err:=w.db.QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=?`,r.ID).Scan(&state);err!=nil{t.Fatal(err)}
+ if state!="waiting"{t.Fatalf("foreign principal woke Worker: %s",state)}
+}

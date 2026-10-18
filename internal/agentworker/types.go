@@ -140,6 +140,7 @@ type failProposal struct {
 
 var (
 	ErrInvalidWorkerState = errors.New("invalid agent worker state")
+	ErrWorkerCycleInProgress = errors.New("agent worker scheduler cycle already in progress")
 	ErrStepLimit          = errors.New("agent worker step limit reached")
 	ErrReplanLimit        = errors.New("agent worker replan limit reached")
 	ErrEscalationLimit    = errors.New("agent worker escalation limit reached")

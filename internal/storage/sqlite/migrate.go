@@ -152,14 +152,43 @@ func (d *DB) createMigrationBackup(ctx context.Context, targetVersion int) (stri
 	}
 	stamp := time.Now().UTC().Format("20060102T150405.000000000Z")
 	backup := fmt.Sprintf("%s.pre-migrate-v%04d-%s.bak", mainPath, targetVersion, stamp)
+	// SQLite explicitly supports VACUUM INTO an existing *empty* file.
+	// Pre-create exclusively and secure the Windows DACL/Unix mode BEFORE
+	// SQLite writes any private rows, avoiding a time window where a new
+	// snapshot inherits broad directory permissions while containing secrets.
+	file, err := os.OpenFile(backup, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("create private pre-migration snapshot: %w", err)
+	}
+	retain := false
+	defer func() {
+		_ = file.Close()
+		if !retain {
+			_ = os.Remove(backup)
+		}
+	}()
+	if err := secureBackupFile(backup); err != nil {
+		return "", err
+	}
+	before, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("stat private migration snapshot: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return "", fmt.Errorf("close empty private migration snapshot: %w", err)
+	}
 	escaped := strings.ReplaceAll(backup, "'", "''")
 	if _, err := d.db.ExecContext(ctx, "VACUUM INTO '"+escaped+"'"); err != nil {
-		return "", err
+		return "", fmt.Errorf("write private migration snapshot: %w", err)
 	}
-	if err := secureBackupFile(backup); err != nil {
-		_ = os.Remove(backup)
-		return "", err
+	after, err := os.Stat(backup)
+	if err != nil || !os.SameFile(before, after) {
+		return "", fmt.Errorf("migration snapshot ownership changed during VACUUM: %v", err)
 	}
+	if err := verifyPrivateBackupFile(backup); err != nil {
+		return "", fmt.Errorf("validate private migration snapshot: %w", err)
+	}
+	retain = true
 	return backup, nil
 }
 

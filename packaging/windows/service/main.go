@@ -3,6 +3,7 @@
 package main
 
 import (
+ "context"
 	"fmt"
 	"crypto/rand"
 	"errors"
@@ -120,8 +121,10 @@ func serviceMain(argc uint32, argv **uint16) uintptr {
 	setStatus(serviceStartPending, 0, 1, 15000, 0)
 	serviceEvidence(startupevidence.ServiceLaunch,startupevidence.Begin)
 
+	startupCtx,cancelStartup:=context.WithCancel(context.Background())
+	defer cancelStartup()
 	done := make(chan error, 1)
-	go func() { done <- runBackend() }()
+	go func() { done <- runBackendWithContext(startupCtx) }()
 
 	// Do not tell SCM the service is RUNNING until the actual control-plane
 	// health endpoint is responding. This keeps SCM state aligned with backend
@@ -131,11 +134,22 @@ func serviceMain(argc uint32, argv **uint16) uintptr {
 		// Do not announce STOPPED while a timed-out or stop-requested
 		// backend still owns inference workers. The graceful stop is bounded;
 		// a failed drain invokes the managed process-tree termination path.
+		setStatus(serviceStopPending, 0, 1, 20000, 0)
 		if hasLaunchedBackendChild() {
-			setStatus(serviceStopPending, 0, 1, 20000, 0)
-			if !drainBackend(done, stopBackend, killBackend,
-				5*time.Second, 5*time.Second) {
+			if !drainBackend(done, stopBackend, func(){
+				cancelStartup()
+				killBackend()
+			}, 5*time.Second, 5*time.Second) {
 				fmt.Fprintln(os.Stderr, "OnePane startup cleanup: managed child did not exit within deadline")
+			}
+		} else {
+			// The backend may be creating configuration and have no Process
+			// yet. Cancellation also fences its future cmd.Start().
+			cancelStartup()
+			select {
+			case <-done:
+			case <-time.After(5*time.Second):
+				fmt.Fprintln(os.Stderr,"OnePane startup cleanup: prelaunch backend did not drain in time")
 			}
 		}
 		serviceEvidence(startupevidence.ServiceReady,startupevidence.Failed)
@@ -161,6 +175,7 @@ func serviceMain(argc uint32, argv **uint16) uintptr {
 			// successful service stop, not a crash/recovery condition.
 			exitCode = 0
 		case <-time.After(52 * time.Second):
+			cancelStartup()
 			killBackend()
 			// Wait a bounded interval for Wait() to reap the backend and
 			// close its KILL_ON_JOB_CLOSE ownership job before SCM stops.
@@ -446,7 +461,13 @@ func ensureOnePaneConfig(root string)error{
  if err!=nil{return err}
  return persistInitialServiceConfig(path,buf)
 }
-func runBackend() (retErr error) {
+func runBackend() error {
+ return runBackendWithContext(context.Background())
+}
+
+func runBackendWithContext(ctx context.Context) (retErr error) {
+ if ctx==nil{return fmt.Errorf("nil service startup context")}
+ if err:=ctx.Err();err!=nil{return err}
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -459,6 +480,7 @@ func runBackend() (retErr error) {
 	dataDir, err := configuredOnePaneDataRoot(filepath.Join(programData,"OnePane"))
  if err != nil { return fmt.Errorf("resolve persistent installer data root: %w", err) }
 	logDir := filepath.Join(dataDir, "logs")
+ if err:=ctx.Err();err!=nil{return err}
 	if err:=ensureOnePaneConfig(dataDir);err!=nil{return fmt.Errorf("prepare OnePane persistent configuration: %w",err)}
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return err
@@ -478,7 +500,9 @@ func runBackend() (retErr error) {
 
 	backend := filepath.Join(installDir, "OnePane.Backend.exe")
 	config := filepath.Join(dataDir, "config.yaml")
-	cmd := exec.Command(backend, "-config", config)
+ // CommandContext prevents a still-preparing service from spawning a
+ // backend after SCM stop, cancellation or readiness timeout.
+ cmd := exec.CommandContext(ctx,backend,"-config",config)
 	cmd.Dir = installDir
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -500,9 +524,11 @@ func runBackend() (retErr error) {
 		childMu.Unlock()
 	}()
 
+ if err:=ctx.Err();err!=nil{return err}
 	job,err:=newOwnedBackendJob()
 	if err!=nil{return fmt.Errorf("create managed process job: %w",err)}
 	defer job.Close()
+ if err:=ctx.Err();err!=nil{return err}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("launch OnePane backend %s: %w", backend, err)
 	}

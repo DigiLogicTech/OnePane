@@ -271,9 +271,12 @@ jobs:
       - name: Native Windows managed-model environment and private-log regressions
         shell: pwsh
         run: |
-          # Real Windows process launch and NTFS ACL verification. These tests
-          # do not install models, download Colibri or touch a user data root.
-          go test -count=1 -timeout 4m -run '^(TestManagedRuntimeLaunchWithNilOrEmptyEnvDoesNotInheritSecrets|TestWindowsManagedRuntimeLog.*)
+          # Real Windows process-launch credential isolation and NTFS ACL tests.
+          # No Colibri downloads, installs, or user data root access.
+          go test -count=1 -timeout 4m -run TestManagedRuntimeLaunchWithNilOrEmptyEnvDoesNotInheritSecrets ./internal/localai
+          go test -count=1 -timeout 4m -run TestWindowsManagedRuntimeLog ./internal/localai
+      - name: Native Windows SQLite migration and startup-evidence regressions
+        shell: pwsh
         run: |
           # Exercise actual Windows filesystem and SQLite behavior on hosted
           # Windows. Does not replace a populated RC10->RC11 installer upgrade

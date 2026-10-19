@@ -105,3 +105,38 @@ func TestManagedStopWaitsForInFlightLeaseAdmission(t *testing.T){
  if err:=db.QueryRow(`SELECT status FROM local_runtime_instances WHERE id='inst'`).Scan(&status);err!=nil{t.Fatal(err)}
  if status!="healthy"{t.Fatalf("stop marked active runtime draining: %s",status)}
 }
+
+func TestManagedStopWaitsForModelResidencyTransition(t *testing.T){
+ svc,db:=stopLeaseFixture(t,"healthy")
+ svc.residencyMu.Lock()
+ started:=make(chan struct{})
+ result:=make(chan error,1)
+ go func(){
+  close(started)
+  result<-svc.Stop(context.Background(),"model")
+ }()
+ <-started
+ select {
+ case err:=<-result:
+  svc.residencyMu.Unlock()
+  t.Fatalf("direct Stop bypassed ongoing residency operation: %v",err)
+ case <-time.After(30*time.Millisecond):
+ }
+ // An in-progress Acquire can persist a busy state before Stop acquires
+ // residencyMu; the completed model lease must be respected afterward.
+ if _,err:=db.Exec(`UPDATE local_runtime_instances SET status='busy' WHERE deployment_id='model'`);err!=nil{
+  svc.residencyMu.Unlock()
+  t.Fatal(err)
+ }
+ svc.activityMu.Lock()
+ svc.activeRequests["model"]=1
+ svc.activityMu.Unlock()
+ svc.residencyMu.Unlock()
+ err:=<-result
+ if err==nil||!strings.Contains(err.Error(),"active inference"){
+  t.Fatalf("stop raced newly acquired residency/lease: %v",err)
+ }
+ var status string
+ if err:=db.QueryRow(`SELECT status FROM local_runtime_instances WHERE deployment_id='model'`).Scan(&status);err!=nil{t.Fatal(err)}
+ if status!="busy"{t.Fatalf("direct Stop changed active residency: %s",status)}
+}

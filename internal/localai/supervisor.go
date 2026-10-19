@@ -1486,6 +1486,10 @@ func (s *RuntimeSupervisor) stopIfIdleBeforeLocked(ctx context.Context,deploymen
 // activityMu and invoke stopWithActivityLock directly to avoid re-locking.
 func (s *RuntimeSupervisor) Stop(ctx context.Context, deploymentID string) error {
  if s==nil{return errors.New("local runtime supervisor unavailable")}
+ // Lock ordering matches Acquire/startLocked: residency then activity.
+ // A user stop must not race with launch, recovery or a model swap.
+ s.residencyMu.Lock()
+ defer s.residencyMu.Unlock()
  s.activityMu.Lock()
  defer s.activityMu.Unlock()
  return s.stopWithActivityLock(ctx,deploymentID)

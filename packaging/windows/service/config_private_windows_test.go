@@ -61,7 +61,7 @@ func TestServiceConfigACLValidationRefusesBroadEveryone(t *testing.T){
  if err!=nil{t.Fatal(err)}
  dacl,_,err:=broad.DACL()
  if err!=nil{t.Fatal(err)}
- if err:=windows.SetSecurityInfo(windows.Handle(f.Fd()),windows.SE_FILE_OBJECT,
+ if err:=windows.SetNamedSecurityInfo(f.Name(),windows.SE_FILE_OBJECT,
   windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
   nil,nil,dacl,nil);err!=nil{t.Fatal(err)}
  if err:=verifyPrivateServiceConfig(f);err==nil{

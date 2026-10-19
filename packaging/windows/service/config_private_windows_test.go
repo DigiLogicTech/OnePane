@@ -70,3 +70,18 @@ func TestServiceConfigACLValidationRefusesBroadEveryone(t *testing.T){
  if err:=secureNewServiceConfig(f);err!=nil{t.Fatal(err)}
  if err:=verifyPrivateServiceConfig(f);err!=nil{t.Fatal(err)}
 }
+
+func TestInitialServiceConfigFailedACLDoesNotLeaveEmptyConfig(t *testing.T) {
+ path:=filepath.Join(t.TempDir(),"config.yaml")
+ injected:=errors.New("simulated WRITE_DAC denial")
+ err:=persistInitialServiceConfigWithSecurity(path,[]byte("secret-data"),
+  func(*os.File)error{return injected})
+ if !errors.Is(err,injected){t.Fatalf("permission failure lost: %v",err)}
+ if _,statErr:=os.Lstat(path);!errors.Is(statErr,os.ErrNotExist){
+  t.Fatalf("failed private config left a persistent file: %v",statErr)
+ }
+ // The same pathname can then be safely initialized after the fault is gone.
+ if err:=persistInitialServiceConfig(path,[]byte("restored"));err!=nil{t.Fatal(err)}
+ got,err:=os.ReadFile(path)
+ if err!=nil||string(got)!="restored"{t.Fatalf("recovery: %q %v",got,err)}
+}

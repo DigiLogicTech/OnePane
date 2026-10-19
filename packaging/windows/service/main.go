@@ -193,7 +193,11 @@ func recordStartupError(startupErr error) {
 }
 
 func waitForBackendHealth(done <-chan error, timeout time.Duration) (bool, error) {
-	client := &http.Client{Timeout: time.Second}
+	client := &http.Client{
+		Timeout: time.Second,
+		// Do not accept a redirect to a different host as backend readiness.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 	deadline := time.Now().Add(timeout)
 	checkpoint := uint32(2)
 	for time.Now().Before(deadline) {
@@ -209,11 +213,30 @@ func waitForBackendHealth(done <-chan error, timeout time.Duration) (bool, error
 		default:
 		}
 
-		resp, err := client.Get("http://127.0.0.1:18181/v1/health")
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-				return true, nil
+		// Every service launch has a new random secret, passed only to the
+		// child. A pre-existing unrelated loopback listener must NEVER make
+		// SCM declare this backend running.
+		childMu.Lock()
+		token := backendShutdownToken
+		childMu.Unlock()
+		if len(token) >= 32 {
+			req, requestErr := http.NewRequest(http.MethodGet,
+				"http://127.0.0.1:18181/__onepane/service/ready", nil)
+			if requestErr != nil { return false, requestErr }
+			req.Header.Set("X-OnePane-Service-Token", token)
+			resp, requestErr := client.Do(req)
+			if requestErr == nil {
+				_ = resp.Body.Close()
+				if resp.StatusCode == http.StatusNoContent {
+					// A child that has already exited is never healthy.
+					select {
+					case err := <-done:
+						if err == nil { err = fmt.Errorf("backend exited after readiness response") }
+						return false, err
+					default:
+						return true, nil
+					}
+				}
 			}
 		}
 
@@ -351,15 +374,16 @@ func runBackend() (retErr error) {
 	token:=hex.EncodeToString(seed)
 	cmd.Env=append(os.Environ(),"ONEPANE_SERVICE_SHUTDOWN_TOKEN="+token,
         "ONEPANE_STARTUP_EVIDENCE_ROOT="+dataDir)
-	backendShutdownToken=token
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000} // CREATE_NO_WINDOW
 
 	childMu.Lock()
 	child = cmd
+	backendShutdownToken = token
 	childMu.Unlock()
 	defer func() {
 		childMu.Lock()
 		child = nil
+		backendShutdownToken = ""
 		childMu.Unlock()
 	}()
 

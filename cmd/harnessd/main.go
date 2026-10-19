@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"crypto/subtle"
 	"errors"
 	"flag"
 	"fmt"
@@ -162,22 +161,11 @@ func main() {
 		WriteTimeout:      0, // SSE responses are intentionally long-lived.
 		IdleTimeout:       60 * time.Second,
 	}
-	// The Windows SCM wrapper cannot send POSIX SIGTERM to its hidden
-	// subprocess. It provides an ephemeral per-launch token and requests a
-	// loopback-only graceful stop before any forced process-tree termination.
-	// No shutdown endpoint exists when running without that token.
+	// Windows SCM readiness and shutdown must prove ownership of THIS
+	// service-launched backend, not merely some listener on the same port.
+	// No privileged endpoints exist for ordinary non-service launches.
 	if token := os.Getenv("ONEPANE_SERVICE_SHUTDOWN_TOKEN"); len(token) >= 32 {
-		base := httpServer.Handler
-		httpServer.Handler = http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
-			if r.URL.Path != "/__onepane/service/shutdown" {base.ServeHTTP(w,r);return}
-			host,_,err:=net.SplitHostPort(r.RemoteAddr)
-			if err!=nil||!net.ParseIP(host).IsLoopback()||r.Method!=http.MethodPost||
-				subtle.ConstantTimeCompare([]byte(r.Header.Get("X-OnePane-Service-Token")),[]byte(token))!=1 {
-				http.Error(w,"not found",http.StatusNotFound);return
-			}
-			w.WriteHeader(http.StatusAccepted)
-			go cancel()
-		})
+		httpServer.Handler = serviceControlHandler(httpServer.Handler, token, cancel)
 	}
 	previewHTTPServer := &http.Server{
 		Addr:              cfg.Server.PreviewListen,

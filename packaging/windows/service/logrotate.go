@@ -42,8 +42,19 @@ func inspectExistingServiceLog(path string)error{
  if !st.Mode().IsRegular(){return fmt.Errorf("service log path is not a regular file")}
  return nil
 }
+// Keep an older rotated service log private as well. It may contain
+// diagnostic secrets from an earlier version using inherited NTFS ACLs.
+func securePreviousServiceLog(path string)error{
+ previous:=path+".1"
+ if err:=inspectExistingServiceLog(previous);err!=nil{return err}
+ if _,err:=os.Lstat(previous);os.IsNotExist(err){return nil}else if err!=nil{return err}
+ f,err:=openPrivateServiceLogFile(previous)
+ if err!=nil{return err}
+ return f.Close()
+}
 func openBoundedLogWriter(path string)(*boundedLogWriter,error){
  if err:=os.MkdirAll(filepath.Dir(path),0o755);err!=nil{return nil,err}
+ if err:=securePreviousServiceLog(path);err!=nil{return nil,err}
  f,err:=openPrivateServiceLogFile(path)
  if err!=nil{return nil,err}
  st,err:=f.Stat();if err!=nil{_ = f.Close();return nil,err}

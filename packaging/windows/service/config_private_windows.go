@@ -69,8 +69,9 @@ func persistInitialServiceConfigWithSecurity(path string,contents []byte,
 }
 
 // OS Chmod(0600) is not an NTFS confidentiality guarantee. Apply a protected
-// DACL by HANDLE (not pathname) to avoid granting unrelated principals access
-// during creation or being redirected to an attacker-replaced path.
+// DACL before writing credentials. Ordinary Go write/append handles may lack
+// WRITE_DAC/READ_CONTROL, so Windows named-object security APIs are used;
+// callers verify the opened file still matches the pathname before writing.
 func secureNewServiceConfig(f *os.File) error {
  return securePrivateServiceFile(f)
 }

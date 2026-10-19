@@ -302,7 +302,14 @@ func onePaneRegistryPathValue(name string) (string, bool, error) {
 func configuredOnePaneDataRoot(fallback string) (string, error) {
  value,present,err:=onePaneRegistryPathValue("DataRoot")
  if err!=nil{return "",err}
- return resolveOnePaneDataRoot(fallback,value,present)
+ root,err:=resolveOnePaneDataRoot(fallback,value,present)
+ if err!=nil{return "",err}
+ // MSI-selected persistent state must not be redirected through an
+ // existing NTFS junction/symlink to the previous C: database.
+ if present {
+  if err:=verifySelectedRootComponents(root);err!=nil{return "",err}
+ }
+ return root,nil
 }
 
 // Separated for Windows-native deterministic regression without touching

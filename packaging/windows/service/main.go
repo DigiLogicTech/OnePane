@@ -128,6 +128,15 @@ func serviceMain(argc uint32, argv **uint16) uintptr {
 	// readiness and surfaces bootstrap failures as service-start failures.
 	ready, startupErr := waitForBackendHealth(done, 60*time.Second)
 	if !ready {
+		// Do not announce STOPPED while a timed-out or stop-requested
+		// backend still owns inference workers. The graceful stop is bounded;
+		// a failed drain invokes the managed process-tree termination path.
+		if hasLaunchedBackendChild() {
+			if !drainBackend(done, stopBackend, killBackend,
+				5*time.Second, 5*time.Second) {
+				fmt.Fprintln(os.Stderr, "OnePane startup cleanup: managed child did not exit within deadline")
+			}
+		}
 		serviceEvidence(startupevidence.ServiceReady,startupevidence.Failed)
 		if startupErr != nil {
 			fmt.Fprintln(os.Stderr, "OnePane backend failed during startup:", startupErr)
@@ -152,6 +161,13 @@ func serviceMain(argc uint32, argv **uint16) uintptr {
 			exitCode = 0
 		case <-time.After(52 * time.Second):
 			killBackend()
+			// Wait a bounded interval for Wait() to reap the backend and
+			// close its KILL_ON_JOB_CLOSE ownership job before SCM stops.
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				fmt.Fprintln(os.Stderr, "OnePane backend still not reaped after forced stop")
+			}
 		}
 	case err := <-done:
 		if err != nil {
@@ -252,6 +268,36 @@ func waitForBackendHealth(done <-chan error, timeout time.Duration) (bool, error
 		time.Sleep(time.Second)
 	}
 	return false, fmt.Errorf("backend health endpoint did not become ready within %s", timeout)
+}
+
+// A failure that already consumed the exited backend's done signal does
+// not need to wait through another shutdown grace period.
+func hasLaunchedBackendChild() bool {
+ childMu.Lock()
+ defer childMu.Unlock()
+ return child!=nil && child.Process!=nil
+}
+
+// drainBackend bounds both phases. Reaping through done permits runBackend to
+// release its Windows Job Object (which owns model-server descendants).
+// Returning false is visible to the service log, never an assertion that all
+// processes or physical hardware were proven stopped.
+func drainBackend(done <-chan error, graceful, force func(),
+ grace, afterForce time.Duration) bool {
+ if graceful!=nil{graceful()}
+ graceTimer:=time.NewTimer(grace)
+ defer graceTimer.Stop()
+ select {
+ case <-done:return true
+ case <-graceTimer.C:
+ }
+ if force!=nil{force()}
+ forcedTimer:=time.NewTimer(afterForce)
+ defer forcedTimer.Stop()
+ select {
+ case <-done:return true
+ case <-forcedTimer.C:return false
+ }
 }
 
 func serviceHandler(control, eventType uint32, eventData, context uintptr) uintptr {

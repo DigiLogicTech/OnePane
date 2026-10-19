@@ -1863,7 +1863,7 @@ func (s *RuntimeSupervisor) Shutdown(ctx context.Context) error {
 	}
 	var first error
 	for _, idv := range ids {
-		if err := s.Stop(ctx, idv); err != nil && first == nil {
+		if err := s.stopForDaemonShutdown(ctx, idv); err != nil && first == nil {
 			first = err
 		}
 	}

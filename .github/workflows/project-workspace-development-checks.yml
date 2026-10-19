@@ -78,6 +78,7 @@ on:
       - 'internal/api/**'
       - 'internal/startupevidence/**'
       - 'internal/processlock/**'
+      - 'internal/serviceproof/**'
       - 'cmd/harnessd/**'
       - 'packaging/windows/service/**'
       - 'packaging/windows/setup/**'
@@ -266,7 +267,7 @@ jobs:
         run: |
           # Validate readiness/shutdown credentials on the actual target OS.
           # The server is NOT installed or launched by this unit check.
-          go test -count=1 -timeout 3m ./cmd/harnessd
+          go test -count=1 -timeout 3m ./cmd/harnessd ./internal/serviceproof
       - name: Native Windows SQLite migration and startup-evidence regressions
         shell: pwsh
         run: |

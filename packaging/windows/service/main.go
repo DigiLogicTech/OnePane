@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"strconv"
 	"net/http"
+ "github.com/DigiLogicTech/OnePane/internal/serviceproof"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -194,15 +195,19 @@ func recordStartupError(startupErr error) {
 
 func probeLaunchedBackend(client *http.Client, address, token string) bool {
  if client==nil||len(token)<32{return false}
+ challenge:=make([]byte,serviceproof.ChallengeBytes)
+ if _,err:=rand.Read(challenge);err!=nil{return false}
  req,err:=http.NewRequest(http.MethodGet,address,nil)
  if err!=nil{return false}
  req.Header.Set("X-OnePane-Service-Token",token)
+ req.Header.Set(serviceproof.ChallengeHeader,hex.EncodeToString(challenge))
  resp,err:=client.Do(req)
  if err!=nil{return false}
  defer resp.Body.Close()
- // Never equate public 200 health, redirection, or unauthorized failure
- // with proof of this freshly launched service child.
- return resp.StatusCode==http.StatusNoContent
+ // An unrelated 204 responder or a child from an older service launch
+ // cannot produce the correct HMAC for this fresh random challenge.
+ return resp.StatusCode==http.StatusNoContent &&
+  serviceproof.Verify(token,challenge,resp.Header.Get(serviceproof.ProofHeader))
 }
 
 func waitForBackendHealth(done <-chan error, timeout time.Duration) (bool, error) {

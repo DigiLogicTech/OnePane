@@ -4,6 +4,9 @@ import (
  "crypto/subtle"
  "net"
  "net/http"
+ "encoding/hex"
+
+ "github.com/DigiLogicTech/OnePane/internal/serviceproof"
 )
 
 // serviceControlHandler installs token-authenticated loopback-only endpoints
@@ -26,7 +29,14 @@ func serviceControlHandler(base http.Handler, token string, cancel func()) http.
    http.NotFound(w,r);return
   }
   w.Header().Set("Cache-Control","no-store")
-  if isReady {w.WriteHeader(http.StatusNoContent);return}
+  if isReady {
+   challenge,decodeErr:=hex.DecodeString(r.Header.Get(serviceproof.ChallengeHeader))
+   if decodeErr!=nil||len(challenge)!=serviceproof.ChallengeBytes {
+    http.NotFound(w,r);return
+   }
+   w.Header().Set(serviceproof.ProofHeader,serviceproof.Sign(token,challenge))
+   w.WriteHeader(http.StatusNoContent);return
+  }
   w.WriteHeader(http.StatusAccepted)
   if cancel!=nil{go cancel()}
  })

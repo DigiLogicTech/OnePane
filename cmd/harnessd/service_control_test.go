@@ -5,6 +5,9 @@ import (
  "net/http/httptest"
  "testing"
  "time"
+ "bytes"
+
+ "github.com/DigiLogicTech/OnePane/internal/serviceproof"
 )
 
 func TestServiceReadinessRequiresEphemeralLaunchTokenAndLoopback(t *testing.T) {
@@ -23,6 +26,7 @@ func TestServiceReadinessRequiresEphemeralLaunchTokenAndLoopback(t *testing.T) {
   {"old-service-token","GET","/__onepane/service/ready","127.0.0.1:50000",oldToken,404},
   {"remote-client","GET","/__onepane/service/ready","203.0.113.10:50000",token,404},
   {"bad-method","POST","/__onepane/service/ready","127.0.0.1:50000",token,404},
+  {"missing-challenge","GET","/__onepane/service/ready","127.0.0.1:50000",token,404},
   {"public-health","GET","/v1/health","127.0.0.1:50000","",200},
   {"untrusted-shutdown","POST","/__onepane/service/shutdown","127.0.0.1:50000",oldToken,404},
  }
@@ -32,11 +36,18 @@ func TestServiceReadinessRequiresEphemeralLaunchTokenAndLoopback(t *testing.T) {
    req:=httptest.NewRequest(tc.method,tc.path,nil)
    req.RemoteAddr=tc.remote
    if tc.header!=""{req.Header.Set("X-OnePane-Service-Token",tc.header)}
+   nonce:=bytes.Repeat([]byte{7},serviceproof.ChallengeBytes)
+   if tc.name!="missing-challenge"{
+    req.Header.Set(serviceproof.ChallengeHeader,"0707070707070707070707070707070707070707070707070707070707070707")
+   }
    recorder:=httptest.NewRecorder()
    handler.ServeHTTP(recorder,req)
    if recorder.Code!=tc.want{t.Fatalf("got %d, want %d",recorder.Code,tc.want)}
-   if tc.want==204&&recorder.Header().Get("Cache-Control")!="no-store"{
-    t.Fatal("service readiness is cacheable")
+   if tc.want==204 {
+    if recorder.Header().Get("Cache-Control")!="no-store"{t.Fatal("service readiness is cacheable")}
+    if !serviceproof.Verify(token,nonce,recorder.Header().Get(serviceproof.ProofHeader)){
+     t.Fatal("backend omitted valid HMAC service proof")
+    }
    }
   })
  }

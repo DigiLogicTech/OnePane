@@ -287,7 +287,10 @@ func resolveOnePaneDataRoot(fallback, configured string, present bool) (string, 
 }
 func ensureOnePaneConfig(root string)error{
  path:=filepath.Join(root,"config.yaml")
- if _,err:=os.Stat(path);err==nil{return nil}else if !os.IsNotExist(err){return err}
+ // Never follow an existing symlink/reparse file before bootstrapping the
+ // persistent service configuration. Legacy regular configs are preserved.
+ if err:=inspectExistingServiceConfig(path);err==nil{return nil
+ }else if !errors.Is(err,os.ErrNotExist){return err}
  if err:=os.MkdirAll(root,0700);err!=nil{return err}
  cfg:=config.Default()
  cfg.Server.Listen="127.0.0.1:18181"
@@ -305,12 +308,7 @@ func ensureOnePaneConfig(root string)error{
   return fmt.Errorf("installer configured relative model or project directory")
  }
  buf,err:=yaml.Marshal(cfg);if err!=nil{return err}
- file,err:=os.OpenFile(path,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
- if os.IsExist(err){return nil}
- if err!=nil{return err}
- defer file.Close()
- if _,err:=file.Write(buf);err!=nil{_ = os.Remove(path);return err}
- return file.Sync()
+ return persistInitialServiceConfig(path,buf)
 }
 func runBackend() (retErr error) {
 	exe, err := os.Executable()

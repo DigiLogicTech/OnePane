@@ -146,3 +146,52 @@ func TestServiceLogRenameFailureCanResumeSafeAppend(t *testing.T){
   t.Fatalf("failed rename overwrote operator diagnostics: %q %v",saved,err)
  }
 }
+
+func TestServiceLogNewFileOpenFailureRollsBackOriginalHistory(t *testing.T){
+ path:=filepath.Join(t.TempDir(),"onepane.log")
+ w,err:=openBoundedLogWriter(path)
+ if err!=nil{t.Fatal(err)}
+ if _,err:=w.Write([]byte("before replacement error\n"));err!=nil{t.Fatal(err)}
+ denied:=errors.New("simulated protected log creation denied")
+ rotateErr:=w.rotateWithOpen(os.Remove,os.Rename,func(string)(*os.File,error){
+  return nil,denied
+ })
+ if !errors.Is(rotateErr,denied){t.Fatalf("lost original failure: %v",rotateErr)}
+ if w.file==nil{t.Fatal("failed replacement permanently disabled log writer")}
+ if _,err:=w.Write([]byte("after recovery\n"));err!=nil{
+  t.Fatalf("logging could not recover: %v",err)
+ }
+ if err:=verifyPrivateServiceConfig(w.file);err!=nil{t.Fatal(err)}
+ if err:=w.Close();err!=nil{t.Fatal(err)}
+ saved,err:=os.ReadFile(path)
+ if err!=nil||string(saved)!="before replacement error\nafter recovery\n"{
+  t.Fatalf("recovery changed history: %q %v",saved,err)
+ }
+ if _,err:=os.Stat(path+".1");!os.IsNotExist(err){
+  t.Fatalf("failed rotation left duplicate historical file: %v",err)
+ }
+}
+
+func TestServiceLogOpenFailureNeverOverwritesUnexpectedReplacement(t *testing.T){
+ path:=filepath.Join(t.TempDir(),"onepane.log")
+ w,err:=openBoundedLogWriter(path)
+ if err!=nil{t.Fatal(err)}
+ if _,err:=w.Write([]byte("historic log\n"));err!=nil{t.Fatal(err)}
+ injected:=errors.New("simulated concurrent pathname replacement")
+ rotateErr:=w.rotateWithOpen(os.Remove,os.Rename,func(path string)(*os.File,error){
+  if err:=os.WriteFile(path,[]byte("foreign file\n"),0600);err!=nil{
+   return nil,err
+  }
+  return nil,injected
+ })
+ if !errors.Is(rotateErr,injected){t.Fatalf("missing error: %v",rotateErr)}
+ if w.file!=nil{t.Fatal("unexpected replacement was silently used as service log")}
+ foreign,err:=os.ReadFile(path)
+ if err!=nil||string(foreign)!="foreign file\n"{
+  t.Fatalf("unexpected replacement was overwritten: %q %v",foreign,err)
+ }
+ prior,err:=os.ReadFile(path+".1")
+ if err!=nil||string(prior)!="historic log\n"{
+  t.Fatalf("original diagnostic history lost: %q %v",prior,err)
+ }
+}

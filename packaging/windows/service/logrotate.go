@@ -70,6 +70,14 @@ func (w *boundedLogWriter) rotate()error{
 // logging. An existing rotated log is checked/deleted BEFORE closing the
 // active handle; a failed rename reopens and revalidates the same file.
 func (w *boundedLogWriter) rotateWith(remove func(string)error,rename func(string,string)error)error{
+ return w.rotateWithOpen(remove,rename,openPrivateServiceLogFile)
+}
+
+// Internal operation injection exercises the Windows case where rename
+// succeeds but creating a protected replacement log is denied. Rollback is
+// allowed ONLY while no other object occupies the original pathname.
+func (w *boundedLogWriter) rotateWithOpen(remove func(string)error,
+ rename func(string,string)error,open func(string)(*os.File,error))error{
  if w.file==nil{return os.ErrClosed}
  previous:=w.path+".1"
  if err:=remove(previous);err!=nil&&!os.IsNotExist(err){return err}
@@ -80,8 +88,21 @@ func (w *boundedLogWriter) rotateWith(remove func(string)error,rename func(strin
  if err:=rename(w.path,previous);err!=nil{
   return w.reopenAfterFailedRename(original,err)
  }
- f,err:=openPrivateServiceLogFile(w.path)
- if err!=nil{return err}
+ f,err:=open(w.path)
+ if err!=nil{
+  // Do not overwrite a pathname newly created by another process. If no
+  // replacement was created, put the exact original file back and reopen it
+  // using the protected ACL path; never silently drop diagnostic history.
+  _,pathErr:=os.Lstat(w.path)
+  if pathErr==nil{
+   return errors.Join(err,fmt.Errorf("replacement service log path already exists; refusing destructive rollback"))
+  }
+  if !os.IsNotExist(pathErr){return errors.Join(err,pathErr)}
+  if restoreErr:=rename(previous,w.path);restoreErr!=nil{
+   return errors.Join(err,fmt.Errorf("restore original service log: %w",restoreErr))
+  }
+  return w.reopenAfterFailedRename(original,err)
+ }
  w.file=f
  w.size=0
  return nil

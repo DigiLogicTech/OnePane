@@ -1474,17 +1474,40 @@ func (s *RuntimeSupervisor) stopIfIdleBeforeLocked(ctx context.Context,deploymen
  case RuntimeHealthy,RuntimeStarting:
   // An idle reaper never terminates a new model still starting up.
   if cutoff>0&&inst.Status!=RuntimeHealthy{return false,nil}
-  if err:=s.Stop(ctx,deploymentID);err!=nil{return false,err}
+  if err:=s.stopWithActivityLock(ctx,deploymentID);err!=nil{return false,err}
   return true,nil
  default:return false,nil
  }
 }
 
+// Stop must serialize with inference SetBusy/Release. The caller-facing stop
+// refuses to unload an active runtime, without persisting drain intent or
+// sending any process signal. Internal eviction/reaper call sites already own
+// activityMu and invoke stopWithActivityLock directly to avoid re-locking.
 func (s *RuntimeSupervisor) Stop(ctx context.Context, deploymentID string) error {
-	inst, err := s.Instance(ctx, deploymentID)
+ if s==nil{return errors.New("local runtime supervisor unavailable")}
+ s.activityMu.Lock()
+ defer s.activityMu.Unlock()
+ return s.stopWithActivityLock(ctx,deploymentID)
+}
+
+// Call only while activityMu is held (including Colibri swap and idle reaper).
+func (s *RuntimeSupervisor) stopWithActivityLock(ctx context.Context, deploymentID string) error {
+ deploymentID=strings.TrimSpace(deploymentID)
+ if deploymentID==""{return errors.New("deployment ID is required")}
+ if s.activeRequests[deploymentID]>0{
+  return errors.New("managed model is serving active inference requests; wait for them to complete before stopping")
+ }
+ inst, err := s.Instance(ctx, deploymentID)
 	if err != nil {
 		return err
 	}
+ // A persisted busy status without a corresponding in-memory lease may
+ // represent an unknown request after daemon restart. Refuse to signal it
+ // until operator reconciliation; never infer idleness from map absence.
+ if inst.Status==RuntimeBusy {
+  return errors.New("managed model has a persisted busy status with no safely releasable inference lease; reconcile before stopping")
+ }
 	markOrphaned := func(reason string) error {
 		now := s.clock.UnixMilli()
 		res, e := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET status='orphaned',failure_reason=?,updated_at=?,revision=revision+1 WHERE id=? AND revision=?`, reason, now, inst.ID, inst.Revision)

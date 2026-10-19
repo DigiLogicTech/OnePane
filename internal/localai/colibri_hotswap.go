@@ -83,7 +83,7 @@ func (s *RuntimeSupervisor) prepareColibriSwapLocked(ctx context.Context,nodeID,
     if err!=nil{return nil,err}
     stopped:=[]string{}
     for _,id:=range evict {
-        if err:=s.Stop(ctx,id);err!=nil{
+        if err:=s.stopWithActivityLock(ctx,id);err!=nil{
             return stopped,fmt.Errorf("cannot safely evict Colibri model %s: %w",id,err)
         }
         stopped=append(stopped,id)

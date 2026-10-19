@@ -22,6 +22,7 @@ func TestServiceReadinessRejectsOldAndUnrelatedListeners(t *testing.T) {
   {"forged-proof",http.StatusNoContent,"forged",false},
   {"previous-service",http.StatusNoContent,older,false},
   {"correct-service",http.StatusNoContent,token,true},
+  {"blind-reflected-challenge",http.StatusNoContent,"reflect",false},
   {"redirect",http.StatusFound,"",false},
   {"unavailable",http.StatusServiceUnavailable,"",false},
  }{
@@ -32,6 +33,8 @@ func TestServiceReadinessRejectsOldAndUnrelatedListeners(t *testing.T) {
      if err!=nil{http.NotFound(w,req);return}
      if tc.signer=="forged"{
       w.Header().Set(serviceproof.ProofHeader,"0000000000000000000000000000000000000000000000000000000000000000")
+     }else if tc.signer=="reflect"{
+      w.Header().Set(serviceproof.ProofHeader,req.Header.Get(serviceproof.ChallengeHeader))
      }else{
       w.Header().Set(serviceproof.ProofHeader,serviceproof.Sign(tc.signer,nonce))
      }
@@ -50,4 +53,22 @@ func TestServiceReadinessRejectsOldAndUnrelatedListeners(t *testing.T) {
  if probeLaunchedBackend(client,"http://127.0.0.1:1","short"){
   t.Fatal("short service token accepted")
  }
+}
+
+func TestSCMReadinessDoesNotLeakLaunchSecretToPortHijacker(t *testing.T){
+ const token="a5e5fed0d30eb5504a6b43a94be9dd3ca5b44e7d3a9cc1109097da2afe767ab9"
+ seen:=make(chan http.Header,1)
+ fake:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+  seen<-r.Header.Clone()
+  w.WriteHeader(http.StatusNoContent)
+ }))
+ defer fake.Close()
+ client:=&http.Client{Timeout:time.Second,CheckRedirect:func(*http.Request,[]*http.Request)error{return http.ErrUseLastResponse}}
+ if probeLaunchedBackend(client,fake.URL,token){t.Fatal("blind 204 accepted")}
+ headers:=<-seen
+ if headers.Get("X-OnePane-Service-Token")!=""{t.Fatal("SCM disclosed bearer token")}
+ for name,values:=range headers {
+  for _,value:=range values{if value==token{t.Fatalf("leaked secret in %s header",name)}}
+ }
+ if headers.Get(serviceproof.ChallengeHeader)==""{t.Fatal("missing nonce")}
 }

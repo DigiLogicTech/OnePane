@@ -1,41 +1,42 @@
 package main
 
 import (
- "crypto/subtle"
+ "encoding/hex"
  "net"
  "net/http"
- "encoding/hex"
 
  "github.com/DigiLogicTech/OnePane/internal/serviceproof"
 )
 
-// serviceControlHandler installs token-authenticated loopback-only endpoints
-// exclusively for Windows SCM launches, with an ephemeral per-launch secret.
-// A normal /v1/health response is intentionally insufficient to establish
-// ownership or readiness of the SCM-managed child process.
+// serviceControlHandler installs non-bearer, loopback-only service endpoints.
+// Readiness is observable but proves possession of the launch secret to SCM.
+// Shutdown requires a DIFFERENT purpose-bound HMAC; reading the readiness
+// endpoint cannot yield a valid shutdown authorisation.
 func serviceControlHandler(base http.Handler, token string, cancel func()) http.Handler {
  if base==nil{base=http.NotFoundHandler()}
  if len(token)<32{return base}
  return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
-  isReady:=r.URL.Path=="/__onepane/service/ready"
-  isShutdown:=r.URL.Path=="/__onepane/service/shutdown"
-  if !isReady&&!isShutdown{base.ServeHTTP(w,r);return}
+  ready:=r.URL.Path=="/__onepane/service/ready"
+  shutdown:=r.URL.Path=="/__onepane/service/shutdown"
+  if !ready&&!shutdown{base.ServeHTTP(w,r);return}
   host,_,err:=net.SplitHostPort(r.RemoteAddr)
-  expectedMethod:=http.MethodPost
-  if isReady {expectedMethod=http.MethodGet}
-  if err!=nil||net.ParseIP(host)==nil||!net.ParseIP(host).IsLoopback()||
-   r.Method!=expectedMethod||
-   subtle.ConstantTimeCompare([]byte(r.Header.Get("X-OnePane-Service-Token")),[]byte(token))!=1 {
+  method:=http.MethodPost
+  if ready{method=http.MethodGet}
+  if err!=nil||net.ParseIP(host)==nil||!net.ParseIP(host).IsLoopback()||r.Method!=method{
+   http.NotFound(w,r);return
+  }
+  challenge,err:=hex.DecodeString(r.Header.Get(serviceproof.ChallengeHeader))
+  if err!=nil||len(challenge)!=serviceproof.ChallengeBytes{
    http.NotFound(w,r);return
   }
   w.Header().Set("Cache-Control","no-store")
-  if isReady {
-   challenge,decodeErr:=hex.DecodeString(r.Header.Get(serviceproof.ChallengeHeader))
-   if decodeErr!=nil||len(challenge)!=serviceproof.ChallengeBytes {
-    http.NotFound(w,r);return
-   }
+  if ready{
    w.Header().Set(serviceproof.ProofHeader,serviceproof.Sign(token,challenge))
-   w.WriteHeader(http.StatusNoContent);return
+   w.WriteHeader(http.StatusNoContent)
+   return
+  }
+  if !serviceproof.VerifyShutdown(token,challenge,r.Header.Get(serviceproof.ProofHeader)){
+   http.NotFound(w,r);return
   }
   w.WriteHeader(http.StatusAccepted)
   if cancel!=nil{go cancel()}

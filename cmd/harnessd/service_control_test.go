@@ -1,85 +1,74 @@
 package main
 
 import (
+ "bytes"
+ "encoding/hex"
  "net/http"
  "net/http/httptest"
  "testing"
  "time"
- "bytes"
 
  "github.com/DigiLogicTech/OnePane/internal/serviceproof"
 )
 
-func TestServiceReadinessRequiresEphemeralLaunchTokenAndLoopback(t *testing.T) {
- const token="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
- const oldToken="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
- base:=http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
-  w.WriteHeader(http.StatusOK) // The public health handler is NOT proof.
- })
- cases:=[]struct{
-  name,method,path,remote,header string
-  want int
- }{
-  {"ready","GET","/__onepane/service/ready","127.0.0.1:50000",token,204},
-  {"ipv6-loopback","GET","/__onepane/service/ready","[::1]:50000",token,204},
-  {"missing-token","GET","/__onepane/service/ready","127.0.0.1:50000","",404},
-  {"old-service-token","GET","/__onepane/service/ready","127.0.0.1:50000",oldToken,404},
-  {"remote-client","GET","/__onepane/service/ready","203.0.113.10:50000",token,404},
-  {"bad-method","POST","/__onepane/service/ready","127.0.0.1:50000",token,404},
-  {"missing-challenge","GET","/__onepane/service/ready","127.0.0.1:50000",token,404},
-  {"public-health","GET","/v1/health","127.0.0.1:50000","",200},
-  {"untrusted-shutdown","POST","/__onepane/service/shutdown","127.0.0.1:50000",oldToken,404},
- }
- handler:=serviceControlHandler(base,token,nil)
- for _,tc:=range cases{
-  t.Run(tc.name,func(t *testing.T){
-   req:=httptest.NewRequest(tc.method,tc.path,nil)
-   req.RemoteAddr=tc.remote
-   if tc.header!=""{req.Header.Set("X-OnePane-Service-Token",tc.header)}
-   nonce:=bytes.Repeat([]byte{7},serviceproof.ChallengeBytes)
-   if tc.name!="missing-challenge"{
-    req.Header.Set(serviceproof.ChallengeHeader,"0707070707070707070707070707070707070707070707070707070707070707")
-   }
-   recorder:=httptest.NewRecorder()
-   handler.ServeHTTP(recorder,req)
-   if recorder.Code!=tc.want{t.Fatalf("got %d, want %d",recorder.Code,tc.want)}
-   if tc.want==204 {
-    if recorder.Header().Get("Cache-Control")!="no-store"{t.Fatal("service readiness is cacheable")}
-    if !serviceproof.Verify(token,nonce,recorder.Header().Get(serviceproof.ProofHeader)){
-     t.Fatal("backend omitted valid HMAC service proof")
-    }
-   }
-  })
- }
+const testToken="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+func requestWithNonce(method,path,remote string, nonce []byte) *http.Request {
+ req:=httptest.NewRequest(method,path,nil)
+ req.RemoteAddr=remote
+ if nonce!=nil{req.Header.Set(serviceproof.ChallengeHeader,hex.EncodeToString(nonce))}
+ return req
 }
-
-func TestServiceControlDisabledOutsideServiceLaunch(t *testing.T) {
- base:=http.HandlerFunc(func(w http.ResponseWriter,_ *http.Request){w.WriteHeader(http.StatusTeapot)})
- for _,token:=range []string{"","short"}{
-  recorder:=httptest.NewRecorder()
-  serviceControlHandler(base,token,nil).ServeHTTP(recorder,
-   httptest.NewRequest("GET","/__onepane/service/ready",nil))
-  if recorder.Code!=http.StatusTeapot{t.Fatalf("changed normal non-service behavior: %d",recorder.Code)}
- }
-}
-
-func TestServiceShutdownRequiresSameTokenAndOnlyPosts(t *testing.T) {
- const token="cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
- canceled:=make(chan struct{},1)
- handler:=serviceControlHandler(http.NotFoundHandler(),token,func(){canceled<-struct{}{}})
- for _,method:=range []string{http.MethodGet,http.MethodPut}{
-  req:=httptest.NewRequest(method,"/__onepane/service/shutdown",nil)
-  req.RemoteAddr="127.0.0.1:50000"
-  req.Header.Set("X-OnePane-Service-Token",token)
+func TestReadinessReturnsNonceProofWithoutBearerHeader(t *testing.T){
+ nonce:=bytes.Repeat([]byte{7},serviceproof.ChallengeBytes)
+ handler:=serviceControlHandler(http.NotFoundHandler(),testToken,nil)
+ for _,remote:=range []string{"127.0.0.1:50000","[::1]:50000"}{
+  req:=requestWithNonce("GET","/__onepane/service/ready",remote,nonce)
   rec:=httptest.NewRecorder()
   handler.ServeHTTP(rec,req)
-  if rec.Code!=http.StatusNotFound{t.Fatalf("%s wrongly accepted",method)}
+  if rec.Code!=204||rec.Header().Get("Cache-Control")!="no-store"||
+   !serviceproof.Verify(testToken,nonce,rec.Header().Get(serviceproof.ProofHeader)){
+   t.Fatalf("loopback readiness proof failed: %s %d",remote,rec.Code)
+  }
  }
- req:=httptest.NewRequest(http.MethodPost,"/__onepane/service/shutdown",nil)
- req.RemoteAddr="127.0.0.1:50000"
- req.Header.Set("X-OnePane-Service-Token",token)
- rec:=httptest.NewRecorder()
- handler.ServeHTTP(rec,req)
- if rec.Code!=http.StatusAccepted{t.Fatalf("shutdown returned %d",rec.Code)}
- select{case <-canceled:case <-time.After(time.Second):t.Fatal("authenticated shutdown did not cancel")}
+ for _,tc:=range []struct{method,remote string;nonce []byte}{
+  {"GET","203.0.113.5:9999",nonce},
+  {"POST","127.0.0.1:50000",nonce},
+  {"GET","127.0.0.1:50000",nil},
+  {"GET","127.0.0.1:50000",[]byte{1}},
+ }{
+  rec:=httptest.NewRecorder()
+  handler.ServeHTTP(rec,requestWithNonce(tc.method,"/__onepane/service/ready",tc.remote,tc.nonce))
+  if rec.Code!=404{t.Fatalf("invalid request accepted: %+v",tc)}
+ }
+}
+func TestShutdownRejectsReadinessProofAndInvalidPurpose(t *testing.T){
+ nonce:=bytes.Repeat([]byte{3},serviceproof.ChallengeBytes)
+ closed:=make(chan struct{},1)
+ handler:=serviceControlHandler(http.NotFoundHandler(),testToken,func(){closed<-struct{}{}})
+ send:=func(method,remote,signature string)int{
+  req:=requestWithNonce(method,"/__onepane/service/shutdown",remote,nonce)
+  if signature!=""{req.Header.Set(serviceproof.ProofHeader,signature)}
+  rec:=httptest.NewRecorder();handler.ServeHTTP(rec,req)
+  return rec.Code
+ }
+ for _,signature:=range []string{"",serviceproof.Sign(testToken,nonce),
+  serviceproof.SignShutdown("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",nonce)}{
+  if got:=send("POST","127.0.0.1:50000",signature);got!=404{
+   t.Fatalf("unapproved shutdown response: %d",got)
+  }
+ }
+ valid:=serviceproof.SignShutdown(testToken,nonce)
+ if send("GET","127.0.0.1:50000",valid)!=404||
+  send("POST","203.0.113.1:50000",valid)!=404{t.Fatal("invalid method/remote shutdown accepted")}
+ select{case <-closed:t.Fatal("unauthorized cancel");default:}
+ if got:=send("POST","127.0.0.1:50000",valid);got!=202{t.Fatalf("signed shutdown returned %d",got)}
+ select{case <-closed:case <-time.After(time.Second):t.Fatal("authenticated shutdown failed")}
+}
+func TestServiceControlDisabledWithoutLaunchToken(t *testing.T){
+ base:=http.HandlerFunc(func(w http.ResponseWriter,_ *http.Request){w.WriteHeader(http.StatusTeapot)})
+ for _,token:=range []string{"","short"}{
+  rec:=httptest.NewRecorder()
+  serviceControlHandler(base,token,nil).ServeHTTP(rec,requestWithNonce("GET","/__onepane/service/ready","127.0.0.1:9",nil))
+  if rec.Code!=http.StatusTeapot{t.Fatal("normal backend behavior changed")}
+ }
 }

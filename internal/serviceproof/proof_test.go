@@ -15,4 +15,10 @@ func TestChallengeResponseRejectsStaleAndForgedProofs(t *testing.T){
   t.Fatal("invalid/stale service proof accepted")
  }
  if Sign(token,nonce[:31])!=""{t.Fatal("short nonce signed")}
+ shutdown:=SignShutdown(token,nonce)
+ if shutdown==sig||!VerifyShutdown(token,nonce,shutdown){t.Fatal("shutdown signature not purpose-separated")}
+ if VerifyShutdown(token,nonce,sig)||Verify(token,nonce,shutdown)||
+  VerifyShutdown(old,nonce,shutdown)||VerifyShutdown(token,different,shutdown){
+  t.Fatal("readiness and shutdown proofs not independently protected")
+ }
 }

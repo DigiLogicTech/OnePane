@@ -199,7 +199,6 @@ func probeLaunchedBackend(client *http.Client, address, token string) bool {
  if _,err:=rand.Read(challenge);err!=nil{return false}
  req,err:=http.NewRequest(http.MethodGet,address,nil)
  if err!=nil{return false}
- req.Header.Set("X-OnePane-Service-Token",token)
  req.Header.Set(serviceproof.ChallengeHeader,hex.EncodeToString(challenge))
  resp,err:=client.Do(req)
  if err!=nil{return false}
@@ -414,16 +413,22 @@ func runBackend() (retErr error) {
 // Give harnessd an authenticated, loopback-only opportunity to unload
 // managed inference processes and remove its own child process records.
 func stopBackend() {
-	childMu.Lock(); cmd:=child; token:=backendShutdownToken; childMu.Unlock()
-	if cmd==nil||cmd.Process==nil||token==""{return}
-	req,err:=http.NewRequest(http.MethodPost,"http://127.0.0.1:18181/__onepane/service/shutdown",nil)
-	if err!=nil{return}
-	req.Header.Set("X-OnePane-Service-Token",token)
-	client:=&http.Client{Timeout:3*time.Second}
-	resp,err:=client.Do(req)
-	if err!=nil{fmt.Fprintln(os.Stderr,"OnePane graceful stop request failed:",err);return}
-	_ = resp.Body.Close()
-	if resp.StatusCode!=http.StatusAccepted{fmt.Fprintln(os.Stderr,"OnePane graceful stop rejected:",resp.StatusCode)}
+ childMu.Lock(); cmd:=child; token:=backendShutdownToken; childMu.Unlock()
+ if cmd==nil||cmd.Process==nil||len(token)<32{return}
+ nonce:=make([]byte,serviceproof.ChallengeBytes)
+ if _,err:=rand.Read(nonce);err!=nil{
+  fmt.Fprintln(os.Stderr,"OnePane shutdown nonce unavailable:",err);return
+ }
+ req,err:=http.NewRequest(http.MethodPost,"http://127.0.0.1:18181/__onepane/service/shutdown",nil)
+ if err!=nil{return}
+ req.Header.Set(serviceproof.ChallengeHeader,hex.EncodeToString(nonce))
+ req.Header.Set(serviceproof.ProofHeader,serviceproof.SignShutdown(token,nonce))
+ client:=&http.Client{Timeout:3*time.Second,
+  CheckRedirect:func(*http.Request,[]*http.Request)error{return http.ErrUseLastResponse}}
+ resp,err:=client.Do(req)
+ if err!=nil{fmt.Fprintln(os.Stderr,"OnePane graceful stop request failed:",err);return}
+ _=resp.Body.Close()
+ if resp.StatusCode!=http.StatusAccepted{fmt.Fprintln(os.Stderr,"OnePane graceful stop rejected:",resp.StatusCode)}
 }
 
 // A forced service stop must terminate the entire harnessd child tree; simply

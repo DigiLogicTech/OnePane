@@ -62,3 +62,28 @@ func TestServiceLogRejectsNonregularTargets(t *testing.T){
   w.Close();t.Fatal("directory accepted for service log")
  }
 }
+
+func TestServiceLogProtectsExistingRotatedHistory(t *testing.T){
+ root:=t.TempDir()
+ path:=filepath.Join(root,"onepane.log")
+ prior:=path+".1"
+ if err:=os.WriteFile(prior,[]byte("legacy diagnostic history\n"),0644);err!=nil{t.Fatal(err)}
+ broad,err:=windows.SecurityDescriptorFromString("D:P(A;;FA;;;WD)")
+ if err!=nil{t.Fatal(err)}
+ dacl,_,err:=broad.DACL()
+ if err!=nil{t.Fatal(err)}
+ if err:=windows.SetNamedSecurityInfo(prior,windows.SE_FILE_OBJECT,
+  windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+  nil,nil,dacl,nil);err!=nil{t.Fatal(err)}
+ w,err:=openBoundedLogWriter(path)
+ if err!=nil{t.Fatal(err)}
+ if err:=w.Close();err!=nil{t.Fatal(err)}
+ f,err:=os.Open(prior)
+ if err!=nil{t.Fatal(err)}
+ if err:=verifyPrivateServiceConfig(f);err!=nil{f.Close();t.Fatal(err)}
+ f.Close()
+ saved,err:=os.ReadFile(prior)
+ if err!=nil||string(saved)!="legacy diagnostic history\n"{
+  t.Fatalf("rotated log history was changed: %q %v",saved,err)
+ }
+}

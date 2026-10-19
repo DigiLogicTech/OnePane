@@ -4,6 +4,7 @@ package main
 
 import (
  "fmt"
+ "io"
  "os"
  "path/filepath"
  "sync"
@@ -72,13 +73,29 @@ func (w *boundedLogWriter) rotate()error{
  w.file=f;w.size=0
  return nil
 }
+// Write bounds the disk footprint even if a single stdout/stderr chunk is
+// larger than the log limit. Splitting the input retains the most recent
+// history across the current and one rotated file without dropping bytes.
 func (w *boundedLogWriter) Write(p []byte)(int,error){
- w.mu.Lock();defer w.mu.Unlock()
+ w.mu.Lock()
+ defer w.mu.Unlock()
  if w.file==nil{return 0,os.ErrClosed}
- if w.size>0&&w.size+int64(len(p))>onePaneLogMaxBytes{
-  if err:=w.rotate();err!=nil{return 0,err}
+ written:=0
+ for len(p)>0{
+  if w.size>=onePaneLogMaxBytes{
+   if err:=w.rotate();err!=nil{return written,err}
+  }
+  available:=onePaneLogMaxBytes-w.size
+  chunk:=len(p)
+  if int64(chunk)>available{chunk=int(available)}
+  n,err:=w.file.Write(p[:chunk])
+  w.size+=int64(n)
+  written+=n
+  p=p[n:]
+  if err!=nil{return written,err}
+  if n!=chunk{return written,io.ErrShortWrite}
  }
- n,err:=w.file.Write(p);w.size+=int64(n);return n,err
+ return written,nil
 }
 func (w *boundedLogWriter) Close()error{
  w.mu.Lock();defer w.mu.Unlock()

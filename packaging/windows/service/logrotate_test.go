@@ -3,6 +3,7 @@
 package main
 
 import (
+ "bytes"
  "os"
  "path/filepath"
  "testing"
@@ -86,4 +87,43 @@ func TestServiceLogProtectsExistingRotatedHistory(t *testing.T){
  if err!=nil||string(saved)!="legacy diagnostic history\n"{
   t.Fatalf("rotated log history was changed: %q %v",saved,err)
  }
+}
+
+func TestOversizedSingleServiceLogWriteStaysBounded(t *testing.T){
+ path:=filepath.Join(t.TempDir(),"onepane.log")
+ w,err:=openBoundedLogWriter(path)
+ if err!=nil{t.Fatal(err)}
+ // A single large stream buffer previously bypassed the max-size guard.
+ // Construct data with a distinctive suffix to verify the newest bytes.
+ data:=bytes.Repeat([]byte("A"),int(2*onePaneLogMaxBytes)+123)
+ copy(data[len(data)-7:],[]byte("LATEST!"))
+ n,err:=w.Write(data)
+ if err!=nil||n!=len(data){t.Fatalf("large append: written=%d expected=%d err=%v",n,len(data),err)}
+ if err:=w.Close();err!=nil{t.Fatal(err)}
+ var footprint int64
+ for _,candidate:=range []string{path,path+".1"}{
+  stat,err:=os.Stat(candidate)
+  if err!=nil{t.Fatalf("log segment missing: %v",err)}
+  if stat.Size()>onePaneLogMaxBytes{
+   t.Fatalf("bounded service log segment exceeded limit: %s %d",candidate,stat.Size())
+  }
+  footprint+=stat.Size()
+  f,err:=os.Open(candidate)
+  if err!=nil{t.Fatal(err)}
+  if err:=verifyPrivateServiceConfig(f);err!=nil{f.Close();t.Fatal(err)}
+  f.Close()
+ }
+ if footprint>2*onePaneLogMaxBytes{t.Fatalf("bounded rotated log consumed %d bytes",footprint)}
+ last,err:=os.ReadFile(path)
+ if err!=nil{t.Fatal(err)}
+ if !bytes.HasSuffix(last,[]byte("LATEST!")){t.Fatal("newest log data missing after multi-rotation append")}
+}
+
+func TestServiceLogBoundaryDoesNotRotateOnEmptyWrite(t *testing.T){
+ path:=filepath.Join(t.TempDir(),"onepane.log")
+ w,err:=openBoundedLogWriter(path)
+ if err!=nil{t.Fatal(err)}
+ if n,err:=w.Write(nil);err!=nil||n!=0{t.Fatalf("empty write: %d %v",n,err)}
+ if _,err:=os.Stat(path+".1");!os.IsNotExist(err){t.Fatalf("empty write unexpectedly rotated: %v",err)}
+ if err:=w.Close();err!=nil{t.Fatal(err)}
 }

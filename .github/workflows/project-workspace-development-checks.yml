@@ -261,6 +261,12 @@ jobs:
           # OS-held lock release after forcibly killing a holder process.
           # Hosted test only; does not assert installed Windows SCM readiness.
           go test -count=1 -timeout 3m ./internal/processlock
+      - name: Native Windows backend authenticated service-control regressions
+        shell: pwsh
+        run: |
+          # Validate readiness/shutdown credentials on the actual target OS.
+          # The server is NOT installed or launched by this unit check.
+          go test -count=1 -timeout 3m ./cmd/harnessd
       - name: Native Windows SQLite migration and startup-evidence regressions
         shell: pwsh
         run: |

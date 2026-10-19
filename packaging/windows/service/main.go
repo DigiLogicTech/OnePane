@@ -192,6 +192,19 @@ func recordStartupError(startupErr error) {
 	fmt.Fprintf(f, "%s OnePane service startup failure: %v\n", time.Now().Format(time.RFC3339Nano), startupErr)
 }
 
+func probeLaunchedBackend(client *http.Client, address, token string) bool {
+ if client==nil||len(token)<32{return false}
+ req,err:=http.NewRequest(http.MethodGet,address,nil)
+ if err!=nil{return false}
+ req.Header.Set("X-OnePane-Service-Token",token)
+ resp,err:=client.Do(req)
+ if err!=nil{return false}
+ defer resp.Body.Close()
+ // Never equate public 200 health, redirection, or unauthorized failure
+ // with proof of this freshly launched service child.
+ return resp.StatusCode==http.StatusNoContent
+}
+
 func waitForBackendHealth(done <-chan error, timeout time.Duration) (bool, error) {
 	client := &http.Client{
 		Timeout: time.Second,
@@ -219,24 +232,14 @@ func waitForBackendHealth(done <-chan error, timeout time.Duration) (bool, error
 		childMu.Lock()
 		token := backendShutdownToken
 		childMu.Unlock()
-		if len(token) >= 32 {
-			req, requestErr := http.NewRequest(http.MethodGet,
-				"http://127.0.0.1:18181/__onepane/service/ready", nil)
-			if requestErr != nil { return false, requestErr }
-			req.Header.Set("X-OnePane-Service-Token", token)
-			resp, requestErr := client.Do(req)
-			if requestErr == nil {
-				_ = resp.Body.Close()
-				if resp.StatusCode == http.StatusNoContent {
-					// A child that has already exited is never healthy.
-					select {
-					case err := <-done:
-						if err == nil { err = fmt.Errorf("backend exited after readiness response") }
-						return false, err
-					default:
-						return true, nil
-					}
-				}
+		if probeLaunchedBackend(client, "http://127.0.0.1:18181/__onepane/service/ready", token) {
+			// A child that has already exited is never healthy.
+			select {
+			case err := <-done:
+				if err == nil { err = fmt.Errorf("backend exited after readiness response") }
+				return false, err
+			default:
+				return true, nil
 			}
 		}
 

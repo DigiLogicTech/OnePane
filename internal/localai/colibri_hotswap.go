@@ -123,7 +123,7 @@ func (s *RuntimeSupervisor) ColibriHotSwap(ctx context.Context,deploymentID stri
         // is still alive. Never load the predecessor until verified teardown
         // has completed: doing so risks concurrent VRAM/RAM overcommit.
         if failed,instanceErr:=s.Instance(ctx,deploymentID);instanceErr==nil && failed.PID>1 && s.processes.Alive(failed.PID) {
-            if cleanupErr:=s.Stop(ctx,deploymentID);cleanupErr!=nil {
+            if cleanupErr:=s.stopWhileResidencyLocked(ctx,deploymentID);cleanupErr!=nil {
                 return state,fmt.Errorf("Colibri swap failed: %w; replacement process could not be safely drained (%v); rollback withheld",launchErr,cleanupErr)
             }
         }

@@ -1490,6 +1490,11 @@ func (s *RuntimeSupervisor) Stop(ctx context.Context, deploymentID string) error
  // A user stop must not race with launch, recovery or a model swap.
  s.residencyMu.Lock()
  defer s.residencyMu.Unlock()
+ return s.stopWhileResidencyLocked(ctx,deploymentID)
+}
+
+// Internal Colibri rollback already holds residencyMu but not activityMu.
+func (s *RuntimeSupervisor) stopWhileResidencyLocked(ctx context.Context, deploymentID string) error {
  s.activityMu.Lock()
  defer s.activityMu.Unlock()
  return s.stopWithActivityLock(ctx,deploymentID)

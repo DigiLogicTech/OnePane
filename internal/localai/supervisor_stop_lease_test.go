@@ -140,3 +140,22 @@ func TestManagedStopWaitsForModelResidencyTransition(t *testing.T){
  if err:=db.QueryRow(`SELECT status FROM local_runtime_instances WHERE deployment_id='model'`).Scan(&status);err!=nil{t.Fatal(err)}
  if status!="busy"{t.Fatalf("direct Stop changed active residency: %s",status)}
 }
+
+func TestColibriRollbackCanStopWhileHoldingResidencyLock(t *testing.T){
+ svc,db:=stopLeaseFixture(t,"healthy")
+ result:=make(chan error,1)
+ go func(){
+  svc.residencyMu.Lock()
+  defer svc.residencyMu.Unlock()
+  result<-svc.stopWhileResidencyLocked(context.Background(),"model")
+ }()
+ select{
+ case err:=<-result:
+  if err!=nil{t.Fatalf("rollback stop refused an idle model: %v",err)}
+ case <-time.After(2*time.Second):
+  t.Fatal("Colibri rollback reentered residency lock and deadlocked")
+ }
+ var status string
+ if err:=db.QueryRow(`SELECT status FROM local_runtime_instances WHERE deployment_id='model'`).Scan(&status);err!=nil{t.Fatal(err)}
+ if status!="stopped"{t.Fatalf("Colibri rollback did not stop healthy model: %s",status)}
+}

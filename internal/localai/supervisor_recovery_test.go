@@ -35,7 +35,7 @@ func TestStopRechecksManagedPIDIdentityBeforeForceKill(t *testing.T){
  raw,err:=os.ReadFile("supervisor.go")
  if err!=nil{t.Fatal(err)}
  source:=string(raw)
- start:=strings.Index(source,"func (s *RuntimeSupervisor) Stop(")
+ start:=strings.Index(source,"func (s *RuntimeSupervisor) stopWithActivityLock(")
  if start<0{t.Fatal("managed stop missing")}
  section:=source[start:]
  if end:=strings.Index(section,"\nfunc ");end>0{section=section[:end]}

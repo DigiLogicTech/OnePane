@@ -10,7 +10,7 @@ func TestStopFailedSignalsAlwaysRequireOperatorReconciliation(t *testing.T){
  raw,err:=os.ReadFile("supervisor.go")
  if err!=nil{t.Fatal(err)}
  all:=string(raw)
- start:=strings.Index(all,"func (s *RuntimeSupervisor) Stop(")
+ start:=strings.Index(all,"func (s *RuntimeSupervisor) stopWithActivityLock(")
  if start<0{t.Fatal("managed Stop missing")}
  section:=all[start:]
  if end:=strings.Index(section,"\nfunc ");end>0{section=section[:end]}

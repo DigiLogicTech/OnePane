@@ -101,7 +101,10 @@ func securePrivateServiceFile(f *os.File) error {
 
 func verifyPrivateServiceConfig(f *os.File) error {
  if f==nil{return fmt.Errorf("nil service configuration handle")}
- sd,err:=windows.GetSecurityInfo(windows.Handle(f.Fd()),windows.SE_FILE_OBJECT,
+ // FILE_APPEND_DATA handles opened by Go need not have READ_CONTROL.
+ // Inspect the named security descriptor instead. Each caller separately
+ // validates os.SameFile(open handle, Lstat pathname) before writing data.
+ sd,err:=windows.GetNamedSecurityInfo(f.Name(),windows.SE_FILE_OBJECT,
   windows.DACL_SECURITY_INFORMATION)
  if err!=nil{return err}
  control,_,err:=sd.Control()

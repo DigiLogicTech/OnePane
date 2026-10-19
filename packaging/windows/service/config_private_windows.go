@@ -72,6 +72,12 @@ func persistInitialServiceConfigWithSecurity(path string,contents []byte,
 // DACL by HANDLE (not pathname) to avoid granting unrelated principals access
 // during creation or being redirected to an attacker-replaced path.
 func secureNewServiceConfig(f *os.File) error {
+ return securePrivateServiceFile(f)
+}
+
+// Logs and generated service YAML share the same protected Windows DACL.
+// No sensitive bytes are written until the inherited permissions are replaced.
+func securePrivateServiceFile(f *os.File) error {
  if f==nil{return fmt.Errorf("nil service configuration handle")}
  user,err:=windows.GetCurrentProcessToken().GetTokenUser()
  if err!=nil{return fmt.Errorf("read OnePane service identity: %w",err)}

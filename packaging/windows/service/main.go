@@ -185,12 +185,12 @@ func recordStartupError(startupErr error) {
   return
  }
  logPath := filepath.Join(root,"logs","onepane.log")
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fmt.Fprintf(f, "%s OnePane service startup failure: %v\n", time.Now().Format(time.RFC3339Nano), startupErr)
+ // Same protected append/rotation path as the backend log. An early
+ // startup failure must not leave a second, broadly readable log.
+ f,err:=openBoundedLogWriter(logPath)
+ if err!=nil{return}
+ defer f.Close()
+ fmt.Fprintf(f,"%s OnePane service startup failure: %v\n",time.Now().Format(time.RFC3339Nano),startupErr)
 }
 
 func probeLaunchedBackend(client *http.Client, address, token string) bool {

@@ -331,44 +331,48 @@ func resolveOnePaneDataRoot(fallback, configured string, present bool) (string, 
  }
  return cleaned,nil
 }
+// resolveInstallerStoragePath validates explicit storage choices without
+// touching user data. Default legacy paths retain their existing behaviour.
+func resolveInstallerStoragePath(fallback, configured string, present bool)(string,error){
+ resolved,err:=resolveOnePaneDataRoot(fallback,configured,present)
+ if err!=nil{return "",err}
+ if present{
+  if err:=verifySelectedRootComponents(resolved);err!=nil{return "",err}
+ }
+ return resolved,nil
+}
+
 func ensureOnePaneConfig(root string)error{
  path:=filepath.Join(root,"config.yaml")
- // Existing configurations are never rewritten. However, an MSI-selected
- // DataRoot must not silently launch a copied legacy config pointing at the
- // previous drive's database. Refuse the mismatch before starting harnessd.
+ // Validate both registry-selected directories even on existing installs;
+ // the presence of a config file must not bypass invalid MSI path choices.
+ projectValue,projectPresent,err:=onePaneRegistryPathValue("ProjectRoot")
+ if err!=nil{return err}
+ projectRoot,err:=resolveInstallerStoragePath(filepath.Join(root,"Projects"),projectValue,projectPresent)
+ if err!=nil{return fmt.Errorf("invalid installer ProjectRoot: %w",err)}
+ modelValue,modelPresent,err:=onePaneRegistryPathValue("ModelRoot")
+ if err!=nil{return err}
+ modelRoot,err:=resolveInstallerStoragePath(filepath.Join(root,"models"),modelValue,modelPresent)
+ if err!=nil{return fmt.Errorf("invalid installer ModelRoot: %w",err)}
+
+ // Existing configuration is never rewritten. An MSI-selected DataRoot
+ // cannot silently use a copied config pointing back to an old database.
  if err:=inspectExistingServiceConfig(path);err==nil{
   _,explicit,regErr:=onePaneRegistryPathValue("DataRoot")
   if regErr!=nil{return regErr}
   if explicit{return verifyExistingConfigUsesSelectedRoot(path,root)}
   return nil
  }else if !errors.Is(err,os.ErrNotExist){return err}
+
  if err:=os.MkdirAll(root,0700);err!=nil{return err}
  cfg:=config.Default()
  cfg.Server.Listen="127.0.0.1:18181"
  cfg.Server.PreviewListen="127.0.0.1:18182"
  cfg.Storage.DataDir=filepath.Join(root,"data")
- projectRoot,projectPresent,err:=onePaneRegistryPathValue("ProjectRoot")
+ cfg.Storage.ProjectRoot=projectRoot
+ cfg.LocalAI.ModelPoolPath=modelRoot
+ buf,err:=yaml.Marshal(cfg)
  if err!=nil{return err}
- cfg.Storage.ProjectRoot,err=resolveOnePaneDataRoot(filepath.Join(root,"Projects"),projectRoot,projectPresent)
- if err!=nil{return fmt.Errorf("invalid installer ProjectRoot: %w",err)}
- if projectPresent {
-  if err:=verifySelectedRootComponents(cfg.Storage.ProjectRoot);err!=nil{
-   return fmt.Errorf("unsafe installer ProjectRoot: %w",err)
-  }
- }
- modelRoot,modelPresent,err:=onePaneRegistryPathValue("ModelRoot")
- if err!=nil{return err}
- cfg.LocalAI.ModelPoolPath,err=resolveOnePaneDataRoot(filepath.Join(root,"models"),modelRoot,modelPresent)
- if err!=nil{return fmt.Errorf("invalid installer ModelRoot: %w",err)}
- if modelPresent {
-  if err:=verifySelectedRootComponents(cfg.LocalAI.ModelPoolPath);err!=nil{
-   return fmt.Errorf("unsafe installer ModelRoot: %w",err)
-  }
- }
- if !filepath.IsAbs(cfg.Storage.ProjectRoot)||!filepath.IsAbs(cfg.LocalAI.ModelPoolPath){
-  return fmt.Errorf("installer configured relative model or project directory")
- }
- buf,err:=yaml.Marshal(cfg);if err!=nil{return err}
  return persistInitialServiceConfig(path,buf)
 }
 func runBackend() (retErr error) {

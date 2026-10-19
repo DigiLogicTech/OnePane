@@ -2,6 +2,7 @@
 
 package localai
 import (
+ "bytes"
  "os"
  "path/filepath"
  "strings"
@@ -43,5 +44,33 @@ func TestWindowsManagedRuntimeLogCurrentAndArchivePrivate(t *testing.T){
   if err!=nil{t.Fatal(err)}
   flags,_,err:=sd.Control()
   if err!=nil||flags&windows.SE_DACL_PROTECTED==0{t.Fatalf("runtime log not private: %s %v",p,err)}
+ }
+}
+
+func TestWindowsLegacyFullRuntimeLogPrivateAfterRotation(t *testing.T){
+ path:=filepath.Join(t.TempDir(),"logs","legacy.log")
+ if err:=os.MkdirAll(filepath.Dir(path),0700);err!=nil{t.Fatal(err)}
+ payload:=make([]byte,int(maxManagedRuntimeLogBytes))
+ copy(payload,[]byte("legacy model diagnostic bytes"))
+ if err:=os.WriteFile(path,payload,0644);err!=nil{t.Fatal(err)}
+ broad,err:=windows.SecurityDescriptorFromString("D:P(A;;FA;;;WD)")
+ if err!=nil{t.Fatal(err)}
+ dacl,_,err:=broad.DACL()
+ if err!=nil{t.Fatal(err)}
+ if err:=windows.SetNamedSecurityInfo(path,windows.SE_FILE_OBJECT,
+  windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+  nil,nil,dacl,nil);err!=nil{t.Fatal(err)}
+ f,err:=openManagedRuntimeLog(path)
+ if err!=nil{t.Fatal(err)}
+ _=f.Close()
+ prior:=path+".previous"
+ sd,err:=windows.GetNamedSecurityInfo(prior,windows.SE_FILE_OBJECT,windows.DACL_SECURITY_INFORMATION)
+ if err!=nil{t.Fatal(err)}
+ if strings.Contains(strings.ToUpper(sd.String()),";;;WD)"){
+  t.Fatal("legacy model diagnostic archive retains broad Everyone DACL")
+ }
+ saved,err:=os.ReadFile(prior)
+ if err!=nil||len(saved)!=len(payload)||!bytes.Equal(saved[:len("legacy model diagnostic bytes")],payload[:len("legacy model diagnostic bytes")]){
+  t.Fatalf("legacy archived content damaged: %v",err)
  }
 }

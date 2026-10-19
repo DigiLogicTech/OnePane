@@ -163,6 +163,29 @@ func(w *boundedRuntimeLogWriter)Write(p []byte)(int,error){
 // launcher must not truncate a previous log, follow a linked log file or
 // operate in a shared directory. All checks precede the subprocess spawn;
 // no existing arbitrary file is opened with O_TRUNC.
+// Existing or archived logs from earlier releases can inherit broad Windows
+// DACLs. Protect their NTFS ACL without writing/truncating any log bytes.
+// The returned handle is closed before rename to avoid Windows share issues.
+func protectExistingRuntimeLogOnDisk(path string)error{
+ observed,err:=os.Lstat(path)
+ if errors.Is(err,os.ErrNotExist){return nil}
+ if err!=nil{return err}
+ if !observed.Mode().IsRegular(){return errors.New("unsafe archived managed runtime log")}
+ f,err:=os.OpenFile(path,os.O_WRONLY|os.O_APPEND,0o600)
+ if err!=nil{return err}
+ defer f.Close()
+ held,err:=f.Stat()
+ if err!=nil||!os.SameFile(observed,held){
+  return errors.New("managed runtime log changed before protection")
+ }
+ if err:=protectManagedRuntimeLog(f);err!=nil{return err}
+ named,err:=os.Lstat(path)
+ if err!=nil||!named.Mode().IsRegular()||!os.SameFile(held,named){
+  return errors.New("managed runtime log path changed during security update")
+ }
+ return nil
+}
+
 func openManagedRuntimeLog(path string)(*os.File,error){
  dir:=filepath.Dir(path)
  if err:=os.MkdirAll(dir,0o700);err!=nil{return nil,err}
@@ -171,6 +194,10 @@ func openManagedRuntimeLog(path string)(*os.File,error){
  if !di.IsDir()||di.Mode()&os.ModeSymlink!=0||
   (runtime.GOOS!="windows"&&di.Mode().Perm()&0o077!=0){
   return nil,errors.New("unsafe managed runtime log directory")
+ }
+ // Audit an older rotated log even when a new model launch does not rotate.
+ if runtime.GOOS=="windows"{
+  if err:=protectExistingRuntimeLogOnDisk(path+".previous");err!=nil{return nil,err}
  }
  st,err:=os.Lstat(path)
  if err!=nil&&!errors.Is(err,os.ErrNotExist){return nil,err}
@@ -184,6 +211,11 @@ func openManagedRuntimeLog(path string)(*os.File,error){
   // A log already at the live-write cap must rotate too; reopening
   // it would silently discard every diagnostic from the next launch.
   if st.Size()>=maxManagedRuntimeLogBytes{
+   // Without this step a legacy 0644/Everyone log becomes a readable
+   // archived .previous when the first launch rotates it.
+   if runtime.GOOS=="windows"{
+    if e:=protectExistingRuntimeLogOnDisk(path);e!=nil{return nil,e}
+   }
    archive:=path+".previous"
    if _,e:=os.Lstat(archive);e==nil{
     if e=os.Remove(archive);e!=nil{return nil,e}

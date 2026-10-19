@@ -317,9 +317,14 @@ func resolveOnePaneDataRoot(fallback, configured string, present bool) (string, 
 }
 func ensureOnePaneConfig(root string)error{
  path:=filepath.Join(root,"config.yaml")
- // Never follow an existing symlink/reparse file before bootstrapping the
- // persistent service configuration. Legacy regular configs are preserved.
- if err:=inspectExistingServiceConfig(path);err==nil{return nil
+ // Existing configurations are never rewritten. However, an MSI-selected
+ // DataRoot must not silently launch a copied legacy config pointing at the
+ // previous drive's database. Refuse the mismatch before starting harnessd.
+ if err:=inspectExistingServiceConfig(path);err==nil{
+  _,explicit,regErr:=onePaneRegistryPathValue("DataRoot")
+  if regErr!=nil{return regErr}
+  if explicit{return verifyExistingConfigUsesSelectedRoot(path,root)}
+  return nil
  }else if !errors.Is(err,os.ErrNotExist){return err}
  if err:=os.MkdirAll(root,0700);err!=nil{return err}
  cfg:=config.Default()

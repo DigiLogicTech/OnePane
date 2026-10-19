@@ -342,6 +342,21 @@ func resolveInstallerStoragePath(fallback, configured string, present bool)(stri
  return resolved,nil
 }
 
+// A first-run local Windows installation must not join LAN multicast or
+// expose a federation listener without operator opt-in. Existing YAML is
+// never modified, so previously approved Node settings are preserved.
+func firstRunWindowsServiceConfig(root,projectRoot,modelRoot string) config.Config {
+ cfg:=config.Default()
+ cfg.Server.Listen="127.0.0.1:18181"
+ cfg.Server.PreviewListen="127.0.0.1:18182"
+ cfg.Storage.DataDir=filepath.Join(root,"data")
+ cfg.Storage.ProjectRoot=projectRoot
+ cfg.LocalAI.ModelPoolPath=modelRoot
+ cfg.Federation.Enabled=false
+ cfg.Federation.DiscoveryEnabled=false
+ return cfg
+}
+
 func ensureOnePaneConfig(root string)error{
  path:=filepath.Join(root,"config.yaml")
  // Validate both registry-selected directories even on existing installs;
@@ -365,12 +380,7 @@ func ensureOnePaneConfig(root string)error{
  }else if !errors.Is(err,os.ErrNotExist){return err}
 
  if err:=os.MkdirAll(root,0700);err!=nil{return err}
- cfg:=config.Default()
- cfg.Server.Listen="127.0.0.1:18181"
- cfg.Server.PreviewListen="127.0.0.1:18182"
- cfg.Storage.DataDir=filepath.Join(root,"data")
- cfg.Storage.ProjectRoot=projectRoot
- cfg.LocalAI.ModelPoolPath=modelRoot
+ cfg:=firstRunWindowsServiceConfig(root,projectRoot,modelRoot)
  buf,err:=yaml.Marshal(cfg)
  if err!=nil{return err}
  return persistInitialServiceConfig(path,buf)

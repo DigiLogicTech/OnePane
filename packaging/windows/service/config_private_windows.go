@@ -71,7 +71,10 @@ func secureNewServiceConfig(f *os.File) error {
  if err!=nil{return fmt.Errorf("create private service configuration DACL: %w",err)}
  dacl,_,err:=descriptor.DACL()
  if err!=nil||dacl==nil{return fmt.Errorf("read private service configuration DACL: %v",err)}
- if err:=windows.SetSecurityInfo(windows.Handle(f.Fd()),windows.SE_FILE_OBJECT,
+ // The ordinary os.OpenFile writer handle has no WRITE_DAC access on
+ // Windows. Use the same named-object DACL API already validated by SQLite
+ // migration snapshots. The caller verifies os.SameFile before writing YAML.
+ if err:=windows.SetNamedSecurityInfo(f.Name(),windows.SE_FILE_OBJECT,
   windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
   nil,nil,dacl,nil);err!=nil{
   return fmt.Errorf("protect OnePane service configuration DACL: %w",err)

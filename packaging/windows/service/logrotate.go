@@ -3,6 +3,7 @@
 package main
 
 import (
+ "errors"
  "fmt"
  "io"
  "os"
@@ -62,16 +63,41 @@ func openBoundedLogWriter(path string)(*boundedLogWriter,error){
  return &boundedLogWriter{path:path,file:f,size:st.Size()},nil
 }
 func (w *boundedLogWriter) rotate()error{
+ return w.rotateWith(os.Remove,os.Rename)
+}
+
+// A transient Windows rename/share-denial must not permanently disable
+// logging. An existing rotated log is checked/deleted BEFORE closing the
+// active handle; a failed rename reopens and revalidates the same file.
+func (w *boundedLogWriter) rotateWith(remove func(string)error,rename func(string,string)error)error{
  if w.file==nil{return os.ErrClosed}
- if err:=w.file.Close();err!=nil{return err}
- w.file=nil
  previous:=w.path+".1"
- if err:=os.Remove(previous);err!=nil&&!os.IsNotExist(err){return err}
- if err:=os.Rename(w.path,previous);err!=nil{return err}
+ if err:=remove(previous);err!=nil&&!os.IsNotExist(err){return err}
+ original,err:=w.file.Stat()
+ if err!=nil{return err}
+ if err:=w.file.Close();err!=nil{w.file=nil;return err}
+ w.file=nil
+ if err:=rename(w.path,previous);err!=nil{
+  return w.reopenAfterFailedRename(original,err)
+ }
  f,err:=openPrivateServiceLogFile(w.path)
  if err!=nil{return err}
- w.file=f;w.size=0
+ w.file=f
+ w.size=0
  return nil
+}
+
+func (w *boundedLogWriter) reopenAfterFailedRename(original os.FileInfo,cause error)error{
+ f,err:=openPrivateServiceLogFile(w.path)
+ if err!=nil{return errors.Join(cause,err)}
+ info,err:=f.Stat()
+ if err!=nil||!os.SameFile(original,info){
+  _=f.Close()
+  return errors.Join(cause,fmt.Errorf("service log pathname changed during rotation recovery"))
+ }
+ w.file=f
+ w.size=info.Size()
+ return cause
 }
 // Write bounds the disk footprint even if a single stdout/stderr chunk is
 // larger than the log limit. Splitting the input retains the most recent

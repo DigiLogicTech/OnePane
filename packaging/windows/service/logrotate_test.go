@@ -4,6 +4,7 @@ package main
 
 import (
  "bytes"
+ "errors"
  "os"
  "path/filepath"
  "testing"
@@ -126,4 +127,22 @@ func TestServiceLogBoundaryDoesNotRotateOnEmptyWrite(t *testing.T){
  if n,err:=w.Write(nil);err!=nil||n!=0{t.Fatalf("empty write: %d %v",n,err)}
  if _,err:=os.Stat(path+".1");!os.IsNotExist(err){t.Fatalf("empty write unexpectedly rotated: %v",err)}
  if err:=w.Close();err!=nil{t.Fatal(err)}
+}
+
+func TestServiceLogRenameFailureCanResumeSafeAppend(t *testing.T){
+ path:=filepath.Join(t.TempDir(),"onepane.log")
+ w,err:=openBoundedLogWriter(path)
+ if err!=nil{t.Fatal(err)}
+ if _,err:=w.Write([]byte("before\n"));err!=nil{t.Fatal(err)}
+ denied:=errors.New("simulated Windows rename sharing violation")
+ rotateErr:=w.rotateWith(os.Remove,func(string,string)error{return denied})
+ if !errors.Is(rotateErr,denied){t.Fatalf("rename cause lost: %v",rotateErr)}
+ if w.file==nil{t.Fatal("rename failure permanently disabled service log")}
+ if _,err:=w.Write([]byte("after\n"));err!=nil{t.Fatalf("append after failed rotation: %v",err)}
+ if err:=verifyPrivateServiceConfig(w.file);err!=nil{t.Fatal(err)}
+ if err:=w.Close();err!=nil{t.Fatal(err)}
+ saved,err:=os.ReadFile(path)
+ if err!=nil||string(saved)!="before\nafter\n"{
+  t.Fatalf("failed rename overwrote operator diagnostics: %q %v",saved,err)
+ }
 }

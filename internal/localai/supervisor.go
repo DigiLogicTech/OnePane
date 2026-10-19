@@ -200,10 +200,32 @@ func openManagedRuntimeLog(path string)(*os.File,error){
    _=f.Close()
    return nil,errors.New("managed runtime log changed before opening")
   }
+  if e:=protectManagedRuntimeLog(f);e!=nil{_ = f.Close();return nil,e}
+  named,e:=os.Lstat(path)
+  if e!=nil||!named.Mode().IsRegular()||!os.SameFile(fi,named){
+   _=f.Close()
+   return nil,errors.New("managed runtime log changed during ACL protection")
+  }
   return f,nil
  }
  f,e:=os.OpenFile(path,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0o600)
  if e!=nil{return nil,e}
+ if e=protectManagedRuntimeLog(f);e!=nil{
+  // A DACL failure must never leave a new unprotected file behind.
+  opened,statErr:=f.Stat()
+  named,nameErr:=os.Lstat(path)
+  _=f.Close()
+  if statErr==nil&&nameErr==nil&&named.Mode().IsRegular()&&os.SameFile(opened,named){
+   _=os.Remove(path)
+  }
+  return nil,e
+ }
+ fi,e:=f.Stat()
+ named,nameErr:=os.Lstat(path)
+ if e!=nil||nameErr!=nil||!named.Mode().IsRegular()||!os.SameFile(fi,named){
+  _=f.Close()
+  return nil,errors.New("new managed runtime log changed during protected creation")
+ }
  return f,nil
 }
 

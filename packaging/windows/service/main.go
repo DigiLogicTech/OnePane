@@ -132,6 +132,7 @@ func serviceMain(argc uint32, argv **uint16) uintptr {
 		// backend still owns inference workers. The graceful stop is bounded;
 		// a failed drain invokes the managed process-tree termination path.
 		if hasLaunchedBackendChild() {
+			setStatus(serviceStopPending, 0, 1, 20000, 0)
 			if !drainBackend(done, stopBackend, killBackend,
 				5*time.Second, 5*time.Second) {
 				fmt.Fprintln(os.Stderr, "OnePane startup cleanup: managed child did not exit within deadline")
@@ -170,9 +171,13 @@ func serviceMain(argc uint32, argv **uint16) uintptr {
 			}
 		}
 	case err := <-done:
+		// An unrequested backend exit (even status 0) is a service failure.
+		// Otherwise SCM may report an unexpected crash as a clean stop,
+		// hiding it from the operator and service-recovery policy.
 		if err != nil {
-			exitCode = 1
+			fmt.Fprintln(os.Stderr, "OnePane backend exited:", err)
 		}
+		exitCode = classifyBackendExit(stopCh)
 	}
 
 	if exitCode!=0{
@@ -268,6 +273,16 @@ func waitForBackendHealth(done <-chan error, timeout time.Duration) (bool, error
 		time.Sleep(time.Second)
 	}
 	return false, fmt.Errorf("backend health endpoint did not become ready within %s", timeout)
+}
+
+// Only a stop explicitly requested by SCM can make a child exit count as
+// successful. A spontaneous clean exit still terminates the service's job
+// tree and is reported as a failure for diagnosis and recovery policy.
+func classifyBackendExit(stopping <-chan struct{}) uint32 {
+ select {
+ case <-stopping:return 0
+ default:return 1
+ }
 }
 
 // A failure that already consumed the exited backend's done signal does

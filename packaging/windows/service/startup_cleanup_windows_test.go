@@ -39,3 +39,14 @@ func TestSCMStartupCleanupReportsStillUnreapedChild(t *testing.T){
   t.Fatal("unresponsive child was silently treated as clean SCM stop")
  }
 }
+
+func TestSCMUnexpectedCleanBackendExitIsFailure(t *testing.T){
+ stopping:=make(chan struct{})
+ if actual:=classifyBackendExit(stopping);actual!=1{
+  t.Fatalf("unexpected clean exit classified as success: %d",actual)
+ }
+ close(stopping)
+ if actual:=classifyBackendExit(stopping);actual!=0{
+  t.Fatalf("explicit SCM stop classified as crash: %d",actual)
+ }
+}

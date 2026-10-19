@@ -25,21 +25,27 @@ func TestManagedBackendJobTerminatesChildWhenOwnerCloses(t *testing.T){
  child.Env=append(os.Environ(),"ONEPANE_OWNED_JOB_TEST_CHILD=1")
  child.SysProcAttr=&syscall.SysProcAttr{CreationFlags:0x08000000}
  if err:=child.Start();err!=nil{t.Fatal(err)}
+ finished:=make(chan error,1)
+ go func(){finished<-child.Wait()}()
+ reaped:=false
  defer func(){
-  if child.Process!=nil{_ = child.Process.Kill()}
-  _ = child.Wait()
+  if !reaped{
+   _ = child.Process.Kill()
+   select{
+   case <-finished:
+   case <-time.After(5*time.Second):
+   }
+  }
  }()
  if err:=job.Assign(child.Process.Pid);err!=nil{t.Fatalf("could not enroll test child in owned job: %v",err)}
  if err:=job.Close();err!=nil{t.Fatalf("job close failed: %v",err)}
- finished:=make(chan error,1)
- go func(){finished<-child.Wait()}()
  select{
- case <-finished: // Nonzero child exit is expected when the owned job closes.
+ case <-finished:
+  // Nonzero child exit is expected when the owned job closes.
+  reaped=true
  case <-time.After(5*time.Second):
   t.Fatal("closing owned Windows Job Object did not terminate managed child")
  }
- // Avoid a second concurrent Wait via the defer above.
- child.Process=nil
 }
 
 func TestManagedBackendJobRejectsInvalidPIDAndClosesIdempotently(t *testing.T){

@@ -26,6 +26,14 @@ func inspectExistingServiceConfig(path string) error {
 // regular config is NEVER overwritten or silently reinitialised. The file's
 // NTFS ACL is protected before any credential-bearing YAML is written.
 func persistInitialServiceConfig(path string, contents []byte) error {
+ return persistInitialServiceConfigWithSecurity(path,contents,secureNewServiceConfig)
+}
+
+// Separating the ACL operation permits fault injection of Windows permission
+// denial without touching HKLM, the SCM or real operator configuration.
+func persistInitialServiceConfigWithSecurity(path string,contents []byte,
+ secure func(*os.File)error) error {
+ if secure==nil{return fmt.Errorf("missing service configuration security policy")}
  if err:=inspectExistingServiceConfig(path);err==nil{return nil
  }else if !errors.Is(err,os.ErrNotExist){return err}
  f,err:=os.OpenFile(path,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0o600)
@@ -47,7 +55,7 @@ func persistInitialServiceConfig(path string, contents []byte) error {
    _=os.Remove(path)
   }
  }()
- if err:=secureNewServiceConfig(f);err!=nil{return err}
+ if err:=secure(f);err!=nil{return err}
  held,err:=f.Stat()
  if err!=nil{return err}
  named,err:=os.Lstat(path)

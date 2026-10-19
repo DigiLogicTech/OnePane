@@ -1501,10 +1501,14 @@ func (s *RuntimeSupervisor) stopWhileResidencyLocked(ctx context.Context, deploy
 }
 
 // Call only while activityMu is held (including Colibri swap and idle reaper).
-func (s *RuntimeSupervisor) stopWithActivityLock(ctx context.Context, deploymentID string) error {
+func (s *RuntimeSupervisor) stopWithActivityLock(ctx context.Context, deploymentID string, daemonShutdown ...bool) error {
  deploymentID=strings.TrimSpace(deploymentID)
  if deploymentID==""{return errors.New("deployment ID is required")}
- if s.activeRequests[deploymentID]>0{
+ teardown:=len(daemonShutdown)>0 && daemonShutdown[0]
+ // Manual stops/evictions must preserve live inference. Daemon teardown
+ // follows HTTP-server drain and has explicit authority to clean up managed
+ // children even if a timed-out request still owns an in-process lease.
+ if !teardown&&s.activeRequests[deploymentID]>0{
   return errors.New("managed model is serving active inference requests; wait for them to complete before stopping")
  }
  inst, err := s.Instance(ctx, deploymentID)
@@ -1514,7 +1518,7 @@ func (s *RuntimeSupervisor) stopWithActivityLock(ctx context.Context, deployment
  // A persisted busy status without a corresponding in-memory lease may
  // represent an unknown request after daemon restart. Refuse to signal it
  // until operator reconciliation; never infer idleness from map absence.
- if inst.Status==RuntimeBusy {
+ if inst.Status==RuntimeBusy&&!teardown {
   return errors.New("managed model has a persisted busy status with no safely releasable inference lease; reconcile before stopping")
  }
 	markOrphaned := func(reason string) error {
@@ -1622,6 +1626,10 @@ func (s *RuntimeSupervisor) stopWithActivityLock(ctx context.Context, deployment
 	 SET residency_state='stopped',updated_at=?,revision=revision+1
 	 WHERE id=? AND (residency_state IS NULL OR residency_state<>'stopped')`,now,deploymentID)
 	if err!=nil{return fmt.Errorf("persist stopped model residency: %w",err)}
+ // This is called only after Stop independently proved the managed process
+ // exited. Abandoning daemon-owned lease counts on explicit teardown stops
+ // late request cleanup from falsely holding a defunct model busy.
+ if teardown{delete(s.activeRequests,deploymentID)}
 	return nil
 }
 
@@ -1817,6 +1825,18 @@ func (s *RuntimeSupervisor) ReapIdle(ctx context.Context, idle time.Duration, li
   if didStop{stopped++}
  }
  return stopped,nil
+}
+
+// stopForDaemonShutdown is private to deliberate daemon teardown, after
+// HTTP graceful drain has had an opportunity to complete active inference.
+// It uses the ordinary PID identity checks and owned-process stop logic;
+// only the normal active-lease veto is bypassed during final teardown.
+func (s *RuntimeSupervisor) stopForDaemonShutdown(ctx context.Context, deploymentID string) error {
+ s.residencyMu.Lock()
+ defer s.residencyMu.Unlock()
+ s.activityMu.Lock()
+ defer s.activityMu.Unlock()
+ return s.stopWithActivityLock(ctx,deploymentID,true)
 }
 
 func (s *RuntimeSupervisor) Shutdown(ctx context.Context) error {

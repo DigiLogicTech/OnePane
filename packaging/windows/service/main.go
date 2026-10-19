@@ -320,7 +320,16 @@ func resolveOnePaneDataRoot(fallback, configured string, present bool) (string, 
  if value == "" || !filepath.IsAbs(value) {
   return "", fmt.Errorf("invalid installer storage path: expected absolute persistent path")
  }
- return filepath.Clean(value), nil
+ cleaned:=filepath.Clean(value)
+ volume:=filepath.VolumeName(cleaned)
+ // filepath.IsAbs also accepts UNC shares and Windows device namespaces.
+ // The MSI promises local NTFS volumes; remote/device paths would silently
+ // redirect secrets, model weights or databases outside the selected drive.
+ if len(volume)!=2||volume[1]!=':'||
+  !(volume[0]>='A'&&volume[0]<='Z'||volume[0]>='a'&&volume[0]<='z'){
+  return "",fmt.Errorf("invalid installer storage path: select a local drive-letter directory")
+ }
+ return cleaned,nil
 }
 func ensureOnePaneConfig(root string)error{
  path:=filepath.Join(root,"config.yaml")
@@ -342,10 +351,20 @@ func ensureOnePaneConfig(root string)error{
  if err!=nil{return err}
  cfg.Storage.ProjectRoot,err=resolveOnePaneDataRoot(filepath.Join(root,"Projects"),projectRoot,projectPresent)
  if err!=nil{return fmt.Errorf("invalid installer ProjectRoot: %w",err)}
+ if projectPresent {
+  if err:=verifySelectedRootComponents(cfg.Storage.ProjectRoot);err!=nil{
+   return fmt.Errorf("unsafe installer ProjectRoot: %w",err)
+  }
+ }
  modelRoot,modelPresent,err:=onePaneRegistryPathValue("ModelRoot")
  if err!=nil{return err}
  cfg.LocalAI.ModelPoolPath,err=resolveOnePaneDataRoot(filepath.Join(root,"models"),modelRoot,modelPresent)
  if err!=nil{return fmt.Errorf("invalid installer ModelRoot: %w",err)}
+ if modelPresent {
+  if err:=verifySelectedRootComponents(cfg.LocalAI.ModelPoolPath);err!=nil{
+   return fmt.Errorf("unsafe installer ModelRoot: %w",err)
+  }
+ }
  if !filepath.IsAbs(cfg.Storage.ProjectRoot)||!filepath.IsAbs(cfg.LocalAI.ModelPoolPath){
   return fmt.Errorf("installer configured relative model or project directory")
  }

@@ -23,3 +23,21 @@ func TestInstallerDataRootDoesNotSilentlyFallBack(t *testing.T) {
   }
  }
 }
+
+func TestInstallerExplicitStorageRootsRejectUNCAndDeviceNames(t *testing.T) {
+ for _,configured:=range []string{
+  `\\server\share\OnePane`,
+  `\\?\C:\OnePane`,
+  `\\.\C:\OnePane`,
+  `\\?\UNC\server\share\OnePane`,
+ } {
+  if got,err:=resolveOnePaneDataRoot(`C:\ProgramData\OnePane`,configured,true);err==nil {
+   t.Fatalf("explicit remote/device storage %q incorrectly accepted: %q",configured,got)
+  }
+ }
+ for _,configured:=range []string{`C:\OnePane\data`,`D:\OnePane\models`,`E:\OnePane\Projects`} {
+  if got,err:=resolveOnePaneDataRoot(`C:\ProgramData\OnePane`,configured,true);err!=nil||got!=filepath.Clean(configured){
+   t.Fatalf("ordinary local drive %q rejected: %q %v",configured,got,err)
+  }
+ }
+}

@@ -37,6 +37,10 @@ func main() {
 	flag.StringVar(&offlineRoot, "startup-evidence-root", "", "read only: print sanitized offline startup evidence for an explicit data root")
 	flag.Parse()
 
+	// Capture the SCM launch credential then remove it from the backend's
+	// environment BEFORE bootstrap or any model/tool subprocess can inherit it.
+	serviceShutdownToken := consumeServiceLaunchToken()
+
 	// This mode does not open config, SQLite, start listeners or use a network.
 	// Local filesystem access is governed by OS permissions on the data root.
 	if offlineRoot != "" {
@@ -164,8 +168,8 @@ func main() {
 	// Windows SCM readiness and shutdown must prove ownership of THIS
 	// service-launched backend, not merely some listener on the same port.
 	// No privileged endpoints exist for ordinary non-service launches.
-	if token := os.Getenv("ONEPANE_SERVICE_SHUTDOWN_TOKEN"); len(token) >= 32 {
-		httpServer.Handler = serviceControlHandler(httpServer.Handler, token, cancel)
+	if len(serviceShutdownToken) >= 32 {
+		httpServer.Handler = serviceControlHandler(httpServer.Handler, serviceShutdownToken, cancel)
 	}
 	previewHTTPServer := &http.Server{
 		Addr:              cfg.Server.PreviewListen,

@@ -159,3 +159,32 @@ func TestColibriRollbackCanStopWhileHoldingResidencyLock(t *testing.T){
  if err:=db.QueryRow(`SELECT status FROM local_runtime_instances WHERE deployment_id='model'`).Scan(&status);err!=nil{t.Fatal(err)}
  if status!="stopped"{t.Fatalf("Colibri rollback did not stop healthy model: %s",status)}
 }
+
+func TestExplicitDaemonShutdownDrainsOtherwiseBusyManagedRuntime(t *testing.T){
+ svc,db:=stopLeaseFixture(t,"busy")
+ svc.activeRequests["model"]=2
+ if err:=svc.Stop(context.Background(),"model");err==nil{
+  t.Fatal("ordinary model Stop unexpectedly bypassed active inference lease")
+ }
+ if err:=svc.Shutdown(context.Background());err!=nil{
+  t.Fatalf("explicit daemon shutdown failed to reconcile managed model: %v",err)
+ }
+ var status,residency string
+ if err:=db.QueryRow(`SELECT status FROM local_runtime_instances WHERE deployment_id='model'`).Scan(&status);err!=nil{t.Fatal(err)}
+ if err:=db.QueryRow(`SELECT residency_state FROM model_deployments WHERE id='model'`).Scan(&residency);err!=nil{t.Fatal(err)}
+ if status!="stopped"||residency!="stopped"||svc.activeRequests["model"]!=0{
+  t.Fatalf("daemon teardown leaked active managed model: runtime=%s residency=%s leases=%v",status,residency,svc.activeRequests)
+ }
+}
+func TestExplicitDaemonShutdownDoesNotAssumeUnknownBusyIsManagedUserStop(t *testing.T){
+ svc,db:=stopLeaseFixture(t,"busy")
+ if err:=svc.Stop(context.Background(),"model");err==nil{
+  t.Fatal("direct Stop accepted persisted busy without valid inference lease")
+ }
+ if err:=svc.Shutdown(context.Background());err!=nil{
+  t.Fatalf("daemon teardown failed to reconcile stopped-OS-process busy record: %v",err)
+ }
+ var status string
+ if err:=db.QueryRow(`SELECT status FROM local_runtime_instances WHERE deployment_id='model'`).Scan(&status);err!=nil{t.Fatal(err)}
+ if status!="stopped"{t.Fatalf("shutdown left managed model as %s",status)}
+}

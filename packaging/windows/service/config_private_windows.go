@@ -33,13 +33,16 @@ func persistInitialServiceConfig(path string, contents []byte) error {
   return inspectExistingServiceConfig(path)
  }
  if err!=nil{return fmt.Errorf("create OnePane service config: %w",err)}
- defer f.Close()
  committed:=false
  defer func(){
-  if committed{return}
-  // Never delete an unrelated file if the pathname changed after creation.
+  // Windows does not reliably allow unlinking a still-open file. Close the
+  // writer BEFORE deleting a failed first-run config, otherwise a zero-byte
+  // config could survive and be mistaken for intentional persistent state.
   opened,e1:=f.Stat()
   named,e2:=os.Lstat(path)
+  _=f.Close()
+  if committed{return}
+  // Never delete an unrelated file if the pathname changed after creation.
   if e1==nil&&e2==nil&&named.Mode().IsRegular()&&os.SameFile(opened,named){
    _=os.Remove(path)
   }

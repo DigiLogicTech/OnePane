@@ -421,8 +421,8 @@ func ensureOnePaneConfig(root string)error{
  if err:=inspectExistingServiceConfig(path);err==nil{
   _,explicit,regErr:=onePaneRegistryPathValue("DataRoot")
   if regErr!=nil{return regErr}
-  if explicit{return verifyExistingConfigUsesSelectedRoot(path,root)}
-  return nil
+  return verifyExistingConfigStorageSelections(path,root,explicit,
+   projectRoot,projectPresent,modelRoot,modelPresent)
  }else if !errors.Is(err,os.ErrNotExist){return err}
 
  if err:=os.MkdirAll(root,0700);err!=nil{return err}

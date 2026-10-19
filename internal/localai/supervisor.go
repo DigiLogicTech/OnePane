@@ -88,7 +88,11 @@ func (b *OSProcessBackend) Start(ctx context.Context, spec LaunchSpec) (int, err
     // inherited stdout/stderr pipes open. Bound Wait's I/O pump cleanup
     // so a dead parent does not appear alive forever in the supervisor.
     cmd.WaitDelay=5*time.Second
-	cmd.Env = append([]string(nil), spec.Env...)
+	// A nil exec.Cmd.Env inherits the parent process environment (including
+	// cloud/API credentials). Force a non-nil, explicitly constructed slice
+	// even for callers with no approved host variables.
+	cmd.Env = make([]string, 0, len(spec.Env))
+	cmd.Env = append(cmd.Env, spec.Env...)
 	if spec.Dir != "" {
 		cmd.Dir = spec.Dir
 	}

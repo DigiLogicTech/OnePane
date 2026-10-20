@@ -1081,6 +1081,13 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 			return old, nil
 		}
 	}
+	// A persisted stopped/failed/orphaned model can still have an engine
+    // running after a crash or a failed teardown. Check BEFORE any Colibri
+    // eviction or admission so constrained hosts never assume its RAM/VRAM
+    // is available. Windows checks the actual OS PID even after restart.
+    if err:=s.refuseUnreconciledMemoryOwners(ctx,nodeID,deploymentID);err!=nil{
+        return RuntimeInstance{},err
+    }
 	// Resolve the Colibri launcher BEFORE evicting a healthy predecessor.
 	// Otherwise ordinary inference acquisition could lose its working
 	// model merely because Python was missing, with no swap rollback.

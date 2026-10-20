@@ -39,6 +39,10 @@ func selectColibriEvictions(candidates []colibriSwapCandidate, active map[string
             out=append(out,c.ID)
         case RuntimeBusy,RuntimeStarting,RuntimeDraining,RuntimeOrphaned:
             return nil,fmt.Errorf("Colibri model %s is %s; wait for an idle model or resolve the orphaned process",c.ID,c.Status)
+        case RuntimeFailed,RuntimeStopped:
+            // Only reported here when a PID is independently observed
+            // alive despite this stale persisted state.
+            return nil,fmt.Errorf("Colibri model %s has a live process despite status %s; reconcile the process before swapping",c.ID,c.Status)
         default:
             return nil,fmt.Errorf("unexpected Colibri residency state %s",c.Status)
         }
@@ -54,19 +58,32 @@ func selectColibriEvictions(candidates []colibriSwapCandidate, active map[string
 }
 
 func (s *RuntimeSupervisor) colibriResidents(ctx context.Context,nodeID,except string) ([]colibriSwapCandidate,error) {
-    rows,err:=s.db.QueryContext(ctx, `SELECT i.deployment_id,i.status,COALESCE(i.last_seen_at,i.started_at,i.updated_at),CASE WHEN json_extract(d.runtime_config_json,'$.colibri_pinned')=1 THEN 1 ELSE 0 END
+    rows,err:=s.db.QueryContext(ctx, `SELECT i.deployment_id,i.status,COALESCE(i.last_seen_at,i.started_at,i.updated_at),
+        CASE WHEN json_extract(d.runtime_config_json,'$.colibri_pinned')=1 THEN 1 ELSE 0 END,i.pid
         FROM local_runtime_instances i
         JOIN model_deployments d ON d.id=i.deployment_id
         WHERE i.node_id=? AND i.deployment_id<>?
           AND LOWER(COALESCE(d.runtime_name,''))='colibri'
-          AND i.status IN ('healthy','busy','starting','draining','orphaned')
+          AND (i.status IN ('healthy','busy','starting','draining','orphaned')
+            OR (i.status IN ('failed','stopped') AND COALESCE(i.pid,0)>1))
         ORDER BY COALESCE(i.last_seen_at,i.started_at,i.updated_at) DESC`,nodeID,except)
     if err!=nil{return nil,err}
     defer rows.Close()
     result:=[]colibriSwapCandidate{}
     for rows.Next(){
         var v colibriSwapCandidate
-        if err:=rows.Scan(&v.ID,&v.Status,&v.LastUsed,&v.Pinned);err!=nil{return nil,err}
+        var pid sql.NullInt64
+        if err:=rows.Scan(&v.ID,&v.Status,&v.LastUsed,&v.Pinned,&pid);err!=nil{return nil,err}
+        if v.Status==RuntimeFailed||v.Status==RuntimeStopped {
+            // A recorded "failed" or "stopped" status does not free VRAM
+            // when its old managed engine is still alive. Reject a new
+            // Colibri residency rather than overcommitting constrained RAM.
+            if !pid.Valid||pid.Int64<=1{continue}
+            if s.processes==nil{
+                return nil,fmt.Errorf("cannot verify process for stale Colibri model %s",v.ID)
+            }
+            if !s.processes.Alive(int(pid.Int64)){continue}
+        }
         result=append(result,v)
     }
     return result,rows.Err()
@@ -207,10 +224,16 @@ func (s *Service) ColibriHotSwapStatus(ctx context.Context,deploymentID string) 
     residents,err:=s.supervisor.colibriResidents(ctx,nodeID,"")
     if err!=nil{return state,err}
     for _,r:=range residents{
-        if r.Status==RuntimeHealthy||r.Status==RuntimeBusy||r.Status==RuntimeStarting {
+        if r.Status==RuntimeHealthy||r.Status==RuntimeBusy||r.Status==RuntimeStarting||
+            r.Status==RuntimeFailed||r.Status==RuntimeStopped {
             state.ActiveDeploymentIDs=append(state.ActiveDeploymentIDs,r.ID)
         }
-        if r.ID==deploymentID{state.Status=string(r.Status)}
+        if r.ID==deploymentID{
+            state.Status=string(r.Status)
+            if r.Status==RuntimeFailed||r.Status==RuntimeStopped{
+                state.Message="Colibri process is still running despite its saved state; stop/reconcile the engine before another swap."
+            }
+        }
     }
     return state,nil
 }

@@ -78,11 +78,11 @@ func TestColibriSwapStatusPreservesFailedVersusStoppedInstance(t *testing.T){
   `CREATE TABLE local_runtime_instances(
    deployment_id TEXT PRIMARY KEY,node_id TEXT NOT NULL,
    status TEXT NOT NULL,last_seen_at INTEGER,started_at INTEGER,
-   updated_at INTEGER NOT NULL)`,
+   updated_at INTEGER NOT NULL,pid INTEGER)`,
   `INSERT INTO local_runtime_instances
-   VALUES('colibri-a','node-1','failed',3,1,5)`,
+   VALUES('colibri-a','node-1','failed',3,1,5,NULL)`,
   `INSERT INTO local_runtime_instances
-   VALUES('colibri-b','node-1','healthy',4,2,6)`,
+   VALUES('colibri-b','node-1','healthy',4,2,6,NULL)`,
  }{
   if _,err:=db.Exec(query);err!=nil{t.Fatal(err)}
  }
@@ -193,4 +193,56 @@ func TestColibriFailedReplacementAlreadyStoppedDoesNotBlockRollback(t *testing.T
  if err:=svc.reconcileFailedColibriReplacement(context.Background(),"model");err!=nil{
   t.Fatalf("verified stopped replacement unnecessarily prevents restore: %v",err)
  }
+}
+
+func TestColibriHotSwapRejectsLiveFailedAndStoppedEngineBeforeEviction(t *testing.T){
+ db:=colibriPinTestDB(t)
+ defer db.Close()
+ for _,query:=range []string{
+  `CREATE TABLE local_runtime_instances(
+    node_id TEXT,deployment_id TEXT,status TEXT,last_seen_at INTEGER,
+    started_at INTEGER,updated_at INTEGER,pid INTEGER)`,
+  `INSERT INTO local_runtime_instances VALUES
+    ('node-1','colibri-a','healthy',5,4,6,1234),
+    ('node-1','colibri-b','failed',6,5,7,4321)`,
+ }{
+  if _,err:=db.Exec(query);err!=nil{t.Fatal(err)}
+ }
+ proc:=&unrecordedProcessBackend{alive:true}
+ supervisor:=&RuntimeSupervisor{db:db,processes:proc,activeRequests:map[string]int{}}
+ ctx:=context.Background()
+ for _,status:=range []string{"failed","stopped"}{
+  if _,err:=db.ExecContext(ctx,"UPDATE local_runtime_instances SET status=? WHERE deployment_id='colibri-b'",status);err!=nil{t.Fatal(err)}
+  residents,err:=supervisor.colibriResidents(ctx,"node-1","new-colibri")
+  if err!=nil{t.Fatal(err)}
+  selected,selectionErr:=selectColibriEvictions(residents,nil)
+  if selectionErr==nil||len(selected)!=0||
+    !strings.Contains(selectionErr.Error(),"live process"){
+    t.Fatalf("live %s engine was ignored and healthy model evicted: selected=%v err=%v",status,selected,selectionErr)
+  }
+  stateService:=&Service{db:db,supervisor:supervisor}
+  state,err:=stateService.ColibriHotSwapStatus(ctx,"colibri-b")
+  if err!=nil{t.Fatal(err)}
+  if state.Status!=status||!reflect.DeepEqual(state.ActiveDeploymentIDs,[]string{"colibri-a","colibri-b"})||
+    !strings.Contains(state.Message,"still running"){
+    t.Fatalf("operator view hid live %s engine: %+v",status,state)
+  }
+ }
+ if proc.signalCalls!=0{t.Fatal("admission inspection unexpectedly signalled a model")}
+}
+
+func TestColibriFailedRowWithConfirmedDeadPIDDoesNotBlockSwap(t *testing.T){
+ db:=colibriPinTestDB(t)
+ defer db.Close()
+ for _,q:=range []string{
+  `CREATE TABLE local_runtime_instances(
+    node_id TEXT,deployment_id TEXT,status TEXT,last_seen_at INTEGER,
+    started_at INTEGER,updated_at INTEGER,pid INTEGER)`,
+  `INSERT INTO local_runtime_instances VALUES ('node-1','colibri-b','failed',5,4,6,4321)`,
+ }{
+  if _,err:=db.Exec(q);err!=nil{t.Fatal(err)}
+ }
+ supervisor:=&RuntimeSupervisor{db:db,processes:&unrecordedProcessBackend{alive:false}}
+ residents,err:=supervisor.colibriResidents(context.Background(),"node-1","new-colibri")
+ if err!=nil||len(residents)!=0{t.Fatalf("confirmed dead legacy PID blocked safe swap: %v %v",residents,err)}
 }

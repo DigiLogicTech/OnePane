@@ -296,7 +296,12 @@ func (b *OSProcessBackend) Alive(pid int) bool {
 		return cmd.ProcessState == nil || !cmd.ProcessState.Exited()
 	}
 	if runtime.GOOS == "windows" {
-		return false
+        // After daemon restart the OS child is no longer in b.cmds.
+        // Windows previously returned false for EVERY such PID, even a
+        // living model engine still holding VRAM. Treat an untracked live
+        // (or uninspectable) PID as occupied; VerifyIdentity will separately
+        // refuse reusing/signalling it without authenticated ownership.
+        return windowsUntrackedPIDAlive(pid)
 	}
 	p, err := os.FindProcess(pid)
 	if err != nil {

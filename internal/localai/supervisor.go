@@ -305,9 +305,19 @@ func (b *OSProcessBackend) Alive(pid int) bool {
 	}
 	p, err := os.FindProcess(pid)
 	if err != nil {
-		return false
+        // Unix FindProcess normally succeeds even for an absent PID.
+        // If an unusual lookup error occurs, do not assume the process
+        // released RAM/VRAM unless its absence is conclusively established.
+        return !errors.Is(err,syscall.ESRCH)&&!errors.Is(err,os.ErrProcessDone)
 	}
-	return p.Signal(syscall.Signal(0)) == nil
+    return unixPIDProbeMeansOccupied(p.Signal(syscall.Signal(0)))
+}
+
+// Linux signal(0) returning EPERM means a process EXISTS but cannot be
+// inspected under this service UID. It is not evidence of free VRAM.
+// Only ESRCH / ProcessDone prove that this PID is no longer present.
+func unixPIDProbeMeansOccupied(err error)bool{
+ return err==nil||(!errors.Is(err,syscall.ESRCH)&&!errors.Is(err,os.ErrProcessDone))
 }
 func (b *OSProcessBackend) Identity(pid int) (ProcessIdentity, error) {
 	if pid <= 1 {

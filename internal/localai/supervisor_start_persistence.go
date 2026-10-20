@@ -48,7 +48,7 @@ func (s *RuntimeSupervisor) reconcileUnrecordedLaunch(parent context.Context, in
  now:=s.clock.UnixMilli()
  result,err:=s.db.ExecContext(cleanupCtx,`UPDATE local_runtime_instances
  SET pid=?,status=?,failure_reason=?,updated_at=?,revision=revision+1
- WHERE id=? AND status='starting' AND pid IS NULL`,pid,status,reason,now,inst.ID)
+ WHERE id=? AND status='starting' AND pid IS NULL AND revision=? AND process_fingerprint=?`,pid,status,reason,now,inst.ID,inst.Revision,inst.ProcessFingerprint)
  if err!=nil{
   return errors.Join(launchRecordErr,fmt.Errorf("failed to retain unrecorded managed model process ownership: %w",err))
  }

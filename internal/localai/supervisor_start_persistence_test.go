@@ -2,6 +2,8 @@ package localai
 
 import (
  "context"
+ "database/sql"
+ "strings"
  "errors"
  "os"
  "syscall"
@@ -34,7 +36,7 @@ func TestFailedModelPIDPersistenceUsesUncancelledRecoveryToKeepOrphan(t *testing
  parent,cancel:=context.WithCancel(context.Background())
  cancel()
  original:=parent.Err()
- err:=svc.reconcileUnrecordedLaunch(parent,RuntimeInstance{ID:"inst",DeploymentID:"model",Port:11333},4321,original)
+ err:=svc.reconcileUnrecordedLaunch(parent,RuntimeInstance{ID:"inst",Revision:1,ProcessFingerprint:"identity",DeploymentID:"model",Port:11333},4321,original)
  if !errors.Is(err,original){t.Fatalf("original cancelled-launch error lost: %v",err)}
  var status,reason string
  var pid int
@@ -49,7 +51,7 @@ func TestFailedModelPIDPersistenceRecordsConfirmedExitedChild(t *testing.T){
  proc:=&unrecordedProcessBackend{alive:false}
  svc.processes=proc
  cause:=errors.New("sqlite write refused")
- err:=svc.reconcileUnrecordedLaunch(context.Background(),RuntimeInstance{ID:"inst",DeploymentID:"model"},9876,cause)
+ err:=svc.reconcileUnrecordedLaunch(context.Background(),RuntimeInstance{ID:"inst",Revision:1,ProcessFingerprint:"identity",DeploymentID:"model"},9876,cause)
  if !errors.Is(err,cause){t.Fatalf("lost SQLite error: %v",err)}
  var status string
  var pid int
@@ -63,7 +65,7 @@ func TestUnrecordedModelPIDPersistenceDoesNotOverwriteAnotherLaunch(t *testing.T
  proc:=&unrecordedProcessBackend{alive:true}
  svc.processes=proc
  cause:=errors.New("original launch database failure")
- err:=svc.reconcileUnrecordedLaunch(context.Background(),RuntimeInstance{ID:"inst",DeploymentID:"model"},4321,cause)
+ err:=svc.reconcileUnrecordedLaunch(context.Background(),RuntimeInstance{ID:"inst",Revision:1,ProcessFingerprint:"identity",DeploymentID:"model"},4321,cause)
  if !errors.Is(err,cause)||err.Error()==cause.Error(){
   t.Fatalf("launch state conflict was hidden: %v",err)
  }
@@ -71,5 +73,25 @@ func TestUnrecordedModelPIDPersistenceDoesNotOverwriteAnotherLaunch(t *testing.T
  if scanErr:=db.QueryRow(`SELECT status FROM local_runtime_instances WHERE id='inst'`).Scan(&status);scanErr!=nil{t.Fatal(scanErr)}
  if status!="healthy"||proc.signalCalls!=0{
   t.Fatalf("unrecorded launch overwrote new owner or sent unauthorised signal: %s %d",status,proc.signalCalls)
+ }
+}
+
+func TestUnrecordedModelRecoveryRejectsStaleLaunchGeneration(t *testing.T){
+ svc,db:=stopLeaseFixture(t,"starting")
+ proc:=&unrecordedProcessBackend{alive:true}
+ svc.processes=proc
+ if _,err:=db.Exec(`UPDATE local_runtime_instances SET revision=2,process_fingerprint='new-launch' WHERE id='inst'`);err!=nil{t.Fatal(err)}
+ err:=svc.reconcileUnrecordedLaunch(context.Background(),
+  RuntimeInstance{ID:"inst",Revision:1,ProcessFingerprint:"identity",DeploymentID:"model"},
+  4321,errors.New("original launch store failed"))
+ if err==nil||!strings.Contains(err.Error(),"state changed"){
+  t.Fatalf("old launch generation was allowed to claim replacement: %v",err)
+ }
+ var revision int64
+ var fingerprint string
+ var pid sql.NullInt64
+ if e:=db.QueryRow(`SELECT revision,process_fingerprint,pid FROM local_runtime_instances WHERE id='inst'`).Scan(&revision,&fingerprint,&pid);e!=nil{t.Fatal(e)}
+ if revision!=2||fingerprint!="new-launch"||pid.Valid||proc.signalCalls!=0{
+  t.Fatalf("old launched model overwrote newer generation: revision=%d fingerprint=%s pid=%v signals=%d",revision,fingerprint,pid,proc.signalCalls)
  }
 }

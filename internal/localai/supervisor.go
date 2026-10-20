@@ -1162,6 +1162,9 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 			if n != 1 {
 				return errors.New("runtime instance restart state conflict")
 			}
+            // PID persistence must bind to this particular restart, not
+            // merely to a reused instance ID that another actor replaced.
+            inst.Revision=existing.Revision+1
 		}
 		eid, _ := s.ids.New("evt")
 		payload, _ := json.Marshal(map[string]any{"runtime_instance_id": inst.ID, "deployment_id": deploymentID, "port": port})
@@ -1192,7 +1195,7 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 		_ = s.markFailed(context.Background(), inst.ID, err.Error())
 		return RuntimeInstance{}, err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET pid=?,started_at=?,updated_at=?,revision=revision+1 WHERE id=? AND status='starting' AND pid IS NULL`, pid, now, now, inst.ID)
+	result, err := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET pid=?,started_at=?,updated_at=?,revision=revision+1 WHERE id=? AND status='starting' AND pid IS NULL AND revision=? AND process_fingerprint=?`, pid, now, now, inst.ID, inst.Revision, inst.ProcessFingerprint)
  if err==nil{
   var count int64
   count,err=result.RowsAffected()

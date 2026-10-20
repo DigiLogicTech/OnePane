@@ -1194,8 +1194,10 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 	}
 	_, err = s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET pid=?,started_at=?,updated_at=?,revision=revision+1 WHERE id=? AND status='starting'`, pid, now, now, inst.ID)
 	if err != nil {
-		_ = s.processes.Signal(pid, syscall.SIGTERM)
-		return RuntimeInstance{}, err
+        // A managed process has ALREADY started. Do not discard the PID
+        // or ignore a failed signal simply because the request context
+        // was cancelled before SQLite could record process ownership.
+        return RuntimeInstance{},s.reconcileUnrecordedLaunch(ctx,inst,pid,err)
 	}
 	return s.waitHealthy(ctx, inst.ID, 120*time.Second)
 }

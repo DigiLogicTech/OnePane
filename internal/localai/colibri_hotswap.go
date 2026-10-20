@@ -219,6 +219,13 @@ func (s *RuntimeSupervisor) colibriSwapOnNodeLocked(ctx context.Context,
             if _,restoreErr:=start(recoveryCtx,prev);restoreErr!=nil{
                 return state,RuntimeInstance{},fmt.Errorf("Colibri swap failed: %w; rollback to %s also failed: %v",launchErr,prev,restoreErr)
             }
+            // Rollback is real residency, not a successful target launch.
+            // Report the restored engine as active instead of still evicted,
+            // while keeping the original replacement failure as the error.
+            state.Status="failed"
+            state.ActiveDeploymentIDs=[]string{prev}
+            state.EvictedDeploymentIDs=nil
+            state.Message="Replacement failed; the previous Colibri model was restored. The requested model did not become resident."
             return state,RuntimeInstance{},fmt.Errorf("Colibri swap failed: %w; restored previous model %s",launchErr,prev)
         }
         return state,RuntimeInstance{},launchErr

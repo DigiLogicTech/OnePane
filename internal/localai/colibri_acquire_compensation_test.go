@@ -57,8 +57,11 @@ func TestChatColibriReplacementCancelledAfterEvictionRestoresPreviousWithIndepen
  var status string
  if err:=db.QueryRow("SELECT status FROM local_runtime_instances WHERE deployment_id='previous'").Scan(&status);err!=nil{t.Fatal(err)}
  if status!="healthy"{t.Fatalf("existing Colibri remained evicted after failed chat: %s",status)}
- if len(state.EvictedDeploymentIDs)!=1||state.EvictedDeploymentIDs[0]!="previous"{
-  t.Fatalf("lost eviction provenance: %+v",state)
+ if len(state.EvictedDeploymentIDs)!=0||
+  len(state.ActiveDeploymentIDs)!=1||state.ActiveDeploymentIDs[0]!="previous"||
+  state.Status!="failed"||
+  !strings.Contains(state.Message,"previous Colibri model was restored"){
+  t.Fatalf("rollback outcome misreported as still evicted or target success: %+v",state)
  }
 }
 

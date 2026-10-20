@@ -4,6 +4,9 @@ import (
     "reflect"
  "os"
  "context"
+ "database/sql"
+ "errors"
+ "time"
     "strings"
     "testing"
 )
@@ -148,5 +151,46 @@ func TestRuntimeReuseMustVerifyPIDIdentityBeforeReturningOrHealth(t *testing.T){
  ret:=strings.Index(scope[check:],"return old, nil")
  if start<0||ret<0||start>check{
   t.Fatal("healthy or busy old PID not guarded by original process fingerprint")
+ }
+}
+
+func TestCancelledColibriSwapGetsBoundedIndependentRecoveryContext(t *testing.T){
+ parent,cancel:=context.WithCancel(context.Background())
+ cancel()
+ recovery,finish:=colibriFailureRecoveryContext(parent)
+ defer finish()
+ if recovery.Err()!=nil{t.Fatalf("cancelled request also canceled cleanup: %v",recovery.Err())}
+ if deadline,ok:=recovery.Deadline();!ok||time.Until(deadline)>colibriFailureRecoveryLimit||
+  time.Until(deadline)<colibriFailureRecoveryLimit-5*time.Second{
+  t.Fatalf("Colibri cleanup deadline absent or unbounded: %v %v",deadline,ok)
+ }
+}
+func TestColibriReplacementUnknownPIDBlocksRollback(t *testing.T){
+ svc,db:=stopLeaseFixture(t,"starting")
+ ctx,cancel:=context.WithCancel(context.Background())
+ cancel()
+ recovery,finish:=colibriFailureRecoveryContext(ctx)
+ defer finish()
+ if err:=svc.reconcileFailedColibriReplacement(recovery,"model");err==nil||
+  !strings.Contains(err.Error(),"rollback withheld"){
+  t.Fatalf("unrecorded PID allowed old Colibri model to start: %v",err)
+ }
+ var status string
+ if err:=db.QueryRow("SELECT status FROM local_runtime_instances WHERE id='inst'").Scan(&status);err!=nil{t.Fatal(err)}
+ if status!="starting"{t.Fatalf("uncertain launching model was overwritten: %s",status)}
+}
+func TestColibriReplacementInspectionErrorsFailClosed(t *testing.T){
+ svc,db:=stopLeaseFixture(t,"failed")
+ ctx:=context.Background()
+ if _,err:=db.Exec("DROP TABLE local_runtime_instances");err!=nil{t.Fatal(err)}
+ err:=svc.reconcileFailedColibriReplacement(ctx,"model")
+ if err==nil||!strings.Contains(err.Error(),"rollback withheld")||errors.Is(err,sql.ErrNoRows){
+  t.Fatalf("storage inspection failure permitted rollback: %v",err)
+ }
+}
+func TestColibriFailedReplacementAlreadyStoppedDoesNotBlockRollback(t *testing.T){
+ svc,_:=stopLeaseFixture(t,"failed")
+ if err:=svc.reconcileFailedColibriReplacement(context.Background(),"model");err!=nil{
+  t.Fatalf("verified stopped replacement unnecessarily prevents restore: %v",err)
  }
 }

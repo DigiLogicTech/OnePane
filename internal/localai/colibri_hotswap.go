@@ -6,6 +6,7 @@ import (
     "errors"
     "fmt"
     "strings"
+    "time"
 )
 
 // ColibriSwapState reports whole-model residency, distinct from Colibri's
@@ -91,6 +92,36 @@ func (s *RuntimeSupervisor) prepareColibriSwapLocked(ctx context.Context,nodeID,
     return stopped,nil
 }
 
+// A failed Colibri launch may be reported after the caller cancels while
+// the managed Python/engine process continues to hold RAM/VRAM. Recovery must
+// use a bounded context independent of that cancelled request, just like
+// inference lease release, or it cannot inspect and drain the replacement.
+// The budget allows the existing Colibri graceful drain (35s on Unix) and
+// a slow-model restore (up to 120s); it never grants a background job.
+const colibriFailureRecoveryLimit = 165*time.Second
+
+func colibriFailureRecoveryContext(parent context.Context)(context.Context,context.CancelFunc){
+ return context.WithTimeout(context.WithoutCancel(parent),colibriFailureRecoveryLimit)
+}
+
+// Called with residencyMu already held. Uncertain database inspection or an
+// unrecorded PID in "starting" means the new model may still be running.
+// Never restart the predecessor in that state and overcommit a small host.
+func (s *RuntimeSupervisor) reconcileFailedColibriReplacement(ctx context.Context,target string)error{
+ failed,err:=s.Instance(ctx,target)
+ if errors.Is(err,sql.ErrNoRows){return nil}
+ if err!=nil{return fmt.Errorf("replacement residency inspection unavailable; rollback withheld: %w",err)}
+ if failed.Status==RuntimeStarting&&failed.PID<=1{
+  return errors.New("replacement launch ownership is uncertain; rollback withheld pending operator reconciliation")
+ }
+ if failed.PID>1&&s.processes.Alive(failed.PID){
+  if err:=s.stopWhileResidencyLocked(ctx,target);err!=nil{
+   return fmt.Errorf("replacement process could not be safely drained; rollback withheld: %w",err)
+  }
+ }
+ return nil
+}
+
 func (s *RuntimeSupervisor) ColibriHotSwap(ctx context.Context,deploymentID string) (ColibriSwapState,error) {
     state:=ColibriSwapState{DeploymentID:deploymentID,ActiveDeploymentIDs:[]string{}}
     if strings.TrimSpace(deploymentID)==""{return state,errors.New("Colibri deployment ID is required")}
@@ -106,7 +137,15 @@ func (s *RuntimeSupervisor) ColibriHotSwap(ctx context.Context,deploymentID stri
     if err!=nil{return state,err}
     // The actual evictions happen inside startLocked, under the same lock.
     inst,launchErr:=s.startLocked(ctx,deploymentID)
-    after,queryErr:=s.colibriResidents(ctx,nodeID,deploymentID)
+    // Success can use the caller's context; failure recovery must not.
+    // A cancelled request must never leave the replacement uninspected.
+    recoveryCtx:=ctx
+    if launchErr!=nil{
+        var cancel context.CancelFunc
+        recoveryCtx,cancel=colibriFailureRecoveryContext(ctx)
+        defer cancel()
+    }
+    after,queryErr:=s.colibriResidents(recoveryCtx,nodeID,deploymentID)
     if queryErr!=nil {
         if launchErr!=nil{return state,fmt.Errorf("Colibri launch failed: %w; residency inspection failed: %v",launchErr,queryErr)}
         return state,queryErr
@@ -122,16 +161,14 @@ func (s *RuntimeSupervisor) ColibriHotSwap(ctx context.Context,deploymentID stri
         // A startup timeout may mark the replacement failed while its engine
         // is still alive. Never load the predecessor until verified teardown
         // has completed: doing so risks concurrent VRAM/RAM overcommit.
-        if failed,instanceErr:=s.Instance(ctx,deploymentID);instanceErr==nil && failed.PID>1 && s.processes.Alive(failed.PID) {
-            if cleanupErr:=s.stopWhileResidencyLocked(ctx,deploymentID);cleanupErr!=nil {
-                return state,fmt.Errorf("Colibri swap failed: %w; replacement process could not be safely drained (%v); rollback withheld",launchErr,cleanupErr)
-            }
+        if cleanupErr:=s.reconcileFailedColibriReplacement(recoveryCtx,deploymentID);cleanupErr!=nil{
+            return state,fmt.Errorf("Colibri swap failed: %w; %v",launchErr,cleanupErr)
         }
         // Only roll back an instance that was actually stopped. Never
         // attempt another model switch when an active/busy model blocked us.
         if len(state.EvictedDeploymentIDs)>0{
             prev:=state.EvictedDeploymentIDs[0]
-            if _,restoreErr:=s.startLocked(ctx,prev);restoreErr!=nil{
+            if _,restoreErr:=s.startLocked(recoveryCtx,prev);restoreErr!=nil{
                 return state,fmt.Errorf("Colibri swap failed: %w; rollback to %s also failed: %v",launchErr,prev,restoreErr)
             }
             return state,fmt.Errorf("Colibri swap failed: %w; restored previous model %s",launchErr,prev)

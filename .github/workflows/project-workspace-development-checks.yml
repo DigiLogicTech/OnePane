@@ -217,6 +217,10 @@ jobs:
           # No live model or GPU. Real SQLite-backed concurrent lease tests.
           go test -race -count=1 -timeout 3m -run TestManagedStop ./internal/localai
           go test -race -count=1 -timeout 3m -run TestColibriRollbackCanStopWhileHoldingResidencyLock ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestCancelledColibriSwap ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestColibriReplacement ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestUnrecordedModel ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestFailedModelPIDPersistence ./internal/localai
       - name: Full Go regression and cross-platform compilation
         run: |
           go test ./internal/featurepolicy ./internal/inference ./internal/tool ./internal/webui
@@ -283,6 +287,11 @@ jobs:
           # No Colibri downloads, installs, or user data root access.
           go test -count=1 -timeout 4m -run TestManagedRuntimeLaunchWithNilOrEmptyEnvDoesNotInheritSecrets ./internal/localai
           go test -count=1 -timeout 4m -run TestWindowsManagedRuntimeLog ./internal/localai
+          # Verify exact launched-model PID ownership and cancelled Colibri
+          # compensation on Windows rather than relying on cross-compilation.
+          go test -count=1 -timeout 4m -run TestUnrecordedModel ./internal/localai
+          go test -count=1 -timeout 4m -run TestFailedModelPIDPersistence ./internal/localai
+          go test -count=1 -timeout 4m -run TestCancelledColibriSwap ./internal/localai
       - name: Native Windows SQLite migration and startup-evidence regressions
         shell: pwsh
         run: |

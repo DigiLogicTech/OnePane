@@ -4,6 +4,7 @@ import (
     "reflect"
  "os"
  "context"
+ "sort"
  "database/sql"
  "errors"
  "time"
@@ -223,6 +224,7 @@ func TestColibriHotSwapRejectsLiveFailedAndStoppedEngineBeforeEviction(t *testin
   stateService:=&Service{db:db,supervisor:supervisor}
   state,err:=stateService.ColibriHotSwapStatus(ctx,"colibri-b")
   if err!=nil{t.Fatal(err)}
+  sort.Strings(state.ActiveDeploymentIDs)
   if state.Status!=status||!reflect.DeepEqual(state.ActiveDeploymentIDs,[]string{"colibri-a","colibri-b"})||
     !strings.Contains(state.Message,"still running"){
     t.Fatalf("operator view hid live %s engine: %+v",status,state)

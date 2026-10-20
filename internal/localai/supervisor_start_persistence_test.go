@@ -15,11 +15,15 @@ import (
 type unrecordedProcessBackend struct{
  alive bool
  signalCalls int
+ onAlive func(int)
 }
 func (p *unrecordedProcessBackend) Start(context.Context,LaunchSpec)(int,error){
  return 0,errors.New("unexpected process start during recovery test")
 }
-func (p *unrecordedProcessBackend) Alive(int)bool{return p.alive}
+func (p *unrecordedProcessBackend) Alive(pid int)bool{
+ if p.onAlive!=nil{p.onAlive(pid)}
+ return p.alive
+}
 func (p *unrecordedProcessBackend) Signal(_ int,_ os.Signal)error{
  p.signalCalls++
  p.alive=false
@@ -94,4 +98,26 @@ func TestUnrecordedModelRecoveryRejectsStaleLaunchGeneration(t *testing.T){
  if revision!=2||fingerprint!="new-launch"||pid.Valid||proc.signalCalls!=0{
   t.Fatalf("old launched model overwrote newer generation: revision=%d fingerprint=%s pid=%v signals=%d",revision,fingerprint,pid,proc.signalCalls)
  }
+}
+
+func TestUnrecordedModelPersistsPIDBeforeProcessInspection(t *testing.T){
+ svc,db:=stopLeaseFixture(t,"starting")
+ proc:=&unrecordedProcessBackend{alive:true}
+ seen:=0
+ proc.onAlive=func(pid int){
+  seen++
+  var gotPID int
+  var gotStatus string
+  if err:=db.QueryRow(`SELECT pid,status FROM local_runtime_instances WHERE id='inst'`).Scan(&gotPID,&gotStatus);err!=nil{
+   t.Fatalf("process inspected before PID was durably stored: %v",err)
+  }
+  if gotPID!=pid||gotStatus!="orphaned"{
+   t.Fatalf("process checked without orphan ownership: got %s pid %d, expected %d",gotStatus,gotPID,pid)
+  }
+ }
+ svc.processes=proc
+ _=svc.reconcileUnrecordedLaunch(context.Background(),
+  RuntimeInstance{ID:"inst",Revision:1,ProcessFingerprint:"identity",DeploymentID:"model",Port:11333},
+  4477,errors.New("simulated launch CAS refusal"))
+ if seen<1{t.Fatal("fake process never checked after durable ownership")}
 }

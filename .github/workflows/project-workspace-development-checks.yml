@@ -296,6 +296,9 @@ jobs:
           go test -count=1 -timeout 4m -run TestCancelledColibriSwap ./internal/localai
           go test -count=1 -timeout 4m -run TestColibriHotSwapRejectsLiveFailedAndStoppedEngineBeforeEviction ./internal/localai
           go test -count=1 -timeout 4m -run TestColibriFailedRowWithConfirmedDeadPIDDoesNotBlockSwap ./internal/localai
+          # OS-backed post-restart PID liveness: live untracked child must
+          # block memory admission; dead child must not. Identity stays denied.
+          go test -count=1 -timeout 4m -run TestWindowsUntrackedPID ./internal/localai
       - name: Native Windows SQLite migration and startup-evidence regressions
         shell: pwsh
         run: |

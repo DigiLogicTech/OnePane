@@ -1192,14 +1192,20 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 		_ = s.markFailed(context.Background(), inst.ID, err.Error())
 		return RuntimeInstance{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET pid=?,started_at=?,updated_at=?,revision=revision+1 WHERE id=? AND status='starting'`, pid, now, now, inst.ID)
-	if err != nil {
-        // A managed process has ALREADY started. Do not discard the PID
-        // or ignore a failed signal simply because the request context
-        // was cancelled before SQLite could record process ownership.
-        return RuntimeInstance{},s.reconcileUnrecordedLaunch(ctx,inst,pid,err)
-	}
-	return s.waitHealthy(ctx, inst.ID, 120*time.Second)
+	result, err := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET pid=?,started_at=?,updated_at=?,revision=revision+1 WHERE id=? AND status='starting' AND pid IS NULL`, pid, now, now, inst.ID)
+ if err==nil{
+  var count int64
+  count,err=result.RowsAffected()
+  if err==nil && count!=1{
+   err=errors.New("managed model launch ownership changed before PID persistence")
+  }
+ }
+ if err!=nil{
+  // A managed process has ALREADY started. Never silently forget it if
+  // SQLite rejected or changed the owning row (even when RowsAffected=0).
+  return RuntimeInstance{},s.reconcileUnrecordedLaunch(ctx,inst,pid,err)
+ }
+ return s.waitHealthy(ctx, inst.ID, 120*time.Second)
 }
 
 func (s *RuntimeSupervisor) Acquire(ctx context.Context, deploymentID string) (RuntimeInstance, error) {

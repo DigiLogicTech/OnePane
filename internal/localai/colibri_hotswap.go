@@ -131,9 +131,19 @@ func (s *RuntimeSupervisor) reconcileFailedColibriReplacement(ctx context.Contex
  if failed.Status==RuntimeStarting&&failed.PID<=1{
   return errors.New("replacement launch ownership is uncertain; rollback withheld pending operator reconciliation")
  }
- if failed.PID>1&&s.processes.Alive(failed.PID){
-  if err:=s.stopWhileResidencyLocked(ctx,target);err!=nil{
-   return fmt.Errorf("replacement process could not be safely drained; rollback withheld: %w",err)
+ if failed.PID>1{
+  if s.processes==nil{
+   return errors.New("replacement process liveness cannot be inspected; rollback withheld")
+  }
+  if s.processes.Alive(failed.PID){
+   if err:=s.stopWhileResidencyLocked(ctx,target);err!=nil{
+    return fmt.Errorf("replacement process could not be safely drained; rollback withheld: %w",err)
+   }
+   // A successful Stop result is not sufficient evidence that the original
+   // process exited; never restart the old model while its PID is still live.
+   if s.processes.Alive(failed.PID){
+    return errors.New("replacement process remains alive after stop; rollback withheld")
+   }
   }
  }
  return nil

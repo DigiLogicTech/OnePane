@@ -149,19 +149,30 @@ func (s *RuntimeSupervisor) reconcileFailedColibriReplacement(ctx context.Contex
  return nil
 }
 
+// Explicit hot swaps and ordinary chat acquisition share one bounded,
+// cancellation-safe Colibri swap/rollback path. A caller must never start a
+// replacement after losing its previously resident model without applying
+// the same verified compensation rules.
 func (s *RuntimeSupervisor) ColibriHotSwap(ctx context.Context,deploymentID string) (ColibriSwapState,error) {
-    state:=ColibriSwapState{DeploymentID:deploymentID,ActiveDeploymentIDs:[]string{}}
-    if strings.TrimSpace(deploymentID)==""{return state,errors.New("Colibri deployment ID is required")}
-    s.residencyMu.Lock()
-    defer s.residencyMu.Unlock()
+ s.residencyMu.Lock()
+ defer s.residencyMu.Unlock()
+ state,_,err:=s.colibriHotSwapLocked(ctx,deploymentID)
+ return state,err
+}
 
+// Must be called with residencyMu held. On failure it never reports success
+// merely because a compensating predecessor was restored. The caller can
+// surface the specific failure without sending prompts to an uncertain PID.
+func (s *RuntimeSupervisor) colibriHotSwapLocked(ctx context.Context,deploymentID string) (ColibriSwapState,RuntimeInstance,error) {
+    state:=ColibriSwapState{DeploymentID:deploymentID,ActiveDeploymentIDs:[]string{}}
+    if strings.TrimSpace(deploymentID)==""{return state,RuntimeInstance{},errors.New("Colibri deployment ID is required")}
     cfg,_,nodeID,err:=s.resolve(ctx,deploymentID)
-    if err!=nil{return state,err}
+    if err!=nil{return state,RuntimeInstance{},err}
     if !strings.EqualFold(cfg.RuntimeBackend,"colibri"){
-        return state,errors.New("hot swap requires a managed Colibri deployment")
+        return state,RuntimeInstance{},errors.New("hot swap requires a managed Colibri deployment")
     }
     previous,err:=s.colibriResidents(ctx,nodeID,deploymentID)
-    if err!=nil{return state,err}
+    if err!=nil{return state,RuntimeInstance{},err}
     // The actual evictions happen inside startLocked, under the same lock.
     inst,launchErr:=s.startLocked(ctx,deploymentID)
     // Success can use the caller's context; failure recovery must not.
@@ -174,8 +185,8 @@ func (s *RuntimeSupervisor) ColibriHotSwap(ctx context.Context,deploymentID stri
     }
     after,queryErr:=s.colibriResidents(recoveryCtx,nodeID,deploymentID)
     if queryErr!=nil {
-        if launchErr!=nil{return state,fmt.Errorf("Colibri launch failed: %w; residency inspection failed: %v",launchErr,queryErr)}
-        return state,queryErr
+        if launchErr!=nil{return state,RuntimeInstance{},fmt.Errorf("Colibri launch failed: %w; residency inspection failed: %v",launchErr,queryErr)}
+        return state,RuntimeInstance{},queryErr
     }
     still:=map[string]bool{}
     for _,c:=range after {still[c.ID]=true}
@@ -189,23 +200,23 @@ func (s *RuntimeSupervisor) ColibriHotSwap(ctx context.Context,deploymentID stri
         // is still alive. Never load the predecessor until verified teardown
         // has completed: doing so risks concurrent VRAM/RAM overcommit.
         if cleanupErr:=s.reconcileFailedColibriReplacement(recoveryCtx,deploymentID);cleanupErr!=nil{
-            return state,fmt.Errorf("Colibri swap failed: %w; %v",launchErr,cleanupErr)
+            return state,RuntimeInstance{},fmt.Errorf("Colibri swap failed: %w; %v",launchErr,cleanupErr)
         }
         // Only roll back an instance that was actually stopped. Never
         // attempt another model switch when an active/busy model blocked us.
         if len(state.EvictedDeploymentIDs)>0{
             prev:=state.EvictedDeploymentIDs[0]
             if _,restoreErr:=s.startLocked(recoveryCtx,prev);restoreErr!=nil{
-                return state,fmt.Errorf("Colibri swap failed: %w; rollback to %s also failed: %v",launchErr,prev,restoreErr)
+                return state,RuntimeInstance{},fmt.Errorf("Colibri swap failed: %w; rollback to %s also failed: %v",launchErr,prev,restoreErr)
             }
-            return state,fmt.Errorf("Colibri swap failed: %w; restored previous model %s",launchErr,prev)
+            return state,RuntimeInstance{},fmt.Errorf("Colibri swap failed: %w; restored previous model %s",launchErr,prev)
         }
-        return state,launchErr
+        return state,RuntimeInstance{},launchErr
     }
     state.Status=string(inst.Status)
     state.ActiveDeploymentIDs=[]string{deploymentID}
     state.Message="Colibri model is resident and ready. Chat routing remains independently configurable."
-    return state,nil
+    return state,inst,nil
 }
 
 func (s *Service) ColibriHotSwap(ctx context.Context,deploymentID string) (ColibriSwapState,error) {

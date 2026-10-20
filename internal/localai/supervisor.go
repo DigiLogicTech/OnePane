@@ -1234,16 +1234,24 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 }
 
 func (s *RuntimeSupervisor) Acquire(ctx context.Context, deploymentID string) (RuntimeInstance, error) {
-	s.residencyMu.Lock()
-	defer s.residencyMu.Unlock()
-	inst, err := s.startLocked(ctx, deploymentID)
-	if err != nil {
-		return RuntimeInstance{}, err
-	}
-	if err := s.SetBusy(ctx, deploymentID, true); err != nil {
-		return RuntimeInstance{}, err
-	}
-	return inst, nil
+ s.residencyMu.Lock()
+ defer s.residencyMu.Unlock()
+ cfg,_,_,err:=s.resolve(ctx,deploymentID)
+ if err!=nil{return RuntimeInstance{},err}
+ var inst RuntimeInstance
+ if strings.EqualFold(cfg.RuntimeBackend,"colibri"){
+  // An ordinary chat can evict a healthy Colibri predecessor, too.
+  // The explicit swap's verified cleanup and bounded rollback therefore
+  // also govern chat/model acquisition; do not call bare startLocked.
+  _,inst,err=s.colibriHotSwapLocked(ctx,deploymentID)
+ }else{
+  inst,err=s.startLocked(ctx,deploymentID)
+ }
+ if err!=nil{return RuntimeInstance{},err}
+ if err:=s.SetBusy(ctx,deploymentID,true);err!=nil{
+  return RuntimeInstance{},err
+ }
+ return inst,nil
 }
 
 func (s *RuntimeSupervisor) Release(ctx context.Context, deploymentID string) error {

@@ -219,6 +219,8 @@ jobs:
           go test -race -count=1 -timeout 3m -run TestColibriRollbackCanStopWhileHoldingResidencyLock ./internal/localai
           go test -race -count=1 -timeout 3m -run TestCancelledColibriSwap ./internal/localai
           go test -race -count=1 -timeout 3m -run TestColibriReplacement ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestColibriHotSwapRejectsLiveFailedAndStoppedEngineBeforeEviction ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestColibriFailedRowWithConfirmedDeadPIDDoesNotBlockSwap ./internal/localai
           go test -race -count=1 -timeout 3m -run TestUnrecordedModel ./internal/localai
           go test -race -count=1 -timeout 3m -run TestFailedModelPIDPersistence ./internal/localai
       - name: Full Go regression and cross-platform compilation
@@ -292,6 +294,8 @@ jobs:
           go test -count=1 -timeout 4m -run TestUnrecordedModel ./internal/localai
           go test -count=1 -timeout 4m -run TestFailedModelPIDPersistence ./internal/localai
           go test -count=1 -timeout 4m -run TestCancelledColibriSwap ./internal/localai
+          go test -count=1 -timeout 4m -run TestColibriHotSwapRejectsLiveFailedAndStoppedEngineBeforeEviction ./internal/localai
+          go test -count=1 -timeout 4m -run TestColibriFailedRowWithConfirmedDeadPIDDoesNotBlockSwap ./internal/localai
       - name: Native Windows SQLite migration and startup-evidence regressions
         shell: pwsh
         run: |

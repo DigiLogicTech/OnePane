@@ -171,10 +171,20 @@ func (s *RuntimeSupervisor) colibriHotSwapLocked(ctx context.Context,deploymentI
     if !strings.EqualFold(cfg.RuntimeBackend,"colibri"){
         return state,RuntimeInstance{},errors.New("hot swap requires a managed Colibri deployment")
     }
-    previous,err:=s.colibriResidents(ctx,nodeID,deploymentID)
-    if err!=nil{return state,RuntimeInstance{},err}
-    // The actual evictions happen inside startLocked, under the same lock.
-    inst,launchErr:=s.startLocked(ctx,deploymentID)
+    return s.colibriSwapOnNodeLocked(ctx,deploymentID,nodeID,s.startLocked)
+}
+
+// With residencyMu held, run the same stateful rollback for explicit swaps
+// and inference acquisition. A starter is injectable for deterministic
+// cancellation and restoration tests without launching a real GPU engine.
+func (s *RuntimeSupervisor) colibriSwapOnNodeLocked(ctx context.Context,
+ deploymentID,nodeID string,start func(context.Context,string)(RuntimeInstance,error)) (ColibriSwapState,RuntimeInstance,error){
+ state:=ColibriSwapState{DeploymentID:deploymentID,ActiveDeploymentIDs:[]string{}}
+ if start==nil{return state,RuntimeInstance{},errors.New("managed Colibri starter unavailable")}
+ previous,err:=s.colibriResidents(ctx,nodeID,deploymentID)
+ if err!=nil{return state,RuntimeInstance{},err}
+ // The actual evictions happen inside the passed startLocked operation.
+ inst,launchErr:=start(ctx,deploymentID)
     // Success can use the caller's context; failure recovery must not.
     // A cancelled request must never leave the replacement uninspected.
     recoveryCtx:=ctx
@@ -206,7 +216,7 @@ func (s *RuntimeSupervisor) colibriHotSwapLocked(ctx context.Context,deploymentI
         // attempt another model switch when an active/busy model blocked us.
         if len(state.EvictedDeploymentIDs)>0{
             prev:=state.EvictedDeploymentIDs[0]
-            if _,restoreErr:=s.startLocked(recoveryCtx,prev);restoreErr!=nil{
+            if _,restoreErr:=start(recoveryCtx,prev);restoreErr!=nil{
                 return state,RuntimeInstance{},fmt.Errorf("Colibri swap failed: %w; rollback to %s also failed: %v",launchErr,prev,restoreErr)
             }
             return state,RuntimeInstance{},fmt.Errorf("Colibri swap failed: %w; restored previous model %s",launchErr,prev)

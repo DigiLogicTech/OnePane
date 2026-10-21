@@ -129,6 +129,13 @@ does **not** replace the final whole-branch audit or physical installation QA.
   pre-spawn cancellation that records `failed` with NULL PID remains
   independently retryable.
 
+- `cd315fe6` + `5b55054b` + `de5c439d`: repeat the managed model
+  process identity check after the durable `draining` update but before
+  SIGTERM, and enforce ordering in Linux/native Windows tests. A recycled or
+  otherwise unverified PID is orphaned for reconciliation rather than
+  signalled. This does not create kernel-held PID references or prove that a
+  Colibri GPU child has also exited.
+
 **Verification:** native Windows/Linux hosted CI on the final combined code
 must pass before this checkpoint is marked verified. Earlier partial source
 heads had green builds, but they do not establish the combined behavior.

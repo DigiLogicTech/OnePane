@@ -1197,7 +1197,11 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 	}
 	runtimeHome := filepath.Join(s.dataDir, "runtime-home")
 	if err := os.MkdirAll(runtimeHome, 0o700); err != nil {
-		_ = s.markFailed(ctx, inst.ID, err.Error())
+        // The launch row is already durable but no child exists yet.
+        // Record a guarded failure using an independent cleanup context.
+        if cleanupErr:=s.failUnlaunchedManagedRuntime(ctx,inst);cleanupErr!=nil{
+            return RuntimeInstance{},errors.Join(err,cleanupErr)
+        }
 		return RuntimeInstance{}, err
 	}
 	// Never forward the OnePane service's full environment into managed

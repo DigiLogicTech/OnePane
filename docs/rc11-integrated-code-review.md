@@ -58,3 +58,39 @@ This is an **incremental source audit**, not the mandated final whole-branch rev
 **Finding 3 — process could change during an HTTP readiness probe (partially remediated).** `waitHealthy` verifies managed process identity before **and after** the HTTP request, and then uses the exact-generation CAS to commit readiness. This reduces the PID-reuse gap but does not hold an OS kernel PID handle across the entire probe, attest GPU resources, or substitute for physical process-tree acceptance. A source-order regression enforces both checks.
 
 **Review outcome:** no new model stop/kill authority, cloud fallback or remote Node privilege was added. Remaining review must inspect storage/ACL/reparse TOCTOU, cross-process scheduler/Worker boundaries, tool capabilities and default L4/opt-in L5, integrated UX, real Windows SCM+data-root rollback and genuine CPU/Colibri process/memory isolation. Do not mark this preliminary review complete as a release gate, package an installer, or merge based on hosted tests alone. The final code/safety audit and mandatory LAST operator-focused UI/UX review remain independently required.
+
+## Follow-up source-security checkpoint — managed-model process identity (2026-10-21)
+
+The current head contains a narrow, fail-closed hardening of the managed
+llama.cpp/Colibri PID ownership predicate. Earlier checks accepted an
+otherwise valid `-m`/`--model`, `--host` and `--port` argument pair
+even when the inspected command carried unexamined `--flag=value` or
+fused-short overrides. Host and port strings could also pass through
+filesystem-path normalization. Colibri only required its script path
+*somewhere* in the Python argv, leaving a `python -c`/module/program
+impersonation ambiguity.
+
+- [x] `0fbb1ece`: deny alternate inline/fused argument spellings and match
+  TCP host/port literally, while preserving model-path normalization.
+- [x] `ca797689`: negative tests for host/model/port override and
+  noncanonical scalar arguments.
+- [x] `42b2a580`: bind a Colibri Python process to OnePane's actual
+  script operand position (including the approved `py.exe -3` form);
+  reject option terminators.
+- [x] `aa34b0f1`: regressions for Python inline-code/module impersonation,
+  script misplacement and post-terminator option smuggling.
+- [x] `cf6c8614`: explicitly run managed-process identity tests in
+  native Windows CI and Linux `-race` lane.
+- [ ] **Exact-source/workflow CI verification:** [run #39553844948](https://github.com/DigiLogicTech/OnePane/actions/runs/39553844948)
+  started for `cf6c8614`; verify both hosted jobs before marking this
+  checkpoint green. Preceding source/test run
+  [#39553490507](https://github.com/DigiLogicTech/OnePane/actions/runs/39553490507)
+  passed but does not validate the later Colibri/script-position changes.
+
+The change does not claim OS-kernel-held process identity, ownership of a
+recycled PID on Windows after a service crash, a proven bound GPU child/process
+tree, or actual Colibri VRAM release. The existing deny/reconcile path for
+untracked Windows PIDs is intentionally unchanged. Whole-branch security
+review, real constrained-hardware acceptance, non-C: Windows upgrade/reboot/
+rollback, paired Nodes, opt-in Level 5 effects, mandatory LAST UI/UX review,
+operator installer approval and PR merge remain outstanding.

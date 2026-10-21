@@ -2,6 +2,7 @@ package localai
 
 import (
  "context"
+ "database/sql"
  "os"
  "strings"
  "testing"
@@ -72,4 +73,32 @@ func TestRecoveryIdentityIsReverifiedAfterSocketAndBeforeHealthyCAS(t *testing.T
  if !strings.Contains(recovery,"AND pid=? AND process_fingerprint=? AND status=?"){
   t.Fatal("failed recovery process could orphan a replaced model generation")
  }
+}
+
+func TestRecoveryPreservesInterruptedModelDrainWithoutHealthOrSignals(t *testing.T){
+ svc,db:=stopLeaseFixture(t,"draining")
+ if _,err:=db.Exec(`UPDATE local_runtime_instances SET pid=4321 WHERE id='inst'`);err!=nil{t.Fatal(err)}
+ calls:=0
+ proc:=&unrecordedProcessBackend{alive:true,onAlive:func(int){calls++}}
+ svc.processes=proc
+ if err:=svc.Recover(context.Background());err!=nil{t.Fatal(err)}
+ var status,reason string
+ var revision int64
+ var pid int
+ if err:=db.QueryRow(`SELECT status,failure_reason,revision,pid FROM local_runtime_instances WHERE id='inst'`).Scan(&status,&reason,&revision,&pid);err!=nil{t.Fatal(err)}
+ if status!="orphaned"||reason==""||revision!=2||pid!=4321{
+  t.Fatalf("interrupted drain became reusable or lost PID: %s %s rev=%d pid=%d",status,reason,revision,pid)
+ }
+ if calls!=0||proc.signalCalls!=0{
+  t.Fatalf("interrupted stop triggered unauthorised probe/signal: probes=%d signals=%d",calls,proc.signalCalls)
+ }
+}
+
+func TestRecoveryOrphansUnlaunchedStartingRowWithoutPID(t *testing.T){
+ svc,db:=stopLeaseFixture(t,"starting")
+ if err:=svc.Recover(context.Background());err!=nil{t.Fatal(err)}
+ var status string
+ var pid sql.NullInt64
+ if err:=db.QueryRow(`SELECT status,pid FROM local_runtime_instances WHERE id='inst'`).Scan(&status,&pid);err!=nil{t.Fatal(err)}
+ if status!="orphaned"||pid.Valid{t.Fatalf("unverified null PID starting row not reconciled: %s %v",status,pid)}
 }

@@ -1285,15 +1285,20 @@ func (s *RuntimeSupervisor) runtimeLogReviewHint(idv string) string {
 }
 func (s *RuntimeSupervisor) waitHealthy(ctx context.Context, idv string, timeout time.Duration) (RuntimeInstance, error) {
 	deadline := time.Now().Add(timeout)
+	var last RuntimeInstance
 	for time.Now().Before(deadline) {
 		inst, err := s.instanceByID(ctx, idv)
 		if err != nil {
 			return inst, err
 		}
+		if inst.Status != RuntimeStarting {
+			return RuntimeInstance{}, errors.New("managed runtime startup state changed; readiness result discarded")
+		}
+		last=inst
 		if !s.processes.Alive(inst.PID) {
 			reason:="runtime exited before becoming healthy"+s.runtimeLogReviewHint(idv)
-   _ = s.markFailed(ctx,idv,reason)
-   return RuntimeInstance{}, errors.New(reason)
+			if e:=s.failStartingInstance(ctx,inst,reason);e!=nil{return RuntimeInstance{},e}
+			return RuntimeInstance{}, errors.New(reason)
 		}
 		// A model health server on a loopback port does not prove that
 		// the intended managed process still owns that server. First
@@ -1304,12 +1309,8 @@ func (s *RuntimeSupervisor) waitHealthy(ctx context.Context, idv string, timeout
 		}
 		health, err := s.Health(ctx, inst)
 		if err == nil {
-			now := s.clock.UnixMilli()
-			raw, _ := json.Marshal(health)
-			if _, err := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET status='healthy',health_json=?,last_seen_at=?,updated_at=?,revision=revision+1 WHERE id=?`, string(raw), now, now, idv); err != nil {
-				return RuntimeInstance{}, err
-			}
-			return s.instanceByID(ctx, idv)
+			if e:=s.confirmStartingHealthy(ctx,inst,health);e!=nil{return RuntimeInstance{},e}
+			return s.instanceByID(ctx,idv)
 		}
 		select {
 		case <-ctx.Done():
@@ -1318,7 +1319,9 @@ func (s *RuntimeSupervisor) waitHealthy(ctx context.Context, idv string, timeout
 		}
 	}
 	reason:="managed runtime health check timed out"+s.runtimeLogReviewHint(idv)
- _ = s.markFailed(ctx,idv,reason)
+	if last.ID!=""{
+		if e:=s.failStartingInstance(ctx,last,reason);e!=nil{return RuntimeInstance{},e}
+	}
  return RuntimeInstance{}, errors.New(reason)
 }
 

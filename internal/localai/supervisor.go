@@ -1725,10 +1725,11 @@ type recoverableRuntime struct {
  id string
  pid int
  revision int64
+ status string
 }
 func recoverableRuntimeSnapshot(ctx context.Context,db *sql.DB)([]recoverableRuntime,error){
  const maxRecoveryCandidates=512
- rows,err:=db.QueryContext(ctx,`SELECT id,pid,revision
+ rows,err:=db.QueryContext(ctx,`SELECT id,pid,revision,status
   FROM local_runtime_instances
   WHERE status IN ('starting','healthy','busy','draining')
   ORDER BY id LIMIT 513`)
@@ -1737,7 +1738,7 @@ func recoverableRuntimeSnapshot(ctx context.Context,db *sql.DB)([]recoverableRun
  for rows.Next(){
   var x recoverableRuntime
   var pid sql.NullInt64
-  if err=rows.Scan(&x.id,&pid,&x.revision);err!=nil{break}
+  if err=rows.Scan(&x.id,&pid,&x.revision,&x.status);err!=nil{break}
   if pid.Valid{x.pid=int(pid.Int64)}
   xs=append(xs,x)
   if len(xs)>maxRecoveryCandidates{
@@ -1768,10 +1769,13 @@ func (s *RuntimeSupervisor) Recover(ctx context.Context) error {
 		// Python server after a daemon restart. Never contact a health
 		// socket or signal an unverified/recycled PID.
 		inst, ierr := s.instanceByID(ctx, x.id)
+		// An interrupted stop is not an invitation to reuse a healthy
+		// socket. Keep the original drain intent awaiting reconciliation.
 		trusted := ierr==nil && inst.PID==x.pid && inst.Revision==x.revision &&
+			string(inst.Status)==x.status && inst.Status!=RuntimeDraining &&
 			s.VerifyIdentity(ctx, inst)==nil
 		if !trusted {
-			res, e := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET status='orphaned',failure_reason='runtime process identity could not be re-established after daemon restart',updated_at=?,revision=revision+1 WHERE id=? AND revision=?`, now, x.id, x.revision)
+			res, e := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET status='orphaned',failure_reason='runtime process identity could not be re-established after daemon restart',updated_at=?,revision=revision+1 WHERE id=? AND revision=? AND status=? AND ((pid IS NULL AND ?=0) OR pid=?)`, now, x.id, x.revision, x.status, x.pid, x.pid)
 			if e != nil {
 				return e
 			}

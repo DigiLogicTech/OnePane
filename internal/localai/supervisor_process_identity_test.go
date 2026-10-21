@@ -149,3 +149,37 @@ func TestManagedProcessIdentityRejectsInlineOrFusedOverrides(t *testing.T) {
   t.Fatal("Colibri inline model override accepted as managed ownership")
  }
 }
+
+func TestManagedProcessIdentityRejectsInertOptionsAndPythonCodeImpersonation(t *testing.T){
+ model:="/models/cache/b"
+ script:="/colibri/coli"
+ for _,tc:=range []struct{
+  name string
+  args []string
+ }{
+  {"Python code before approved script",[]string{"/usr/bin/python3","-c","print('untrusted')",script,"--model",model,"--host","127.0.0.1","--port","11003"}},
+  {"Python module before approved script",[]string{"/usr/bin/python3","-m","untrusted",script,"--model",model,"--host","127.0.0.1","--port","11003"}},
+  {"approved script after unrelated program",[]string{"/usr/bin/python3","/tmp/unapproved.py",script,"--model",model,"--host","127.0.0.1","--port","11003"}},
+  {"option terminator after script",[]string{"/usr/bin/python3",script,"--","--model",model,"--host","127.0.0.1","--port","11003"}},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   ident:=ProcessIdentity{Executable:"/usr/bin/python3",Args:tc.args}
+   if managedProcessCLIIdentified("colibri",ident,"/usr/bin/python3",[]string{script},model,11003){
+    t.Fatalf("unapproved Python execution accepted as Colibri residency: %v",tc.args)
+   }
+  })
+ }
+ native:=ProcessIdentity{Executable:"/models/runtime/llama-server",Args:[]string{
+  "llama-server","--","-m","/models/weights/a.gguf","--host","127.0.0.1","--port","11001",
+ }}
+ if managedProcessCLIIdentified("cuda",native,"/models/runtime/llama-server",nil,"/models/weights/a.gguf",11001){
+  t.Fatal("CLI arguments after option terminator accepted as managed process")
+ }
+ // py.exe -3 script is OnePane's explicitly constructed Windows argv.
+ win:=ProcessIdentity{Executable:"/bin/py.exe",Args:[]string{
+  "/bin/py.exe","-3",script,"serve","--model",model,"--host","127.0.0.1","--port","11003",
+ }}
+ if !managedProcessCLIIdentified("colibri",win,"/bin/py.exe",[]string{script},model,11003){
+  t.Fatal("approved py.exe -3 Colibri script launcher was rejected")
+ }
+}

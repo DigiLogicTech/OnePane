@@ -1044,6 +1044,12 @@ func findPythonExecutable() (string, error) {
 // No replacement is permitted while that PID is still alive, even when
 // the process identity cannot be re-established safely.
 func requiresOperatorReconciliationBeforeRestart(inst RuntimeInstance, alive bool) bool {
+ // A recovered orphan with NO recorded PID does not prove no engine was
+ // spawned: the process could have started before its PID could be saved.
+ // Never overwrite that evidence with a second engine on the same Node.
+ if (inst.Status==RuntimeOrphaned||inst.Status==RuntimeDraining)&&inst.PID<=1{
+  return true
+ }
  if inst.PID <= 1 || !alive { return false }
  switch inst.Status {
  case RuntimeHealthy, RuntimeBusy, RuntimeStarting:

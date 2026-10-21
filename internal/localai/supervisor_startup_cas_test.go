@@ -2,6 +2,7 @@ package localai
 
 import (
  "context"
+ "os"
  "strings"
  "testing"
 )
@@ -68,4 +69,21 @@ func TestManagedStartupHealthAndFailureCASHaveSingleWinner(t *testing.T){
  current,err=svc2.Instance(ctx,"model")
  if err!=nil{t.Fatal(err)}
  if current.Status!=RuntimeFailed{t.Fatalf("failed managed startup unexpectedly revived: %s",current.Status)}
+}
+
+func TestStartupHealthRechecksProcessIdentityAfterHTTPBeforePersist(t *testing.T){
+ source,err:=os.ReadFile("supervisor.go")
+ if err!=nil{t.Fatal(err)}
+ body:=string(source)
+ from:=strings.Index(body,"func (s *RuntimeSupervisor) waitHealthy(")
+ to:=strings.Index(body,"func (s *RuntimeSupervisor) Health(")
+ if from<0||to<=from{t.Fatal("managed health and startup boundaries missing")}
+ section:=body[from:to]
+ before:=strings.Index(section,"s.VerifyIdentity(ctx,inst)")
+ probe:=strings.Index(section,"s.Health(ctx, inst)")
+ after:=strings.LastIndex(section,"s.VerifyIdentity(ctx,inst)")
+ commit:=strings.Index(section,"s.confirmStartingHealthy(ctx,inst,health)")
+ if before<0||probe<=before||after<=probe||commit<=after{
+  t.Fatal("a startup health response can be persisted without post-HTTP process identity revalidation")
+ }
 }

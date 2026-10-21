@@ -95,3 +95,41 @@ untracked Windows PIDs is intentionally unchanged. Whole-branch security
 review, real constrained-hardware acceptance, non-C: Windows upgrade/reboot/
 rollback, paired Nodes, opt-in Level 5 effects, mandatory LAST UI/UX review,
 operator installer approval and PR merge remain outstanding.
+
+## Managed recovery fencing — interrupted inference, drain and unknown PID (2026-10-21)
+
+This incremental review follows the process-identity hardening checkpoint. It
+does **not** replace the final whole-branch audit or physical installation QA.
+
+**Code and regression work:**
+- `f4ddfbe6` + `c3ebbd66`: after restart, repeat live model PID/CLI identity
+  verification *after* the loopback health response and before committing
+  readiness; promote only an original active generation using status, revision,
+  PID and process-fingerprint CAS. The initial intermediate commit could not
+  compile independently until the newly introduced CAS helper was added.
+- `6f146332`: SQLite mutation regressions for stop, orphan, changed PID,
+  revision and command fingerprint; source-order revalidation assertion.
+- `ec5ed67a` + `60acb740`: recovery snapshot now carries exact status;
+  first orphan transition is conditional on that status and the original
+  NULL/non-NULL PID. A crash-interrupted `draining` runtime is orphaned without
+  probing or signalling instead of quietly resurrected on HTTP readiness.
+- `785a38be`: explicit native Windows and Linux race-lane recovery regressions.
+- `02beb33b` + `7db8f14d` + `b2277a57`: persisted `busy` after crash
+  represents an unknown inference outcome. Never mark that model reusable on a
+  healthy socket; retain the PID in an orphaned record for reconciliation,
+  without automatically repeating the request or sending a signal.
+- `b533ea9f` + `dba77b89`: a target model left `orphaned`/`draining` with
+  NULL/invalid PID cannot be assumed unlaunched or memory-free. Block its
+  restart rather than overwrite the evidence with a second engine. A verified
+  pre-spawn cancellation that records `failed` with NULL PID remains
+  independently retryable.
+
+**Verification:** native Windows/Linux hosted CI on the final combined code
+must pass before this checkpoint is marked verified. Earlier partial source
+heads had green builds, but they do not establish the combined behavior.
+These tests do not prove real process-tree/VRAM release, handle-based Windows
+PID ownership after crash, service restart with populated non-C data, or
+safe unattended reconciliation. The system deliberately fails closed where
+actual external effects remain unknown. Final review, explicit L4/L5 authority
+checks, physical Node/model acceptance, mandatory LAST UI/UX review and
+operator-approved installer are still separate gates.

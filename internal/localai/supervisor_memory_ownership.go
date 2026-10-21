@@ -34,6 +34,12 @@ func (s *RuntimeSupervisor) refuseUnreconciledMemoryOwners(ctx context.Context,n
  if err!=nil{return fmt.Errorf("inspect managed memory ownership: %w",err)}
  if len(found)>512{return errors.New("managed model ownership registry exceeds bounded admission check")}
  for _,c:=range found{
+  // A persisted non-NULL PID must have been returned by a real managed
+  // child launch. Zero/negative/service PIDs are corrupt evidence, not
+  // proof that a failed or stopped engine surrendered RAM/VRAM.
+  if c.pid.Valid&&c.pid.Int64<=1{
+   return fmt.Errorf("managed model %s has invalid persisted PID; operator reconciliation required",c.id)
+  }
   if c.pid.Valid&&c.pid.Int64>1{
    if int64(int(c.pid.Int64))!=c.pid.Int64{
     return fmt.Errorf("managed model %s has invalid process identity; operator reconciliation required",c.id)

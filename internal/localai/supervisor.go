@@ -1324,6 +1324,12 @@ func (s *RuntimeSupervisor) waitHealthy(ctx context.Context, idv string, timeout
 		}
 		health, err := s.Health(ctx, inst)
 		if err == nil {
+            // Health is a socket response, not process ownership. Recheck
+            // the inspected command identity after HTTP returns, since a
+            // child may exit or its PID be recycled during the probe.
+            if verifyErr:=s.VerifyIdentity(ctx,inst);verifyErr!=nil{
+                return RuntimeInstance{},errors.New("managed runtime process identity changed while probing startup readiness")
+            }
 			if e:=s.confirmStartingHealthy(ctx,inst,health);e!=nil{return RuntimeInstance{},e}
 			return s.instanceByID(ctx,idv)
 		}

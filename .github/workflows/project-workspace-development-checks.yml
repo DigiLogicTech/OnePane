@@ -227,6 +227,9 @@ jobs:
           go test -race -count=1 -timeout 3m -run TestUnrecordedModel ./internal/localai
           go test -race -count=1 -timeout 3m -run TestFailedModelPIDPersistence ./internal/localai
           go test -race -count=1 -timeout 3m -run TestManagedStartup ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestCancelledUnlaunchedModel ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestUnlaunchedModel ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestManagedLauncherCancellationPreflight ./internal/localai
           go test -race -count=1 -timeout 3m -run TestManagedMemoryAdmission ./internal/localai
       - name: Full Go regression and cross-platform compilation
         run: |
@@ -299,6 +302,8 @@ jobs:
           go test -count=1 -timeout 4m -run TestUnrecordedModel ./internal/localai
           go test -count=1 -timeout 4m -run TestFailedModelPIDPersistence ./internal/localai
           go test -count=1 -timeout 4m -run TestManagedStartup ./internal/localai
+          go test -count=1 -timeout 4m -run TestCancelledUnlaunchedModel ./internal/localai
+          go test -count=1 -timeout 4m -run TestUnlaunchedModel ./internal/localai
           go test -count=1 -timeout 4m -run TestCancelledColibriSwap ./internal/localai
           go test -count=1 -timeout 4m -run TestColibriHotSwapRejectsLiveFailedAndStoppedEngineBeforeEviction ./internal/localai
           go test -count=1 -timeout 4m -run TestColibriFailedRowWithConfirmedDeadPIDDoesNotBlockSwap ./internal/localai

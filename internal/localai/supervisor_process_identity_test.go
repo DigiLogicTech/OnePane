@@ -108,3 +108,44 @@ func TestManagedProcessIdentityWorksForColibriAndLlamaBackends(t *testing.T){
   })
  }
 }
+
+func TestManagedProcessIdentityRejectsInlineOrFusedOverrides(t *testing.T) {
+ base:=[]string{"llama-server","-m","/models/weights/a.gguf","--host","127.0.0.1","--port","11001"}
+ for _,tc:=range []struct{
+  name string
+  override []string
+ }{
+  {"inline network exposure",[]string{"--host=0.0.0.0"}},
+  {"inline port redirection",[]string{"--port=11002"}},
+  {"inline model alias",[]string{"--model=/models/weights/other.gguf"}},
+  {"inline short model",[]string{"-m=/models/weights/other.gguf"}},
+  {"fused short model",[]string{"-m/models/weights/other.gguf"}},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   args:=append(append([]string(nil),base...),tc.override...)
+   ident:=ProcessIdentity{Executable:"/models/runtime/llama-server",Args:args}
+   if managedProcessCLIIdentified("cuda",ident,"/models/runtime/llama-server",nil,"/models/weights/a.gguf",11001){
+    t.Fatalf("unapproved override accepted as managed model ownership: %v",args)
+   }
+  })
+ }
+ // Path normalization must not turn an invalid TCP port or host into
+ // apparently valid CLI network configuration.
+ for _,tc:=range []struct{name string; args []string}{
+  {"noncanonical port",[]string{"llama-server","-m","/models/weights/a.gguf","--host","127.0.0.1","--port","./11001"}},
+  {"noncanonical host",[]string{"llama-server","-m","/models/weights/a.gguf","--host","./127.0.0.1","--port","11001"}},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   ident:=ProcessIdentity{Executable:"/models/runtime/llama-server",Args:tc.args}
+   if managedProcessCLIIdentified("cuda",ident,"/models/runtime/llama-server",nil,"/models/weights/a.gguf",11001){
+    t.Fatalf("nonliteral network argument accepted: %v",tc.args)
+   }
+  })
+ }
+ colibri:=ProcessIdentity{Executable:"/usr/bin/python3",Args:[]string{
+  "/usr/bin/python3","/colibri/coli","serve","--model","/models/cache/b","--host","127.0.0.1","--port","11003","--model=/models/cache/other",
+ }}
+ if managedProcessCLIIdentified("colibri",colibri,"/usr/bin/python3",[]string{"/colibri/coli"},"/models/cache/b",11003){
+  t.Fatal("Colibri inline model override accepted as managed ownership")
+ }
+}

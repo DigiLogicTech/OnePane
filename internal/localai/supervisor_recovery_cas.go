@@ -17,7 +17,7 @@ func (s *RuntimeSupervisor) confirmRecoveredHealthy(ctx context.Context, inst Ru
   return errors.New("recovered managed runtime ownership evidence unavailable")
  }
  switch inst.Status {
- case RuntimeHealthy,RuntimeBusy,RuntimeStarting:
+ case RuntimeHealthy,RuntimeStarting:
  default:
   return errors.New("recovered managed runtime is not in an active state")
  }

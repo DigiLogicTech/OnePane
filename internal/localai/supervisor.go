@@ -1784,8 +1784,18 @@ func (s *RuntimeSupervisor) Recover(ctx context.Context) error {
 			continue
 		}
 		health, herr := s.Health(ctx, inst)
+		// A loopback /health reply is not durable process ownership. The
+		// recovered child can exit or its PID can be recycled while HTTP is
+		// in flight. Revalidate its command after the response, just as
+		// waitHealthy does for a newly launched model.
+		if herr == nil {
+			if verifyErr := s.VerifyIdentity(ctx, inst); verifyErr != nil {
+				herr = errors.New("recovered managed model process identity changed during health probe")
+			}
+		}
 		if herr != nil {
-			res, e := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET status='orphaned',failure_reason='recovered process failed independent health probe',updated_at=?,revision=revision+1 WHERE id=? AND revision=?`, now, x.id, x.revision)
+			res, e := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET status='orphaned',failure_reason='recovered runtime health or process identity could not be verified',updated_at=?,revision=revision+1 WHERE id=? AND revision=? AND pid=? AND process_fingerprint=? AND status=?`,
+				now, inst.ID, inst.Revision, inst.PID, inst.ProcessFingerprint, inst.Status)
 			if e != nil {
 				return e
 			}
@@ -1797,16 +1807,8 @@ func (s *RuntimeSupervisor) Recover(ctx context.Context) error {
 			}
 			continue
 		}
-		raw, _ := json.Marshal(health)
-		res, e := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET status='healthy',health_json=?,last_seen_at=?,failure_reason=NULL,updated_at=?,revision=revision+1 WHERE id=? AND revision=?`, string(raw), now, now, x.id, x.revision)
-		if e != nil {
+		if e := s.confirmRecoveredHealthy(ctx, inst, health); e != nil {
 			return e
-		}
-		if n, e := res.RowsAffected(); e != nil || n != 1 {
-			if e != nil {
-				return e
-			}
-			return fmt.Errorf("runtime recovery state conflict")
 		}
 	}
 	return nil

@@ -1472,7 +1472,17 @@ func managedProcessCLIIdentified(backend string,ident ProcessIdentity,
  alternate:="--model"
  if modelFlag=="--model"{alternate="-m"}
  for _,arg:=range ident.Args{
-  if arg==alternate{return false}
+  // A different process can contain our approved flag/value pairs and
+  // still append a CLI-supported inline or fused override. The managed
+  // launcher never emits those forms: treat them as untrusted ownership.
+  if arg==alternate||
+   strings.HasPrefix(arg,"--model=")||
+   strings.HasPrefix(arg,"--host=")||
+   strings.HasPrefix(arg,"--port=")||
+   strings.HasPrefix(arg,"-m=")||
+   (strings.HasPrefix(arg,"-m")&&len(arg)>2&&arg[2]!='-'){
+   return false
+  }
  }
  return oneExactManagedOption(ident.Args,modelFlag,model)&&
   oneExactManagedOption(ident.Args,"--host","127.0.0.1")&&
@@ -1486,9 +1496,12 @@ func oneExactManagedOption(args []string,name,want string)bool{
  for i:=0;i<len(args);i++{
   if args[i]!=name{continue}
   count++
-  if i+1>=len(args)||filepath.Clean(args[i+1])!=filepath.Clean(want){
-   return false
-  }
+  if i+1>=len(args){return false}
+  // Only model options are filesystem paths. Host and port are literal
+  // network configuration and must not pass via filepath normalization.
+  if name=="-m"||name=="--model"{
+   if filepath.Clean(args[i+1])!=filepath.Clean(want){return false}
+  }else if args[i+1]!=want{return false}
  }
  return count==1
 }

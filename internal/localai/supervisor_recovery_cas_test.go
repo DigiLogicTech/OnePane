@@ -88,7 +88,7 @@ func TestRecoveryPreservesInterruptedModelDrainWithoutHealthOrSignals(t *testing
  var revision int64
  var pid int
  if err:=db.QueryRow(`SELECT status,failure_reason,revision,pid FROM local_runtime_instances WHERE id='inst'`).Scan(&status,&reason,&revision,&pid);err!=nil{t.Fatal(err)}
- if status!="orphaned"||reason==""||revision!=2||pid!=4321{
+ if status!="orphaned"||!strings.Contains(reason,"termination was interrupted")||revision!=2||pid!=4321{
   t.Fatalf("interrupted drain became reusable or lost PID: %s %s rev=%d pid=%d",status,reason,revision,pid)
  }
  if calls!=0||proc.signalCalls!=0{
@@ -116,7 +116,7 @@ func TestRecoveryPreservesUnknownBusyInferenceWithoutReleasingLease(t *testing.T
  var revision int64
  var pid int
  if err:=db.QueryRow(`SELECT status,failure_reason,revision,pid FROM local_runtime_instances WHERE id='inst'`).Scan(&status,&reason,&revision,&pid);err!=nil{t.Fatal(err)}
- if status!="orphaned"||reason==""||revision!=2||pid!=4321{
+ if status!="orphaned"||!strings.Contains(reason,"external completion unknown")||revision!=2||pid!=4321{
   t.Fatalf("unknown in-flight inference was marked reusable: status=%s reason=%s rev=%d pid=%d",status,reason,revision,pid)
  }
  if calls!=0||proc.signalCalls!=0{

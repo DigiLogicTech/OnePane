@@ -1769,10 +1769,13 @@ func (s *RuntimeSupervisor) Recover(ctx context.Context) error {
 		// Python server after a daemon restart. Never contact a health
 		// socket or signal an unverified/recycled PID.
 		inst, ierr := s.instanceByID(ctx, x.id)
-		// An interrupted stop is not an invitation to reuse a healthy
-		// socket. Keep the original drain intent awaiting reconciliation.
+		// A process surviving service restart does not prove that its
+		// former busy request completed or its interrupted drain succeeded.
+		// Never erase an unknown external outcome or manual stop intent based
+		// on a healthy HTTP socket; require explicit reconciliation.
 		trusted := ierr==nil && inst.PID==x.pid && inst.Revision==x.revision &&
-			string(inst.Status)==x.status && inst.Status!=RuntimeDraining &&
+			string(inst.Status)==x.status &&
+			inst.Status!=RuntimeDraining && inst.Status!=RuntimeBusy &&
 			s.VerifyIdentity(ctx, inst)==nil
 		if !trusted {
 			res, e := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET status='orphaned',failure_reason='runtime process identity could not be re-established after daemon restart',updated_at=?,revision=revision+1 WHERE id=? AND revision=? AND status=? AND ((pid IS NULL AND ?=0) OR pid=?)`, now, x.id, x.revision, x.status, x.pid, x.pid)

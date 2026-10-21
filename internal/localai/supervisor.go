@@ -1648,6 +1648,15 @@ func (s *RuntimeSupervisor) stopWithActivityLock(ctx context.Context, deployment
 	}
 	inst.Revision++
 	if inst.PID > 1 && s.processes.Alive(inst.PID) {
+		// The durable drain transition takes time. A process may exit and
+		// the OS may recycle its PID between the initial pre-drain identity
+		// check and SIGTERM. Recheck ownership at the actual signal boundary.
+		if verifyErr := s.VerifyIdentity(ctx, inst); verifyErr != nil {
+			if e := markOrphaned("refused graceful termination of an unverified runtime PID"); e != nil {
+				return fmt.Errorf("graceful termination denied; orphan-state persistence failed: %w", e)
+			}
+			return errors.New("graceful termination denied: runtime process identity changed")
+		}
 		if err := s.processes.Signal(inst.PID, syscall.SIGTERM); err != nil && s.processes.Alive(inst.PID) {
 			// The stop intent was durably set to draining, but the
 			// managed process is still alive. An unresolved signal must

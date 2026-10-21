@@ -118,6 +118,11 @@ does **not** replace the final whole-branch audit or physical installation QA.
   represents an unknown inference outcome. Never mark that model reusable on a
   healthy socket; retain the PID in an orphaned record for reconciliation,
   without automatically repeating the request or sending a signal.
+- `5948756b` + `b42f6daf`: when examining *other* model reservations on
+  the same Node, a corrupt non-NULL PID (including zero, negative and PID 1)
+  is not evidence that a failed/stopped process released memory. Reject the
+  admission and require reconciliation; a confirmed pre-spawn failure with
+  SQL NULL PID remains eligible for retry.
 - `b533ea9f` + `dba77b89`: a target model left `orphaned`/`draining` with
   NULL/invalid PID cannot be assumed unlaunched or memory-free. Block its
   restart rather than overwrite the evidence with a second engine. A verified

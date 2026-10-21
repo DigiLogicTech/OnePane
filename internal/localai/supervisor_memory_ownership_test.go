@@ -79,3 +79,27 @@ func TestManagedMemoryAdmissionBoundsHugeAbnormalRegistry(t *testing.T){
   t.Fatalf("oversized unresolved process ledger was silently truncated: %v",err)
  }
 }
+
+func TestManagedMemoryAdmissionRejectsCorruptPIDEvenWhenMarkedStopped(t *testing.T){
+ db,err:=sql.Open("sqlite",":memory:")
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ if _,err=db.Exec(`CREATE TABLE local_runtime_instances(
+  node_id TEXT,deployment_id TEXT,status TEXT,pid INTEGER)`);err!=nil{t.Fatal(err)}
+ s:=&RuntimeSupervisor{db:db,processes:&unrecordedProcessBackend{alive:false}}
+ for _,pid:=range []int64{-4321,0,1}{
+  for _,status:=range []string{"failed","stopped"}{
+   if _,err=db.Exec(`DELETE FROM local_runtime_instances`);err!=nil{t.Fatal(err)}
+   if _,err=db.Exec(`INSERT INTO local_runtime_instances VALUES('node','old',?,?)`,status,pid);err!=nil{t.Fatal(err)}
+   if err:=s.refuseUnreconciledMemoryOwners(context.Background(),"node","new");err==nil||!strings.Contains(err.Error(),"invalid persisted PID"){
+    t.Fatalf("status=%s invalid PID %d freed model budget: %v",status,pid,err)
+   }
+  }
+ }
+ // A confirmed never-launched failure records NULL, not 0 or 1.
+ if _,err=db.Exec(`DELETE FROM local_runtime_instances`);err!=nil{t.Fatal(err)}
+ if _,err=db.Exec(`INSERT INTO local_runtime_instances VALUES('node','old','failed',NULL)`);err!=nil{t.Fatal(err)}
+ if err:=s.refuseUnreconciledMemoryOwners(context.Background(),"node","new");err!=nil{
+  t.Fatalf("valid failed prelaunch without PID wrongly blocks budget: %v",err)
+ }
+}

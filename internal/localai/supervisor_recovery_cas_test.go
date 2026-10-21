@@ -33,7 +33,7 @@ func TestRecoveredModelHealthCASRequiresExactOwningGeneration(t *testing.T) {
 }
 
 func TestRecoveredModelHealthCASAcceptsOnlyOriginalActiveProcess(t *testing.T) {
- for _,status:=range []string{"starting","healthy","busy"} {
+ for _,status:=range []string{"starting","healthy"} {
   t.Run(status,func(t *testing.T){
    svc,db:=stopLeaseFixture(t,status)
    if _,err:=db.Exec(`UPDATE local_runtime_instances SET pid=4321 WHERE id='inst'`);err!=nil{t.Fatal(err)}
@@ -49,9 +49,11 @@ func TestRecoveredModelHealthCASAcceptsOnlyOriginalActiveProcess(t *testing.T) {
    }
   })
  }
- svc,_:=stopLeaseFixture(t,"failed")
- if err:=svc.confirmRecoveredHealthy(context.Background(),RuntimeInstance{ID:"inst",PID:4321,Revision:1,Status:RuntimeFailed,ProcessFingerprint:"identity"},map[string]any{"status":"ok"});err==nil{
-  t.Fatal("failed process accepted as recovered resident")
+ for _,status:=range []RuntimeInstanceStatus{RuntimeFailed,RuntimeBusy,RuntimeDraining} {
+  svc,_:=stopLeaseFixture(t,string(status))
+  if err:=svc.confirmRecoveredHealthy(context.Background(),RuntimeInstance{ID:"inst",PID:4321,Revision:1,Status:status,ProcessFingerprint:"identity"},map[string]any{"status":"ok"});err==nil{
+   t.Fatalf("unknown %s process accepted as recovered resident",status)
+  }
  }
 }
 
@@ -101,4 +103,23 @@ func TestRecoveryOrphansUnlaunchedStartingRowWithoutPID(t *testing.T){
  var pid sql.NullInt64
  if err:=db.QueryRow(`SELECT status,pid FROM local_runtime_instances WHERE id='inst'`).Scan(&status,&pid);err!=nil{t.Fatal(err)}
  if status!="orphaned"||pid.Valid{t.Fatalf("unverified null PID starting row not reconciled: %s %v",status,pid)}
+}
+
+func TestRecoveryPreservesUnknownBusyInferenceWithoutReleasingLease(t *testing.T){
+ svc,db:=stopLeaseFixture(t,"busy")
+ if _,err:=db.Exec(`UPDATE local_runtime_instances SET pid=4321 WHERE id='inst'`);err!=nil{t.Fatal(err)}
+ calls:=0
+ proc:=&unrecordedProcessBackend{alive:true,onAlive:func(int){calls++}}
+ svc.processes=proc
+ if err:=svc.Recover(context.Background());err!=nil{t.Fatal(err)}
+ var status,reason string
+ var revision int64
+ var pid int
+ if err:=db.QueryRow(`SELECT status,failure_reason,revision,pid FROM local_runtime_instances WHERE id='inst'`).Scan(&status,&reason,&revision,&pid);err!=nil{t.Fatal(err)}
+ if status!="orphaned"||reason==""||revision!=2||pid!=4321{
+  t.Fatalf("unknown in-flight inference was marked reusable: status=%s reason=%s rev=%d pid=%d",status,reason,revision,pid)
+ }
+ if calls!=0||proc.signalCalls!=0{
+  t.Fatalf("crash-recovered inference triggered unauthorised process action: %d probes %d signals",calls,proc.signalCalls)
+ }
 }

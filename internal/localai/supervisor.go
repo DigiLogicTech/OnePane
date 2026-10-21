@@ -1784,7 +1784,14 @@ func (s *RuntimeSupervisor) Recover(ctx context.Context) error {
 			inst.Status!=RuntimeDraining && inst.Status!=RuntimeBusy &&
 			s.VerifyIdentity(ctx, inst)==nil
 		if !trusted {
-			res, e := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET status='orphaned',failure_reason='runtime process identity could not be re-established after daemon restart',updated_at=?,revision=revision+1 WHERE id=? AND revision=? AND status=? AND ((pid IS NULL AND ?=0) OR pid=?)`, now, x.id, x.revision, x.status, x.pid, x.pid)
+			reason := "runtime process identity could not be re-established after daemon restart"
+			switch x.status {
+			case string(RuntimeBusy):
+				reason = "inference was interrupted by daemon restart; external completion unknown and operator reconciliation required"
+			case string(RuntimeDraining):
+				reason = "model termination was interrupted by daemon restart; process ownership requires operator reconciliation"
+			}
+			res, e := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET status='orphaned',failure_reason=?,updated_at=?,revision=revision+1 WHERE id=? AND revision=? AND status=? AND ((pid IS NULL AND ?=0) OR pid=?)`, reason, now, x.id, x.revision, x.status, x.pid, x.pid)
 			if e != nil {
 				return e
 			}

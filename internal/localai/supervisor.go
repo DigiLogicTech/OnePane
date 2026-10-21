@@ -1457,12 +1457,18 @@ func managedProcessCLIIdentified(backend string,ident ProcessIdentity,
  modelFlag:="-m"
  if strings.EqualFold(backend,"colibri"){
   modelFlag="--model"
+  // The approved launcher executes Python with one script operand, not
+  // -c, -m or an arbitrary program that happens to mention the script
+  // later in its arguments. The Windows py.exe launcher uses -3 first.
+  scriptPos:=1
+  if strings.EqualFold(filepath.Base(executable),"py.exe"){
+   if len(ident.Args)<3||ident.Args[1]!="-3"{return false}
+   scriptPos=2
+  }
+  if len(ident.Args)<=scriptPos{return false}
   found:=false
-  for _,a:=range ident.Args{
-   for _,expected:=range allowedColibriScripts{
-    if filepath.Clean(a)==filepath.Clean(expected){found=true;break}
-   }
-   if found{break}
+  for _,expected:=range allowedColibriScripts{
+   if filepath.Clean(ident.Args[scriptPos])==filepath.Clean(expected){found=true;break}
   }
   if !found{return false}
  }
@@ -1475,7 +1481,7 @@ func managedProcessCLIIdentified(backend string,ident ProcessIdentity,
   // A different process can contain our approved flag/value pairs and
   // still append a CLI-supported inline or fused override. The managed
   // launcher never emits those forms: treat them as untrusted ownership.
-  if arg==alternate||
+  if arg=="--"||arg==alternate||
    strings.HasPrefix(arg,"--model=")||
    strings.HasPrefix(arg,"--host=")||
    strings.HasPrefix(arg,"--port=")||

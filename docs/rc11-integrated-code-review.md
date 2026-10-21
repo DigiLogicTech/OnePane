@@ -81,11 +81,12 @@ impersonation ambiguity.
   script misplacement and post-terminator option smuggling.
 - [x] `cf6c8614`: explicitly run managed-process identity tests in
   native Windows CI and Linux `-race` lane.
-- [ ] **Exact-source/workflow CI verification:** [run #39553844948](https://github.com/DigiLogicTech/OnePane/actions/runs/39553844948)
-  started for `cf6c8614`; verify both hosted jobs before marking this
-  checkpoint green. Preceding source/test run
-  [#39553490507](https://github.com/DigiLogicTech/OnePane/actions/runs/39553490507)
-  passed but does not validate the later Colibri/script-position changes.
+- [x] **Exact-source/workflow CI verified:** [run #39553844948](https://github.com/DigiLogicTech/OnePane/actions/runs/39553844948)
+  completed successfully for `cf6c8614`, including native Windows managed
+  PID identity tests, Linux `-race` identity tests, full Go regression,
+  and cross-platform source compilation. Physical Node acceptance remains
+  intentionally skipped: none of this verifies GPU/VRAM reclamation, actual
+  installed process identity after Windows crash, or a real Colibri model.
 
 The change does not claim OS-kernel-held process identity, ownership of a
 recycled PID on Windows after a service crash, a proven bound GPU child/process

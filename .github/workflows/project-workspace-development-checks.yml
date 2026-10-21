@@ -226,6 +226,7 @@ jobs:
           go test -race -count=1 -timeout 3m -run TestColibriFailedRowWithConfirmedDeadPIDDoesNotBlockSwap ./internal/localai
           go test -race -count=1 -timeout 3m -run TestUnrecordedModel ./internal/localai
           go test -race -count=1 -timeout 3m -run TestFailedModelPIDPersistence ./internal/localai
+          go test -race -count=1 -timeout 3m -run '^TestManagedProcessIdentity' ./internal/localai
           go test -race -count=1 -timeout 3m -run TestManagedStartup ./internal/localai
           go test -race -count=1 -timeout 3m -run TestCancelledUnlaunchedModel ./internal/localai
           go test -race -count=1 -timeout 3m -run TestUnlaunchedModel ./internal/localai
@@ -301,6 +302,7 @@ jobs:
           # compensation on Windows rather than relying on cross-compilation.
           go test -count=1 -timeout 4m -run TestUnrecordedModel ./internal/localai
           go test -count=1 -timeout 4m -run TestFailedModelPIDPersistence ./internal/localai
+          go test -count=1 -timeout 4m -run '^TestManagedProcessIdentity' ./internal/localai
           go test -count=1 -timeout 4m -run TestManagedStartup ./internal/localai
           go test -count=1 -timeout 4m -run TestCancelledUnlaunchedModel ./internal/localai
           go test -count=1 -timeout 4m -run TestUnlaunchedModel ./internal/localai

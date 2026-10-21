@@ -1212,11 +1212,22 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 		env = append(env, "COLI_MODEL="+cfg.ModelPath, "COLI_MODEL_ID="+firstNonEmpty(cfg.ModelRef, "onepane-colibri"), "COLI_SERVE_PORT="+strconv.Itoa(port))
 		env = append(env, colibriTierEnv(cfg.ColibriTier)...)
 	}
-	pid, err := s.processes.Start(context.Background(), LaunchSpec{Executable: executable, Args: args, Env: env, Dir: filepath.Dir(cfg.Executable),LogPath: filepath.Join(s.dataDir,"components","logs","local-runtime-"+inst.ID+".log")})
-	if err != nil {
-		_ = s.markFailed(context.Background(), inst.ID, err.Error())
-		return RuntimeInstance{}, err
-	}
+	// A managed engine is intentionally detached once started (it must outlive
+ // one chat request), but a request cancelled BEFORE process creation must
+ // not spawn a new GPU/Colibri engine. Record the unlaunched generation as
+ // failed under a separate bounded context so cancellation cannot strand an
+ // ambiguous "starting" row with no PID.
+ if cancelErr:=ctx.Err();cancelErr!=nil{
+  if e:=s.failUnlaunchedManagedRuntime(ctx,inst);e!=nil{
+   return RuntimeInstance{},errors.Join(cancelErr,e)
+  }
+  return RuntimeInstance{},cancelErr
+ }
+ pid, err := s.processes.Start(context.Background(), LaunchSpec{Executable: executable, Args: args, Env: env, Dir: filepath.Dir(cfg.Executable),LogPath: filepath.Join(s.dataDir,"components","logs","local-runtime-"+inst.ID+".log")})
+ if err!=nil{
+  if e:=s.failUnlaunchedManagedRuntime(ctx,inst);e!=nil{return RuntimeInstance{},errors.Join(err,e)}
+  return RuntimeInstance{},err
+ }
 	result, err := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET pid=?,started_at=?,updated_at=?,revision=revision+1 WHERE id=? AND status='starting' AND pid IS NULL AND revision=? AND process_fingerprint=?`, pid, now, now, inst.ID, inst.Revision, inst.ProcessFingerprint)
  if err==nil{
   var count int64

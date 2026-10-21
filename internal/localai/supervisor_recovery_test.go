@@ -55,9 +55,10 @@ func TestManagedStopRechecksPIDAfterDrainingPersistenceBeforeSIGTERM(t *testing.
  if err!=nil{t.Fatal(err)}
  source:=string(raw)
  from:=strings.Index(source,"func (s *RuntimeSupervisor) stopWithActivityLock(")
- to:=strings.Index(source,"// Recover snapshots candidate rows",from)
- if from<0||to<=from{t.Fatal("managed stop source boundary missing")}
- body:=source[from:to]
+ if from<0{t.Fatal("managed stop source boundary missing")}
+ offset:=strings.Index(source[from:],"// Recover snapshots candidate rows")
+ if offset<=0{t.Fatal("managed recovery boundary missing")}
+ body:=source[from:from+offset]
  first:=strings.Index(body,"s.VerifyIdentity(ctx, inst)")
  draining:=strings.Index(body,"status='draining'")
  second:=strings.Index(body[draining:],"s.VerifyIdentity(ctx, inst)")

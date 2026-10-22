@@ -422,3 +422,56 @@ whole-branch security/source review, the explicitly LAST user-focused
 UI/UX review and operator installer authorisation all remain open.
 No runtime weights, installed service, actual GPU, user Project data or
 external network target were touched.
+
+## Colibri rollback/target persisted-generation admission — 2026-10-22
+
+**Exact software verification:** source/workflow commit
+`d8ef971e4ce0bde21f427a3c6480fad1a88f91c7`, hosted
+[Windows/Linux CI #39741362521](https://github.com/DigiLogicTech/OnePane/actions/runs/39741362521)
+**PASSED** (native Windows, Linux model/Colibri race, full Go regression,
+cross-platform compilation). Physical Node job **SKIPPED**.
+
+- [x] **Fail closed on false Colibri rollback reporting**
+  (`a58026a1`). A replacement launch failure can initiate an
+  independently bounded predecessor restoration, but a nil-error
+  callback is not proof of residency. The restored instance must
+  identify the expected Node/deployment/PID/loopback/fingerprint
+  and healthy or legitimately busy state, match the saved SQLite
+  runtime generation, and have no other possibly resident Colibri
+  peer. Only then may the operator state claim the predecessor
+  was restored. A conflicting/missing record leaves reconciliation
+  required, does not return a usable target, and does not falsely
+  clear `EvictedDeploymentIDs`.
+- [x] **Deterministic positive/adversarial rollback fixtures**
+  (`c8cc6f15`). A test predecessor is created with a fully
+  populated persisted runtime record, not a bare `healthy`
+  label. Regressions cover missing/wrong restored model identity,
+  PID/fingerprint mismatch, uncommitted restoration, and a
+  resurfaced competing replacement. Earlier intermediate
+  source-only CI `a58026a1` failed because the fixture had
+  NULL runtime identity columns; the fixture was repaired without
+  weakening the production guard. The
+  [corrected rollback workflow #39740881476](https://github.com/DigiLogicTech/OnePane/actions/runs/39740881476)
+  **PASSED**.
+- [x] **Target success must also match durable generation**
+  (`f55f1c0b`). A nil-error, valid-looking requested model may
+  not be returned as resident unless the persisted Instance ID,
+  PID, port, fingerprint and expected model/Node match. Native
+  negative tests cover forged returned identifiers and an
+  uncommitted stopped SQLite record; a legitimate persisted
+  successful Colibri swap remains usable.
+- [x] **Explicit Windows/Linux test selectors** (`fce8335e`,
+  `d8ef971e`). The same failure-path and target-owner regressions
+  run in the named native Windows and Linux race suites; no real
+  inference engines were started by the tests.
+
+**Scope limitation:** durable ID/PID equality and the success of
+`startLocked` are software-level ownership assertions, not a
+kernel-held process handle or independent Colibri child/VRAM
+reclamation proof. The actual host process tree, GPU allocation,
+Windows/Ubuntu installed service and chosen non-C: root
+upgrade/rollback, paired Nodes, authorised Level 5 external
+postconditions, the complete source/security review and mandatory
+LAST operator-focused UI/UX review remain release blockers.
+No release merge, installer, live model, installed service or user
+data was touched.

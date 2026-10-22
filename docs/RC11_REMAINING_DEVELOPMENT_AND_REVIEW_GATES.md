@@ -1184,3 +1184,30 @@ Windows chosen-root upgrade and rollback, Ubuntu installed service,
 paired Nodes, reversible external Level 5 effects, final full
 code/security review, mandatory LAST operator-centred UI/UX review,
 explicit sign-off before MSI/deb packaging. PR #227 stays draft.
+
+## Colibri durable target and compensating rollback audit — 2026-10-22
+
+[Exact-head Windows/Linux CI #39741362521](https://github.com/DigiLogicTech/OnePane/actions/runs/39741362521)
+**PASSED** at `d8ef971e4ce0bde21f427a3c6480fad1a88f91c7`.
+Source verification is complete for this scope; physical Node
+acceptance was **SKIPPED**.
+
+A failed Colibri replacement cannot be labelled restored merely
+because the fallback starter returned without error; the
+predecessor's returned generation must match durable SQLite
+identity and no other possibly resident engine may remain.
+Likewise a successful requested target cannot be advertised
+ready unless its recorded launch generation matches the
+returned PID/model/port/fingerprint. Positive and adversarial
+regressions run on native Windows and Linux race suites.
+See `docs/rc11-integrated-code-review.md` for intermediate
+fixture remediation and exact commit/provenance details.
+
+**Unchanged release blockers:** operator-approved real Colibri and
+llama.cpp parent/child process-tree and attributed RAM/VRAM release,
+installed Windows chosen-drive SCM/data-root upgrade/rollback,
+Ubuntu installed service, paired physical Nodes, reversible Level
+5 effect verification, full code/security review, and the LAST
+human-centred UI/UX review. Explicit approval is required before
+MSI/deb QA packaging; draft PR #227 must not be promoted based
+solely on hosted CI.

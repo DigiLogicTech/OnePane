@@ -1160,3 +1160,27 @@ security/code review and mandatory LAST UI/UX review remain open.
 Consult `docs/rc11-physical-model-lifecycle-acceptance.md` for the
 opt-in physical protocol; do not execute it automatically. PR #227
 remains draft and unmerged; no installer is authorised.
+
+## Model owner provenance / Colibri unresolved status checkpoint (2026-10-22)
+
+**Software CI PASSED**, exact source/workflow head
+`aa1e11d53877add6a0930099e0d5c0c901c42a4e`;
+[Windows/Linux CI #39729564503](https://github.com/DigiLogicTech/OnePane/actions/runs/39729564503).
+Physical Node approval **SKIPPED**.
+
+A `stopped` runtime whose PID was never durably recorded is now
+treated as unknown ownership unless the exact no-child prelaunch
+record survives. Stop/restart/memory admission and failed Colibri
+replacement rollback preserve that reservation. The Colibri resident
+listing also shows uncertain failed/stopped models as potentially
+using RAM/VRAM rather than advertising a falsely clear Node. Known
+prelaunch cancellation and independently dead recorded PID behaviors
+retain their allowed paths. Intermediate fixture CI failures were
+investigated, corrected and verified at the above exact head.
+
+**Next:** operator-specific physical process-tree/VRAM acceptance
+(`docs/rc11-physical-model-lifecycle-acceptance.md`), real installed
+Windows chosen-root upgrade and rollback, Ubuntu installed service,
+paired Nodes, reversible external Level 5 effects, final full
+code/security review, mandatory LAST operator-centred UI/UX review,
+explicit sign-off before MSI/deb packaging. PR #227 stays draft.

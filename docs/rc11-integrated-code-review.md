@@ -368,3 +368,57 @@ Ubuntu installed service, full whole-branch code/security review,
 mandatory LAST human-centred UI/UX review, and explicit operator
 approval before packaging/merge. No installed model, service, user data,
 credential or external device was touched.
+
+## RC11 stopped/NULL-PID ownership and Colibri status — 2026-10-22
+
+**Software-only verified checkpoint.** This follows `57766b75`
+and fixes a previously unguarded ambiguity: `stopped` plus a SQL
+NULL PID does **not** prove no engine was ever created. The daemon could
+have crashed before process identity persistence. The code and tests
+do not claim independently measured child-process or VRAM release.
+
+- [x] **Durable no-child evidence for stopped models** (`86ca37a9`).
+  Shared `confirmedNoChildWithoutPID` accepts `failed` or `stopped`
+  with true SQL NULL PID, no child start timestamp, and the exact
+  guarded pre-spawn failure reason. Unproven stopped/NULL-PID records
+  now refuse local memory admission, runtime restart, manual Stop
+  rewriting, and Colibri failed-swap rollback until explicit operator
+  reconciliation. Recorded zero/invalid PIDs remain denied. Tests
+  cover unknown legacy rows, mismatched reasons, contradictory
+  `started_at`, idempotent Stop of a verified no-child model and
+  positive safe rollback.
+- [x] **Windows/Linux no-child test selection** (`a0e24b1d`).
+  Dedicated native Windows and Linux race tests exercise unproven
+  stopped/NULL-PID memory/restart/rollback paths.
+  [CI #39728662960 PASSED](https://github.com/DigiLogicTech/OnePane/actions/runs/39728662960).
+- [x] **Colibri resident-list truthfulness** (`443e9808`).
+  `colibriResidents` now returns unproven failed/stopped owners with
+  SQL NULL or invalid recorded PID as uncertain residency, rather than
+  silently omitting them. `selectColibriEvictions` refuses to evict
+  another model when ownership cannot be established; the status
+  endpoint reports potentially occupied RAM/VRAM instead of an
+  apparently empty Node. An exact verified never-launched child
+  remains excluded and does not strand a legitimate swap.
+- [x] **Test fixture correction without weakening safety**
+  (`43e45f56`, `aa1e11d5`). Two older rollback fixtures simulated
+  a formerly healthy Colibri engine as stopped with no PID and no
+  provenance. Intermediate CI at `443e9808` and `fec93f32`
+  correctly rejected this synthetic unknown-owner state. The fixture
+  now models a genuinely launched predecessor with a recorded PID,
+  later observed dead by a deterministic fake process backend (not
+  an arbitrary live CI worker PID). Success and cancellation/recovery
+  paths remain tested.
+- [x] **Native exact-head source + workflow CI**:
+  [#39729564503 PASSED](https://github.com/DigiLogicTech/OnePane/actions/runs/39729564503)
+  at `aa1e11d53877add6a0930099e0d5c0c901c42a4e`, both hosted
+  Windows and Linux with Linux race and full Go/cross-platform tests.
+  Physical Node approval job was intentionally **SKIPPED**.
+
+**Continuing release blockers:** no approved physical Windows/Ubuntu
+Colibri/llama.cpp parent/child lifecycle, process-attributed GPU/RAM
+reclaim, or installed service/SCM/non-C root upgrade/rollback evidence.
+Paired real Nodes, irreversible/reversible Level 5 proof, mandatory
+whole-branch security/source review, the explicitly LAST user-focused
+UI/UX review and operator installer authorisation all remain open.
+No runtime weights, installed service, actual GPU, user Project data or
+external network target were touched.

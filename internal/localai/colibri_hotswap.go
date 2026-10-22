@@ -255,6 +255,20 @@ func (s *RuntimeSupervisor) colibriSwapOnNodeLocked(ctx context.Context,
         // still present; avoid an automatic stop/rollback of unknown owners.
         return state,RuntimeInstance{},errors.New("Colibri replacement has competing process residency; operator reconciliation required")
     }
+    if launchErr==nil{
+        // A nil-error starter might return valid-looking but unpersisted
+        // ownership. The target and restored predecessor must satisfy the
+        // same exact durable model generation evidence. Do not route any
+        // inference to an uncommitted or changed PID.
+        persisted,persistErr:=s.Instance(recoveryCtx,deploymentID)
+        if persistErr!=nil || persisted.ID!=inst.ID ||
+            persisted.PID!=inst.PID ||
+            persisted.Port!=inst.Port ||
+            persisted.ProcessFingerprint!=inst.ProcessFingerprint ||
+            !verifiedColibriResidency(persisted,deploymentID,nodeID){
+            return state,RuntimeInstance{},errors.New("Colibri target returned unverified durable residency; operator reconciliation required")
+        }
+    }
     if launchErr!=nil {
         // A startup timeout may mark the replacement failed while its engine
         // is still alive. Never load the predecessor until verified teardown

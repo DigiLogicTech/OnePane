@@ -222,13 +222,18 @@ func TestColibriVerifiedReplacementRejectsUnstoppedPredecessor(t *testing.T){
 
 func TestColibriVerifiedTargetCanReplaceActuallyStoppedPredecessor(t *testing.T){
  svc,db:=colibriSwapFailureFixture(t)
- target:=RuntimeInstance{ID:"target-instance",DeploymentID:"model",
-  NodeID:"node",PID:4321,ProcessFingerprint:"fingerprint",
+ target:=RuntimeInstance{ID:"inst",DeploymentID:"model",
+  NodeID:"node",PID:5678,ProcessFingerprint:"fingerprint",
   BindAddress:"127.0.0.1",Port:11333,Status:RuntimeHealthy}
  starter:=func(_ context.Context,id string)(RuntimeInstance,error){
   if id!="model"{t.Fatalf("unexpected target %s",id)}
   if _,err:=db.Exec(`UPDATE local_runtime_instances
     SET status='stopped' WHERE deployment_id='previous'`);err!=nil{t.Fatal(err)}
+  // Simulate the guarded PID/readiness persistence performed by Start.
+  if _,err:=db.Exec(`UPDATE local_runtime_instances
+    SET status='healthy',pid=?,process_fingerprint=?,port=?,
+        bind_address='127.0.0.1'
+    WHERE deployment_id='model'`,target.PID,target.ProcessFingerprint,target.Port);err!=nil{t.Fatal(err)}
   return target,nil
  }
  svc.residencyMu.Lock()
@@ -300,6 +305,42 @@ func TestColibriRollbackCannotClaimAnUnverifiedRestoredModel(t *testing.T){
       inst.ID!=""||len(state.ActiveDeploymentIDs)!=0||
       strings.Contains(state.Message,"was restored"){
     t.Fatalf("unproven Colibri rollback advertised as restored: state=%+v instance=%+v calls=%d err=%v",state,inst,calls,err)
+   }
+  })
+ }
+}
+
+func TestColibriTargetCannotAdvertiseUnpersistedSuccessfulStart(t *testing.T){
+ for _,tc:=range []struct{name string;mutate func(*RuntimeInstance,*sql.DB,*testing.T)}{
+  {"result ID absent in SQLite",func(inst *RuntimeInstance,_ *sql.DB,_ *testing.T){inst.ID="not-persisted"}},
+  {"result PID differs from durable owner",func(inst *RuntimeInstance,_ *sql.DB,_ *testing.T){inst.PID=2222}},
+  {"result fingerprint differs from durable owner",func(inst *RuntimeInstance,_ *sql.DB,_ *testing.T){inst.ProcessFingerprint="different"}},
+  {"result port differs from durable owner",func(inst *RuntimeInstance,_ *sql.DB,_ *testing.T){inst.Port=11999}},
+  {"SQLite retained stopped state",func(_ *RuntimeInstance,db *sql.DB,t *testing.T){
+    if _,err:=db.Exec(`UPDATE local_runtime_instances SET status='stopped' WHERE deployment_id='model'`);err!=nil{t.Fatal(err)}
+  }},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   svc,db:=colibriSwapFailureFixture(t)
+   target:=RuntimeInstance{ID:"inst",NodeID:"node",DeploymentID:"model",
+    PID:5678,ProcessFingerprint:"fingerprint",BindAddress:"127.0.0.1",
+    Port:11333,Status:RuntimeHealthy}
+   starter:=func(_ context.Context,id string)(RuntimeInstance,error){
+    if id!="model"{t.Fatalf("unverified target triggered rollback: %s",id)}
+    if _,err:=db.Exec(`UPDATE local_runtime_instances SET status='stopped' WHERE deployment_id='previous'`);err!=nil{t.Fatal(err)}
+    if _,err:=db.Exec(`UPDATE local_runtime_instances SET status='healthy',pid=?,
+      process_fingerprint=?,port=?,bind_address='127.0.0.1'
+      WHERE deployment_id='model'`,target.PID,target.ProcessFingerprint,target.Port);err!=nil{t.Fatal(err)}
+    tc.mutate(&target,db,t)
+    return target,nil
+   }
+   svc.residencyMu.Lock()
+   state,got,err:=svc.colibriSwapOnNodeLocked(context.Background(),"model","node",starter)
+   svc.residencyMu.Unlock()
+   if err==nil||!strings.Contains(err.Error(),"unverified durable residency")||
+       got.ID!=""||len(state.ActiveDeploymentIDs)!=0||
+       strings.Contains(state.Message,"ready"){
+    t.Fatalf("false-ready Colibri target accepted: state=%+v got=%+v err=%v",state,got,err)
    }
   })
  }

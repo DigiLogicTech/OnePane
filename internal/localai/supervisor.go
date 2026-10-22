@@ -76,12 +76,19 @@ type ProcessInspector interface {
 	Identity(int) (ProcessIdentity, error)
 }
 
+// A completed exec.Cmd.Wait mutates ProcessState. Inspecting that field from
+// an independent model health/stop goroutine races with Wait. A close-only
+// channel is the owned process exit signal; the launch spec never changes.
+type trackedManagedCommand struct {
+ cmd *exec.Cmd
+ exited chan struct{}
+}
 type OSProcessBackend struct {
 	mu   sync.Mutex
-	cmds map[int]*exec.Cmd
+	cmds map[int]*trackedManagedCommand
 }
 
-func NewOSProcessBackend() *OSProcessBackend { return &OSProcessBackend{cmds: map[int]*exec.Cmd{}} }
+func NewOSProcessBackend() *OSProcessBackend { return &OSProcessBackend{cmds: map[int]*trackedManagedCommand{}} }
 func (b *OSProcessBackend) Start(ctx context.Context, spec LaunchSpec) (int, error) {
 	if strings.TrimSpace(spec.Executable) == "" || filepath.IsAbs(spec.Executable) == false {
 		return 0, errors.New("managed runtime executable must be an absolute path")
@@ -116,11 +123,15 @@ func (b *OSProcessBackend) Start(ctx context.Context, spec LaunchSpec) (int, err
 		return 0, err
 	}
 	pid := cmd.Process.Pid
+	tracked:=&trackedManagedCommand{cmd:cmd,exited:make(chan struct{})}
 	b.mu.Lock()
-	b.cmds[pid] = cmd
+	b.cmds[pid] = tracked
 	b.mu.Unlock()
 	go func() {
   _=cmd.Wait()
+  // Never race with cmd.Wait's ProcessState mutation. A caller that has
+  // retained this tracked generation observes exit without PID recycling.
+  close(tracked.exited)
   // Only close after Wait has drained all stdout/stderr pumps.
   if logFile!=nil{_ = logFile.Close()}
   b.mu.Lock();delete(b.cmds,pid);b.mu.Unlock()
@@ -293,10 +304,15 @@ func (b *OSProcessBackend) Alive(pid int) bool {
 		return false
 	}
 	b.mu.Lock()
-	cmd := b.cmds[pid]
+	tracked := b.cmds[pid]
 	b.mu.Unlock()
-	if cmd != nil {
-		return cmd.ProcessState == nil || !cmd.ProcessState.Exited()
+	if tracked != nil {
+		select {
+		case <-tracked.exited:
+			return false
+		default:
+			return true
+		}
 	}
 	if runtime.GOOS == "windows" {
         // After daemon restart the OS child is no longer in b.cmds.
@@ -327,10 +343,15 @@ func (b *OSProcessBackend) Identity(pid int) (ProcessIdentity, error) {
 		return ProcessIdentity{}, errors.New("invalid pid")
 	}
 	b.mu.Lock()
-	cmd := b.cmds[pid]
+	tracked := b.cmds[pid]
 	b.mu.Unlock()
-	if cmd != nil {
-		return ProcessIdentity{Executable: filepath.Clean(cmd.Path), Args: append([]string(nil), cmd.Args...)}, nil
+	if tracked != nil {
+		select {
+		case <-tracked.exited:
+			return ProcessIdentity{}, errors.New("managed process exited; cached launch identity is no longer valid")
+		default:
+			return ProcessIdentity{Executable: filepath.Clean(tracked.cmd.Path), Args: append([]string(nil), tracked.cmd.Args...)}, nil
+		}
 	}
 	if runtime.GOOS == "windows" {
 		return ProcessIdentity{}, errors.New("process identity unavailable after Windows service restart")

@@ -136,12 +136,71 @@ does **not** replace the final whole-branch audit or physical installation QA.
   signalled. This does not create kernel-held PID references or prove that a
   Colibri GPU child has also exited.
 
-**Verification:** native Windows/Linux hosted CI on the final combined code
-must pass before this checkpoint is marked verified. Earlier partial source
-heads had green builds, but they do not establish the combined behavior.
+**Verification:** the combined source/workflow head `60dc7755` passed
+[hosted CI #39578352208](https://github.com/DigiLogicTech/OnePane/actions/runs/39578352208),
+including native Windows managed-process/SQLite checks, Linux race tests,
+full Go regression and cross-compilation. This is not physical acceptance.
 These tests do not prove real process-tree/VRAM release, handle-based Windows
 PID ownership after crash, service restart with populated non-C data, or
 safe unattended reconciliation. The system deliberately fails closed where
 actual external effects remain unknown. Final review, explicit L4/L5 authority
 checks, physical Node/model acceptance, mandatory LAST UI/UX review and
 operator-approved installer are still separate gates.
+
+## RC11 P0 — no-child provenance and conservative Stop/memory admission (2026-10-22)
+
+This is another **incremental software code-review checkpoint**, not the
+mandatory final source/security audit or installed hardware QA.
+
+- [x] **Unknown PID stop fence** (`a8a1e521`): manual Stop and daemon
+  shutdown no longer rewrite a `starting`, `draining` or `orphaned`
+  model with no trustworthy PID as successfully `stopped`. A missing
+  child PID after a crash or SQLite failure cannot prove the process
+  and its potential GPU/Colibri children exited. SQL status, revision,
+  residency and operator-reconcilable evidence remain intact. A
+  confirmed prelaunch `failed` model remains explicitly stoppable.
+  [Windows/Linux CI #39699667254 passed](https://github.com/DigiLogicTech/OnePane/actions/runs/39699667254).
+- [x] **Failed/NULL-PID memory provenance** (`886737eb`): failed
+  instance without a PID is eligible for new local memory capacity,
+  restart or cleanup **only** if its stored failure reason is the exact
+  bounded pre-spawn cancellation/launcher-creation failure and it
+  has no child start timestamp. Generic failed records (including
+  legacy/unknown outcomes) remain blocked pending operator
+  reconciliation. The canonical reason is bound by the guarded
+  prelaunch SQL write. Tests cover absent, wrong and inconsistent
+  provenance plus known-safe retries.
+  [Windows/Linux CI #39700172492 passed](https://github.com/DigiLogicTech/OnePane/actions/runs/39700172492).
+- [x] **SQL NULL versus recorded zero** (`14b3dab1`): a private
+  `RuntimeInstance.pidRecorded` flag preserves actual SQL NULL
+  provenance across instance reads; a corrupt persisted `pid=0`
+  cannot impersonate a no-child failure. This flag is not serialized
+  as a new operator API field. SQLite tests verify denial without
+  mutating the original failed row. Source CI
+  [#39700685628 passed](https://github.com/DigiLogicTech/OnePane/actions/runs/39700685628).
+- [x] **Native Windows exact proof regression** (`c22d2dce`,
+  `7bbbe466`): explicitly exercise unknown-PID Stop, cancelled
+  prelaunch, recovery and recorded-zero versus NULL-PID proof on
+  hosted Windows; Linux runs the local-model tests and race suite.
+  A preceding workflow-only change `fdcec636` was rejected as
+  malformed configuration and was replaced with the clean workflow
+  before the verified runs. [Exact source/workflow CI #39700884306
+  PASSED](https://github.com/DigiLogicTech/OnePane/actions/runs/39700884306)
+  for `7bbbe46672ed460ba27b28b2436e3ab1e43d272c`, including
+  both Windows and Linux; the physical Node job was intentionally
+  **SKIPPED**, not marked accepted.
+
+**Remaining unverified:** real model parent/child process-tree and RAM/
+VRAM/Colibri-cache release under pressure and cancellation; physical
+Windows service crash/restart, populated operator-selected non-C:
+upgrade/reboot/rollback, installed Ubuntu service, paired physical
+Nodes and reversible operator-authorised Level 5 postconditions.
+Source tests cannot establish these external observations. A
+human-facing reconciliation path for intentionally blocked uncertain
+models needs installed UI/Debug Centre QA.
+
+**Mandatory release gates remain:** final integrated code/security audit,
+the explicitly LAST human-focused UI/UX customisation review, both
+operator review approvals, physical acceptance and separately approved
+Windows/Ubuntu package/installer QA. PR #227 is draft and unmerged.
+No user models, real GPUs, existing Project data, credentials or live
+network devices were touched in this checkpoint.

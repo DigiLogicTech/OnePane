@@ -52,6 +52,15 @@ func TestWindowsUntrackedPIDLifecycle(t *testing.T) {
  if _,err:=backend.Identity(pid);err==nil{
   t.Fatal("untracked PID liveness incorrectly authorised CLI/process ownership")
  }
+ // A live foreign/untracked child is a valid liveness occupant, NOT a
+ // process OnePane can send to taskkill /T /F. This process belongs to
+ // this test and will be terminated only through its original os.Process.
+ if err:=backend.Signal(pid,os.Kill);err==nil{
+  t.Fatal("Windows model backend accepted a tree signal for an untracked PID")
+ }
+ if !backend.Alive(pid){
+  t.Fatal("untracked test-owned process was terminated by unsafe taskkill")
+ }
  if err:=child.Process.Kill();err!=nil{t.Fatal(err)}
  if err:=child.Wait();err==nil{
   t.Fatal("killed helper unexpectedly exited cleanly")

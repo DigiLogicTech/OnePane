@@ -1111,3 +1111,31 @@ The status contains no Tool inputs, secrets, receipts or resource refs.
 It also changes the derived recovery checkpoint observation digest,
 never permits automatic replay, and is tested against an actual
 Task-scoped SQLite read snapshot and checkpoint recovery classes.
+
+## Development checkpoint — RC11 model/process generation and admission (2026-10-22)
+
+**Exact verified integration source/workflow head:**
+`55a8a91409b06250e1bb2ab0c99e2a01810bdd51`,
+[hosted Windows/Linux CI #39718524948](https://github.com/DigiLogicTech/OnePane/actions/runs/39718524948)
+**PASSED**. Physical Node check remains **SKIPPED**.
+
+This software-only task batch fenced PID-reuse cleanup for tracked
+processes; denied Windows taskkill for untracked or exited launch
+generations; rejected a Colibri "successful" replacement with incomplete
+model identity or a second still-resident Colibri process; and blocked
+admission of persisted `busy` inference with no live in-process lease.
+Native Windows, Linux race and bounded SQLite regressions verify the
+scoped states. The exact commits and limitations are captured in
+`docs/rc11-integrated-code-review.md`.
+
+**Persistent continuation:** source-code-only model-lifecycle gates are
+green, but physical CPU/GPU model parent/child memory reclamation is
+unverified. The operator-approved protocol is
+`docs/rc11-physical-model-lifecycle-acceptance.md`. Do not dispatch it
+without explicit host/model/run approval. Next unresolved acceptance
+requires real process-tree/VRAM evidence, Windows installed SCM and
+operator-selected non-C data-root upgrade/rollback, Ubuntu installed
+service, paired physical Nodes and verified reversible L5 postconditions,
+followed by the final whole-branch audit and the explicitly **LAST**
+human-centred UI/UX review. Installer/PR merge and release remain
+separately approval-gated.

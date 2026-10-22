@@ -268,3 +268,59 @@ the mandatory LAST human-focused UI/UX review; explicit approval
 before Windows/Ubuntu packaging and installed QA. Do not infer
 physical success from GitHub CI or silently convert an orphaned
 engine to a stopped one.
+
+## RC11 managed process generation / Colibri success admission (2026-10-22)
+
+**Software-only checkpoint, not release or physical memory-reclamation
+acceptance.** From prior audited head `b73e2aff`, 11 commits changed
+seven scoped files. Intermediate workflow `a4fc1040` was rejected by GitHub
+before running any jobs because a test selector was truncated; the original
+clean workflow was restored and the selector simplified in `7a3a79c1`.
+
+- [x] **Tracked subprocess generation fence — `7983360f`.**
+  An old `exec.Cmd.Wait` goroutine may finish after a numeric PID has been
+  recycled. Cleanup now removes the tracked map entry only if it still
+  refers to the exact original `trackedManagedCommand` pointer.
+  Cross-platform deterministic tests simulate delayed cleanup, PID reuse
+  and idempotence; native Windows and Linux race lanes exercise them.
+- [x] **Windows tree-signal ownership — `b4d1257d`,
+  `1544911b`.** The Windows `taskkill /T /F` path denies missing or
+  completed launch generations rather than signalling a bare restored PID.
+  A native-Windows test starts its own untracked subprocess, confirms
+  liveness, proves the model backend refuses to terminate it, and tears
+  it down only through the test's own process handle. This guard does
+  **not** close the final PID-recycle window of external taskkill, create
+  a kernel Job Object, or certify that Colibri child GPU memory is freed.
+- [x] **Colibri returned-owner and competing-residency contracts —
+  `397856a1`, `313176d6`, `6ba9b728`, `49fe0bff`,
+  `3846f67b`.** A nil-error starter must return an actual, matching
+  Node/Deployment/Instance/PID/loopback/fingerprint with healthy or
+  legitimately busy status. Otherwise the coordinator rejects claimed
+  readiness without automatically rolling back an unknown process.
+  Following a valid target return, any separate resident Colibri peer
+  still observed on the same Node also blocks a false success.
+  Positive and adversarial SQLite tests distinguish a truly stopped
+  predecessor from overlapping or incomplete replacement state.
+- [x] **Native Windows Colibri contract lane — `7a3a79c1`.**
+  The exact native Windows test selection is included in the workflow.
+  Source and full workflow at `7a3a79c1998e10b416e63ac448d92a3df06579d1`
+  [passed CI #39718213444](https://github.com/DigiLogicTech/OnePane/actions/runs/39718213444).
+- [x] **Unknown persisted busy inference admission — `55a8a914`.**
+  Before process reuse, `Start` refuses a durable `busy` model
+  without a corresponding, activity-lock-checked in-process lease.
+  An old PID and healthy HTTP socket cannot establish completion of a
+  crash-interrupted inference. Existing actively leased inference remains
+  eligible under its separate model identity check. Windows and Linux
+  regression evidence is
+  [exact-head CI #39718524948](https://github.com/DigiLogicTech/OnePane/actions/runs/39718524948),
+  **PASSED**: native Windows, Linux race/integration, full Go regression
+  and cross-platform compilation. The physical Node job was **SKIPPED**.
+
+**Limitations remain:** no approved real CPU/GPU/Colibri hardware test,
+per-process child VRAM reclamation, kernel-held Windows process tree
+ownership, installed Windows SCM/non-C selected data root rollback,
+installed Ubuntu service test, paired Nodes, verified bounded Level 5
+effects, final integrated code/security audit or the mandatory LAST
+operator-focused UI/UX review. No production model process, credentials,
+user Project data, home network or installed environment was touched.
+No installer or release merge is approved.

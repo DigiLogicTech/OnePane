@@ -13,7 +13,9 @@ import(
 )
 
 // A one-connection SQLite pool exposes the old reader-versus-Stop deadlock.
-// PID 0 means both managed model processes are independently already gone;
+// Both managed model processes have durable launch PIDs and the synthetic
+// backend independently reports both as exited. PID=0 is corrupt launch
+// ownership evidence, not proof that an engine has released memory.
 // Shutdown must persist stopped residency without signalling anything.
 func TestShutdownClosesReadCursorBeforeModelStateChanges(t *testing.T){
  db,err:=sql.Open("sqlite",":memory:")
@@ -39,12 +41,13 @@ func TestShutdownClosesReadCursorBeforeModelStateChanges(t *testing.T){
     bind_address,port,pid,status,process_fingerprint,
     launch_json,health_json,revision,created_at,updated_at)
    VALUES
-   ('instance-a','node','model-a','runtime','model','127.0.0.1',11001,0,'healthy','fp','{}','{}',1,1,1),
-   ('instance-b','node','model-b','runtime','model','127.0.0.1',11002,0,'healthy','fp','{}','{}',1,1,1)`,
+   ('instance-a','node','model-a','runtime','model','127.0.0.1',11001,4321,'healthy','fp','{}','{}',1,1,1),
+   ('instance-b','node','model-b','runtime','model','127.0.0.1',11002,5678,'healthy','fp','{}','{}',1,1,1)`,
  }{
   if _,err=db.Exec(q);err!=nil{t.Fatal(err)}
  }
- s:=&RuntimeSupervisor{db:db,clock:clock.Real{}}
+ s:=&RuntimeSupervisor{db:db,clock:clock.Real{},
+  processes:&unrecordedProcessBackend{alive:false}}
  ctx,cancel:=context.WithTimeout(context.Background(),time.Second)
  defer cancel()
  if err:=s.Shutdown(ctx);err!=nil{

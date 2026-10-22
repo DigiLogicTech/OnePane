@@ -134,3 +134,52 @@ func TestColibriReplacementUnknownOwnerCannotRestartEvictedModel(t *testing.T){
   })
  }
 }
+
+func TestColibriStarterCannotAdvertiseUnverifiedResidentProcess(t *testing.T){
+ for _,tc:=range []struct{name string;mutate func(*RuntimeInstance)}{
+  {"no instance",func(x *RuntimeInstance){*x=RuntimeInstance{}}},
+  {"wrong deployment",func(x *RuntimeInstance){x.DeploymentID="foreign"}},
+  {"wrong node",func(x *RuntimeInstance){x.NodeID="foreign-node"}},
+  {"missing instance ID",func(x *RuntimeInstance){x.ID=""}},
+  {"missing process PID",func(x *RuntimeInstance){x.PID=0}},
+  {"missing process fingerprint",func(x *RuntimeInstance){x.ProcessFingerprint=""}},
+  {"not yet healthy",func(x *RuntimeInstance){x.Status=RuntimeStarting}},
+  {"wrong host",func(x *RuntimeInstance){x.BindAddress="0.0.0.0"}},
+  {"missing port",func(x *RuntimeInstance){x.Port=0}},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   svc,db:=colibriSwapFailureFixture(t)
+   good:=RuntimeInstance{ID:"verified",DeploymentID:"model",NodeID:"node",
+    PID:4321,ProcessFingerprint:"fingerprint",BindAddress:"127.0.0.1",
+    Port:11333,Status:RuntimeHealthy}
+   tc.mutate(&good)
+   calls:=0
+   starter:=func(_ context.Context,model string)(RuntimeInstance,error){
+    calls++
+    if model!="model"{t.Fatalf("unverified target initiated rollback to %s",model)}
+    return good,nil
+   }
+   svc.residencyMu.Lock()
+   state,inst,err:=svc.colibriSwapOnNodeLocked(context.Background(),"model","node",starter)
+   svc.residencyMu.Unlock()
+   if err==nil||!strings.Contains(err.Error(),"unverified model residency")||
+    calls!=1||inst.ID!=""||len(state.ActiveDeploymentIDs)!=0{
+    t.Fatalf("invalid model was advertised ready: calls=%d state=%+v inst=%+v err=%v",calls,state,inst,err)
+   }
+   var prev string
+   if err:=db.QueryRow(`SELECT status FROM local_runtime_instances WHERE deployment_id='previous'`).Scan(&prev);err!=nil{t.Fatal(err)}
+   if prev!="healthy"{t.Fatalf("unverified launch altered working predecessor: %s",prev)}
+  })
+ }
+}
+
+func TestColibriVerifiedStarterResultAcceptsBusyAndHealthy(t *testing.T){
+ for _,status:=range []RuntimeInstanceStatus{RuntimeHealthy,RuntimeBusy}{
+  inst:=RuntimeInstance{ID:"instance",NodeID:"node",DeploymentID:"model",
+   PID:4133,Status:status,ProcessFingerprint:"fp",BindAddress:"127.0.0.1",
+   Port:11333}
+  if !verifiedColibriResidency(inst,"model","node"){
+   t.Fatalf("legitimate %s resident was rejected",status)
+  }
+ }
+}

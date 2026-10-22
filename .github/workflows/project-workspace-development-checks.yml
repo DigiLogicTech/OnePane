@@ -220,6 +220,7 @@ jobs:
           go test -race -count=1 -timeout 3m -run TestChatColibriReplacementCancelledAfterEvictionRestoresPreviousWithIndependentDeadline ./internal/localai
           go test -race -count=1 -timeout 3m -run TestColibriReplacementDoesNotGuessRollbackWhenTargetPIDUnknown ./internal/localai
           go test -race -count=1 -timeout 3m -run TestChatColibriUsesSameFailClosedSwapAsExplicitControl ./internal/localai
+          go test -race -count=1 -timeout 3m -run 'Test(DirectColibriStart|ColibriHotSwapStatusShows)' ./internal/localai
           go test -race -count=1 -timeout 3m -run TestCancelledColibriSwap ./internal/localai
           go test -race -count=1 -timeout 3m -run TestColibriReplacement ./internal/localai
           go test -race -count=1 -timeout 3m -run TestColibriHotSwapRejectsLiveFailedAndStoppedEngineBeforeEviction ./internal/localai
@@ -319,6 +320,7 @@ jobs:
           go test -count=1 -timeout 4m -run TestChatColibriReplacementCancelledAfterEvictionRestoresPreviousWithIndependentDeadline ./internal/localai
           go test -count=1 -timeout 4m -run TestColibriReplacementDoesNotGuessRollbackWhenTargetPIDUnknown ./internal/localai
           go test -count=1 -timeout 4m -run 'TestColibri(StarterCannot|VerifiedStarter|VerifiedReplacement|VerifiedTarget)' ./internal/localai
+          go test -count=1 -timeout 4m -run 'Test(DirectColibriStart|ColibriHotSwapStatusShows)' ./internal/localai
           # OS-backed post-restart PID liveness: live untracked child must
           # block memory admission; dead child must not. Identity stays denied.
           go test -count=1 -timeout 4m -run TestWindowsUntrackedPID ./internal/localai

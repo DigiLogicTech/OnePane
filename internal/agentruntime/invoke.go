@@ -13,6 +13,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/budget"
 	"github.com/DigiLogicTech/OnePane/internal/event"
 	"github.com/DigiLogicTech/OnePane/internal/policy"
+	"github.com/DigiLogicTech/OnePane/internal/runtimeendpoint"
 	"github.com/DigiLogicTech/OnePane/internal/storage"
 )
 
@@ -47,6 +48,13 @@ func (s *Service) Invoke(ctx context.Context, cmd InvokeCommand) (InvokeResult, 
 	c, err := s.repo.Get(ctx, cmd.ConnectionID)
 	if err != nil {
 		return InvokeResult{}, err
+	}
+	// Unlike a service-local model, an external Agent Runtime can move
+	// Task inputs over HTTP and may use a Vault-backed credential. Every
+	// configured canonical Task/Workspace/Agent restriction must permit
+	// the actual network and secrets capabilities before any work begins.
+	if err:=s.requireTaskRuntimeEffects(ctx,cmd,c);err!=nil{
+		return InvokeResult{},err
 	}
 	if len(cmd.Constraints) == 0 {
 		cmd.Constraints = json.RawMessage(`{}`)
@@ -156,6 +164,10 @@ func (s *Service) Invoke(ctx context.Context, cmd InvokeCommand) (InvokeResult, 
 		s.releaseBudgetBeforeDispatch(ctx, cmd)
 		return InvokeResult{}, err
 	}
+	if err:=s.requireCurrentRuntimeDispatch(ctx,c,cmd);err!=nil{
+		s.releaseBudgetBeforeDispatch(ctx,cmd)
+		return s.finishInvocationError(ctx,inv.ID,InvocationAuthorized,err,cmd)
+	}
 	if err := s.transitionInvocation(ctx, inv.ID, InvocationDispatched, nil, nil, nil, cmd, "agent_runtime_invocation.dispatched", nil); err != nil {
 		s.releaseBudgetBeforeDispatch(ctx, cmd)
 		return InvokeResult{}, err
@@ -163,6 +175,13 @@ func (s *Service) Invoke(ctx context.Context, cmd InvokeCommand) (InvokeResult, 
 	if err := s.transitionInvocation(ctx, inv.ID, InvocationExecuting, nil, nil, nil, cmd, "agent_runtime_invocation.executing", nil); err != nil {
 		s.releaseBudgetBeforeDispatch(ctx, cmd)
 		return InvokeResult{}, err
+	}
+	// Revalidate the canonical peer and data policy immediately before the
+	// potentially external side-effect. A non-replayable unknown network
+	// outcome remains handled by the existing Invocation state machine.
+	if err:=s.requireCurrentRuntimeDispatch(ctx,c,cmd);err!=nil{
+		s.releaseBudgetBeforeDispatch(ctx,cmd)
+		return s.finishInvocationError(ctx,inv.ID,InvocationExecuting,err,cmd)
 	}
 	resp, callErr := transport.Invoke(ctx, c, req, s.secrets)
 	if cmd.BudgetReservationID != nil && s.budgets != nil {
@@ -201,25 +220,13 @@ func (s *Service) releaseBudgetBeforeDispatch(ctx context.Context, cmd InvokeCom
 	_, _ = s.budgets.Release(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 }
 
-func runtimeRouteRequiresBudget(c Connection) bool {
-	var caps struct {
-		Scheduling struct {
-			CostClass string `json:"cost_class"`
-			HardZero  bool   `json:"hard_zero_incremental_cost"`
-		} `json:"scheduling"`
-	}
-	_ = json.Unmarshal(c.CapabilitiesJSON, &caps)
-	switch strings.ToLower(strings.TrimSpace(caps.Scheduling.CostClass)) {
-	case "local":
-		return false
-	case "free":
-		return !caps.Scheduling.HardZero
-	case "included_subscription", "provider_managed", "paid", "unknown", "":
-		return true
-	default:
-		return true
-	}
-}
+// A third-party Agent Runtime is NOT a verified inference deployment:
+// even a bridge reached at 127.0.0.1 can call paid providers on its own.
+// A runtime's self-declared "local/free/hard_zero_incremental_cost" is
+// never authority to consume someone else's money or subscription quota.
+// A later independent, enforceable zero-spend lease can narrow this
+// requirement, but merely trusting the bridge's JSON cannot.
+func runtimeRouteRequiresBudget(_ Connection) bool { return true }
 
 func (s *Service) authorizeInvocation(c Connection, input policy.DataLabel) (policy.DataLabel, RuntimeTransport, error) {
 	if c.WorkspaceID != nil && *c.WorkspaceID != input.WorkspaceID {
@@ -249,6 +256,13 @@ func (s *Service) authorizeInvocation(c Connection, input policy.DataLabel) (pol
 	}
 	dest := policy.FlowDestination{WorkspaceID: input.WorkspaceID, Kind: policy.DestinationKind(dp.DestinationKind), Clearance: clearance}
 	if dest.Kind == policy.DestinationOriginNode {
+		// The Node ID and JSON policy alone cannot turn an off-host URL
+		// into origin-host inference. No socket or budget is consumed on
+		// denial. DNS names, including localhost, are not sufficient proof.
+		if c.AdapterName!="builtin.agent_protocol_http"||
+		 c.AdapterVersion!="1"||!runtimeendpoint.LiteralLoopbackHTTP(c.EndpointJSON){
+			return policy.DataLabel{},nil,ErrRuntimeInformationFlow
+		}
 		if c.NodeID == nil || *c.NodeID != s.localNodeID {
 			return policy.DataLabel{}, nil, ErrRuntimeInformationFlow
 		}

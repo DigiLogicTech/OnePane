@@ -38,6 +38,12 @@ func (s *Service) ColibriPin(ctx context.Context,deploymentID string)(ColibriPin
 
 func (s *Service) SetColibriPin(ctx context.Context,deploymentID string,pin bool)(ColibriPinState,error){
  if strings.TrimSpace(deploymentID)==""{return ColibriPinState{},errors.New("deployment is required")}
+ // Pin updates must not race a Colibri eviction between its old pin
+ // snapshot and Stop. Share the residency lock with the model scheduler.
+ if s!=nil&&s.supervisor!=nil{
+  s.supervisor.residencyMu.Lock()
+  defer s.supervisor.residencyMu.Unlock()
+ }
  before,err:=s.ColibriPin(ctx,deploymentID)
  if err!=nil{return ColibriPinState{},err}
  if !before.Eligible{return ColibriPinState{},errors.New("Colibri pinning requires a registered native Colibri model; GGUF/llama.cpp is unsupported")}
@@ -50,7 +56,7 @@ func (s *Service) SetColibriPin(ctx context.Context,deploymentID string,pin bool
  runtime_config_json=json_set(runtime_config_json,'$.colibri_pinned',json(?)),
  updated_at=?,revision=revision+1
  WHERE id=? AND LOWER(runtime_name)='colibri'
- AND json_extract(runtime_config_json,'$.runtime_backend')='colibri'
+ AND LOWER(COALESCE(json_extract(runtime_config_json,'$.runtime_backend'),''))='colibri'
  AND EXISTS(SELECT 1 FROM managed_local_models m WHERE m.deployment_id=model_deployments.id AND m.status<>'removed')`,
  flag,s.clock.UnixMilli(),deploymentID)
  if err!=nil{

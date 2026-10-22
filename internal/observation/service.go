@@ -50,8 +50,8 @@ func (s *Service) Record(ctx context.Context, cmd RecordCommand) (Observation, e
 		strings.TrimSpace(cmd.ProbeToolVersion) == "" {
 		return Observation{}, fmt.Errorf("%w: workspace, subject, observation type and probe identity are required", ErrInvalidCommand)
 	}
-	if len(cmd.Value) == 0 || !json.Valid(cmd.Value) {
-		return Observation{}, fmt.Errorf("%w: value must be valid JSON", ErrInvalidCommand)
+	if err := validateUnambiguousObservationJSON(cmd.Value); err != nil {
+		return Observation{}, fmt.Errorf("%w: value must be unambiguous valid JSON: %v", ErrInvalidCommand, err)
 	}
 	if cmd.Label.WorkspaceID != cmd.WorkspaceID {
 		return Observation{}, fmt.Errorf("%w: data label workspace mismatch", ErrInvalidCommand)
@@ -145,6 +145,11 @@ func (s *Service) VerifyIntegrity(ctx context.Context, observationID string) err
 	o, err := s.Get(ctx, observationID)
 	if err != nil {
 		return err
+	}
+	// Older rows may predate strict JSON admission. A matching SHA-256 is
+	// insufficient to authenticate data with conflicting duplicate keys.
+	if err := validateUnambiguousObservationJSON(o.Value); err != nil {
+		return fmt.Errorf("ambiguous stored observation: %w", err)
 	}
 	hash, err := IntegrityHash(o)
 	if err != nil {

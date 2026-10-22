@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DigiLogicTech/OnePane/internal/policy"
+	"github.com/DigiLogicTech/OnePane/internal/runtimeendpoint"
 )
 
 type Catalog struct{ db *sql.DB }
@@ -138,8 +139,8 @@ func (c *Catalog) applyManagedAdmission(ctx context.Context, deploymentID, capab
 }
 
 func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role string) ([]Candidate, error) {
-	rows, err := c.db.QueryContext(ctx, `SELECT d.id,d.status,d.node_id,d.provider_connection_id,d.context_max_reported,d.context_max_verified,d.runtime_config_json,
- m.model_ref,m.trust_state,m.static_metadata_json,p.workspace_id,p.provider,p.status,p.connection_json,
+	rows, err := c.db.QueryContext(ctx, `SELECT d.id,d.status,d.node_id,d.provider_connection_id,d.runtime_name,d.context_max_reported,d.context_max_verified,d.runtime_config_json,
+ m.model_ref,m.trust_state,m.static_metadata_json,p.workspace_id,p.provider,p.status,p.auth_type,p.connection_json,
  COALESCE(n.local,0),COALESCE(n.trust_state,''),COALESCE(np.status,''),COALESCE(cm.expires_at,0)
  FROM model_deployments d JOIN models m ON m.id=d.model_id
  LEFT JOIN provider_connections p ON p.id=d.provider_connection_id
@@ -154,15 +155,15 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 	var out []Candidate
 	for rows.Next() {
 		var id, status, modelRef, trust, runtimeCfg, metadata string
-		var node, providerID, pws, provider, pstatus, pjson sql.NullString
+		var node, providerID, deploymentRuntime, pws, provider, pstatus, pauth, pjson sql.NullString
 		var reported, verified sql.NullInt64
 		var local int
 		var nodeTrust, pairingStatus string
 		var manifestExpires int64
-		if err := rows.Scan(&id, &status, &node, &providerID, &reported, &verified, &runtimeCfg, &modelRef, &trust, &metadata, &pws, &provider, &pstatus, &pjson, &local, &nodeTrust, &pairingStatus, &manifestExpires); err != nil {
+		if err := rows.Scan(&id, &status, &node, &providerID, &deploymentRuntime, &reported, &verified, &runtimeCfg, &modelRef, &trust, &metadata, &pws, &provider, &pstatus, &pauth, &pjson, &local, &nodeTrust, &pairingStatus, &manifestExpires); err != nil {
 			return nil, err
 		}
-		cand := Candidate{ID: id, Kind: CandidateModel, DisplayName: modelRef, Status: status, TrustState: trust, Local: local == 1, Qualification: QualUntested, ProtocolLevel: "L0", CostClass: CostUnknown, Schedulable: (status == "ready" || status == "degraded") && (trust == "trusted" || trust == "user_trusted"), CapabilityIDs: []string{}, RoleNames: []string{}, ToolCallback: true}
+		cand := Candidate{ID: id, Kind: CandidateModel, DisplayName: modelRef, Status: status, TrustState: trust, Local: node.Valid && local == 1 && nodeTrust == "local" && !providerID.Valid, Qualification: QualUntested, ProtocolLevel: "L0", CostClass: CostUnknown, Schedulable: (status == "ready" || status == "degraded") && (trust == "trusted" || trust == "user_trusted"), CapabilityIDs: []string{}, RoleNames: []string{}, ToolCallback: true}
 		if node.Valid {
 			cand.NodeID = node.String
 		}
@@ -175,7 +176,7 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 			v := pws.String
 			cand.WorkspaceID = &v
 		}
-		if local == 1 {
+		if node.Valid && local == 1 && nodeTrust == "local" && !providerID.Valid {
 			cand.ComputeMode = "cpu"
 			cand.CostClass = CostLocal
 			cand.HardZeroIncrementalCost = true
@@ -191,14 +192,67 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 			if err := json.Unmarshal([]byte(pjson.String), &pc); err != nil {
 				cand.Schedulable = false
 			} else {
-				cand.CostClass = pc.Scheduling.CostClass
-				if cand.CostClass == "" {
+				// The provider's own JSON (including "free", "local", or a
+				// hard_zero flag) is not a signed zero-charge contract.
+				// Only the explicit monetary-spend/entitlement gates
+				// may authorize an opaque provider route. Do not let a
+				// missing or misleading declaration consume cloud usage
+				// while the operator expects local-only, $0 behaviour.
+				switch pc.Scheduling.CostClass {
+				case CostPaid, CostProviderManaged:
+					cand.CostClass = pc.Scheduling.CostClass
+				case CostIncludedSubscription:
+					// Only the dedicated first-party plan transport can
+					// consume a separately opted-in entitlement. Any
+					// generic provider using a fabricated "included" tag
+					// must still obtain monetary-spend consent.
+					if provider.String == "openai_chatgpt_plan" &&
+						pauth.String == "oauth2-pkce" &&
+						pstatus.String == "connected" &&
+						strings.EqualFold(strings.ReplaceAll(strings.TrimSpace(
+							deploymentRuntime.String), "_", "-"), "openai-chatgpt-plan") {
+						cand.CostClass = CostIncludedSubscription
+					} else {
+						cand.CostClass = CostUnknown
+					}
+				default:
 					cand.CostClass = CostUnknown
 				}
-				cand.HardZeroIncrementalCost = pc.Scheduling.HardZeroIncrementalCost
+				cand.HardZeroIncrementalCost = false
 				cand.AllowedResidency = pc.DataPolicy.AllowedResidency
-				cand.Destination = destination(pc.DataPolicy.DestinationKind, ws, node.String, pc.DataPolicy.MaxConfidentiality)
+				// Provider configuration is not cryptographic endpoint proof.
+				// A provider-backed deployment must never become an origin/paired
+				// Node just because its JSON says "trusted_node"/"origin_node".
+				// Preserve an explicit untrusted classification; all other
+				// provider-backed destinations stay cloud until verified.
+				kind := "cloud"
+				if pc.DataPolicy.DestinationKind == "untrusted" {
+					kind = "untrusted"
+				}
+				cand.Destination = destination(kind, ws, "", pc.DataPolicy.MaxConfidentiality)
 			}
+		 } else if node.Valid && local == 1 && !providerID.Valid {
+			// A local flag alone is not an active host trust grant.
+			// Revoked/malformed origin-node identity cannot be treated as
+			// verified free local compute just because the model is READY.
+			cand.Schedulable = false
+			cand.Local = false
+			cand.TrustedNodeVerified = false
+			cand.ComputeMode = "unavailable"
+			cand.CostClass = CostUnknown
+			cand.HardZeroIncrementalCost = false
+			cand.Destination = destination("untrusted", ws, "", "public")
+		} else if providerID.Valid {
+			// A provider-backed deployment whose provider record disappeared
+			// MUST NOT fall back to trusted/zero-cost Node classification.
+			// This can occur after legacy imports or a damaged catalogue;
+			// a dangling foreign key is never a local-compute grant.
+			cand.Schedulable = false
+			cand.Local = false
+			cand.ComputeMode = "cloud"
+			cand.CostClass = CostUnknown
+			cand.HardZeroIncrementalCost = false
+			cand.Destination = destination("cloud", ws, "", "public")
 		} else if node.Valid {
 			cand.ComputeMode = "remote"
 			cand.CostClass = CostLocal
@@ -236,14 +290,20 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 			} `json:"placement"`
 		}
 		if json.Unmarshal([]byte(runtimeCfg), &dc) == nil {
-			if dc.Scheduling.CostClass != "" {
+			// A deployment may refine local scheduling metadata, but it cannot
+			// downgrade a provider-backed route to "free/local" or claim a
+			// zero-cost contract independently of its provider policy.
+			if !providerID.Valid && cand.Schedulable && dc.Scheduling.CostClass != "" {
 				cand.CostClass = dc.Scheduling.CostClass
 				cand.HardZeroIncrementalCost = dc.Scheduling.HardZeroIncrementalCost
 			}
 			if dc.ToolCallback != nil {
 				cand.ToolCallback = *dc.ToolCallback
 			}
-			if dc.Compute.Mode != "" {
+			// A provider-backed route remains remote/cloud until verified
+			// destination attestation exists; model metadata cannot turn it
+			// into an apparent CPU or GPU placement on the current host.
+			if !providerID.Valid && cand.Schedulable && dc.Compute.Mode != "" {
 				cand.ComputeMode = dc.Compute.Mode
 			}
 			if dc.Compute.Backend != "" {
@@ -254,7 +314,7 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 			if cand.RuntimeBackend == "" {
 				cand.RuntimeBackend = firstNonBlank(dc.Placement.Backend, dc.RuntimeBackend)
 			}
-			if dc.Compute.Mode == "" && dc.Placement.Mode != "" {
+			if !providerID.Valid && cand.Schedulable && dc.Compute.Mode == "" && dc.Placement.Mode != "" {
 				hasCPU, hasGPU := false, false
 				for _, dev := range dc.Placement.Devices {
 					if dev.Kind == "cpu" {
@@ -293,19 +353,32 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 		if err := c.applyManagedAdmission(ctx, id, capability, role, &cand); err != nil {
 			return nil, err
 		}
-		if node.Valid && local == 0 && !provider.Valid {
+		if node.Valid && local == 0 && !providerID.Valid {
 			// A persisted READY deployment cannot authorize a dispatch after
 			// its Node's signed/mTLS-paired capability heartbeat has expired.
-			// Do not silently route a stale model or substitute local capacity.
-			if nodeTrust != "paired" || pairingStatus != "paired" || manifestExpires <= time.Now().UnixMilli() {
+			// This flag is catalogue-derived, not a model-provided label.
+			cand.TrustedNodeVerified = nodeTrust == "paired" &&
+				pairingStatus == "paired" && manifestExpires > time.Now().UnixMilli()
+			if !cand.TrustedNodeVerified {
 				cand.Schedulable = false
 				cand.NodeStatus = "unavailable"
+				// Until a live pairing and signed capability manifest
+				// are verified, the foreign host's advertised "local"
+				// cost is not a proven $0 resource. Retain Node ID only
+				// for operator diagnostics, never as transfer authority.
+				cand.CostClass = CostUnknown
+				cand.HardZeroIncrementalCost = false
+				cand.Destination = destination("untrusted", ws, "", "public")
 			}
 			var enabled, idleOnly int
 			err := c.db.QueryRowContext(ctx, `SELECT enabled,idle_only FROM remote_node_compute_policies WHERE node_id=?`, node.String).Scan(&enabled, &idleOnly)
 			if err == nil {
 				if enabled == 0 {
 					cand.Schedulable = false
+					cand.TrustedNodeVerified = false
+					cand.CostClass = CostUnknown
+					cand.HardZeroIncrementalCost = false
+					cand.Destination = destination("untrusted", ws, "", "public")
 				}
 				if idleOnly != 0 && strings.EqualFold(cand.NodeStatus, "busy") {
 					cand.Schedulable = false
@@ -359,32 +432,65 @@ func (c *Catalog) bestProfile(ctx context.Context, deployment, capability, role 
 func qualScore(q Qualification) int { return qualRank(q) }
 
 func (c *Catalog) runtimeCandidates(ctx context.Context, ws string) ([]Candidate, error) {
-	rows, err := c.db.QueryContext(ctx, `SELECT id,workspace_id,node_id,runtime_kind,display_name,status,trust_state,operating_mode,protocol_json,capabilities_json,data_policy_json FROM agent_runtime_connections WHERE workspace_id IS NULL OR workspace_id=?`, ws)
+	rows, err := c.db.QueryContext(ctx, `SELECT r.id,r.workspace_id,r.node_id,r.runtime_kind,r.display_name,r.status,r.trust_state,r.operating_mode,r.protocol_json,r.capabilities_json,r.data_policy_json,r.endpoint_json,r.adapter_name,r.adapter_version,
+ COALESCE(n.local,0),COALESCE(n.trust_state,'')
+ FROM agent_runtime_connections r LEFT JOIN harness_nodes n ON n.id=r.node_id
+ WHERE r.workspace_id IS NULL OR r.workspace_id=?`, ws)
 	if err != nil {
 		return nil, fmt.Errorf("list runtime scheduler candidates: %w", err)
 	}
 	defer rows.Close()
 	var out []Candidate
 	for rows.Next() {
-		var id, kind, name, status, trust, mode, protoJSON, capsJSON, dataJSON string
+		var id, kind, name, status, trust, mode, protoJSON, capsJSON, dataJSON, endpointJSON,adapterName,adapterVersion,nodeTrust string
 		var pws, node sql.NullString
-		if err := rows.Scan(&id, &pws, &node, &kind, &name, &status, &trust, &mode, &protoJSON, &capsJSON, &dataJSON); err != nil {
+		var nodeLocal int
+		if err := rows.Scan(&id, &pws, &node, &kind, &name, &status, &trust, &mode, &protoJSON, &capsJSON, &dataJSON,&endpointJSON,&adapterName,&adapterVersion,&nodeLocal,&nodeTrust); err != nil {
 			return nil, err
 		}
 		var caps runtimeCaps
 		_ = json.Unmarshal([]byte(capsJSON), &caps)
 		var dp runtimePolicy
 		_ = json.Unmarshal([]byte(dataJSON), &dp)
-		cost := caps.Scheduling.CostClass
-		if cost == "" {
-			cost = CostUnknown
+		// The runtime, unlike a verified model deployment, can itself
+		// route requests to paid cloud models. Self-reported "local"/"free"
+		// costs never establish a zero-cost contract.
+		cost := CostUnknown
+		switch caps.Scheduling.CostClass {
+		case CostPaid,CostProviderManaged:
+			// These two are already protected by independent explicit
+			// monetary-spend consent. An alleged included subscription is
+			// NOT verified: treating it as subscription-only would allow
+			// potentially paid use without AllowPotentialMonetarySpend.
+			cost=caps.Scheduling.CostClass
 		}
 		qual := QualUntested
 		if len(caps.Capabilities) > 0 || caps.ProtocolLevel != "" {
 			qual = QualSupported
 		}
 		sched := (status == "connected" || status == "degraded") && (trust == "user_trusted" || trust == "trusted_adapter") && mode != "unmanaged"
-		cand := Candidate{ID: id, Kind: CandidateAgentRuntime, DisplayName: name, Provider: kind, Status: status, TrustState: trust, CostClass: cost, HardZeroIncrementalCost: caps.Scheduling.HardZeroIncrementalCost, Qualification: qual, ProtocolLevel: caps.ProtocolLevel, RoleNames: caps.Roles, CapabilityIDs: caps.Capabilities, ContextMax: caps.ContextMax, Schedulable: sched, ToolCallback: mode == "gateway_mediated", AllowedResidency: dp.AllowedResidency, Destination: destination(dp.DestinationKind, ws, node.String, dp.MaxConfidentiality)}
+		// The only supported direct host-origin runtime transport is the
+		// built-in HTTP bridge to an exact literal IP loopback address.
+		// A node_id or data_policy_json value alone is not endpoint proof.
+		localTransport:=node.Valid&&nodeLocal==1&&nodeTrust=="local"&&
+			adapterName=="builtin.agent_protocol_http"&&adapterVersion=="1"&&
+			runtimeendpoint.LiteralLoopbackHTTP([]byte(endpointJSON))
+		kindForFlow:="cloud"
+		if dp.DestinationKind=="untrusted"{kindForFlow="untrusted"}
+		if dp.DestinationKind=="trusted_node"{
+			// Remote Agent Runtime transfer is not implemented as a paired,
+			// consent-checked channel; never borrow Node scheduler trust.
+			sched=false
+		}
+		if dp.DestinationKind=="origin_node"{
+			if localTransport{kindForFlow="origin_node"}else{sched=false}
+		}
+		// Local *transport* is not proof the bridge does not use cloud
+		// models internally; keep CostUnknown unless independently proven.
+		destNode:=""
+		if kindForFlow=="origin_node"{destNode=node.String}
+		cand := Candidate{ID: id, Kind: CandidateAgentRuntime, DisplayName: name, Provider: kind, Status: status, TrustState: trust, CostClass: cost, HardZeroIncrementalCost: false, Qualification: qual, ProtocolLevel: caps.ProtocolLevel, RoleNames: caps.Roles, CapabilityIDs: caps.Capabilities, ContextMax: caps.ContextMax, Schedulable: sched, ToolCallback: mode == "gateway_mediated", AllowedResidency: dp.AllowedResidency, Destination: destination(kindForFlow, ws, destNode, dp.MaxConfidentiality)}
+		if json.Unmarshal([]byte(capsJSON), &caps)!=nil||json.Unmarshal([]byte(dataJSON), &dp)!=nil{cand.Schedulable=false}
 		if pws.Valid {
 			v := pws.String
 			cand.WorkspaceID = &v

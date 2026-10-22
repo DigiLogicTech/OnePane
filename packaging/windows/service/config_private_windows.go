@@ -1,0 +1,127 @@
+//go:build windows
+
+package main
+
+import (
+ "errors"
+ "fmt"
+ "os"
+ "strings"
+
+ "golang.org/x/sys/windows"
+)
+
+// inspectExistingServiceConfig retains a valid legacy config byte-for-byte.
+// Do not follow a symlink/junction to another install or device path.
+func inspectExistingServiceConfig(path string) error {
+ info,err:=os.Lstat(path)
+ if err!=nil{return err}
+ if !info.Mode().IsRegular(){
+  return fmt.Errorf("unsafe existing OnePane service config (not regular file)")
+ }
+ return nil
+}
+
+// persistInitialServiceConfig creates new persistent state only; an existing
+// regular config is NEVER overwritten or silently reinitialised. The file's
+// NTFS ACL is protected before any credential-bearing YAML is written.
+func persistInitialServiceConfig(path string, contents []byte) error {
+ return persistInitialServiceConfigWithSecurity(path,contents,secureNewServiceConfig)
+}
+
+// Separating the ACL operation permits fault injection of Windows permission
+// denial without touching HKLM, the SCM or real operator configuration.
+func persistInitialServiceConfigWithSecurity(path string,contents []byte,
+ secure func(*os.File)error) error {
+ if secure==nil{return fmt.Errorf("missing service configuration security policy")}
+ if err:=inspectExistingServiceConfig(path);err==nil{return nil
+ }else if !errors.Is(err,os.ErrNotExist){return err}
+ f,err:=os.OpenFile(path,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0o600)
+ if errors.Is(err,os.ErrExist){
+  return inspectExistingServiceConfig(path)
+ }
+ if err!=nil{return fmt.Errorf("create OnePane service config: %w",err)}
+ committed:=false
+ defer func(){
+  // Windows does not reliably allow unlinking a still-open file. Close the
+  // writer BEFORE deleting a failed first-run config, otherwise a zero-byte
+  // config could survive and be mistaken for intentional persistent state.
+  opened,e1:=f.Stat()
+  named,e2:=os.Lstat(path)
+  _=f.Close()
+  if committed{return}
+  // Never delete an unrelated file if the pathname changed after creation.
+  if e1==nil&&e2==nil&&named.Mode().IsRegular()&&os.SameFile(opened,named){
+   _=os.Remove(path)
+  }
+ }()
+ if err:=secure(f);err!=nil{return err}
+ held,err:=f.Stat()
+ if err!=nil{return err}
+ named,err:=os.Lstat(path)
+ if err!=nil||!named.Mode().IsRegular()||!os.SameFile(held,named){
+  return fmt.Errorf("service configuration file changed after private creation: %v",err)
+ }
+ if _,err:=f.Write(contents);err!=nil{return fmt.Errorf("write private service config: %w",err)}
+ if err:=f.Sync();err!=nil{return fmt.Errorf("persist private service config: %w",err)}
+ committed=true
+ return nil
+}
+
+// OS Chmod(0600) is not an NTFS confidentiality guarantee. Apply a protected
+// DACL before writing credentials. Ordinary Go write/append handles may lack
+// WRITE_DAC/READ_CONTROL, so Windows named-object security APIs are used;
+// callers verify the opened file still matches the pathname before writing.
+func secureNewServiceConfig(f *os.File) error {
+ return securePrivateServiceFile(f)
+}
+
+// Logs and generated service YAML share the same protected Windows DACL.
+// No sensitive bytes are written until the inherited permissions are replaced.
+func securePrivateServiceFile(f *os.File) error {
+ if f==nil{return fmt.Errorf("nil service configuration handle")}
+ user,err:=windows.GetCurrentProcessToken().GetTokenUser()
+ if err!=nil{return fmt.Errorf("read OnePane service identity: %w",err)}
+ sid:=user.User.Sid.String()
+ if sid==""{return fmt.Errorf("missing OnePane service identity SID")}
+ descriptor,err:=windows.SecurityDescriptorFromString(
+  "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;"+sid+")")
+ if err!=nil{return fmt.Errorf("create private service configuration DACL: %w",err)}
+ dacl,_,err:=descriptor.DACL()
+ if err!=nil||dacl==nil{return fmt.Errorf("read private service configuration DACL: %v",err)}
+ // The ordinary os.OpenFile writer handle has no WRITE_DAC access on
+ // Windows. Use the same named-object DACL API already validated by SQLite
+ // migration snapshots. The caller verifies os.SameFile before writing YAML.
+ if err:=windows.SetNamedSecurityInfo(f.Name(),windows.SE_FILE_OBJECT,
+  windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+  nil,nil,dacl,nil);err!=nil{
+  return fmt.Errorf("protect OnePane service configuration DACL: %w",err)
+ }
+ return verifyPrivateServiceConfig(f)
+}
+
+func verifyPrivateServiceConfig(f *os.File) error {
+ if f==nil{return fmt.Errorf("nil service configuration handle")}
+ // FILE_APPEND_DATA handles opened by Go need not have READ_CONTROL.
+ // Inspect the named security descriptor instead. Each caller separately
+ // validates os.SameFile(open handle, Lstat pathname) before writing data.
+ sd,err:=windows.GetNamedSecurityInfo(f.Name(),windows.SE_FILE_OBJECT,
+  windows.DACL_SECURITY_INFORMATION)
+ if err!=nil{return err}
+ control,_,err:=sd.Control()
+ if err!=nil{return err}
+ dacl,_,err:=sd.DACL()
+ if err!=nil||dacl==nil||control&windows.SE_DACL_PROTECTED==0{
+  return fmt.Errorf("service configuration DACL is absent or unprotected")
+ }
+ // New files have an exact allowlist generated by secureNewServiceConfig.
+ // Deny broad principals even when a caller installs an unexpected DACL.
+ sddl:=sd.String()
+ for _,broad:=range []string{";;;WD)",";;;AU)",";;;BU)",
+  ";;;S-1-1-0)",";;;S-1-5-11)",";;;S-1-5-32-545)"}{
+  if strings.Contains(strings.ToUpper(sddl),broad){
+   return fmt.Errorf("service configuration DACL exposes broad local principal")
+  }
+ }
+ return nil
+}

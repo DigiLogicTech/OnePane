@@ -5,6 +5,8 @@ import (
  "database/sql"
  "errors"
  "io/fs"
+ "os"
+ "runtime"
  "path/filepath"
  "strings"
  "testing"
@@ -131,4 +133,74 @@ func TestLegacyAgentCheckErrorMigrationSelectivelyRedacts(t *testing.T){
  apply()
  if err:=db.QueryRowContext(ctx,`SELECT revision FROM model_spec_sheets WHERE deployment_id='legacy'`).Scan(&revision);err!=nil{t.Fatal(err)}
  if revision!=8{t.Fatalf("redaction migration must be idempotent, revision=%d",revision)}
+}
+
+
+func TestRuntimeLaunchFailureNeverEchoesRawLogOrUnsafePaths(t *testing.T){
+ dataDir:=t.TempDir()
+ logs:=filepath.Join(dataDir,"components","logs")
+ if err:=os.MkdirAll(logs,0o700);err!=nil{t.Fatal(err)}
+ secret:="Bearer VERY_PRIVATE_LOCAL_MODEL_TOKEN"
+ logPath:=filepath.Join(logs,"local-runtime-safe-id.log")
+ if err:=os.WriteFile(logPath,[]byte(secret+"\n/home/private/model/path"),0o600);err!=nil{
+  t.Fatal(err)
+ }
+ supervisor:=&RuntimeSupervisor{dataDir:dataDir}
+ hint:=supervisor.runtimeLogReviewHint("safe-id")
+ if hint==""||strings.Contains(hint,secret)||
+  strings.Contains(hint,"/home/private")||strings.Contains(hint,"log tail:"){
+  t.Fatalf("model launch error leaked private local log: %q",hint)
+ }
+ for _,id:=range []string{"../private","safe/id","safe\\id",".","",strings.Repeat("x",129)}{
+  if got:=supervisor.runtimeLogReviewHint(id);got!=""{
+   t.Fatalf("unsafe runtime ID %q found a local log: %q",id,got)
+  }
+ }
+ if got:=supervisor.runtimeLogReviewHint("no-log");got!=""{
+  t.Fatalf("nonexistent log was falsely advertised: %s",got)
+ }
+ if err:=os.Remove(logPath);err!=nil{t.Fatal(err)}
+ external:=filepath.Join(t.TempDir(),"external.log")
+ if err:=os.WriteFile(external,[]byte(secret),0o600);err!=nil{t.Fatal(err)}
+ if err:=os.Symlink(external,logPath);err==nil{
+  if got:=supervisor.runtimeLogReviewHint("safe-id");got!=""{
+   t.Fatalf("linked external logs were accepted: %s",got)
+  }
+ }
+}
+
+
+func TestManagedRuntimeLogNeverClobbersOrFollowsPrivateFiles(t *testing.T){
+ base:=t.TempDir()
+ p:=filepath.Join(base,"secure","managed.log")
+ first,err:=openManagedRuntimeLog(p)
+ if err!=nil{t.Fatal(err)}
+ secret:="PRIVATE_DIAGNOSTIC_DO_NOT_TRUNCATE"
+ if _,err=first.WriteString(secret);err!=nil{t.Fatal(err)}
+ if err=first.Close();err!=nil{t.Fatal(err)}
+ second,err:=openManagedRuntimeLog(p)
+ if err!=nil{t.Fatal(err)}
+ if _,err=second.WriteString(" next attempt");err!=nil{t.Fatal(err)}
+ if err=second.Close();err!=nil{t.Fatal(err)}
+ contents,err:=os.ReadFile(p)
+ if err!=nil||!strings.HasPrefix(string(contents),secret)||
+  !strings.HasSuffix(string(contents)," next attempt"){
+  t.Fatalf("log restart discarded original private diagnostics: %v",err)
+ }
+ if runtime.GOOS!="windows"{
+  external:=filepath.Join(t.TempDir(),"external-secret")
+  if err=os.WriteFile(external,[]byte(secret),0o600);err!=nil{t.Fatal(err)}
+  if err=os.Remove(p);err!=nil{t.Fatal(err)}
+  if err=os.Symlink(external,p);err!=nil{t.Fatal(err)}
+  if file,e:=openManagedRuntimeLog(p);e==nil{
+   _=file.Close();t.Fatal("runtime followed external symlink with write access")
+  }
+  preserved,e:=os.ReadFile(external)
+  if e!=nil||string(preserved)!=secret{t.Fatal("external secret was mutated via runtime log")}
+  if err=os.Remove(p);err!=nil{t.Fatal(err)}
+  if err=os.WriteFile(p,[]byte(secret),0o644);err!=nil{t.Fatal(err)}
+  if file,e:=openManagedRuntimeLog(p);e==nil{
+   _=file.Close();t.Fatal("shared-readable managed logs were admitted")
+  }
+ }
 }

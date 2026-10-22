@@ -25,10 +25,11 @@ func colibriPinTestDB(t *testing.T)*sql.DB{
     ('colibri-a','node-1','colibri','{"managed":true,"runtime_backend":"colibri","colibri_tier":{"mode":"manual","ram_gb":8}}',1,1),
     ('colibri-b','node-1','colibri','{"managed":true,"runtime_backend":"colibri"}',1,1),
     ('colibri-remote','node-2','colibri','{"runtime_backend":"colibri"}',1,1),
+    ('colibri-mixed','node-3','CoLiBrI','{"runtime_backend":"CoLiBrI","managed":true}',1,1),
     ('llama','node-1','llamacpp','{"runtime_backend":"cuda"}',1,1),
     ('fake','node-1','colibri','{"runtime_backend":"llamacpp"}',1,1),
     ('removed','node-1','colibri','{"runtime_backend":"colibri"}',1,1)`,
-  `INSERT INTO managed_local_models VALUES ('colibri-a','ready'),('colibri-b','ready'),('colibri-remote','ready'),('llama','ready'),('fake','ready'),('removed','removed')`,
+  `INSERT INTO managed_local_models VALUES ('colibri-a','ready'),('colibri-b','ready'),('colibri-remote','ready'),('colibri-mixed','ready'),('llama','ready'),('fake','ready'),('removed','removed')`,
  }{
   if _,err=db.Exec(q);err!=nil{t.Fatalf("setup: %v query=%s",err,q)}
  }
@@ -54,6 +55,10 @@ func TestColibriPinPersistentNativeOnlyAndNodeExclusive(t *testing.T){
  }
  remote,err:=svc.SetColibriPin(ctx,"colibri-remote",true)
  if err!=nil||!remote.Pinned{t.Fatalf("independent Node should allow pin: %+v %v",remote,err)}
+ mixed,err:=svc.ColibriPin(ctx,"colibri-mixed")
+ if err!=nil||!mixed.Eligible{t.Fatalf("mixed-case native eligibility: %+v %v",mixed,err)}
+ mixed,err=svc.SetColibriPin(ctx,"colibri-mixed",true)
+ if err!=nil||!mixed.Pinned{t.Fatalf("eligible mixed-case Colibri pin failed: %+v %v",mixed,err)}
  var raw string
  if err:=db.QueryRow(`SELECT runtime_config_json FROM model_deployments WHERE id='colibri-a'`).Scan(&raw);err!=nil{t.Fatal(err)}
  var cfg map[string]any

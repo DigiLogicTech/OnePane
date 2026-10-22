@@ -30,6 +30,13 @@ type Policy struct {
 	CloudRouting       State
 	Images             State
 	Files              State
+	// Independent Workspace controls; the legacy Files switch is still
+	// the parent master gate for read and write compatibility.
+	FileRead           State
+	FileWrite          State
+	ProcessExecute     State
+	NetworkAccess      State
+	SecretsAccess      State
 	AudioInput         State
 	AudioOutput        State
 	Camera             State
@@ -47,6 +54,8 @@ func AssistedDefaults() Policy {
 		TelemetryAccess: Enabled, TelemetryAutonomy: Disabled,
 		ModelRouting: Enabled, AutomaticFallback: Enabled, CapabilityRouting: Enabled,
 		CloudRouting: Inherited, Images: Enabled, Files: Enabled,
+		FileRead: Enabled, FileWrite: Enabled, ProcessExecute: Inherited,
+		NetworkAccess: Inherited, SecretsAccess: Inherited,
 		AudioInput: Disabled, AudioOutput: Disabled, Camera: Disabled, Video: Disabled,
 		Team: Enabled, Council: Enabled, CrossProjectShare: Disabled,
 		AutonomousRoutines: Disabled, ConfigAuthority: AuthorityPropose,
@@ -141,6 +150,19 @@ func ResolveAuthorityChain(root Authority, descendants ...Authority) Authority {
 	return effective
 }
 
+// The legacy Files master grant predates independent Read/Write states.
+// For older root Policy objects without the new fields, preserve the
+// historical file capability and then apply monotonic child restrictions.
+func resolveFileSubGrant(parent,child,legacy State)State{
+    if parent==""||parent==Inherited {
+        switch legacy{
+        case Enabled,Disabled,Unavailable:parent=legacy
+        default:parent=Unavailable
+        }
+    }
+    return Resolve(parent,child)
+}
+
 // ResolvePolicy computes an effective policy for a child scope. Every feature
 // must pass through the same fail-closed resolution; new fields must be added
 // here before they can be granted to an execution scope.
@@ -157,6 +179,11 @@ func ResolvePolicy(parent, child Policy) Policy {
 		CloudRouting: Resolve(parent.CloudRouting, child.CloudRouting),
 		Images: Resolve(parent.Images, child.Images),
 		Files: Resolve(parent.Files, child.Files),
+		FileRead: resolveFileSubGrant(parent.FileRead, child.FileRead, parent.Files),
+		FileWrite: resolveFileSubGrant(parent.FileWrite, child.FileWrite, parent.Files),
+		ProcessExecute: Resolve(parent.ProcessExecute, child.ProcessExecute),
+		NetworkAccess: Resolve(parent.NetworkAccess, child.NetworkAccess),
+		SecretsAccess: Resolve(parent.SecretsAccess, child.SecretsAccess),
 		AudioInput: Resolve(parent.AudioInput, child.AudioInput),
 		AudioOutput: Resolve(parent.AudioOutput, child.AudioOutput),
 		Camera: Resolve(parent.Camera, child.Camera),
@@ -207,6 +234,11 @@ type ExecutionGrants struct {
 	CloudInference bool
 	AutomaticFallback bool
 	FileAccess bool
+	ReadFiles bool
+	WriteFiles bool
+	Execute bool
+	Network bool
+	Secrets bool
 	CrossProjectShare bool
 	AutonomousTasks bool
 }
@@ -217,6 +249,11 @@ func (p Policy) ExecutionGrants() ExecutionGrants {
 		CloudInference: p.CanUseCloudModel(),
 		AutomaticFallback: p.CanUseAutomaticFallback(),
 		FileAccess: p.Files == Enabled,
+		ReadFiles: p.Files == Enabled && p.FileRead == Enabled,
+		WriteFiles: p.Files == Enabled && p.FileWrite == Enabled,
+		Execute: p.ProcessExecute == Enabled,
+		Network: p.NetworkAccess == Enabled,
+		Secrets: p.SecretsAccess == Enabled,
 		CrossProjectShare: p.CanShareAcrossProjects(),
 		AutonomousTasks: p.ProjectAI == Enabled && p.AutonomousRoutines == Enabled,
 	}
@@ -234,8 +271,16 @@ func (p Policy) ValidateExecution(action string) bool {
 		return grants.CloudInference
 	case "inference.fallback":
 		return grants.AutomaticFallback
-	case "files.read", "files.write":
-		return grants.FileAccess
+	case "files.read":
+		return grants.ReadFiles
+	case "files.write":
+		return grants.WriteFiles
+	case "process.execute":
+		return grants.Execute
+	case "network.connect":
+		return grants.Network
+	case "secrets.use":
+		return grants.Secrets
 	case "projects.share":
 		return grants.CrossProjectShare
 	case "tasks.autonomous":

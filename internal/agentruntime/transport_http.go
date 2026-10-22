@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/DigiLogicTech/OnePane/internal/agentprotocol"
+	"github.com/DigiLogicTech/OnePane/internal/runtimeendpoint"
 )
 
 type AgentProtocolHTTPTransport struct{ Client *http.Client }
@@ -28,6 +29,35 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
 	if err := json.Unmarshal(c.EndpointJSON, &cfg); err != nil {
 		return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_endpoint", OutcomeKnown: true, Err: err}
 	}
+	// The built-in transport is an independent last safety boundary:
+	// a self-declared origin_node must not send data to a remote service,
+	// even when the caller neglected the Service's canonical admission.
+	var dp DataPolicy
+	// Service admission normally normalises this policy, but the adapter is
+	// also a final egress boundary. A malformed explicit policy must not
+	// silently lose its origin-only classification and default to remote
+	// HTTP dispatch when the transport is called directly.
+	if raw := bytes.TrimSpace(c.DataPolicyJSON); len(raw) != 0 {
+		if raw[0] != '{' || hasAmbiguousPolicyKeys(raw) {
+			return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_data_policy", OutcomeKnown: true}
+		}
+		if err := json.Unmarshal(raw, &dp); err != nil {
+			return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_data_policy", OutcomeKnown: true}
+		}
+		// An explicit but empty, unknown, or mistyped destination is not
+		// permission to send content beyond the local Node. Canonical
+		// Service registration always normalises the destination kind.
+		switch dp.DestinationKind {
+		case "origin_node", "trusted_node", "cloud", "untrusted":
+		default:
+			return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_data_policy", OutcomeKnown: true}
+		}
+	}
+	originOnly := dp.DestinationKind == "origin_node"
+	if originOnly && !runtimeendpoint.LiteralLoopbackHTTP(c.EndpointJSON) {
+		return agentprotocol.Response{},&RuntimeTransportError{
+		 Code:"origin_endpoint_not_loopback",OutcomeKnown:true}
+	}
 	u, err := url.Parse(cfg.BaseURL)
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
 		return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_base_url", OutcomeKnown: true, Err: err}
@@ -35,7 +65,7 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
 	if strings.ToLower(c.AuthType) != "none" && u.Scheme != "https" {
 		host := u.Hostname()
 		ip := net.ParseIP(host)
-		if !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
+		if ip == nil || !ip.IsLoopback() {
 			return agentprotocol.Response{}, &RuntimeTransportError{Code: "insecure_credential_destination", OutcomeKnown: true}
 		}
 	}
@@ -51,10 +81,17 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
 	if cfg.AuthPrefix == "" {
 		cfg.AuthPrefix = "Bearer"
 	}
-	if strings.ContainsAny(cfg.AuthHeader+cfg.AuthPrefix, "\r\n") {
+	if !safeAgentAuthHeader(cfg.AuthHeader) ||
+  strings.ContainsAny(cfg.AuthPrefix,"\r\n\x00") {
 		return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_auth_config", OutcomeKnown: true}
 	}
-	if cfg.TimeoutMS < 0 || cfg.TimeoutMS > int64((10*time.Minute)/time.Millisecond) {
+	// Plaintext credentials are allowed ONLY to a literal loopback socket.
+    // A caller-provided proxy or dial hook must not turn that exception
+    // into a request carrying the secret to a remote HTTP proxy.
+    localPlaintextCredential := strings.ToLower(c.AuthType)!="none" &&
+     u.Scheme=="http" && net.ParseIP(u.Hostname())!=nil &&
+     net.ParseIP(u.Hostname()).IsLoopback()
+    if cfg.TimeoutMS < 0 || cfg.TimeoutMS > int64((10*time.Minute)/time.Millisecond) {
 		return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_timeout", OutcomeKnown: true}
 	}
 	body, err := json.Marshal(req)
@@ -81,10 +118,36 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
 		client = &http.Client{}
 	}
 	clone := *client
-	clone.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
-	if cfg.TimeoutMS > 0 {
-		clone.Timeout = time.Duration(cfg.TimeoutMS) * time.Millisecond
+	if originOnly || localPlaintextCredential {
+		// A literal loopback endpoint must also use an independently owned
+		// direct transport. Cloning a caller-supplied http.Transport and
+		// clearing Proxy is insufficient: custom DialContext/DialTLSContext,
+		// TLSNextProto or similar hooks can silently redirect private input.
+		// Reject opaque RoundTrippers and discard all caller transport hooks.
+		// HTTPS must use the normal platform trust roots.
+		switch transport := clone.Transport.(type) {
+		case nil:
+		case *http.Transport:
+			if transport == nil {
+				return agentprotocol.Response{}, &RuntimeTransportError{Code: "unsafe_origin_transport", OutcomeKnown: true}
+			}
+		default:
+			return agentprotocol.Response{}, &RuntimeTransportError{Code: "unsafe_origin_transport", OutcomeKnown: true}
+		}
+		clone.Transport = &http.Transport{
+			Proxy:                 nil,
+			DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			ForceAttemptHTTP2:     true,
+			TLSHandshakeTimeout:   10 * time.Second,
+			IdleConnTimeout:       90 * time.Second,
+			ExpectContinueTimeout: time.Second,
+		}
 	}
+	clone.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	// Even a zero/omitted timeout must not pin an Agent Worker forever.
+	// Explicit per-runtime timeouts take precedence, while callers may
+	// supply a shorter bounded deadline through their HTTP client.
+	clone.Timeout = boundedRuntimeHTTPTimeout(cfg.TimeoutMS, clone.Timeout)
 	client = &clone
 	resp, err := client.Do(hr)
 	if err != nil {
@@ -110,4 +173,77 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
 		return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_agent_response", HTTPStatus: resp.StatusCode, OutcomeKnown: true, Err: err}
 	}
 	return out, nil
+}
+
+// The configured upper bound is shared by the default and any injected
+// http.Client. Unlimited or excessive caller timeouts would otherwise
+// keep a queued Worker and its budget reservation indefinitely occupied.
+func boundedRuntimeHTTPTimeout(configuredMillis int64, callerTimeout time.Duration) time.Duration {
+ const maximum = 10 * time.Minute
+ if configuredMillis > 0 {
+  return time.Duration(configuredMillis) * time.Millisecond
+ }
+ if callerTimeout <= 0 || callerTimeout > maximum {
+  return maximum
+ }
+ return callerTimeout
+}
+
+
+// Top-level duplicate policy keys are ambiguous: the later JSON value
+// can silently replace an original origin-only label. Never interpret
+// that as permission to send a prompt/credential to a different endpoint.
+// This accepts ordinary JSON field order and whitespace without requiring
+// canonical Service serialization; nested payloads are not unwrapped here.
+func hasAmbiguousPolicyKeys(raw []byte) bool {
+ decoder:=json.NewDecoder(bytes.NewReader(raw))
+ begin,err:=decoder.Token()
+ if err!=nil||begin!=json.Delim('{'){return true}
+ // encoding/json matches struct tags case-insensitively. A repeated
+ // property with alternate casing can override the intended egress label.
+ // Bound work even for directly invoked, non-Service adapters.
+ if len(raw)>16*1024{return true}
+ seen:=make([]string,0,8)
+ for decoder.More(){
+  keyToken,err:=decoder.Token()
+  if err!=nil{return true}
+  key,ok:=keyToken.(string)
+  if !ok||len(seen)>=32{return true}
+  for _,prior:=range seen{
+   if strings.EqualFold(prior,key){return true}
+  }
+  seen=append(seen,key)
+  var value json.RawMessage
+  if err=decoder.Decode(&value);err!=nil{return true}
+ }
+ end,err:=decoder.Token()
+ if err!=nil||end!=json.Delim('}'){return true}
+ _,err=decoder.Token()
+ return err!=io.EOF
+}
+
+
+// Auth headers are operator-configurable, but they may not control proxy
+// authentication, routing or HTTP framing. Those names can leak credentials
+// outside the approved runtime destination or cause ambiguous message
+// parsing. RFC HTTP token syntax keeps other custom API-key names working.
+func safeAgentAuthHeader(name string) bool {
+ if name==""{return false}
+ switch strings.ToLower(name){
+ case "host","proxy-authorization","proxy-authenticate",
+  "connection","proxy-connection","keep-alive","te","trailer",
+  "transfer-encoding","upgrade","content-length":
+  return false
+ }
+ for i:=0;i<len(name);i++{
+  c:=name[i]
+  if (c>='0'&&c<='9')||(c>='a'&&c<='z')||(c>='A'&&c<='Z'){
+   continue
+  }
+  switch c{
+  case '!','#','$','%','&','\'','*','+','-','.','^','_','|','~',0x60:
+  default:return false
+  }
+ }
+ return true
 }

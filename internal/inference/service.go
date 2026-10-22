@@ -11,6 +11,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/budget"
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/event"
+	"github.com/DigiLogicTech/OnePane/internal/featurepolicy"
 	"github.com/DigiLogicTech/OnePane/internal/id"
 	"github.com/DigiLogicTech/OnePane/internal/storage"
 )
@@ -35,6 +36,7 @@ type RuntimeCoordinator interface {
 type Service struct {
 	repo               repository
 	requests           requestRepository
+	scopes             featurepolicy.StoredScopes
 	tx                 storage.Transactor
 	events             event.Store
 	ids                id.Generator
@@ -48,7 +50,7 @@ type Service struct {
 }
 
 func NewService(db *sql.DB, tx storage.Transactor, clk clock.Clock) *Service {
-	return &Service{repo: newSQLRepository(db), requests: newSQLRequestRepository(db), tx: tx, events: event.Store{}, ids: id.Generator{}, clock: clk}
+	return &Service{repo: newSQLRepository(db), requests: newSQLRequestRepository(db), scopes:featurepolicy.StoredScopes{DB:db}, tx: tx, events: event.Store{}, ids: id.Generator{}, clock: clk}
 }
 
 func (s *Service) ConfigureExecution(artifacts *artifact.Service, transports *TransportRegistry, secrets SecretResolver, localNodeID string) error {

@@ -5,6 +5,7 @@ package nodefederation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -81,8 +82,8 @@ func TestPairedNodeManifestBecomesSchedulerCandidate(t *testing.T) {
 	for _, c := range cands {
 		if c.Kind == scheduler.CandidateModel && c.DisplayName == "example/remote" {
 			found = true
-			if !c.Schedulable {
-				t.Fatalf("remote candidate not schedulable: %+v", c)
+			if !c.Schedulable || !c.TrustedNodeVerified {
+				t.Fatalf("paired remote candidate has no verified trust: %+v", c)
 			}
 			if c.Destination.Kind != "trusted_node" {
 				t.Fatalf("destination=%s", c.Destination.Kind)
@@ -100,8 +101,9 @@ func TestPairedNodeManifestBecomesSchedulerCandidate(t *testing.T) {
 		if err != nil { t.Fatal(err) }
 		for _, candidate := range items {
 			if candidate.DisplayName == "example/remote" {
-				if candidate.Schedulable != schedulable {
-					t.Fatalf("%s: remote was schedulable=%t, want %t", label, candidate.Schedulable, schedulable)
+				if candidate.Schedulable != schedulable || candidate.TrustedNodeVerified != schedulable {
+					t.Fatalf("%s: remote status=%t verified=%t, want %t", label,
+						candidate.Schedulable, candidate.TrustedNodeVerified, schedulable)
 				}
 				return
 			}
@@ -198,6 +200,171 @@ func TestRemoteTransportUsesMTLSAndIsIdempotent(t *testing.T) {
 	}
 	if string(out.ResponseJSON) != string(out2.ResponseJSON) {
 		t.Fatal("idempotent replay changed response")
+	}
+	// Complete local scheduling -> source imported model -> pinned mTLS ->
+	// receiver admission -> original one-shot SQLite receipt -> reply decode.
+	// This remains hosted loopback, not an independently possessed device.
+	if _,err:=dbA.SQL().ExecContext(ctx,`INSERT INTO models(id,model_ref,
+	 modalities_json,static_metadata_json,trust_state,created_at,updated_at)
+	 VALUES('imported-model','example/remote','["text"]','{}','user_trusted',?,?)`,
+	 now,now);err!=nil{t.Fatal(err)}
+	cfg:=`{"federation":{"peer_node_id":"node-b","remote_deployment_id":"local-dep"}}`
+	if _,err:=dbA.SQL().ExecContext(ctx,`INSERT INTO model_deployments(
+	 id,model_id,node_id,runtime_name,runtime_config_json,status,
+	 deployment_fingerprint,revision,discovered_at,updated_at)
+	 VALUES('imported-dep','imported-model','node-b','remote-node',?,
+	 'ready','imported-fp',1,?,?)`,cfg,now,now);err!=nil{t.Fatal(err)}
+	if _,err:=dbA.SQL().ExecContext(ctx,`INSERT INTO node_capability_manifests(
+	 peer_node_id,sequence,manifest_json,received_at,expires_at,revision,updated_at)
+	 VALUES('node-b',1,?,?,?,1,?)`,
+	 `{"node_id":"node-b","protocol":"onepane-federation-v1","models":[{"deployment_id":"local-dep"}]}`,
+	 now,now+3600000,now);err!=nil{t.Fatal(err)}
+	// Root Project AND its active Workspace must both approve this exact
+	// off-host Node; a direct transport call is not a substitute.
+	grants:=`{"onepane_routing":{"trusted_node_compute":{"enabled":true,"allowed_node_ids":["node-b"]}}}`
+	for _,q:=range []struct{sql string; args []any}{
+	 {`INSERT INTO workspaces(id,name,status,revision,created_at,updated_at)
+	   VALUES('tenant','Tenant','active',1,?,?)`,[]any{now,now}},
+	 {`INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at)
+	   VALUES('owner','human','Owner','active',1,?,?)`,[]any{now,now}},
+	 {`INSERT INTO projects(id,workspace_id,name,status,project_policy_json,
+	   indexing_config_json,created_by,created_at,updated_at)
+	   VALUES('project','tenant','Project','active',?,'{}','owner',?,?)`,
+	   []any{grants,now,now}},
+	 {`INSERT INTO project_workspaces(id,project_id,name,ai_settings_json,
+	   created_at,updated_at) VALUES('project-view','project','Workspace',?,?,?)`,
+	   []any{grants,now,now}},
+	 {`INSERT INTO tasks(id,workspace_id,project_id,project_workspace_id,
+	   objective,state,completion_json,created_at,updated_at)
+	   VALUES('task','tenant','project','project-view','Scoped inference',
+	   'ready','{}',?,?)`,[]any{now,now}},
+	}{
+	 if _,err:=dbA.SQL().ExecContext(ctx,q.sql,q.args...);err!=nil{t.Fatal(err)}
+	}
+	taskID:="task"
+	sent:=inference.DispatchRequest{
+	 WorkspaceID:"tenant",TaskID:&taskID,
+	 RequestID:"routed-through-transport",
+	 Deployment:inference.ModelDeployment{ID:"imported-dep",
+	  RuntimeConfigJSON:json.RawMessage(cfg)},
+	 RequestJSON:json.RawMessage(`{"prompt":"private once"}`),
+	}
+	// Persist the exact origin inference work before the remote adapter can
+	// export its bytes. Retained requests used by revocation tests must
+	// independently satisfy source request identity, not just grant scope.
+	for _,requestID:=range []string{sent.RequestID,
+	 "workspace-revoked-no-send","project-revoked-no-send",
+	 "taskless-never-send","withdrawn-consent-never-sent"}{
+	 if _,err:=dbA.SQL().ExecContext(ctx,`INSERT INTO inference_requests(
+	  id,workspace_id,task_id,principal_id,deployment_id,status,
+	  capability_json,context_manifest_json,classification_json,
+	  request_json,created_at,updated_at)
+	  VALUES(?,'tenant','task','owner','imported-dep','executing',
+	   '{}','{}','{}',?,?,?)`,
+	  requestID,string(sent.RequestJSON),now,now);err!=nil{t.Fatal(err)}
+	}
+	modelTransport:=RemoteTransport{Service:svcA}
+	assertOriginDenied:=func(name string,r inference.DispatchRequest){
+	 t.Helper()
+	 _,err:=modelTransport.Dispatch(ctx,r,nil)
+	 var te *inference.TransportError
+	 if !errors.As(err,&te)||!te.OutcomeKnown||
+	  te.Code!="remote_node_not_admitted"{
+	  t.Fatalf("%s: unbound inference admitted: %v",name,err)
+	 }
+	}
+	missing:=sent
+	missing.RequestID="unrecorded-inference"
+	assertOriginDenied("absent origin request",missing)
+	altered:=sent
+	altered.RequestJSON=json.RawMessage(`{"prompt":"modified"}`)
+	assertOriginDenied("different request bytes",altered)
+	wrongWorkspace:=sent
+	wrongWorkspace.WorkspaceID="foreign"
+	assertOriginDenied("wrong inference workspace",wrongWorkspace)
+	wrongTask:=sent
+	otherTask:="foreign-task"
+	wrongTask.TaskID=&otherTask
+	assertOriginDenied("wrong inference Task",wrongTask)
+	first,err:=modelTransport.Dispatch(ctx,sent,nil)
+	if err!=nil||!strings.Contains(string(first.ResponseJSON),"private once"){
+	 t.Fatalf("model transport failed genuine dual Node loopback: %v %+v",err,first)
+	}
+	cached,err:=modelTransport.Dispatch(ctx,sent,nil)
+	if err!=nil||string(cached.ResponseJSON)!=string(first.ResponseJSON){
+	 t.Fatalf("remote replay did not preserve exact result: %v %+v",err,cached)
+	}
+	var receipts int
+	if err:=dbB.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM
+	 node_federated_inference_receipts WHERE peer_node_id='node-a'
+	 AND remote_request_id='routed-through-transport'`).Scan(&receipts);err!=nil{
+	 t.Fatal(err)
+	}
+	if receipts!=1{t.Fatalf("replayed remote call made %d receipts",receipts)}
+	if _,err:=dbA.SQL().ExecContext(ctx,`UPDATE inference_requests
+	 SET status='succeeded' WHERE id=?`,sent.RequestID);err!=nil{t.Fatal(err)}
+	assertOriginDenied("terminal source inference",sent)
+	// Independent human Project and Project Workspace grants must BOTH
+	// remain live at the moment the next private prompt leaves the origin.
+	assertNoRemoteEffect:=func(requestID string){
+	 t.Helper()
+	 deniedRequest:=sent
+	 deniedRequest.RequestID=requestID
+	 _,err:=modelTransport.Dispatch(ctx,deniedRequest,nil)
+	 var deniedErr *inference.TransportError
+	 if !errors.As(err,&deniedErr)||!deniedErr.OutcomeKnown||
+	  deniedErr.Code!="remote_node_not_admitted"{
+	  t.Fatalf("%s: revoked off-host scope still reached Node: %v",requestID,err)
+	 }
+	 var transmitted int
+	 if err:=dbB.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM
+	  node_federated_inference_receipts WHERE peer_node_id='node-a'
+	  AND remote_request_id=?`,requestID).Scan(&transmitted);err!=nil||
+	  transmitted!=0{
+	  t.Fatalf("%s: revoked scope created %d remote receipts, error=%v",
+	   requestID,transmitted,err)
+	 }
+	}
+	if _,err:=dbA.SQL().ExecContext(ctx,`UPDATE project_workspaces
+	 SET ai_settings_json='{}' WHERE id='project-view'`);err!=nil{t.Fatal(err)}
+	assertNoRemoteEffect("workspace-revoked-no-send")
+	if _,err:=dbA.SQL().ExecContext(ctx,`UPDATE project_workspaces
+	 SET ai_settings_json=? WHERE id='project-view'`,grants);err!=nil{t.Fatal(err)}
+	if _,err:=dbA.SQL().ExecContext(ctx,`UPDATE projects
+	 SET project_policy_json='{}' WHERE id='project'`);err!=nil{t.Fatal(err)}
+	assertNoRemoteEffect("project-revoked-no-send")
+	if _,err:=dbA.SQL().ExecContext(ctx,`UPDATE projects
+	 SET project_policy_json=? WHERE id='project'`,grants);err!=nil{t.Fatal(err)}
+	// An explicitly taskless caller cannot inherit the selected model's
+	// Project grants just because a previous Task used the same deployment.
+	taskless:=sent
+	taskless.RequestID="taskless-never-send"
+	taskless.TaskID=nil
+	_,err=modelTransport.Dispatch(ctx,taskless,nil)
+	var tasklessError *inference.TransportError
+	if !errors.As(err,&tasklessError)||!tasklessError.OutcomeKnown||
+	 tasklessError.Code!="remote_node_not_admitted"{
+	 t.Fatalf("taskless off-host model request bypassed Task authority: %v",err)
+	}
+	// In-flight routing decisions are not consent. The last outbound
+	// transport must recheck CURRENT pairing before sending a new prompt.
+	if _,err:=dbA.SQL().ExecContext(ctx,`UPDATE node_pairings
+	 SET local_confirmed=0 WHERE peer_node_id='node-b'`);err!=nil{t.Fatal(err)}
+	revokedRequest:=sent
+	revokedRequest.RequestID="withdrawn-consent-never-sent"
+	_,err=modelTransport.Dispatch(ctx,revokedRequest,nil)
+	var transportDenied *inference.TransportError
+	if !errors.As(err,&transportDenied)||!transportDenied.OutcomeKnown||
+	 transportDenied.Code!="remote_node_not_admitted"{
+	 t.Fatalf("withdrawn local pairing did not block pre-network: %v",err)
+	}
+	if _,err:=dbA.SQL().ExecContext(ctx,`UPDATE node_pairings
+	 SET local_confirmed=1 WHERE peer_node_id='node-b'`);err!=nil{t.Fatal(err)}
+	if err:=dbB.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM
+	 node_federated_inference_receipts
+	 WHERE remote_request_id='withdrawn-consent-never-sent'`).Scan(&receipts);
+	 err!=nil||receipts!=0{
+	 t.Fatalf("revoked transfer unexpectedly reached remote execution: count=%d err=%v",receipts,err)
 	}
 	// A live paired mTLS peer must not gain inference authority if the
 	// receiver's local admission manager disappears after startup.

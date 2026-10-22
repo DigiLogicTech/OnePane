@@ -144,6 +144,33 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 	if err != nil {
 		return s.finishPreDispatchError(ctx, q.ID, err, cmd)
 	}
+	// Bind the Task's current custom Agent revision before waiting on a
+	// model lease. An archived or foreign profile must not be inferred using
+	// previously compiled instructions or an implicit default profile.
+	agentBinding,err:=s.pinnedAgentProfileAtInference(ctx,cmd)
+	if err!=nil{return s.finishPreDispatchError(ctx,q.ID,err,cmd)}
+	// General Assistant and Project Orchestrator are taskless and have no
+	// approved off-host transfer or paid-provider authority. Use the actual
+	// persisted deployment identity rather than scheduler-selected labels.
+	if err:=requireTasklessLocalDeployment(cmd,d,s.localNodeID);err!=nil{
+		return s.finishPreDispatchError(ctx,q.ID,err,cmd)
+	}
+	// Off-host inference transports require live, scope-bound explicit
+	// transfer consent independently from model capability or cloud budgets.
+	if err:=s.authorizeTrustedNodeTaskDispatch(ctx,cmd,d);err!=nil{
+		return s.finishPreDispatchError(ctx,q.ID,err,cmd)
+	}
+	// Evaluate persisted Project, canonical Workspace and Task restrictions before
+	// provider recovery, runtime acquisition, budget usage or model dispatch.
+	// Legacy Tasks with no feature_policy retain existing authorization gates.
+	if cmd.TaskID != nil {
+		action := "inference.local"
+		if p != nil { action = "inference.cloud" }
+		allowed, scopeErr := s.scopes.AuthorizeTask(ctx, cmd.WorkspaceID, *cmd.TaskID, action)
+		if scopeErr != nil || !allowed {
+			return s.finishPreDispatchError(ctx, q.ID, fmt.Errorf("%w: effective feature policy rejected inference", ErrInformationFlow), cmd)
+		}
+	}
 	if p != nil && p.Status == ProviderRateLimited && p.RetryAfter != nil && *p.RetryAfter <= s.clock.UnixMilli() {
 		refreshed, refreshErr := s.SetProviderStatus(ctx, SetProviderStatusCommand{
 			ConnectionID: p.ID, ExpectedRevision: p.Revision, Status: ProviderConnected,
@@ -201,7 +228,49 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 		return s.requests.Get(ctx, q.ID)
 	}
 
-	result, dispatchErr := transport.Dispatch(ctx, DispatchRequest{RequestID: q.ID, Model: m, Deployment: d, Provider: p, RequestJSON: requestJSON}, s.secrets)
+	// Re-read revocable policy at the last local boundary before calling
+	// the transport. This rejects a Workspace suspension or permission
+	// restriction that occurred while scheduling or reserving resources.
+	if cmd.TaskID != nil {
+		action := "inference.local"
+		if p != nil { action = "inference.cloud" }
+		allowed, scopeErr := s.scopes.AuthorizeTask(ctx, cmd.WorkspaceID, *cmd.TaskID, action)
+		if scopeErr != nil || !allowed {
+			s.releaseBudgetBeforeDispatch(ctx, cmd)
+			return s.finishTransportError(ctx, q.ID, nil,
+				&TransportError{Code:"feature_policy_revoked", OutcomeKnown:true}, cmd)
+		}
+	}
+	// Revalidate transfer policy and live pairing after resource acquisition
+	// and budget operations, immediately before any remote side effect.
+	if err:=s.authorizeTrustedNodeTaskDispatch(ctx,cmd,d);err!=nil{
+		s.releaseBudgetBeforeDispatch(ctx,cmd)
+		return s.finishTransportError(ctx,q.ID,nil,
+			&TransportError{Code:"trusted_node_transfer_revoked",OutcomeKnown:true,Err:err},cmd)
+	}
+	// A provider or Node association may change while waiting for runtime
+	// acquisition and reservation. Check it again before exporting tokens.
+	if err:=s.requireTasklessLocalAtTransport(ctx,cmd,d);err!=nil{
+		s.releaseBudgetBeforeDispatch(ctx,cmd)
+		return s.finishTransportError(ctx,q.ID,nil,
+			&TransportError{Code:"private_chat_locality_revoked",OutcomeKnown:true,Err:err},cmd)
+	}
+	// Admission and budget reservation may have waited for old hardware or
+	// provider capacity. A Task may keep its authority, but may not silently
+	// switch model, Node, provider, secret ref or transport runtime.
+	if err:=s.requireCurrentDispatchIdentity(ctx,d,m,p);err!=nil{
+		s.releaseBudgetBeforeDispatch(ctx,cmd)
+		return s.finishTransportError(ctx,q.ID,nil,
+			&TransportError{Code:"inference_route_identity_revoked",OutcomeKnown:true,Err:err},cmd)
+	}
+	// Prevent the scheduler/model queue from exporting an old Agent prompt
+	// if the operator updated, archived or rehomed that Agent meanwhile.
+	if err:=s.revalidateTaskAgentBeforeTransport(ctx,cmd,agentBinding);err!=nil{
+		s.releaseBudgetBeforeDispatch(ctx,cmd)
+		return s.finishTransportError(ctx,q.ID,nil,
+			&TransportError{Code:"task_agent_profile_revoked",OutcomeKnown:true,Err:err},cmd)
+	}
+	result, dispatchErr := transport.Dispatch(ctx, DispatchRequest{WorkspaceID:cmd.WorkspaceID,TaskID:cmd.TaskID,RequestID: q.ID, Model: m, Deployment: d, Provider: p, RequestJSON: requestJSON}, s.secrets)
 	if dispatchErr != nil {
 		if cmd.BudgetReservationID != nil && s.budgets != nil {
 			// Once transport dispatch was attempted, account conservatively: the
@@ -335,41 +404,21 @@ func (s *Service) releaseBudgetBeforeDispatch(ctx context.Context, cmd ExecuteCo
 	_, _ = s.budgets.Release(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 }
 
+// Provider-backed deployments are not proven host-local merely because
+// their runtime JSON advertises "local" or "free". Budget classification
+// comes exclusively from the registered provider connection, never from
+// model deployment metadata supplied by a routing client or a model.
 func inferenceRouteRequiresBudget(d ModelDeployment, p *ProviderConnection) bool {
-	// Local deployments are zero incremental cost. Provider-backed routes are
-	// protected unless they explicitly prove a hard-zero route. Deployment
-	// runtime scheduling metadata may override the provider classification.
-	type sched struct {
-		CostClass string `json:"cost_class"`
-		HardZero  bool   `json:"hard_zero_incremental_cost"`
-	}
-	type wrapped struct {
-		Scheduling sched `json:"scheduling"`
-	}
-	var effective sched
-	if p != nil {
-		var c wrapped
-		if json.Unmarshal(p.ConnectionJSON, &c) == nil {
-			effective = c.Scheduling
-		}
-	}
-	var dc wrapped
-	if json.Unmarshal(d.RuntimeConfigJSON, &dc) == nil && strings.TrimSpace(dc.Scheduling.CostClass) != "" {
-		effective = dc.Scheduling
-	}
 	if p == nil {
+		// Canonical provider-less deployments are local or require separate
+		// paired-Node transfer authority, not an external billing contract.
 		return false
 	}
-	switch strings.ToLower(strings.TrimSpace(effective.CostClass)) {
-	case "local":
-		return false
-	case "free":
-		return !effective.HardZero
-	case "included_subscription", "provider_managed", "paid", "unknown", "":
-		return true
-	default:
-		return true
-	}
+	// A provider connection can be directed at a paid endpoint regardless
+	// of its own free/local/hard_zero JSON. No independent zero-charge
+	// contract attestation exists yet: even an alleged free provider MUST
+	// have a bounded, separately authorized budget reservation.
+	return true
 }
 
 func storageConfidentiality(v string) policy.Confidentiality {

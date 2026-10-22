@@ -11,6 +11,7 @@ import (
 
 	"github.com/DigiLogicTech/OnePane/internal/agentprotocol"
 	"github.com/DigiLogicTech/OnePane/internal/artifact"
+	"github.com/DigiLogicTech/OnePane/internal/budget"
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/policy"
 	sqliteStore "github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
@@ -124,9 +125,32 @@ func TestSQLiteHermesCompleteProposalDoesNotCompleteAuthoritativeTask(t *testing
 	if err := svc.ConfigureExecution(arts, trs, nil, "node"); err != nil {
 		t.Fatal(err)
 	}
+	// Explicit budget consent is required even for an apparently local
+	// HTTP bridge: the external Hermes runtime may call paid models.
+	budgets:=budget.NewService(db.SQL(),db,clock.Real{})
+	if err:=svc.ConfigureBudget(budgets);err!=nil{t.Fatal(err)}
 	task := "task"
+	acct,err:=budgets.CreateAccount(ctx,budget.CreateAccountCommand{
+	 WorkspaceID:&ws,Name:"Agent runtime invocation quota",
+	 Unit:"requests",LimitAmount:5})
+	if err!=nil{t.Fatal(err)}
+	reservation,err:=budgets.Reserve(ctx,budget.ReserveCommand{
+	 WorkspaceID:ws,AccountID:acct.ID,TaskID:&task,
+	 Amount:1,TTLMillis:60000})
+	if err!=nil{t.Fatal(err)}
+
 	label := policy.DataLabel{WorkspaceID: "ws", Confidentiality: policy.ConfidentialityInternal, Residency: policy.ResidencyOriginNode, Trust: policy.TrustUserInstruction, OriginNodeID: "node"}
-	res, err := svc.Invoke(ctx, InvokeCommand{WorkspaceID: "ws", TaskID: &task, PrincipalID: "agent", ConnectionID: c.ID, Objective: "inspect task", InputLabel: label})
+	// Without a reservation, the direct service must fail closed, before
+	// any external request is dispatched, irrespective of its cost label.
+	_,noBudgetErr:=svc.Invoke(ctx,InvokeCommand{WorkspaceID:"ws",TaskID:&task,
+	 PrincipalID:"agent",ConnectionID:c.ID,Objective:"inspect task",
+	 InputLabel:label})
+	if !errors.Is(noBudgetErr,ErrRuntimeBudgetRequired){
+	 t.Fatalf("agent runtime bypassed cost consent: %v",noBudgetErr)
+	}
+	res, err := svc.Invoke(ctx, InvokeCommand{WorkspaceID: "ws", TaskID: &task,
+	 PrincipalID: "agent", ConnectionID: c.ID, Objective: "inspect task",
+	 InputLabel: label, BudgetReservationID:&reservation.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,4 +170,18 @@ func TestSQLiteHermesCompleteProposalDoesNotCompleteAuthoritativeTask(t *testing
 	if err := arts.VerifyContent(ctx, *res.Invocation.ResponseArtifactID); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestExternalRuntimeCostMetadataIsNeverDirectBudgetExemption(t *testing.T){
+ for _,raw:=range []string{
+  `{"scheduling":{"cost_class":"local","hard_zero_incremental_cost":true}}`,
+  `{"scheduling":{"cost_class":"free","hard_zero_incremental_cost":true}}`,
+  `{"scheduling":{"cost_class":"included_subscription","hard_zero_incremental_cost":true}}`,
+  `{"scheduling":{"cost_class":"unknown"}}`,
+  `{}`,`{`,
+ }{
+  if !runtimeRouteRequiresBudget(Connection{CapabilitiesJSON:json.RawMessage(raw)}){
+   t.Fatalf("unverified Agent Runtime cost JSON waived budget: %s",raw)
+  }
+ }
 }

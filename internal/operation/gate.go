@@ -100,6 +100,33 @@ func (g *MutationGate) ValidateAndConsume(ctx context.Context, c tool.MutationPe
 	if err != nil {
 		return err
 	}
+	// Policy escalation or any missing required human approval invalidates
+	// even a correctly minted one-use permit, rather than skipping approval.
+	if o.PolicyRevision != c.PolicyRevision ||
+		o.RequiredApproval == nil || *o.RequiredApproval != c.RequiredApproval {
+		return ErrExecutionPermit
+	}
+	if c.RequiredApproval != "none" {
+		var approved int
+		err = g.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM approvals a
+		 JOIN principals human ON human.id=a.approved_by
+		  AND human.principal_type='human' AND human.status='active'
+		 JOIN workspace_memberships member ON member.workspace_id=a.workspace_id
+		  AND member.principal_id=human.id AND member.status='active'
+		 WHERE a.operation_id=? AND a.workspace_id=?
+		  AND a.status='consumed' AND a.requested_by=?
+		  AND a.approved_by<>a.requested_by
+		  AND a.policy_revision=? AND a.expires_at>?
+		  AND EXISTS(SELECT 1 FROM principal_roles pr
+		   JOIN roles role ON role.id=pr.role_id
+		   WHERE pr.principal_id=human.id AND role.role_class='human'
+		    AND (pr.workspace_id=a.workspace_id OR pr.workspace_id IS NULL)
+		    AND (lower(role.name)='admin' OR
+		     (lower(role.name)='approver' AND ?='approver')))`,
+		 o.ID,o.WorkspaceID,o.PrincipalID,o.PolicyRevision,
+		 time.Now().UTC().UnixMilli(),string(c.RequiredApproval)).Scan(&approved)
+		if err != nil || approved != 1 { return ErrExecutionPermit }
+	}
 	if o.State != StateExecuting || o.WorkspaceID != c.WorkspaceID || o.PrincipalID != c.PrincipalID ||
 		o.ToolID != c.ToolID || o.ToolVersion != c.ToolVersion || o.AdapterID != c.AdapterID ||
 		o.AdapterVersion != c.AdapterVersion || o.ResourceRef != c.ResourceRef || o.InputHash != c.InputHash {

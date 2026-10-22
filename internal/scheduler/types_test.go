@@ -272,3 +272,43 @@ func TestRouteResourceAdaptiveLimitedCandidateStillChecksProtocolAndContext(t *t
         t.Fatalf("L1-limited models cannot satisfy stronger L2 protocol: %v",err)
     }
 }
+
+
+func TestLocalFirstTrustedNodeRoutingRequiresVerificationAndExactAllowlist(t *testing.T) {
+ remote:=baseCandidate("paired-deployment")
+ remote.Local=false
+ remote.Provider=""
+ remote.NodeID="node-owned"
+ remote.ComputeMode="remote"
+ remote.CostClass=CostLocal
+ remote.TrustedNodeVerified=true
+ remote.Destination=policy.FlowDestination{WorkspaceID:"ws",Kind:policy.DestinationTrustedNode,
+  NodeID:"node-owned",Clearance:policy.ConfidentialitySecret}
+ req:=RouteRequest{WorkspaceID:"ws",CapabilityID:"agent.reason",ProtocolLevel:"L1",
+  DataLabel:label(),LocalOnly:true,AllowTrustedNodes:true,
+  AllowedTrustedNodeIDs:[]string{"node-owned"}}
+ expectDenied:=func(name string,c Candidate,q RouteRequest){
+  t.Helper()
+  d,err:=Route(q,[]Candidate{c})
+  if err!=ErrNoEligibleCandidate||d.Selected!=nil{
+   t.Fatalf("%s allowed unapproved remote candidate: result=%+v err=%v",name,d.Selected,err)
+  }
+ }
+ missingGrant:=req;missingGrant.AllowTrustedNodes=false
+ expectDenied("explicit grant missing",remote,missingGrant)
+ wrongID:=req;wrongID.AllowedTrustedNodeIDs=[]string{"different-node"}
+ expectDenied("Node not on allowlist",remote,wrongID)
+ unverified:=remote;unverified.TrustedNodeVerified=false
+ expectDenied("stale Node trust",unverified,req)
+ wrongDestination:=remote
+ wrongDestination.Destination.Kind=policy.DestinationCloud
+ expectDenied("Node destination cloud",wrongDestination,req)
+ provider:=remote;provider.Provider="external-provider"
+ expectDenied("provider-backed candidate",provider,req)
+ untrustedKind:=remote;untrustedKind.Kind=CandidateAgentRuntime
+ expectDenied("external runtime is not verified model deployment",untrustedKind,req)
+ d,err:=Route(req,[]Candidate{remote})
+ if err!=nil||d.Selected==nil||d.Selected.Candidate.ID!="paired-deployment"{
+  t.Fatalf("explicitly allowed paired Node not admitted: result=%+v err=%v",d.Selected,err)
+ }
+}

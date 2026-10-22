@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"crypto/subtle"
 	"errors"
 	"flag"
 	"fmt"
@@ -26,6 +25,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/event"
 	"github.com/DigiLogicTech/OnePane/internal/ingress"
 	"github.com/DigiLogicTech/OnePane/internal/nodefederation"
+	"github.com/DigiLogicTech/OnePane/internal/processlock"
 	"github.com/DigiLogicTech/OnePane/internal/sandboxrunner"
 	"github.com/DigiLogicTech/OnePane/internal/startupevidence"
 	"github.com/DigiLogicTech/OnePane/internal/webui"
@@ -36,6 +36,10 @@ func main() {
 	flag.StringVar(&configPath, "config", "", "path to bootstrap YAML configuration")
 	flag.StringVar(&offlineRoot, "startup-evidence-root", "", "read only: print sanitized offline startup evidence for an explicit data root")
 	flag.Parse()
+
+	// Capture the SCM launch credential then remove it from the backend's
+	// environment BEFORE bootstrap or any model/tool subprocess can inherit it.
+	serviceShutdownToken := consumeServiceLaunchToken()
 
 	// This mode does not open config, SQLite, start listeners or use a network.
 	// Local filesystem access is governed by OS permissions on the data root.
@@ -67,6 +71,21 @@ func main() {
 		evidenceRoot = cfg.Storage.DataDir
 	}
 	record(startupevidence.Config, startupevidence.OK)
+
+	// Single active backend per canonical data root. The kernel holds the
+	// ownership lock for the whole daemon lifetime, including migrations,
+	// restart recovery, slow inference and shutdown. A second backend must
+	// not run recovery against another live worker using this SQLite state.
+	instance, err := processlock.Acquire(cfg.Storage.DataDir)
+	if err != nil {
+		record(startupevidence.Bootstrap, startupevidence.Failed)
+		log.Fatalf("harnessd data-root ownership: %v", err)
+	}
+	defer func() {
+		if err := instance.Close(); err != nil {
+			log.Printf("release harnessd data-root ownership: %v", err)
+		}
+	}()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -146,22 +165,11 @@ func main() {
 		WriteTimeout:      0, // SSE responses are intentionally long-lived.
 		IdleTimeout:       60 * time.Second,
 	}
-	// The Windows SCM wrapper cannot send POSIX SIGTERM to its hidden
-	// subprocess. It provides an ephemeral per-launch token and requests a
-	// loopback-only graceful stop before any forced process-tree termination.
-	// No shutdown endpoint exists when running without that token.
-	if token := os.Getenv("ONEPANE_SERVICE_SHUTDOWN_TOKEN"); len(token) >= 32 {
-		base := httpServer.Handler
-		httpServer.Handler = http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
-			if r.URL.Path != "/__onepane/service/shutdown" {base.ServeHTTP(w,r);return}
-			host,_,err:=net.SplitHostPort(r.RemoteAddr)
-			if err!=nil||!net.ParseIP(host).IsLoopback()||r.Method!=http.MethodPost||
-				subtle.ConstantTimeCompare([]byte(r.Header.Get("X-OnePane-Service-Token")),[]byte(token))!=1 {
-				http.Error(w,"not found",http.StatusNotFound);return
-			}
-			w.WriteHeader(http.StatusAccepted)
-			go cancel()
-		})
+	// Windows SCM readiness and shutdown must prove ownership of THIS
+	// service-launched backend, not merely some listener on the same port.
+	// No privileged endpoints exist for ordinary non-service launches.
+	if len(serviceShutdownToken) >= 32 {
+		httpServer.Handler = serviceControlHandler(httpServer.Handler, serviceShutdownToken, cancel)
 	}
 	previewHTTPServer := &http.Server{
 		Addr:              cfg.Server.PreviewListen,
@@ -286,6 +294,56 @@ func main() {
 				return
 			case <-ticker.C:
 				tick()
+			}
+		}
+	}()
+
+	// Level 5 receipt-only review is deliberately cheaper than inference:
+	// one bounded SQLite cadence pass each minute, with no external probes,
+	// model residency, device changes or automatic remediation. A human must
+	// approve exact source permits before this loop has any eligible work.
+	go func(){
+		run:=func(){
+			results,err:=runtime.ProjectWorkspaces.TickDueGoalEvidenceReviews(ctx,8)
+			if err!=nil&&ctx.Err()==nil{
+				log.Printf("goal receipt-review tick: %v",err)
+			}else if len(results)>0{
+				log.Printf("goal receipt-review tick: recorded %d metadata assessments (not monitored health)",len(results))
+			}
+		}
+		run()
+		ticker:=time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for{
+			select{
+			case <-ctx.Done():return
+			case <-ticker.C:run()
+			}
+		}
+	}()
+
+	// Independent Level 5 LAN observation: this loop is inert unless a
+	// human specifically approved a short-lived recurring TCP grant that
+	// references an exact-IP manual probe permit for a canonical Workspace.
+	// Never infer network authority from source names or receipt review.
+	// At most ONE 100–1500ms handshake per minute tick; SQLite deduplicates
+	// each source/cadence window across restarts and competing workers.
+	go func(){
+		run:=func(){
+			results,err:=runtime.ProjectWorkspaces.TickDueTCPRecurringProbes(ctx,1)
+			if err!=nil&&ctx.Err()==nil{
+				log.Printf("consented tcp observation tick: %v",err)
+			}else if len(results)>0{
+				log.Printf("consented tcp observation tick: %d source handshake attempt(s); security health UNVERIFIED",len(results))
+			}
+		}
+		run()
+		ticker:=time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for{
+			select{
+			case <-ctx.Done():return
+			case <-ticker.C:run()
 			}
 		}
 	}()

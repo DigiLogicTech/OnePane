@@ -4,6 +4,7 @@ import (
     "context"
     "encoding/json"
     "fmt"
+    "io"
     "io/fs"
     "os"
     "path/filepath"
@@ -82,9 +83,7 @@ func (s *Service) ColibriPoolModels(ctx context.Context) ([]ColibriPoolModel, er
         if rel != "." && (name == ".git" || name == "__pycache__" || name == "node_modules" || name == ".cache") { return fs.SkipDir }
         if rel == "." { return nil } // The pool itself is never a selectable model.
         conf := filepath.Join(path, "config.json")
-        info, err := os.Lstat(conf)
-        if err != nil || !info.Mode().IsRegular() || info.Size() > 1<<20 { return nil }
-        b, err := os.ReadFile(conf)
+        b, err := readBoundedColibriConfig(conf)
         if err != nil { return nil }
         var obj map[string]any
         if json.Unmarshal(b, &obj) != nil { return nil }
@@ -103,9 +102,28 @@ func (s *Service) ColibriPoolModels(ctx context.Context) ([]ColibriPoolModel, er
 
 // An omitted context means automatic model-config selection, capped to prevent
 // pathological allocations. Actual capability is never promoted without checks.
+func readBoundedColibriConfig(path string)([]byte,error){
+    info,err:=os.Lstat(path)
+    if err!=nil{return nil,err}
+    if !info.Mode().IsRegular()||info.Size()>1<<20{
+        return nil,fmt.Errorf("Colibri config is not a bounded regular file")
+    }
+    f,err:=os.Open(path)
+    if err!=nil{return nil,err}
+    defer f.Close()
+    // The file can change between stat and read. Both discovery and
+    // auto-context selection share this hard cap; neither uses ReadFile.
+    data,err:=io.ReadAll(io.LimitReader(f,(1<<20)+1))
+    if err!=nil{return nil,err}
+    if len(data)>1<<20{
+        return nil,fmt.Errorf("Colibri config exceeds 1 MiB")
+    }
+    return data,nil
+}
+
 func colibriAutoContext(path string) int64 {
-    data, err := os.ReadFile(filepath.Join(path, "config.json"))
-    if err != nil || len(data) > 1<<20 { return 8192 }
+    data,err:=readBoundedColibriConfig(filepath.Join(path,"config.json"))
+    if err!=nil{return 8192}
     return initialColibriContext(colibriDeclaredContext(data))
 }
 

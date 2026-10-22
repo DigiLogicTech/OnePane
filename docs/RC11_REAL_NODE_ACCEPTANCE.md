@@ -48,14 +48,35 @@ These are nonsecret public image reference identifiers. Keep credentials in the
 Vault; no registry credentials are needed in test containers. No variable means
 the corresponding physical gate is **skipped, not passed**.
 
-For self-hosted runner security, the physical jobs live in the **separate**
-`.github/workflows/rc11-rootless-physical.yml` workflow and are eligible **only
-on trusted pushes to** `feature/project-workspace-development-environments`.
-The GitHub-hosted `.github/workflows/project-workspace-development-checks.yml`
-may validate pull requests but contains **no self-hosted jobs**. A contributor
-cannot enable self-hosted execution merely by editing a pull-request workflow
-in an unmerged branch. Validate and merge source changes using the
-GitHub-hosted checks first.
+For self-hosted runner security, physical tests live in the **separate**
+`.github/workflows/rc11-rootless-physical.yml` workflow. The former
+push-to-obsolete-branch trigger has been REMOVED. The workflow is now
+`workflow_dispatch` only; it is explicitly restricted to
+`feature/rc11-policy-worker-diagnostics-integration-20261011`.
+It must be deliberately initiated using the REVIEWED exact commit SHA and the
+confirmation phrase `AUTHORIZE_RC11_ROOTLESS_PHYSICAL_ACCEPTANCE`.
+Additionally, a repository administrator must deliberately set the GitHub
+Actions variable `ONEPANE_PHYSICAL_ACCEPTANCE_ENABLED` to exactly
+`approved` and separately set approved digest-pinned container image
+variables as described above. Each physical job uses the environment
+`rc11-physical-node-approval`, which an administrator **MUST configure**
+with required reviewers, trusted deployment branch restrictions and a
+restricted list of people permitted to initiate jobs before the variable is
+enabled. The workflow cannot inspect whether those GitHub environment
+protections are configured; the operator must verify them independently.
+An environment with this name but NO protection rules is not approved.
+Once configured, check out only `github.sha` with Git credentials disabled.
+
+**Important:** GitHub normally requires a `workflow_dispatch` workflow
+to be available from the default branch before manual invocation; this
+draft integration workflow must not be deployed/merged merely to make a
+button available. Until a repository administrator has installed the
+independently reviewed trusted workflow definition, configured the
+environment/variables and explicitly initiated the dispatch, **the
+physical gate remains unavailable, not passed**. Do not trigger it from this
+source development session or a contributor PR. The GitHub-hosted
+`.github/workflows/project-workspace-development-checks.yml` is still
+source-level CI with **no self-hosted jobs**.
 
 ### General dual-Workspace evidence
 
@@ -95,3 +116,30 @@ physical jobs actually **completed / success**, not `skipped`.
 Do not call RC11 physically validated if neither rootless job ran. Keep
 uninstall/reinstall and data preservation, remote Node placement, live
 user Node orchestration, and Windows installer QA on the remaining RC11 checklist.
+
+## Operator dispatch checklist (not executed by source CI)
+
+Before enabling `ONEPANE_PHYSICAL_ACCEPTANCE_ENABLED=approved`, the repository
+administrator must confirm the protected environment and its reviewers are
+actually configured, the RC11 source SHA is reviewed and immutable, the
+self-hosted runner is unprivileged/rootless, all container image digests
+were independently reviewed and pre-pulled, and sufficient available disk
+and memory exist. Select the exact reviewed RC11 SHA when dispatching; never
+pass a mutable branch name or install an image automatically. Record the
+workflow run ID, exact checkout SHA, approved image digests, operator approval,
+rootless identity, test outcomes, and cleanup evidence. **SKIPPED** jobs
+do not count as passed. Physical approval remains an operator-controlled
+procedure and is not proof of TPM attestation or a real endpoint's health.
+
+## Fail-closed hosted result summary
+
+The physically executing workflow now includes a separate **GitHub-hosted**
+`physical-acceptance-summary` job with dependencies on all five physical
+jobs and an `always()` condition. The workflow's conclusion MUST be a failure
+if the primary rootless Node job did not actually finish `success` (including
+when the image, manual approval or protected environment is absent). Optional
+Godot/artifact/Library/broker jobs are reported individually; an optional job
+that is `skipped` stays **unverified** even if the primary job passes.
+A source unit test confirms this contract without scheduling any self-hosted
+runner. A successful summary is NOT TPM attestation, remote Node acceptance,
+or proof that an installed OnePane service can protect a real target.

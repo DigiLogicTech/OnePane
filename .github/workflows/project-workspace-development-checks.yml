@@ -14,6 +14,9 @@ on:
       - 'internal/webui/static/model-agentcheck-diagnostics.js'
       - 'internal/webui/static/app-foundation.js'
       - 'internal/webui/static/index.html'
+      - 'internal/webui/static/ux-alignment.css'
+      - 'scripts/validate_product_ux_alignment.js'
+      - 'docs/rc11-product-ux-alignment.md'
       - 'internal/api/qa_execution_evidence.go'
       - 'internal/api/qa_execution_evidence_test.go'
       - 'internal/api/qa_snapshot.go'
@@ -52,15 +55,30 @@ on:
       - 'cmd/onepane-node-preflight/**'
       - '.github/workflows/rc11-rootless-physical.yml'
       - 'docs/GENERAL_PURPOSE_WORKSPACE_SANDBOX.md'
+      - 'docs/rc11-integrated-code-review.md'
+      - 'docs/rc11-integration-code-audit.md'
+      - 'docs/rc11-policy-branch-manifest.md'
+      - 'docs/rc11-diagnostics-branch-manifest.md'
+      - 'internal/featurepolicy/**'
+      - 'internal/webui/static/policy-diagnostic-review.js'
+      - 'internal/webui/policy_diagnostic_assets_test.go'
+      - 'scripts/validate_policy_diagnostic_review.js'
+      - 'internal/inference/**'
+      - 'internal/tool/**'
+      - 'internal/goalobserveradapter/**'
       - 'internal/agentworker/**'
       - 'internal/team/**'
       - 'internal/teamworker/**'
       - 'internal/agentprotocol/**'
+      - 'internal/agentruntime/**'
+      - 'internal/runtimeendpoint/**'
       - 'internal/task/**'
       - 'internal/storage/sqlite/**'
       - 'migrations/**'
       - 'internal/api/**'
       - 'internal/startupevidence/**'
+      - 'internal/processlock/**'
+      - 'internal/serviceproof/**'
       - 'cmd/harnessd/**'
       - 'packaging/windows/service/**'
       - 'packaging/windows/setup/**'
@@ -148,6 +166,9 @@ jobs:
           node --check internal/webui/static/project-workspace-page.js
           node --check internal/webui/static/app-foundation.js
           node --check internal/webui/static/app.js
+          node scripts/validate_unified_assistant_chat.js
+          node scripts/validate_l5_goal_lifecycle.js
+          node scripts/validate_product_ux_alignment.js
           node --check internal/webui/static/settings-redesign.js
           node --check internal/webui/static/qa-execution-provenance.js
           node scripts/validate_qa_execution_provenance.js
@@ -159,15 +180,71 @@ jobs:
           node --check internal/webui/static/qa-trace-correlation.js
           node scripts/validate_qa_trace_correlation.js
           node scripts/validate_debug_centre.js
+          node --check internal/webui/static/policy-diagnostic-review.js
+          node scripts/validate_policy_diagnostic_review.js
           node scripts/validate_project_development_surface.js
           node scripts/validate_model_agentcheck_residency.js
           node scripts/validate_legacy_cleanup.js
       - name: Existing sandbox and Project contract tests
         run: |
-          go test ./internal/projectworkspace ./internal/projectruntime ./internal/sandboxrunner ./internal/agentprotocol ./internal/agentworker ./internal/team ./internal/teamworker ./internal/task ./internal/storage/sqlite ./internal/scheduler ./internal/localai ./internal/api
-          go test -tags integration ./internal/projectworkspace ./internal/sandboxrunner ./internal/agentworker ./internal/task ./internal/workspacepublisher ./internal/projectorchestrator ./internal/workspacebroker ./internal/nodefederation ./internal/scheduler ./internal/operation
+          go test ./internal/runtimeendpoint ./internal/agentruntime ./internal/projectworkspace ./internal/projectruntime ./internal/sandboxrunner ./internal/agentprotocol ./internal/agentworker ./internal/team ./internal/teamworker ./internal/task ./internal/storage/sqlite ./internal/scheduler ./internal/localai ./internal/api ./internal/nodepreflight
+          go test -tags integration ./internal/agentruntime ./internal/scheduler ./internal/inference ./internal/tool ./internal/projectworkspace ./internal/sandboxrunner ./internal/agentworker ./internal/task ./internal/workspacepublisher ./internal/projectorchestrator ./internal/workspacebroker ./internal/nodefederation ./internal/operation ./internal/goalobserveradapter
+      - name: Bounded low-memory L5 observer lifecycle (hosted simulation)
+        env:
+          GOMEMLIMIT: 256MiB
+          GOMAXPROCS: '2'
+          GOGC: '50'
+        run: |
+          # Source/in-memory SQLite acceptance, not physical hardware or
+          # a measured peak RSS guarantee. Repeat with fresh Go processes.
+          go test -tags integration -count=1 -timeout 3m -run '^(TestObserverPauseResumeRequiresRealCoordinatorApprovalAndCompensation|TestRecurringTCPWorkerRequiresOptInAndPersistsCadenceAcrossRestart)$' ./internal/projectworkspace ./internal/goalobserveradapter
+      - name: Persistent SQLite/WAL observer soak (hosted Linux, no sockets)
+        env:
+          GOMEMLIMIT: 256MiB
+          GOMAXPROCS: '2'
+          GOGC: '50'
+        run: |
+          go test -tags integration -count=1 -timeout 5m -run '^TestObserverFenceBoundedRestartWALDurabilitySoak$' -v ./internal/projectworkspace
+      - name: Node approval and SQLite race checks (hosted source only)
+        run: |
+          go test -race -count=1 ./internal/instrumentprobe ./internal/nodefederation ./cmd/onepane-node-custody ./cmd/onepane-instrument-probe
+          go test -race -tags integration -count=1 -run TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly ./internal/projectworkspace
+      - name: Managed inference lease and Colibri rollback race tests (hosted Linux)
+        env:
+          GOMEMLIMIT: 256MiB
+          GOMAXPROCS: '2'
+        run: |
+          # No live model or GPU. Real SQLite-backed concurrent lease tests.
+          go test -race -count=1 -timeout 3m -run TestManagedStop ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestColibriRollbackCanStopWhileHoldingResidencyLock ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestChatColibriReplacementCancelledAfterEvictionRestoresPreviousWithIndependentDeadline ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestColibriRollbackCannotClaimAnUnverifiedRestoredModel ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestColibriTargetCannotAdvertiseUnpersistedSuccessfulStart ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestColibriReplacementDoesNotGuessRollbackWhenTargetPIDUnknown ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestChatColibriUsesSameFailClosedSwapAsExplicitControl ./internal/localai
+          go test -race -count=1 -timeout 3m -run 'Test(DirectColibriStart|ColibriHotSwapStatusShows)' ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestCancelledColibriSwap ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestColibriReplacement ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestColibriHotSwapRejectsLiveFailedAndStoppedEngineBeforeEviction ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestColibriFailedRowWithConfirmedDeadPIDDoesNotBlockSwap ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestUnrecordedModel ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestFailedModelPIDPersistence ./internal/localai
+          go test -race -count=1 -timeout 3m -run '^TestManagedProcessIdentity' ./internal/localai
+          go test -race -count=1 -timeout 3m -run '^TestManagedTrackedProcess' ./internal/localai
+          go test -race -count=1 -timeout 3m -run '^(TestRecoveredModel|TestRecovery|TestManagedRuntimeRecovery)' ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestManagedStartup ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestCancelledUnlaunchedModel ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestUnlaunchedModel ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestManagedLauncherCancellationPreflight ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestManagedMemoryAdmission ./internal/localai
+          go test -race -count=1 -timeout 3m -run 'TestManaged(HealthyOrBusyUnknownPIDNeverSilentlyStops|MemoryAdmissionPreservesUnknownHealthyBusyOwners|RuntimeRestartRequiresReconciliationForLiveNonRunningProcess)' ./internal/localai
+          go test -race -count=1 -timeout 3m -run 'TestManaged(Stopped|StopDoesNotErase|MemoryAdmissionRejectsUnproven)' ./internal/localai
+          go test -race -count=1 -timeout 3m -run 'TestColibri(ReplacementUnknownResult|ConfirmedNoChildFailure)' ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestColibriUnknownStoppedOrFailedPID ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestColibriHealthyBusyWithoutPIDCannotClaimSafeEviction ./internal/localai
       - name: Full Go regression and cross-platform compilation
         run: |
+          go test ./internal/featurepolicy ./internal/inference ./internal/tool ./internal/webui
           go test ./...
           # Exercise a real pre-config, pre-HTTP backend failure and the
           # offline-only reader without a running OnePane API or database.
@@ -189,6 +266,8 @@ jobs:
             })'
           rm -rf -- "$evidence_root"
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-node-preflight.exe ./cmd/onepane-node-preflight
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-node-custody.exe ./cmd/onepane-node-custody
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-instrument-probe.exe ./cmd/onepane-instrument-probe
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-harnessd.exe ./cmd/harnessd
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-service.exe ./packaging/windows/service
           # Compile the legacy setup source without a real distributable payload.
@@ -199,11 +278,80 @@ jobs:
           bash -n scripts/install-ubuntu.sh
 
   offline-msi-evidence:
-    name: Validate opt-in Windows MSI log reader
+    name: Validate Windows instance lock and offline MSI evidence
     runs-on: windows-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Native Windows LockFileEx ownership and crash-recovery regressions
+        shell: pwsh
+        run: |
+          # Native Windows (not cross-compilation): verifies LockFileEx denial
+          # for a competing backend, stale lock-file reuse, unsafe paths, and
+          # OS-held lock release after forcibly killing a holder process.
+          # Hosted test only; does not assert installed Windows SCM readiness.
+          go test -count=1 -timeout 3m ./internal/processlock
+      - name: Native Windows backend authenticated service-control regressions
+        shell: pwsh
+        run: |
+          # Validate readiness/shutdown credentials on the actual target OS.
+          # The server is NOT installed or launched by this unit check.
+          go test -count=1 -timeout 3m ./cmd/harnessd ./internal/serviceproof
+      - name: Native Windows managed-model environment and private-log regressions
+        shell: pwsh
+        run: |
+          # Real Windows process-launch credential isolation and NTFS ACL tests.
+          # No Colibri downloads, installs, or user data root access.
+          go test -count=1 -timeout 4m -run TestManagedRuntimeLaunchWithNilOrEmptyEnvDoesNotInheritSecrets ./internal/localai
+          go test -count=1 -timeout 4m -run TestWindowsManagedRuntimeLog ./internal/localai
+          # Verify exact launched-model PID ownership and cancelled Colibri
+          # compensation on Windows rather than relying on cross-compilation.
+          go test -count=1 -timeout 4m -run TestUnrecordedModel ./internal/localai
+          go test -count=1 -timeout 4m -run TestFailedModelPIDPersistence ./internal/localai
+          go test -count=1 -timeout 4m -run '^TestManagedProcessIdentity' ./internal/localai
+          go test -count=1 -timeout 4m -run '^TestManagedTrackedProcess' ./internal/localai
+          go test -count=1 -timeout 4m -run TestWindowsTreeSignalNeverExecutesOnUntrackedPID ./internal/localai
+          go test -count=1 -timeout 4m -run TestManagedStopRechecksPIDAfterDrainingPersistenceBeforeSIGTERM ./internal/localai
+          go test -count=1 -timeout 4m -run '^(TestManagedStopRetainsUnknownProcessOwnershipWithoutPID|TestManagedShutdownCannotSilentlyStopUnknownPIDStartingOrDrain|TestManagedRestartNoChildFailureProofIsRequired|TestConfirmedPrelaunchFailureWithNoPIDStillAllowsExplicitStop|TestRecordedZeroPIDCannotImpersonateProvenNoChildFailure)$' ./internal/localai
+          go test -count=1 -timeout 4m -run '^(TestRecoveredModel|TestRecovery|TestManagedRuntimeRecovery)' ./internal/localai
+          go test -count=1 -timeout 4m -run TestManagedStartup ./internal/localai
+          go test -count=1 -timeout 4m -run TestCancelledUnlaunchedModel ./internal/localai
+          go test -count=1 -timeout 4m -run TestUnlaunchedModel ./internal/localai
+          go test -count=1 -timeout 4m -run TestCancelledColibriSwap ./internal/localai
+          go test -count=1 -timeout 4m -run TestColibriHotSwapRejectsLiveFailedAndStoppedEngineBeforeEviction ./internal/localai
+          go test -count=1 -timeout 4m -run TestColibriFailedRowWithConfirmedDeadPIDDoesNotBlockSwap ./internal/localai
+          go test -count=1 -timeout 4m -run TestChatColibriReplacementCancelledAfterEvictionRestoresPreviousWithIndependentDeadline ./internal/localai
+          go test -count=1 -timeout 4m -run TestColibriRollbackCannotClaimAnUnverifiedRestoredModel ./internal/localai
+          go test -count=1 -timeout 4m -run TestColibriTargetCannotAdvertiseUnpersistedSuccessfulStart ./internal/localai
+          go test -count=1 -timeout 4m -run TestColibriReplacementDoesNotGuessRollbackWhenTargetPIDUnknown ./internal/localai
+          go test -count=1 -timeout 4m -run 'TestColibri(StarterCannot|VerifiedStarter|VerifiedReplacement|VerifiedTarget)' ./internal/localai
+          go test -count=1 -timeout 4m -run 'Test(DirectColibriStart|ColibriHotSwapStatusShows)' ./internal/localai
+          # OS-backed post-restart PID liveness: live untracked child must
+          # block memory admission; dead child must not. Identity stays denied.
+          go test -count=1 -timeout 4m -run TestWindowsUntrackedPID ./internal/localai
+          go test -count=1 -timeout 4m -run TestManagedMemoryAdmission ./internal/localai
+          go test -count=1 -timeout 4m -run 'TestManaged(HealthyOrBusyUnknownPIDNeverSilentlyStops|MemoryAdmissionPreservesUnknownHealthyBusyOwners|RuntimeRestartRequiresReconciliationForLiveNonRunningProcess)' ./internal/localai
+          go test -count=1 -timeout 4m -run 'TestManaged(Stopped|StopDoesNotErase|MemoryAdmissionRejectsUnproven)' ./internal/localai
+          go test -count=1 -timeout 4m -run 'TestColibri(ReplacementUnknownResult|ConfirmedNoChildFailure)' ./internal/localai
+          go test -count=1 -timeout 4m -run TestColibriUnknownStoppedOrFailedPID ./internal/localai
+          go test -count=1 -timeout 4m -run TestColibriHealthyBusyWithoutPIDCannotClaimSafeEviction ./internal/localai
+      - name: Native Windows SQLite migration and startup-evidence regressions
+        shell: pwsh
+        run: |
+          # Exercise actual Windows filesystem and SQLite behavior on hosted
+          # Windows. Does not replace a populated RC10->RC11 installer upgrade
+          # or verify persistence on the operator's selected data drive.
+          go test -count=1 -timeout 5m ./internal/storage/sqlite ./internal/startupevidence
+      - name: Native Windows persistent drive-root resolution
+        shell: pwsh
+        run: |
+          # Must not create an accidental empty C: instance when an explicitly
+          # configured non-C installer path is corrupt or unreadable.
+          go test -count=1 -timeout 3m ./packaging/windows/service
       - name: Test allowlisted MSI analysis against synthetic secret-bearing logs
         shell: powershell
         run: .\scripts\test_offline_msi_evidence.ps1

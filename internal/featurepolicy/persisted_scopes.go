@@ -1,0 +1,237 @@
+package featurepolicy
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+)
+
+// StoredScopes reads trusted, versioned scope data from the persisted Project,
+// canonical Workspace and Task. Task-supplied overrides can only restrict a
+// Project/Workspace grant, never expand it.
+type StoredScopes struct{ DB *sql.DB }
+
+type ScopedDecision struct {
+	Effective Policy
+	Configured bool
+	// A locally proposed DAG is bound to a revocable standing L4 grant.
+	// This marker comes ONLY from canonical Task completion_json.
+	AutonomousGraph bool
+}
+
+// feature_policy is opt-in for existing installations. Existing authority,
+// sandbox and data-flow gates remain mandatory even when no feature policy
+// was configured; the absence of a feature policy is NOT an execution grant.
+func parseFeatureDocument(raw []byte, base Policy) (Policy, bool, error) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return base, false, nil
+	}
+	var outer map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &outer); err != nil || outer == nil {
+		return Policy{}, false, fmt.Errorf("invalid scope document")
+	}
+	value, exists := outer["feature_policy"]
+	if !exists {
+		return base, false, nil
+	}
+	if len(value) == 0 || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+		return Policy{}, false, fmt.Errorf("null feature policy is invalid")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(value))
+	decoder.DisallowUnknownFields()
+	p := base
+	if err := decoder.Decode(&p); err != nil {
+		return Policy{}, false, fmt.Errorf("invalid feature policy: %w", err)
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return Policy{}, false, fmt.Errorf("trailing feature policy data")
+	}
+	if err := validatePolicyValues(p); err != nil {
+		return Policy{}, false, err
+	}
+	return p, true, nil
+}
+
+func validatePolicyValues(p Policy) error {
+	for _, state := range []State{
+		p.Assistant,p.ProjectAI,p.ProjectMemory,p.TelemetryAccess,
+		p.TelemetryAutonomy,p.ModelRouting,p.AutomaticFallback,
+		p.CapabilityRouting,p.CloudRouting,p.Images,p.Files,
+		p.FileRead,p.FileWrite,p.ProcessExecute,p.NetworkAccess,p.SecretsAccess,
+		p.AudioInput,p.AudioOutput,p.Camera,p.Video,p.Team,p.Council,
+		p.CrossProjectShare,p.AutonomousRoutines,
+	} {
+		switch state {
+		case "",Inherited,Enabled,Disabled,Unavailable:
+		default:
+			return fmt.Errorf("invalid feature policy state")
+		}
+	}
+	switch p.ConfigAuthority {
+	case "",AuthorityNever,AuthorityRead,AuthorityPropose,AuthorityAuto:
+		return nil
+	default:
+		return fmt.Errorf("invalid feature policy authority")
+	}
+}
+
+// ForTask loads the real source scopes, not permissions claimed by a Task or
+// model response. The tenant and canonical ownership checks are intentional:
+// a Task cannot name another Project's Workspace to obtain additional grants.
+// scopedRowReader allows the same canonical policy lookup to run against
+// either the database or the caller's admission transaction.
+type scopedRowReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func (s StoredScopes) ForTask(ctx context.Context, tenantID, taskID string) (ScopedDecision, error) {
+	if s.DB == nil {
+		return ScopedDecision{}, fmt.Errorf("scope resolver unavailable")
+	}
+	return forTaskWithReader(ctx, s.DB, tenantID, taskID)
+}
+
+// ForTaskTx resolves revocable permissions from the SAME transaction that
+// owns Worker admission. The caller must not use a separate DB read here.
+func (s StoredScopes) ForTaskTx(ctx context.Context, tx scopedRowReader, tenantID, taskID string) (ScopedDecision, error) {
+	if tx == nil {
+		return ScopedDecision{}, fmt.Errorf("transactional scope reader unavailable")
+	}
+	return forTaskWithReader(ctx, tx, tenantID, taskID)
+}
+
+func forTaskWithReader(ctx context.Context, reader scopedRowReader, tenantID, taskID string) (ScopedDecision, error) {
+	if strings.TrimSpace(tenantID) == "" || strings.TrimSpace(taskID) == "" {
+		return ScopedDecision{}, fmt.Errorf("scope resolver unavailable")
+	}
+	var topStatus string
+	if err := reader.QueryRowContext(ctx,"SELECT status FROM workspaces WHERE id=?",tenantID).Scan(&topStatus); err != nil {
+		return ScopedDecision{}, fmt.Errorf("execution Workspace unavailable")
+	}
+	if topStatus != "active" {
+		return ScopedDecision{}, fmt.Errorf("Workspace %s is not active (state=%s)",tenantID,topStatus)
+	}
+	var projectID,workspaceID sql.NullString
+	var completion string
+	err := reader.QueryRowContext(ctx,
+		"SELECT project_id,project_workspace_id,COALESCE(completion_json,'{}') FROM tasks WHERE id=? AND workspace_id=?",
+		taskID,tenantID).Scan(&projectID,&workspaceID,&completion)
+	if err != nil { return ScopedDecision{}, fmt.Errorf("resolve canonical Task scope: %w",err) }
+	var source struct{
+		Source string `json:"source"`
+		GraphID string `json:"graph_id"`
+		NodeKey string `json:"node_key"`
+		StandingAutonomyPolicy bool `json:"standing_autonomy_policy"`
+		OperatorApproved bool `json:"operator_approved"`
+	}
+	if err:=json.Unmarshal([]byte(completion),&source);err!=nil{
+		return ScopedDecision{},fmt.Errorf("invalid Task origin")
+	}
+	autoGraph:=source.Source=="project-orchestrator-autonomous-graph"
+	if autoGraph{
+		if !projectID.Valid||!workspaceID.Valid||!source.StandingAutonomyPolicy||
+			source.OperatorApproved||strings.TrimSpace(source.GraphID)==""||
+			strings.TrimSpace(source.NodeKey)==""{
+			return ScopedDecision{},fmt.Errorf("autonomous Task missing canonical graph provenance")
+		}
+		// Task completion JSON is not a signed or authoritative grant.
+		// A Task or model can claim any source string: require real membership
+		// in the canonical, Project-owned, dependency-attested graph.
+		var count int
+		err:=reader.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_orchestrator_task_graph_nodes n
+			JOIN project_orchestrator_task_graphs g ON g.id=n.graph_id
+			WHERE n.task_id=? AND n.graph_id=? AND n.node_key=?
+			  AND n.project_workspace_id=? AND n.approved_dependencies_recorded=1
+			  AND g.project_id=? AND g.workspace_id=?`,
+			taskID,source.GraphID,source.NodeKey,workspaceID.String,
+			projectID.String,tenantID).Scan(&count)
+		if err!=nil||count!=1{
+			return ScopedDecision{},fmt.Errorf("autonomous Task graph membership missing or forged")
+		}
+	}
+	if !projectID.Valid {
+		if workspaceID.Valid {
+			return ScopedDecision{}, fmt.Errorf("canonical Workspace requires a Project owner")
+		}
+		return ScopedDecision{Configured:false},nil // legacy Task: existing authority still applies
+	}
+	var projectJSON,projectStatus string
+	if err := reader.QueryRowContext(ctx,
+		"SELECT project_policy_json,status FROM projects WHERE id=? AND workspace_id=?",
+		projectID.String,tenantID).Scan(&projectJSON,&projectStatus);err!=nil||projectStatus!="active"{
+		return ScopedDecision{},fmt.Errorf("Project scope unavailable or inactive")
+	}
+	project,fromProject,err:=parseFeatureDocument([]byte(projectJSON),AssistedDefaults())
+	if err!=nil{return ScopedDecision{},err}
+	workspace:=Policy{}
+	fromWorkspace:=false
+	if workspaceID.Valid {
+		var settings,status string
+		if err:=reader.QueryRowContext(ctx,
+			"SELECT ai_settings_json,status FROM project_workspaces WHERE id=? AND project_id=?",
+			workspaceID.String,projectID.String).Scan(&settings,&status);err!=nil||status!="active"{
+			return ScopedDecision{},fmt.Errorf("canonical Workspace scope unavailable or inactive")
+		}
+		workspace,fromWorkspace,err=parseFeatureDocument([]byte(settings),Policy{})
+		if err!=nil{return ScopedDecision{},err}
+	}
+	var taskDoc map[string]json.RawMessage
+	if err:=json.Unmarshal([]byte(completion),&taskDoc);err!=nil{
+		return ScopedDecision{},fmt.Errorf("invalid Task execution scope")
+	}
+	taskOverride:=Policy{}
+	fromTask:=false
+	agentOverride:=Policy{}
+	fromAgent:=false
+	if routing,ok:=taskDoc["onepane_routing"];ok {
+		taskOverride,fromTask,err=parseFeatureDocument(routing,Policy{})
+		if err!=nil{return ScopedDecision{},err}
+		var route struct{AgentProfile string `json:"agent_profile"`}
+		if err:=json.Unmarshal(routing,&route);err!=nil{
+			return ScopedDecision{},fmt.Errorf("invalid Task Agent routing document")
+		}
+		profileID:=strings.TrimSpace(route.AgentProfile)
+		if profileID!=""&&profileID!="agent.md"&&!strings.EqualFold(profileID,"onepane-default"){
+			agentOverride,fromAgent,err=forAgentWithReader(ctx,reader,tenantID,profileID)
+			if err!=nil{return ScopedDecision{},err}
+		}
+	}
+	return ScopedDecision{
+		Effective:ResolvePolicyChain(project,workspace,agentOverride,taskOverride),
+		Configured:fromProject||fromWorkspace||fromAgent||fromTask||autoGraph,
+		AutonomousGraph:autoGraph,
+	},nil
+}
+
+// AuthorizeTask determines whether a configured feature policy also permits
+// the action. The existing gateway authorization remains mandatory.
+func (s StoredScopes) AuthorizeTask(ctx context.Context,tenantID,taskID,action string)(bool,error){
+	decision,err:=s.ForTask(ctx,tenantID,taskID)
+	if err!=nil{return false,err}
+	if decision.AutonomousGraph&&
+		(decision.Effective.AutonomousRoutines!=Enabled||
+		 decision.Effective.ProjectAI!=Enabled||decision.Effective.ModelRouting!=Enabled){
+		return false,nil // live parent/Workspace autonomy revocation
+	}
+	if !decision.Configured{return true,nil}
+	return decision.Effective.ValidateExecution(action),nil
+}
+
+// AuthorizeTaskTx performs canonical permission resolution inside the caller's
+// transaction; no preflight decision is sufficient for durable admission.
+func (s StoredScopes) AuthorizeTaskTx(ctx context.Context, tx scopedRowReader, tenantID, taskID, action string) (bool, error) {
+	decision, err := s.ForTaskTx(ctx, tx, tenantID, taskID)
+	if err != nil { return false, err }
+	if decision.AutonomousGraph&&
+		(decision.Effective.AutonomousRoutines!=Enabled||
+		 decision.Effective.ProjectAI!=Enabled||decision.Effective.ModelRouting!=Enabled){
+		return false,nil
+	}
+	if !decision.Configured { return true, nil }
+	return decision.Effective.ValidateExecution(action), nil
+}

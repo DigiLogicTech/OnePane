@@ -17,6 +17,7 @@ var (
 	ErrBindingInactive   = errors.New("project routine binding is not active")
 	ErrUnsupportedAction = errors.New("project routine action is not implemented by the sandbox executor")
 	ErrRuntimeNotReady   = errors.New("project runtime/application is not in verified running state")
+	ErrBindingScopeMismatch = errors.New("project routine binding target does not match its canonical Project or runtime")
 )
 
 type projectService interface {
@@ -69,6 +70,12 @@ func (e *Executor) Execute(ctx context.Context, cmd ExecuteCommand) (tool.Invoca
 	if binding.Status != "active" {
 		return tool.Invocation{}, ErrBindingInactive
 	}
+	// A selected binding must never be silently replaced with a different
+	// binding or a missing canonical Project/runtime identity.
+	if binding.ID!=cmd.BindingID||strings.TrimSpace(binding.ProjectID)==""||
+		strings.TrimSpace(binding.ProjectRuntimeID)==""{
+		return tool.Invocation{},ErrBindingScopeMismatch
+	}
 	if err := e.projects.ValidateTaskProject(ctx, cmd.TaskID, binding.ProjectID); err != nil {
 		return tool.Invocation{}, err
 	}
@@ -79,21 +86,44 @@ func (e *Executor) Execute(ctx context.Context, cmd ExecuteCommand) (tool.Invoca
 	if err != nil {
 		return tool.Invocation{}, err
 	}
+	// The Task's Project was checked above. Check the actual resolved runtime
+	// again: a stale/broken RoutineBinding cannot cross into another Project,
+	// even if its application is healthy and the underlying tenant is shared.
+	if runtime.ID!=binding.ProjectRuntimeID||runtime.ProjectID!=binding.ProjectID{
+		return tool.Invocation{},ErrBindingScopeMismatch
+	}
 	app, err := e.projects.Application(ctx, *binding.ApplicationID)
 	if err != nil {
 		return tool.Invocation{}, err
 	}
-	if app.ProjectRuntimeID != runtime.ID || runtime.Status != projectworkspace.RuntimeRunning || app.Status != projectworkspace.AppRunning {
+	if app.ID!=*binding.ApplicationID||app.ProjectRuntimeID!=runtime.ID{
+		return tool.Invocation{},ErrBindingScopeMismatch
+	}
+	if runtime.Status != projectworkspace.RuntimeRunning || app.Status != projectworkspace.AppRunning {
 		return tool.Invocation{}, ErrRuntimeNotReady
+	}
+	// Bound persisted action-spec parsing before argv construction or any
+	// Tool Gateway effects. A stored binding cannot allocate huge arguments.
+	const maxRoutineSpecBytes=64<<10
+	const maxRoutineArgBytes=4096
+	const maxRoutineArgvBytes=16<<10
+	if len(binding.ActionSpecJSON)==0||len(binding.ActionSpecJSON)>maxRoutineSpecBytes{
+		return tool.Invocation{},ErrInvalidCommand
 	}
 	var spec appCommandSpec
 	if err := json.Unmarshal(binding.ActionSpecJSON, &spec); err != nil || len(spec.Command) == 0 || len(spec.Command) > 128 {
 		return tool.Invocation{}, ErrInvalidCommand
 	}
-	for _, arg := range spec.Command {
-		if strings.ContainsRune(arg, '\x00') {
-			return tool.Invocation{}, ErrInvalidCommand
+	argvBytes:=0
+	for i,arg:=range spec.Command {
+		if len(arg)>maxRoutineArgBytes||strings.ContainsRune(arg, '\x00')||
+			(i==0&&strings.TrimSpace(arg)==""){
+			return tool.Invocation{},ErrInvalidCommand
 		}
+		if argvBytes>maxRoutineArgvBytes-len(arg){
+			return tool.Invocation{},ErrInvalidCommand
+		}
+		argvBytes+=len(arg)
 	}
 	input, _ := json.Marshal(map[string]any{"runtime_id": runtime.ID, "application_id": app.ID, "command": spec.Command, "routine_binding_id": binding.ID, "routine_id": binding.RoutineID})
 	workspaceID, err := e.projects.TaskWorkspace(ctx, cmd.TaskID)

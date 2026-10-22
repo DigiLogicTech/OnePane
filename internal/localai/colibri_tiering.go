@@ -12,6 +12,7 @@ import (
     "runtime"
     "strconv"
     "strings"
+    "sync"
     "time"
 )
 
@@ -140,7 +141,14 @@ func (s *Service) SetColibriTier(ctx context.Context, cmd ColibriTierCommand) (C
     if strings.TrimSpace(cmd.DeploymentID)=="" { return ColibriTierState{},errors.New("deployment id required") }
     settings,err:=validateColibriTier(cmd.Settings)
     if err!=nil { return ColibriTierState{},err }
-    cfg,err:=s.colibriTierSnapshot(ctx,cmd.DeploymentID)
+    if s==nil||s.db==nil||s.supervisor==nil{
+        return ColibriTierState{},errors.New("local runtime supervisor unavailable")
+    }
+    // Serialize the entire idle check, optional drain and configuration
+    // persistence with model Acquire, hot-swap and the idle reaper.
+    s.supervisor.residencyMu.Lock()
+    defer s.supervisor.residencyMu.Unlock()
+    _,err=s.colibriTierSnapshot(ctx,cmd.DeploymentID)
     if err!=nil { return ColibriTierState{},err }
     var status string
     err=s.db.QueryRowContext(ctx,"SELECT status FROM local_runtime_instances WHERE deployment_id=?",cmd.DeploymentID).Scan(&status)
@@ -149,18 +157,57 @@ func (s *Service) SetColibriTier(ctx context.Context, cmd ColibriTierCommand) (C
         return ColibriTierState{},errors.New("Colibri deployment is serving a request; change tier settings after it becomes idle")
     }
     if err==nil && (status=="healthy"||status=="starting") {
-        stopped,stopErr:=s.supervisor.StopIfIdle(ctx,cmd.DeploymentID)
+        stopped,stopErr:=s.supervisor.stopIfIdleBeforeLocked(ctx,cmd.DeploymentID,0)
         if stopErr!=nil{return ColibriTierState{},fmt.Errorf("stop idle Colibri runtime: %w",stopErr)}
         if !stopped {return ColibriTierState{},errors.New("Colibri runtime became busy; retry after it is idle")}
     }
-    raw,_:=json.Marshal(settings)
-    cfg["colibri_tier"]=raw
-    updated,err:=json.Marshal(cfg)
+    raw,err:=json.Marshal(settings)
     if err!=nil{return ColibriTierState{},err}
     now:=s.clock.UnixMilli()
-    _,err=s.db.ExecContext(ctx,"UPDATE model_deployments SET runtime_config_json=?,updated_at=?,revision=revision+1 WHERE id=?",string(updated),now,cmd.DeploymentID)
-    if err!=nil { return ColibriTierState{},err }
+    // Update ONLY the Colibri profile. Never replace a previously read
+    // runtime_config_json object and accidentally discard a pin or newer
+    // approved execution configuration.
+    result,err:=s.db.ExecContext(ctx,`UPDATE model_deployments
+      SET runtime_config_json=json_set(runtime_config_json,'$.colibri_tier',json(?)),
+          updated_at=?,revision=revision+1
+      WHERE id=? AND LOWER(runtime_name)='colibri'
+       AND EXISTS(SELECT 1 FROM managed_local_models m
+        WHERE m.deployment_id=model_deployments.id AND m.status<>'removed')`,
+      string(raw),now,cmd.DeploymentID)
+    if err!=nil{return ColibriTierState{},err}
+    changed,err:=result.RowsAffected()
+    if err!=nil{return ColibriTierState{},err}
+    if changed!=1{return ColibriTierState{},errors.New("Colibri deployment changed before settings could be saved")}
     return s.ColibriTier(ctx,cmd.DeploymentID)
+}
+
+// boundedColibriPlanOutput retains at most one modest diagnostic document.
+// An external runtime may write arbitrarily many bytes before it exits. A
+// post-CombinedOutput length check is NOT an acceptable memory budget.
+const maxColibriPlanOutputBytes=128<<10
+type boundedColibriPlanOutput struct{
+ mu sync.Mutex
+ data []byte
+ overflow bool
+}
+func(b *boundedColibriPlanOutput)Write(p []byte)(int,error){
+ b.mu.Lock()
+ defer b.mu.Unlock()
+ available:=maxColibriPlanOutputBytes-len(b.data)
+ if available<0{available=0}
+ count:=len(p)
+ if count>available{
+  b.data=append(b.data,p[:available]...)
+  b.overflow=true
+ }else{
+  b.data=append(b.data,p...)
+ }
+ return count,nil
+}
+func(b *boundedColibriPlanOutput)Result()([]byte,bool){
+ b.mu.Lock()
+ defer b.mu.Unlock()
+ return append([]byte(nil),b.data...),b.overflow
 }
 
 // ColibriPlan runs only a managed in-root launcher with a fixed argument set.
@@ -188,9 +235,13 @@ func (s *Service) ColibriPlan(ctx context.Context, deploymentID string) (json.Ra
     command:=exec.CommandContext(cctx,python,args...)
     command.Dir=root
     command.Env=append(os.Environ(),colibriTierEnv(settings)...)
-    output,err:=command.CombinedOutput()
-    if err!=nil { return nil,fmt.Errorf("Colibri placement plan unavailable: %w: %s",err,strings.TrimSpace(string(output[:min(len(output),1000)]))) }
-    if len(output)>128<<10 {return nil,errors.New("Colibri plan exceeds response limit")}
+    capture:=&boundedColibriPlanOutput{}
+    command.Stdout=capture
+    command.Stderr=capture
+    err=command.Run()
+    output,overflow:=capture.Result()
+    if overflow {return nil,errors.New("Colibri plan exceeds response limit")}
+    if err!=nil {return nil,fmt.Errorf("Colibri placement plan unavailable: %w",err)}
     if !json.Valid(output) {return nil,errors.New("Colibri launcher did not return machine-readable JSON")}
     return json.RawMessage(output),nil
 }

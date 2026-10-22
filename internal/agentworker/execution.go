@@ -17,6 +17,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/authority"
 	"github.com/DigiLogicTech/OnePane/internal/budget"
 	"github.com/DigiLogicTech/OnePane/internal/contextcompiler"
+	"github.com/DigiLogicTech/OnePane/internal/featurepolicy"
 	"github.com/DigiLogicTech/OnePane/internal/inference"
 	"github.com/DigiLogicTech/OnePane/internal/observation"
 	"github.com/DigiLogicTech/OnePane/internal/operation"
@@ -78,9 +79,23 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	if err:=s.requireActiveWorkerExecutionBinding(ctx,run);err!=nil{
 		return failedResult(res,err)
 	}
+	// Preserve the Task/Attempt binding error before any policy revocation
+	// can mutate Worker state or consume a step.
+	// Re-read autonomy on every Worker tick so a live policy revocation
+	// blocks reasoning before model/tool selection.
+	autonomyAllowed,policyErr:= (featurepolicy.StoredScopes{DB:s.db}).AuthorizeTask(ctx,t.WorkspaceID,t.ID,"tasks.autonomous")
+	if policyErr!=nil||!autonomyAllowed {
+		return s.blockRun(ctx,run,res,"effective feature policy no longer permits autonomous Worker execution")
+	}
+
 	if run.StepCount >= run.MaxSteps {
 		return s.failRun(ctx, run, res, ErrStepLimit)
 	}
+	// Bind an explicitly chosen Agent's active revision before constructing
+	// any context. A missing/archived custom Agent cannot fall back to default.
+	agentBinding,err:=resolveTaskAgentProfileBinding(ctx,s.db,run.WorkspaceID,
+		routingPolicyFromCompletion(t.Completion).AgentProfile)
+	if err!=nil{return s.blockRun(ctx,run,res,"pinned Agent profile unavailable or revoked: "+err.Error())}
 
 	compiled, err := s.compileContext(ctx, run, t)
 	if err != nil {
@@ -96,7 +111,14 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	if tokens < 1 {
 		tokens = 1
 	}
-	decision, err := s.scheduler.Route(ctx, scheduler.RouteRequest{WorkspaceID: run.WorkspaceID, CapabilityID: run.CapabilityID, RoleName: run.RoleName, ProtocolLevel: run.ProtocolLevel, ContextTokens: tokens, DataLabel: label, AllowUntested: rp.AllowUntested, AllowLimited: rp.AllowLimited, AllowMediated: rp.AllowMediated, AllowDegraded: rp.AllowDegraded, RequireZeroIncrementalCost: rp.RequireZeroIncrementalCost, PreferZeroIncrementalCost: rp.PreferZeroIncrementalCost, AllowSubscriptionUsage: rp.AllowSubscriptionUsage, AllowPotentialMonetarySpend: rp.AllowPotentialMonetarySpend, LocalOnly: !rp.AllowRemote, ComputePreference:rp.ComputePreference, IncludeCandidateIDs: rp.IncludeCandidateIDs, ExcludeCandidateIDs: rp.ExcludedCandidateIDs})
+	// Refresh the authorised Node allowlist from canonical persisted Project
+	// and Workspace policy on every Worker tick. Never trust Task JSON,
+	// model-created routing metadata or an old saved routePolicy grant.
+	trustedNodes, trustErr := (featurepolicy.StoredScopes{DB:s.db}).TrustedNodesForTask(ctx,run.WorkspaceID,run.TaskID)
+	if trustErr!=nil {
+		return s.blockRun(ctx,run,res,"canonical trusted Node policy unavailable")
+	}
+	decision, err := s.scheduler.Route(ctx, scheduler.RouteRequest{WorkspaceID: run.WorkspaceID, CapabilityID: run.CapabilityID, RoleName: run.RoleName, ProtocolLevel: run.ProtocolLevel, ContextTokens: tokens, DataLabel: label, AllowUntested: rp.AllowUntested, AllowLimited: rp.AllowLimited, AllowMediated: rp.AllowMediated, AllowDegraded: rp.AllowDegraded, RequireZeroIncrementalCost: rp.RequireZeroIncrementalCost, PreferZeroIncrementalCost: rp.PreferZeroIncrementalCost, AllowSubscriptionUsage: rp.AllowSubscriptionUsage, AllowPotentialMonetarySpend: rp.AllowPotentialMonetarySpend, LocalOnly: !rp.AllowRemote, AllowTrustedNodes:len(trustedNodes)>0, AllowedTrustedNodeIDs:trustedNodes, ComputePreference:rp.ComputePreference, IncludeCandidateIDs: rp.IncludeCandidateIDs, ExcludeCandidateIDs: rp.ExcludedCandidateIDs})
 	if err != nil || decision.Selected == nil {
 		if err == nil {
 			err = scheduler.ErrNoEligibleCandidate
@@ -119,6 +141,12 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	if reservationID != "" {
 		_ = s.journal(ctx, run.ID, "budget", "reserved", &kind, &cid, nil, &reservationID, map[string]any{"budget_account_id": rp.BudgetAccountID})
 	}
+	// A human may update or archive an Agent during model queue selection.
+	// Do not dispatch inference with stale prompt/Agent provenance.
+	if err:=enforceTaskAgentProfileBinding(ctx,s.db,run.WorkspaceID,agentBinding);err!=nil{
+		s.releaseBudgetIfReserved(ctx,reservationID)
+		return s.blockRun(ctx,run,res,"pinned Agent profile changed during model selection: "+err.Error())
+	}
 	if err := s.markReasoningDispatch(ctx, &run, kind, cid); err != nil {
 		s.releaseBudgetIfReserved(ctx, reservationID)
 		// Dispatch ownership may have changed while selecting a model.
@@ -127,15 +155,32 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	}
 
 	constraints, _ := json.Marshal(map[string]any{"completion": json.RawMessage(t.Completion), "worker": map[string]any{"max_steps": run.MaxSteps, "steps_used": run.StepCount, "max_replans": run.MaxReplans, "replans_used": run.ReplanCount, "max_escalations": run.MaxEscalations, "escalations_used": run.EscalationCount}})
+	// Repeat the revision check at the last Worker-owned call boundary.
+	// Inference and gateway paths must still enforce their own revocations.
+	if err:=enforceTaskAgentProfileBinding(ctx,s.db,run.WorkspaceID,agentBinding);err!=nil{
+		s.releaseBudgetIfReserved(ctx,reservationID)
+		return s.blockRun(ctx,run,res,"pinned Agent profile changed before dispatch: "+err.Error())
+	}
 	response, ref, dispatchErr := s.dispatch(ctx, run, t, cand, compiled, constraints, label, reservationID)
 	stepKind := "model"
 	if cand.Kind == scheduler.CandidateAgentRuntime {
 		stepKind = "agent_runtime"
 	}
 	if dispatchErr != nil {
+		if errors.Is(dispatchErr, ErrDispatchRequiresReconciliation) {
+			// Do not release potentially spent quota or route a fallback.
+			// Atomically interrupt the Task, Attempt and Worker with evidence.
+			return s.interruptDispatchForReconciliation(ctx, run, res, stepKind, kind, cid, ref, dispatchErr)
+		}
 		s.releaseBudgetIfReserved(ctx, reservationID)
 		_ = s.journal(ctx, run.ID, stepKind, "failed", &kind, &cid, nil, &ref, map[string]any{"error": dispatchErr.Error()})
 		return s.handleDispatchFailure(ctx, run, res, cid, dispatchErr)
+	}
+	// A running inference may finish after its Agent's instructions have
+	// changed or the profile has been archived. Discard its proposal before
+	// any tool, file, network or delegation effect is interpreted.
+	if err:=enforceTaskAgentProfileBinding(ctx,s.db,run.WorkspaceID,agentBinding);err!=nil{
+		return s.blockRun(ctx,run,res,"pinned Agent profile revoked before proposal application: "+err.Error())
 	}
 	pt := string(response.ProposalType)
 	res.Proposal = pt
@@ -154,7 +199,12 @@ func (s *Service) compileContext(ctx context.Context, run Run, t task.Task) (con
 	if err := s.db.QueryRowContext(ctx, `SELECT name,instructions_md,default_role,revision FROM agent_profiles WHERE id=? AND status='active' AND (workspace_id=? OR workspace_id IS NULL) ORDER BY CASE WHEN workspace_id=? THEN 0 ELSE 1 END LIMIT 1`, profileID, run.WorkspaceID, run.WorkspaceID).Scan(&profileName,&profileInstructions,&profileRole,&profileRevision); err == nil {
 		profileRaw,_:=json.Marshal(map[string]any{"profile_id":profileID,"name":profileName,"role":profileRole,"revision":profileRevision,"instructions":profileInstructions,"authority":false,"note":"Profile instructions affect reasoning only and grant no capabilities or permissions."})
 		sections=append(sections,contextcompiler.Section{ID:"agent-profile",Kind:"agent_profile",Trust:"USER_INSTRUCTION",Authoritative:false,Required:true,Priority:99,Content:profileRaw})
-	} else if !errors.Is(err,sql.ErrNoRows) { return contextcompiler.Result{},err }
+	} else if errors.Is(err,sql.ErrNoRows) {
+		explicit:=strings.TrimSpace(routing.AgentProfile)
+		if explicit!=""&&!strings.EqualFold(explicit,"onepane-default")&&explicit!="agent.md"{
+			return contextcompiler.Result{},fmt.Errorf("explicit custom Agent profile is unavailable or revoked")
+		}
+	} else { return contextcompiler.Result{},err }
 	// Resource backoff is internal scheduler bookkeeping, not an instruction
 	// to the model. Once it becomes available, don't tell the model that it is
 	// still unavailable or let historical wait data bias tool selection.
@@ -207,10 +257,11 @@ func (s *Service) dispatch(ctx context.Context, run Run, t task.Task, c schedule
 		taskID, attemptID := t.ID, run.AttemptID
 		result, err := s.runtimes.Invoke(ctx, agentruntime.InvokeCommand{WorkspaceID: run.WorkspaceID, TaskID: &taskID, AttemptID: &attemptID, PrincipalID: WorkerPrincipal, ConnectionID: c.ID, Role: run.RoleName, Objective: t.Objective, Constraints: constraints, Context: compiled.Sections, ContextManifest: compiled.ManifestJSON, PermittedProposalTypes: permitted, InputLabel: label, ActorPrincipalID: strPtr(WorkerPrincipal), BudgetReservationID: optionalString(reservationID)})
 		if err != nil {
-			return agentprotocol.Response{}, result.Invocation.ID, err
+			return agentprotocol.Response{}, result.Invocation.ID, reconcileRuntimeDispatchError(result, err)
 		}
 		if result.Response == nil {
-			return agentprotocol.Response{}, result.Invocation.ID, fmt.Errorf("external runtime returned no AgentResponse")
+			return agentprotocol.Response{}, result.Invocation.ID,
+				dispatchReconciliationError(fmt.Errorf("external runtime returned no AgentResponse"))
 		}
 		return *result.Response, result.Invocation.ID, nil
 	}
@@ -228,33 +279,34 @@ func (s *Service) dispatch(ctx context.Context, run Run, t task.Task, c schedule
 	taskID := t.ID
 	q, err := s.inference.Execute(ctx, inference.ExecuteCommand{WorkspaceID: run.WorkspaceID, TaskID: &taskID, PrincipalID: WorkerPrincipal, DeploymentID: c.ID, CapabilityJSON: capJSON, ContextManifestJSON: compiled.ManifestJSON, ClassificationMetadata: json.RawMessage(`{"agent_worker":true}`), InputLabel: label, RequestJSON: body, ActorPrincipalID: strPtr(WorkerPrincipal), BudgetReservationID: optionalString(reservationID)})
 	if err != nil {
-		return agentprotocol.Response{}, q.ID, err
+		return agentprotocol.Response{}, q.ID, reconcileInferenceDispatchError(q, err)
 	}
-	if q.ResponseArtifactID == nil {
-		return agentprotocol.Response{}, q.ID, fmt.Errorf("inference succeeded without response artifact")
+	if q.Status != inference.RequestSucceeded || q.ResponseArtifactID == nil {
+		return agentprotocol.Response{}, q.ID,
+			dispatchReconciliationError(fmt.Errorf("inference request %s completed without a usable response (status %s)", q.ID, q.Status))
 	}
 	if err := s.artifacts.VerifyContent(ctx, *q.ResponseArtifactID); err != nil {
-		return agentprotocol.Response{}, q.ID, err
+		return agentprotocol.Response{}, q.ID, dispatchReconciliationError(err)
 	}
 	rc, _, err := s.artifacts.Open(ctx, *q.ResponseArtifactID)
 	if err != nil {
-		return agentprotocol.Response{}, q.ID, err
+		return agentprotocol.Response{}, q.ID, dispatchReconciliationError(err)
 	}
 	defer rc.Close()
 	raw, err := io.ReadAll(io.LimitReader(rc, 32<<20))
 	if err != nil {
-		return agentprotocol.Response{}, q.ID, err
+		return agentprotocol.Response{}, q.ID, dispatchReconciliationError(err)
 	}
 	resp, err := decodeModelResponse(raw, areq)
 	if err != nil {
-		return agentprotocol.Response{}, q.ID, err
+		return agentprotocol.Response{}, q.ID, dispatchReconciliationError(err)
 	}
 	canonical, _ := json.Marshal(resp)
 	outLabel, _ := policy.InheritLabels(label)
 	meta, _ := json.Marshal(map[string]any{"inference_request_id": q.ID, "agent_request_id": reqID, "proposal_type": resp.ProposalType})
 	a, err := s.artifacts.Create(ctx, artifact.CreateCommand{WorkspaceID: run.WorkspaceID, MediaType: "application/vnd.onepane.agent-response+json", Label: outLabel, Status: artifact.StatusActive, Metadata: meta, CreatedBy: strPtr(WorkerPrincipal), ActorPrincipalID: strPtr(WorkerPrincipal)}, bytes.NewReader(canonical))
 	if err != nil {
-		return agentprotocol.Response{}, q.ID, err
+		return agentprotocol.Response{}, q.ID, dispatchReconciliationError(err)
 	}
 	return resp, a.ID, nil
 }
@@ -331,6 +383,11 @@ func (s *Service) handleDispatchFailure(ctx context.Context, run Run, res TickRe
 	if !rp.RoutingEnabled {
 		return s.blockRun(ctx, run, res, "single-path dispatch failed: "+cause.Error())
 	}
+	fallbackAllowed,fallbackErr:=(featurepolicy.StoredScopes{DB:s.db}).AuthorizeTask(ctx,run.WorkspaceID,run.TaskID,"inference.fallback")
+	if fallbackErr!=nil||!fallbackAllowed {
+		return s.blockRun(ctx,run,res,"automatic model fallback is not permitted by effective feature policy")
+	}
+
 	if run.EscalationCount < run.MaxEscalations {
 		if !contains(rp.ExcludedCandidateIDs, candidateID) {
 			rp.ExcludedCandidateIDs = append(rp.ExcludedCandidateIDs, candidateID)
@@ -610,34 +667,18 @@ func (s *Service) handleEscalate(ctx context.Context, run Run, resp agentprotoco
 func (s *Service) handleHuman(ctx context.Context, run Run, t task.Task, resp agentprotocol.Response, res TickResult) TickResult {
 	var p humanProposal
 	_ = json.Unmarshal(resp.Proposal, &p)
-	cont, _ := json.Marshal(map[string]any{"human_input_required": p.Question})
-	if err := s.updateRun(ctx, run.ID, run.Revision, RunWaiting, cont, nil, 0, 0, nil, nil, nil); err != nil {
-		return failedResult(res, err)
-	}
-	cur, _ := s.tasks.Get(ctx, t.ID)
-	actor := WorkerPrincipal
-	_, err := s.tasks.WaitApproval(ctx, task.TransitionCommand{TaskID: cur.ID, ExpectedRevision: cur.Revision, ActorPrincipalID: &actor, Reason: "human input required: " + boundedString(p.Question, 512)})
-	if err != nil {
-		return s.failRun(ctx, run, res, err)
-	}
-	res.Status = "waiting_human"
-	return res
+	question := boundedString(p.Question, 512)
+	cont, _ := json.Marshal(map[string]any{"human_input_required": question})
+	return s.waitRunAtomically(ctx, run, res, task.StateWaitingApproval,
+		"human input required", cont, "human", "waiting_human")
 }
 func (s *Service) handleWait(ctx context.Context, run Run, t task.Task, resp agentprotocol.Response, res TickResult) TickResult {
 	var p waitProposal
 	_ = json.Unmarshal(resp.Proposal, &p)
-	cont, _ := json.Marshal(map[string]any{"wait_reason": p.Reason})
-	if err := s.updateRun(ctx, run.ID, run.Revision, RunWaiting, cont, nil, 0, 0, nil, nil, nil); err != nil {
-		return failedResult(res, err)
-	}
-	cur, _ := s.tasks.Get(ctx, t.ID)
-	actor := WorkerPrincipal
-	_, err := s.tasks.Pause(ctx, task.TransitionCommand{TaskID: cur.ID, ExpectedRevision: cur.Revision, ActorPrincipalID: &actor, Reason: boundedString(p.Reason, 512)})
-	if err != nil {
-		return s.failRun(ctx, run, res, err)
-	}
-	res.Status = "paused"
-	return res
+	reason := boundedString(p.Reason, 512)
+	cont, _ := json.Marshal(map[string]any{"wait_reason": reason})
+	return s.waitRunAtomically(ctx, run, res, task.StatePaused,
+		reason, cont, "wait", "paused")
 }
 func (s *Service) handleFail(ctx context.Context, run Run, t task.Task, resp agentprotocol.Response, res TickResult) TickResult {
 	var p failProposal
@@ -645,16 +686,10 @@ func (s *Service) handleFail(ctx context.Context, run Run, t task.Task, resp age
 	if strings.TrimSpace(p.Reason) == "" {
 		p.Reason = "worker model proposed failure"
 	}
-	cur, _ := s.tasks.Get(ctx, t.ID)
-	actor := WorkerPrincipal
-	_, err := s.tasks.Fail(ctx, task.TransitionCommand{TaskID: cur.ID, ExpectedRevision: cur.Revision, ActorPrincipalID: &actor, Reason: boundedString(p.Reason, 1024)})
-	if err != nil {
-		return s.failRun(ctx, run, res, err)
-	}
-	_ = s.finishRun(ctx, run.ID, RunFailed, p.Reason)
-	res.Status = "failed"
-	res.Error = p.Reason
-	return res
+	// A model-proposed terminal failure is subject to the same exact
+	// Task/Attempt/Worker atomicity and durable error handling as other
+	// failures. No Task.Fail followed by an unchecked Worker status update.
+	return s.failRun(ctx, run, res, fmt.Errorf("%s", boundedString(p.Reason, 1024)))
 }
 
 func (s *Service) handleComplete(ctx context.Context, run Run, t task.Task, resp agentprotocol.Response, res TickResult) TickResult {
@@ -702,11 +737,10 @@ func (s *Service) handleComplete(ctx context.Context, run Run, t task.Task, resp
 			return s.failRun(ctx, run, res, err)
 		}
 		cont, _ := json.Marshal(map[string]any{"completion_proposal": json.RawMessage(resp.Proposal), "required_verification": required, "verification_id": v.ID})
-		_ = s.updateRun(ctx, run.ID, run.Revision, RunBlocked, cont, nil, 0, 0, nil, nil, strPtr(ErrHigherVerification.Error()))
-		_ = s.journal(ctx, run.ID, "verification", "queued", nil, nil, strPtr("complete"), strPtr(v.ID), map[string]any{"verification_id": v.ID, "required_level": required})
-		res.Status = "blocked_verification"
-		res.Error = fmt.Sprintf("completion requires %s; independent assurance queued", required)
-		return res
+		// A pending independent assurance is not a completed Task. Persist
+		// Worker suspension and the schema-valid WAITING journal together.
+		// Failed persistence must not pretend higher verification was parked.
+		return s.parkWorkerForIndependentAssurance(ctx,run,res,cont,v.ID,string(required))
 	}
 	spec, _ := json.Marshal(map[string]any{"source": "agent_completion_proposal", "worker_run_id": run.ID, "rule": "V0 is declaration only; no independent factual claim is inferred"})
 	v, err := s.verification.Create(ctx, verification.CreateCommand{WorkspaceID: run.WorkspaceID, TaskID: &cur.ID, SubjectRef: "agent_worker_run:" + run.ID, RequiredLevel: policy.VerificationV0, Spec: spec, ActorPrincipalID: &verifier})
@@ -728,12 +762,8 @@ func (s *Service) handleComplete(ctx context.Context, run Run, t task.Task, resp
 	if err != nil {
 		return s.failRun(ctx, run, res, err)
 	}
-	_, err = s.tasks.CompleteVerified(ctx, task.CompleteCommand{TaskID: cur.ID, ExpectedRevision: cur.Revision, CheckpointID: cp.ID, Result: p.Result, ActorPrincipalID: &verifier})
-	if err != nil {
-		return s.failRun(ctx, run, res, err)
-	}
-	_ = s.finishRun(ctx, run.ID, RunSucceeded, "")
-	_ = s.journal(ctx, run.ID, "verification", "succeeded", nil, nil, strPtr("complete"), strPtr(cp.ID), map[string]any{"verification_id": v.ID, "checkpoint_id": cp.ID, "level": "V0"})
-	res.Status = "complete"
-	return res
+	// Durable V0 completion is one Task/Attempt/Worker/audit commit.
+	// A partially committed completion must never be presented as success.
+	return s.completeVerifiedWorkerRun(ctx,run,res,cur.Revision,
+		cp.ID,p.Result,v.ID)
 }

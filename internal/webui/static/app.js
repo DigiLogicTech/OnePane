@@ -9,7 +9,8 @@ let a31AgentView="profiles";
 let a31SkillsView="installed";
 let a31SettingsView="overview";
 let a31OperationsView="overview";
-let a31ControlTab="assistant";
+let a31AssistantProjectID="";
+let a31AssistantWorkspaceID="";
 let a31AssistantThreadID="";
 let a31AssistantThreadWorkspace="";
 let a31InstallPoll=null;
@@ -512,6 +513,75 @@ renderNodes=async function(){
 
 /* Agents, Teams, Research */
 function a31ProfileMeta(p){return a31JSON(p.metadata,{})}
+async function a31EditAgentRestrictions(profile){
+  if(!profile||profile.source_kind!=='custom')return;
+  const url='/v1/agent-profiles/'+encodeURIComponent(profile.id)+'/policy';
+  let current;
+  try{current=await apiRequest(url+'?workspace_id='+encodeURIComponent(onepaneWorkspace))}
+  catch(ex){notice('Cannot read Agent restrictions: '+ex.message,'bad');return}
+  const existing=a31Object(current.policy?.feature_policy);
+  const fields=[
+    ['FileRead','Read files'],['FileWrite','Write files'],
+    ['ProcessExecute','Execute programs'],['NetworkAccess','Network access'],
+    ['SecretsAccess','Use secrets']
+  ];
+  openModal('Agent restrictions · '+String(profile.name||'Custom Agent'),
+    '<form id="a31AgentPolicyForm" class="qa-form">'+
+    '<p class="page-subtitle">Checked permissions are DENIED. Unchecked permissions inherit the Project and Workspace policy, never grant new rights. Removing an existing restriction requires human approval.</p>'+
+    '<div class="page-subtitle">Independent policy revision: '+Number(current.revision||0)+'</div>'+
+    fields.map(([key,label])=>'<label class="inline-check"><input type="checkbox" data-agent-deny="'+escapeHtml(key)+'" '+(
+      existing[key]==='disabled'||existing[key]==='unavailable'?'checked':''
+    )+'> Deny '+escapeHtml(label)+'</label>').join('')+
+    '<div class="error" id="a31AgentPolicyError" role="status"></div>'+
+    '<button type="button" class="btn" id="a31AgentPolicyHistory">View revision history</button>'+
+    '<div id="a31AgentPolicyHistoryResults" class="page-subtitle"></div>'+
+    '<button type="submit" class="btn primary">Save Agent restrictions</button></form>');
+  const form=$('#a31AgentPolicyForm');
+  if(!form)return;
+  $('#a31AgentPolicyHistory')?.addEventListener('click',async()=>{
+    const holder=$('#a31AgentPolicyHistoryResults');
+    if(!holder)return;
+    holder.textContent='Loading scoped revision metadata…';
+    try{
+      const rows=await apiRequest(url+'/history?workspace_id='+encodeURIComponent(onepaneWorkspace)+'&limit=20');
+      if(!holder.isConnected)return;
+      holder.innerHTML=Array.isArray(rows)&&rows.length?
+        rows.map(r=>'<div class="list-row">Revision '+escapeHtml(r.revision)+
+          ' · '+escapeHtml(r.issued_by||'unknown operator')+
+          ' · '+escapeHtml(new Date(r.issued_at).toLocaleString())+
+          ' · immutable denial policy</div>').join(''):
+        '<div class="page-subtitle">No prior Agent policy revisions.</div>';
+    }catch(ex){if(holder.isConnected)holder.textContent='History unavailable: '+ex.message}
+  });
+  form.onsubmit=async e=>{
+    e.preventDefault();
+    const save=form.querySelector('button[type="submit"]');
+    const policy={};
+    for(const [key] of fields){
+      const checked=!!form.querySelector('[data-agent-deny="'+key+'"]')?.checked;
+      policy[key]=checked?'disabled':'inherited';
+    }
+    // Preserve restrictions outside the five common controls. They may
+    // originate from specialist Agent policy revisions.
+    for(const [key,value] of Object.entries(existing)){
+      if(!(key in policy))policy[key]=value;
+    }
+    save.disabled=true;
+    try{
+      await apiRequest(url,{method:'PUT',body:JSON.stringify({
+        workspace_id:onepaneWorkspace,expected_revision:Number(current.revision||0),
+        policy:{feature_policy:policy}
+      })});
+      closeModal();notice('Agent policy revision saved. Worker/tool grants re-evaluate before execution.');
+      renderAgents();
+    }catch(ex){
+      const status=$('#a31AgentPolicyError');
+      if(status)status.textContent='Policy update denied: '+ex.message;
+      save.disabled=false;
+    }
+  };
+}
+
 async function a31DuplicateProfile(p){
   openModal("Duplicate Agent Profile",`<form id="a31DuplicateProfile" class="qa-form"><label>Name<input name="name" value="${escapeHtml((p.name||"Profile")+" - Custom")}"></label><label>Instructions<textarea name="instructions" rows="9">${escapeHtml(p.instructions_md||"")}</textarea></label><button class="btn primary">Create custom profile</button></form>`);
   $("#a31DuplicateProfile").onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.currentTarget),meta=a31ProfileMeta(p);try{await apiRequest("/v1/agent-profiles",{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace,name:fd.get("name"),description:p.description||"",instructions_md:fd.get("instructions"),default_role:p.default_role||"",capability_id:p.capability_id||"inference.general",protocol_level:p.protocol_level||"L1",metadata:{...meta,based_on:p.id}})});closeModal();renderAgents()}catch(ex){notice(ex.message,"bad")}}
@@ -529,7 +599,7 @@ async function a31EditTeam(team){
 renderAgents=async function(){
   $("#viewHost").innerHTML=`<section class="page">${pageHeader("Agents","Reusable Profiles, Sessions, Teams and Councils with policy-scoped capabilities.")}<div class="subtabs"><button class="subtab ${a31AgentView==='profiles'?'active':''}" data-a31-agent-tab="profiles">Profiles</button><button class="subtab ${a31AgentView==='teams'?'active':''}" data-a31-agent-tab="teams">Teams</button><button class="subtab ${a31AgentView==='sessions'?'active':''}" data-a31-agent-tab="sessions">Sessions</button><button class="subtab ${a31AgentView==='councils'?'active':''}" data-a31-agent-tab="councils">Councils</button></div><div id="a31AgentsBody"><div class="widget-body">Loading…</div></div></section>`;$$("[data-a31-agent-tab]").forEach(b=>b.onclick=()=>a31SetAgentView(b.dataset.a31AgentTab));const body=$("#a31AgentsBody");
   try{
-    if(a31AgentView==="profiles"){const [profiles,bundles]=await Promise.all([apiRequest(`/v1/agent-profiles?workspace_id=${encodeURIComponent(onepaneWorkspace)}`),apiRequest(`/v1/skills/tool-bundles?workspace_id=${encodeURIComponent(onepaneWorkspace)}`).catch(()=>[])]);body.innerHTML=`<div class="agent-profile-grid">${a31Array(profiles).map((p,i)=>{const m=a31ProfileMeta(p),pbs=a31Array(m.recommended_tool_bundles);return `<article class="panel-card agent-profile-card"><div class="card-header"><div><div class="card-title">${escapeHtml(p.name)}</div><div class="list-meta">${escapeHtml(titleCase(m.category||p.default_role||"general"))} · ${escapeHtml(p.protocol_level||"L1")}</div></div><span class="pill ${p.source_kind==='builtin'?'good':''}">${p.source_kind==='builtin'?'DigiLogic Core':'Custom'}</span></div><div class="widget-body"><p>${escapeHtml(p.description||"")}</p><div class="tool-chip-row">${pbs.map(x=>`<span class="tool-chip">${escapeHtml(x)}</span>`).join("")}</div><div class="toolbar"><button class="btn" data-a31-profile-view="${i}">View</button>${p.source_kind==='builtin'?`<button class="btn primary" data-a31-profile-duplicate="${i}">Duplicate & customise</button>`:""}</div></div></article>`}).join("")}</div>`;$$("[data-a31-profile-view]").forEach(b=>b.onclick=()=>{const p=profiles[Number(b.dataset.a31ProfileView)];openModal(p.name,`<div class="widget-body"><p>${escapeHtml(p.description||"")}</p><pre class="text-preview">${escapeHtml(p.instructions_md||"")}</pre></div>`)});$$("[data-a31-profile-duplicate]").forEach(b=>b.onclick=()=>a31DuplicateProfile(profiles[Number(b.dataset.a31ProfileDuplicate)]))}
+    if(a31AgentView==="profiles"){const [profiles,bundles]=await Promise.all([apiRequest(`/v1/agent-profiles?workspace_id=${encodeURIComponent(onepaneWorkspace)}`),apiRequest(`/v1/skills/tool-bundles?workspace_id=${encodeURIComponent(onepaneWorkspace)}`).catch(()=>[])]);body.innerHTML=`<div class="agent-profile-grid">${a31Array(profiles).map((p,i)=>{const m=a31ProfileMeta(p),pbs=a31Array(m.recommended_tool_bundles);return `<article class="panel-card agent-profile-card"><div class="card-header"><div><div class="card-title">${escapeHtml(p.name)}</div><div class="list-meta">${escapeHtml(titleCase(m.category||p.default_role||"general"))} · ${escapeHtml(p.protocol_level||"L1")}</div></div><span class="pill ${p.source_kind==='builtin'?'good':''}">${p.source_kind==='builtin'?'DigiLogic Core':'Custom'}</span></div><div class="widget-body"><p>${escapeHtml(p.description||"")}</p><div class="tool-chip-row">${pbs.map(x=>`<span class="tool-chip">${escapeHtml(x)}</span>`).join("")}</div><div class="toolbar"><button class="btn" data-a31-profile-view="${i}">View</button>${p.source_kind==='builtin'?`<button class="btn primary" data-a31-profile-duplicate="${i}">Duplicate & customise</button>`:`<button class="btn" data-a31-profile-restrictions="${i}">Restrictions</button>`}</div></div></article>`}).join("")}</div>`;$$("[data-a31-profile-view]").forEach(b=>b.onclick=()=>{const p=profiles[Number(b.dataset.a31ProfileView)];openModal(p.name,`<div class="widget-body"><p>${escapeHtml(p.description||"")}</p><pre class="text-preview">${escapeHtml(p.instructions_md||"")}</pre></div>`)});$("[data-a31-profile-duplicate]").forEach(b=>b.onclick=()=>a31DuplicateProfile(profiles[Number(b.dataset.a31ProfileDuplicate)]));$("[data-a31-profile-restrictions]").forEach(b=>b.onclick=()=>a31EditAgentRestrictions(profiles[Number(b.dataset.a31ProfileRestrictions)]))}
     else if(a31AgentView==="teams"){const [teams,presets]=await Promise.all([apiRequest(`/v1/teams?workspace_id=${encodeURIComponent(onepaneWorkspace)}`),apiRequest(`/v1/team-presets?workspace_id=${encodeURIComponent(onepaneWorkspace)}`)]);body.innerHTML=`<section class="panel-card"><div class="card-header"><div><div class="card-title">Team templates</div><div class="list-meta">Create a legitimate Team with profile-backed agent seats.</div></div></div><div class="team-preset-grid">${a31Array(presets).map((p,i)=>`<article class="team-preset"><strong>${escapeHtml(p.name||p.Name)}</strong><span>${escapeHtml(p.description||p.Description||"")}</span><button class="btn" data-a31-team-preset="${i}">Create Team</button></article>`).join("")}</div></section><section class="panel-card"><div class="card-header"><div class="card-title">Configured Teams</div></div><div class="team-list">${a31Array(teams).map((t,i)=>{const cfg=a31JSON(t.configuration??t.Configuration,{}),name=t.name||t.Name,purpose=t.purpose||t.Purpose||"";return `<div class="team-row"><div><strong>${escapeHtml(name)}</strong><div class="list-meta">${escapeHtml(purpose)} ${cfg.research_mode?'· Research mode':''}</div></div><span class="pill ${cfg.research_mode?'good':''}">${cfg.research_mode?'Research':'Standard'}</span><button class="btn" data-a31-team-edit="${i}">Configure</button></div>`}).join("")||'<div class="empty-state compact">No Teams configured yet.</div>'}</div></section>`;$$("[data-a31-team-preset]").forEach(b=>b.onclick=()=>a31CreateTeamPreset(presets[Number(b.dataset.a31TeamPreset)]));$$("[data-a31-team-edit]").forEach(b=>b.onclick=()=>a31EditTeam(teams[Number(b.dataset.a31TeamEdit)]))}
     else if(a31AgentView==="sessions"){const rows=await apiRequest(`/v1/agent-sessions?workspace_id=${encodeURIComponent(onepaneWorkspace)}`);body.innerHTML=`<div class="table-shell"><table class="data-table"><thead><tr><th>Task</th><th>Mode</th><th>Profile</th><th>State</th></tr></thead><tbody>${a31Array(rows).map(x=>`<tr><td>${escapeHtml(x.task_id||"")}</td><td>${escapeHtml(x.execution_mode||"")}</td><td>${escapeHtml(x.profile_id||"")}</td><td>${escapeHtml(x.state||"")}</td></tr>`).join("")}</tbody></table></div>`}
     else body.innerHTML='<section class="panel-card"><div class="widget-body"><strong>Councils</strong><p>Council execution remains Workspace-owned. Research mode adds pinned-model, independent-pass and provenance constraints when selected from a Research-capable Team/Council configuration.</p><button class="btn" data-route="projects">Configure in Workspace</button></div></section>';
@@ -559,21 +629,88 @@ renderSkills=async function(){
 function a31SetControlChatCollapsed(collapsed){
   state.controlChatCollapsed=!!collapsed;persist();const panel=$("#controlChatPanel"),toggle=$("#controlChatToggle");if(panel)panel.dataset.collapsed=state.controlChatCollapsed?"true":"false";if(toggle){toggle.setAttribute("aria-expanded",state.controlChatCollapsed?"false":"true");toggle.title=state.controlChatCollapsed?"Expand OnePane Chat":"Collapse OnePane Chat"}requestAnimationFrame(()=>a33ApplyControlChatPosition());
 }
-function a31OpenControlChat(tab=a31ControlTab){
-  a31ControlTab=tab;const panel=$("#controlChatPanel");if(!panel)return;panel.dataset.state="open";panel.removeAttribute("hidden");a31SetControlChatCollapsed(!!state.controlChatCollapsed);a31RenderControlChat();requestAnimationFrame(()=>a33ApplyControlChatPosition());
+function a31OpenControlChat(){const panel=$("#controlChatPanel");if(!panel)return;panel.dataset.state="open";panel.removeAttribute("hidden");a31SetControlChatCollapsed(!!state.controlChatCollapsed);a31RenderControlChat();requestAnimationFrame(()=>a33ApplyControlChatPosition());
 }
 function a31CloseControlChat(){const p=$("#controlChatPanel");if(p){p.dataset.state="closed";p.setAttribute("hidden","")}}
 async function a31EnsureAssistantThread(){
   const workspace=String(onepaneWorkspace||"");if(a31AssistantThreadID&&a31AssistantThreadWorkspace===workspace)return a31AssistantThreadID;
   a31AssistantThreadID="";a31AssistantThreadWorkspace="";
   const rows=await apiRequest(`/v1/assistant/threads?workspace_id=${encodeURIComponent(workspace)}&limit=20`);const t=a31Array(rows)[0]||await apiRequest("/v1/assistant/threads",{method:"POST",body:JSON.stringify({workspace_id:workspace,title:"OnePane Control Chat"})});
-  a31AssistantThreadID=t.id;a31AssistantThreadWorkspace=workspace;return t.id;
+  a31AssistantThreadID=t.id;a31AssistantThreadWorkspace=workspace;a31AssistantProjectID=String(t.active_project_id||"");a31AssistantWorkspaceID="";return t.id;
 }
+
 async function a31RenderControlChat(){
-  const body=$("#controlChatBody");if(!body)return;const projects=a31Array(qa4ProjectHub?.projects),current=a31CurrentProject();
-  $("#controlChatAssistantTab")?.classList.toggle("active",a31ControlTab==="assistant");$("#controlChatOrchestratorTab")?.classList.toggle("active",a31ControlTab==="orchestrator");
-  if(a31ControlTab==="assistant"){body.innerHTML='<div class="control-chat-loading">Loading Assistant…</div>';try{const id=await a31EnsureAssistantThread(),[turns,picker]=await Promise.all([apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/turns?limit=100`),a31AssistantModelPicker(id)]);body.innerHTML=`<div class="control-chat-scope">Global OnePane Assistant</div>${picker.ui}<div class="control-chat-history">${a31Array(turns).map(t=>`<div class="control-chat-message ${t.role||t.author_kind||''}"><strong>${escapeHtml(t.role||t.author_kind||"OnePane")}</strong><span>${escapeHtml(t.content||t.text||"")}</span></div>`).join("")}</div><form id="a31ControlChatForm" class="control-chat-form"><textarea rows="3" placeholder="Ask OnePane…"></textarea><div><button class="btn">Ask</button><button class="btn primary" name="run" value="1">Run</button></div></form>`;a31BindAssistantModelPicker(id,picker);$("#a31ControlChatForm").onsubmit=async e=>{e.preventDefault();const text=e.currentTarget.querySelector("textarea").value.trim();if(!text)return;const run=e.submitter?.value==="1";try{await apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/turns`,{method:"POST",body:JSON.stringify({content:text,allow_task_creation:run,force_task:false})});a31RenderControlChat()}catch(ex){notice(ex.message,"bad")}}}catch(ex){body.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`}}
-  else{const pid=$("#controlChatProject")?.value||current?.id||projects[0]?.id;if(!pid){body.innerHTML='<div class="empty-state compact">Create a Project before using Project Orchestrator.</div>';return}const p=projects.find(x=>x.id===pid),workspaces=p?qa4Workspaces(p):[];body.innerHTML=`<div class="control-chat-selectors"><label>Project<select id="controlChatProject">${projects.map(x=>`<option value="${escapeHtml(x.id)}" ${x.id===pid?'selected':''}>${escapeHtml(x.name)}</option>`).join("")}</select></label><label>Workspace<select id="controlChatWorkspace"><option value="">Project-wide</option>${workspaces.map(w=>`<option value="${escapeHtml(w.id)}">${escapeHtml(w.name)}</option>`).join("")}</select></label></div><div id="a31OrchestratorTurns" class="control-chat-history">Loading…</div><form id="a31OrchestratorForm" class="control-chat-form"><textarea rows="3" placeholder="Ask the Project Orchestrator…"></textarea><div><button class="btn">Ask</button><button class="btn primary" name="run" value="1">Run</button></div></form>`;$("#controlChatProject").onchange=()=>a31RenderControlChat();try{const turns=await apiRequest(`/v1/projects/${encodeURIComponent(pid)}/orchestrator/turns?limit=100`);$("#a31OrchestratorTurns").innerHTML=a31Array(turns).map(t=>`<div class="control-chat-message ${t.role||''}"><strong>${escapeHtml(t.role||"OnePane")}</strong><span>${escapeHtml(t.content||t.objective||t.response||"")}</span></div>`).join("");$("#a31OrchestratorForm").onsubmit=async e=>{e.preventDefault();const objective=e.currentTarget.querySelector("textarea").value.trim(),run=e.submitter?.value==="1",ws=$("#controlChatWorkspace").value;if(!objective)return;try{await apiRequest(`/v1/projects/${encodeURIComponent(pid)}/orchestrator/turns`,{method:"POST",body:JSON.stringify({objective,project_workspace_id:ws,allow_task_creation:run,force_task:false})});a31RenderControlChat()}catch(ex){notice(ex.message,"bad")}}}catch(ex){$("#a31OrchestratorTurns").innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`}}
+  const body=$("#controlChatBody");if(!body)return;
+  body.innerHTML='<div class="control-chat-loading">Loading Assistant…</div>';
+  try{
+    const id=await a31EnsureAssistantThread();
+    const [turns,projectRows]=await Promise.all([
+      apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/turns?limit=100`),
+      apiRequest(`/v1/projects?workspace_id=${encodeURIComponent(onepaneWorkspace)}`)
+    ]);
+    const projects=a31Array(projectRows).filter(p=>p.status==="active");
+    const project=projects.find(p=>p.id===a31AssistantProjectID)||null;
+    // Avoid unnecessary model inventory requests while Project routing owns execution.
+    const picker=project?null:await a31AssistantModelPicker(id);
+    const workspaceRows=project?await apiRequest(`/v1/projects/${encodeURIComponent(project.id)}/workspaces`):[];
+    const workspaces=a31Array(workspaceRows).filter(w=>w.status==="active");
+    const selectedWorkspace=workspaces.find(w=>w.id===a31AssistantWorkspaceID)||null;
+    if(!selectedWorkspace)a31AssistantWorkspaceID="";
+    const canRun=!!project&&workspaces.length>0;
+    const workspaceAdvice=project&&workspaces.length>1&&!selectedWorkspace?
+      '<div class="control-chat-model-status">Multiple isolated Workspaces exist. Select a Workspace to queue Run immediately if the local planner is unavailable; automatic selection requires a successful planning decision.</div>':
+      project&&!workspaces.length?
+      '<div class="control-chat-model-status">Create an active Project Workspace before running tasks.</div>':'';
+    const selector=`<div class="control-chat-selectors">
+      <label>Context<select id="controlChatProject" aria-label="Assistant Project context">
+        <option value="" ${!project?'selected':''}>General conversation</option>
+        ${projects.map(p=>`<option value="${escapeHtml(p.id)}" ${project?.id===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join("")}
+      </select></label>
+      ${project?`<label>Workspace<select id="controlChatWorkspace" aria-label="Assistant Workspace context">
+        <option value="" ${!selectedWorkspace?'selected':''}>Automatic Workspace</option>
+        ${workspaces.map(w=>`<option value="${escapeHtml(w.id)}" ${selectedWorkspace?.id===w.id?'selected':''}>${escapeHtml(w.name)}</option>`).join("")}
+      </select></label>`:""}
+    </div>`;
+    const scope=project?(selectedWorkspace?`Project · ${project.name} / ${selectedWorkspace.name}`:`Project · ${project.name} (automatic Workspace)`):"General OnePane Assistant";
+    const prompt=project?"Ask OnePane to plan or execute within the selected Project…":"Ask OnePane a general question…";
+    body.innerHTML=`${selector}<div class="control-chat-scope">${escapeHtml(scope)}</div>
+      ${project?'<div class="control-chat-model-status">Project execution uses the authorised Project Orchestrator and Workspace routing; conversation alone grants no tools.</div>':picker.ui}
+      ${workspaceAdvice}
+      <div class="control-chat-history">${a31Array(turns).map(t=>`<div class="control-chat-message ${escapeHtml(t.role||"")}"><strong>${escapeHtml(t.role||"OnePane")}</strong><span>${escapeHtml(t.content||t.text||"")}</span></div>`).join("")}</div>
+      <form id="a31ControlChatForm" class="control-chat-form"><textarea rows="3" placeholder="${escapeHtml(prompt)}"></textarea>
+        <div><button class="btn" type="submit">Ask</button><button class="btn primary" type="submit" name="run" value="1" ${canRun?'':'disabled title="Select a Project with an active Workspace before running tasks"'}>Run</button>${!project?'<button class="btn" id="a31StartProjectFromAssistant" type="button">Start Project…</button>':''}</div>
+      </form>`;
+    if(!project){
+      a31BindAssistantModelPicker(id,picker);
+      // General chat must obtain human Project creation confirmation.
+      const start=$('#a31StartProjectFromAssistant');
+      if(start)start.onclick=()=>{
+        const objective=String($('#a31ControlChatForm textarea')?.value||'').trim();
+        openProjectDialog(objective);
+      };
+    }
+    $("#controlChatProject").onchange=async e=>{
+      const next=String(e.target.value||"");e.target.disabled=true;
+      try{
+        const updated=await apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/scope`,{method:"POST",body:JSON.stringify({project_id:next||null})});
+        a31AssistantProjectID=String(updated.active_project_id||"");a31AssistantWorkspaceID="";
+        await a31RenderControlChat();
+      }catch(ex){notice("Assistant scope: "+ex.message,"bad");await a31RenderControlChat()}
+    };
+    if(project)$("#controlChatWorkspace").onchange=e=>{a31AssistantWorkspaceID=String(e.target.value||"");a31RenderControlChat()};
+    $("#a31ControlChatForm").onsubmit=async e=>{
+      e.preventDefault();
+      const content=e.currentTarget.querySelector("textarea").value.trim();
+      if(!content)return;
+      const run=e.submitter?.value==="1";
+      if(run&&!canRun){notice("Select an active Project Workspace to run tasks.","bad");return}
+      try{
+        await apiRequest(`/v1/assistant/threads/${encodeURIComponent(id)}/turns`,{method:"POST",
+          body:JSON.stringify({content,project_id:project?.id||"",project_workspace_id:selectedWorkspace?.id||"",allow_task_creation:run,force_task:run})});
+        await a31RenderControlChat();
+      }catch(ex){notice(ex.message,"bad")}
+    };
+  }catch(ex){body.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`}
 }
 
 /* Settings */
@@ -621,7 +758,7 @@ startProductTour=function({replay=false,welcome=false}={}){
   const steps=[
     {title:"Welcome to OnePane",body:"DigiLogic OnePane brings Projects, Workspaces, Tasks, Agents, local and cloud models, Nodes, Skills, Councils and observability into one control plane.",target:null},
     {title:"Navigation",body:"Use the left menu to navigate Projects, expandable Workspaces, Local/Cloud Models, Nodes, Agents, Skills, Tasks and Operations.",target:".sidebar",padding:0},
-    {title:"OnePane Chat",body:"Assistant and Project Orchestrator are two separate chat tabs. Select the Assistant model and change projects in the Orchestrator without leaving your page.",target:"#controlChatLauncher"},
+    {title:"OnePane Chat",body:"One unified Assistant can answer general questions or coordinate scoped Project and Workspace tasks. Select context inside the same chat; grants remain independently enforced.",target:"#controlChatLauncher"},
     {title:"Web Chat is a separate workspace",body:"Web Chat uses the provider's own website and subscription, with individual OnePane conversation tabs. You can keep several ChatGPT, Claude, Gemini and other manual consultations open independently.",target:"#webChatLauncher",prepare:()=>{if(typeof openRoute==="function")openRoute("webchat")}},
     {title:"Start Web-only Research Council",body:"Start a Council here: enter a research objective, choose 2–8 consultation seats (or 2–7 plus a Chair), models, roles and critique rounds. OnePane manages prompts, queues and immutable research evidence; cloud websites stay external.",target:"#a41StartCouncil",prepare:async()=>{openRoute("webchat");if(typeof renderWebChat==="function")await renderWebChat()}},
     {title:"AI Chair and human approvals",body:"Choose a separate manual AI Chair and your final synthesis participant. The Chair proposes an agenda and follow-up questions; you can review/edit/approve each before the next round. No AI Chair keeps deterministic orchestration.",target:"#a41StartCouncil"},
@@ -759,7 +896,7 @@ function a33ToggleControlChatCollapsed(){const handle=$("#controlChatToggle");if
 const a31BindShellBase=bindShell;
 bindShell=function(){
   a31BindShellBase();a32BindPanelToggleMovement();a33BindControlChatDrag();if(typeof a31StartDownloadMonitor==="function")a31StartDownloadMonitor();window.addEventListener("resize",a33ApplyControlChatPosition);
-  $("#controlChatLauncher")?.addEventListener("click",()=>a33ToggleControlChatPanel());$("#webChatLauncher")?.addEventListener("click",()=>openRoute("webchat"));$("#controlChatClose")?.addEventListener("click",e=>{e.stopPropagation();a31CloseControlChat()});$("#controlChatToggle")?.addEventListener("click",()=>a33ToggleControlChatCollapsed());$("#controlChatAssistantTab")?.addEventListener("click",()=>a31OpenControlChat("assistant"));$("#controlChatOrchestratorTab")?.addEventListener("click",()=>a31OpenControlChat("orchestrator"));
+  $("#controlChatLauncher")?.addEventListener("click",()=>a33ToggleControlChatPanel());$("#webChatLauncher")?.addEventListener("click",()=>openRoute("webchat"));$("#controlChatClose")?.addEventListener("click",e=>{e.stopPropagation();a31CloseControlChat()});$("#controlChatToggle")?.addEventListener("click",()=>a33ToggleControlChatCollapsed());
 };
 renderActiveView=async function(){
   const epoch=++qa31ViewEpoch,t=currentTab();if(!t)return;if(t.state==="suspended")t.state="active";const route=t.route;

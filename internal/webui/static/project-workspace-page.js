@@ -293,11 +293,39 @@ renderNav=function(){
   const projectsButton=$('[data-route="projects"]',nav);if(projectsButton)projectsButton.classList.toggle("active",route==="projects");
   $$("[data-a31-project-nav]",nav).forEach(b=>{
     const isWorkspace=!!b.dataset.a31WorkspaceNav,projectID=b.dataset.a31ProjectNav,workspaceID=b.dataset.a31WorkspaceNav||"";
-    const active=route==="workspaces"&&projectID===qa4ProjectHub.activeProjectID&&(!isWorkspace||workspaceID===qa4ProjectHub.activeWorkspaceID);
+    const active=route==="workspaces"&&projectID===qa4ProjectHub.activeProjectID&&(isWorkspace?workspaceID===qa4ProjectHub.activeWorkspaceID:!qa4ProjectHub.activeWorkspaceID);
     b.classList.toggle("active",active);
     b.onclick=e=>{e.preventDefault();e.stopPropagation();a35OpenWorkspace(projectID,workspaceID)};
   });
   const legacyWorkspace=$('[data-route="workspaces"]',nav);if(legacyWorkspace)legacyWorkspace.remove();
+
+  // A leaf and its ancestor must not both be announced as the active
+  // destination. When the subtree is collapsed, highlight the visible
+  // parent instead so keyboard/screen-reader users retain route context.
+  if(projectsButton){
+    const activeWorkspaceLeaf=nav.querySelector('.project-nav-workspace.active,.project-nav-project.active');
+    projectsButton.classList.toggle('active',
+      route==='projects'||(route==='workspaces'&&!activeWorkspaceLeaf));
+  }
+  const modelsButton=$('[data-route="models"]',nav);
+  if(modelsButton){
+    const activeModelLeaf=nav.querySelector('.model-nav-child.active');
+    modelsButton.classList.toggle('active',route==='models'&&!activeModelLeaf);
+  }
+  $('.nav-item,.project-nav-project,.project-nav-workspace,.model-nav-child',nav)
+    .forEach(button=>{
+      if(button.classList.contains('active'))button.setAttribute('aria-current','page');
+      else button.removeAttribute('aria-current');
+    });
+  // Mobile navigation has no nested Project tree, but its visible active
+  // item should still expose the correct accessible route state.
+  const mobile=$('#mobileNav');
+  if(mobile){
+    $('[data-mobile-route]',mobile).forEach(button=>{
+      if(button.classList.contains('active'))button.setAttribute('aria-current','page');
+      else button.removeAttribute('aria-current');
+    });
+  }
 };
 
 const a35ActivateTabBase=activateTab;

@@ -29,6 +29,9 @@ func scanProject(row scanner) (Project, error) {
 	}
 	p.ProjectPolicyJSON = json.RawMessage(pol)
 	p.IndexingConfigJSON = json.RawMessage(idx)
+	mode, err := operatingModeFromPolicy(p.ProjectPolicyJSON)
+	if err != nil { return Project{},fmt.Errorf("read Project operating mode: %w",err) }
+	p.OperatingMode = mode
 	return p, nil
 }
 func (r *sqlRepository) Project(ctx context.Context, id string) (Project, error) {

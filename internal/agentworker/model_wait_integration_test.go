@@ -89,6 +89,15 @@ func TestNamedWorkspaceModelWaitSurvivesWorkerRestartWithoutDuplicateAttempt(t *
   `{"model_wait":"invalid"}`,
   `{"model_wait":{"attempt":0,"retry_at_ms":1}}`,
   `{"model_wait":{"attempt":1,"retry_at_ms":0}}`,
+  `null`,
+  `[]`,
+  `{"model_wait":{"attempt":1,"retry_at_ms":1},"model_wait":null}`,
+  `{"model_wait":{"attempt":1,"retry_at_ms":1,"attempt":2}}`,
+  `{"model_wait":{"attempt":1,"retry_at_ms":1},"model_w\u0061it":null}`,
+  `{"operation_id":"a","operation_id":"b"}`,
+  `{"operation_id":null}`,
+  `{"operation_id":""}`,
+  `{"model_wait":{"attempt":1,"retry_at_ms":1},"operation_id":"approved"}`,
  }{
   if _,err:=db.SQL().ExecContext(ctx,
    `UPDATE agent_worker_runs SET continuation_json=? WHERE id=?`,
@@ -250,7 +259,12 @@ func TestWorkerWakeIsAtomicAcrossAttemptTaskAndRun(t *testing.T) {
  });err!=nil{t.Fatal(err)}
  if _,err:=db.SQL().ExecContext(ctx,`UPDATE task_attempts
    SET status='waiting' WHERE id=?`,run.AttemptID);err!=nil{t.Fatal(err)}
- if err:=worker.syncResumedRuns(ctx);err!=nil{t.Fatal(err)}
+ // The original Worker remains parked. A Task-only resume is no longer
+ // silently treated as healthy: the mismatched Attempt is reported for
+ // operator review without dispatching any second model request.
+ if err:=worker.syncResumedRuns(ctx);err==nil{
+  t.Fatal("Task-only resume must report invalid original Attempt")
+ }
  heldRun,err=worker.getRun(ctx,run.ID)
  if err!=nil||heldRun.Status!=RunWaiting{
   t.Fatalf("Worker resumed without original running Attempt: %+v %v",heldRun,err)

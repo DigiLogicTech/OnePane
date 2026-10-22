@@ -1111,3 +1111,129 @@ The status contains no Tool inputs, secrets, receipts or resource refs.
 It also changes the derived recovery checkpoint observation digest,
 never permits automatic replay, and is tested against an actual
 Task-scoped SQLite read snapshot and checkpoint recovery classes.
+
+## Development checkpoint — RC11 model/process generation and admission (2026-10-22)
+
+**Exact verified integration source/workflow head:**
+`55a8a91409b06250e1bb2ab0c99e2a01810bdd51`,
+[hosted Windows/Linux CI #39718524948](https://github.com/DigiLogicTech/OnePane/actions/runs/39718524948)
+**PASSED**. Physical Node check remains **SKIPPED**.
+
+This software-only task batch fenced PID-reuse cleanup for tracked
+processes; denied Windows taskkill for untracked or exited launch
+generations; rejected a Colibri "successful" replacement with incomplete
+model identity or a second still-resident Colibri process; and blocked
+admission of persisted `busy` inference with no live in-process lease.
+Native Windows, Linux race and bounded SQLite regressions verify the
+scoped states. The exact commits and limitations are captured in
+`docs/rc11-integrated-code-review.md`.
+
+**Persistent continuation:** source-code-only model-lifecycle gates are
+green, but physical CPU/GPU model parent/child memory reclamation is
+unverified. The operator-approved protocol is
+`docs/rc11-physical-model-lifecycle-acceptance.md`. Do not dispatch it
+without explicit host/model/run approval. Next unresolved acceptance
+requires real process-tree/VRAM evidence, Windows installed SCM and
+operator-selected non-C data-root upgrade/rollback, Ubuntu installed
+service, paired physical Nodes and verified reversible L5 postconditions,
+followed by the final whole-branch audit and the explicitly **LAST**
+human-centred UI/UX review. Installer/PR merge and release remain
+separately approval-gated.
+
+## RC11 direct Colibri Start and uncertain-residency status checkpoint (2026-10-22)
+
+**Verified software head:** `4f91668fdcf6b6a5735b87c6215baf2b7df6c19c`,
+[hosted CI #39721549420](https://github.com/DigiLogicTech/OnePane/actions/runs/39721549420)
+**PASSED** for Windows and Linux; physical Node validation **SKIPPED**.
+
+Direct Models Start now calls the same Colibri rollback/compensation
+coordinator as chat acquisition and explicit Hot Swap. The read-only
+Colibri operator status now includes orphaned/draining processes as
+*possibly* resident and displays a redacted reconciliation warning.
+Both paths carry explicit native Windows/Linux tests. Details and
+commit-level evidence are in `docs/rc11-integrated-code-review.md`.
+
+**Continuation:** implementation is source-verified, but physical
+process-tree/VRAM release, chosen-drive installed service tests,
+paired Nodes, safe Level 5 external postconditions, the complete
+security/code review and mandatory LAST UI/UX review remain open.
+Consult `docs/rc11-physical-model-lifecycle-acceptance.md` for the
+opt-in physical protocol; do not execute it automatically. PR #227
+remains draft and unmerged; no installer is authorised.
+
+## Model owner provenance / Colibri unresolved status checkpoint (2026-10-22)
+
+**Software CI PASSED**, exact source/workflow head
+`aa1e11d53877add6a0930099e0d5c0c901c42a4e`;
+[Windows/Linux CI #39729564503](https://github.com/DigiLogicTech/OnePane/actions/runs/39729564503).
+Physical Node approval **SKIPPED**.
+
+A `stopped` runtime whose PID was never durably recorded is now
+treated as unknown ownership unless the exact no-child prelaunch
+record survives. Stop/restart/memory admission and failed Colibri
+replacement rollback preserve that reservation. The Colibri resident
+listing also shows uncertain failed/stopped models as potentially
+using RAM/VRAM rather than advertising a falsely clear Node. Known
+prelaunch cancellation and independently dead recorded PID behaviors
+retain their allowed paths. Intermediate fixture CI failures were
+investigated, corrected and verified at the above exact head.
+
+**Next:** operator-specific physical process-tree/VRAM acceptance
+(`docs/rc11-physical-model-lifecycle-acceptance.md`), real installed
+Windows chosen-root upgrade and rollback, Ubuntu installed service,
+paired Nodes, reversible external Level 5 effects, final full
+code/security review, mandatory LAST operator-centred UI/UX review,
+explicit sign-off before MSI/deb packaging. PR #227 stays draft.
+
+## Colibri durable target and compensating rollback audit — 2026-10-22
+
+[Exact-head Windows/Linux CI #39741362521](https://github.com/DigiLogicTech/OnePane/actions/runs/39741362521)
+**PASSED** at `d8ef971e4ce0bde21f427a3c6480fad1a88f91c7`.
+Source verification is complete for this scope; physical Node
+acceptance was **SKIPPED**.
+
+A failed Colibri replacement cannot be labelled restored merely
+because the fallback starter returned without error; the
+predecessor's returned generation must match durable SQLite
+identity and no other possibly resident engine may remain.
+Likewise a successful requested target cannot be advertised
+ready unless its recorded launch generation matches the
+returned PID/model/port/fingerprint. Positive and adversarial
+regressions run on native Windows and Linux race suites.
+See `docs/rc11-integrated-code-review.md` for intermediate
+fixture remediation and exact commit/provenance details.
+
+**Unchanged release blockers:** operator-approved real Colibri and
+llama.cpp parent/child process-tree and attributed RAM/VRAM release,
+installed Windows chosen-drive SCM/data-root upgrade/rollback,
+Ubuntu installed service, paired physical Nodes, reversible Level
+5 effect verification, full code/security review, and the LAST
+human-centred UI/UX review. Explicit approval is required before
+MSI/deb QA packaging; draft PR #227 must not be promoted based
+solely on hosted CI.
+
+## RC11 unknown active-PID owner checkpoint (2026-10-22)
+
+**Software source/workflow tested:** `070562aff1c588c7f8fc92baf9b3af79da124517`;
+[CI #39748484805](https://github.com/DigiLogicTech/OnePane/actions/runs/39748484805)
+**PASSED** on native Windows and Linux, including race/full Go and
+cross-compilation. Physical Node job **SKIPPED**.
+
+Active-looking healthy/busy/starting models whose persisted PID is
+absent or invalid no longer silently release RAM/VRAM budget through
+manual Stop, daemon shutdown, restart or admission of another backend.
+Dead process parents remain subject to explicit reconciliation where
+descendant memory ownership is uncertain. Colibri's read-only status
+exposes rather than hides healthy/busy instances with unknown PIDs,
+and denies evictions based on the unproven healthy state. Tests also
+preserve the safe independently stopped-model path. The detailed
+regression/CI audit and corrected one-connection SQLite fixture are
+recorded in `docs/rc11-integrated-code-review.md`.
+
+**Still required before QA build:** explicitly approved physical model
+parent/child and RAM/VRAM release testing, installed Windows SCM and
+non-C drive upgrade/rollback, installed Ubuntu service, paired physical
+Nodes, verified reversible Level 5 operations, final whole-branch
+code/security review and the LAST operator-focused UI/UX review.
+PR #227 stays draft/unmerged; do not run physical tests or issue a
+packaged installer without operator sign-off.

@@ -85,3 +85,41 @@ func TestCPUOnlyResourceWaitDoesNotSubstituteCloud(t *testing.T){
   }
  }
 }
+
+
+func TestWaitContinuationRejectsNullAndDuplicateJSON(t *testing.T){
+ for _,raw:=range []string{
+  "null", "[]", `"no wait"`,
+  `{"model_wait":null,"model_wait":{"attempt":1,"retry_at_ms":2}}`,
+  `{"model_wait":{"attempt":1,"attempt":2,"retry_at_ms":2}}`,
+  `{"model_wait":{"attempt":1,"retry_at_ms":2},"model_w\u0061it":null}`,
+  `{"operation_id":"a","operation_id":""}`,
+  `{"toolchain_wait":{"runtime_id":"a","runtime_id":"b"}}`,
+ }{
+  if _,ok:=readWorkerContinuationFields(json.RawMessage(raw));ok{
+   t.Fatalf("ambiguous/non-object Worker continuation accepted: %s",raw)
+  }
+  if decodeModelWait(json.RawMessage(raw))!=nil||
+   decodeToolchainWait(json.RawMessage(raw))!=nil{
+   t.Fatalf("untrusted resource wait decoder accepted: %s",raw)
+  }
+ }
+ for _,raw:=range []string{`{}`,`{"operation_id":"op"}`,
+  `{"model_wait":{"attempt":2,"retry_at_ms":1750000000000}}`,
+ }{
+  if _,ok:=readWorkerContinuationFields(json.RawMessage(raw));!ok{
+   t.Fatalf("valid legacy continuation refused: %s",raw)
+  }
+ }
+}
+
+
+func TestOperationWaitMustHaveOneNonemptyIdentifier(t *testing.T){
+ for _,raw:=range []string{`{"operation_id":null}`,`{"operation_id":""}`} {
+  fields,ok:=readWorkerContinuationFields(json.RawMessage(raw))
+  if !ok{t.Fatalf("unexpectedly invalid JSON object: %s",raw)}
+  if _,present:=fields["operation_id"];!present{
+   t.Fatalf("missing explicit Operation field: %s",raw)
+  }
+ }
+}

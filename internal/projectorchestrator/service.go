@@ -12,6 +12,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/artifact"
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/event"
+	"github.com/DigiLogicTech/OnePane/internal/featurepolicy"
 	"github.com/DigiLogicTech/OnePane/internal/id"
 	"github.com/DigiLogicTech/OnePane/internal/inference"
 	"github.com/DigiLogicTech/OnePane/internal/policy"
@@ -64,6 +65,7 @@ type TurnResult struct {
 	Turn               Turn    `json:"turn"`
 	Disposition        string  `json:"disposition"`
 	TaskID             *string `json:"task_id,omitempty"`
+	TaskGraphID        *string `json:"task_graph_id,omitempty"`
 	ProjectWorkspaceID *string `json:"project_workspace_id,omitempty"`
 	Mode               *string `json:"mode,omitempty"`
 	TeamSessionID      *string `json:"team_session_id,omitempty"`
@@ -238,24 +240,52 @@ func extractText(raw []byte) string {
 	b,_:=json.Marshal(v);return string(b)
 }
 
-func (s *Service) reason(ctx context.Context, workspaceID, actor, objective string, snapshot json.RawMessage) (string, map[string]any, *string, error) {
+func(s *Service) requireProjectReasoning(ctx context.Context,tenantID,projectID,projectWorkspaceID string)error{
+ if s==nil||s.db==nil{return fmt.Errorf("taskless Project policy resolver unavailable")}
+ decision,err:=(featurepolicy.StoredScopes{DB:s.db}).ForProjectWorkspace(ctx,tenantID,projectID,projectWorkspaceID)
+ if err!=nil{return fmt.Errorf("Project reasoning scope unavailable: %w",err)}
+ return decision.RequireProjectReasoning()
+}
+func (s *Service) reason(ctx context.Context, workspaceID, projectID, projectWorkspaceID, actor, objective string, snapshot json.RawMessage) (string, map[string]any, *string, error) {
+ if err:=s.requireProjectReasoning(ctx,workspaceID,projectID,projectWorkspaceID);err!=nil{return "",nil,nil,err}
 	label:=policy.DataLabel{WorkspaceID:workspaceID,Confidentiality:policy.ConfidentialityInternal,Residency:policy.ResidencyAny,Trust:policy.TrustUserInstruction}
 	// No per-Project opt-in for external Orchestrator reasoning exists yet.
 	// Never send ungranted Project snapshots to free/remote/cloud providers,
 	// and never use an untested deployment merely to satisfy a route.
 	decision,err:=s.scheduler.Route(ctx,scheduler.RouteRequest{WorkspaceID:workspaceID,CapabilityID:"inference.general",RoleName:"project-orchestrator",ProtocolLevel:"L1",ContextTokens:8192,DataLabel:label,AllowUntested:false,AllowLimited:true,AllowMediated:true,AllowDegraded:true,RequireZeroIncrementalCost:true,PreferZeroIncrementalCost:true,LocalOnly:true,AllowedKinds:[]scheduler.CandidateKind{scheduler.CandidateModel},ComputePreference:"auto"})
 	if err!=nil||decision.Selected==nil{return "",nil,nil,fmt.Errorf("route project orchestrator: %w",err)}
+	if !scheduler.VerifiedHostLocalZeroCost(decision.Selected.Candidate){
+		return "",nil,nil,fmt.Errorf("unverified remote or paid model refused for Project Orchestrator")
+	}
 	dep:=decision.Selected.Candidate.ID
-	system:=`You are the logical OnePane Project Orchestrator. Coordinate project work but never claim direct tool, filesystem, secret, node, or approval authority. Use only the supplied bounded Project context. Return one JSON object: {"answer":"...", "action":"answer|task", "objective":"...", "project_workspace_id":"..."}. You may suggest a Workspace for requests without an explicit Workspace choice, but execution mode and Team are locked to the selected Workspace's operator configuration. Use action=task only when the user is asking OnePane to perform work rather than explain or report state.`
+	system:=`You are the logical OnePane Project Orchestrator. Coordinate project work but never claim direct tool, filesystem, secret, node, or approval authority. Use only the supplied bounded Project context. Return one JSON object: {"answer":"...", "action":"answer|task", "project_workspace_id":"...", "plan":{"version":1,"steps":[{"key":"step_a","objective":"A bounded subtask","depends_on":[]}]}}. The plan field is optional and is ONLY a draft; never include tools, credentials, filesystem paths, permission grants or Workspace IDs inside plan steps. You may suggest a Workspace for requests without an explicit Workspace choice, but execution mode and Team are locked to the selected Workspace's operator configuration. Use action=task only when the user is asking OnePane to perform work rather than explain or report state.`
 	req,_:=json.Marshal(map[string]any{"messages":[]map[string]string{{"role":"system","content":system},{"role":"user","content":"Project context:\n"+string(snapshot)+"\n\nUser objective:\n"+objective}},"max_tokens":1200,"temperature":0.2})
 	manifest,_:=json.Marshal(map[string]any{"project_context":json.RawMessage(snapshot),"logical_role":"project-orchestrator"})
-	inf,err:=s.inference.Execute(ctx,inference.ExecuteCommand{WorkspaceID:workspaceID,PrincipalID:actor,DeploymentID:dep,CapabilityJSON:json.RawMessage(`{"id":"inference.general"}`),ContextManifestJSON:manifest,ClassificationMetadata:json.RawMessage(`{"source":"project-orchestrator"}`),InputLabel:label,RequestJSON:req,ActorPrincipalID:&actor})
+	// Recheck the canonical scopes after routing, immediately before this
+ 	// controllable model-inference dispatch. Tool and transport policies
+ 	// still need their own live revocation guarantees.
+ 	if err:=s.requireProjectReasoning(ctx,workspaceID,projectID,projectWorkspaceID);err!=nil{
+ 		return "",nil,nil,err
+ 	}
+ 	inf,err:=s.inference.Execute(ctx,inference.ExecuteCommand{WorkspaceID:workspaceID,PrincipalID:actor,DeploymentID:dep,CapabilityJSON:json.RawMessage(`{"id":"inference.general"}`),ContextManifestJSON:manifest,ClassificationMetadata:json.RawMessage(`{"source":"project-orchestrator"}`),InputLabel:label,RequestJSON:req,ActorPrincipalID:&actor})
 	if err!=nil{return "",nil,&dep,err}
 	if inf.ResponseArtifactID==nil{return "",nil,&dep,fmt.Errorf("orchestrator inference returned no response artifact")}
 	rc,_,err:=s.artifacts.Open(ctx,*inf.ResponseArtifactID);if err!=nil{return "",nil,&dep,err};defer rc.Close()
 	body,err:=io.ReadAll(io.LimitReader(rc,4<<20));if err!=nil{return "",nil,&dep,err}
 	text:=extractText(body)
-	plan:=map[string]any{};trim:=strings.TrimSpace(text);trim=strings.TrimPrefix(trim,"```json");trim=strings.TrimPrefix(trim,"```");trim=strings.TrimSuffix(trim,"```");_ = json.Unmarshal([]byte(strings.TrimSpace(trim)),&plan)
+	plan:=map[string]any{}
+ trim:=strings.TrimSpace(text)
+ trim=strings.TrimPrefix(trim,"```json")
+ trim=strings.TrimPrefix(trim,"```")
+ trim=strings.TrimSuffix(trim,"```")
+ // A model response is untrusted. Ambiguous duplicate fields must not be
+ // allowed to change the action, destination Workspace or Task graph.
+ // If its directive is invalid, retain the answer as text but grant no
+ // model-directed actions. Never fall back to a permissive JSON decoder.
+ directive:=[]byte(strings.TrimSpace(trim))
+ if rejectAmbiguousPlannerJSON(directive)==nil{
+  _=json.Unmarshal(directive,&plan)
+ }
 	return text,plan,&dep,nil
 }
 
@@ -265,6 +295,7 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 	if c.ProjectID==""||c.Objective==""||c.ActorPrincipalID==""{return TurnResult{},ErrInvalid}
 	o,err:=s.Ensure(ctx,c.ProjectID);if err!=nil{return TurnResult{},err}
 	snapshot,pwsID,mode,teamID,err:=s.contextSnapshot(ctx,c.ProjectID,c.ProjectWorkspaceID);if err!=nil{return TurnResult{},err}
+	if err:=s.requireProjectReasoning(ctx,o.WorkspaceID,c.ProjectID,pwsID);err!=nil{return TurnResult{},err}
 	userTurnID,_:=s.ids.New("pturn");now:=s.clock.UnixMilli()
 	// Audit admission must be durable before any model inference or Task
 	// creation. Never suppress a failed turn insert or state transition.
@@ -279,7 +310,7 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 		if changed!=1{return fmt.Errorf("Project Orchestrator status changed unexpectedly")}
 		return nil
 	});err!=nil{return TurnResult{},fmt.Errorf("persist Project Orchestrator user turn: %w",err)}
-	text,plan,deploymentID,reasonErr:=s.reason(ctx,o.WorkspaceID,c.ActorPrincipalID,c.Objective,snapshot)
+	text,plan,deploymentID,reasonErr:=s.reason(ctx,o.WorkspaceID,c.ProjectID,pwsID,c.ActorPrincipalID,c.Objective,snapshot)
 	// An unscoped initial turn may suggest a *different* active Workspace.
 	// The first reasoning pass was supplied the original Workspace's private
 	// Task context. Never persist that pass or use its proposed objective for
@@ -294,24 +325,102 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 			if snapshotErr!=nil{return TurnResult{},snapshotErr}
 			snapshot=boundSnapshot
 			resolvedPin=boundID
-			text,plan,deploymentID,reasonErr=s.reason(ctx,o.WorkspaceID,c.ActorPrincipalID,c.Objective,snapshot)
+			text,plan,deploymentID,reasonErr=s.reason(ctx,o.WorkspaceID,c.ProjectID,boundID,c.ActorPrincipalID,c.Objective,snapshot)
 		}
 	}
 	answer:=strings.TrimSpace(text);action:="answer";objective:=c.Objective
 	if v,ok:=plan["answer"].(string);ok&&strings.TrimSpace(v)!=""{answer=strings.TrimSpace(v)}
 	if v,ok:=plan["action"].(string);ok{action=strings.ToLower(strings.TrimSpace(v))}
-	if v,ok:=plan["objective"].(string);ok&&strings.TrimSpace(v)!=""{objective=strings.TrimSpace(v)}
+	// A model is allowed to *suggest* how to pursue a Project objective,
+	// but cannot substitute an unapproved objective into a runnable Task.
+	// Future multi-step plans need separately scoped Task specs and the
+	// standing Level 4 grant; they cannot smuggle an action through this field.
 	// Keep the operator's explicit Workspace selection authoritative even
 	// when an untrusted model proposes a different active sibling.
 	pwsID, mode, teamID, err = resolveOrchestratorWorkspaceProfile(ctx, s.db, c.ProjectID,
 		resolvedPin, pwsID, plan["project_workspace_id"])
 	if err != nil { return TurnResult{}, err }
+	// Even when the operator selected Run, a revoked Project/Workspace
+	// reasoning policy must not be bypassed by ForceTask after inference.
+	// Resource-unavailable reasoning may still queue an otherwise permitted
+	// explicit Task; this only blocks invalidated authority.
+	if err=s.requireProjectReasoning(ctx,o.WorkspaceID,c.ProjectID,pwsID);err!=nil{
+		_,_=s.db.ExecContext(ctx,`UPDATE project_orchestrators SET status='blocked',
+			revision=revision+1,updated_at=? WHERE id=?`,s.clock.UnixMilli(),o.ID)
+		return TurnResult{},err
+	}
+	// Treat the local model's optional multi-step proposal as untrusted
+	// review material, never as authorisation to create executable Tasks.
+	var planDraft *AutonomousPlanDraft
+	if reasonErr==nil&&pwsID!=""{
+		if proposed,ok:=plan["plan"];ok{
+			if raw,e:=json.Marshal(proposed);e==nil{
+				if draft,e:=ParseAutonomousPlanDraft(raw,c.ProjectID,pwsID,c.Objective);e==nil{
+					planDraft=&draft
+				}
+			}
+		}
+	}
 	if reasonErr!=nil { answer="Project Orchestrator is available, but no eligible reasoning model could complete this turn: "+reasonErr.Error(); action="answer" }
+	if planDraft!=nil&&!c.ForceTask{
+		answer+="\n\nProposed local plan (draft only; no new Tasks created from this proposal):"
+		for _,step:=range planDraft.Nodes{
+			answer+="\n- "+step.Key+": "+step.Objective
+		}
+	}
 	if c.ForceTask { action="task"; c.AllowTaskCreation=true }
 	if action=="task" && !c.AllowTaskCreation { action="answer"; answer=answer+"\n\nThis turn was read-only; no Task was created." }
 	var taskID,sessionID *string
 	disposition:="answered"
 	if action=="task" {
+		// If several isolated Workspaces exist and neither the operator nor
+		// a successful model decision chose one, NEVER silently create work
+		// in whichever sibling happened to be most recently updated.
+		var activeCount int
+		if err:=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM project_workspaces
+			WHERE project_id=? AND status='active'`,c.ProjectID).Scan(&activeCount);err!=nil{
+			return TurnResult{},err
+		}
+		// The first reasoning pass may have selected a verified active sibling,
+		// after which the destination-scoped second pass omits its ID.
+		// Preserve that validated rebind rather than guessing a recent sibling.
+		modelChoseWorkspace:=resolvedPin!=""&&resolvedPin==pwsID&&reasonErr==nil
+		if selected,ok:=plan["project_workspace_id"].(string);ok&&reasonErr==nil&&
+			strings.TrimSpace(selected)==pwsID&&pwsID!=""{
+			modelChoseWorkspace=true
+		}
+		if pwsID==""||(c.ProjectWorkspaceID==""&&activeCount>1&&!modelChoseWorkspace){
+			action="answer"
+			disposition="waiting"
+			answer+="\n\nSelect a canonical Workspace before running this Task. OnePane will not guess between isolated Workspaces while planning is unavailable."
+		}
+	}
+	var taskGraphID *string
+	// A human-initiated Run may admit a local model's bounded DAG only
+	// through the separately revocable standing Level 4 grant. Never let
+	// a read-only Ask or a model-supplied action implicitly do this.
+	if action=="task"&&c.ForceTask&&planDraft!=nil&&pwsID!=""&&mode=="direct"{
+		graph,graphErr:=s.CreateTaskGraph(ctx,CreateTaskGraphCommand{
+			ProjectID:c.ProjectID,Name:"Autonomous Project plan",
+			IdempotencyKey:"auto-"+userTurnID,Nodes:planDraft.Nodes,
+			ActorPrincipalID:c.ActorPrincipalID,AutonomousModelDraft:true,
+			AuthorizedWorkspaceID:pwsID,UserObjective:c.Objective,
+		})
+		if graphErr==nil&&len(graph.Nodes)>0{
+			taskGraphID=&graph.ID
+			first:=graph.Nodes[0].TaskID
+			taskID=&first
+			disposition="task_graph_created"
+			answer+="\n\nStanding Level 4 autonomy authorised a bounded "+
+				fmt.Sprintf("%d-step",len(graph.Nodes))+
+				" local-first Task graph. Task dependencies are enforced by the Worker."
+		}else{
+			answer+="\n\nThe draft graph was not authorised by the current "+
+				"Level 4 policy. The original user objective remains eligible "+
+				"for an individually authorised Task."
+		}
+	}
+	if action=="task"&&taskID==nil {
 		// Use canonical relational ownership, not only model-supplied JSON.
 		// When an approved toolchain exists, pin its exact digest to this Task,
 		// so later approval changes cannot silently substitute a build image.
@@ -342,8 +451,13 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 	}
 	if answer=="" { answer="Project context reviewed." }
 	prov:=map[string]any{"project_id":c.ProjectID,"orchestrator_id":o.ID,"project_workspace_id":pwsID,"execution_mode":mode}
+	if planDraft!=nil{
+		prov["bounded_local_plan"]=planDraft.Nodes
+		prov["plan_admission"]="draft_only_no_task_authority"
+	}
 	if deploymentID!=nil{prov["candidate_kind"]="model_deployment";prov["candidate_id"]=*deploymentID}
 	if taskID!=nil{prov["task_id"]=*taskID}
+	if taskGraphID!=nil{prov["task_graph_id"]=*taskGraphID;prov["plan_admission"]="standing_L4_autonomy_policy"}
 	if sessionID!=nil{prov["team_session_id"]=*sessionID}
 	provRaw,_:=json.Marshal(prov)
 	turnID,_:=s.ids.New("pturn");created:=s.clock.UnixMilli()
@@ -352,5 +466,5 @@ func (s *Service) Turn(ctx context.Context, c TurnCommand) (TurnResult, error) {
 	status:="ready";if disposition=="waiting"||disposition=="blocked"{status="waiting"};if reasonErr!=nil{status="degraded"}
 	_,_ = s.db.ExecContext(ctx,`UPDATE project_orchestrators SET status=?,revision=revision+1,updated_at=? WHERE id=?`,status,created,o.ID)
 	turn:=Turn{ID:turnID,OrchestratorID:o.ID,AssistantThreadID:c.AssistantThreadID,TaskID:taskID,Role:"orchestrator",Content:answer,ContextJSON:snapshot,ProvenanceJSON:provRaw,CreatedAt:created}
-	return TurnResult{Turn:turn,Disposition:disposition,TaskID:taskID,ProjectWorkspaceID:&pwsID,Mode:&mode,TeamSessionID:sessionID},nil
+	return TurnResult{Turn:turn,Disposition:disposition,TaskID:taskID,TaskGraphID:taskGraphID,ProjectWorkspaceID:&pwsID,Mode:&mode,TeamSessionID:sessionID},nil
 }

@@ -25,6 +25,7 @@ type Project struct {
 	Name               string          `json:"name"`
 	Description        *string         `json:"description,omitempty"`
 	Status             string          `json:"status"`
+	OperatingMode      OperatingMode   `json:"operating_mode"`
 	ProjectPolicyJSON  json.RawMessage `json:"project_policy"`
 	IndexingConfigJSON json.RawMessage `json:"indexing_config"`
 	Revision           int64           `json:"revision"`
@@ -153,6 +154,9 @@ type RoutineBinding struct {
 
 type CreateProjectCommand struct {
 	WorkspaceID, Name, Description, CreatedBy string
+	// Explicit user choice: atomically create one safe Development Workspace.
+	// Existing automation/API callers that omit this flag are unchanged.
+	CreateStarterWorkspace bool
 	ProjectPolicyJSON, IndexingConfigJSON     json.RawMessage
 	RequestID, TraceID                        *string
 }

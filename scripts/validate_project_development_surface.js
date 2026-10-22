@@ -36,6 +36,35 @@ assertContains(ui,'container.isConnected','do not repaint a disposed page');
 assertContains(workspace,'"Workspace isolation pending"','dashboard capability chip must not lie');
 assertContains(foundation,'Requested Workspace capabilities','request flags must not imply security permissions');
 assertContains(foundation,'not runtime permissions','do not misstate runtime policy');
+assertContains(foundation,'name="operating_mode"','Project creation must expose L4/L5 modes in a dropdown');
+assertContains(foundation,'value="autonomous_project" selected','Level 4 is the UI default');
+assertContains(foundation,'value="continuous_operations"','Level 5 is an explicit Project selection');
+assertContains(foundation,'name="autonomous_local_tasks" checked',"new Project setup must offer the default Level 4 local Task autonomy option");
+assertContains(foundation,"AutonomousRoutines:f.autonomous_local_tasks?'enabled':'disabled'","autonomy must be an explicit user-selected Project feature policy");
+assertContains(foundation,"create_starter_workspace:true","new Project dialog must request atomic canonical starter Workspace");
+assertContains(foundation,"initialObjective.trim().slice(0,4096)","Assistant draft must be length-bounded");
+assertContains(foundation,'${escapeHtml(suggestedObjective)}',"Assistant draft must be escaped in a human-reviewed form");
+for(const marker of ['name="initial_objective"','name="queue_initial_task" checked',
+ "objective,project_workspace_id:starter.id","force_task:true,allow_task_creation:true",
+ "Project created, but initial Task was not queued:"]){
+ assertContains(foundation,marker,"initial Project Task queue contract missing "+marker);
+}
+assertContains(foundation,"This does not enable shell, network, secret access or provider spending.","local Task autonomy must not grant external permissions");
+assertContains(foundation,'onepane_operations:{version:1,mode:f.operating_mode','mode selection must persist in actual Project policy');
+assertContains(foundation,"id=\"qa4SaveProjectOperatingMode\"",'Project Inspector must offer an operating-mode save action');
+assertContains(foundation,'Level 5 monitoring and remediation require separately authorised setup','mode selection must not claim permission to monitor or remediate');
+assertContains(foundation,'expected_revision:Number(active.revision||1)','mode edit must have optimistic revision compare-and-swap');
+assertContains(foundation,'id="qa4ProjectAutonomousTasks"','older Projects need a deliberate autonomy adoption control');
+assertContains(foundation,"AutonomousRoutines:autonomyEnabled?'enabled':'disabled'","Inspector must persist explicit autonomy permission without changing other grants");
+assertContains(foundation,'It does not enable shell, LAN, internet, secrets, paid models or monitoring.','task autonomy must not imply risky privileges');
+assertContains(foundation,'qa4L5GoalForm','Level 5 must provide a usable objective form');
+assertContains(foundation,"base+'/workspaces'","L5 goal selector must load canonical Workspaces rather than local UI ghosts");
+assertContains(foundation,"base+'/continuous-goals'","L5 goal state must originate from backend");
+assertContains(foundation,"monitoring_plan:{version:1,source_ids:sourceIDs}","L5 goal setup must use reviewed operator-entered sources, not infer network targets");
+assertContains(foundation,"String(data.source_ids||'').split(',')","source IDs must come only from user form input");
+assertContains(foundation,"new Set(sourceIDs).size!==sourceIDs.length","duplicates in source plan must be rejected");
+assertContains(foundation,"Listing a source does not enable probes or network access.","source selection must never imply monitoring activation");
+assertContains(foundation,'Monitoring and remediation are still inactive.','configured objectives must not be represented as active protection');
 assertContains(architecture,'project_runtimes.project_id','known schema blocker must be documented');
 assertContains(architecture,'Workspace-environment ownership','required backend migration must be documented');
 assert.ok(!/privileged[=:]true|--privileged/.test(ui),'UI must never enable privileged execution');

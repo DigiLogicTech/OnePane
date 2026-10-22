@@ -1,0 +1,7 @@
+# P0-AG — operator possession proof before Node execution authority
+
+Human-authenticated OnePane now binds a submitted Ed25519 operator public key to the original one-shot Node execution grant. The operator must also prove possession of the separately held private key by signing a domain-separated approval request containing the exact Project, Goal, human principal ID, instrument enrollment, random challenge ID, paired Node ID, optimistic Goal revision and operator public key. The server verifies this with the submitted public key before any grant mutation. The actor ID comes from the authenticated session.
+
+The offline onepane-node-custody prepare-approval-request command creates a canonical exclusive owner-only JSON body for the human POST, without exporting the private key or making network requests. Tests reject cross-Node, cross-human, cross-Goal and altered challenge/revision signatures, shared keys and overwritten output.
+
+This is software-key possession by the human-controlled client, NOT physical identity, a guarantee the OnePane server signed the portable grant, or an online revocation check. Newly added server identity seals also require separate pinned-identity tests. User-directed UI/UX review remains LAST before approved installers and physical Node QA.

@@ -142,3 +142,80 @@ func TestFederatedInFlightDuplicateDoesNotStartAnotherExecution(t *testing.T){
   t.Fatalf("completed same-request replay did not use verified receipt: %v %+v",err,replay)
  }
 }
+
+
+type cancelledInboundExecutor struct{
+ cancel context.CancelFunc
+ fail bool
+ calls int
+}
+func(e *cancelledInboundExecutor)DispatchFederatedLocal(
+ _ context.Context,dep,requestID string,raw json.RawMessage)(inference.DispatchResult,error){
+ e.calls++
+ e.cancel()
+ if e.fail{return inference.DispatchResult{},context.Canceled}
+ return inference.DispatchResult{ResponseJSON:json.RawMessage(`{"completed":"once"}`),
+  UsageJSON:json.RawMessage(`{"tokens":1}`)},nil
+}
+
+func TestCancelledInboundFederatedInferencePersistsKnownOrUnknownReceipt(t *testing.T){
+ background:=context.Background()
+ db,now:=seedNodeDB(t,"node-origin","node-origin-fp")
+ defer db.Close()
+ for _,stmt:=range []string{
+  `INSERT INTO harness_nodes(id,name,local,identity_fingerprint,trust_state,
+   trust_zone,protocol_json,capabilities_json,last_seen_at,revision,created_at,updated_at)
+   VALUES('peer','Peer',0,'peer','paired','PAIRED_MTLS','{}','{}',1,1,1,1)`,
+  `INSERT INTO models(id,model_ref,modalities_json,static_metadata_json,trust_state,
+   created_at,updated_at) VALUES('m','test/local','["text"]','{}','user_trusted',1,1)`,
+  `INSERT INTO model_deployments(id,model_id,node_id,runtime_name,runtime_config_json,
+   status,deployment_fingerprint,revision,discovered_at,updated_at)
+   VALUES('d','m','node-origin','local','{}','ready','fp',1,1,1)`,
+ }{
+  if _,err:=db.SQL().ExecContext(background,stmt);err!=nil{t.Fatal(err)}
+ }
+ _=now
+ svc:=NewService(db.SQL(),db,clock.Real{},NodeView{ID:"node-origin",Local:true},
+  Identity{},"",30*time.Second)
+ for _,tc:=range []struct{name string;fail bool;status,code string}{
+  {"completed after cancelled request",false,"succeeded",""},
+  {"uncertain cancellation",true,"unknown","remote_inference_outcome_unknown"},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   callCtx,cancel:=context.WithCancel(background)
+   executor:=&cancelledInboundExecutor{cancel:cancel,fail:tc.fail}
+   request:=RemoteInferenceRequest{
+    Protocol:ProtocolVersion,RequestID:tc.name,DeploymentID:"d",
+    RequestJSON:json.RawMessage(`{"prompt":"private one-time task"}`),
+   }
+   first,err:=svc.executeInbound(callCtx,"peer",request,executor)
+   if err!=nil||executor.calls!=1{
+    t.Fatalf("cancelled inference did not finalise: calls=%d err=%v",executor.calls,err)
+   }
+   if tc.fail&&(first.OutcomeKnown||first.ErrorCode!=tc.code){
+    t.Fatalf("cancelled uncertain execution misrepresented as known: %+v",first)
+   }
+   var status,code string
+   var completed int64
+   if err:=db.SQL().QueryRowContext(background,`SELECT status,COALESCE(error_code,''),
+    completed_at FROM node_federated_inference_receipts
+    WHERE peer_node_id='peer' AND remote_request_id=?`,request.RequestID).
+    Scan(&status,&code,&completed);err!=nil||status!=tc.status||
+    code!=tc.code||completed<=0{
+    t.Fatalf("cancelled receipt was not persisted: %s %s %d err=%v",
+     status,code,completed,err)
+   }
+   retry,err:=svc.executeInbound(background,"peer",request,executor)
+   if err!=nil||executor.calls!=1{
+    t.Fatalf("cancelled request replay executed work: calls=%d err=%v",executor.calls,err)
+   }
+   if tc.fail{
+    if retry.OutcomeKnown||retry.ErrorCode!="duplicate_or_unknown_remote_request"{
+     t.Fatalf("uncertain work silently retried or declared safe: %+v",retry)
+    }
+   }else if !retry.OutcomeKnown||string(retry.ResponseJSON)!=`{"completed":"once"}`{
+    t.Fatalf("known completion was not reused idempotently: %+v",retry)
+   }
+  })
+ }
+}

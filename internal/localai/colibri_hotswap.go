@@ -23,6 +23,9 @@ type colibriSwapCandidate struct {
     Status RuntimeInstanceStatus
     LastUsed int64
     Pinned bool
+    // True for a corrupt or unproven failed/stopped PID; neither an
+    // absent parent nor a saved stopped label demonstrates free VRAM.
+    OwnershipUnverified bool
 }
 
 // The caller must enforce the supervisor residency lock. Refuse a competing
@@ -40,8 +43,9 @@ func selectColibriEvictions(candidates []colibriSwapCandidate, active map[string
         case RuntimeBusy,RuntimeStarting,RuntimeDraining,RuntimeOrphaned:
             return nil,fmt.Errorf("Colibri model %s is %s; wait for an idle model or resolve the orphaned process",c.ID,c.Status)
         case RuntimeFailed,RuntimeStopped:
-            // Only reported here when a PID is independently observed
-            // alive despite this stale persisted state.
+            if c.OwnershipUnverified{
+                return nil,fmt.Errorf("Colibri model %s has unverified %s process ownership; operator reconciliation required before swapping",c.ID,c.Status)
+            }
             return nil,fmt.Errorf("Colibri model %s has a live process despite status %s; reconcile the process before swapping",c.ID,c.Status)
         default:
             return nil,fmt.Errorf("unexpected Colibri residency state %s",c.Status)
@@ -59,30 +63,37 @@ func selectColibriEvictions(candidates []colibriSwapCandidate, active map[string
 
 func (s *RuntimeSupervisor) colibriResidents(ctx context.Context,nodeID,except string) ([]colibriSwapCandidate,error) {
     rows,err:=s.db.QueryContext(ctx, `SELECT i.deployment_id,i.status,COALESCE(i.last_seen_at,i.started_at,i.updated_at),
-        CASE WHEN json_extract(d.runtime_config_json,'$.colibri_pinned')=1 THEN 1 ELSE 0 END,i.pid
+        CASE WHEN json_extract(d.runtime_config_json,'$.colibri_pinned')=1 THEN 1 ELSE 0 END,
+        i.pid,i.failure_reason,i.started_at
         FROM local_runtime_instances i
         JOIN model_deployments d ON d.id=i.deployment_id
         WHERE i.node_id=? AND i.deployment_id<>?
           AND LOWER(COALESCE(d.runtime_name,''))='colibri'
           AND (i.status IN ('healthy','busy','starting','draining','orphaned')
-            OR (i.status IN ('failed','stopped') AND COALESCE(i.pid,0)>1))
-        ORDER BY COALESCE(i.last_seen_at,i.started_at,i.updated_at) DESC`,nodeID,except)
+            OR (i.status IN ('failed','stopped')
+              AND (i.pid IS NOT NULL OR COALESCE(i.failure_reason,'')<>?
+                OR i.started_at IS NOT NULL)))
+        ORDER BY COALESCE(i.last_seen_at,i.started_at,i.updated_at) DESC`,nodeID,except,managedNoChildFailureReason)
     if err!=nil{return nil,err}
     defer rows.Close()
     result:=[]colibriSwapCandidate{}
     for rows.Next(){
         var v colibriSwapCandidate
-        var pid sql.NullInt64
-        if err:=rows.Scan(&v.ID,&v.Status,&v.LastUsed,&v.Pinned,&pid);err!=nil{return nil,err}
+        var pid,started sql.NullInt64
+        var reason sql.NullString
+        if err:=rows.Scan(&v.ID,&v.Status,&v.LastUsed,&v.Pinned,&pid,&reason,&started);err!=nil{return nil,err}
         if v.Status==RuntimeFailed||v.Status==RuntimeStopped {
-            // A recorded "failed" or "stopped" status does not free VRAM
-            // when its old managed engine is still alive. Reject a new
-            // Colibri residency rather than overcommitting constrained RAM.
-            if !pid.Valid||pid.Int64<=1{continue}
-            if s.processes==nil{
-                return nil,fmt.Errorf("cannot verify process for stale Colibri model %s",v.ID)
+            // Exclude only an exact durable never-launched child. The
+            // query excludes those NULL-PID rows already; a NULL/invalid
+            // PID arriving here is unverified occupancy, not free memory.
+            if !pid.Valid||pid.Int64<=1{
+                v.OwnershipUnverified=true
+            }else{
+                if s.processes==nil{
+                    return nil,fmt.Errorf("cannot verify process for stale Colibri model %s",v.ID)
+                }
+                if !s.processes.Alive(int(pid.Int64)){continue}
             }
-            if !s.processes.Alive(int(pid.Int64)){continue}
         }
         result=append(result,v)
     }
@@ -312,7 +323,11 @@ func (s *Service) ColibriHotSwapStatus(ctx context.Context,deploymentID string) 
         if r.ID==deploymentID{
             state.Status=string(r.Status)
             if r.Status==RuntimeFailed||r.Status==RuntimeStopped{
-                state.Message="Colibri process is still running despite its saved state; stop/reconcile the engine before another swap."
+                if r.OwnershipUnverified{
+                    state.Message="Colibri process ownership is unresolved; RAM/VRAM may still be occupied. Reconcile before swapping."
+                }else{
+                    state.Message="Colibri process is still running despite its saved state; stop/reconcile the engine before another swap."
+                }
             }
             if r.Status==RuntimeDraining||r.Status==RuntimeOrphaned{
                 state.Message="Colibri process ownership or termination is unresolved; RAM/VRAM may still be occupied. Reconcile the model before swapping."

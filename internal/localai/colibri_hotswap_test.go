@@ -79,11 +79,13 @@ func TestColibriSwapStatusPreservesFailedVersusStoppedInstance(t *testing.T){
   `CREATE TABLE local_runtime_instances(
    deployment_id TEXT PRIMARY KEY,node_id TEXT NOT NULL,
    status TEXT NOT NULL,last_seen_at INTEGER,started_at INTEGER,
-   updated_at INTEGER NOT NULL,pid INTEGER)`,
+   updated_at INTEGER NOT NULL,pid INTEGER,failure_reason TEXT)`,
   `INSERT INTO local_runtime_instances
-   VALUES('colibri-a','node-1','failed',3,1,5,NULL)`,
+   (deployment_id,node_id,status,last_seen_at,started_at,updated_at,pid,failure_reason)
+   VALUES('colibri-a','node-1','failed',3,NULL,5,NULL,'managed runtime launch cancelled or could not create child')`,
   `INSERT INTO local_runtime_instances
-   VALUES('colibri-b','node-1','healthy',4,2,6,NULL)`,
+   (deployment_id,node_id,status,last_seen_at,started_at,updated_at,pid,failure_reason)
+   VALUES('colibri-b','node-1','healthy',4,2,6,NULL,NULL)`,
  }{
   if _,err:=db.Exec(query);err!=nil{t.Fatal(err)}
  }
@@ -256,8 +258,8 @@ func TestColibriHotSwapRejectsLiveFailedAndStoppedEngineBeforeEviction(t *testin
  for _,query:=range []string{
   `CREATE TABLE local_runtime_instances(
     node_id TEXT,deployment_id TEXT,status TEXT,last_seen_at INTEGER,
-    started_at INTEGER,updated_at INTEGER,pid INTEGER)`,
-  `INSERT INTO local_runtime_instances VALUES
+    started_at INTEGER,updated_at INTEGER,pid INTEGER,failure_reason TEXT)`,
+  `INSERT INTO local_runtime_instances(node_id,deployment_id,status,last_seen_at,started_at,updated_at,pid) VALUES
     ('node-1','colibri-a','healthy',5,4,6,1234),
     ('node-1','colibri-b','failed',6,5,7,4321)`,
  }{
@@ -293,8 +295,9 @@ func TestColibriFailedRowWithConfirmedDeadPIDDoesNotBlockSwap(t *testing.T){
  for _,q:=range []string{
   `CREATE TABLE local_runtime_instances(
     node_id TEXT,deployment_id TEXT,status TEXT,last_seen_at INTEGER,
-    started_at INTEGER,updated_at INTEGER,pid INTEGER)`,
-  `INSERT INTO local_runtime_instances VALUES ('node-1','colibri-b','failed',5,4,6,4321)`,
+    started_at INTEGER,updated_at INTEGER,pid INTEGER,failure_reason TEXT)`,
+  `INSERT INTO local_runtime_instances(node_id,deployment_id,status,last_seen_at,started_at,updated_at,pid)
+    VALUES ('node-1','colibri-b','failed',5,4,6,4321)`,
  }{
   if _,err:=db.Exec(q);err!=nil{t.Fatal(err)}
  }
@@ -309,8 +312,8 @@ func TestColibriHotSwapStatusShowsOrphanedAndDrainingAsPossibleResidents(t *test
  for _,q:=range []string{
   `CREATE TABLE local_runtime_instances(
     node_id TEXT,deployment_id TEXT,status TEXT,last_seen_at INTEGER,
-    started_at INTEGER,updated_at INTEGER,pid INTEGER)`,
-  `INSERT INTO local_runtime_instances VALUES
+    started_at INTEGER,updated_at INTEGER,pid INTEGER,failure_reason TEXT)`,
+  `INSERT INTO local_runtime_instances(node_id,deployment_id,status,last_seen_at,started_at,updated_at,pid) VALUES
    ('node-1','colibri-a','healthy',5,4,6,1234),
    ('node-1','colibri-b','orphaned',6,5,7,NULL)`,
  }{
@@ -332,4 +335,49 @@ func TestColibriHotSwapStatusShowsOrphanedAndDrainingAsPossibleResidents(t *test
   })
  }
  if proc.signalCalls!=0{t.Fatal("read-only Colibri state observation signalled a process")}
+}
+
+func TestColibriUnknownStoppedOrFailedPIDRemainsVisibleAsPossibleResident(t *testing.T){
+ db:=colibriPinTestDB(t)
+ defer db.Close()
+ for _,q:=range []string{
+  `CREATE TABLE local_runtime_instances(
+   node_id TEXT,deployment_id TEXT,status TEXT,last_seen_at INTEGER,
+   started_at INTEGER,updated_at INTEGER,pid INTEGER,failure_reason TEXT)`,
+  `INSERT INTO local_runtime_instances
+   (node_id,deployment_id,status,last_seen_at,updated_at,pid)
+   VALUES('node-1','colibri-b','stopped',5,6,NULL)`,
+ }{if _,err:=db.Exec(q);err!=nil{t.Fatal(err)}}
+ supervisor:=&RuntimeSupervisor{db:db,processes:&unrecordedProcessBackend{alive:false}}
+ service:=&Service{db:db,supervisor:supervisor}
+ for _,status:=range []string{"stopped","failed"}{
+  t.Run(status,func(t *testing.T){
+   if _,err:=db.Exec(`UPDATE local_runtime_instances
+    SET status=?,failure_reason=NULL,started_at=NULL,pid=NULL WHERE deployment_id='colibri-b'`,status);err!=nil{t.Fatal(err)}
+   residents,err:=supervisor.colibriResidents(context.Background(),"node-1","other")
+   if err!=nil||len(residents)!=1||!residents[0].OwnershipUnverified{
+    t.Fatalf("unknown %s model hidden from occupancy: %+v %v",status,residents,err)
+   }
+   ids,e:=selectColibriEvictions(residents,nil)
+   if e==nil||len(ids)!=0||!strings.Contains(e.Error(),"operator reconciliation"){
+    t.Fatalf("unknown %s predecessor eligible for eviction: %v %v",status,ids,e)
+   }
+   state,err:=service.ColibriHotSwapStatus(context.Background(),"colibri-b")
+   if err!=nil||state.Status!=status||
+    !reflect.DeepEqual(state.ActiveDeploymentIDs,[]string{"colibri-b"})||
+    !strings.Contains(state.Message,"RAM/VRAM may still be occupied"){
+    t.Fatalf("unknown %s model shown as free: %+v %v",status,state,err)
+   }
+  })
+ }
+ // Exact no-child evidence must not strand legitimate ordinary model swaps.
+ if _,err:=db.Exec(`UPDATE local_runtime_instances SET
+  status='stopped',pid=NULL,started_at=NULL,failure_reason=?
+  WHERE deployment_id='colibri-b'`,managedNoChildFailureReason);err!=nil{t.Fatal(err)}
+ residents,err:=supervisor.colibriResidents(context.Background(),"node-1","other")
+ if err!=nil||len(residents)!=0{t.Fatalf("verified no-child model falsely reported as live: %+v %v",residents,err)}
+ state,err:=service.ColibriHotSwapStatus(context.Background(),"colibri-b")
+ if err!=nil||len(state.ActiveDeploymentIDs)!=0||state.Message!=""{
+  t.Fatalf("verified no-child stopped state falsely blocked: %+v %v",state,err)
+ }
 }

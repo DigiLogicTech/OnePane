@@ -1611,6 +1611,15 @@ func (s *RuntimeSupervisor) stopWithActivityLock(ctx context.Context, deployment
  if inst.Status==RuntimeBusy&&!teardown {
   return errors.New("managed model has a persisted busy status with no safely releasable inference lease; reconcile before stopping")
  }
+ // A crashed launch or interrupted drain can lack its child PID. This is
+ // unresolved process ownership, NOT proof the engine and its children
+ // released RAM/VRAM. Do not let manual Stop or Shutdown relabel this
+ // generation as stopped or clear residency without independent evidence.
+ // A confirmed pre-spawn failure is separately persisted as failed.
+ if inst.PID<=1 && (inst.Status==RuntimeStarting ||
+  inst.Status==RuntimeDraining || inst.Status==RuntimeOrphaned) {
+  return errors.New("managed runtime process ownership uncertain; operator reconciliation required before stopping")
+ }
 	markOrphaned := func(reason string) error {
 		now := s.clock.UnixMilli()
 		res, e := s.db.ExecContext(ctx, `UPDATE local_runtime_instances SET status='orphaned',failure_reason=?,updated_at=?,revision=revision+1 WHERE id=? AND revision=?`, reason, now, inst.ID, inst.Revision)

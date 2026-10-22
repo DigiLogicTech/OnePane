@@ -23,8 +23,10 @@ func colibriSwapFailureFixture(t *testing.T)(*RuntimeSupervisor,*sql.DB){
  // a stopped/NULL-PID row would instead be unresolved ownership and must
  // not allow a replacement or rollback.
  if _,err:=db.Exec(`INSERT INTO local_runtime_instances
- (id,node_id,deployment_id,status,pid,started_at,revision,updated_at)
- VALUES('old-inst','node','previous','healthy',4321,1,1,2)`);err!=nil{t.Fatal(err)}
+ (id,node_id,deployment_id,status,pid,started_at,revision,updated_at,
+  bind_address,port,process_fingerprint,launch_json,health_json,created_at)
+ VALUES('old-inst','node','previous','healthy',4321,1,1,2,
+  '127.0.0.1',11333,'old-fingerprint','{}','{}',1)`);err!=nil{t.Fatal(err)}
  // No OS process belongs to this deterministic rollback fixture.
  // The recorded predecessor PID is historical evidence only; never
  // inspect or signal a coincidentally reused CI worker PID 4321.
@@ -57,7 +59,9 @@ func TestChatColibriReplacementCancelledAfterEvictionRestoresPreviousWithIndepen
   if _,ok:=callCtx.Deadline();!ok{t.Fatal("rollback has no bound")}
   if _,err:=db.Exec(`UPDATE local_runtime_instances
     SET status='healthy' WHERE deployment_id='previous'`);err!=nil{t.Fatal(err)}
-  return RuntimeInstance{ID:"old-inst",Status:RuntimeHealthy},nil
+  return RuntimeInstance{ID:"old-inst",NodeID:"node",DeploymentID:"previous",
+   PID:4321,ProcessFingerprint:"old-fingerprint",BindAddress:"127.0.0.1",
+   Port:11333,Status:RuntimeHealthy},nil
  }
  svc.residencyMu.Lock()
  state,inst,err:=svc.colibriSwapOnNodeLocked(ctx,"model","node",starter)
@@ -252,5 +256,50 @@ func TestDirectColibriStartSharesExplicitAndChatRecovery(t *testing.T) {
  }
  if !strings.Contains(direct,"s.residencyMu.Lock()"){
   t.Fatal("direct model Start lacks residency mutex for model swap")
+ }
+}
+
+func TestColibriRollbackCannotClaimAnUnverifiedRestoredModel(t *testing.T){
+ for _,tc:=range []struct{name string;modify func(*RuntimeInstance,*sql.DB,*testing.T)}{
+  {"starter returned empty result",func(inst *RuntimeInstance,_ *sql.DB,_ *testing.T){*inst=RuntimeInstance{}}},
+  {"restored wrong deployment",func(inst *RuntimeInstance,_ *sql.DB,_ *testing.T){inst.DeploymentID="foreign"}},
+  {"restored wrong node",func(inst *RuntimeInstance,_ *sql.DB,_ *testing.T){inst.NodeID="foreign"}},
+  {"restored missing PID",func(inst *RuntimeInstance,_ *sql.DB,_ *testing.T){inst.PID=0}},
+  {"restored not healthy",func(inst *RuntimeInstance,_ *sql.DB,_ *testing.T){inst.Status=RuntimeStarting}},
+  {"returned PID differs from persisted",func(inst *RuntimeInstance,_ *sql.DB,_ *testing.T){inst.PID=9876}},
+  {"returned fingerprint differs from persisted",func(inst *RuntimeInstance,_ *sql.DB,_ *testing.T){inst.ProcessFingerprint="forged"}},
+  {"persisted predecessor remains stopped",func(_ *RuntimeInstance,_ *sql.DB,_ *testing.T){}},
+  {"competing replacement resurfaced",func(_ *RuntimeInstance,db *sql.DB,t *testing.T){
+    if _,err:=db.Exec(`UPDATE local_runtime_instances SET status='orphaned',pid=NULL,failure_reason=NULL WHERE deployment_id='model'`);err!=nil{t.Fatal(err)}
+  }},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   svc,db:=colibriSwapFailureFixture(t)
+   calls:=0
+   starter:=func(_ context.Context,id string)(RuntimeInstance,error){
+    calls++
+    if id=="model"{
+     if _,err:=db.Exec(`UPDATE local_runtime_instances SET status='stopped' WHERE deployment_id='previous'`);err!=nil{t.Fatal(err)}
+     if _,err:=db.Exec(`UPDATE local_runtime_instances SET status='failed',pid=NULL,started_at=NULL,failure_reason=? WHERE deployment_id='model'`,managedNoChildFailureReason);err!=nil{t.Fatal(err)}
+     return RuntimeInstance{},errors.New("replacement launch failed")
+    }
+    if id!="previous"{t.Fatalf("unexpected rollback target %s",id)}
+    if tc.name!="persisted predecessor remains stopped"{
+     if _,err:=db.Exec(`UPDATE local_runtime_instances SET status='healthy' WHERE deployment_id='previous'`);err!=nil{t.Fatal(err)}
+    }
+    restored:=RuntimeInstance{ID:"old-inst",NodeID:"node",DeploymentID:"previous",PID:4321,
+      ProcessFingerprint:"old-fingerprint",BindAddress:"127.0.0.1",Port:11333,Status:RuntimeHealthy}
+    tc.modify(&restored,db,t)
+    return restored,nil
+   }
+   svc.residencyMu.Lock()
+   state,inst,err:=svc.colibriSwapOnNodeLocked(context.Background(),"model","node",starter)
+   svc.residencyMu.Unlock()
+   if err==nil||!strings.Contains(err.Error(),"operator reconciliation required")||calls!=2||
+      inst.ID!=""||len(state.ActiveDeploymentIDs)!=0||
+      strings.Contains(state.Message,"was restored"){
+    t.Fatalf("unproven Colibri rollback advertised as restored: state=%+v instance=%+v calls=%d err=%v",state,inst,calls,err)
+   }
+  })
  }
 }

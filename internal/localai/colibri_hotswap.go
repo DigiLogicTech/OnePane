@@ -266,8 +266,31 @@ func (s *RuntimeSupervisor) colibriSwapOnNodeLocked(ctx context.Context,
         // attempt another model switch when an active/busy model blocked us.
         if len(state.EvictedDeploymentIDs)>0{
             prev:=state.EvictedDeploymentIDs[0]
-            if _,restoreErr:=start(recoveryCtx,prev);restoreErr!=nil{
+            restored,restoreErr:=start(recoveryCtx,prev)
+            if restoreErr!=nil{
                 return state,RuntimeInstance{},fmt.Errorf("Colibri swap failed: %w; rollback to %s also failed: %v",launchErr,prev,restoreErr)
+            }
+            // The same ownership assertions used for a successful target
+            // must hold for its predecessor. A nil-error restoration with
+            // no PID, wrong model/Node or a starting engine cannot be
+            // reported to the operator as restored.
+            if !verifiedColibriResidency(restored,prev,nodeID){
+                return state,RuntimeInstance{},fmt.Errorf("Colibri swap failed: %w; rollback to %s returned unverified residency; operator reconciliation required",launchErr,prev)
+            }
+            // A valid-looking returned struct alone is not an owned
+            // generation. Re-read its durable instance under the same
+            // bounded recovery context and confirm model/PID/fingerprint.
+            saved,savedErr:=s.Instance(recoveryCtx,prev)
+            if savedErr!=nil || saved.ID!=restored.ID ||
+                saved.PID!=restored.PID || saved.ProcessFingerprint!=restored.ProcessFingerprint ||
+                !verifiedColibriResidency(saved,prev,nodeID){
+                return state,RuntimeInstance{},fmt.Errorf("Colibri swap failed: %w; rollback to %s has unverified durable ownership; operator reconciliation required",launchErr,prev)
+            }
+            // A separately persisted replacement/child could still be
+            // resident even after a starter reports restored success.
+            peers,peersErr:=s.colibriResidents(recoveryCtx,nodeID,prev)
+            if peersErr!=nil || len(peers)>0{
+                return state,RuntimeInstance{},fmt.Errorf("Colibri swap failed: %w; rollback to %s has unresolved competing residency; operator reconciliation required",launchErr,prev)
             }
             // Rollback is real residency, not a successful target launch.
             // Report the restored engine as active instead of still evicted,

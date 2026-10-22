@@ -237,6 +237,13 @@ func (s *RuntimeSupervisor) colibriSwapOnNodeLocked(ctx context.Context,
             state.EvictedDeploymentIDs=append(state.EvictedDeploymentIDs,p.ID)
         }
     }
+    if launchErr==nil && len(after)>0 {
+        // A verified target does not prove that a predecessor was evicted.
+        // OnePane permits only a single Colibri engine per Node. Never
+        // claim readiness when another resident or live failed child is
+        // still present; avoid an automatic stop/rollback of unknown owners.
+        return state,RuntimeInstance{},errors.New("Colibri replacement has competing process residency; operator reconciliation required")
+    }
     if launchErr!=nil {
         // A startup timeout may mark the replacement failed while its engine
         // is still alive. Never load the predecessor until verified teardown

@@ -4,6 +4,7 @@ import (
  "context"
  "errors"
  "os"
+ "runtime"
  "strings"
  "sync"
  "testing"
@@ -85,4 +86,41 @@ func TestManagedTrackedProcessCleanupIsGenerationFenced(t *testing.T) {
  current=b.cmds[reusedPID]
  b.mu.Unlock()
  if current!=newer{t.Fatal("completed old launch reclaimed a newer PID")}
+}
+
+func TestManagedTrackedProcessTreeSignalRequiresLiveOwnedGeneration(t *testing.T) {
+ b:=NewOSProcessBackend()
+ const testPID=4321
+ if err:=b.requireOwnedWindowsTreeSignal(testPID);err==nil{
+  t.Fatal("unknown PID could invoke Windows taskkill")
+ }
+ current:=&trackedManagedCommand{exited:make(chan struct{})}
+ b.mu.Lock()
+ b.cmds[testPID]=current
+ b.mu.Unlock()
+ if err:=b.requireOwnedWindowsTreeSignal(testPID);err!=nil{
+  t.Fatalf("live backend-owned generation was denied: %v",err)
+ }
+ close(current.exited)
+ if err:=b.requireOwnedWindowsTreeSignal(testPID);err==nil{
+  t.Fatal("exited managed generation could invoke Windows taskkill")
+ }
+ b.forgetTrackedProcess(testPID,current)
+ if err:=b.requireOwnedWindowsTreeSignal(testPID);err==nil{
+  t.Fatal("reaped/untracked PID could invoke Windows taskkill")
+ }
+ if err:=b.requireOwnedWindowsTreeSignal(1);err==nil{
+  t.Fatal("service PID 1 was accepted as a managed tree signal")
+ }
+}
+
+func TestWindowsTreeSignalNeverExecutesOnUntrackedPID(t *testing.T) {
+ if runtime.GOOS!="windows"{t.Skip("Windows-only numeric PID tree termination guard")}
+ b:=NewOSProcessBackend()
+ // PID 4321 is deliberately NOT owned. The expected error must be
+ // returned before os.FindProcess or taskkill can touch any OS process.
+ if err:=b.Signal(4321,os.Kill);err==nil||
+  !strings.Contains(err.Error(),"untracked process"){
+  t.Fatalf("untracked Windows PID reached taskkill or returned wrong error: %v",err)
+ }
 }

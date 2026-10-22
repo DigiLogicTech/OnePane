@@ -286,9 +286,34 @@ func openManagedRuntimeLog(path string)(*os.File,error){
  return f,nil
 }
 
+// requireOwnedWindowsTreeSignal never contacts or signals a process. It
+// refuses any PID without a live command generation launched by this backend.
+// taskkill still has a narrow PID-reuse interval; passing this guard is NOT
+// proof of kernel-held ownership or released child VRAM after /T /F.
+func (b *OSProcessBackend) requireOwnedWindowsTreeSignal(pid int) error {
+ if b==nil||pid<=1{return errors.New("invalid managed process identity")}
+ b.mu.Lock()
+ tracked:=b.cmds[pid]
+ b.mu.Unlock()
+ if tracked==nil{return errors.New("refusing Windows tree signal for untracked process; operator reconciliation required")}
+ select {
+ case <-tracked.exited:
+  return errors.New("refusing Windows tree signal for exited managed process")
+ default:
+  return nil
+ }
+}
 func (b *OSProcessBackend) Signal(pid int, sig os.Signal) error {
 	if pid <= 1 {
 		return errors.New("invalid pid")
+	}
+	// Native Windows tree termination is delegated to taskkill /T /F,
+	// which addresses a numeric PID, not an owned process handle. A caller
+	// verifying a saved PID earlier is not authority to kill an untracked
+	// (possibly recycled) process after service restart. Require that this
+	// particular backend still owns a live tracked launch generation.
+	if runtime.GOOS == "windows" {
+		if err:=b.requireOwnedWindowsTreeSignal(pid);err!=nil{return err}
 	}
 	p, err := os.FindProcess(pid)
 	if err != nil {

@@ -306,6 +306,7 @@ jobs:
           go test -count=1 -timeout 4m -run TestFailedModelPIDPersistence ./internal/localai
           go test -count=1 -timeout 4m -run '^TestManagedProcessIdentity' ./internal/localai
           go test -count=1 -timeout 4m -run '^TestManagedTrackedProcess' ./internal/localai
+          go test -count=1 -timeout 4m -run TestWindowsTreeSignalNeverExecutesOnUntrackedPID ./internal/localai
           go test -count=1 -timeout 4m -run TestManagedStopRechecksPIDAfterDrainingPersistenceBeforeSIGTERM ./internal/localai
           go test -count=1 -timeout 4m -run '^(TestManagedStopRetainsUnknownProcessOwnershipWithoutPID|TestManagedShutdownCannotSilentlyStopUnknownPIDStartingOrDrain|TestManagedRestartNoChildFailureProofIsRequired|TestConfirmedPrelaunchFailureWithNoPIDStillAllowsExplicitStop|TestRecordedZeroPIDCannotImpersonateProvenNoChildFailure)$' ./internal/localai
           go test -count=1 -timeout 4m -run '^(TestRecoveredModel|TestRecovery|TestManagedRuntimeRecovery)' ./internal/localai

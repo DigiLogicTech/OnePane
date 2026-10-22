@@ -163,3 +163,33 @@ func TestManagedMemoryAdmissionRejectsUnprovenStoppedNullPID(t *testing.T){
   })
  }
 }
+
+func TestManagedMemoryAdmissionPreservesUnknownHealthyBusyOwners(t *testing.T){
+ db,err:=sql.Open("sqlite",":memory:")
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ if _,err:=db.Exec(`CREATE TABLE local_runtime_instances(
+  node_id TEXT,deployment_id TEXT,status TEXT,pid INTEGER,
+  failure_reason TEXT,started_at INTEGER)`);err!=nil{t.Fatal(err)}
+ proc:=&unrecordedProcessBackend{alive:false}
+ svc:=&RuntimeSupervisor{db:db,processes:proc}
+ for _,status:=range []string{"healthy","busy"}{
+  for _,pid:=range []any{nil,int64(0),int64(1)}{
+   if _,err:=db.Exec(`DELETE FROM local_runtime_instances`);err!=nil{t.Fatal(err)}
+   if _,err:=db.Exec(`INSERT INTO local_runtime_instances
+    (node_id,deployment_id,status,pid)
+    VALUES('node','unknown',?,?)`,status,pid);err!=nil{t.Fatal(err)}
+   err:=svc.refuseUnreconciledMemoryOwners(context.Background(),"node","new")
+   if err==nil||!strings.Contains(err.Error(),"operator reconciliation"){
+    t.Fatalf("%s PID %v wrongly allowed cross-backend memory reuse: %v",status,pid,err)
+   }
+   if proc.signalCalls!=0{t.Fatal("memory inspection signalled a process")}
+  }
+ }
+ // An ordinary healthy running owner with a valid PID is budgeted by
+ // ensureCapacity, not mistaken for an orphaned/unknown-PID generation.
+ if _,err:=db.Exec(`UPDATE local_runtime_instances SET status='healthy',pid=4321`);err!=nil{t.Fatal(err)}
+ if err:=svc.refuseUnreconciledMemoryOwners(context.Background(),"node","new");err!=nil{
+  t.Fatalf("normal recorded healthy PID should use capacity admission: %v",err)
+ }
+}

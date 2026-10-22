@@ -67,8 +67,18 @@ func TestManagedStopRefusesUnknownPersistedBusyAfterRestart(t *testing.T){
  if err:=db.QueryRow(`SELECT status FROM local_runtime_instances WHERE id='inst'`).Scan(&status);err!=nil{t.Fatal(err)}
  if status!="busy"{t.Fatalf("unknown process status rewritten: %s",status)}
 }
+// Only a recorded launch whose original PID was independently observed
+// dead is safe for these synthetic successful-Stop fixtures. Other tests
+// deliberately preserve NULL PID to exercise unknown-owner denial.
+func markManagedFixtureProcessAsDead(t *testing.T,svc *RuntimeSupervisor,db *sql.DB){
+ t.Helper()
+ if _,err:=db.Exec(`UPDATE local_runtime_instances
+ SET pid=4321,started_at=1 WHERE deployment_id='model'`);err!=nil{t.Fatal(err)}
+ svc.processes=&unrecordedProcessBackend{alive:false}
+}
 func TestManagedStopSucceedsAfterFinalActiveRequestReleases(t *testing.T){
  svc,db:=stopLeaseFixture(t,"busy")
+ markManagedFixtureProcessAsDead(t,svc,db)
  svc.activeRequests["model"]=1
  if err:=svc.Release(context.Background(),"model");err!=nil{t.Fatalf("release: %v",err)}
  if err:=svc.Stop(context.Background(),"model");err!=nil{t.Fatalf("clean stopped model refused: %v",err)}
@@ -143,6 +153,7 @@ func TestManagedStopWaitsForModelResidencyTransition(t *testing.T){
 
 func TestColibriRollbackCanStopWhileHoldingResidencyLock(t *testing.T){
  svc,db:=stopLeaseFixture(t,"healthy")
+ markManagedFixtureProcessAsDead(t,svc,db)
  result:=make(chan error,1)
  go func(){
   svc.residencyMu.Lock()
@@ -162,6 +173,7 @@ func TestColibriRollbackCanStopWhileHoldingResidencyLock(t *testing.T){
 
 func TestExplicitDaemonShutdownDrainsOtherwiseBusyManagedRuntime(t *testing.T){
  svc,db:=stopLeaseFixture(t,"busy")
+ markManagedFixtureProcessAsDead(t,svc,db)
  svc.activeRequests["model"]=2
  if err:=svc.Stop(context.Background(),"model");err==nil{
   t.Fatal("ordinary model Stop unexpectedly bypassed active inference lease")
@@ -178,6 +190,7 @@ func TestExplicitDaemonShutdownDrainsOtherwiseBusyManagedRuntime(t *testing.T){
 }
 func TestExplicitDaemonShutdownDoesNotAssumeUnknownBusyIsManagedUserStop(t *testing.T){
  svc,db:=stopLeaseFixture(t,"busy")
+ markManagedFixtureProcessAsDead(t,svc,db)
  if err:=svc.Stop(context.Background(),"model");err==nil{
   t.Fatal("direct Stop accepted persisted busy without valid inference lease")
  }

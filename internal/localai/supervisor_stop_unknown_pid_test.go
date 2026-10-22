@@ -3,6 +3,7 @@ package localai
 import (
  "context"
  "database/sql"
+ "fmt"
  "strings"
  "testing"
 )
@@ -109,5 +110,35 @@ func TestManagedStoppedWithProvenNeverLaunchedChildAllowsIdempotentStop(t *testi
  if err:=svc.Stop(context.Background(),"model");err!=nil{t.Fatal(err)}
  if err:=svc.Stop(context.Background(),"model");err!=nil{
   t.Fatalf("valid no-child stopped record became permanently stuck: %v",err)
+ }
+}
+
+func TestManagedHealthyOrBusyUnknownPIDNeverSilentlyStops(t *testing.T){
+ for _,status:=range []string{"healthy","busy"}{
+  for _,pid:=range []any{nil,int64(0),int64(1)}{
+   t.Run(status+"/pid"+fmt.Sprint(pid),func(t *testing.T){
+    svc,db:=stopLeaseFixture(t,status)
+    if pid!=nil{
+     if _,err:=db.Exec(`UPDATE local_runtime_instances SET pid=? WHERE deployment_id='model'`,pid);err!=nil{t.Fatal(err)}
+    }
+    if status=="healthy"{
+     if err:=svc.Stop(context.Background(),"model");err==nil||
+      !strings.Contains(err.Error(),"operator reconciliation"){
+      t.Fatalf("healthy row with missing/invalid PID was cleared: %v",err)
+     }
+    }
+    if err:=svc.Shutdown(context.Background());err==nil||
+     !strings.Contains(err.Error(),"operator reconciliation"){
+     t.Fatalf("daemon shutdown cleared unknown %s PID %v: %v",status,pid,err)
+    }
+    var saved,residency string
+    var rev int
+    if err:=db.QueryRow(`SELECT status,revision FROM local_runtime_instances WHERE id='inst'`).Scan(&saved,&rev);err!=nil{t.Fatal(err)}
+    if err:=db.QueryRow(`SELECT residency_state FROM model_deployments WHERE id='model'`).Scan(&residency);err!=nil{t.Fatal(err)}
+    if saved!=status||rev!=1||residency!="resident"{
+     t.Fatalf("unsafe release of %s PID %v: status=%s revision=%d residency=%s",status,pid,saved,rev,residency)
+    }
+   })
+  }
  }
 }

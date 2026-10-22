@@ -36,7 +36,8 @@ func (s *RuntimeSupervisor) refuseUnreconciledMemoryOwners(ctx context.Context,n
  rows,err:=s.db.QueryContext(ctx,`SELECT deployment_id,status,pid,failure_reason,started_at
   FROM local_runtime_instances
   WHERE node_id=? AND deployment_id<>?
-    AND status IN ('starting','draining','orphaned','failed','stopped')
+    AND (status IN ('starting','draining','orphaned','failed','stopped')
+       OR (status IN ('healthy','busy') AND COALESCE(pid,0)<=1))
   ORDER BY deployment_id LIMIT 513`,nodeID,target)
  if err!=nil{return fmt.Errorf("inspect managed memory ownership: %w",err)}
  type candidate struct{id,status string;pid sql.NullInt64;reason sql.NullString;started sql.NullInt64}
@@ -65,6 +66,11 @@ func (s *RuntimeSupervisor) refuseUnreconciledMemoryOwners(ctx context.Context,n
     return fmt.Errorf("managed model %s remains %s with a live process; stop/reconcile before allocating more memory",c.id,c.status)
    }
    continue
+  }
+  // Healthy/busy with missing PID has no trustworthy process ownership,
+  // even when a socket or database row once reported it ready.
+  if c.status=="healthy"||c.status=="busy"{
+   return fmt.Errorf("managed model %s has unverified %s PID ownership; operator reconciliation required",c.id,c.status)
   }
   // A NULL PID plus failed state without an exact pre-spawn proof could
   // have followed an interrupted OS launch before PID persistence.

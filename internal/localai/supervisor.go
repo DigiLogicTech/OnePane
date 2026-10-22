@@ -1107,8 +1107,14 @@ func requiresOperatorReconciliationBeforeRestart(inst RuntimeInstance, alive boo
  // A recovered orphan with NO recorded PID does not prove no engine was
  // spawned: the process could have started before its PID could be saved.
  // Never overwrite that evidence with a second engine on the same Node.
- if (inst.Status==RuntimeOrphaned||inst.Status==RuntimeDraining)&&inst.PID<=1{
-  return true
+ if inst.PID<=1 {
+  // A healthy/busy/starting label is not process-spawn evidence. A
+  // crash can persist readiness without saving the PID, leaving
+  // descendant model engines alive and holding device memory.
+  switch inst.Status{
+  case RuntimeHealthy,RuntimeBusy,RuntimeStarting,RuntimeOrphaned,RuntimeDraining:
+   return true
+  }
  }
  // A generic failed/NULL-PID row is ambiguous after crash. Only a guarded,
  // no-child prelaunch failure carries sufficient evidence for a retry.
@@ -1116,7 +1122,12 @@ func requiresOperatorReconciliationBeforeRestart(inst RuntimeInstance, alive boo
   inst.PID<=1&&!confirmedNoChildWithoutPID(inst){
   return true
  }
- if inst.PID <= 1 || !alive { return false }
+ if !alive {
+  // A dead parent does not prove its descendant engine freed RAM/VRAM.
+  // Keep the old generation instead of trying an impossible SQL restart
+  // of an active/starting record or silently allocating another model.
+  return inst.Status==RuntimeHealthy||inst.Status==RuntimeBusy||inst.Status==RuntimeStarting
+ }
  switch inst.Status {
  case RuntimeHealthy, RuntimeBusy, RuntimeStarting:
   return false // reusable only after the separate VerifyIdentity boundary
@@ -1167,7 +1178,7 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 		// spawn a second engine until the operator reconciles that process.
 		// In particular, a restart must not erase a recovered orphan's PID.
 		if requiresOperatorReconciliationBeforeRestart(old, alive) {
-			return RuntimeInstance{}, errors.New("previous managed runtime process is still alive in a non-running state; operator reconciliation required before restart")
+			return RuntimeInstance{}, errors.New("previous managed runtime process ownership or readiness is uncertain; operator reconciliation required before restart")
 		}
 		if (old.Status == RuntimeHealthy || old.Status == RuntimeBusy ||
 			old.Status == RuntimeStarting) && alive {
@@ -1703,8 +1714,9 @@ func (s *RuntimeSupervisor) stopWithActivityLock(ctx context.Context, deployment
  // released RAM/VRAM. Do not let manual Stop or Shutdown relabel this
  // generation as stopped or clear residency without independent evidence.
  // A confirmed pre-spawn failure is separately persisted as failed.
- if inst.PID<=1 && (inst.Status==RuntimeStarting ||
-  inst.Status==RuntimeDraining || inst.Status==RuntimeOrphaned ||
+ if inst.PID<=1 && (inst.Status==RuntimeHealthy || inst.Status==RuntimeBusy ||
+  inst.Status==RuntimeStarting || inst.Status==RuntimeDraining ||
+  inst.Status==RuntimeOrphaned ||
   ((inst.Status==RuntimeFailed||inst.Status==RuntimeStopped)&&
    !confirmedNoChildWithoutPID(inst))) {
   return errors.New("managed runtime process ownership uncertain; operator reconciliation required before stopping")

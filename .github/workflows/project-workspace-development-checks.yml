@@ -218,6 +218,7 @@ jobs:
           go test -race -count=1 -timeout 3m -run TestManagedStop ./internal/localai
           go test -race -count=1 -timeout 3m -run TestColibriRollbackCanStopWhileHoldingResidencyLock ./internal/localai
           go test -race -count=1 -timeout 3m -run TestChatColibriReplacementCancelledAfterEvictionRestoresPreviousWithIndependentDeadline ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestColibriRollbackCannotClaimAnUnverifiedRestoredModel ./internal/localai
           go test -race -count=1 -timeout 3m -run TestColibriReplacementDoesNotGuessRollbackWhenTargetPIDUnknown ./internal/localai
           go test -race -count=1 -timeout 3m -run TestChatColibriUsesSameFailClosedSwapAsExplicitControl ./internal/localai
           go test -race -count=1 -timeout 3m -run 'Test(DirectColibriStart|ColibriHotSwapStatusShows)' ./internal/localai
@@ -321,6 +322,7 @@ jobs:
           go test -count=1 -timeout 4m -run TestColibriHotSwapRejectsLiveFailedAndStoppedEngineBeforeEviction ./internal/localai
           go test -count=1 -timeout 4m -run TestColibriFailedRowWithConfirmedDeadPIDDoesNotBlockSwap ./internal/localai
           go test -count=1 -timeout 4m -run TestChatColibriReplacementCancelledAfterEvictionRestoresPreviousWithIndependentDeadline ./internal/localai
+          go test -count=1 -timeout 4m -run TestColibriRollbackCannotClaimAnUnverifiedRestoredModel ./internal/localai
           go test -count=1 -timeout 4m -run TestColibriReplacementDoesNotGuessRollbackWhenTargetPIDUnknown ./internal/localai
           go test -count=1 -timeout 4m -run 'TestColibri(StarterCannot|VerifiedStarter|VerifiedReplacement|VerifiedTarget)' ./internal/localai
           go test -count=1 -timeout 4m -run 'Test(DirectColibriStart|ColibriHotSwapStatusShows)' ./internal/localai

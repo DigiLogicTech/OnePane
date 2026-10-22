@@ -34,6 +34,13 @@ func TestChatColibriReplacementCancelledAfterEvictionRestoresPreviousWithIndepen
   if id=="model"{
    if _,err:=db.Exec(`UPDATE local_runtime_instances
      SET status='stopped' WHERE deployment_id='previous'`);err!=nil{t.Fatal(err)}
+   // This scenario deliberately cancels BEFORE the replacement child was
+   // spawned. Preserve the same durable no-child evidence production writes
+   // at the prelaunch cancellation boundary; an unknown launch would
+   // correctly withhold rollback instead of restoring the old model.
+   if _,err:=db.Exec(`UPDATE local_runtime_instances
+     SET status='failed',pid=NULL,started_at=NULL,failure_reason=?
+     WHERE deployment_id='model'`,managedNoChildFailureReason);err!=nil{t.Fatal(err)}
    cancel() // the chat request ended AFTER the old resident was evicted
    return RuntimeInstance{},context.Canceled
   }

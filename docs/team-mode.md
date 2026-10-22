@@ -1,5 +1,7 @@
 # M31 Team Mode
 
+For the user-confirmed extension to real-time collaboration with switchable shared-conversation and individual-agent views, see [Live collaborative Team completion contract](rc11-live-team-completion.md). The implementation described below is the existing deliberation/accepted-plan model; it does not yet establish that extended experience.
+
 Team Mode is OnePane's human-in-the-loop multi-agent orchestration mode. It sits between ordinary Supervisor execution and formal Council deliberation:
 
 - **Supervisor**: one orchestrator autonomously delegates bounded work and drives a Task to verified completion.

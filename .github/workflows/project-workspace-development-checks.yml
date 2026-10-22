@@ -13,6 +13,10 @@ on:
       - 'scripts/validate_colibri_pin.js'
       - 'internal/webui/static/model-agentcheck-diagnostics.js'
       - 'internal/webui/static/app-foundation.js'
+      - 'internal/webui/static/web-chat-*.js'
+      - 'scripts/validate_web_chair.js'
+      - 'scripts/validate_web_only_council.js'
+      - 'scripts/validate_web_chat_sessions.js'
       - 'internal/webui/static/index.html'
       - 'internal/webui/static/ux-alignment.css'
       - 'scripts/validate_product_ux_alignment.js'
@@ -166,6 +170,13 @@ jobs:
           node --check internal/webui/static/project-workspace-page.js
           node --check internal/webui/static/app-foundation.js
           node --check internal/webui/static/app.js
+          node --check internal/webui/static/web-chat-page.js
+          node --check internal/webui/static/web-chat-session-tabs.js
+          node --check internal/webui/static/web-chat-council-launch.js
+          node --check internal/webui/static/web-chat-chair.js
+          node scripts/validate_web_chair.js
+          node scripts/validate_web_only_council.js
+          node scripts/validate_web_chat_sessions.js
           node scripts/validate_unified_assistant_chat.js
           node scripts/validate_l5_goal_lifecycle.js
           node scripts/validate_product_ux_alignment.js

@@ -17,6 +17,10 @@ on:
       - 'scripts/validate_web_chair.js'
       - 'scripts/validate_web_only_council.js'
       - 'scripts/validate_web_chat_sessions.js'
+      - 'internal/webui/static/colibri-spec-sheet.js'
+      - 'internal/webui/static/colibri-registration-dialog.js'
+      - 'scripts/validate_colibri_spec_tour.js'
+      - 'scripts/validate_models_qa_rc2.js'
       - 'internal/webui/static/index.html'
       - 'internal/webui/static/ux-alignment.css'
       - 'scripts/validate_product_ux_alignment.js'
@@ -177,6 +181,10 @@ jobs:
           node scripts/validate_web_chair.js
           node scripts/validate_web_only_council.js
           node scripts/validate_web_chat_sessions.js
+          node --check internal/webui/static/colibri-spec-sheet.js
+          node --check internal/webui/static/colibri-registration-dialog.js
+          node scripts/validate_colibri_spec_tour.js
+          node scripts/validate_models_qa_rc2.js
           node scripts/validate_unified_assistant_chat.js
           node scripts/validate_l5_goal_lifecycle.js
           node scripts/validate_product_ux_alignment.js

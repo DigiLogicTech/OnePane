@@ -43,7 +43,7 @@ The old #1 failure is in the step **Restore Alpha 3 and apply Alpha 3.1 stabiliz
 
 | ID | Action | Completion evidence | Status |
 | --- | --- | --- | --- |
-| CI-01 | Carry existing Web Council/session-isolation checks into current integration CI | Existing three behavioural validator scripts and four syntax checks run in the current workflow; their source/validator changes trigger it | Implemented locally in this follow-up; all 18 current validator scripts and 23 syntax checks pass; hosted run pending publication |
+| CI-01 | Carry existing Web Council/session-isolation and Colibri UI checks into current integration CI | Existing five behavioural validator scripts and six syntax checks run in the current workflow; their source/validator changes trigger it | Implemented in this follow-up; all 23 repository validator scripts pass locally, including 20 now directly invoked by integration CI plus three already invoked through its development-surface validator; all 25 directly referenced syntax checks pass; final hosted head must pass separately |
 | CI-02 | Reconcile stacked/legacy PRs before release | Requirement/patch comparison against integration, explicit retained/absorbed/deferred decision, then deliberate branch cleanup | Open; several heads are not Git ancestors despite the integration manifest describing consolidated work; ancestry alone cannot determine missing functionality |
 | CI-03 | Establish fresh physical rootless evidence | Explicitly dispatched approved-head tests with trusted runner, protected reviewer environment and administrator-approved pre-pulled digest images | Unverified; five physical jobs exist, not executed by this assessment |
 | CI-04 | Qualify real model process/resource lifecycle | CPU/GPU/Colibri stop, swap, cancellation/crash and child/RAM/VRAM observations on selected machines | Unverified; hosted process/SQLite tests are insufficient |
@@ -59,7 +59,9 @@ The older `manual-web-council-check.yml` runs on its historical feature branch o
 - `validate_web_only_council.js`: independent manual web seats, staged rounds and policy.
 - `validate_web_chat_sessions.js`: session isolation, per-provider concurrency and conversation/handoff behaviour.
 
-The integrated workflow now also syntax-checks the four corresponding web-chat scripts and triggers for `web-chat-*.js` and those validators. No test is removed, physical dispatch gate changed or model/host privilege widened.
+Two more passing validators were found only in the historical Alpha 3.1 stabilisation workflow: `validate_colibri_spec_tour.js` and `validate_models_qa_rc2.js`. They exercise current Colibri spec/tour distinctions, model registration, duplicate prevention and Agent Check messaging. Carry both into integration rather than depending on an old build-restoration job. Their source modules and validator changes now trigger integration CI.
+
+The integrated workflow also syntax-checks the four corresponding web-chat scripts and both Colibri modules. Three other QA validators (incident capture, report summary and consolidated support ZIP) are already invoked by `validate_project_development_surface.js`; they were verified rather than duplicated. No test is removed, physical dispatch gate changed or model/host privilege widened.
 
 ## Physical workflow boundaries
 

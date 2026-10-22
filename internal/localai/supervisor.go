@@ -1127,6 +1127,16 @@ func requiresOperatorReconciliationBeforeRestart(inst RuntimeInstance, alive boo
 func (s *RuntimeSupervisor) Start(ctx context.Context, deploymentID string) (RuntimeInstance, error) {
 	s.residencyMu.Lock()
 	defer s.residencyMu.Unlock()
+	// Direct Models -> Start is an eviction-capable entrypoint, just like
+	// chat Acquire and explicit Hot Swap. A failing Colibri launch must
+	// follow the same inspected, bounded rollback path; bare startLocked
+	// can evict a healthy predecessor before a later preflight fails.
+	cfg,_,_,err:=s.resolve(ctx,deploymentID)
+	if err!=nil{return RuntimeInstance{},err}
+	if strings.EqualFold(cfg.RuntimeBackend,"colibri"){
+		_,inst,err:=s.colibriHotSwapLocked(ctx,deploymentID)
+		return inst,err
+	}
 	return s.startLocked(ctx, deploymentID)
 }
 

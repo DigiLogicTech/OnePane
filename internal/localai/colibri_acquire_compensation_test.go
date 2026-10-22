@@ -226,3 +226,23 @@ func TestColibriVerifiedTargetCanReplaceActuallyStoppedPredecessor(t *testing.T)
   t.Fatalf("valid single Colibri resident rejected: state=%+v got=%+v err=%v",state,got,err)
  }
 }
+
+func TestDirectColibriStartSharesExplicitAndChatRecovery(t *testing.T) {
+ raw,err:=os.ReadFile("supervisor.go")
+ if err!=nil{t.Fatal(err)}
+ code:=string(raw)
+ start:=strings.Index(code,"func (s *RuntimeSupervisor) Start(")
+ end:=strings.Index(code[start:],"\nfunc (s *RuntimeSupervisor) startLocked(")
+ if start<0||end<=0{t.Fatal("direct model Start boundary missing")}
+ direct:=code[start:start+end]
+ cfg:=strings.Index(direct,"s.resolve(ctx,deploymentID)")
+ route:=strings.Index(direct,"s.colibriHotSwapLocked(ctx,deploymentID)")
+ bare:=strings.LastIndex(direct,"return s.startLocked(ctx, deploymentID)")
+ if cfg<0||route<=cfg||bare<=route||
+  !strings.Contains(direct,"strings.EqualFold(cfg.RuntimeBackend,\"colibri\")"){
+  t.Fatal("direct Models Start bypasses Colibri's inspected and bounded rollback coordinator")
+ }
+ if !strings.Contains(direct,"s.residencyMu.Lock()"){
+  t.Fatal("direct model Start lacks residency mutex for model swap")
+ }
+}

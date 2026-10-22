@@ -204,3 +204,67 @@ operator review approvals, physical acceptance and separately approved
 Windows/Ubuntu package/installer QA. PR #227 is draft and unmerged.
 No user models, real GPUs, existing Project data, credentials or live
 network devices were touched in this checkpoint.
+
+## Colibri replacement unknown-outcome and tracked process Wait (2026-10-22)
+
+The earlier no-child/PID provenance work exposed two additional code paths
+which could misinterpret an interrupted model as safely recyclable. This is
+a scoped implementation and audit checkpoint, **not** real process-tree,
+CPU/RAM/VRAM, installer, or paired-Node acceptance.
+
+- [x] **Colibri rollback denied for unresolved replacement states**
+  (`cdf091388d70e3ab2e7b4611190ec4e270fc4f14`).
+  `reconcileFailedColibriReplacement` can no longer allow the old
+  resident to restart merely because the failed target's Python PID
+  appears absent while its persisted status is still starting,
+  draining, orphaned, busy or healthy. An unknown `failed`/NULL-PID
+  record and corrupt recorded PID are also denied. A proven
+  no-child prelaunch cancellation and a completed `stopped` record
+  retain their intended rollback path. Negative SQLite regressions
+  assert that no old Colibri engine is restarted or foreign process
+  signalled under unresolved ownership.
+- [x] **Existing cancellation fixture reconciled to truthful state**
+  (`1679169bc0fa93f5253c2856d745d826cab276d3`).
+  The original request-cancelled-after-eviction test represented
+  pre-spawn cancellation but omitted the required guarded no-child
+  failure record. The fixture now records the same durable no-child
+  marker that production writes, preserving safe rollback. Earlier
+  intermediate code-only CI at `cdf09138` failed this legacy
+  fixture; this was investigated and fixed rather than weakening
+  the new production ownership check.
+- [x] **Owned process exit signalling is race-safe**
+  (`6f612ad09e203c05ec62266e2c3473b52044429c`).
+  The managed `OSProcessBackend` no longer reads
+  `exec.Cmd.ProcessState` concurrently with `cmd.Wait`.
+  A per-launch, close-only completion channel records the completed
+  Wait generation; once closed, cached executable/argv identity is
+  rejected instead of reused as live ownership. Bounded tests launch
+  only the self-owned Go test executable and concurrently inspect
+  its short-lived lifecycle. This is **not** a kernel-held PID handle,
+  a universal race-free OS PID reuse guarantee, or a Colibri child
+  process release claim.
+- [x] **Explicit platform regression**
+  (`1abd72659de785f3c5bad272ec9a21d1a602b9f7`):
+  native Windows and Linux race lanes run the subprocess-exit
+  fixture in addition to the Colibri rollback regressions.
+  [Exact combined source/workflow CI #39704135818 PASSED](https://github.com/DigiLogicTech/OnePane/actions/runs/39704135818)
+  with native Windows checks, Linux model/Colibri race checks,
+  full Go regression and cross-platform compilation. The physical
+  Node job was **SKIPPED** intentionally.
+- [x] **Physical acceptance protocol authored, not executed**
+  (`45137212b3f6d1fb4408ae8a85b81e7c38e7c499`):
+  `docs/rc11-physical-model-lifecycle-acceptance.md` specifies
+  operator-authorised host/model preconditions, read-only inspection,
+  observed process *and child* exit, per-process memory/VRAM
+  attribution, state/restart failure matrix and explicit stop/pass
+  criteria. No real model, remote Node, GPU, service or installer was
+  started or modified in this work.
+
+**Remaining blockers:** physical Windows/Ubuntu Colibri/llama.cpp parent
+and child lifecycle + GPU memory reclamation; safe service crash and
+populated operator-selected data-root rollback; paired Nodes and
+authorised reversible L5 acceptance; final integrated security review;
+the mandatory LAST human-focused UI/UX review; explicit approval
+before Windows/Ubuntu packaging and installed QA. Do not infer
+physical success from GitHub CI or silently convert an orphaned
+engine to a stopped one.

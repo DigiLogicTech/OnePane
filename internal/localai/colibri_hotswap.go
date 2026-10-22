@@ -164,6 +164,16 @@ func (s *RuntimeSupervisor) reconcileFailedColibriReplacement(ctx context.Contex
  return nil
 }
 
+// A successful start must carry the exact resolved local model generation.
+// This is an assertion about the already verified Start result, not a
+// substitute for live process identity checks or physical VRAM observation.
+func verifiedColibriResidency(inst RuntimeInstance,deploymentID,nodeID string)bool{
+ return inst.ID!="" && inst.DeploymentID==deploymentID &&
+  inst.NodeID==nodeID && inst.PID>1 && inst.ProcessFingerprint!="" &&
+  inst.BindAddress=="127.0.0.1" && inst.Port>0 &&
+  (inst.Status==RuntimeHealthy||inst.Status==RuntimeBusy)
+}
+
 // Explicit hot swaps and ordinary chat acquisition share one bounded,
 // cancellation-safe Colibri swap/rollback path. A caller must never start a
 // replacement after losing its previously resident model without applying
@@ -200,6 +210,13 @@ func (s *RuntimeSupervisor) colibriSwapOnNodeLocked(ctx context.Context,
  if err!=nil{return state,RuntimeInstance{},err}
  // The actual evictions happen inside the passed startLocked operation.
  inst,launchErr:=start(ctx,deploymentID)
+ // The starter is deliberately injectable for deterministic cancellation
+ // tests, so never let a nil error alone claim a resident inference engine.
+ // If the returned generation is incomplete, refuse success AND rollback:
+ // a process may have been created despite the missing ownership evidence.
+ if launchErr==nil && !verifiedColibriResidency(inst,deploymentID,nodeID){
+  return state,RuntimeInstance{},errors.New("Colibri starter returned unverified model residency; operator reconciliation required")
+ }
     // Success can use the caller's context; failure recovery must not.
     // A cancelled request must never leave the replacement uninspected.
     recoveryCtx:=ctx

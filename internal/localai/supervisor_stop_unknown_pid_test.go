@@ -88,3 +88,26 @@ func TestRecordedZeroPIDCannotImpersonateProvenNoChildFailure(t *testing.T){
   t.Fatal("invalid stored zero PID became eligible for a fresh engine")
  }
 }
+
+func TestManagedStopDoesNotEraseUnprovenStoppedNullPID(t *testing.T){
+ svc,db:=stopLeaseFixture(t,"stopped")
+ err:=svc.Stop(context.Background(),"model")
+ if err==nil||!strings.Contains(err.Error(),"operator reconciliation"){
+  t.Fatalf("legacy stopped/NULL PID was overwritten: %v",err)
+ }
+ var status,residency string
+ var rev int64
+ if err:=db.QueryRow(`SELECT status,revision FROM local_runtime_instances WHERE id='inst'`).Scan(&status,&rev);err!=nil{t.Fatal(err)}
+ if err:=db.QueryRow(`SELECT residency_state FROM model_deployments WHERE id='model'`).Scan(&residency);err!=nil{t.Fatal(err)}
+ if status!="stopped"||rev!=1||residency!="resident"{
+  t.Fatalf("ambiguous stopped child cleared: status=%s rev=%d residency=%s",status,rev,residency)
+ }
+}
+func TestManagedStoppedWithProvenNeverLaunchedChildAllowsIdempotentStop(t *testing.T){
+ svc,db:=stopLeaseFixture(t,"failed")
+ if _,err:=db.Exec(`UPDATE local_runtime_instances SET failure_reason=? WHERE id='inst'`,managedNoChildFailureReason);err!=nil{t.Fatal(err)}
+ if err:=svc.Stop(context.Background(),"model");err!=nil{t.Fatal(err)}
+ if err:=svc.Stop(context.Background(),"model");err!=nil{
+  t.Fatalf("valid no-child stopped record became permanently stuck: %v",err)
+ }
+}

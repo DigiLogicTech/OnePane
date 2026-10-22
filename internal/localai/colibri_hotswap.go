@@ -140,8 +140,8 @@ func (s *RuntimeSupervisor) reconcileFailedColibriReplacement(ctx context.Contex
    return errors.New("replacement failed with unverified process ownership; rollback withheld pending operator reconciliation")
   }
  case RuntimeStopped:
-  if failed.PID<=1&&failed.pidRecorded{
-   return errors.New("replacement stopped with invalid recorded PID; rollback withheld pending operator reconciliation")
+  if failed.PID<=1&&!confirmedNoChildWithoutPID(failed){
+   return errors.New("replacement stopped with unverified process ownership; rollback withheld pending operator reconciliation")
   }
  default:
   return errors.New("replacement has unrecognized process state; rollback withheld pending operator reconciliation")

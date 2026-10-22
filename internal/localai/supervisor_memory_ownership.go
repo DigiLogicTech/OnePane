@@ -12,9 +12,16 @@ import (
 // unknown external process effects after a daemon or SQLite crash.
 const managedNoChildFailureReason = "managed runtime launch cancelled or could not create child"
 
-func confirmedUnlaunchedModelFailure(inst RuntimeInstance)bool{
- return inst.Status==RuntimeFailed && inst.PID==0 && !inst.pidRecorded && inst.StartedAt==nil &&
+// The same exact pre-spawn proof can persist after an explicit Stop
+// transitions a never-launched failed model to stopped. A generic stopped
+// record without PID is not proof its parent/child engine exited.
+func confirmedNoChildWithoutPID(inst RuntimeInstance)bool{
+ return (inst.Status==RuntimeFailed||inst.Status==RuntimeStopped) &&
+  inst.PID==0 && !inst.pidRecorded && inst.StartedAt==nil &&
   inst.FailureReason!=nil && *inst.FailureReason==managedNoChildFailureReason
+}
+func confirmedUnlaunchedModelFailure(inst RuntimeInstance)bool{
+ return inst.Status==RuntimeFailed&&confirmedNoChildWithoutPID(inst)
 }
 
 // A stopped/failed row does not establish freed memory. When any abnormal
@@ -61,9 +68,12 @@ func (s *RuntimeSupervisor) refuseUnreconciledMemoryOwners(ctx context.Context,n
   }
   // A NULL PID plus failed state without an exact pre-spawn proof could
   // have followed an interrupted OS launch before PID persistence.
-  if c.status=="failed"&&(!c.reason.Valid||
+  // A stopped row with NULL PID is as ambiguous as a failed one: the
+  // daemon could have exited before recording a spawned model's PID.
+  // Permit only the exact no-child SQL proof, with no start timestamp.
+  if (c.status=="failed"||c.status=="stopped")&&(!c.reason.Valid||
     c.reason.String!=managedNoChildFailureReason||c.started.Valid){
-   return fmt.Errorf("managed model %s has unverified failed launch ownership; operator reconciliation required",c.id)
+   return fmt.Errorf("managed model %s has unverified %s launch ownership; operator reconciliation required",c.id,c.status)
   }
   if c.status=="starting"||c.status=="draining"||c.status=="orphaned"{
    return fmt.Errorf("managed model %s has uncertain %s process ownership; operator reconciliation required",c.id,c.status)

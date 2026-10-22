@@ -23,6 +23,7 @@ func TestManagedRuntimeRestartRequiresReconciliationForLiveNonRunningProcess(t *
   {"orphaned with unknown PID after restart",RuntimeOrphaned,0,false,true},
   {"draining without recorded PID",RuntimeDraining,0,false,true},
   {"failed with unverified NULL PID",RuntimeFailed,0,false,true},
+  {"stopped with unverified NULL PID",RuntimeStopped,0,false,true},
   {"invalid PID",RuntimeFailed,1,true,true},
   {"healthy verified separately",RuntimeHealthy,44,true,false},
   {"busy verified separately",RuntimeBusy,44,true,false},
@@ -95,5 +96,24 @@ func TestManagedStartupChecksUnknownBusyBeforeProcessReuse(t *testing.T){
  }
  if !strings.Contains(section[busy:verify],"s.activityMu.Unlock()"){
   t.Fatal("startLocked must release activityMu before VerifyIdentity")
+ }
+}
+
+func TestManagedStoppedNoChildProofIsRequiredBeforeRestart(t *testing.T){
+ reason:=managedNoChildFailureReason
+ for _,tc:=range []struct{
+  name string;inst RuntimeInstance;deny bool
+ }{
+  {"unknown stopped",RuntimeInstance{Status:RuntimeStopped},true},
+  {"unrelated failure",RuntimeInstance{Status:RuntimeStopped,FailureReason:func()*string{v:="unrelated";return &v}()},true},
+  {"recorded zero",RuntimeInstance{Status:RuntimeStopped,PID:0,pidRecorded:true,FailureReason:&reason},true},
+  {"started model",RuntimeInstance{Status:RuntimeStopped,FailureReason:&reason,StartedAt:func()*int64{n:=int64(123);return &n}()},true},
+  {"proven no-child stopped",RuntimeInstance{Status:RuntimeStopped,FailureReason:&reason},false},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   if got:=requiresOperatorReconciliationBeforeRestart(tc.inst,false);got!=tc.deny{
+    t.Fatalf("stopped evidence %+v: deny=%t want=%t",tc.inst,got,tc.deny)
+   }
+  })
  }
 }

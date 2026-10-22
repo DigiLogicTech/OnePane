@@ -193,9 +193,7 @@ func TestColibriConfirmedNoChildFailureAllowsRollback(t *testing.T){
  for _,status:=range []string{"failed","stopped"} {
   t.Run(status,func(t *testing.T){
    svc,db:=stopLeaseFixture(t,status)
-   if status=="failed"{
-    if _,err:=db.Exec(`UPDATE local_runtime_instances SET failure_reason=? WHERE id='inst'`,managedNoChildFailureReason);err!=nil{t.Fatal(err)}
-   }
+   if _,err:=db.Exec(`UPDATE local_runtime_instances SET failure_reason=? WHERE id='inst'`,managedNoChildFailureReason);err!=nil{t.Fatal(err)}
    if err:=svc.reconcileFailedColibriReplacement(context.Background(),"model");err!=nil{
     t.Fatalf("proven no-child or completed stop unnecessarily prevents restore: %v",err)
    }
@@ -220,6 +218,10 @@ func TestColibriReplacementUnknownResultBlocksRollbackWithoutSignals(t *testing.
   {"failed with unrelated failure","failed",0,"health probe failed"},
   {"recorded corrupt PID","failed",1,managedNoChildFailureReason},
   {"failed with start evidence","failed",0,managedNoChildFailureReason},
+  {"stopped with unproven NULL PID","stopped",0,""},
+  {"stopped with unrelated reason","stopped",0,"operator stop"},
+  {"stopped with recorded bad PID","stopped",1,managedNoChildFailureReason},
+  {"stopped with start evidence","stopped",0,managedNoChildFailureReason},
   {"invalid state","unknown",0,""},
  }{
   t.Run(tc.name,func(t *testing.T){
@@ -230,7 +232,7 @@ func TestColibriReplacementUnknownResultBlocksRollbackWithoutSignals(t *testing.
    if tc.reason!=""{
     if _,err:=db.Exec(`UPDATE local_runtime_instances SET failure_reason=? WHERE id='inst'`,tc.reason);err!=nil{t.Fatal(err)}
    }
-   if tc.name=="failed with start evidence"{
+   if tc.name=="failed with start evidence"||tc.name=="stopped with start evidence"{
     if _,err:=db.Exec(`UPDATE local_runtime_instances SET started_at=12 WHERE id='inst'`);err!=nil{t.Fatal(err)}
    }
    proc:=&unrecordedProcessBackend{alive:false}

@@ -136,3 +136,30 @@ func TestManagedMemoryAdmissionRequiresDurableNoChildFailureProof(t *testing.T){
   })
  }
 }
+
+// A stopped/NULL-PID row without the exact pre-spawn proof can still have
+// an untracked live engine. Do not free memory merely from status=stopped.
+func TestManagedMemoryAdmissionRejectsUnprovenStoppedNullPID(t *testing.T){
+ db,err:=sql.Open("sqlite",":memory:")
+ if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ if _,err:=db.Exec(`CREATE TABLE local_runtime_instances(
+ node_id TEXT,deployment_id TEXT,status TEXT,pid INTEGER,
+ failure_reason TEXT,started_at INTEGER)`);err!=nil{t.Fatal(err)}
+ svc:=&RuntimeSupervisor{db:db,processes:&unrecordedProcessBackend{alive:false}}
+ for _,tc:=range []struct{name string;reason any;started any;allow bool}{
+  {"unknown legacy stopped",nil,nil,false},
+  {"unrelated stop marker","operator requested stop",nil,false},
+  {"prelaunch marker inconsistent with child timestamp",managedNoChildFailureReason,int64(123),false},
+  {"proven no-child stopped",managedNoChildFailureReason,nil,true},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   if _,err=db.Exec(`DELETE FROM local_runtime_instances`);err!=nil{t.Fatal(err)}
+   if _,err=db.Exec(`INSERT INTO local_runtime_instances(
+    node_id,deployment_id,status,pid,failure_reason,started_at)
+    VALUES('node','old','stopped',NULL,?,?)`,tc.reason,tc.started);err!=nil{t.Fatal(err)}
+   e:=svc.refuseUnreconciledMemoryOwners(context.Background(),"node","new")
+   if (e==nil)!=tc.allow{t.Fatalf("stopped/NULL-PID reason=%v started=%v allowed=%t err=%v",tc.reason,tc.started,e==nil,e)}
+  })
+ }
+}

@@ -297,18 +297,25 @@ func (s *Service) ColibriHotSwapStatus(ctx context.Context,deploymentID string) 
         if persistedStatus=="failed"{
             state.Message="The managed Colibri process failed; inspect local runtime diagnostics before retrying."
         }
+        if persistedStatus=="orphaned"||persistedStatus=="draining"{
+            state.Message="Colibri process ownership or termination is unresolved; RAM/VRAM may still be occupied. Reconcile the model before swapping."
+        }
     }
     residents,err:=s.supervisor.colibriResidents(ctx,nodeID,"")
     if err!=nil{return state,err}
     for _,r:=range residents{
-        if r.Status==RuntimeHealthy||r.Status==RuntimeBusy||r.Status==RuntimeStarting||
-            r.Status==RuntimeFailed||r.Status==RuntimeStopped {
-            state.ActiveDeploymentIDs=append(state.ActiveDeploymentIDs,r.ID)
-        }
+        // ActiveDeploymentIDs is the conservative *possibly resident*
+        // Node list. An orphaned or interrupted drain may still have
+        // a Colibri child holding VRAM even without a trusted parent PID.
+        // Never hide it just because no verified healthy socket exists.
+        state.ActiveDeploymentIDs=append(state.ActiveDeploymentIDs,r.ID)
         if r.ID==deploymentID{
             state.Status=string(r.Status)
             if r.Status==RuntimeFailed||r.Status==RuntimeStopped{
                 state.Message="Colibri process is still running despite its saved state; stop/reconcile the engine before another swap."
+            }
+            if r.Status==RuntimeDraining||r.Status==RuntimeOrphaned{
+                state.Message="Colibri process ownership or termination is unresolved; RAM/VRAM may still be occupied. Reconcile the model before swapping."
             }
         }
     }

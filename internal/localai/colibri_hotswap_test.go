@@ -300,3 +300,34 @@ func TestColibriFailedRowWithConfirmedDeadPIDDoesNotBlockSwap(t *testing.T){
  residents,err:=supervisor.colibriResidents(context.Background(),"node-1","new-colibri")
  if err!=nil||len(residents)!=0{t.Fatalf("confirmed dead legacy PID blocked safe swap: %v %v",residents,err)}
 }
+
+func TestColibriHotSwapStatusShowsOrphanedAndDrainingAsPossibleResidents(t *testing.T){
+ db:=colibriPinTestDB(t)
+ defer db.Close()
+ for _,q:=range []string{
+  `CREATE TABLE local_runtime_instances(
+    node_id TEXT,deployment_id TEXT,status TEXT,last_seen_at INTEGER,
+    started_at INTEGER,updated_at INTEGER,pid INTEGER)`,
+  `INSERT INTO local_runtime_instances VALUES
+   ('node-1','colibri-a','healthy',5,4,6,1234),
+   ('node-1','colibri-b','orphaned',6,5,7,NULL)`,
+ }{
+  if _,err:=db.Exec(q);err!=nil{t.Fatal(err)}
+ }
+ proc:=&unrecordedProcessBackend{alive:false}
+ svc:=&Service{db:db,supervisor:&RuntimeSupervisor{db:db,processes:proc}}
+ for _,status:=range []string{"orphaned","draining"}{
+  t.Run(status,func(t *testing.T){
+   if _,err:=db.Exec(`UPDATE local_runtime_instances SET status=? WHERE deployment_id='colibri-b'`,status);err!=nil{t.Fatal(err)}
+   state,err:=svc.ColibriHotSwapStatus(context.Background(),"colibri-b")
+   if err!=nil{t.Fatal(err)}
+   sort.Strings(state.ActiveDeploymentIDs)
+   if state.Status!=status ||
+    !reflect.DeepEqual(state.ActiveDeploymentIDs,[]string{"colibri-a","colibri-b"}) ||
+    !strings.Contains(state.Message,"RAM/VRAM may still be occupied"){
+    t.Fatalf("%s model hidden from operator's possibly resident list: %+v",status,state)
+   }
+  })
+ }
+ if proc.signalCalls!=0{t.Fatal("read-only Colibri state observation signalled a process")}
+}

@@ -183,3 +183,26 @@ func TestColibriVerifiedStarterResultAcceptsBusyAndHealthy(t *testing.T){
   }
  }
 }
+
+func TestColibriVerifiedReplacementRejectsUnstoppedPredecessor(t *testing.T){
+ svc,db:=colibriSwapFailureFixture(t)
+ good:=RuntimeInstance{ID:"verified",DeploymentID:"model",NodeID:"node",
+  PID:4321,ProcessFingerprint:"fp",BindAddress:"127.0.0.1",Port:11333,
+  Status:RuntimeHealthy}
+ calls:=0
+ starter:=func(_ context.Context,id string)(RuntimeInstance,error){
+  calls++
+  if id!="model"{t.Fatalf("unexpected auto rollback for model %q",id)}
+  return good,nil
+ }
+ svc.residencyMu.Lock()
+ state,inst,err:=svc.colibriSwapOnNodeLocked(context.Background(),"model","node",starter)
+ svc.residencyMu.Unlock()
+ if err==nil||!strings.Contains(err.Error(),"competing process residency")||
+  calls!=1||inst.ID!=""||len(state.ActiveDeploymentIDs)!=0{
+  t.Fatalf("two Colibri engines were incorrectly reported usable: state=%+v inst=%+v calls=%d err=%v",state,inst,calls,err)
+ }
+ var saved string
+ if err:=db.QueryRow(`SELECT status FROM local_runtime_instances WHERE deployment_id='previous'`).Scan(&saved);err!=nil{t.Fatal(err)}
+ if saved!="healthy"{t.Fatalf("unverified overlap modified healthy predecessor: %s",saved)}
+}

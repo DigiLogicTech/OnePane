@@ -475,3 +475,56 @@ postconditions, the complete source/security review and mandatory
 LAST operator-focused UI/UX review remain release blockers.
 No release merge, installer, live model, installed service or user
 data was touched.
+
+## RC11 unknown healthy/busy PID admission and Colibri operator status (2026-10-22)
+
+**Exact implementation/workflow source:** `070562aff1c588c7f8fc92baf9b3af79da124517`;
+[hosted Windows/Linux CI #39748484805](https://github.com/DigiLogicTech/OnePane/actions/runs/39748484805)
+**PASSED** for native Windows, Linux race, full Go regression and
+cross-platform compilation. The separate physical Node approval job was
+**SKIPPED**. This is not hardware VRAM or child-process acceptance.
+
+- [x] **Unknown healthy/busy/start PID ownership — `831287ad`.**
+  An active-looking SQLite row with an unrecorded/invalid PID may reflect
+  a crash before child identity persistence, including a descendant that
+  still occupies RAM/VRAM. Manual Stop, daemon Shutdown and restart refuse
+  to silently relabel or reuse it, preserving the original state,
+  revision and deployment residency. A dead recorded parent in an active
+  state is also not independently sufficient evidence that its child
+  model engine has exited. Other models on the same Node cannot bypass
+  the cross-backend memory-ownership check merely because that uncertain
+  old row was marked healthy or busy.
+- [x] **Native platform regression — `c65bdc4e`.**
+  Explicit Windows and Linux race selectors cover NULL, zero and service
+  PID values, restart, Stop/Shutdown, cross-backend admission and
+  protection against accidentally signalling unrelated OS processes.
+- [x] **Single-connection SQLite shutdown fixture remediation —
+  `9c7c88eb`.** Earlier CI runs `#39747664871` and
+  `#39747744455` failed because a historical test incorrectly
+  treated two synthetic `healthy`, `PID=0` rows as safely terminated
+  engines. The test now records genuine launch PIDs and independently
+  reports them exited using a deterministic fake process backend. The
+  original single-SQLite-cursor deadlock assertion is preserved.
+  [CI #39747899936 passed](https://github.com/DigiLogicTech/OnePane/actions/runs/39747899936).
+- [x] **Colibri operator truthfulness — `63d1a602`.**
+  `colibriResidents` now also marks healthy/busy instances without
+  valid persisted PIDs as unverified occupancy. An apparently idle,
+  healthy row with no known process cannot be selected for swap
+  eviction; the status endpoint warns that RAM/VRAM ownership is
+  uncertain and requires reconciliation, without initiating a signal.
+  Adversarial SQLite regressions cover both statuses and NULL/zero/1
+  PID values.
+- [x] **Exact Windows/Linux CI at combined head — `070562af`.**
+  Added native Windows and Linux race coverage for the Colibri
+  unresolved-readiness status. [CI #39748484805 PASSED](https://github.com/DigiLogicTech/OnePane/actions/runs/39748484805).
+
+**Limitations:** source CI does not prove kernel-held process ownership,
+Colibri engine-child termination or real GPU memory reclamation. Physical
+CPU/GPU lifecycle acceptance requires explicit operator-approved hardware,
+models and measurements per
+`docs/rc11-physical-model-lifecycle-acceptance.md`. Installed Windows
+SCM / non-C data-root upgrade/rollback, installed Ubuntu daemon, paired
+Nodes, bounded approved Level 5 effects, complete final code/security
+review, mandatory LAST human-focused UI/UX pass and operator QA installer
+authorisation are still open. No real models, hardware or user projects
+were modified, and no merge/release occurred.

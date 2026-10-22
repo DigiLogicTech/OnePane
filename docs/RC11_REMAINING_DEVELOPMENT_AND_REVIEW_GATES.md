@@ -1211,3 +1211,29 @@ Ubuntu installed service, paired physical Nodes, reversible Level
 human-centred UI/UX review. Explicit approval is required before
 MSI/deb QA packaging; draft PR #227 must not be promoted based
 solely on hosted CI.
+
+## RC11 unknown active-PID owner checkpoint (2026-10-22)
+
+**Software source/workflow tested:** `070562aff1c588c7f8fc92baf9b3af79da124517`;
+[CI #39748484805](https://github.com/DigiLogicTech/OnePane/actions/runs/39748484805)
+**PASSED** on native Windows and Linux, including race/full Go and
+cross-compilation. Physical Node job **SKIPPED**.
+
+Active-looking healthy/busy/starting models whose persisted PID is
+absent or invalid no longer silently release RAM/VRAM budget through
+manual Stop, daemon shutdown, restart or admission of another backend.
+Dead process parents remain subject to explicit reconciliation where
+descendant memory ownership is uncertain. Colibri's read-only status
+exposes rather than hides healthy/busy instances with unknown PIDs,
+and denies evictions based on the unproven healthy state. Tests also
+preserve the safe independently stopped-model path. The detailed
+regression/CI audit and corrected one-connection SQLite fixture are
+recorded in `docs/rc11-integrated-code-review.md`.
+
+**Still required before QA build:** explicitly approved physical model
+parent/child and RAM/VRAM release testing, installed Windows SCM and
+non-C drive upgrade/rollback, installed Ubuntu service, paired physical
+Nodes, verified reversible Level 5 operations, final whole-branch
+code/security review and the LAST operator-focused UI/UX review.
+PR #227 stays draft/unmerged; do not run physical tests or issue a
+packaged installer without operator sign-off.

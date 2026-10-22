@@ -1050,6 +1050,11 @@ func requiresOperatorReconciliationBeforeRestart(inst RuntimeInstance, alive boo
  if (inst.Status==RuntimeOrphaned||inst.Status==RuntimeDraining)&&inst.PID<=1{
   return true
  }
+ // A generic failed/NULL-PID row is ambiguous after crash. Only a guarded,
+ // no-child prelaunch failure carries sufficient evidence for a retry.
+ if inst.Status==RuntimeFailed&&inst.PID<=1&&!confirmedUnlaunchedModelFailure(inst){
+  return true
+ }
  if inst.PID <= 1 || !alive { return false }
  switch inst.Status {
  case RuntimeHealthy, RuntimeBusy, RuntimeStarting:
@@ -1617,7 +1622,8 @@ func (s *RuntimeSupervisor) stopWithActivityLock(ctx context.Context, deployment
  // generation as stopped or clear residency without independent evidence.
  // A confirmed pre-spawn failure is separately persisted as failed.
  if inst.PID<=1 && (inst.Status==RuntimeStarting ||
-  inst.Status==RuntimeDraining || inst.Status==RuntimeOrphaned) {
+  inst.Status==RuntimeDraining || inst.Status==RuntimeOrphaned ||
+  (inst.Status==RuntimeFailed&&!confirmedUnlaunchedModelFailure(inst))) {
   return errors.New("managed runtime process ownership uncertain; operator reconciliation required before stopping")
  }
 	markOrphaned := func(reason string) error {

@@ -22,8 +22,8 @@ func TestManagedRuntimeRestartRequiresReconciliationForLiveNonRunningProcess(t *
   {"orphaned with unknown PID",RuntimeOrphaned,0,true,true},
   {"orphaned with unknown PID after restart",RuntimeOrphaned,0,false,true},
   {"draining without recorded PID",RuntimeDraining,0,false,true},
-  {"failed confirmed unlaunched without PID",RuntimeFailed,0,false,false},
-  {"invalid PID",RuntimeFailed,1,true,false},
+  {"failed with unverified NULL PID",RuntimeFailed,0,false,true},
+  {"invalid PID",RuntimeFailed,1,true,true},
   {"healthy verified separately",RuntimeHealthy,44,true,false},
   {"busy verified separately",RuntimeBusy,44,true,false},
   {"starting verified separately",RuntimeStarting,44,true,false},
@@ -54,5 +54,24 @@ func TestManagedRuntimeRestartGuardPrecedesCapacityAndProcessLaunch(t *testing.T
  launch:=strings.Index(scope,"s.processes.Start(")
  if check<0||swap<=check||capacity<=check||launch<=capacity {
   t.Fatal("live orphan/failed process was not denied before swap, eviction and launch")
+ }
+}
+
+// An exact durable pre-spawn failure is independently retryable; a generic
+// failed status after a crash cannot prove no engine was created.
+func TestManagedRestartNoChildFailureProofIsRequired(t *testing.T){
+ reason:=managedNoChildFailureReason
+ valid:=RuntimeInstance{Status:RuntimeFailed,PID:0,FailureReason:&reason}
+ if !confirmedUnlaunchedModelFailure(valid) || requiresOperatorReconciliationBeforeRestart(valid,false){
+  t.Fatal("safe pre-spawn failure became permanently blocked")
+ }
+ for _,inst:=range []RuntimeInstance{
+  {Status:RuntimeFailed,PID:0},
+  {Status:RuntimeFailed,PID:1,FailureReason:&reason},
+  {Status:RuntimeFailed,PID:0,FailureReason:&reason,StartedAt:func() *int64 {v:=int64(42);return &v}()},
+ }{
+  if confirmedUnlaunchedModelFailure(inst) || !requiresOperatorReconciliationBeforeRestart(inst,false){
+   t.Fatalf("unproven failed PID became retryable: %+v",inst)
+  }
  }
 }

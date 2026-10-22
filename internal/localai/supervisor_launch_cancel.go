@@ -17,11 +17,11 @@ func (s *RuntimeSupervisor) failUnlaunchedManagedRuntime(ctx context.Context, in
  defer cancel()
  res,err:=s.db.ExecContext(persistCtx,`UPDATE local_runtime_instances
   SET status='failed',
-      failure_reason='managed runtime launch cancelled or could not create child',
+      failure_reason=?,
       updated_at=?,revision=revision+1
   WHERE id=? AND status='starting' AND pid IS NULL
     AND revision=? AND process_fingerprint=?`,
-    s.clock.UnixMilli(),inst.ID,inst.Revision,inst.ProcessFingerprint)
+    managedNoChildFailureReason,s.clock.UnixMilli(),inst.ID,inst.Revision,inst.ProcessFingerprint)
  if err!=nil{return err}
  affected,err:=res.RowsAffected()
  if err!=nil{return err}

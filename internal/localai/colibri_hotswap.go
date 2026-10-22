@@ -36,6 +36,9 @@ func selectColibriEvictions(candidates []colibriSwapCandidate, active map[string
         if c.Pinned {return nil,fmt.Errorf("Colibri model %s is pinned; unpin it before selecting another Colibri model",c.ID)}
         switch c.Status {
         case RuntimeHealthy:
+            if c.OwnershipUnverified {
+                return nil,fmt.Errorf("Colibri model %s has unverified healthy process PID; operator reconciliation required before swapping",c.ID)
+            }
             if active[c.ID]>0 {
                 return nil,fmt.Errorf("Colibri model %s is serving an active request",c.ID)
             }
@@ -82,6 +85,12 @@ func (s *RuntimeSupervisor) colibriResidents(ctx context.Context,nodeID,except s
         var pid,started sql.NullInt64
         var reason sql.NullString
         if err:=rows.Scan(&v.ID,&v.Status,&v.LastUsed,&v.Pinned,&pid,&reason,&started);err!=nil{return nil,err}
+        if (v.Status==RuntimeHealthy||v.Status==RuntimeBusy) && (!pid.Valid||pid.Int64<=1){
+            // SQL healthy/busy does not prove a managed process exists.
+            // With no recorded PID, a previous launch or an engine child
+            // could remain in RAM/VRAM after a crash.
+            v.OwnershipUnverified=true
+        }
         if v.Status==RuntimeFailed||v.Status==RuntimeStopped {
             // Exclude only an exact durable never-launched child. The
             // query excludes those NULL-PID rows already; a NULL/invalid
@@ -368,6 +377,9 @@ func (s *Service) ColibriHotSwapStatus(ctx context.Context,deploymentID string) 
             }
             if r.Status==RuntimeDraining||r.Status==RuntimeOrphaned{
                 state.Message="Colibri process ownership or termination is unresolved; RAM/VRAM may still be occupied. Reconcile the model before swapping."
+            }
+            if (r.Status==RuntimeHealthy||r.Status==RuntimeBusy)&&r.OwnershipUnverified{
+                state.Message="Colibri reports healthy or busy without a verified process PID; RAM/VRAM ownership is uncertain. Reconcile before swapping."
             }
         }
     }

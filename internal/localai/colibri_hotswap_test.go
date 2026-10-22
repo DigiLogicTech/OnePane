@@ -7,6 +7,7 @@ import (
  "sort"
  "database/sql"
  "errors"
+ "fmt"
  "time"
     "strings"
     "testing"
@@ -380,4 +381,43 @@ func TestColibriUnknownStoppedOrFailedPIDRemainsVisibleAsPossibleResident(t *tes
  if err!=nil||len(state.ActiveDeploymentIDs)!=0||state.Message!=""{
   t.Fatalf("verified no-child stopped state falsely blocked: %+v %v",state,err)
  }
+}
+
+func TestColibriHealthyBusyWithoutPIDCannotClaimSafeEviction(t *testing.T){
+ db:=colibriPinTestDB(t)
+ defer db.Close()
+ for _,q:=range []string{
+  `CREATE TABLE local_runtime_instances(
+    node_id TEXT,deployment_id TEXT,status TEXT,last_seen_at INTEGER,
+    started_at INTEGER,updated_at INTEGER,pid INTEGER,failure_reason TEXT)`,
+  `INSERT INTO local_runtime_instances(
+     node_id,deployment_id,status,last_seen_at,started_at,updated_at,pid)
+    VALUES('node-1','colibri-a','healthy',5,4,6,NULL)`,
+ }{if _,err:=db.Exec(q);err!=nil{t.Fatal(err)}}
+ proc:=&unrecordedProcessBackend{alive:false}
+ sup:=&RuntimeSupervisor{db:db,processes:proc,activeRequests:map[string]int{}}
+ svc:=&Service{db:db,supervisor:sup}
+ for _,status:=range []string{"healthy","busy"}{
+  for _,pid:=range []any{nil,int64(0),int64(1)}{
+   t.Run(status+"/pid"+fmt.Sprint(pid),func(t *testing.T){
+    if _,err:=db.Exec(`UPDATE local_runtime_instances
+       SET status=?,pid=? WHERE deployment_id='colibri-a'`,status,pid);err!=nil{t.Fatal(err)}
+    residents,err:=sup.colibriResidents(context.Background(),"node-1","colibri-b")
+    if err!=nil||len(residents)!=1||!residents[0].OwnershipUnverified{
+     t.Fatalf("%s missing PID %v incorrectly recognised as verified: %v %v",status,pid,residents,err)
+    }
+    evicted,err:=selectColibriEvictions(residents,nil)
+    if err==nil||len(evicted)!=0||!strings.Contains(err.Error(),"operator reconciliation")&&status=="healthy"{
+     t.Fatalf("unverified Colibri healthy/busy evicted: %v %v",evicted,err)
+    }
+    state,err:=svc.ColibriHotSwapStatus(context.Background(),"colibri-a")
+    if err!=nil||state.Status!=status||
+       !reflect.DeepEqual(state.ActiveDeploymentIDs,[]string{"colibri-a"})||
+       !strings.Contains(state.Message,"RAM/VRAM ownership is uncertain"){
+     t.Fatalf("%s PID %v was advertised safe: %+v %v",status,pid,state,err)
+    }
+   })
+  }
+ }
+ if proc.signalCalls!=0{t.Fatal("read-only residency inspection signalled an OS process")}
 }

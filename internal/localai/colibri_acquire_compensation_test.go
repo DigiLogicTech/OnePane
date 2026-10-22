@@ -206,3 +206,23 @@ func TestColibriVerifiedReplacementRejectsUnstoppedPredecessor(t *testing.T){
  if err:=db.QueryRow(`SELECT status FROM local_runtime_instances WHERE deployment_id='previous'`).Scan(&saved);err!=nil{t.Fatal(err)}
  if saved!="healthy"{t.Fatalf("unverified overlap modified healthy predecessor: %s",saved)}
 }
+
+func TestColibriVerifiedTargetCanReplaceActuallyStoppedPredecessor(t *testing.T){
+ svc,db:=colibriSwapFailureFixture(t)
+ target:=RuntimeInstance{ID:"target-instance",DeploymentID:"model",
+  NodeID:"node",PID:4321,ProcessFingerprint:"fingerprint",
+  BindAddress:"127.0.0.1",Port:11333,Status:RuntimeHealthy}
+ starter:=func(_ context.Context,id string)(RuntimeInstance,error){
+  if id!="model"{t.Fatalf("unexpected target %s",id)}
+  if _,err:=db.Exec(`UPDATE local_runtime_instances
+    SET status='stopped' WHERE deployment_id='previous'`);err!=nil{t.Fatal(err)}
+  return target,nil
+ }
+ svc.residencyMu.Lock()
+ state,got,err:=svc.colibriSwapOnNodeLocked(context.Background(),"model","node",starter)
+ svc.residencyMu.Unlock()
+ if err!=nil || got.ID!=target.ID || state.Status!="healthy" ||
+  len(state.ActiveDeploymentIDs)!=1||state.ActiveDeploymentIDs[0]!="model"{
+  t.Fatalf("valid single Colibri resident rejected: state=%+v got=%+v err=%v",state,got,err)
+ }
+}

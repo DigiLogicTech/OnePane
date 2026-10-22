@@ -227,6 +227,7 @@ jobs:
           go test -race -count=1 -timeout 3m -run TestUnrecordedModel ./internal/localai
           go test -race -count=1 -timeout 3m -run TestFailedModelPIDPersistence ./internal/localai
           go test -race -count=1 -timeout 3m -run '^TestManagedProcessIdentity' ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestManagedTrackedProcessExitIsRaceFree ./internal/localai
           go test -race -count=1 -timeout 3m -run '^(TestRecoveredModel|TestRecovery|TestManagedRuntimeRecovery)' ./internal/localai
           go test -race -count=1 -timeout 3m -run TestManagedStartup ./internal/localai
           go test -race -count=1 -timeout 3m -run TestCancelledUnlaunchedModel ./internal/localai
@@ -304,6 +305,7 @@ jobs:
           go test -count=1 -timeout 4m -run TestUnrecordedModel ./internal/localai
           go test -count=1 -timeout 4m -run TestFailedModelPIDPersistence ./internal/localai
           go test -count=1 -timeout 4m -run '^TestManagedProcessIdentity' ./internal/localai
+          go test -count=1 -timeout 4m -run TestManagedTrackedProcessExitIsRaceFree ./internal/localai
           go test -count=1 -timeout 4m -run TestManagedStopRechecksPIDAfterDrainingPersistenceBeforeSIGTERM ./internal/localai
           go test -count=1 -timeout 4m -run '^(TestManagedStopRetainsUnknownProcessOwnershipWithoutPID|TestManagedShutdownCannotSilentlyStopUnknownPIDStartingOrDrain|TestManagedRestartNoChildFailureProofIsRequired|TestConfirmedPrelaunchFailureWithNoPIDStillAllowsExplicitStop|TestRecordedZeroPIDCannotImpersonateProvenNoChildFailure)$' ./internal/localai
           go test -count=1 -timeout 4m -run '^(TestRecoveredModel|TestRecovery|TestManagedRuntimeRecovery)' ./internal/localai

@@ -128,8 +128,23 @@ func (s *RuntimeSupervisor) reconcileFailedColibriReplacement(ctx context.Contex
  failed,err:=s.Instance(ctx,target)
  if errors.Is(err,sql.ErrNoRows){return nil}
  if err!=nil{return fmt.Errorf("replacement residency inspection unavailable; rollback withheld: %w",err)}
- if failed.Status==RuntimeStarting&&failed.PID<=1{
-  return errors.New("replacement launch ownership is uncertain; rollback withheld pending operator reconciliation")
+ // A failed replacement can retain engine descendants after its
+ // Colibri parent disappears. Neither a missing PID nor an intermediate
+ // startup/drain state proves memory was released. Only an exact durable
+ // pre-spawn failure or independently completed Stop permits restoration.
+ switch failed.Status {
+ case RuntimeStarting,RuntimeDraining,RuntimeOrphaned,RuntimeBusy,RuntimeHealthy:
+  return fmt.Errorf("replacement remains %s with uncertain process ownership; rollback withheld pending operator reconciliation",failed.Status)
+ case RuntimeFailed:
+  if failed.PID<=1&&!confirmedUnlaunchedModelFailure(failed){
+   return errors.New("replacement failed with unverified process ownership; rollback withheld pending operator reconciliation")
+  }
+ case RuntimeStopped:
+  if failed.PID<=1&&failed.pidRecorded{
+   return errors.New("replacement stopped with invalid recorded PID; rollback withheld pending operator reconciliation")
+  }
+ default:
+  return errors.New("replacement has unrecognized process state; rollback withheld pending operator reconciliation")
  }
  if failed.PID>1{
   if s.processes==nil{

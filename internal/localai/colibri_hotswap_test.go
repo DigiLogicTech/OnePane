@@ -189,10 +189,62 @@ func TestColibriReplacementInspectionErrorsFailClosed(t *testing.T){
   t.Fatalf("storage inspection failure permitted rollback: %v",err)
  }
 }
-func TestColibriFailedReplacementAlreadyStoppedDoesNotBlockRollback(t *testing.T){
- svc,_:=stopLeaseFixture(t,"failed")
- if err:=svc.reconcileFailedColibriReplacement(context.Background(),"model");err!=nil{
-  t.Fatalf("verified stopped replacement unnecessarily prevents restore: %v",err)
+func TestColibriConfirmedNoChildFailureAllowsRollback(t *testing.T){
+ for _,status:=range []string{"failed","stopped"} {
+  t.Run(status,func(t *testing.T){
+   svc,db:=stopLeaseFixture(t,status)
+   if status=="failed"{
+    if _,err:=db.Exec(`UPDATE local_runtime_instances SET failure_reason=? WHERE id='inst'`,managedNoChildFailureReason);err!=nil{t.Fatal(err)}
+   }
+   if err:=svc.reconcileFailedColibriReplacement(context.Background(),"model");err!=nil{
+    t.Fatalf("proven no-child or completed stop unnecessarily prevents restore: %v",err)
+   }
+  })
+ }
+}
+
+func TestColibriReplacementUnknownResultBlocksRollbackWithoutSignals(t *testing.T){
+ for _,tc:=range []struct{
+  name,status string
+  pid int
+  reason string
+ }{
+  {"orphaned no PID","orphaned",0,""},
+  {"orphaned dead parent","orphaned",4321,""},
+  {"draining no PID","draining",0,""},
+  {"draining dead parent","draining",4321,""},
+  {"starting live parent unverified","starting",4321,""},
+  {"busy dead parent","busy",4321,""},
+  {"healthy dead parent","healthy",4321,""},
+  {"failed without no-child evidence","failed",0,""},
+  {"failed with unrelated failure","failed",0,"health probe failed"},
+  {"recorded corrupt PID","failed",1,managedNoChildFailureReason},
+  {"failed with start evidence","failed",0,managedNoChildFailureReason},
+  {"invalid state","unknown",0,""},
+ }{
+  t.Run(tc.name,func(t *testing.T){
+   svc,db:=stopLeaseFixture(t,tc.status)
+   if tc.pid!=0{
+    if _,err:=db.Exec(`UPDATE local_runtime_instances SET pid=? WHERE id='inst'`,tc.pid);err!=nil{t.Fatal(err)}
+   }
+   if tc.reason!=""{
+    if _,err:=db.Exec(`UPDATE local_runtime_instances SET failure_reason=? WHERE id='inst'`,tc.reason);err!=nil{t.Fatal(err)}
+   }
+   if tc.name=="failed with start evidence"{
+    if _,err:=db.Exec(`UPDATE local_runtime_instances SET started_at=12 WHERE id='inst'`);err!=nil{t.Fatal(err)}
+   }
+   proc:=&unrecordedProcessBackend{alive:false}
+   svc.processes=proc
+   err:=svc.reconcileFailedColibriReplacement(context.Background(),"model")
+   if err==nil||!strings.Contains(err.Error(),"rollback withheld"){
+    t.Fatalf("uncertain replacement wrongly allowed rollback: %v",err)
+   }
+   if proc.signalCalls!=0{t.Fatal("unverified replacement triggered process signal")}
+   var status string
+   var rev int64
+   if err:=db.QueryRow(`SELECT status,revision FROM local_runtime_instances WHERE id='inst'`).Scan(&status,&rev);err!=nil{t.Fatal(err)}
+   if status!=tc.status||rev!=1{t.Fatalf("failed reconciliation changed owner: status=%s revision=%d",status,rev)}
+  })
  }
 }
 

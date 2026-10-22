@@ -102,3 +102,28 @@ func TestChatColibriUsesSameFailClosedSwapAsExplicitControl(t *testing.T){
   t.Fatal("Colibri compensation is not shared by explicit and chat swap paths")
  }
 }
+
+func TestColibriReplacementUnknownOwnerCannotRestartEvictedModel(t *testing.T){
+ for _,status:=range []string{"orphaned","draining","failed","busy"}{
+  t.Run(status,func(t *testing.T){
+   svc,db:=colibriSwapFailureFixture(t)
+   calls:=[]string{}
+   starter:=func(_ context.Context,id string)(RuntimeInstance,error){
+    calls=append(calls,id)
+    if id!="model"{t.Fatalf("unsafe restoration of previous model %s",id)}
+    if _,err:=db.Exec(`UPDATE local_runtime_instances SET status='stopped' WHERE deployment_id='previous'`);err!=nil{t.Fatal(err)}
+    if _,err:=db.Exec(`UPDATE local_runtime_instances SET status=?,pid=NULL,failure_reason=NULL WHERE deployment_id='model'`,status);err!=nil{t.Fatal(err)}
+    return RuntimeInstance{},errors.New("replacement outcome uncertain")
+   }
+   svc.residencyMu.Lock()
+   _,_,err:=svc.colibriSwapOnNodeLocked(context.Background(),"model","node",starter)
+   svc.residencyMu.Unlock()
+   if err==nil||!strings.Contains(err.Error(),"rollback withheld")||len(calls)!=1{
+    t.Fatalf("unknown %s replacement permitted old engine reload: calls=%v err=%v",status,calls,err)
+   }
+   var stored string
+   if err:=db.QueryRow(`SELECT status FROM local_runtime_instances WHERE deployment_id='model'`).Scan(&stored);err!=nil{t.Fatal(err)}
+   if stored!=status{t.Fatalf("uncertain replacement state rewritten: %s",stored)}
+  })
+ }
+}

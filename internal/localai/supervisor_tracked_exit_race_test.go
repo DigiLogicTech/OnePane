@@ -52,3 +52,37 @@ func TestManagedTrackedProcessExitIsRaceFree(t *testing.T){
   if b.Alive(pid){t.Fatalf("owned subprocess %d still reported alive after bounded observation",trial)}
  }
 }
+
+func TestManagedTrackedProcessCleanupIsGenerationFenced(t *testing.T) {
+ b:=NewOSProcessBackend()
+ older:=&trackedManagedCommand{exited:make(chan struct{})}
+ newer:=&trackedManagedCommand{exited:make(chan struct{})}
+ const reusedPID=4321
+ b.mu.Lock()
+ b.cmds[reusedPID]=newer
+ b.mu.Unlock()
+ // The delayed cleanup for the previous launch must not drop a newly
+ // registered launch whose OS process reused the same numeric PID.
+ b.forgetTrackedProcess(reusedPID,older)
+ b.mu.Lock()
+ current:=b.cmds[reusedPID]
+ b.mu.Unlock()
+ if current!=newer{t.Fatal("stale managed subprocess Wait deleted a newer PID generation")}
+ if !b.Alive(reusedPID){t.Fatal("new managed PID was treated as exited")}
+ b.forgetTrackedProcess(reusedPID,newer)
+ b.mu.Lock()
+ _,found:=b.cmds[reusedPID]
+ b.mu.Unlock()
+ if found{t.Fatal("actual process owner cleanup did not release its own mapping")}
+ // Repeated cleanup must be idempotent and must not revoke a later
+ // owner even when the original launch's channel has closed.
+ close(older.exited)
+ b.mu.Lock()
+ b.cmds[reusedPID]=newer
+ b.mu.Unlock()
+ b.forgetTrackedProcess(reusedPID,older)
+ b.mu.Lock()
+ current=b.cmds[reusedPID]
+ b.mu.Unlock()
+ if current!=newer{t.Fatal("completed old launch reclaimed a newer PID")}
+}

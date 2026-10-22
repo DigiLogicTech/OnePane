@@ -134,9 +134,20 @@ func (b *OSProcessBackend) Start(ctx context.Context, spec LaunchSpec) (int, err
   close(tracked.exited)
   // Only close after Wait has drained all stdout/stderr pumps.
   if logFile!=nil{_ = logFile.Close()}
-  b.mu.Lock();delete(b.cmds,pid);b.mu.Unlock()
+  // An exited PID can be reused immediately. Do not let this old
+  // launch's delayed cleanup delete a newer tracked generation.
+  b.forgetTrackedProcess(pid,tracked)
  }()
 	return pid, nil
+}
+
+// forgetTrackedProcess is generation-fenced: an old Wait goroutine may run
+// after the OS has recycled the PID and a new managed process was tracked.
+func (b *OSProcessBackend) forgetTrackedProcess(pid int, owner *trackedManagedCommand) {
+ if b==nil || owner==nil { return }
+ b.mu.Lock()
+ defer b.mu.Unlock()
+ if b.cmds[pid]==owner { delete(b.cmds,pid) }
 }
 // Stream a model's diagnostics without ever letting a long-lived process
 // grow the current log beyond 4 MiB. Writes beyond the cap are acknowledged

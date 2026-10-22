@@ -13,7 +13,7 @@ import (
 const managedNoChildFailureReason = "managed runtime launch cancelled or could not create child"
 
 func confirmedUnlaunchedModelFailure(inst RuntimeInstance)bool{
- return inst.Status==RuntimeFailed && inst.PID==0 && inst.StartedAt==nil &&
+ return inst.Status==RuntimeFailed && inst.PID==0 && !inst.pidRecorded && inst.StartedAt==nil &&
   inst.FailureReason!=nil && *inst.FailureReason==managedNoChildFailureReason
 }
 

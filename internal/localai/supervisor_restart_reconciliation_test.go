@@ -68,6 +68,7 @@ func TestManagedRestartNoChildFailureProofIsRequired(t *testing.T){
  for _,inst:=range []RuntimeInstance{
   {Status:RuntimeFailed,PID:0},
   {Status:RuntimeFailed,PID:1,FailureReason:&reason},
+  {Status:RuntimeFailed,PID:0,pidRecorded:true,FailureReason:&reason},
   {Status:RuntimeFailed,PID:0,FailureReason:&reason,StartedAt:func() *int64 {v:=int64(42);return &v}()},
  }{
   if confirmedUnlaunchedModelFailure(inst) || !requiresOperatorReconciliationBeforeRestart(inst,false){

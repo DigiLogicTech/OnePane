@@ -43,6 +43,9 @@ const (
 type RuntimeInstance struct {
 	ID, NodeID, DeploymentID, RuntimeID, ManagedModelID, BindAddress, ProcessFingerprint string
 	Port, PID                                                                            int
+	// Non-public SQLite evidence: PID=0 with pidRecorded=true is corrupt,
+	// whereas pidRecorded=false represents an actual SQL NULL.
+	pidRecorded                                                                          bool
 	Status                                                                               RuntimeInstanceStatus
 	LaunchJSON, HealthJSON                                                               json.RawMessage
 	StartedAt, LastSeenAt, StoppedAt                                                     *int64
@@ -1881,6 +1884,7 @@ func (s *RuntimeSupervisor) instanceByID(ctx context.Context, idv string) (Runti
 	var fail sql.NullString
 	var launch, health string
 	err := s.db.QueryRowContext(ctx, `SELECT id,node_id,deployment_id,runtime_id,managed_model_id,bind_address,port,pid,status,process_fingerprint,launch_json,health_json,started_at,last_seen_at,stopped_at,failure_reason,revision,created_at,updated_at FROM local_runtime_instances WHERE id=?`, idv).Scan(&x.ID, &x.NodeID, &x.DeploymentID, &x.RuntimeID, &x.ManagedModelID, &x.BindAddress, &x.Port, &pid, &x.Status, &x.ProcessFingerprint, &launch, &health, &started, &last, &stopped, &fail, &x.Revision, &x.CreatedAt, &x.UpdatedAt)
+	x.pidRecorded=pid.Valid
 	if pid.Valid {
 		x.PID = int(pid.Int64)
 	}

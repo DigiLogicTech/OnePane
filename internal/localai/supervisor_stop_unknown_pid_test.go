@@ -64,3 +64,27 @@ func TestConfirmedPrelaunchFailureWithNoPIDStillAllowsExplicitStop(t *testing.T)
  if err:=db.QueryRow(`SELECT status FROM local_runtime_instances WHERE id='inst'`).Scan(&got);err!=nil{t.Fatal(err)}
  if got!="stopped"{t.Fatalf("confirmed no-child failed model was not stopped: %s",got)}
 }
+
+// A corrupted, explicitly recorded PID 0 is not the SQL NULL proof written
+// by failUnlaunchedManagedRuntime. It must never clear an old reservation.
+func TestRecordedZeroPIDCannotImpersonateProvenNoChildFailure(t *testing.T){
+ svc,db:=stopLeaseFixture(t,"failed")
+ if _,err:=db.Exec(`UPDATE local_runtime_instances SET pid=0,
+  failure_reason=? WHERE id='inst'`,managedNoChildFailureReason);err!=nil{t.Fatal(err)}
+ inst,err:=svc.Instance(context.Background(),"model")
+ if err!=nil{t.Fatal(err)}
+ if !inst.pidRecorded||inst.PID!=0||confirmedUnlaunchedModelFailure(inst){
+  t.Fatalf("persisted zero PID became null/prelaunch evidence: %+v",inst)
+ }
+ if err:=svc.Stop(context.Background(),"model");err==nil||
+  !strings.Contains(err.Error(),"operator reconciliation"){
+  t.Fatalf("invalid stored zero PID released failed model: %v",err)
+ }
+ var status string
+ var revision int64
+ if err:=db.QueryRow(`SELECT status,revision FROM local_runtime_instances WHERE id='inst'`).Scan(&status,&revision);err!=nil{t.Fatal(err)}
+ if status!="failed"||revision!=1{t.Fatalf("unsafe Stop changed invalid PID evidence: %s rev=%d",status,revision)}
+ if !requiresOperatorReconciliationBeforeRestart(inst,false){
+  t.Fatal("invalid stored zero PID became eligible for a fresh engine")
+ }
+}

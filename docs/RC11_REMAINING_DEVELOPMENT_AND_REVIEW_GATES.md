@@ -1139,3 +1139,24 @@ service, paired physical Nodes and verified reversible L5 postconditions,
 followed by the final whole-branch audit and the explicitly **LAST**
 human-centred UI/UX review. Installer/PR merge and release remain
 separately approval-gated.
+
+## RC11 direct Colibri Start and uncertain-residency status checkpoint (2026-10-22)
+
+**Verified software head:** `4f91668fdcf6b6a5735b87c6215baf2b7df6c19c`,
+[hosted CI #39721549420](https://github.com/DigiLogicTech/OnePane/actions/runs/39721549420)
+**PASSED** for Windows and Linux; physical Node validation **SKIPPED**.
+
+Direct Models Start now calls the same Colibri rollback/compensation
+coordinator as chat acquisition and explicit Hot Swap. The read-only
+Colibri operator status now includes orphaned/draining processes as
+*possibly* resident and displays a redacted reconciliation warning.
+Both paths carry explicit native Windows/Linux tests. Details and
+commit-level evidence are in `docs/rc11-integrated-code-review.md`.
+
+**Continuation:** implementation is source-verified, but physical
+process-tree/VRAM release, chosen-drive installed service tests,
+paired Nodes, safe Level 5 external postconditions, the complete
+security/code review and mandatory LAST UI/UX review remain open.
+Consult `docs/rc11-physical-model-lifecycle-acceptance.md` for the
+opt-in physical protocol; do not execute it automatically. PR #227
+remains draft and unmerged; no installer is authorised.

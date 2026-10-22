@@ -324,3 +324,47 @@ effects, final integrated code/security audit or the mandatory LAST
 operator-focused UI/UX review. No production model process, credentials,
 user Project data, home network or installed environment was touched.
 No installer or release merge is approved.
+
+## RC11 direct Colibri startup and conservative operator residency (2026-10-22)
+
+This code checkpoint followed the verified `6add596b` model lifecycle
+review. It covers code/tests and hosted CI **only**, not installation or
+physical process-tree/GPU acceptance.
+
+- [x] **Direct Models Start no longer bypasses Colibri rollback**
+  (`6e775b6400a765897cb0c9a973c2867d36a65a90`).
+  `RuntimeSupervisor.Start` resolves the intended managed backend under
+  the existing residency mutex and routes a Colibri deployment through
+  `colibriHotSwapLocked`. Ordinary chat Acquire and the explicit Hot Swap
+  action already used this coordinator. A failed post-eviction direct
+  launch now receives the same independently bounded, ownership-checked
+  compensation path. Plain llama.cpp starts remain unchanged.
+  Source-route regression prevents reintroducing bare `startLocked`
+  for direct Colibri Start; the swap coordinator already has adversarial
+  SQLite failure/rollback tests.
+- [x] **Unresolved Colibri process stays visible to the operator**
+  (`a7a4085ddca501c172d0aa292e8ff9f955a6c88e`).
+  The read-only `ColibriHotSwapStatus` endpoint's
+  `active_deployment_ids` conservatively includes `orphaned` and
+  `draining` entries (possibly resident, not verified healthy),
+  rather than hiding uncertain RAM/VRAM owners. The target's status and
+  redacted message require reconciliation before swapping. This
+  does not automatically signal, relaunch or reconcile any process.
+  SQLite regressions verify both states, competing resident visibility,
+  and absence of process signals.
+- [x] **Native Windows and Linux race-lane regression**
+  (`4f91668fdcf6b6a5735b87c6215baf2b7df6c19c`)
+  explicitly selects the new direct-Start and status tests. The
+  [exact combined source/workflow CI #39721549420](https://github.com/DigiLogicTech/OnePane/actions/runs/39721549420)
+  **PASSED**, including native Windows, Linux race checks, full Go
+  regression and cross-platform compilation. Physical Node approval
+  status was deliberately **SKIPPED**.
+
+**Unverified/release blockers are unchanged:** actual Windows/Ubuntu
+Colibri/llama.cpp parent/child process-tree and independently attributed
+RAM/VRAM release, physical Node and authorised Level 5 effects,
+installed Windows SCM and chosen non-C storage upgrade/reboot/rollback,
+Ubuntu installed service, full whole-branch code/security review,
+mandatory LAST human-centred UI/UX review, and explicit operator
+approval before packaging/merge. No installed model, service, user data,
+credential or external device was touched.

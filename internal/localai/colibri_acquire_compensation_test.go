@@ -23,10 +23,11 @@ func colibriSwapFailureFixture(t *testing.T)(*RuntimeSupervisor,*sql.DB){
  // a stopped/NULL-PID row would instead be unresolved ownership and must
  // not allow a replacement or rollback.
  if _,err:=db.Exec(`INSERT INTO local_runtime_instances
- (id,node_id,deployment_id,status,pid,started_at,revision,updated_at,
-  bind_address,port,process_fingerprint,launch_json,health_json,created_at)
- VALUES('old-inst','node','previous','healthy',4321,1,1,2,
-  '127.0.0.1',11333,'old-fingerprint','{}','{}',1)`);err!=nil{t.Fatal(err)}
+ (id,node_id,deployment_id,runtime_id,managed_model_id,status,pid,
+  started_at,revision,updated_at,bind_address,port,process_fingerprint,
+  launch_json,health_json,created_at)
+ VALUES('old-inst','node','previous','colibri-runtime','model-weights',
+  'healthy',4321,1,1,2,'127.0.0.1',11333,'old-fingerprint','{}','{}',1)`);err!=nil{t.Fatal(err)}
  // No OS process belongs to this deterministic rollback fixture.
  // The recorded predecessor PID is historical evidence only; never
  // inspect or signal a coincidentally reused CI worker PID 4321.

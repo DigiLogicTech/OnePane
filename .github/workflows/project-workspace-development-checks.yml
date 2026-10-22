@@ -241,6 +241,7 @@ jobs:
           go test -race -count=1 -timeout 3m -run 'TestManaged(Stopped|StopDoesNotErase|MemoryAdmissionRejectsUnproven)' ./internal/localai
           go test -race -count=1 -timeout 3m -run 'TestColibri(ReplacementUnknownResult|ConfirmedNoChildFailure)' ./internal/localai
           go test -race -count=1 -timeout 3m -run TestColibriUnknownStoppedOrFailedPID ./internal/localai
+          go test -race -count=1 -timeout 3m -run TestColibriHealthyBusyWithoutPIDCannotClaimSafeEviction ./internal/localai
       - name: Full Go regression and cross-platform compilation
         run: |
           go test ./internal/featurepolicy ./internal/inference ./internal/tool ./internal/webui
@@ -337,6 +338,7 @@ jobs:
           go test -count=1 -timeout 4m -run 'TestManaged(Stopped|StopDoesNotErase|MemoryAdmissionRejectsUnproven)' ./internal/localai
           go test -count=1 -timeout 4m -run 'TestColibri(ReplacementUnknownResult|ConfirmedNoChildFailure)' ./internal/localai
           go test -count=1 -timeout 4m -run TestColibriUnknownStoppedOrFailedPID ./internal/localai
+          go test -count=1 -timeout 4m -run TestColibriHealthyBusyWithoutPIDCannotClaimSafeEviction ./internal/localai
       - name: Native Windows SQLite migration and startup-evidence regressions
         shell: pwsh
         run: |

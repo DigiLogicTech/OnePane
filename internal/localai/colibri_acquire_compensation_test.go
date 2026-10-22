@@ -18,9 +18,13 @@ func colibriSwapFailureFixture(t *testing.T)(*RuntimeSupervisor,*sql.DB){
  if _,err:=db.Exec(`INSERT INTO model_deployments
   (id,runtime_name,residency_state,updated_at,revision,runtime_config_json)
   VALUES('previous','colibri','resident',1,1,'{}')`);err!=nil{t.Fatal(err)}
+ // This predecessor genuinely launched and has a durable PID. After
+ // synthetic eviction the test backend independently reports it dead;
+ // a stopped/NULL-PID row would instead be unresolved ownership and must
+ // not allow a replacement or rollback.
  if _,err:=db.Exec(`INSERT INTO local_runtime_instances
- (id,node_id,deployment_id,status,revision,updated_at)
- VALUES('old-inst','node','previous','healthy',1,2)`);err!=nil{t.Fatal(err)}
+ (id,node_id,deployment_id,status,pid,started_at,revision,updated_at)
+ VALUES('old-inst','node','previous','healthy',4321,1,1,2)`);err!=nil{t.Fatal(err)}
  return svc,db
 }
 

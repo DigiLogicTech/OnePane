@@ -76,3 +76,24 @@ func TestManagedRestartNoChildFailureProofIsRequired(t *testing.T){
   }
  }
 }
+
+func TestManagedStartupChecksUnknownBusyBeforeProcessReuse(t *testing.T){
+ raw,err:=os.ReadFile("supervisor.go")
+ if err!=nil{t.Fatal(err)}
+ code:=string(raw)
+ start:=strings.Index(code,"func (s *RuntimeSupervisor) startLocked(")
+ if start<0{t.Fatal("managed startup unavailable")}
+ section:=code[start:]
+ if end:=strings.Index(section,"\nfunc ");end>0{section=section[:end]}
+ busy:=strings.Index(section,"if old.Status==RuntimeBusy {")
+ lock:=strings.Index(section[busy:],"s.activityMu.Lock()")
+ evidence:=strings.Index(section[busy:],"s.activeRequests[deploymentID]>0")
+ denial:=strings.Index(section[busy:],"unknown persisted busy inference outcome")
+ verify:=strings.Index(section,"s.VerifyIdentity(ctx,old)")
+ if busy<0||lock<0||evidence<lock||denial<evidence||verify<=busy+denial{
+  t.Fatal("persisted busy inference can be reused before verifying active request lease")
+ }
+ if !strings.Contains(section[busy:verify],"s.activityMu.Unlock()"){
+  t.Fatal("startLocked must release activityMu before VerifyIdentity")
+ }
+}

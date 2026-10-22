@@ -1139,6 +1139,17 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 	var existing *RuntimeInstance
 	if old, err := s.Instance(ctx, deploymentID); err == nil {
 		existing = &old
+        // A persisted busy state with no live in-process lease may be an
+        // inference whose outcome was lost on daemon restart. Do not
+        // infer that it can accept another request from PID liveness.
+        if old.Status==RuntimeBusy {
+         s.activityMu.Lock()
+         leased:=s.activeRequests[deploymentID]>0
+         s.activityMu.Unlock()
+         if !leased{
+          return RuntimeInstance{},errors.New("managed runtime has unknown persisted busy inference outcome; operator reconciliation required before reuse")
+         }
+        }
 		alive := old.PID > 1 && s.processes.Alive(old.PID)
 		// A failed, stopped, draining or orphaned instance may still own a
 		// process and GPU/CPU memory. Never overwrite its original PID or

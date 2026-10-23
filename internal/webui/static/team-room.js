@@ -42,13 +42,18 @@
    finally{state.busy=false;emit()}
   }
   async function mutate(suffix,body){
-   const allowed=["deliberating","plan_proposed","paused_for_deliberation","team_review",...(suffix==="/messages"?["plan_accepted","executing"]:[])];
+   const allowed=["deliberating","plan_proposed","paused_for_deliberation","team_review",...(["/messages","/execution/cancel"].includes(suffix)?["plan_accepted","executing"]:[])];
    if(state.busy||!state.room||!allowed.includes(state.room.status)||!active())return false;
    state.busy=true;emit();try{await request(path(suffix),{method:"POST",body:JSON.stringify(body)});if(!active())return false;state.error="";return true}
    catch{if(active()){state.error="The action could not be confirmed. Refresh and inspect the room before submitting again."}return false}
    finally{state.busy=false;emit()}
   }
   return {state,refresh,older,
+   async cancelExecution(reason=""){
+    const room=state.room;
+    if(!room||room.execution_mode!=="team"||!room.assignments?.length||!room.accepted_plan_id||!Number.isSafeInteger(room.task_revision)||room.task_revision<1||!["created","ready","running","waiting_dependency","waiting_approval","paused","blocked","completion_requested","verifying"].includes(room.task_state)||typeof reason!=="string"||reason.length>2048)return false;
+    const ok=await mutate("/execution/cancel",{plan_id:room.accepted_plan_id,expected_task_revision:room.task_revision,reason:reason.trim()});await refresh();return ok;
+   },
 	assignmentDraft(messageID){
 	 if(!state.room||state.room.task_state!=="created"||state.room.assignments?.length)return null;
 	 const message=state.messages.find(m=>id(m)===messageID&&field(m,"kind","Kind")==="agent"&&state.room.members.some(member=>member.id===field(m,"author_member_id","AuthorMemberID")&&member.kind==="agent"));if(!message)return null;
@@ -86,7 +91,7 @@
  function mount(taskID){
   if(typeof openModal!=="function"||typeof apiRequest!=="function")return;
   const scope=onepaneWorkspace;
-  openModal("Live Team",'<section class="team-room" id="onepaneTeamRoom"><p class="page-subtitle">One shared session. Watch contributions and observed turns, send guidance, then request replies. Tool execution still requires the accepted Task plan.</p><div class="toolbar" role="group" aria-label="Team view"><button class="btn" data-team-view="conversation" aria-pressed="true">Conversation</button><button class="btn" data-team-view="agents" aria-pressed="false">Agents</button><button class="btn" data-team-refresh>Refresh</button></div><p data-team-status role="status">Connecting to the Task’s Team…</p><div data-team-conversation><div class="toolbar"><button class="btn" data-team-older>Earlier messages</button><button class="btn" data-team-live hidden>Return to live</button></div><div class="team-room-feed" data-team-feed tabindex="0" aria-label="Team conversation"></div></div><div class="team-room-agents" data-team-agents hidden></div><form class="qa-form" data-team-form><label>Guidance recipient<select aria-label="Guidance recipient" data-team-guidance-target><option value="">Whole team</option></select></label><p class="list-meta">Addressed guidance stays visible in the shared room and reaches the selected agent on its next reasoning step. It does not change the accepted plan or grant permissions.</p><label>Message to the room<textarea rows="3" maxlength="8000" data-team-draft required></textarea></label><div class="toolbar"><button class="btn" type="submit" data-team-send>Send message</button><label>Request replies from<select aria-label="Request replies from" data-team-target><option value="">All agents</option></select></label><button class="btn primary" type="button" data-team-ask>Request replies</button></div><p class="list-meta">Sending saves your message. Request replies queues reasoning turns. Waiting does not mean that an agent or model is running.</p></form></section>');
+  openModal("Live Team",'<section class="team-room" id="onepaneTeamRoom"><p class="page-subtitle">One shared session. Watch contributions and observed turns, send guidance, then request replies. Tool execution still requires the accepted Task plan.</p><div class="toolbar" role="group" aria-label="Team view"><button class="btn" data-team-view="conversation" aria-pressed="true">Conversation</button><button class="btn" data-team-view="agents" aria-pressed="false">Agents</button><button class="btn" data-team-refresh>Refresh</button></div><p data-team-status role="status">Connecting to the Task’s Team…</p><details data-team-cancel-controls hidden><summary>Cancel Team work</summary><p>Request cancellation of this Task, its contributions and their descendant Tasks. Completed results remain available. This records a request; already-started external actions may still need reconciliation.</p><label>Reason (optional)<input data-team-cancel-reason maxlength="2048"></label><button class="btn" type="button" data-team-cancel>Request cancellation</button></details><div data-team-conversation><div class="toolbar"><button class="btn" data-team-older>Earlier messages</button><button class="btn" data-team-live hidden>Return to live</button></div><div class="team-room-feed" data-team-feed tabindex="0" aria-label="Team conversation"></div></div><div class="team-room-agents" data-team-agents hidden></div><form class="qa-form" data-team-form><label>Guidance recipient<select aria-label="Guidance recipient" data-team-guidance-target><option value="">Whole team</option></select></label><p class="list-meta">Addressed guidance stays visible in the shared room and reaches the selected agent on its next reasoning step. It does not change the accepted plan or grant permissions.</p><label>Message to the room<textarea rows="3" maxlength="8000" data-team-draft required></textarea></label><div class="toolbar"><button class="btn" type="submit" data-team-send>Send message</button><label>Request replies from<select aria-label="Request replies from" data-team-target><option value="">All agents</option></select></label><button class="btn primary" type="button" data-team-ask>Request replies</button></div><p class="list-meta">Sending saves your message. Request replies queues reasoning turns. Waiting does not mean that an agent or model is running.</p></form></section>');
   const el=document.getElementById("onepaneTeamRoom");if(!el)return;
   const get=s=>el.querySelector(s);let roster="",timer=null,planEditor=null;
   const alive=()=>el.isConnected&&scope===onepaneWorkspace;
@@ -109,11 +114,14 @@
    const guidanceEnabled=!!s.room&&["deliberating","plan_proposed","paused_for_deliberation","team_review","plan_accepted","executing"].includes(s.room.status)&&!s.busy;
    get("[data-team-send]").disabled=!guidanceEnabled;get("[data-team-guidance-target]").disabled=!guidanceEnabled||s.room.execution_mode!=="team";get("[data-team-guidance-target]").parentElement.hidden=s.room?.execution_mode!=="team";get("[data-team-ask]").disabled=!enabled;
    get("[data-team-older]").disabled=s.busy||!(s.history?s.history.has_more:s.hasOlder||s.messages.length>=100);get("[data-team-live]").hidden=!s.history;
+   const cancellable=!!s.room&&s.room.execution_mode==="team"&&s.room.assignments?.length&&s.room.accepted_plan_id&&["created","ready","running","waiting_dependency","waiting_approval","paused","blocked","completion_requested","verifying"].includes(s.room.task_state);
+   get("[data-team-cancel-controls]").hidden=!cancellable;get("[data-team-cancel]").disabled=!cancellable||s.busy;
    planEditor?.draw(s);
   }
   el.querySelectorAll("[data-team-view]").forEach(b=>b.onclick=()=>c.switchView(b.dataset.teamView));
   get("[data-team-guidance-target]").onchange=e=>{c.state.guidanceTarget=e.target.value};
   get("[data-team-draft]").oninput=e=>{c.state.draft=e.target.value};get("[data-team-target]").onchange=e=>{c.state.selectedAgent=e.target.value};
+  get("[data-team-cancel]").onclick=()=>c.cancelExecution(get("[data-team-cancel-reason]").value);
   get("[data-team-form]").onsubmit=e=>{e.preventDefault();c.send()};get("[data-team-ask]").onclick=()=>c.ask();get("[data-team-refresh]").onclick=()=>c.refresh();get("[data-team-older]").onclick=()=>c.older();get("[data-team-live]").onclick=()=>c.live();
   if(root.OnePaneTeamAssignments)planEditor=root.OnePaneTeamAssignments.mount(el,c);
   const observer=new MutationObserver(()=>{if(!alive())stop()});observer.observe(document.body,{childList:true,subtree:true});

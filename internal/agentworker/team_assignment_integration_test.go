@@ -130,7 +130,11 @@ func (c pausingTeamCoordinator) Acquire(ctx context.Context, req inference.Runti
 	return lease, nil
 }
 
-func runTeamAssignmentScenario(t *testing.T, pause bool, parallel string) {
+func runTeamAssignmentScenario(t *testing.T, pause bool, parallel string, cancellation ...string) {
+	cancelPhase := ""
+	if len(cancellation) > 0 {
+		cancelPhase = cancellation[0]
+	}
 	ctx := context.Background()
 	root := t.TempDir()
 	db, err := sqlitestore.Open(root + "/team-worker.db")
@@ -218,6 +222,23 @@ func runTeamAssignmentScenario(t *testing.T, pause bool, parallel string) {
 		}
 	}
 	worker := New(db.SQL(), db, clock.Real{}, "node", tasks, nil, nil, scheduler.NewService(db.SQL(), db, clock.Real{}), infer, nil, artifacts, nil, nil, nil, verification.NewService(db.SQL(), db, clock.Real{}))
+	if cancelPhase != "" {
+		cancelTeam := func() error {
+			current, e := tasks.Get(ctx, job.ID)
+			if e != nil {
+				return e
+			}
+			_, e = teams.RequestExecutionCancellation(ctx, team.CancelExecutionCommand{SessionID: session.ID, PlanID: plan.ID, ActorPrincipalID: "human", ExpectedTaskRevision: current.Revision, Reason: "Synthetic cancellation boundary"})
+			return e
+		}
+		if cancelPhase == "queued" {
+			if err = infer.ConfigureRuntimeCoordinator(pausingTeamCoordinator{inner: runtimecoord.NewService(db.SQL(), clock.Real{}), pause: cancelTeam}); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			model.observe = func(context.Context) error { return cancelTeam() }
+		}
+	}
 	if parallel != "" {
 		coordinator := runtimecoord.NewService(db.SQL(), clock.Real{})
 		if parallel == "capacity" {
@@ -290,6 +311,30 @@ func runTeamAssignmentScenario(t *testing.T, pause bool, parallel string) {
 		if e != nil {
 			t.Fatal(e)
 		}
+		if cancelPhase != "" {
+			current, e := tasks.Get(ctx, job.ID)
+			if e != nil || current.State != task.StateCancelRequested || worker.dispatchReconciliationFailed {
+				t.Fatalf("cancellation halted unrelated scheduling or lost root intent: %+v %v", current, e)
+			}
+			expectedCalls := 0
+			if cancelPhase == "response" {
+				expectedCalls = 1
+			}
+			if len(model.calls) != expectedCalls {
+				t.Fatalf("unexpected cancelled model effects: %v", model.calls)
+			}
+			var checkpointCount, parked int
+			if e = db.SQL().QueryRow(`SELECT COUNT(*) FROM checkpoints`).Scan(&checkpointCount); e != nil || checkpointCount != 0 {
+				t.Fatalf("cancelled proposal created checkpoint: %d %v", checkpointCount, e)
+			}
+			if e = db.SQL().QueryRow(`SELECT COUNT(*) FROM agent_worker_runs r JOIN task_attempts a ON a.id=r.attempt_id WHERE r.status='waiting' AND a.status='waiting'`).Scan(&parked); e != nil || parked != 1 {
+				t.Fatalf("original cancelled Attempt not parked: %d %v", parked, e)
+			}
+			if _, e = worker.Tick(ctx, 10); e != nil {
+				t.Fatalf("cancellation poisoned subsequent tick: %v", e)
+			}
+			return
+		}
 		if pause {
 			current, e := tasks.Get(ctx, job.ID)
 			if e != nil || current.State != task.StatePaused || len(model.calls) != 0 {
@@ -337,5 +382,11 @@ func (c teamLaneCoordinator) Acquire(ctx context.Context, req inference.RuntimeS
 func TestTeamAssignmentsExecuteIndependentWorkThroughSharedCapacity(t *testing.T) {
 	for _, mode := range []string{"capacity", "constrained"} {
 		t.Run(mode, func(t *testing.T) { runTeamAssignmentScenario(t, false, mode) })
+	}
+}
+
+func TestTeamCancellationDiscardsQueuedAndReturnedModelProposals(t *testing.T) {
+	for _, phase := range []string{"queued", "response"} {
+		t.Run(phase, func(t *testing.T) { runTeamAssignmentScenario(t, false, "", phase) })
 	}
 }

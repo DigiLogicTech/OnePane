@@ -2,6 +2,16 @@
 
 Target: Windows installed QA first, Ubuntu afterwards. This is source progress, not a QA-ready declaration.
 
+## Team cancellation continuation — local source
+
+The live room now offers an explicit cancellation request for the accepted Team Task, contributions and descendant Tasks. The API requires both `team.write` and `task.write`; the domain rechecks current human/workspace authority inside the transaction. The displayed accepted-plan ID and parent Task revision bind the request. Task cancellation intent, audit events and the Team event commit atomically, with a bounded 256-Task scope. Completed/failed results, checkpoints and immutable assignment records remain intact. A stale revision, foreign descendant or oversized graph rejects the whole request; the controller prevents duplicate in-flight submissions and does not retry automatically.
+
+The Task cancellation primitive can participate in an owner transaction. A reasoning response returned after cancellation is discarded and the exact original Worker/Attempt is parked in waiting state for reconciliation. An unknown dispatch outcome still takes the existing interrupted/reconciliation path. Synthetic Worker cases cover cancellation after compute admission before transport, and after a model response before proposal application; neither creates a completion checkpoint or poisons the subsequent Worker tick.
+
+Verification: selected Windows integration regressions pass for Task, Team, Team worker, Agent Worker, Tool Gateway, API, inference, Project orchestrator, SQLite and web assets. Final focused cancellation tests cover transaction rollback, scope bounds, foreign descendants, completed-result preservation, stale revisions, revoked humans and propagation of a prior root-only request. API tests cover both write permissions, authenticated actor binding and conflict/forbidden responses. Controller checks cover explicit scope/revision payloads and duplicate-submit denial. `go vet`, all 25 JavaScript validators and whitespace checks pass. No hosted CI or final browser acceptance was performed for this local continuation.
+
+This is a cancellation request, not completed cancellation, physical process termination or resolution of already-started external effects. Cancellation completion/compensation, Team pause/resume and accepted-graph reassignment remain unfinished. Acceptance fixtures put the parent in READY when the plan is accepted; contribution dependencies continue to fence consolidation. This increment does not alter that admission contract. Browser/product UI and real-model/tool acceptance remain open.
+
 ## Local continuation checkpoint — unpublished
 
 The working tree extends published commit `bb840b91` with bounded concurrent inference for two independent members of the same accepted assignment graph. Preparation and proposal/tool effects remain serialized under the Worker cycle lock; inference retains the shared coordinator and constrained-capacity queue. Synthetic integration cases pass for both overlapping independent capacity and queueing on one pool. This does not establish arbitrary-size parallel scheduling, physical memory admission or real-model acceptance.

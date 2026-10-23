@@ -182,6 +182,12 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 			if cand.Kind == scheduler.CandidateAgentRuntime {
 				stepKind = "agent_runtime"
 			}
+			if !errors.Is(dispatchErr, ErrDispatchRequiresReconciliation) {
+				if stopped,ok:=s.parkIfCancellationRequested(ctx,run,res);ok {
+					if dispatchErr!=nil{s.releaseBudgetIfReserved(ctx,reservationID)}
+					return stopped
+				}
+			}
 			if dispatchErr != nil {
 				if errors.Is(dispatchErr, ErrDispatchRequiresReconciliation) {
 					// Do not release potentially spent quota or route a fallback.
@@ -199,6 +205,7 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 				return s.blockRun(ctx, run, res, "pinned Agent profile revoked before proposal application: "+err.Error())
 			}
 			if _, err := teamgate.Require(ctx, s.db, t.WorkspaceID, t.ID); err != nil {
+				if stopped,ok:=s.parkIfCancellationRequested(ctx,run,res);ok{return stopped}
 				return s.blockRun(ctx, run, res, "Team assignment revoked before proposal application")
 			}
 			pt := string(response.ProposalType)

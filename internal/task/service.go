@@ -507,9 +507,9 @@ func (s *Service) Fail(ctx context.Context, cmd TransitionCommand) (Task, error)
 }
 
 func (s *Service) RequestCancel(ctx context.Context, cmd TransitionCommand) (Task, error) {
-	return s.transition(ctx, cmd, StateCancelRequested, "task.cancel_requested", func(tr *transitionRecord, now int64) {
-		tr.CancelRequestedAt = &now
-	})
+	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error { return s.RequestCancelInTransaction(ctx, tx, cmd) })
+	if err != nil { return Task{}, err }
+	return s.repo.Get(ctx, cmd.TaskID)
 }
 
 // InterruptForRecovery records that the execution incarnation was lost. The

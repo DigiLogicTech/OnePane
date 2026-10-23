@@ -9,17 +9,19 @@ import (
 // LiveRoom exposes observed public coordination metadata, never profile
 // instructions, model reasoning, raw provider errors or tool payloads.
 type LiveRoom struct {
-	ID            string           `json:"id"`
-	WorkspaceID   string           `json:"workspace_id"`
-	TeamID        string           `json:"team_id"`
-	TaskID        string           `json:"task_id"`
-	Status        string           `json:"status"`
-	ExecutionMode string           `json:"execution_mode"`
-	TaskState     string           `json:"task_state"`
-	Round         int64            `json:"round"`
-	ObservedAt    int64            `json:"observed_at"`
-	Members       []LiveMember     `json:"members"`
-	Assignments   []LiveAssignment `json:"assignments"`
+	ID             string           `json:"id"`
+	WorkspaceID    string           `json:"workspace_id"`
+	TeamID         string           `json:"team_id"`
+	TaskID         string           `json:"task_id"`
+	Status         string           `json:"status"`
+	ExecutionMode  string           `json:"execution_mode"`
+	TaskState      string           `json:"task_state"`
+	TaskRevision   int64            `json:"task_revision"`
+	AcceptedPlanID string           `json:"accepted_plan_id,omitempty"`
+	Round          int64            `json:"round"`
+	ObservedAt     int64            `json:"observed_at"`
+	Members        []LiveMember     `json:"members"`
+	Assignments    []LiveAssignment `json:"assignments"`
 }
 type LiveMember struct {
 	ID            string `json:"id"`
@@ -43,7 +45,10 @@ func (s *Service) LiveRoom(ctx context.Context, sessionID string) (LiveRoom, err
 		return LiveRoom{}, err
 	}
 	out := LiveRoom{ID: ss.ID, WorkspaceID: ss.WorkspaceID, TeamID: ss.TeamID, TaskID: ss.TaskID, Status: ss.Status, Round: ss.RoundNumber, ObservedAt: s.clock.UnixMilli(), Members: []LiveMember{}}
-	if err = s.db.QueryRowContext(ctx, `SELECT state FROM tasks WHERE id=? AND workspace_id=?`, ss.TaskID, ss.WorkspaceID).Scan(&out.TaskState); err != nil {
+	if ss.AcceptedPlanID != nil {
+		out.AcceptedPlanID = *ss.AcceptedPlanID
+	}
+	if err = s.db.QueryRowContext(ctx, `SELECT state,revision FROM tasks WHERE id=? AND workspace_id=?`, ss.TaskID, ss.WorkspaceID).Scan(&out.TaskState, &out.TaskRevision); err != nil {
 		return LiveRoom{}, err
 	}
 	var members []SnapshotMember

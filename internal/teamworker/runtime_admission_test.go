@@ -14,7 +14,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/policy"
 	"github.com/DigiLogicTech/OnePane/internal/runtimecoord"
 	"github.com/DigiLogicTech/OnePane/internal/scheduler"
-	sqlitestore "github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
+
 	"github.com/DigiLogicTech/OnePane/internal/task"
 	"github.com/DigiLogicTech/OnePane/internal/team"
 )
@@ -22,17 +22,12 @@ import (
 // Exercise the real Team dispatch -> inference -> shared coordinator path.
 // No model process is launched: cancellation happens while compute is queued.
 func TestTeamDispatchSharesComputeAdmissionWithAssistantAndOtherTasks(t *testing.T) {
+	root := t.TempDir()
+	db := migratedWorkerDatabase(t)
+	// Keep schema preparation outside the bounded admission/cancellation window.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	root := t.TempDir()
-	db, err := sqlitestore.Open(root + "/team-runtime.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if err = db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
+	var err error
 	for _, q := range []string{
 		`INSERT INTO workspaces(id,name,status,revision,created_at,updated_at) VALUES('tenant','Tenant','active',1,1,1)`,
 		`INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at) VALUES('human','human','Owner','active',1,1,1)`,

@@ -8,8 +8,9 @@
  const id=v=>String(field(v,"id","ID")||"");
  const text=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
  function content(m){let v=field(m,"content","Content");if(typeof v==="string"){try{v=JSON.parse(v)}catch{return v}}return typeof v?.text==="string"?v.text:"Structured contribution (inspect its durable record for details)."}
+ function guidanceRecipient(m){if(field(m,"kind","Kind")!=="human")return "";let v=field(m,"content","Content");if(typeof v==="string"){try{v=JSON.parse(v)}catch{return ""}}return typeof v?.target_member_id==="string"?v.target_member_id:""}
  function controller({api,taskID,onChange=()=>{},alive=()=>true}){
-  const state={sessionID:"",room:null,messages:[],history:null,hasOlder:false,view:"conversation",selectedAgent:"",draft:"",busy:false,error:"",liveAfter:"",proposedPlan:null};
+  const state={sessionID:"",room:null,messages:[],history:null,hasOlder:false,view:"conversation",selectedAgent:"",guidanceTarget:"",draft:"",busy:false,error:"",liveAfter:"",proposedPlan:null};
   const abort=new AbortController();let reading=false,stopped=false,planDraftRevision=0;
   const active=()=>!stopped&&alive();const emit=()=>{if(active())onChange(state)};
   const request=(path,options={})=>api(path,{...options,signal:abort.signal});
@@ -41,22 +42,36 @@
    finally{state.busy=false;emit()}
   }
   async function mutate(suffix,body){
-   if(state.busy||!state.room||!["deliberating","plan_proposed","paused_for_deliberation","team_review"].includes(state.room.status)||!active())return false;
+   const allowed=["deliberating","plan_proposed","paused_for_deliberation","team_review",...(suffix==="/messages"?["plan_accepted","executing"]:[])];
+   if(state.busy||!state.room||!allowed.includes(state.room.status)||!active())return false;
    state.busy=true;emit();try{await request(path(suffix),{method:"POST",body:JSON.stringify(body)});if(!active())return false;state.error="";return true}
    catch{if(active()){state.error="The action could not be confirmed. Refresh and inspect the room before submitting again."}return false}
    finally{state.busy=false;emit()}
   }
   return {state,refresh,older,
+	assignmentDraft(messageID){
+	 if(!state.room||state.room.task_state!=="created"||state.room.assignments?.length)return null;
+	 const message=state.messages.find(m=>id(m)===messageID&&field(m,"kind","Kind")==="agent"&&state.room.members.some(member=>member.id===field(m,"author_member_id","AuthorMemberID")&&member.kind==="agent"));if(!message)return null;
+	 let body=field(message,"content","Content");try{if(typeof body==="string")body=JSON.parse(body);if(body?.proposal_type!=="replan")return null;let proposal=body.proposal;if(typeof proposal==="string")proposal=JSON.parse(proposal);
+	 const assignments=proposal?.assignments;if(!Array.isArray(assignments)||assignments.length<1||assignments.length>8||JSON.stringify(assignments).length>64000)return null;
+	 if(assignments.some(a=>a.required_verification!==undefined&&!['','V0','V1','V2','V3','V4','V5'].includes(a.required_verification)||a.verification_spec!==undefined&&(!a.verification_spec||Array.isArray(a.verification_spec)||typeof a.verification_spec!=="object"||JSON.stringify(a.verification_spec).length>16384)))return null;
+	 const seen=new Set(),ordered=[],remaining=assignments.map(a=>({key:a.key,member_id:a.member_id,objective:a.objective,depends_on:a.depends_on||[],...(a.required_verification!==undefined?{required_verification:a.required_verification}:{}),...(a.verification_spec!==undefined?{verification_spec:a.verification_spec}:{})}));
+	 if(remaining.some(a=>typeof a.key!=="string"||!(/^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/).test(a.key)||typeof a.objective!=="string"||!a.objective.trim()||a.objective.length>4096||!state.room.members.some(m=>m.id===a.member_id&&m.kind==="agent")||!Array.isArray(a.depends_on)||a.depends_on.length>7||new Set(a.depends_on).size!==a.depends_on.length||seen.has(a.key)||(seen.add(a.key),false)))return null;
+	 while(remaining.length){const next=remaining.findIndex(a=>a.depends_on.every(key=>ordered.some(done=>done.key===key)));if(next<0)return null;ordered.push(remaining.splice(next,1)[0])}
+	 return JSON.parse(JSON.stringify(ordered));
+	 }catch{return null}
+	},
    invalidatePlanReview(){planDraftRevision++;state.proposedPlan=null;emit()},
    async readAssignment(taskID){if(!state.room?.assignments?.some(a=>a.task_id===taskID)||!active())return null;try{const task=await request("/v1/tasks/"+encodeURIComponent(taskID));if(!active()||id(task)!==taskID||field(task,"workspace_id","WorkspaceID")!==state.room?.workspace_id)return null;return task}catch{return null}},
    async proposeAssignments(assignments){
     if(state.busy||!state.room||state.room.task_state!=="created"||!Array.isArray(assignments)||assignments.length<1||assignments.length>8||!active())return false;
     if(assignments.some(a=>!state.room.members.some(m=>m.id===a.member_id&&m.kind==="agent")))return false;
+    const savedAssignments=JSON.parse(JSON.stringify(assignments));
     const reviewRevision=planDraftRevision;state.busy=true;state.proposedPlan=null;emit();
-    try{const out=await request(path("/plans"),{method:"POST",body:JSON.stringify({plan:{assignments}})});if(!active())return false;
+    try{const out=await request(path("/plans"),{method:"POST",body:JSON.stringify({plan:{assignments:savedAssignments}})});if(!active())return false;
      if(!id(out)||field(out,"session_id","SessionID")!==state.sessionID)throw Error("Invalid plan scope");
      if(reviewRevision!==planDraftRevision){state.error="The draft changed while saving. Save the updated plan for a new review.";return false}
-     state.proposedPlan={id:id(out),assignments:JSON.parse(JSON.stringify(assignments))};state.error="";return true;
+     state.proposedPlan={id:id(out),assignments:savedAssignments};state.error="";return true;
     }catch{if(active())state.error="The plan could not be confirmed. Refresh and inspect saved plans before submitting again.";return false}
     finally{state.busy=false;emit();await refresh()}
    },
@@ -64,14 +79,14 @@
    stop(){stopped=true;abort.abort()},
    switchView(view){if(view!=="conversation"&&view!=="agents")return;state.view=view;emit()},
    live(){state.history=null;emit()},
-   async send(){const original=state.draft,draft=original.trim();if(!draft||draft.length>8000)return false;const ok=await mutate("/messages",{content:{text:draft}});if(ok){if(state.draft===original)state.draft="";emit();await refresh()}return ok},
+   async send(){const original=state.draft,draft=original.trim(),target=state.guidanceTarget;if(!draft||draft.length>8000||target&&(state.room?.execution_mode!=="team"||!state.room.members.some(m=>m.id===target&&m.kind==="agent")))return false;const ok=await mutate("/messages",{content:{text:draft,...(target?{target_member_id:target}:{})}});if(ok){if(state.draft===original)state.draft="";emit();await refresh()}return ok},
    async ask(){const member=state.selectedAgent;if(member&&!state.room?.members.some(m=>m.id===member&&m.kind!=="human"))return false;const ok=await mutate("/rounds",{member_ids:member?[member]:[]});if(ok)await refresh();return ok}
   };
  }
  function mount(taskID){
   if(typeof openModal!=="function"||typeof apiRequest!=="function")return;
   const scope=onepaneWorkspace;
-  openModal("Live Team",'<section class="team-room" id="onepaneTeamRoom"><p class="page-subtitle">One shared session. Watch contributions and observed turns, send guidance, then request replies. Tool execution still requires the accepted Task plan.</p><div class="toolbar" role="group" aria-label="Team view"><button class="btn" data-team-view="conversation" aria-pressed="true">Conversation</button><button class="btn" data-team-view="agents" aria-pressed="false">Agents</button><button class="btn" data-team-refresh>Refresh</button></div><p data-team-status role="status">Connecting to the Task’s Team…</p><div data-team-conversation><div class="toolbar"><button class="btn" data-team-older>Earlier messages</button><button class="btn" data-team-live hidden>Return to live</button></div><div class="team-room-feed" data-team-feed tabindex="0" aria-label="Team conversation"></div></div><div class="team-room-agents" data-team-agents hidden></div><form class="qa-form" data-team-form><label>Message to the room<textarea rows="3" maxlength="8000" data-team-draft required></textarea></label><div class="toolbar"><button class="btn" type="submit" data-team-send>Send message</button><label>Request replies from<select aria-label="Request replies from" data-team-target><option value="">All agents</option></select></label><button class="btn primary" type="button" data-team-ask>Request replies</button></div><p class="list-meta">Sending saves your message. Request replies queues reasoning turns. Waiting does not mean that an agent or model is running.</p></form></section>');
+  openModal("Live Team",'<section class="team-room" id="onepaneTeamRoom"><p class="page-subtitle">One shared session. Watch contributions and observed turns, send guidance, then request replies. Tool execution still requires the accepted Task plan.</p><div class="toolbar" role="group" aria-label="Team view"><button class="btn" data-team-view="conversation" aria-pressed="true">Conversation</button><button class="btn" data-team-view="agents" aria-pressed="false">Agents</button><button class="btn" data-team-refresh>Refresh</button></div><p data-team-status role="status">Connecting to the Task’s Team…</p><div data-team-conversation><div class="toolbar"><button class="btn" data-team-older>Earlier messages</button><button class="btn" data-team-live hidden>Return to live</button></div><div class="team-room-feed" data-team-feed tabindex="0" aria-label="Team conversation"></div></div><div class="team-room-agents" data-team-agents hidden></div><form class="qa-form" data-team-form><label>Guidance recipient<select aria-label="Guidance recipient" data-team-guidance-target><option value="">Whole team</option></select></label><p class="list-meta">Addressed guidance stays visible in the shared room and reaches the selected agent on its next reasoning step. It does not change the accepted plan or grant permissions.</p><label>Message to the room<textarea rows="3" maxlength="8000" data-team-draft required></textarea></label><div class="toolbar"><button class="btn" type="submit" data-team-send>Send message</button><label>Request replies from<select aria-label="Request replies from" data-team-target><option value="">All agents</option></select></label><button class="btn primary" type="button" data-team-ask>Request replies</button></div><p class="list-meta">Sending saves your message. Request replies queues reasoning turns. Waiting does not mean that an agent or model is running.</p></form></section>');
   const el=document.getElementById("onepaneTeamRoom");if(!el)return;
   const get=s=>el.querySelector(s);let roster="",timer=null,planEditor=null;
   const alive=()=>el.isConnected&&scope===onepaneWorkspace;
@@ -82,19 +97,22 @@
    const feed=get("[data-team-feed]"),top=feed.scrollTop,atEnd=feed.scrollHeight-feed.clientHeight-top<32;
    const members=s.room?.members||[],names=new Map(members.map(m=>[m.id,m.name]));
    const msgs=s.history?.messages||s.messages;
-   feed.innerHTML=msgs.length?msgs.map(m=>'<article class="team-room-message"><strong>'+text(names.get(field(m,"author_member_id","AuthorMemberID"))||(field(m,"kind","Kind")==="human"?"You":"Team"))+'</strong><small>'+(field(m,"kind","Kind")==="system"?"System update · ":"")+'Round '+text(field(m,"round_number","RoundNumber"))+'</small><p>'+text(content(m))+'</p></article>').join(""):'<p class="list-meta">No messages in this window.</p>';
+   feed.innerHTML=msgs.length?msgs.map(m=>'<article class="team-room-message"><strong>'+text(names.get(field(m,"author_member_id","AuthorMemberID"))||(field(m,"kind","Kind")==="human"?"You":"Team"))+'</strong><small>'+(field(m,"kind","Kind")==="system"?"System update · ":"")+'Round '+text(field(m,"round_number","RoundNumber"))+(guidanceRecipient(m)?' · Guidance for '+text(names.get(guidanceRecipient(m))||'session member')+' (shared)':'')+'</small><p>'+text(content(m))+'</p></article>').join(""):'<p class="list-meta">No messages in this window.</p>';
    feed.scrollTop=atEnd&&!s.history?feed.scrollHeight:top;
    get("[data-team-conversation]").hidden=s.view!=="conversation";get("[data-team-agents]").hidden=s.view!=="agents";
    el.querySelectorAll("[data-team-view]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.teamView===s.view)));
    get("[data-team-agents]").innerHTML=members.map(m=>'<article class="panel-card"><h3>'+text(m.name)+'</h3><p>'+text(m.role)+' · Turn: '+text(m.status)+'</p><dl><dt>Model/runtime</dt><dd>'+text(m.model_id||"Not selected")+'</dd><dt>Shared compute</dt><dd>'+text(m.compute_state||"No compute admission observed")+'</dd><dt>Backend / placement</dt><dd>'+text([m.backend,m.compute_mode].filter(Boolean).join(" / ")||"Not observed")+'</dd><dt>Turn</dt><dd>'+text(m.turn_id||"Not queued")+'</dd><dt>Round</dt><dd>'+text(m.round)+'</dd></dl><p class="list-meta">Observed deliberation status. No tool execution is implied.</p></article>').join("");
    const key=JSON.stringify(members.map(m=>[m.id,m.name,m.kind]));if(key!==roster){roster=key;get("[data-team-target]").innerHTML='<option value="">All agents</option>'+members.filter(m=>m.kind!=="human").map(m=>'<option value="'+text(m.id)+'">'+text(m.name)+'</option>').join("");get("[data-team-target]").value=s.selectedAgent}
+   get("[data-team-guidance-target]").innerHTML='<option value="">Whole team</option>'+members.filter(m=>m.kind==="agent").map(m=>'<option value="'+text(m.id)+'">'+text(m.name)+'</option>').join("");get("[data-team-guidance-target]").value=s.guidanceTarget;
    get("[data-team-draft]").value=s.draft;
    const enabled=!!s.room&&["deliberating","plan_proposed","paused_for_deliberation","team_review"].includes(s.room.status)&&!s.busy;
-   get("[data-team-send]").disabled=!enabled;get("[data-team-ask]").disabled=!enabled;
+   const guidanceEnabled=!!s.room&&["deliberating","plan_proposed","paused_for_deliberation","team_review","plan_accepted","executing"].includes(s.room.status)&&!s.busy;
+   get("[data-team-send]").disabled=!guidanceEnabled;get("[data-team-guidance-target]").disabled=!guidanceEnabled||s.room.execution_mode!=="team";get("[data-team-guidance-target]").parentElement.hidden=s.room?.execution_mode!=="team";get("[data-team-ask]").disabled=!enabled;
    get("[data-team-older]").disabled=s.busy||!(s.history?s.history.has_more:s.hasOlder||s.messages.length>=100);get("[data-team-live]").hidden=!s.history;
    planEditor?.draw(s);
   }
   el.querySelectorAll("[data-team-view]").forEach(b=>b.onclick=()=>c.switchView(b.dataset.teamView));
+  get("[data-team-guidance-target]").onchange=e=>{c.state.guidanceTarget=e.target.value};
   get("[data-team-draft]").oninput=e=>{c.state.draft=e.target.value};get("[data-team-target]").onchange=e=>{c.state.selectedAgent=e.target.value};
   get("[data-team-form]").onsubmit=e=>{e.preventDefault();c.send()};get("[data-team-ask]").onclick=()=>c.ask();get("[data-team-refresh]").onclick=()=>c.refresh();get("[data-team-older]").onclick=()=>c.older();get("[data-team-live]").onclick=()=>c.live();
   if(root.OnePaneTeamAssignments)planEditor=root.OnePaneTeamAssignments.mount(el,c);
@@ -103,7 +121,7 @@
   async function tick(){if(!alive()){stop();return}if(!document.hidden)await c.refresh();if(alive())timer=setTimeout(tick,2000);else stop()}
   tick();return c;
  }
- root.OnePaneTeamRoom={controller,mount,content};
+ root.OnePaneTeamRoom={controller,mount,content,guidanceRecipient};
  if(typeof document!=="undefined"){
   document.addEventListener("click",e=>{const b=e.target.closest?.("[data-team-open-task]");if(b){e.preventDefault();mount(b.dataset.teamOpenTask)}});
  }

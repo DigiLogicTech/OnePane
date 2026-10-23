@@ -343,8 +343,12 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
  if activeQuota>0{runs,activeErr=s.activeRuns(ctx,activeQuota)}
  tickErrors:=errors.Join(wakeErr,admissionErr,readyErr,activeErr)
  out:=make([]TickResult,0,limit)
- for _,r:=range runs{
-  out=append(out,s.step(ctx,r))
+ for runIndex:=0;runIndex<len(runs);runIndex++ {
+  r:=runs[runIndex]
+  if runIndex+1<len(runs) && len(out)+2<=limit && s.parallelTeamPair(ctx,r.TaskID,runs[runIndex+1].TaskID) {
+   out=append(out,s.stepTeamPair(ctx,r,runs[runIndex+1])...)
+   runIndex++
+  } else { out=append(out,s.step(ctx,r)) }
   // A terminal/wait/completion persistence failure may have left this
   // Attempt running. Do not dispatch the NEXT selected Task in this
   // same cycle after a step has armed the recovery halt.
@@ -353,7 +357,8 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
   }
   if len(out)>=limit{return out,tickErrors}
  }
- for _,t:=range ready{
+ for readyIndex:=0;readyIndex<len(ready);readyIndex++ {
+  t:=ready[readyIndex]
   if len(out)>=limit{break}
   if s.dispatchReconciliationFailed{
    return out,errors.Join(tickErrors,ErrDispatchRequiresReconciliation)
@@ -363,7 +368,13 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
    out=append(out,res)
    continue
   }
-  out=append(out,s.step(ctx,r))
+  if readyIndex+1<len(ready) && len(out)+2<=limit && s.parallelTeamPair(ctx,t.ID,ready[readyIndex+1].ID) {
+   next,nextResult:=s.startRun(ctx,ready[readyIndex+1])
+   readyIndex++
+   if nextResult.Error!="" { out=append(out,nextResult); out=append(out,s.step(ctx,r)) } else {
+    out=append(out,s.stepTeamPair(ctx,r,next)...)
+   }
+  } else { out=append(out,s.step(ctx,r)) }
   if s.dispatchReconciliationFailed{
    return out,errors.Join(tickErrors,ErrDispatchRequiresReconciliation)
   }

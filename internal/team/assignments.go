@@ -16,10 +16,12 @@ import (
 // Execution assignments are part of the exact plan a human accepts. They
 // schedule ordinary governed Tasks; member names/profiles never grant tools.
 type AssignmentSpec struct {
-	Key       string   `json:"key"`
-	MemberID  string   `json:"member_id"`
-	Objective string   `json:"objective"`
-	DependsOn []string `json:"depends_on,omitempty"`
+	Key                  string          `json:"key"`
+	MemberID             string          `json:"member_id"`
+	Objective            string          `json:"objective"`
+	DependsOn            []string        `json:"depends_on,omitempty"`
+	RequiredVerification string          `json:"required_verification,omitempty"`
+	VerificationSpec     json.RawMessage `json:"verification_spec,omitempty"`
 }
 
 var assignmentKey = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$`)
@@ -48,6 +50,9 @@ func assignmentSpecs(body json.RawMessage) ([]AssignmentSpec, error) {
 			return nil, ErrInvalid
 		}
 		seen[spec.Key] = true
+		if _, err := assignmentCompletionCriteria(map[string]json.RawMessage{}, spec); err != nil {
+			return nil, err
+		}
 	}
 	// Stable topological traversal rejects cycles, unknown and repeated edges.
 	ordered := make([]AssignmentSpec, 0, len(specs))
@@ -195,6 +200,9 @@ func (s *Service) createAssignmentsTx(ctx context.Context, tx storage.Tx, ss Ses
 			delete(childCompletion, key)
 		}
 		childCompletion["source"] = json.RawMessage(`"accepted-team-assignment"`)
+		if childCompletion, err = assignmentCompletionCriteria(childCompletion, spec); err != nil {
+			return err
+		}
 		routing := map[string]json.RawMessage{}
 		if raw, exists := base["onepane_routing"]; exists && json.Unmarshal(raw, &routing) != nil {
 			return ErrInvalid

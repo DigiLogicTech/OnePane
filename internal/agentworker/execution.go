@@ -34,80 +34,92 @@ import (
 // and Workspace before an already-running Worker starts its next model/tool
 // reasoning step. Task Start/Resume perform stronger transaction-scoped
 // checks separately; this is the continuation fence on every Worker tick.
-func (s *Service) activeProjectTaskScope(ctx context.Context,t task.Task)(bool,error){
-	if t.ProjectID==nil && t.ProjectWorkspaceID==nil{return true,nil}
-	if t.ProjectID==nil||strings.TrimSpace(*t.ProjectID)==""{return false,nil}
+func (s *Service) activeProjectTaskScope(ctx context.Context, t task.Task) (bool, error) {
+	if t.ProjectID == nil && t.ProjectWorkspaceID == nil {
+		return true, nil
+	}
+	if t.ProjectID == nil || strings.TrimSpace(*t.ProjectID) == "" {
+		return false, nil
+	}
 	var selectedID string
-	if t.ProjectWorkspaceID!=nil{selectedID=strings.TrimSpace(*t.ProjectWorkspaceID)}
+	if t.ProjectWorkspaceID != nil {
+		selectedID = strings.TrimSpace(*t.ProjectWorkspaceID)
+	}
 	var valid int
-	err:=s.db.QueryRowContext(ctx,`SELECT EXISTS(
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(
 		SELECT 1 FROM projects p
 		JOIN workspaces w ON w.id=p.workspace_id AND w.status='active'
 		LEFT JOIN project_workspaces pw ON pw.id=? AND pw.project_id=p.id
 			AND pw.status='active'
 		WHERE p.id=? AND p.workspace_id=? AND p.status='active'
 			AND (?='' OR pw.id IS NOT NULL)
-	)`,selectedID,*t.ProjectID,t.WorkspaceID,selectedID).Scan(&valid)
-	if err!=nil{return false,err}
-	return valid==1,nil
+	)`, selectedID, *t.ProjectID, t.WorkspaceID, selectedID).Scan(&valid)
+	if err != nil {
+		return false, err
+	}
+	return valid == 1, nil
 }
 
-func (s *Service) step(ctx context.Context, run Run) TickResult {
+func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 	res := TickResult{TaskID: run.TaskID, RunID: run.ID, Status: "running"}
 	current, err := s.getRun(ctx, run.ID)
 	if err != nil {
-		return failedResult(res, err)
+		return immediateWorkerStep(failedResult(res, err))
 	}
 	run = current
 	t, err := s.tasks.Get(ctx, run.TaskID)
 	if err != nil {
-		return s.failRun(ctx, run, res, err)
+		return immediateWorkerStep(s.failRun(ctx, run, res, err))
 	}
 	if run.Status != RunRunning || t.State != task.StateRunning {
-		return failedResult(res, ErrInvalidWorkerState)
+		return immediateWorkerStep(failedResult(res, ErrInvalidWorkerState))
 	}
-	if _,err:=teamgate.Require(ctx,s.db,t.WorkspaceID,t.ID);err!=nil{return s.blockRun(ctx,run,res,"Team assignment or predecessor authority changed")}
-	active,scopeErr:=s.activeProjectTaskScope(ctx,t)
-	if scopeErr!=nil{
+	if _, err := teamgate.Require(ctx, s.db, t.WorkspaceID, t.ID); err != nil {
+		return immediateWorkerStep(s.blockRun(ctx, run, res, "Team assignment or predecessor authority changed"))
+	}
+	active, scopeErr := s.activeProjectTaskScope(ctx, t)
+	if scopeErr != nil {
 		// A broken scope observation must not fall through to inference.
-		return failedResult(res,fmt.Errorf("verify active Project Workspace before Worker step: %w",scopeErr))
+		return immediateWorkerStep(failedResult(res, fmt.Errorf("verify active Project Workspace before Worker step: %w", scopeErr)))
 	}
 	if !active {
-		return s.blockRun(ctx,run,res,"Project or canonical Workspace is inactive; stop Worker execution and require operator review")
+		return immediateWorkerStep(s.blockRun(ctx, run, res, "Project or canonical Workspace is inactive; stop Worker execution and require operator review"))
 	}
 	// Archive handling stays operator-visible as BLOCKED. For otherwise
 	// active scopes, do not route a model or tool with a stale Attempt.
 	// The final dispatch CAS independently repeats this SQL invariant.
-	if err:=s.requireActiveWorkerExecutionBinding(ctx,run);err!=nil{
-		return failedResult(res,err)
+	if err := s.requireActiveWorkerExecutionBinding(ctx, run); err != nil {
+		return immediateWorkerStep(failedResult(res, err))
 	}
 	// Preserve the Task/Attempt binding error before any policy revocation
 	// can mutate Worker state or consume a step.
 	// Re-read autonomy on every Worker tick so a live policy revocation
 	// blocks reasoning before model/tool selection.
-	autonomyAllowed,policyErr:= (featurepolicy.StoredScopes{DB:s.db}).AuthorizeTask(ctx,t.WorkspaceID,t.ID,"tasks.autonomous")
-	if policyErr!=nil||!autonomyAllowed {
-		return s.blockRun(ctx,run,res,"effective feature policy no longer permits autonomous Worker execution")
+	autonomyAllowed, policyErr := (featurepolicy.StoredScopes{DB: s.db}).AuthorizeTask(ctx, t.WorkspaceID, t.ID, "tasks.autonomous")
+	if policyErr != nil || !autonomyAllowed {
+		return immediateWorkerStep(s.blockRun(ctx, run, res, "effective feature policy no longer permits autonomous Worker execution"))
 	}
 
 	if run.StepCount >= run.MaxSteps {
-		return s.failRun(ctx, run, res, ErrStepLimit)
+		return immediateWorkerStep(s.failRun(ctx, run, res, ErrStepLimit))
 	}
 	// Bind an explicitly chosen Agent's active revision before constructing
 	// any context. A missing/archived custom Agent cannot fall back to default.
-	agentBinding,err:=resolveTaskAgentProfileBinding(ctx,s.db,run.WorkspaceID,
+	agentBinding, err := resolveTaskAgentProfileBinding(ctx, s.db, run.WorkspaceID,
 		routingPolicyFromCompletion(t.Completion).AgentProfile)
-	if err!=nil{return s.blockRun(ctx,run,res,"pinned Agent profile unavailable or revoked: "+err.Error())}
+	if err != nil {
+		return immediateWorkerStep(s.blockRun(ctx, run, res, "pinned Agent profile unavailable or revoked: "+err.Error()))
+	}
 
 	compiled, err := s.compileContext(ctx, run, t)
 	if err != nil {
-		return s.failRun(ctx, run, res, err)
+		return immediateWorkerStep(s.failRun(ctx, run, res, err))
 	}
 	rp := defaultRoutePolicy()
 	_ = json.Unmarshal(run.RoutePolicy, &rp)
- if !validComputePlacement(rp.ComputePreference){
-  return s.blockRun(ctx,run,res,"persisted Worker compute placement is invalid")
- }
+	if !validComputePlacement(rp.ComputePreference) {
+		return immediateWorkerStep(s.blockRun(ctx, run, res, "persisted Worker compute placement is invalid"))
+	}
 	label := policy.DataLabel{WorkspaceID: run.WorkspaceID, Confidentiality: policy.ConfidentialityInternal, Residency: policy.ResidencyAny, Trust: policy.TrustUserInstruction}
 	tokens := int64((compiled.Manifest.UsedBytes + 3) / 4)
 	if tokens < 1 {
@@ -116,20 +128,20 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	// Refresh the authorised Node allowlist from canonical persisted Project
 	// and Workspace policy on every Worker tick. Never trust Task JSON,
 	// model-created routing metadata or an old saved routePolicy grant.
-	trustedNodes, trustErr := (featurepolicy.StoredScopes{DB:s.db}).TrustedNodesForTask(ctx,run.WorkspaceID,run.TaskID)
-	if trustErr!=nil {
-		return s.blockRun(ctx,run,res,"canonical trusted Node policy unavailable")
+	trustedNodes, trustErr := (featurepolicy.StoredScopes{DB: s.db}).TrustedNodesForTask(ctx, run.WorkspaceID, run.TaskID)
+	if trustErr != nil {
+		return immediateWorkerStep(s.blockRun(ctx, run, res, "canonical trusted Node policy unavailable"))
 	}
-	decision, err := s.scheduler.Route(ctx, scheduler.RouteRequest{WorkspaceID: run.WorkspaceID, CapabilityID: run.CapabilityID, RoleName: run.RoleName, ProtocolLevel: run.ProtocolLevel, ContextTokens: tokens, DataLabel: label, AllowUntested: rp.AllowUntested, AllowLimited: rp.AllowLimited, AllowMediated: rp.AllowMediated, AllowDegraded: rp.AllowDegraded, RequireZeroIncrementalCost: rp.RequireZeroIncrementalCost, PreferZeroIncrementalCost: rp.PreferZeroIncrementalCost, AllowSubscriptionUsage: rp.AllowSubscriptionUsage, AllowPotentialMonetarySpend: rp.AllowPotentialMonetarySpend, LocalOnly: !rp.AllowRemote, AllowTrustedNodes:len(trustedNodes)>0, AllowedTrustedNodeIDs:trustedNodes, ComputePreference:rp.ComputePreference, IncludeCandidateIDs: rp.IncludeCandidateIDs, ExcludeCandidateIDs: rp.ExcludedCandidateIDs})
+	decision, err := s.scheduler.Route(ctx, scheduler.RouteRequest{WorkspaceID: run.WorkspaceID, CapabilityID: run.CapabilityID, RoleName: run.RoleName, ProtocolLevel: run.ProtocolLevel, ContextTokens: tokens, DataLabel: label, AllowUntested: rp.AllowUntested, AllowLimited: rp.AllowLimited, AllowMediated: rp.AllowMediated, AllowDegraded: rp.AllowDegraded, RequireZeroIncrementalCost: rp.RequireZeroIncrementalCost, PreferZeroIncrementalCost: rp.PreferZeroIncrementalCost, AllowSubscriptionUsage: rp.AllowSubscriptionUsage, AllowPotentialMonetarySpend: rp.AllowPotentialMonetarySpend, LocalOnly: !rp.AllowRemote, AllowTrustedNodes: len(trustedNodes) > 0, AllowedTrustedNodeIDs: trustedNodes, ComputePreference: rp.ComputePreference, IncludeCandidateIDs: rp.IncludeCandidateIDs, ExcludeCandidateIDs: rp.ExcludedCandidateIDs})
 	if err != nil || decision.Selected == nil {
 		if err == nil {
 			err = scheduler.ErrNoEligibleCandidate
 		}
 		_ = s.journal(ctx, run.ID, "route", "failed", nil, nil, nil, nil, map[string]any{"error": err.Error(), "rejected": decision.Rejected})
-		if shouldWaitForLocalModel(t,err,decision.Rejected) {
-			return s.waitForLocalModel(ctx,run,res,"awaiting qualified local model: "+err.Error())
+		if shouldWaitForLocalModel(t, err, decision.Rejected) {
+			return immediateWorkerStep(s.waitForLocalModel(ctx, run, res, "awaiting qualified local model: "+err.Error()))
 		}
-		return s.blockRun(ctx, run, res, "no eligible inference/agent runtime: "+err.Error())
+		return immediateWorkerStep(s.blockRun(ctx, run, res, "no eligible inference/agent runtime: "+err.Error()))
 	}
 	cand := decision.Selected.Candidate
 	kind := string(cand.Kind)
@@ -138,57 +150,67 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	reservationID, err := s.reserveReasoningBudget(ctx, run, rp, cand, tokens)
 	if err != nil {
 		_ = s.journal(ctx, run.ID, "budget", "failed", &kind, &cid, nil, nil, map[string]any{"error": err.Error(), "cost_class": cand.CostClass})
-		return s.blockRun(ctx, run, res, "budget unavailable: "+err.Error())
+		return immediateWorkerStep(s.blockRun(ctx, run, res, "budget unavailable: "+err.Error()))
 	}
 	if reservationID != "" {
 		_ = s.journal(ctx, run.ID, "budget", "reserved", &kind, &cid, nil, &reservationID, map[string]any{"budget_account_id": rp.BudgetAccountID})
 	}
 	// A human may update or archive an Agent during model queue selection.
 	// Do not dispatch inference with stale prompt/Agent provenance.
-	if err:=enforceTaskAgentProfileBinding(ctx,s.db,run.WorkspaceID,agentBinding);err!=nil{
-		s.releaseBudgetIfReserved(ctx,reservationID)
-		return s.blockRun(ctx,run,res,"pinned Agent profile changed during model selection: "+err.Error())
+	if err := enforceTaskAgentProfileBinding(ctx, s.db, run.WorkspaceID, agentBinding); err != nil {
+		s.releaseBudgetIfReserved(ctx, reservationID)
+		return immediateWorkerStep(s.blockRun(ctx, run, res, "pinned Agent profile changed during model selection: "+err.Error()))
 	}
 	if err := s.markReasoningDispatch(ctx, &run, kind, cid); err != nil {
 		s.releaseBudgetIfReserved(ctx, reservationID)
 		// Dispatch ownership may have changed while selecting a model.
 		// Do not mutate a potentially foreign Task/Attempt through failRun.
-		return failedResult(res,err)
+		return immediateWorkerStep(failedResult(res, err))
 	}
 
 	constraints, _ := json.Marshal(map[string]any{"completion": json.RawMessage(t.Completion), "worker": map[string]any{"max_steps": run.MaxSteps, "steps_used": run.StepCount, "max_replans": run.MaxReplans, "replans_used": run.ReplanCount, "max_escalations": run.MaxEscalations, "escalations_used": run.EscalationCount}})
 	// Repeat the revision check at the last Worker-owned call boundary.
 	// Inference and gateway paths must still enforce their own revocations.
-	if err:=enforceTaskAgentProfileBinding(ctx,s.db,run.WorkspaceID,agentBinding);err!=nil{
-		s.releaseBudgetIfReserved(ctx,reservationID)
-		return s.blockRun(ctx,run,res,"pinned Agent profile changed before dispatch: "+err.Error())
-	}
-	response, ref, dispatchErr := s.dispatch(ctx, run, t, cand, compiled, constraints, label, reservationID)
-	stepKind := "model"
-	if cand.Kind == scheduler.CandidateAgentRuntime {
-		stepKind = "agent_runtime"
-	}
-	if dispatchErr != nil {
-		if errors.Is(dispatchErr, ErrDispatchRequiresReconciliation) {
-			// Do not release potentially spent quota or route a fallback.
-			// Atomically interrupt the Task, Attempt and Worker with evidence.
-			return s.interruptDispatchForReconciliation(ctx, run, res, stepKind, kind, cid, ref, dispatchErr)
-		}
+	if err := enforceTaskAgentProfileBinding(ctx, s.db, run.WorkspaceID, agentBinding); err != nil {
 		s.releaseBudgetIfReserved(ctx, reservationID)
-		_ = s.journal(ctx, run.ID, stepKind, "failed", &kind, &cid, nil, &ref, map[string]any{"error": dispatchErr.Error()})
-		return s.handleDispatchFailure(ctx, run, res, cid, dispatchErr)
+		return immediateWorkerStep(s.blockRun(ctx, run, res, "pinned Agent profile changed before dispatch: "+err.Error()))
 	}
-	// A running inference may finish after its Agent's instructions have
-	// changed or the profile has been archived. Discard its proposal before
-	// any tool, file, network or delegation effect is interpreted.
-	if err:=enforceTaskAgentProfileBinding(ctx,s.db,run.WorkspaceID,agentBinding);err!=nil{
-		return s.blockRun(ctx,run,res,"pinned Agent profile revoked before proposal application: "+err.Error())
-	}
-	if _,err:=teamgate.Require(ctx,s.db,t.WorkspaceID,t.ID);err!=nil{return s.blockRun(ctx,run,res,"Team assignment revoked before proposal application")}
-	pt := string(response.ProposalType)
-	res.Proposal = pt
-	_ = s.journal(ctx, run.ID, stepKind, "succeeded", &kind, &cid, &pt, &ref, map[string]any{"message": boundedString(response.Message, 1024)})
-	return s.handleProposal(ctx, run, t, response, res)
+	return preparedWorkerStep{result: res, dispatch: func() func() TickResult {
+		response, ref, dispatchErr := s.dispatch(ctx, run, t, cand, compiled, constraints, label, reservationID)
+		return func() TickResult {
+			stepKind := "model"
+			if cand.Kind == scheduler.CandidateAgentRuntime {
+				stepKind = "agent_runtime"
+			}
+			if dispatchErr != nil {
+				if errors.Is(dispatchErr, ErrDispatchRequiresReconciliation) {
+					// Do not release potentially spent quota or route a fallback.
+					// Atomically interrupt the Task, Attempt and Worker with evidence.
+					return s.interruptDispatchForReconciliation(ctx, run, res, stepKind, kind, cid, ref, dispatchErr)
+				}
+				s.releaseBudgetIfReserved(ctx, reservationID)
+				_ = s.journal(ctx, run.ID, stepKind, "failed", &kind, &cid, nil, &ref, map[string]any{"error": dispatchErr.Error()})
+				return s.handleDispatchFailure(ctx, run, res, cid, dispatchErr)
+			}
+			// A running inference may finish after its Agent's instructions have
+			// changed or the profile has been archived. Discard its proposal before
+			// any tool, file, network or delegation effect is interpreted.
+			if err := enforceTaskAgentProfileBinding(ctx, s.db, run.WorkspaceID, agentBinding); err != nil {
+				return s.blockRun(ctx, run, res, "pinned Agent profile revoked before proposal application: "+err.Error())
+			}
+			if _, err := teamgate.Require(ctx, s.db, t.WorkspaceID, t.ID); err != nil {
+				return s.blockRun(ctx, run, res, "Team assignment revoked before proposal application")
+			}
+			pt := string(response.ProposalType)
+			res.Proposal = pt
+			_ = s.journal(ctx, run.ID, stepKind, "succeeded", &kind, &cid, &pt, &ref, map[string]any{"message": boundedString(response.Message, 1024)})
+			return s.handleProposal(ctx, run, t, response, res)
+
+		}
+	}, abort: func() TickResult {
+		s.releaseBudgetIfReserved(ctx, reservationID)
+		return failedResult(res, ErrDispatchRequiresReconciliation)
+	}}
 }
 
 func (s *Service) compileContext(ctx context.Context, run Run, t task.Task) (contextcompiler.Result, error) {
@@ -196,28 +218,40 @@ func (s *Service) compileContext(ctx context.Context, run Run, t task.Task) (con
 	sections := []contextcompiler.Section{{ID: "task-current", Kind: "task", Trust: "USER_INSTRUCTION", Authoritative: true, Required: true, Priority: 100, Content: taskRaw}}
 	routing := routingPolicyFromCompletion(t.Completion)
 	profileID := strings.TrimSpace(routing.AgentProfile)
-	if profileID == "" || strings.EqualFold(profileID, "onepane-default") { profileID = "agent.md" }
+	if profileID == "" || strings.EqualFold(profileID, "onepane-default") {
+		profileID = "agent.md"
+	}
 	var profileName, profileInstructions, profileRole string
 	var profileRevision int64
-	if err := s.db.QueryRowContext(ctx, `SELECT name,instructions_md,default_role,revision FROM agent_profiles WHERE id=? AND status='active' AND (workspace_id=? OR workspace_id IS NULL) ORDER BY CASE WHEN workspace_id=? THEN 0 ELSE 1 END LIMIT 1`, profileID, run.WorkspaceID, run.WorkspaceID).Scan(&profileName,&profileInstructions,&profileRole,&profileRevision); err == nil {
-		profileRaw,_:=json.Marshal(map[string]any{"profile_id":profileID,"name":profileName,"role":profileRole,"revision":profileRevision,"instructions":profileInstructions,"authority":false,"note":"Profile instructions affect reasoning only and grant no capabilities or permissions."})
-		sections=append(sections,contextcompiler.Section{ID:"agent-profile",Kind:"agent_profile",Trust:"USER_INSTRUCTION",Authoritative:false,Required:true,Priority:99,Content:profileRaw})
-	} else if errors.Is(err,sql.ErrNoRows) {
-		explicit:=strings.TrimSpace(routing.AgentProfile)
-		if explicit!=""&&!strings.EqualFold(explicit,"onepane-default")&&explicit!="agent.md"{
-			return contextcompiler.Result{},fmt.Errorf("explicit custom Agent profile is unavailable or revoked")
+	if err := s.db.QueryRowContext(ctx, `SELECT name,instructions_md,default_role,revision FROM agent_profiles WHERE id=? AND status='active' AND (workspace_id=? OR workspace_id IS NULL) ORDER BY CASE WHEN workspace_id=? THEN 0 ELSE 1 END LIMIT 1`, profileID, run.WorkspaceID, run.WorkspaceID).Scan(&profileName, &profileInstructions, &profileRole, &profileRevision); err == nil {
+		profileRaw, _ := json.Marshal(map[string]any{"profile_id": profileID, "name": profileName, "role": profileRole, "revision": profileRevision, "instructions": profileInstructions, "authority": false, "note": "Profile instructions affect reasoning only and grant no capabilities or permissions."})
+		sections = append(sections, contextcompiler.Section{ID: "agent-profile", Kind: "agent_profile", Trust: "USER_INSTRUCTION", Authoritative: false, Required: true, Priority: 99, Content: profileRaw})
+	} else if errors.Is(err, sql.ErrNoRows) {
+		explicit := strings.TrimSpace(routing.AgentProfile)
+		if explicit != "" && !strings.EqualFold(explicit, "onepane-default") && explicit != "agent.md" {
+			return contextcompiler.Result{}, fmt.Errorf("explicit custom Agent profile is unavailable or revoked")
 		}
-	} else { return contextcompiler.Result{},err }
-	contributions,err:=teamgate.Require(ctx,s.db,t.WorkspaceID,t.ID)
+	} else {
+		return contextcompiler.Result{}, err
+	}
+	contributions, err := teamgate.Require(ctx, s.db, t.WorkspaceID, t.ID)
+	if err != nil {
+		return contextcompiler.Result{}, err
+	}
+	for _, contribution := range contributions {
+		raw, _ := json.Marshal(contribution)
+		sections = append(sections, contextcompiler.Section{ID: "team-contribution-" + contribution.Key, Kind: "team_contribution", Trust: "UNVERIFIED_DERIVED", Authoritative: false, Required: true, Priority: 94, Content: raw})
+	}
+	guidance,err:=teamgate.Guidance(ctx,s.db,t.WorkspaceID,t.ID)
 	if err!=nil{return contextcompiler.Result{},err}
-	for _,contribution:=range contributions{
-		raw,_:=json.Marshal(contribution)
-		sections=append(sections,contextcompiler.Section{ID:"team-contribution-"+contribution.Key,Kind:"team_contribution",Trust:"UNVERIFIED_DERIVED",Authoritative:false,Required:true,Priority:94,Content:raw})
+	if len(guidance)>0 {
+		raw,_:=json.Marshal(guidance)
+		sections=append(sections,contextcompiler.Section{ID:"team-human-guidance",Kind:"team_guidance",Trust:"USER_INSTRUCTION",Authoritative:true,Required:true,Priority:95,Content:raw})
 	}
 	// Resource backoff is internal scheduler bookkeeping, not an instruction
 	// to the model. Once it becomes available, don't tell the model that it is
 	// still unavailable or let historical wait data bias tool selection.
-	if len(run.Continuation) > 0 && string(run.Continuation) != "{}" && decodeModelWait(run.Continuation)==nil {
+	if len(run.Continuation) > 0 && string(run.Continuation) != "{}" && decodeModelWait(run.Continuation) == nil {
 		sections = append(sections, contextcompiler.Section{ID: "worker-continuation", Kind: "continuation", Trust: "UNVERIFIED_DERIVED", Authoritative: false, Required: false, Priority: 80, Content: run.Continuation})
 	}
 	if cp, err := s.verification.LatestValidCheckpoint(ctx, t.ID); err == nil {
@@ -247,13 +281,15 @@ func (s *Service) compileContext(ctx context.Context, run Run, t task.Task) (con
 	// read-only OCI tool metadata; capability leases and independent runtime
 	// verification remain mandatory before every command.
 	if t.ProjectWorkspaceID != nil {
-		manifest,err:=workspaceExecutionManifest(ctx,s.db,t)
-		if err!=nil{return contextcompiler.Result{},err}
-		if len(manifest)>0{
-			sections=append(sections,contextcompiler.Section{
-				ID:"workspace-execution-manifest",Kind:"resource_manifest",
-				Trust:"AUTHORITATIVE_DATA",Authoritative:true,
-				Required:false,Priority:75,Content:manifest,
+		manifest, err := workspaceExecutionManifest(ctx, s.db, t)
+		if err != nil {
+			return contextcompiler.Result{}, err
+		}
+		if len(manifest) > 0 {
+			sections = append(sections, contextcompiler.Section{
+				ID: "workspace-execution-manifest", Kind: "resource_manifest",
+				Trust: "AUTHORITATIVE_DATA", Authoritative: true,
+				Required: false, Priority: 75, Content: manifest,
 			})
 		}
 	}
@@ -262,7 +298,7 @@ func (s *Service) compileContext(ctx context.Context, run Run, t task.Task) (con
 
 func (s *Service) dispatch(ctx context.Context, run Run, t task.Task, c scheduler.Candidate, compiled contextcompiler.Result, constraints json.RawMessage, label policy.DataLabel, reservationID string) (agentprotocol.Response, string, error) {
 	if c.Kind == scheduler.CandidateAgentRuntime {
-		permitted,_:=proposalsForCandidate(c)
+		permitted, _ := proposalsForCandidate(c)
 		taskID, attemptID := t.ID, run.AttemptID
 		result, err := s.runtimes.Invoke(ctx, agentruntime.InvokeCommand{WorkspaceID: run.WorkspaceID, TaskID: &taskID, AttemptID: &attemptID, PrincipalID: WorkerPrincipal, ConnectionID: c.ID, Role: run.RoleName, Objective: t.Objective, Constraints: constraints, Context: compiled.Sections, ContextManifest: compiled.ManifestJSON, PermittedProposalTypes: permitted, InputLabel: label, ActorPrincipalID: strPtr(WorkerPrincipal), BudgetReservationID: optionalString(reservationID)})
 		if err != nil {
@@ -275,8 +311,8 @@ func (s *Service) dispatch(ctx context.Context, run Run, t task.Task, c schedule
 		return *result.Response, result.Invocation.ID, nil
 	}
 	reqID, _ := s.ids.New("agentreq")
-	permitted,structuredJSONTools:=proposalsForCandidate(c)
-	areq := agentprotocol.Request{ProtocolVersion: agentprotocol.Version, RequestID: reqID, WorkspaceID: run.WorkspaceID, TaskID: t.ID, AttemptID: run.AttemptID, PrincipalID: WorkerPrincipal, Role: run.RoleName, Objective: t.Objective, Constraints: constraints, Context: compiled.Sections, ContextManifest: compiled.ManifestJSON, PermittedProposalTypes: permitted, ToolCallback: c.ToolCallback, JSONToolProposals:structuredJSONTools}
+	permitted, structuredJSONTools := proposalsForCandidate(c)
+	areq := agentprotocol.Request{ProtocolVersion: agentprotocol.Version, RequestID: reqID, WorkspaceID: run.WorkspaceID, TaskID: t.ID, AttemptID: run.AttemptID, PrincipalID: WorkerPrincipal, Role: run.RoleName, Objective: t.Objective, Constraints: constraints, Context: compiled.Sections, ContextManifest: compiled.ManifestJSON, PermittedProposalTypes: permitted, ToolCallback: c.ToolCallback, JSONToolProposals: structuredJSONTools}
 	if err := areq.Validate(); err != nil {
 		return agentprotocol.Response{}, "", err
 	}
@@ -392,9 +428,9 @@ func (s *Service) handleDispatchFailure(ctx context.Context, run Run, res TickRe
 	if !rp.RoutingEnabled {
 		return s.blockRun(ctx, run, res, "single-path dispatch failed: "+cause.Error())
 	}
-	fallbackAllowed,fallbackErr:=(featurepolicy.StoredScopes{DB:s.db}).AuthorizeTask(ctx,run.WorkspaceID,run.TaskID,"inference.fallback")
-	if fallbackErr!=nil||!fallbackAllowed {
-		return s.blockRun(ctx,run,res,"automatic model fallback is not permitted by effective feature policy")
+	fallbackAllowed, fallbackErr := (featurepolicy.StoredScopes{DB: s.db}).AuthorizeTask(ctx, run.WorkspaceID, run.TaskID, "inference.fallback")
+	if fallbackErr != nil || !fallbackAllowed {
+		return s.blockRun(ctx, run, res, "automatic model fallback is not permitted by effective feature policy")
 	}
 
 	if run.EscalationCount < run.MaxEscalations {
@@ -460,24 +496,28 @@ func (s *Service) handleTool(ctx context.Context, run Run, t task.Task, resp age
 	// A human-approved Workspace toolchain cannot be bypassed by leaving
 	// required_executables empty or naming another registered OCI application.
 	// Validate before consulting any authority lease or invoking a tool.
-	if p.ToolID=="project.app.exec"||p.ToolID=="project.app.godot.build"{
-		p.Input,err=applyApprovedWorkspaceToolchain(ctx,s.db,t,p.Input)
-		if err!=nil{
-			_ = s.journal(ctx,run.ID,"tool","denied",nil,nil,strPtr("tool"),nil,
-				map[string]any{"tool_id":p.ToolID,"resource_ref":p.ResourceRef,
-				"reason":err.Error(),"policy":"approved_workspace_toolchain"})
-			return s.blockRun(ctx,run,res,"Workspace toolchain admission denied: "+err.Error())
+	if p.ToolID == "project.app.exec" || p.ToolID == "project.app.godot.build" {
+		p.Input, err = applyApprovedWorkspaceToolchain(ctx, s.db, t, p.Input)
+		if err != nil {
+			_ = s.journal(ctx, run.ID, "tool", "denied", nil, nil, strPtr("tool"), nil,
+				map[string]any{"tool_id": p.ToolID, "resource_ref": p.ResourceRef,
+					"reason": err.Error(), "policy": "approved_workspace_toolchain"})
+			return s.blockRun(ctx, run, res, "Workspace toolchain admission denied: "+err.Error())
 		}
 	}
-	if p.ToolID=="project.app.exec"||p.ToolID=="project.app.godot.build"{
+	if p.ToolID == "project.app.exec" || p.ToolID == "project.app.godot.build" {
 		// Preserve this same Task/Attempt if the exact human-approved OCI
 		// application has not yet been started by the Node reconciler.
 		// Planning/approval may continue separately, but a blocked build
 		// never runs on a substitute image or consumes another model turn.
-		wait,waitErr:=approvedToolchainWaitCandidate(ctx,s.db,t,p.Input)
-		if waitErr!=nil{return s.blockRun(ctx,run,res,
-			"Workspace toolchain resource admission denied: "+waitErr.Error())}
-		if wait!=nil{return s.waitForWorkspaceToolchain(ctx,run,res,wait)}
+		wait, waitErr := approvedToolchainWaitCandidate(ctx, s.db, t, p.Input)
+		if waitErr != nil {
+			return s.blockRun(ctx, run, res,
+				"Workspace toolchain resource admission denied: "+waitErr.Error())
+		}
+		if wait != nil {
+			return s.waitForWorkspaceToolchain(ctx, run, res, wait)
+		}
 	}
 	leaseID, err := s.findLease(ctx, run.WorkspaceID, run.TaskID, def.CapabilityID, def.Mode, p.ResourceRef)
 	if err != nil {
@@ -552,8 +592,12 @@ func (s *Service) handleTool(ctx context.Context, run Run, t task.Task, resp age
 
 func (s *Service) handleDelegate(ctx context.Context, run Run, t task.Task, resp agentprotocol.Response, res TickResult) TickResult {
 	var acceptedTeamAssignments int
-	if err:=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM team_execution_assignments WHERE task_id=? OR parent_task_id=?`,t.ID,t.ID).Scan(&acceptedTeamAssignments);err!=nil{return s.failRun(ctx,run,res,err)}
-	if acceptedTeamAssignments>0{return s.blockRun(ctx,run,res,"Team work handoffs must follow the human-accepted assignment graph; new delegation requires a reviewed plan")}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_execution_assignments WHERE task_id=? OR parent_task_id=?`, t.ID, t.ID).Scan(&acceptedTeamAssignments); err != nil {
+		return s.failRun(ctx, run, res, err)
+	}
+	if acceptedTeamAssignments > 0 {
+		return s.blockRun(ctx, run, res, "Team work handoffs must follow the human-accepted assignment graph; new delegation requires a reviewed plan")
+	}
 	rp := defaultRoutePolicy()
 	_ = json.Unmarshal(run.RoutePolicy, &rp)
 	if !rp.AllowDelegation {
@@ -585,53 +629,69 @@ func (s *Service) handleDelegate(ctx context.Context, run Run, t task.Task, resp
 	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
 		var observedStatus string
 		var revision int64
-		if err:=tx.QueryRowContext(ctx,`SELECT status,revision FROM agent_worker_runs
+		if err := tx.QueryRowContext(ctx, `SELECT status,revision FROM agent_worker_runs
 		 WHERE id=? AND task_id=? AND attempt_id=? AND workspace_id=?`,
-		 run.ID,t.ID,run.AttemptID,t.WorkspaceID).Scan(&observedStatus,&revision);err!=nil{return err}
-		if observedStatus!=string(RunRunning)||revision!=run.Revision {
-			return fmt.Errorf("%w: delegation Worker incarnation changed",ErrInvalidWorkerState)
+			run.ID, t.ID, run.AttemptID, t.WorkspaceID).Scan(&observedStatus, &revision); err != nil {
+			return err
+		}
+		if observedStatus != string(RunRunning) || revision != run.Revision {
+			return fmt.Errorf("%w: delegation Worker incarnation changed", ErrInvalidWorkerState)
 		}
 		// Validate persisted ancestry inside the write transaction before
 		// allocating any child ID, event, dependency or admission outbox job.
-		if err:=verifyDelegationAncestry(ctx,tx,t);err!=nil{return err}
+		if err := verifyDelegationAncestry(ctx, tx, t); err != nil {
+			return err
+		}
 		var e error
 		child, e = s.tasks.CreateInTransaction(ctx, tx, task.CreateCommand{
-			WorkspaceID:t.WorkspaceID,ProjectID:t.ProjectID,ProjectWorkspaceID:t.ProjectWorkspaceID,
-			ArtifactSessionID:t.ArtifactSessionID,PlanID:t.PlanID,ParentTaskID:&t.ID,
-			Objective:p.Objective,SchedulingClass:t.SchedulingClass,Priority:t.Priority,
-			Completion:p.Completion,ActorPrincipalID:&actor,
+			WorkspaceID: t.WorkspaceID, ProjectID: t.ProjectID, ProjectWorkspaceID: t.ProjectWorkspaceID,
+			ArtifactSessionID: t.ArtifactSessionID, PlanID: t.PlanID, ParentTaskID: &t.ID,
+			Objective: p.Objective, SchedulingClass: t.SchedulingClass, Priority: t.Priority,
+			Completion: p.Completion, ActorPrincipalID: &actor,
 		})
-		if e!=nil{return e}
-		meta,_:=json.Marshal(map[string]any{"source":"agent_delegate","run_id":run.ID})
-		if _,e=tx.ExecContext(ctx,`INSERT INTO task_dependencies
+		if e != nil {
+			return e
+		}
+		meta, _ := json.Marshal(map[string]any{"source": "agent_delegate", "run_id": run.ID})
+		if _, e = tx.ExecContext(ctx, `INSERT INTO task_dependencies
 		 (task_id,depends_on_task_id,dependency_type,dependency_mode,metadata_json)
-		 VALUES(?,?,'hard','all',?)`,t.ID,child.ID,string(meta));e!=nil{return e}
-		if e=s.tasks.WaitDependencyInTransaction(ctx,tx,task.TransitionCommand{
-			TaskID:t.ID,ExpectedRevision:t.Revision,ActorPrincipalID:&actor,
-			Reason:"waiting for delegated child task "+child.ID,
-		});e!=nil{return e}
-		cont,_:=json.Marshal(map[string]any{"delegated_task_id":child.ID,"objective":child.Objective})
-		now:=s.clock.UnixMilli()
-		updated,e:=tx.ExecContext(ctx,`UPDATE agent_worker_runs
+		 VALUES(?,?,'hard','all',?)`, t.ID, child.ID, string(meta)); e != nil {
+			return e
+		}
+		if e = s.tasks.WaitDependencyInTransaction(ctx, tx, task.TransitionCommand{
+			TaskID: t.ID, ExpectedRevision: t.Revision, ActorPrincipalID: &actor,
+			Reason: "waiting for delegated child task " + child.ID,
+		}); e != nil {
+			return e
+		}
+		cont, _ := json.Marshal(map[string]any{"delegated_task_id": child.ID, "objective": child.Objective})
+		now := s.clock.UnixMilli()
+		updated, e := tx.ExecContext(ctx, `UPDATE agent_worker_runs
 		 SET status='waiting',continuation_json=?,last_error=NULL,revision=revision+1,updated_at=?
 		 WHERE id=? AND task_id=? AND attempt_id=? AND workspace_id=?
-		 AND status='running' AND revision=?`,string(cont),now,
-		 run.ID,t.ID,run.AttemptID,t.WorkspaceID,run.Revision)
-		if e!=nil{return e}
-		n,e:=updated.RowsAffected()
-		if e!=nil{return e}
-		if n!=1{return fmt.Errorf("%w: concurrent Worker delegation",ErrInvalidWorkerState)}
-		return s.journalInTransaction(ctx,tx,run.ID,"delegate","waiting",nil,nil,
-		 strPtr("delegate"),strPtr(child.ID),map[string]any{"child_task_id":child.ID})
+		 AND status='running' AND revision=?`, string(cont), now,
+			run.ID, t.ID, run.AttemptID, t.WorkspaceID, run.Revision)
+		if e != nil {
+			return e
+		}
+		n, e := updated.RowsAffected()
+		if e != nil {
+			return e
+		}
+		if n != 1 {
+			return fmt.Errorf("%w: concurrent Worker delegation", ErrInvalidWorkerState)
+		}
+		return s.journalInTransaction(ctx, tx, run.ID, "delegate", "waiting", nil, nil,
+			strPtr("delegate"), strPtr(child.ID), map[string]any{"child_task_id": child.ID})
 	})
-	if errors.Is(err,ErrDelegationDepthLimit)||errors.Is(err,ErrDelegationAncestry){
-		return s.blockRun(ctx,run,res,err.Error())
+	if errors.Is(err, ErrDelegationDepthLimit) || errors.Is(err, ErrDelegationAncestry) {
+		return s.blockRun(ctx, run, res, err.Error())
 	}
-	if err!=nil{
+	if err != nil {
 		// The transaction rolled back all state. Do not call failRun here:
 		// a concurrent Worker may now own this incarnation, and failing it
 		// would destroy the safe optimistic-concurrency boundary.
-		return failedResult(res,err)
+		return failedResult(res, err)
 	}
 	res.Status = "waiting_dependency"
 	return res
@@ -752,7 +812,7 @@ func (s *Service) handleComplete(ctx context.Context, run Run, t task.Task, resp
 		// A pending independent assurance is not a completed Task. Persist
 		// Worker suspension and the schema-valid WAITING journal together.
 		// Failed persistence must not pretend higher verification was parked.
-		return s.parkWorkerForIndependentAssurance(ctx,run,res,cont,v.ID,string(required))
+		return s.parkWorkerForIndependentAssurance(ctx, run, res, cont, v.ID, string(required))
 	}
 	spec, _ := json.Marshal(map[string]any{"source": "agent_completion_proposal", "worker_run_id": run.ID, "rule": "V0 is declaration only; no independent factual claim is inferred"})
 	v, err := s.verification.Create(ctx, verification.CreateCommand{WorkspaceID: run.WorkspaceID, TaskID: &cur.ID, SubjectRef: "agent_worker_run:" + run.ID, RequiredLevel: policy.VerificationV0, Spec: spec, ActorPrincipalID: &verifier})
@@ -776,6 +836,6 @@ func (s *Service) handleComplete(ctx context.Context, run Run, t task.Task, resp
 	}
 	// Durable V0 completion is one Task/Attempt/Worker/audit commit.
 	// A partially committed completion must never be presented as success.
-	return s.completeVerifiedWorkerRun(ctx,run,res,cur.Revision,
-		cp.ID,p.Result,v.ID)
+	return s.completeVerifiedWorkerRun(ctx, run, res, cur.Revision,
+		cp.ID, p.Result, v.ID)
 }

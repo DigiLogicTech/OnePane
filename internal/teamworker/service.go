@@ -255,12 +255,26 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 	}else if !errors.Is(err,sql.ErrNoRows){return s.fail(ctx,res,err)}
 	taskRaw, _ := json.Marshal(map[string]any{"task_id": ss.TaskID, "objective": taskObjective, "mode": executionMode + "_deliberation", "team_role": member.RoleName})
 	sections = append(sections, agentprotocol.ContextSection{ID: "task", Kind: "task", Trust: "USER_INSTRUCTION", Authoritative: true, Content: taskRaw})
+	if executionMode=="team" && hasManifest {
+		roster:=[]map[string]string{}
+		for _,m:=range snapshot.Members {if m.Status=="active"&&m.MemberKind=="agent" {roster=append(roster,map[string]string{"member_id":m.ID,"name":m.DisplayName,"role":m.RoleName})}}
+		raw,_:=json.Marshal(map[string]any{"members":roster,"assignment_draft_contract":map[string]any{
+			"proposal_type":"replan","proposal":map[string]any{"assignments":[]map[string]any{{"key":"work-1","member_id":"exact roster member_id","objective":"bounded contribution","depends_on":[]string{}}}},
+			"limits":"1 to 8 assignments; unique keys; dependencies refer to assignment keys and must be acyclic",
+			"authority":"A draft is an untrusted suggestion. Only a human can save, review and accept assignments. Do not claim work has executed.",
+		}})
+		sections=append(sections,agentprotocol.ContextSection{ID:"team-assignment-drafting",Kind:"team_roster",Trust:"USER_INSTRUCTION",Authoritative:true,Content:raw})
+	}
 	used := len(taskRaw)
 	start := 0
 	if len(msgs) > 80 {
 		start = len(msgs) - 80
 	}
 	for _, m := range msgs[start:] {
+		if m.Kind == "human" {
+			var guidance struct { Target string `json:"target_member_id"` }
+			if json.Unmarshal(m.Content, &guidance) == nil && guidance.Target != "" && guidance.Target != member.ID { continue }
+		}
 		if researchMode && m.Kind == "agent" {
 			// Same-round outputs are hidden even if another seat finished first.
 			if m.RoundNumber >= turnRound {

@@ -515,12 +515,10 @@ func (s *Service) PostMessage(ctx context.Context, c PostMessageCommand) (Messag
 	if err != nil {
 		return Message{}, err
 	}
-	if ss.Status != "deliberating" && ss.Status != "plan_proposed" && ss.Status != "paused_for_deliberation" && ss.Status != "team_review" {
-		return Message{}, ErrSessionState
-	}
 	if c.Kind == "" {
 		c.Kind = "human"
 	}
+	if !messageSessionAllows(ss.Status,c.Kind) {return Message{},ErrSessionState}
 	switch c.Kind {
 	case "human", "agent", "supervisor", "system":
 	default:
@@ -558,6 +556,15 @@ func (s *Service) PostMessage(ctx context.Context, c PostMessageCommand) (Messag
 	now := s.clock.UnixMilli()
 	m := Message{ID: mid, WorkspaceID: ss.WorkspaceID, SessionID: ss.ID, AuthorMemberID: c.AuthorMemberID, AuthorPrincipalID: &c.AuthorPrincipalID, Kind: c.Kind, Content: raw, ReplyToMessageID: c.ReplyToMessageID, RoundNumber: ss.RoundNumber, CreatedAt: now}
 	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		var status string
+		if err:=tx.QueryRowContext(ctx,`SELECT status FROM team_sessions WHERE id=? AND workspace_id=? AND team_id=?`,ss.ID,ss.WorkspaceID,ss.TeamID).Scan(&status);err!=nil{return err}
+		if !messageSessionAllows(status,c.Kind){return ErrSessionState}
+		if err := validateGuidanceTarget(ctx, tx, ss, c.Kind, raw); err != nil { return err }
+		if c.Kind=="human" {
+			var valid int
+			if err:=tx.QueryRowContext(ctx,`SELECT EXISTS(SELECT 1 FROM principals p JOIN workspace_memberships m ON m.principal_id=p.id JOIN workspaces w ON w.id=m.workspace_id JOIN tasks t ON t.workspace_id=w.id WHERE p.id=? AND p.principal_type='human' AND p.status='active' AND m.workspace_id=? AND m.status='active' AND w.status='active' AND t.id=? AND t.archived_at IS NULL AND t.state NOT IN ('complete','failed','cancel_requested','cancelling','cancelled'))`,c.AuthorPrincipalID,ss.WorkspaceID,ss.TaskID).Scan(&valid);err!=nil{return err}
+			if valid!=1{return ErrHumanRequired}
+		}
 		if _, e := tx.ExecContext(ctx, `INSERT INTO team_messages(id,workspace_id,session_id,author_member_id,author_principal_id,message_kind,content_json,reply_to_message_id,round_number,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, m.ID, m.WorkspaceID, m.SessionID, m.AuthorMemberID, m.AuthorPrincipalID, m.Kind, string(m.Content), m.ReplyToMessageID, m.RoundNumber, m.CreatedAt); e != nil {
 			return e
 		}

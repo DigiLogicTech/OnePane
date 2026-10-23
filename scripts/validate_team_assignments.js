@@ -28,6 +28,28 @@ async function main(){
   throw Error('unexpected read: '+path);
  };
  const c=controller({api,taskID:'root'});await c.refresh();
+ const suggest=assignments=>({id:'suggestion',kind:'agent',author_member_id:'a',content:{proposal_type:'replan',proposal:{assignments}}});
+ const draft=[{key:'review',member_id:'b',objective:'Review',depends_on:['build']},{key:'build',member_id:'a',objective:'Build',depends_on:[],required_verification:'V2',verification_spec:{result_checks:[{pointer:'/summary',operator:'not_empty'}],artifacts:[{media_type:'text/plain'}]}}];
+ c.state.messages=[suggest(draft)];
+ const adopted=c.assignmentDraft('suggestion');
+ assert.equal(JSON.stringify(adopted.map(a=>a.key)),JSON.stringify(['build','review']),'draft dependency order was lost');
+ assert.equal(adopted[0].required_verification,'V2');assert.equal(JSON.stringify(adopted[0].verification_spec),JSON.stringify(draft[1].verification_spec),'adoption dropped verification requirements');
+ adopted[0].objective='Edited';assert.equal(draft[1].objective,'Build','adoption mutated the recorded suggestion');
+ assert.equal(posts.length,0,'reading a suggestion executed work');
+ for(const bad of [
+  [{...draft[0],depends_on:['missing']},draft[1]],
+  [draft[0],{...draft[1],depends_on:['review']}],
+  [draft[1],{...draft[0],key:'build'}],
+  [{...draft[1],member_id:'foreign'}],
+  [{...draft[1],depends_on:['build']}],
+  [{...draft[1],objective:''}],
+  [{...draft[1],required_verification:'V99'}],
+  [{...draft[1],verification_spec:[]}],
+ ]){c.state.messages=[suggest(bad)];assert.equal(c.assignmentDraft('suggestion'),null,'unsafe assignment draft adopted')}
+ for(const patch of [{kind:'human'},{author_member_id:'foreign'},{content:{proposal_type:'complete',proposal:{assignments:draft}}}]){
+  c.state.messages=[{...suggest(draft),...patch}];assert.equal(c.assignmentDraft('suggestion'),null,'unscoped suggestion adopted');
+ }
+ c.state.messages=[];
  const assignments=[{key:'build',member_id:'a',objective:'Build',depends_on:[]},{key:'review',member_id:'b',objective:'Review',depends_on:['build']}];
  assert.equal(await c.acceptAssignments(),false,'unsaved plan executed');assert.equal(posts.length,0);
  assert.equal(await c.proposeAssignments([{...assignments[0],member_id:'foreign'}]),false);assert.equal(posts.length,0);
@@ -42,6 +64,31 @@ async function main(){
  const mutations=posts.length;assert.equal(await c.proposeAssignments(assignments),false);assert.equal(posts.length,mutations+1,'failed save retried itself');assert.equal(c.state.proposedPlan,null);
  fail=false;room={...room,assignments:[{member_id:'foreign',task_id:'private'}]};await c.refresh();assert.equal(c.state.room,null,'foreign assignment projection retained');
  room={...room,assignments:[]};await c.refresh();let releaseSave;hold=new Promise(r=>releaseSave=r);const saving=c.proposeAssignments(assignments);c.invalidatePlanReview();releaseSave();assert.equal(await saving,false,'changed draft retained stale approval');hold=null;assert.equal(c.state.proposedPlan,null);
+ let releaseSnapshot;hold=new Promise(r=>releaseSnapshot=r);const mutable=JSON.parse(JSON.stringify(assignments));const snapshotSave=c.proposeAssignments(mutable);mutable[0].objective='Changed after request';releaseSnapshot();assert.equal(await snapshotSave,true);hold=null;
+ assert.equal(c.state.proposedPlan.assignments[0].objective,posts.at(-1).body.plan.assignments[0].objective,'review differs from saved request');
+ // Exercise shipped form handlers with controlled DOM fields, including the
+ // criteria capture and approval markup that controller-only checks omit.
+ const elements=new Map(),element=selector=>{if(!elements.has(selector))elements.set(selector,{innerHTML:'',disabled:false,hidden:false});return elements.get(selector)};
+ const criteria={value:'',error:'',setCustomValidity(message){this.error=message},reportValidity(){return !this.error},matches:s=>s==='[data-plan-criteria]'};
+ const fields={
+  'select[data-plan-member]':{value:'a'},'textarea':{value:'Build'},
+  '[data-plan-verification]':{value:'V2'},'[data-plan-criteria]':criteria,
+ };
+ const row={querySelector:s=>fields[s],querySelectorAll:()=>[]};
+ const host={querySelector:element,querySelectorAll:s=>s==='[data-plan-row]'?[row]:[],className:'',innerHTML:''};
+ scope.document={createElement:()=>host};vm.runInContext(fs.readFileSync('internal/webui/static/team-assignments.js','utf8'),scope);
+ let formSaved=null;
+ const formState={room:{...room,task_state:'created',assignments:[]},messages:[],busy:false,proposedPlan:null};
+ const formController={state:formState,invalidatePlanReview(){formState.proposedPlan=null},assignmentDraft:()=>null,proposeAssignments:async value=>{formSaved=value}};
+ const editor=scope.OnePaneTeamAssignments.mount({append(){}},formController);editor.draw(formState);
+ assert.match(element('[data-team-plan-rows]').innerHTML,/data-plan-criteria/);
+ criteria.value=JSON.stringify(draft[1].verification_spec);
+ await element('[data-team-plan-form]').onsubmit({preventDefault(){}});
+ assert.equal(JSON.stringify(formSaved[0].verification_spec),criteria.value,'form capture replaced additional checks');
+ formState.proposedPlan={assignments:[{...formSaved[0],verification_spec:{artifacts:[{media_type:'<script>unsafe</script>'}]}}]};editor.draw(formState);
+ const reviewHTML=element('[data-team-plan-review]').innerHTML;assert.ok(reviewHTML.includes('&lt;script&gt;unsafe&lt;/script&gt;'));assert.ok(!reviewHTML.includes('<script>'));
+ formSaved=null;criteria.value='[]';await element('[data-team-plan-form]').onsubmit({preventDefault(){}});assert.equal(formSaved,null,'invalid criteria were submitted');assert.ok(criteria.error);
+ criteria.value='{}';element('[data-team-plan-form]').oninput({target:criteria});assert.equal(criteria.error,'','corrected criteria remained blocked by form validity');
  c.stop();const afterStop=posts.length;assert.equal(await c.proposeAssignments(assignments),false);assert.equal(posts.length,afterStop);
  assert.ok(fs.readFileSync('internal/webui/static/index.html','utf8').includes('/team-assignments.js'));
  console.log('PASS: Team assignment review, explicit approval, shared views, scoped inspection, no duplicate execution or automatic retries');

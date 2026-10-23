@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/DigiLogicTech/OnePane/internal/agentprotocol"
 	"github.com/DigiLogicTech/OnePane/internal/artifact"
@@ -21,9 +23,14 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/verification"
 )
 
-type teamResultTransport struct{ calls []string }
+type teamResultTransport struct {
+	mu          sync.Mutex
+	calls       []string
+	independent bool
+	observe     func(context.Context) error
+}
 
-func (m *teamResultTransport) Dispatch(_ context.Context, request inference.DispatchRequest, _ inference.SecretResolver) (inference.DispatchResult, error) {
+func (m *teamResultTransport) Dispatch(ctx context.Context, request inference.DispatchRequest, _ inference.SecretResolver) (inference.DispatchResult, error) {
 	var body struct {
 		Messages []struct{ Role, Content string } `json:"messages"`
 	}
@@ -38,9 +45,22 @@ func (m *teamResultTransport) Dispatch(_ context.Context, request inference.Disp
 			}
 		}
 	}
+	m.mu.Lock()
 	m.calls = append(m.calls, req.Objective)
+	m.mu.Unlock()
+	if m.observe != nil && req.Objective != "Consolidate Team result" {
+		if err := m.observe(ctx); err != nil {
+			return inference.DispatchResult{}, err
+		}
+	}
 	var contributions []teamgate.Contribution
+	var guidance []teamgate.HumanGuidance
 	for _, section := range req.Context {
+		if section.Kind == "team_guidance" {
+			if !section.Authoritative || section.Trust != "USER_INSTRUCTION" || json.Unmarshal(section.Content, &guidance) != nil {
+				return inference.DispatchResult{}, fmt.Errorf("invalid human guidance context")
+			}
+		}
 		if section.Kind == "team_contribution" {
 			if section.Authoritative || section.Trust != "UNVERIFIED_DERIVED" {
 				return inference.DispatchResult{}, fmt.Errorf("contribution text elevated to instructions")
@@ -55,13 +75,25 @@ func (m *teamResultTransport) Dispatch(_ context.Context, request inference.Disp
 			contributions = append(contributions, c)
 		}
 	}
+	expectedGuidance := []string{"Shared direction"}
+	if req.Objective != "Consolidate Team result" {
+		expectedGuidance = append(expectedGuidance, req.Objective+" direction")
+	}
+	if len(guidance) != len(expectedGuidance) {
+		return inference.DispatchResult{}, fmt.Errorf("wrong scoped human guidance: %+v", guidance)
+	}
+	for i, text := range expectedGuidance {
+		if guidance[i].Text != text {
+			return inference.DispatchResult{}, fmt.Errorf("human guidance leaked or reordered: %+v", guidance)
+		}
+	}
 	switch req.Objective {
 	case "Builder contribution":
 		if len(contributions) != 0 {
 			return inference.DispatchResult{}, fmt.Errorf("builder received unapproved inputs")
 		}
 	case "Reviewer contribution":
-		if len(contributions) != 1 || contributions[0].Key != "build" {
+		if (!m.independent && (len(contributions) != 1 || contributions[0].Key != "build")) || (m.independent && len(contributions) != 0) {
 			return inference.DispatchResult{}, fmt.Errorf("reviewer did not consume builder checkpoint")
 		}
 	case "Consolidate Team result":
@@ -77,8 +109,8 @@ func (m *teamResultTransport) Dispatch(_ context.Context, request inference.Disp
 }
 
 func TestTeamAssignmentsExecuteThroughWorkerAndShareOnlyAcceptedCheckpointResults(t *testing.T) {
-	t.Run("complete", func(t *testing.T) { runTeamAssignmentScenario(t, false) })
-	t.Run("pause_while_admitted", func(t *testing.T) { runTeamAssignmentScenario(t, true) })
+	t.Run("complete", func(t *testing.T) { runTeamAssignmentScenario(t, false, "") })
+	t.Run("pause_while_admitted", func(t *testing.T) { runTeamAssignmentScenario(t, true, "") })
 }
 
 type pausingTeamCoordinator struct {
@@ -98,7 +130,7 @@ func (c pausingTeamCoordinator) Acquire(ctx context.Context, req inference.Runti
 	return lease, nil
 }
 
-func runTeamAssignmentScenario(t *testing.T, pause bool) {
+func runTeamAssignmentScenario(t *testing.T, pause bool, parallel string) {
 	ctx := context.Background()
 	root := t.TempDir()
 	db, err := sqlitestore.Open(root + "/team-worker.db")
@@ -131,7 +163,7 @@ func runTeamAssignmentScenario(t *testing.T, pause bool) {
 	tasks := task.NewService(db.SQL(), db, clock.Real{})
 	infer := inference.NewService(db.SQL(), db, clock.Real{})
 	registry := inference.NewTransportRegistry()
-	model := &teamResultTransport{}
+	model := &teamResultTransport{independent: parallel != ""}
 	if err = registry.Register("fake", model); err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +195,11 @@ func runTeamAssignmentScenario(t *testing.T, pause bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := json.Marshal(map[string]any{"assignments": []team.AssignmentSpec{{Key: "build", MemberID: builder.ID, Objective: "Builder contribution"}, {Key: "review", MemberID: reviewer.ID, Objective: "Reviewer contribution", DependsOn: []string{"build"}}}})
+	deps := []string{"build"}
+	if parallel != "" {
+		deps = nil
+	}
+	body, _ := json.Marshal(map[string]any{"assignments": []team.AssignmentSpec{{Key: "build", MemberID: builder.ID, Objective: "Builder contribution"}, {Key: "review", MemberID: reviewer.ID, Objective: "Reviewer contribution", DependsOn: deps}}})
 	plan, err := teams.ProposePlan(ctx, team.ProposePlanCommand{SessionID: session.ID, ProposedByPrincipalID: "human", Plan: body})
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +207,72 @@ func runTeamAssignmentScenario(t *testing.T, pause bool) {
 	if _, err = teams.AcceptPlan(ctx, team.AcceptPlanCommand{SessionID: session.ID, PlanID: plan.ID, AcceptedByPrincipalID: "human"}); err != nil {
 		t.Fatal(err)
 	}
+	for _, message := range []map[string]string{
+		{"text": "Shared direction"},
+		{"text": "Builder contribution direction", "target_member_id": builder.ID},
+		{"text": "Reviewer contribution direction", "target_member_id": reviewer.ID},
+	} {
+		body, _ := json.Marshal(message)
+		if _, err = teams.PostMessage(ctx, team.PostMessageCommand{SessionID: session.ID, AuthorPrincipalID: "human", Content: body}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	worker := New(db.SQL(), db, clock.Real{}, "node", tasks, nil, nil, scheduler.NewService(db.SQL(), db, clock.Real{}), infer, nil, artifacts, nil, nil, nil, verification.NewService(db.SQL(), db, clock.Real{}))
+	if parallel != "" {
+		coordinator := runtimecoord.NewService(db.SQL(), clock.Real{})
+		if parallel == "capacity" {
+			infer.ConfigureRuntimeCoordinator(teamLaneCoordinator{inner: coordinator})
+			entered := make(chan struct{}, 2)
+			model.observe = func(ctx context.Context) error {
+				entered <- struct{}{}
+				timer := time.NewTimer(5 * time.Second)
+				defer timer.Stop()
+				for len(entered) < 2 {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-timer.C:
+						return fmt.Errorf("independent assignments did not overlap")
+					case <-time.After(time.Millisecond):
+					}
+				}
+				if _, e := worker.Tick(ctx, 1); e != ErrWorkerCycleInProgress {
+					return fmt.Errorf("overlapping Tick was admitted: %v", e)
+				}
+				if _, e := worker.RecoverLostRuns(ctx); e != ErrWorkerCycleInProgress {
+					return fmt.Errorf("live dispatch was recovered: %v", e)
+				}
+				return nil
+			}
+		} else {
+			infer.ConfigureRuntimeCoordinator(coordinator)
+			observed := false
+			model.observe = func(ctx context.Context) error {
+				if observed {
+					return nil
+				}
+				observed = true
+				timer := time.NewTimer(5 * time.Second)
+				defer timer.Stop()
+				for {
+					var waiting int
+					if e := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_execution_queue WHERE state='queued'`).Scan(&waiting); e != nil {
+						return e
+					}
+					if waiting == 1 {
+						return nil
+					}
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-timer.C:
+						return fmt.Errorf("constrained Team assignment never queued")
+					case <-time.After(time.Millisecond):
+					}
+				}
+			}
+		}
+	}
 	if pause {
 		if err = infer.ConfigureRuntimeCoordinator(pausingTeamCoordinator{inner: runtimecoord.NewService(db.SQL(), clock.Real{}), pause: func() error {
 			current, e := tasks.Get(ctx, job.ID)
@@ -221,5 +322,20 @@ func runTeamAssignmentScenario(t *testing.T, pause bool) {
 		if a.State != "complete" || a.WorkerStatus != "succeeded" {
 			t.Fatalf("unobserved completion: %+v", a)
 		}
+	}
+}
+
+// Synthetic independent Node CPU pools exercise the real shared coordinator;
+// constrained mode retains one physical pool and must queue the second member.
+type teamLaneCoordinator struct{ inner inference.RuntimeCoordinator }
+
+func (c teamLaneCoordinator) Acquire(ctx context.Context, req inference.RuntimeScheduleRequest) (inference.RuntimeScheduleLease, error) {
+	lane := *req.Deployment.NodeID + ":" + *req.TaskID
+	req.Deployment.NodeID = &lane
+	return c.inner.Acquire(ctx, req)
+}
+func TestTeamAssignmentsExecuteIndependentWorkThroughSharedCapacity(t *testing.T) {
+	for _, mode := range []string{"capacity", "constrained"} {
+		t.Run(mode, func(t *testing.T) { runTeamAssignmentScenario(t, false, mode) })
 	}
 }

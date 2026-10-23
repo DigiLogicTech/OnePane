@@ -9,9 +9,11 @@ const inspectorContext=vm.createContext({qa4Inspector:{kind:'task',id:'task'},qa
 vm.runInContext(inspector,inspectorContext);
 assert.match(vm.runInContext('qa4InspectorOverview()',inspectorContext),/data-team-open-task="task"/,'canonical Task Inspector must open the live room');
 const {controller}=context.OnePaneTeamRoom;
+assert.equal(context.OnePaneTeamRoom.guidanceRecipient({Kind:'human',Content:'{"text":"Check","target_member_id":"reviewer"}'}),'reviewer');
+assert.equal(context.OnePaneTeamRoom.guidanceRecipient({Kind:'agent',Content:{target_member_id:'reviewer'}}),'');
 const message=i=>({ID:'m'+String(i).padStart(4,'0'),sequence:i+1,SessionID:'room',Kind:'agent',Content:{text:'Contribution '+i},CreatedAt:100+Math.floor(i/60),RoundNumber:1,AuthorMemberID:'builder'});
 async function main(){
- let calls=[],mutations=[],failReads=false,alive=true,room={id:'room',task_id:'task',status:'deliberating',task_state:'CREATED',members:[{id:'builder',name:'Builder',kind:'agent',status:'running'},{id:'reviewer',name:'Reviewer',kind:'agent',status:'pending'}]},messages=Array.from({length:261},(_,i)=>message(i));
+ let calls=[],mutations=[],failReads=false,alive=true,room={id:'room',task_id:'task',status:'deliberating',execution_mode:'team',task_state:'CREATED',members:[{id:'builder',name:'Builder',kind:'agent',status:'running'},{id:'reviewer',name:'Reviewer',kind:'agent',status:'pending'}]},messages=Array.from({length:261},(_,i)=>message(i));
  let holdMutation=null;
  const api=async(path,opts={})=>{
   calls.push(path);
@@ -37,6 +39,16 @@ async function main(){
  c.state.selectedAgent='reviewer';let release;holdMutation=new Promise(r=>release=r);c.state.draft='First message';const sending=c.send();
  c.state.draft='New text written during send';assert.equal(await c.send(),false,'duplicate submission admitted');release();await sending;holdMutation=null;assert.equal(c.state.draft,'New text written during send','async completion erased a newer draft');
  room={...room,status:'plan_accepted'};await c.refresh();assert.equal(await c.ask(),false,'accepted execution silently reopened');
+ c.state.guidanceTarget='reviewer';c.state.draft='Check the accepted contribution';
+ assert.equal(await c.send(),true,'accepted Team rejected human guidance');
+ assert.deepEqual(mutations.at(-1).body,{content:{text:'Check the accepted contribution',target_member_id:'reviewer'}});
+ c.switchView('agents');c.switchView('conversation');assert.equal(c.state.guidanceTarget,'reviewer','view switch lost guidance recipient');
+ c.state.guidanceTarget='foreign';c.state.draft='Keep this text';const guidanceCount=mutations.length;
+ assert.equal(await c.send(),false);assert.equal(mutations.length,guidanceCount,'foreign guidance target dispatched');
+ c.state.guidanceTarget='';room={...room,status:'executing'};await c.refresh();assert.equal(await c.send(),true,'executing Team rejected shared guidance');
+ assert.deepEqual(mutations.at(-1).body,{content:{text:'Keep this text'}});
+ room={...room,status:'complete'};await c.refresh();c.state.draft='New text written during send';const completedCount=mutations.length;
+ assert.equal(await c.send(),false);assert.equal(mutations.length,completedCount,'completed Team admitted guidance');
  failReads=true;await c.refresh();assert.equal(c.state.room,null);assert.equal(c.state.messages.length,0);assert.equal(c.state.history,null);assert.ok(c.state.error);assert.equal(c.state.draft,'New text written during send');
  failReads=false;room={...room,status:'deliberating'};await c.refresh();assert.equal(c.state.messages.at(-1).ID,'m0261','recovery lost newest window');
  const beforeStop=calls.length;c.stop();await c.refresh();assert.equal(calls.length,beforeStop,'closed room polled');

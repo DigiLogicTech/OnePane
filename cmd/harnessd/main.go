@@ -399,6 +399,27 @@ func main() {
 		}
 	}()
 
+	// Cancellation maintenance runs independently of slow inference. It settles
+	// only pristine requests; dispatched work retains its recovery boundary.
+	go func() {
+		run := func() {
+			if _, err := runtime.Tasks.SettleUnstartedCancellations(ctx, 4); err != nil && ctx.Err() == nil {
+				log.Printf("unstarted task cancellation: %v", err)
+			}
+		}
+		run()
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				run()
+			}
+		}
+	}()
+
 	// General autonomous agent execution consumes ordinary READY Tasks. Each
 	// attempt is durable and bounded; reasoning may route to a ModelDeployment or
 	// an eligible external agent runtime, while all tool side effects remain

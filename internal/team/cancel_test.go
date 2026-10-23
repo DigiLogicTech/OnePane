@@ -8,6 +8,51 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/teamgate"
 )
 
+func TestTeamCancellationPristineSettlementRetainsRootForGraphOwner(t *testing.T) {
+	ctx := context.Background()
+	s, _, ss, specs := assignmentFixture(t)
+	ids := acceptAssignments(t, s, ss, specs)
+	root, err := s.tasks.Get(ctx, ss.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A generic root-only request must remain propagatable through the
+	// reviewed Team endpoint. Session reasoning is not tracked by Attempts.
+	root, err = s.tasks.RequestCancel(ctx, task.TransitionCommand{TaskID: root.ID, ExpectedRevision: root.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if n, err := s.tasks.SettleUnstartedCancellations(ctx, 16); err != nil || n != 0 {
+			t.Fatalf("root settled before propagation: %d %v", n, err)
+		}
+	}
+	accepted, err := s.Session(ctx, ss.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.RequestExecutionCancellation(ctx, CancelExecutionCommand{SessionID: ss.ID, PlanID: *accepted.AcceptedPlanID, ExpectedTaskRevision: root.Revision, ActorPrincipalID: "human"}); err != nil {
+		t.Fatal(err)
+	}
+	// Never-attempted members may finish cancellation; the Team session root
+	// stays with its owner even after all child requests have settled.
+	for i := 0; i < 4; i++ {
+		if _, err := s.tasks.SettleUnstartedCancellations(ctx, 16); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.tasks.Get(ctx, root.ID)
+	if err != nil || got.State != task.StateCancelRequested {
+		t.Fatalf("Team root escaped owner: %+v %v", got, err)
+	}
+	for _, id := range ids {
+		child, err := s.tasks.Get(ctx, id)
+		if err != nil || child.State != task.StateCancelled {
+			t.Fatalf("unstarted contribution not cancelled: %+v %v", child, err)
+		}
+	}
+}
+
 func TestTeamCancellationIsAtomicScopedAndPreservesCompletedContributions(t *testing.T) {
 	ctx := context.Background()
 	s, db, ss, specs := assignmentFixture(t)

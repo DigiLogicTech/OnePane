@@ -80,3 +80,7 @@ An isolated browser preview used synthetic records, not model execution. Earlier
 5. Run separately approved physical rootless, CPU/GPU/Colibri and Node lifecycle cases. Source fixtures do not prove real engine termination, VRAM reclamation or installed service behavior.
 
 The preview server and local toolchain are development tools outside the source tree. The temporary legacy-setup compile payload was removed and must never enter a distributable or commit.
+
+## 24 October continuation — bounded ordinary Task cancellation
+
+Exact d64a45fe hosted integration 39954305446 and QA guard 39954305236 passed. Physical approval was skipped; packaging was not performed. Retained cancellation settlement source now completes only never-started ordinary Task graphs after historical evidence and exact scope checks, with bounded rotating scans, atomic ledger writes and an independent daemon loop. Task/Team/SQLite integration suites, daemon tests, affected vet and final focused settlement tests pass locally. Independent SQLite handles, restart, audit rollback, fairness and indexed event evidence are covered. Team roots and all attempted/unknown work remain with explicit reconciliation owners; no general RecoveryCoordinator or physical acceptance is claimed. See the execution manifest for the exact continuation.

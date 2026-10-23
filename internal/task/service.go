@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/event"
@@ -29,6 +30,9 @@ type admissionGuard interface {
 }
 
 type Service struct {
+	db           *sql.DB
+	cancelMu     sync.Mutex
+	cancelCursor string
 	tx     storage.Transactor
 	repo   repository
 	events eventAppender
@@ -40,6 +44,7 @@ type Service struct {
 
 func NewService(db *sql.DB, tx storage.Transactor, clk clock.Clock) *Service {
 	return &Service{
+		db: db,
 		tx: tx, repo: newSQLRepository(db), events: event.Store{}, outbox: outbox.Store{},
 		ids: id.Generator{}, clock: clk,
 	}

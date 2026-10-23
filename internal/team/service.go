@@ -545,6 +545,15 @@ func (s *Service) PostMessage(ctx context.Context, c PostMessageCommand) (Messag
 	if !s.memberActorAllowed(ctx, ss.TeamID, c.AuthorMemberID, c.AuthorPrincipalID, c.Kind == "human") {
 		return Message{}, ErrInvalid
 	}
+	if c.ReplyToMessageID != nil {
+		var found int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_messages WHERE id=? AND session_id=? AND workspace_id=?`, *c.ReplyToMessageID, ss.ID, ss.WorkspaceID).Scan(&found); err != nil {
+			return Message{}, err
+		}
+		if found != 1 {
+			return Message{}, ErrInvalid
+		}
+	}
 	mid, _ := s.ids.New("tmsg")
 	now := s.clock.UnixMilli()
 	m := Message{ID: mid, WorkspaceID: ss.WorkspaceID, SessionID: ss.ID, AuthorMemberID: c.AuthorMemberID, AuthorPrincipalID: &c.AuthorPrincipalID, Kind: c.Kind, Content: raw, ReplyToMessageID: c.ReplyToMessageID, RoundNumber: ss.RoundNumber, CreatedAt: now}
@@ -561,7 +570,20 @@ func (s *Service) ListMessages(ctx context.Context, sessionID string, limit int)
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,workspace_id,session_id,author_member_id,author_principal_id,message_kind,content_json,reply_to_message_id,round_number,created_at FROM team_messages WHERE session_id=? ORDER BY created_at,id LIMIT ?`, sessionID, limit)
+	return s.messageRows(ctx, `SELECT id,workspace_id,session_id,author_member_id,author_principal_id,message_kind,content_json,reply_to_message_id,round_number,created_at FROM team_messages WHERE session_id=? ORDER BY created_at,id LIMIT ?`, sessionID, limit)
+}
+
+// RecentMessages keeps the worker's bounded reasoning context current in long
+// rooms, without changing chronological exports or truncating model evidence.
+func (s *Service) RecentMessages(ctx context.Context, sessionID string, limit int) ([]Message, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 200
+	}
+	return s.messageRows(ctx, `SELECT id,workspace_id,session_id,author_member_id,author_principal_id,message_kind,content_json,reply_to_message_id,round_number,created_at FROM (SELECT * FROM team_messages WHERE session_id=? ORDER BY message_sequence DESC LIMIT ?) ORDER BY message_sequence`, sessionID, limit)
+}
+
+func (s *Service) messageRows(ctx context.Context, query, sessionID string, limit int) ([]Message, error) {
+	rows, err := s.db.QueryContext(ctx, query, sessionID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -597,7 +619,7 @@ func (s *Service) RequestRound(ctx context.Context, c RequestRoundCommand) ([]Tu
 	if ss.Status != "deliberating" && ss.Status != "plan_proposed" && ss.Status != "paused_for_deliberation" && ss.Status != "team_review" {
 		return nil, ErrSessionState
 	}
-	if !s.isHuman(ctx, c.RequestedByPrincipalID) && !s.workspaceMember(ctx, ss.WorkspaceID, c.RequestedByPrincipalID) {
+	if !s.workspaceMember(ctx, ss.WorkspaceID, c.RequestedByPrincipalID) {
 		return nil, ErrInvalid
 	}
 	members, err := s.ListMembers(ctx, ss.TeamID)
@@ -626,10 +648,33 @@ func (s *Service) RequestRound(ctx context.Context, c RequestRoundCommand) ([]Tu
 			want[v] = true
 		}
 	}
+	eligible := map[string]bool{}
+	for _, m := range members {
+		if m.Status == "active" && m.MemberKind != "human" && !(researchMode && research.ChairMode == "manual" && m.ID == research.ChairMemberID) {
+			eligible[m.ID] = true
+		}
+	}
+	if len(eligible) == 0 || len(want) > 8 {
+		return nil, ErrInvalid
+	}
+	for memberID := range want {
+		if !eligible[memberID] {
+			return nil, ErrInvalid
+		}
+	}
 	now := s.clock.UnixMilli()
 	var out []TurnRequest
 	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		res, e := tx.ExecContext(ctx, `UPDATE team_sessions SET round_number=round_number+1,revision=revision+1,updated_at=? WHERE id=? AND revision=?`, now, ss.ID, ss.Revision)
+		if c.TriggerMessageID != nil {
+			var found int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_messages WHERE id=? AND session_id=? AND workspace_id=?`, *c.TriggerMessageID, ss.ID, ss.WorkspaceID).Scan(&found); err != nil {
+				return err
+			}
+			if found != 1 {
+				return ErrInvalid
+			}
+		}
+		res, e := tx.ExecContext(ctx, `UPDATE team_sessions SET status='deliberating',round_number=round_number+1,revision=revision+1,updated_at=? WHERE id=? AND revision=?`, now, ss.ID, ss.Revision)
 		if e != nil {
 			return e
 		}
@@ -654,7 +699,7 @@ func (s *Service) RequestRound(ctx context.Context, c RequestRoundCommand) ([]Tu
 			if m.Status != "active" || m.MemberKind == "human" {
 				continue
 			}
-			if researchMode && research.ChairMode=="manual" && m.ID==research.ChairMemberID {
+			if researchMode && research.ChairMode == "manual" && m.ID == research.ChairMemberID {
 				continue // Chair is never an independent/critique/synthesis participant.
 			}
 			if len(want) > 0 && !want[m.ID] {

@@ -1,8 +1,10 @@
 package node
 
 import (
+	"github.com/DigiLogicTech/OnePane/internal/privatekeyfile"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -23,7 +25,10 @@ func TestEnsureIdentitySeedIsStable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("identity mode=%o want 600", info.Mode().Perm())
+	}
+	if err := privatekeyfile.Check(filepath.Join(dir, "keys", "node.identity")); err != nil {
+		t.Fatalf("identity access control: %v", err)
 	}
 }

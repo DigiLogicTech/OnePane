@@ -10,14 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/event"
 	"github.com/DigiLogicTech/OnePane/internal/id"
+	"github.com/DigiLogicTech/OnePane/internal/privatekeyfile"
 	"github.com/DigiLogicTech/OnePane/internal/storage"
 )
 
@@ -59,39 +58,7 @@ var (
 )
 
 func EnsureMasterKey(dataDir string) ([]byte, error) {
-	dir := filepath.Join(dataDir, "vault")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
-	}
-	path := filepath.Join(dir, "master.key")
-	if st, err := os.Stat(path); err == nil {
-		if runtime.GOOS != "windows" && st.Mode().Perm()&0o077 != 0 {
-			return nil, fmt.Errorf("vault master key permissions must be 0600 or stricter")
-		}
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return nil, err
-		}
-		if len(b) != 32 {
-			return nil, fmt.Errorf("vault master key has invalid length")
-		}
-		return b, nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	b := make([]byte, 32)
-	if _, err := io.ReadFull(rand.Reader, b); err != nil {
-		return nil, err
-	}
-	tmp := path + ".new"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return nil, err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return nil, err
-	}
-	return b, nil
+	return privatekeyfile.Ensure(filepath.Join(dataDir, "vault", "master.key"))
 }
 func NewService(db *sql.DB, tx storage.Transactor, clk clock.Clock, kek []byte) (*Service, error) {
 	if len(kek) != 32 {

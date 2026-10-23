@@ -231,7 +231,7 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		executionMode = "team"
 		researchMode = false
 	}
-	msgs, err := s.teams.ListMessages(ctx, ss.ID, 200)
+	msgs, err := s.teams.RecentMessages(ctx, ss.ID, 200)
 	if err != nil {
 		return s.fail(ctx, res, err)
 	}
@@ -429,6 +429,8 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		manifestPayload["research_evidence_manifest_sha256"]=deliveredResearch.ManifestSHA256
 	}
 	if seatBinding.CandidateID!="" { manifestPayload["seat_binding_candidate_id"]=seatBinding.CandidateID }
+	manifestPayload["turn_id"] = turnID
+	manifestPayload["member_id"] = member.ID
 	manifest,_:=json.Marshal(manifestPayload)
 	areq := agentprotocol.Request{ProtocolVersion: agentprotocol.Version, RequestID: "", WorkspaceID: ws, TaskID: ss.TaskID, PrincipalID: WorkerPrincipal, Role: member.RoleName, Objective: objective, Constraints: json.RawMessage(`{"deliberation_only":true,"no_side_effects":true}`), Context: sections, ContextManifest: manifest, PermittedProposalTypes: []agentprotocol.ProposalType{agentprotocol.ProposalReplan, agentprotocol.ProposalHuman, agentprotocol.ProposalComplete, agentprotocol.ProposalWait, agentprotocol.ProposalFail}, ToolCallback: false}
 	// Last practical permission check before locally dispatching plaintext.

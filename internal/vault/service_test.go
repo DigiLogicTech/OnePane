@@ -2,8 +2,10 @@ package vault
 
 import (
 	"bytes"
+	"github.com/DigiLogicTech/OnePane/internal/privatekeyfile"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -24,8 +26,11 @@ func TestEnsureMasterKeyStableAndPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Mode().Perm()&0077 != 0 {
+	if runtime.GOOS != "windows" && st.Mode().Perm()&0077 != 0 {
 		t.Fatalf("unsafe key mode %o", st.Mode().Perm())
+	}
+	if err := privatekeyfile.Check(filepath.Join(d, "vault", "master.key")); err != nil {
+		t.Fatalf("master key access control: %v", err)
 	}
 }
 func TestEnvelopeRoundTrip(t *testing.T) {

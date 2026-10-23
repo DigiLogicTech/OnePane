@@ -76,7 +76,13 @@ on:
       - 'internal/goalobserveradapter/**'
       - 'internal/agentworker/**'
       - 'internal/team/**'
+      - 'internal/privatekeyfile/**'
+      - 'internal/node/**'
+      - 'internal/vault/**'
+      - 'internal/webui/static/team-room.*'
+      - 'scripts/validate_team_room.js'
       - 'internal/teamworker/**'
+      - 'internal/runtimecoord/**'
       - 'internal/agentprotocol/**'
       - 'internal/agentruntime/**'
       - 'internal/runtimeendpoint/**'
@@ -89,6 +95,10 @@ on:
       - 'internal/serviceproof/**'
       - 'cmd/harnessd/**'
       - 'packaging/windows/service/**'
+      - 'packaging/windows/msi/**'
+      - 'scripts/build-rc11-windows-qa.ps1'
+      - 'scripts/test_rc11_qa_guard.ps1'
+      - '.github/workflows/rc11-windows-qa.yml'
       - 'packaging/windows/setup/**'
       - 'packaging/windows/Read-OnePaneMsiLog.ps1'
       - 'scripts/test_offline_msi_evidence.ps1'
@@ -174,6 +184,8 @@ jobs:
           node --check internal/webui/static/project-workspace-page.js
           node --check internal/webui/static/app-foundation.js
           node --check internal/webui/static/app.js
+          node --check internal/webui/static/team-room.js
+          node scripts/validate_team_room.js
           node --check internal/webui/static/web-chat-page.js
           node --check internal/webui/static/web-chat-session-tabs.js
           node --check internal/webui/static/web-chat-council-launch.js
@@ -206,7 +218,7 @@ jobs:
           node scripts/validate_legacy_cleanup.js
       - name: Existing sandbox and Project contract tests
         run: |
-          go test ./internal/runtimeendpoint ./internal/agentruntime ./internal/projectworkspace ./internal/projectruntime ./internal/sandboxrunner ./internal/agentprotocol ./internal/agentworker ./internal/team ./internal/teamworker ./internal/task ./internal/storage/sqlite ./internal/scheduler ./internal/localai ./internal/api ./internal/nodepreflight
+          go test ./internal/runtimecoord ./internal/runtimeendpoint ./internal/agentruntime ./internal/projectworkspace ./internal/projectruntime ./internal/sandboxrunner ./internal/agentprotocol ./internal/agentworker ./internal/team ./internal/teamworker ./internal/task ./internal/storage/sqlite ./internal/scheduler ./internal/localai ./internal/api ./internal/nodepreflight
           go test -tags integration ./internal/agentruntime ./internal/scheduler ./internal/inference ./internal/tool ./internal/projectworkspace ./internal/sandboxrunner ./internal/agentworker ./internal/task ./internal/workspacepublisher ./internal/projectorchestrator ./internal/workspacebroker ./internal/nodefederation ./internal/operation ./internal/goalobserveradapter
       - name: Bounded low-memory L5 observer lifecycle (hosted simulation)
         env:
@@ -226,6 +238,7 @@ jobs:
           go test -tags integration -count=1 -timeout 5m -run '^TestObserverFenceBoundedRestartWALDurabilitySoak$' -v ./internal/projectworkspace
       - name: Node approval and SQLite race checks (hosted source only)
         run: |
+          go test -race -count=1 ./internal/runtimecoord ./internal/teamworker
           go test -race -count=1 ./internal/instrumentprobe ./internal/nodefederation ./cmd/onepane-node-custody ./cmd/onepane-instrument-probe
           go test -race -tags integration -count=1 -run TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly ./internal/projectworkspace
       - name: Managed inference lease and Colibri rollback race tests (hosted Linux)
@@ -365,6 +378,19 @@ jobs:
           # Windows. Does not replace a populated RC10->RC11 installer upgrade
           # or verify persistence on the operator's selected data drive.
           go test -count=1 -timeout 5m ./internal/storage/sqlite ./internal/startupevidence
+      - name: Native Windows live Team history and authorization
+        shell: pwsh
+        run: |
+          go test -count=1 -timeout 3m -run 'Test(TeamMessagePage|LiveTeamRoom|TeamLiveRoom|TeamRoundAndReplyScope)' ./internal/team ./internal/api
+      - name: Native Windows bootstrap-key privacy and identity preservation
+        shell: pwsh
+        run: |
+          go test -count=1 -timeout 3m ./internal/privatekeyfile ./internal/node ./internal/vault
+      - name: Native Windows shared Team compute admission and cancellation
+        shell: pwsh
+        run: |
+          go test -count=1 -timeout 3m ./internal/runtimecoord
+          go test -count=1 -timeout 3m -run TestTeamDispatchShares ./internal/teamworker
       - name: Native Windows persistent drive-root resolution
         shell: pwsh
         run: |

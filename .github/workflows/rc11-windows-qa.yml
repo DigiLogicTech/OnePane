@@ -1,0 +1,97 @@
+name: RC11 reviewed Windows QA candidate
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/rc11-windows-qa.yml'
+      - 'scripts/build-rc11-windows-qa.ps1'
+      - 'scripts/test_rc11_qa_guard.ps1'
+      - 'packaging/windows/msi/OnePane.wxs'
+  workflow_dispatch:
+    inputs:
+      expected_commit_sha:
+        description: Full reviewed RC11 source SHA
+        required: true
+        type: string
+      operator_confirmation:
+        description: Type AUTHORIZE_RC11_WINDOWS_QA after code and final UI review
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  source-syntax:
+    name: Validate QA build script and MSI authoring syntax (no package)
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Parse PowerShell and XML without executing the builder
+        shell: pwsh
+        run: |
+          $errors = $null
+          $tokens = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'scripts/build-rc11-windows-qa.ps1'), [ref]$tokens, [ref]$errors)
+          if ($errors.Count) { throw ($errors | Out-String) }
+          $null = [xml](Get-Content -Raw packaging/windows/msi/OnePane.wxs)
+      - name: Reject unapproved packaging before artifacts or tools
+        shell: pwsh
+        run: .\scripts\test_rc11_qa_guard.ps1
+
+  package:
+    name: Assemble exact reviewed Windows x64 MSI for operator QA
+    needs: source-syntax
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_commit_sha == github.sha && inputs.operator_confirmation == 'AUTHORIZE_RC11_WINDOWS_QA' && vars.ONEPANE_WINDOWS_QA_REVIEWED_SHA == github.sha }}
+    runs-on: windows-latest
+    environment: rc11-windows-qa-approval
+    timeout-minutes: 30
+    env:
+      ONEPANE_WINDOWS_QA_REVIEWED_SHA: ${{ vars.ONEPANE_WINDOWS_QA_REVIEWED_SHA }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Require successful integration CI for this exact source SHA
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/workflows/project-workspace-development-checks.yml/runs?head_sha=$env:GITHUB_SHA&per_page=20"
+          $runs = Invoke-RestMethod -Uri $uri -Headers @{ Authorization="Bearer $env:GH_TOKEN"; Accept='application/vnd.github+json' }
+          $run = $runs.workflow_runs | Where-Object { $_.head_sha -ceq $env:GITHUB_SHA } | Sort-Object id -Descending | Select-Object -First 1
+          if (-not $run -or $run.status -ne 'completed' -or $run.conclusion -ne 'success') { throw 'Exact-source integration CI has not passed' }
+          "ONEPANE_SOURCE_CI_RUN_ID=$($run.id)" | Add-Content -LiteralPath $env:GITHUB_ENV
+      - name: Install pinned WiX in the disposable runner tool directory
+        shell: pwsh
+        run: |
+          $tool = Join-Path $env:RUNNER_TEMP 'onepane-wix'
+          dotnet tool install wix --tool-path $tool --version 5.0.2
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned WiX install failed' }
+          & (Join-Path $tool 'wix.exe') extension add -g WixToolset.UI.wixext/5.0.2
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned WiX UI extension failed' }
+      - name: Build reviewed current source (no historical recovery archives)
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_commit_sha }}
+        run: |
+          .\scripts\build-rc11-windows-qa.ps1 -ExpectedCommitSha $env:EXPECTED_SHA -WixExecutable (Join-Path $env:RUNNER_TEMP 'onepane-wix/wix.exe')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OnePane-RC11-Windows-QA-${{ github.sha }}
+          path: |
+            dist/windows-rc11-qa/*.msi
+            dist/windows-rc11-qa/*.sha256
+            dist/windows-rc11-qa/candidate-manifest.json
+            dist/windows-rc11-qa/QA-README.txt
+          if-no-files-found: error
+          retention-days: 14

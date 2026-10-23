@@ -41,6 +41,8 @@ The old #1 failure is in the step **Restore Alpha 3 and apply Alpha 3.1 stabiliz
 
 ## Work to close
 
+Implementation has progressed since the inventory snapshot. See [execution status](rc11-qa-execution-status.md) for the live Team room, shared compute admission/cancellation tests, Windows key protection, current-source QA builder and the remaining acceptance gates. The historical inventory below is not a claim that this newer source head has passed CI.
+
 | ID | Action | Completion evidence | Status |
 | --- | --- | --- | --- |
 | CI-01 | Carry existing Web Council/session-isolation and Colibri UI checks into current integration CI | Existing five behavioural validator scripts and six syntax checks run in the current workflow; their source/validator changes trigger it | Implemented in this follow-up; all 23 repository validator scripts pass locally, including 20 now directly invoked by integration CI plus three already invoked through its development-surface validator; all 25 directly referenced syntax checks pass; final hosted head must pass separately |

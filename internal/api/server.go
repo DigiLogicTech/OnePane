@@ -469,6 +469,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/tasks/{taskID}/team-session", s.startTeamSession)
 	s.mux.HandleFunc("GET /v1/tasks/{taskID}/team-session", s.getTaskTeamSession)
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}", s.getTeamSession)
+	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/live", s.getTeamLiveRoom)
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/manifest", s.getTeamSessionManifest)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/research/evidence-selection", s.freezeResearchEvidence)
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/research/evidence-selection", s.readResearchEvidence)
@@ -477,6 +478,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/research/seat-evidence-approval", s.readResearchSeatEvidenceApproval)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/research/seat-evidence-approval/revoke", s.revokeResearchSeatEvidence)
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/messages", s.listTeamMessages)
+	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/messages/page", s.pageTeamMessages)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/messages", s.postTeamMessage)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/rounds", s.requestTeamRound)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/research/retry", s.retryResearchRound)
@@ -1342,6 +1344,12 @@ func respondDomain(w http.ResponseWriter, v any, err error, success int) {
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		writeError(w, http.StatusNotFound, "not found")
+	case errors.Is(err, team.ErrInvalid):
+		writeError(w, http.StatusBadRequest, "invalid team command")
+	case errors.Is(err, team.ErrWorkspaceMismatch), errors.Is(err, team.ErrHumanRequired):
+		writeError(w, http.StatusForbidden, "team operation forbidden")
+	case errors.Is(err, team.ErrSessionState), errors.Is(err, team.ErrPlanRequired), errors.Is(err, team.ErrOpenBlockingObjection):
+		writeError(w, http.StatusConflict, "team state or approval does not permit this operation")
 	case errors.Is(err, projectworkspace.ErrSourceRequestRateLimited):
 		w.Header().Set("Retry-After", "60")
 		writeError(w, http.StatusTooManyRequests, "source request attempt limit reached")

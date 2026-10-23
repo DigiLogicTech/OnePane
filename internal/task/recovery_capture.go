@@ -129,6 +129,11 @@ func (s *Service) CaptureRecoveryCases(ctx context.Context, limit int) (Recovery
 			captured = n == 1
 			var storedCase string
 			if e = tx.QueryRowContext(ctx, `SELECT id FROM task_recovery_cases WHERE attempt_id=? AND task_id=? AND workspace_id=? AND interruption_event_id=?`, payload.AttemptID, payload.TaskID, ws.String, eventID).Scan(&storedCase); e != nil {
+				// An incompatible restored/imported case cannot authorize this job.
+				// Defer it without starving independent intake or editing its identity.
+				if errors.Is(e, sql.ErrNoRows) && !captured {
+					return nil
+				}
 				return e
 			}
 			if captured {

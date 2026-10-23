@@ -296,3 +296,34 @@ func TestRecoveryCaptureReadPaginationCannotCrossScope(t *testing.T) {
 		t.Fatalf("oversized cursor accepted: %v", e)
 	}
 }
+
+func TestRecoveryCaptureIncompatibleCaseDoesNotStarveIndependentWork(t *testing.T) {
+	db, s, job, attempt := interruptedAdmissionFixture(t)
+	if _, e := db.SQL().Exec(`INSERT INTO task_recovery_cases(id,workspace_id,task_id,attempt_id,interruption_event_id,source_job_id,task_revision_at_capture,created_at) SELECT 'incompatible','ws',?,?,id,'restored-job',?,1 FROM events WHERE aggregate_id=? AND event_type='task.created' LIMIT 1`, job.ID, attempt.ID, job.Revision, job.ID); e != nil {
+		t.Fatal(e)
+	}
+	ctx := context.Background()
+	other, e := s.Create(ctx, task.CreateCommand{WorkspaceID: "ws", Objective: "Independent recovery intake"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	other, e = s.MarkReady(ctx, task.TransitionCommand{TaskID: other.ID, ExpectedRevision: other.Revision})
+	if e != nil {
+		t.Fatal(e)
+	}
+	other, _, e = s.Start(ctx, task.StartCommand{TaskID: other.ID, ExpectedRevision: other.Revision})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.InterruptForRecovery(ctx, task.TransitionCommand{TaskID: other.ID, ExpectedRevision: other.Revision}); e != nil {
+		t.Fatal(e)
+	}
+	r, e := s.CaptureRecoveryCases(ctx, 16)
+	if e != nil || r.Captured != 1 || r.Acknowledged != 1 || r.Deferred != 1 {
+		t.Fatalf("incompatible case monopolized intake: %+v %v", r, e)
+	}
+	var status string
+	if e = db.SQL().QueryRow(`SELECT status FROM outbox_jobs WHERE job_type='task.recovery.required' AND json_extract(payload_json,'$.task_id')=?`, job.ID).Scan(&status); e != nil || status != "pending" {
+		t.Fatalf("incompatible case acknowledged: %s %v", status, e)
+	}
+}

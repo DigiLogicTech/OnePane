@@ -70,6 +70,13 @@ func (r *sqlRepository) RequireTeamDependencies(ctx context.Context,tx storage.T
 	return teamgate.RequireAdmission(ctx,tx,t.WorkspaceID,t.ID)
 }
 
+func (r *sqlRepository) RequireNoExecutionHold(ctx context.Context, tx storage.Tx, t Task) error {
+	paused, err := teamgate.TaskPaused(ctx, tx, t.WorkspaceID, t.ID)
+	if err != nil { return err }
+	if paused { return teamgate.ErrPaused }
+	return nil
+}
+
 // approvedTaskGraphDependenciesTx enforces the graph's independently
 // operator-attested predecessor list at the actual Task/Attempt admission
 // boundary. Graph readiness/reporting is only advisory; deleted SQL edges

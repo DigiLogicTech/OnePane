@@ -160,17 +160,19 @@ func (t AgentProtocolHTTPTransport) Invoke(ctx context.Context, c Connection, re
 		return agentprotocol.Response{}, &RuntimeTransportError{Code: "read_response", OutcomeKnown: false, Err: err}
 	}
 	if len(data) > maxResponse {
-		return agentprotocol.Response{}, &RuntimeTransportError{Code: "response_too_large", HTTPStatus: resp.StatusCode, OutcomeKnown: true}
+		return agentprotocol.Response{}, &RuntimeTransportError{Code: "response_too_large", HTTPStatus: resp.StatusCode, OutcomeKnown: false}
 	}
+	// Once sent, neither HTTP status nor an unreadable proposal proves the
+	// external runtime did nothing. Reconciliation must precede any fallback.
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return agentprotocol.Response{}, &RuntimeTransportError{Code: "http_" + http.StatusText(resp.StatusCode), HTTPStatus: resp.StatusCode, OutcomeKnown: true}
+		return agentprotocol.Response{}, &RuntimeTransportError{Code: "http_" + http.StatusText(resp.StatusCode), HTTPStatus: resp.StatusCode, OutcomeKnown: false}
 	}
 	var out agentprotocol.Response
 	if err := json.Unmarshal(data, &out); err != nil {
-		return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_json_response", HTTPStatus: resp.StatusCode, OutcomeKnown: true, Err: err}
+		return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_json_response", HTTPStatus: resp.StatusCode, OutcomeKnown: false, Err: err}
 	}
 	if err := out.ValidateFor(req); err != nil {
-		return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_agent_response", HTTPStatus: resp.StatusCode, OutcomeKnown: true, Err: err}
+		return agentprotocol.Response{}, &RuntimeTransportError{Code: "invalid_agent_response", HTTPStatus: resp.StatusCode, OutcomeKnown: false, Err: err}
 	}
 	return out, nil
 }

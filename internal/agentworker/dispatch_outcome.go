@@ -67,14 +67,24 @@ func (s *Service) interruptDispatchForReconciliation(
 			JOIN tasks t ON t.id=r.task_id
 			JOIN task_attempts a ON a.id=r.attempt_id AND a.task_id=t.id
 				AND a.status IN ('created','queued','running','waiting')
+				AND a.worker_principal_id=r.worker_principal_id
 			WHERE r.id=? AND r.task_id=? AND r.attempt_id=? AND r.revision=?
+				AND r.worker_principal_id='system:agent-worker'
 				AND NOT EXISTS (SELECT 1 FROM task_attempts other
 					WHERE other.task_id=t.id AND other.id<>r.attempt_id
 						AND other.status IN ('created','queued','running','waiting'))`,
 			run.ID, run.TaskID, run.AttemptID, run.Revision,
 		).Scan(&runStatus, &taskState, &revision)
 		if err != nil { return err }
-		if runStatus != string(RunRunning) || taskState != string(task.StateRunning) {
+		if runStatus != string(RunRunning) {
+			return ErrInvalidWorkerState
+		}
+		// A concurrent pause/cancel changes the Task and original Attempt,
+		// but cannot make an already-sent request safe to repeat. Reconcile
+		// that exact owner without stranding all independent scheduling.
+		switch task.State(taskState) {
+		case task.StateRunning, task.StatePaused, task.StateCancelRequested, task.StateCancelling, task.StateCompensating:
+		default:
 			return ErrInvalidWorkerState
 		}
 		actor := AuthorityPrincipal

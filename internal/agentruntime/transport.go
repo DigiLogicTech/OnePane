@@ -18,6 +18,9 @@ type RuntimeTransport interface {
 type RuntimeTransportError struct {
 	Code         string
 	HTTPStatus   int
+	// OutcomeKnown permits retry/fallback. Set it only with evidence that
+	// dispatch had no external effects, such as a local preflight rejection.
+	// An HTTP error or unreadable response alone is not that evidence.
 	OutcomeKnown bool
 	Err          error
 }

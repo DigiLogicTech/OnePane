@@ -9,21 +9,22 @@ import (
 // LiveRoom exposes observed public coordination metadata, never profile
 // instructions, model reasoning, raw provider errors or tool payloads.
 type LiveRoom struct {
-	ID              string           `json:"id"`
-	WorkspaceID     string           `json:"workspace_id"`
-	TeamID          string           `json:"team_id"`
-	TaskID          string           `json:"task_id"`
-	Status          string           `json:"status"`
-	ExecutionMode   string           `json:"execution_mode"`
-	TaskState       string           `json:"task_state"`
-	TaskRevision    int64            `json:"task_revision"`
-	AcceptedPlanID  string           `json:"accepted_plan_id,omitempty"`
-	ExecutionPaused bool             `json:"execution_paused"`
-	PauseDraining   bool             `json:"pause_draining"`
-	Round           int64            `json:"round"`
-	ObservedAt      int64            `json:"observed_at"`
-	Members         []LiveMember     `json:"members"`
-	Assignments     []LiveAssignment `json:"assignments"`
+	ID                          string           `json:"id"`
+	WorkspaceID                 string           `json:"workspace_id"`
+	TeamID                      string           `json:"team_id"`
+	TaskID                      string           `json:"task_id"`
+	Status                      string           `json:"status"`
+	ExecutionMode               string           `json:"execution_mode"`
+	TaskState                   string           `json:"task_state"`
+	TaskRevision                int64            `json:"task_revision"`
+	AcceptedPlanID              string           `json:"accepted_plan_id,omitempty"`
+	ExecutionPaused             bool             `json:"execution_paused"`
+	PauseDraining               bool             `json:"pause_draining"`
+	PauseReconciliationRequired bool             `json:"pause_reconciliation_required"`
+	Round                       int64            `json:"round"`
+	ObservedAt                  int64            `json:"observed_at"`
+	Members                     []LiveMember     `json:"members"`
+	Assignments                 []LiveAssignment `json:"assignments"`
 }
 type LiveMember struct {
 	ID            string `json:"id"`
@@ -53,12 +54,16 @@ func (s *Service) LiveRoom(ctx context.Context, sessionID string) (LiveRoom, err
 	if err = s.db.QueryRowContext(ctx, `SELECT state,revision FROM tasks WHERE id=? AND workspace_id=?`, ss.TaskID, ss.WorkspaceID).Scan(&out.TaskState, &out.TaskRevision); err != nil {
 		return LiveRoom{}, err
 	}
-	var held, draining int
-	if err = s.db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM team_execution_held_tasks ht JOIN agent_worker_runs r ON r.task_id=ht.task_id AND r.status='running' WHERE ht.hold_id=h.id) THEN 1 ELSE 0 END),0) FROM team_execution_holds h WHERE h.session_id=? AND h.released_at IS NULL`, ss.ID).Scan(&held, &draining); err != nil {
+	var held, draining, recovery int
+	if err = s.db.QueryRowContext(ctx, `SELECT COUNT(*),
+	 COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM team_execution_held_tasks ht JOIN agent_worker_runs r ON r.task_id=ht.task_id AND r.status='running' WHERE ht.hold_id=h.id) THEN 1 ELSE 0 END),0),
+	 COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM team_execution_held_tasks ht JOIN tasks t ON t.id=ht.task_id WHERE ht.hold_id=h.id AND t.state<>'paused') THEN 1 ELSE 0 END),0)
+	 FROM team_execution_holds h WHERE h.session_id=? AND h.released_at IS NULL`, ss.ID).Scan(&held, &draining, &recovery); err != nil {
 		return LiveRoom{}, err
 	}
 	out.ExecutionPaused = held > 0
 	out.PauseDraining = draining > 0
+	out.PauseReconciliationRequired = recovery > 0
 	var members []SnapshotMember
 	manifest, err := s.SessionManifest(ctx, ss.ID)
 	if err == nil {

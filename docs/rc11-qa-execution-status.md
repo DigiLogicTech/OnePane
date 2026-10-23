@@ -2,6 +2,16 @@
 
 Target: Windows installed QA first, Ubuntu afterwards. This is source progress, not a QA-ready declaration.
 
+## Runtime outcome and concurrent-control remediation
+
+The first automation increment is published as `1b4b9a58bae76af52c9b7e7ad3cd1e1465821583`. Its exact-head integration run 39951849036 passed both Windows and Linux jobs, including race checks, full regression and cross-platform compilation. Physical approval was skipped. QA guard run 39951848992 passed; no installer was built.
+
+A focused parallel source review then found three additional blocking defects, recorded as RUNTIME-001 and HOLD-003/004 in the release manifest. External Agent Runtime HTTP errors, malformed/oversized/mismatched proposals, untyped adapter errors and response persistence failures now remain durable unknown outcomes after dispatch. HTTP status alone is not proof that the runtime did nothing. Explicit proven preflight rejection retains known-failure semantics. Invocation quota remains committed conservatively; an unusable response cannot trigger automatic fallback through the Worker.
+
+Unknown outcomes returning after pause/cancel now interrupt only the exact original active Worker/Task/Attempt, retaining its revision and principal checks. This leaves the affected work blocked for reconciliation without stranding the shared scheduler. A held room exposes a metadata-only reconciliation-required flag and refuses resume until the underlying recorded Tasks are safe. Generic Task Resume also checks ancestry holds for Tasks without Attempts, so it cannot strand an accepted Team hold by moving its root READY.
+
+Tests exercise actual loopback HTTP responses, durable SQLite invocation status/quota and database-triggered artifact-write failure, plus synthetic queued/returned reasoning under Team controls. No real external runtime, tool effects or installed daemon restart is represented. The affected package regressions pass individually; an initial Task unit failure exposed an abstraction mismatch from raw SQL in a fake repository and was fixed by requiring the hold check through the repository contract. Task tests and affected `go vet` pass after that repair. Final focused control/outcome tests and all 25 JavaScript validators pass. A separate focused read-only review found no additional defect in these fixes; whole-product final review remains open.
+
 ## Automation continuation — Team execution holds
 
 The persistent whole-release queue is now `onepane-release-execution-manifest.md`. This run recovered existing unpublished commits and unfinished pause/resume edits on the same PR 228 branch. Published-head integration run 39913940725 and QA guard run 39913940776 are confirmed successful; neither validates the newer local source or an installer.

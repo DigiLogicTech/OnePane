@@ -74,6 +74,9 @@ func (s *Service) ResumeInTransaction(ctx context.Context, tx storage.Tx, cmd Tr
 	if t.State != StatePaused && t.State != StateWaitingDependency && t.State != StateWaitingApproval {
 		return fmt.Errorf("%w: cannot resume from %s", ErrInvalidTransition, t.State)
 	}
+	if err := s.repo.RequireNoExecutionHold(ctx, tx, t); err != nil {
+		return err
+	}
 	active, err := s.repo.ActiveAttempt(ctx, tx, t.ID)
 	if err != nil {
 		return err

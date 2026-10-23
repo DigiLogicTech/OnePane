@@ -10,6 +10,8 @@ Approved product decisions live in `rc11-vision-decision-register.md`; Team addi
 
 Recovered checkpoint: published `bb840b91b1f4fabc7bd810187ad64feb3aab7112`; local commits `95fb4470` (bounded concurrent Team inference, additive criteria, draft adoption and human guidance) and `28fd4a52` (scoped cancellation). Recovered uncommitted Team pause/resume implementation is being completed and validated, not discarded. The automation memory did not exist at the start of this run.
 
+Publication: `95fb4470`, `28fd4a52` and `1b4b9a58bae76af52c9b7e7ad3cd1e1465821583` (durable Team holds and this manifest) were pushed to existing PR 228. Both native Windows and Linux/race/full-regression/cross-platform jobs passed in integration run [39951849036](https://github.com/DigiLogicTech/OnePane/actions/runs/39951849036). Physical approval was skipped. QA guard run [39951848992](https://github.com/DigiLogicTech/OnePane/actions/runs/39951848992) passed; packaging was not dispatched. Subsequent review found the defects below; their remediation requires new exact-head CI.
+
 ## Execution queue
 
 | ID | Status | Work and exit evidence | Dependencies / exact next action |
@@ -23,6 +25,7 @@ Recovered checkpoint: published `bb840b91b1f4fabc7bd810187ad64feb3aab7112`; loca
 | NODE-SANDBOX | Open blocking acceptance | Trusted paired transport, isolated rootless Workspaces, grants/revocation and runtime/model management | Approved physical machines and runtimes; service-health Task adapter remains disabled pending acceptance/review |
 | L5-DIAGNOSTICS | Open | Consented observe/detect/respond/independent verification, pause/revocation and unknown outcomes; real scoped redacted failure report | Existing bounded hosted simulations are source evidence only |
 | DATA-SECURITY | Open | Permissions, secrets, persistence, migration, backup/restore, sandbox/project isolation and safe upgrades | Final integrated code/security review and affected negative tests |
+| RUNTIME-RECOVERY | Source validated; hosted acceptance pending | External runtime malformed/lost/unsaved results remain durable unknown outcomes; never automatically replay potentially completed effects | Publish transport/service/Worker remediation and inspect exact-head CI |
 | FINAL-UI | Open blocking acceptance | Page-by-page functional, responsive, accessible, theme-aware Windows/Ubuntu review; layout, docking, dialogs and recovery remediation | After core integration; changed Team controls have controller tests only. Prior browser approval-review failure remains unresolved; do not bypass it |
 | EXACT-CI | Pending final source | All applicable mandatory workflows pass against exact release commit; inspect job results/skips, distinguish superseded runs | Publish validated source to existing PR; reconcile stacked PRs and required workflow coverage |
 | WINDOWS-INSTALL | Open blocking acceptance | Versioned x64 MSI, clean install, populated Alpha/RC upgrade, chosen install/data drive, service/reboot, rollback, uninstall/reinstall preserving models/Projects/credentials | Final reviews; reviewed-SHA/protected-environment workflow configuration; record existing roots/backups before installed QA |
@@ -44,6 +47,9 @@ Recovered checkpoint: published `bb840b91b1f4fabc7bd810187ad64feb3aab7112`; loca
 | --- | --- | --- | --- |
 | HOLD-001 | Blocking authority defect | Task hold ancestry lookup stopped at depth 32 and could miss a held root above deeply delegated work | Remediated in current source using cycle-deduplicated traversal with the 256-Task control bound; foreign/truncated ancestry fails closed. Deep/oversized/foreign regressions pass |
 | HOLD-002 | Blocking validation gap | Recovered pause/resume source lacked Worker-boundary drain/resume evidence | Source gap closed: queued/returned reasoning, no premature checkpoint, drain/resume and original Worker/Attempt pass, including reconstructed service. Physical effects/restart acceptance remains open |
+| HOLD-003 | Blocking recovery defect | Unknown dispatch returned after pause/cancel could not interrupt the now-paused/cancelling original Task; failed recovery halted all independent Worker scheduling | Remediated in working source: reconcile only the exact original active owner across pause/cancellation states. Focused integrated tests pass; preserve blocked unknown effects and expose reconciliation-required hold status |
+| HOLD-004 | Blocking lifecycle defect | Generic no-Attempt Task Resume could move a held Task READY, stranding the Team resume API | Remediated in working source: all Resume paths check ancestry holds inside transaction. Focused generic/Team resume regression passes |
+| RUNTIME-001 | Blocking duplicate-effects risk | HTTP status, invalid response, untyped adapter error or unsaved response could become known failure and permit Worker fallback after external execution | Source fixed: post-dispatch unusable outcomes persist UNKNOWN, with spent quota retained; only explicit proven preflight rejection is FAILED. Loopback HTTP and durable service tests pass; affected package regressions pass individually after repairing the Task repository abstraction; hosted CI pending |
 
 ## Recovery rules
 

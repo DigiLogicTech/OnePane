@@ -47,6 +47,7 @@ type fakeRepo struct {
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{tasks: map[string]Task{}, attempts: map[string]Attempt{}, hardPredecessors: map[string][]string{}}
 }
+func (r *fakeRepo) RequireNoExecutionHold(context.Context, storage.Tx, Task) error { return nil }
 func (r *fakeRepo) Get(_ context.Context, id string) (Task, error) {
 	t, ok := r.tasks[id]
 	if !ok {

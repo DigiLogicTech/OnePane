@@ -28,6 +28,7 @@ type teamResultTransport struct {
 	mu          sync.Mutex
 	calls       []string
 	independent bool
+	unknown     bool
 	observe     func(context.Context) error
 }
 
@@ -53,6 +54,9 @@ func (m *teamResultTransport) Dispatch(ctx context.Context, request inference.Di
 		if err := m.observe(ctx); err != nil {
 			return inference.DispatchResult{}, err
 		}
+	}
+	if m.unknown {
+		return inference.DispatchResult{}, &inference.TransportError{Code: "synthetic_response_lost", OutcomeKnown: false}
 	}
 	var contributions []teamgate.Contribution
 	var guidance []teamgate.HumanGuidance
@@ -170,7 +174,7 @@ func runTeamAssignmentScenario(t *testing.T, pause bool, parallel string, cancel
 	tasks := task.NewService(db.SQL(), db, clock.Real{})
 	infer := inference.NewService(db.SQL(), db, clock.Real{})
 	registry := inference.NewTransportRegistry()
-	model := &teamResultTransport{independent: parallel != ""}
+	model := &teamResultTransport{independent: parallel != "", unknown: strings.HasSuffix(cancelPhase, "unknown")}
 	if err = registry.Register("fake", model); err != nil {
 		t.Fatal(err)
 	}
@@ -334,6 +338,31 @@ func runTeamAssignmentScenario(t *testing.T, pause bool, parallel string, cancel
 			t.Fatal(e)
 		}
 		if cancelPhase != "" {
+			if model.unknown {
+				if worker.dispatchReconciliationFailed || len(model.calls) != 1 {
+					t.Fatalf("unknown controlled dispatch stranded scheduling: %+v %v", results, model.calls)
+				}
+				var interrupted, checkpoints int
+				if e = db.SQL().QueryRow(`SELECT COUNT(*) FROM agent_worker_runs r JOIN task_attempts a ON a.id=r.attempt_id JOIN tasks t ON t.id=r.task_id WHERE r.status='interrupted' AND a.status='interrupted' AND t.state='blocked'`).Scan(&interrupted); e != nil || interrupted != 1 {
+					t.Fatalf("unknown dispatch not reconciled: %d %v", interrupted, e)
+				}
+				if e = db.SQL().QueryRow(`SELECT COUNT(*) FROM checkpoints`).Scan(&checkpoints); e != nil || checkpoints != 0 {
+					t.Fatalf("unknown response applied: %d %v", checkpoints, e)
+				}
+				if holding {
+					room, e := teams.LiveRoom(ctx, session.ID)
+					if e != nil || !room.ExecutionPaused || room.PauseDraining || !room.PauseReconciliationRequired {
+						t.Fatalf("unknown held work misrepresented: %+v %v", room, e)
+					}
+					if _, e = teams.ResumeExecution(ctx, team.ExecutionControlCommand{SessionID: session.ID, PlanID: plan.ID, ActorPrincipalID: "human", ExpectedTaskRevision: room.TaskRevision}); e != team.ErrSessionState {
+						t.Fatalf("unknown held work resumed: %v", e)
+					}
+				}
+				if _, e = worker.Tick(ctx, 10); e != nil || len(model.calls) != 1 {
+					t.Fatalf("controlled unknown outcome poisoned next tick or retried: %v %v", model.calls, e)
+				}
+				return
+			}
 			if holding {
 				room, e := teams.LiveRoom(ctx, session.ID)
 				if e != nil || !room.ExecutionPaused || room.PauseDraining || worker.dispatchReconciliationFailed {
@@ -458,5 +487,11 @@ func TestTeamCancellationDiscardsQueuedAndReturnedModelProposals(t *testing.T) {
 func TestTeamPauseDrainsAndResumesOriginalWorkerAfterQueuedAndReturnedReasoning(t *testing.T) {
 	for _, phase := range []string{"queued", "response"} {
 		t.Run(phase, func(t *testing.T) { runTeamAssignmentScenario(t, false, "", "hold_"+phase) })
+	}
+}
+
+func TestTeamPauseAndCancellationUnknownOutcomesDoNotHaltIndependentScheduling(t *testing.T) {
+	for _, phase := range []string{"unknown", "hold_unknown"} {
+		t.Run(phase, func(t *testing.T) { runTeamAssignmentScenario(t, false, "", phase) })
 	}
 }

@@ -45,6 +45,9 @@ func TestTeamPauseResumesOriginalAttemptsAndRetainsPlanAndCreatedContributions(t
 	}
 	root, _ = s.tasks.Get(ctx, ss.TaskID)
 	c.ExpectedTaskRevision = root.Revision
+	if _, err = s.tasks.Resume(ctx, task.TransitionCommand{TaskID: root.ID, ExpectedRevision: root.Revision}); err != teamgate.ErrPaused {
+		t.Fatalf("generic Resume bypassed Team hold: %v", err)
+	}
 	if _, err = s.ResumeExecution(ctx, c); err != nil {
 		t.Fatal(err)
 	}

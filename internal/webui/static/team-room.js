@@ -53,7 +53,7 @@
     const room=state.room;
     if(!["pause","resume"].includes(action)||!room||room.execution_mode!=="team"||!room.assignments?.length||!room.accepted_plan_id||!Number.isSafeInteger(room.task_revision)||room.task_revision<1||typeof reason!=="string"||reason.length>2048)return false;
     if(action==="pause"&&(room.execution_paused||!["ready","running"].includes(room.task_state)))return false;
-    if(action==="resume"&&(!room.execution_paused||room.pause_draining||room.task_state!=="paused"))return false;
+    if(action==="resume"&&(!room.execution_paused||room.pause_draining||room.pause_reconciliation_required||room.task_state!=="paused"))return false;
     const ok=await mutate("/execution/"+action,{plan_id:room.accepted_plan_id,expected_task_revision:room.task_revision,reason:reason.trim()});await refresh();return ok;
    },
    async cancelExecution(reason=""){
@@ -122,8 +122,8 @@
    get("[data-team-send]").disabled=!guidanceEnabled;get("[data-team-guidance-target]").disabled=!guidanceEnabled||s.room.execution_mode!=="team";get("[data-team-guidance-target]").parentElement.hidden=s.room?.execution_mode!=="team";get("[data-team-ask]").disabled=!enabled;
    get("[data-team-older]").disabled=s.busy||!(s.history?s.history.has_more:s.hasOlder||s.messages.length>=100);get("[data-team-live]").hidden=!s.history;
    const executionControls=!!s.room&&s.room.execution_mode==="team"&&s.room.assignments?.length&&s.room.accepted_plan_id;
-   get("[data-team-execution-controls]").hidden=!executionControls;get("[data-team-pause]").disabled=!executionControls||s.busy||s.room.execution_paused||!["ready","running"].includes(s.room.task_state);get("[data-team-resume]").disabled=!executionControls||s.busy||!s.room.execution_paused||s.room.pause_draining||s.room.task_state!=="paused";
-   get("[data-team-hold-status]").textContent=s.room?.execution_paused?(s.room.pause_draining?"Paused for new work; waiting for an in-flight reasoning call to finish before resume.":"Team execution paused. Resume continues the accepted plan and original Attempts."):"";
+   get("[data-team-execution-controls]").hidden=!executionControls;get("[data-team-pause]").disabled=!executionControls||s.busy||s.room.execution_paused||!["ready","running"].includes(s.room.task_state);get("[data-team-resume]").disabled=!executionControls||s.busy||!s.room.execution_paused||s.room.pause_draining||s.room.pause_reconciliation_required||s.room.task_state!=="paused";
+   get("[data-team-hold-status]").textContent=s.room?.execution_paused?(s.room.pause_reconciliation_required?"Team execution requires reconciliation before resume. Inspect blocked assignments and their recovery evidence.":s.room.pause_draining?"Paused for new work; waiting for an in-flight reasoning call to finish before resume.":"Team execution paused. Resume continues the accepted plan and original Attempts."):"";
    const cancellable=!!s.room&&s.room.execution_mode==="team"&&s.room.assignments?.length&&s.room.accepted_plan_id&&["created","ready","running","waiting_dependency","waiting_approval","paused","blocked","completion_requested","verifying"].includes(s.room.task_state);
    get("[data-team-cancel-controls]").hidden=!cancellable;get("[data-team-cancel]").disabled=!cancellable||s.busy;
    planEditor?.draw(s);

@@ -287,9 +287,10 @@ func (s *Service) claimForDeployment(ctx context.Context, d inference.ModelDeplo
 	backend = firstNonEmpty(cfg.Placement.Backend, cfg.RuntimeBackend)
 	devices := []string{}
 	mode = "cpu"
+	hasCPU, hasGPU := false, false
 	for _, dev := range cfg.Placement.Devices {
 		if dev.Kind == "accelerator" {
-			mode = "gpu"
+			hasGPU = true
 			id := strings.TrimSpace(dev.DeviceID)
 			if id == "" {
 				id = fmt.Sprintf("gpu-%d", dev.DeviceIndex)
@@ -297,11 +298,15 @@ func (s *Service) claimForDeployment(ctx context.Context, d inference.ModelDeplo
 			devices = append(devices, id)
 			claim.VRAMBytes += dev.AllocatedBytes
 		}
-		if dev.Kind == "cpu" && mode == "gpu" {
-			mode = "hybrid"
-		}
 		if dev.Kind == "cpu" {
+			hasCPU = true
 			claim.RAMBytes += dev.AllocatedBytes
+		}
+	}
+	if hasGPU {
+		mode = "gpu"
+		if hasCPU {
+			mode = "hybrid"
 		}
 	}
 	if cfg.Placement.Mode == "cpu_offload" {

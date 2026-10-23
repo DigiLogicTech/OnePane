@@ -2,8 +2,10 @@ package runtimecoord
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -137,6 +139,23 @@ func TestAdmissionCancellationRaceDoesNotStrandComputeLease(t *testing.T) {
 		s.mu.Unlock()
 		if count != 0 {
 			t.Fatalf("cancelled admission stranded %d active leases", count)
+		}
+	}
+}
+
+func TestHybridComputeClaimsAreIndependentOfPlacementDeviceOrder(t *testing.T) {
+	s := coordinatorFixture(t)
+	for _, devices := range []string{
+		`[{"kind":"cpu","allocated_bytes":100},{"kind":"accelerator","device_id":"gpu-0","allocated_bytes":200},{"kind":"accelerator","device_id":"gpu-1","allocated_bytes":300}]`,
+		`[{"kind":"accelerator","device_id":"gpu-0","allocated_bytes":200},{"kind":"cpu","allocated_bytes":100},{"kind":"accelerator","device_id":"gpu-1","allocated_bytes":300}]`,
+		`[{"kind":"accelerator","device_id":"gpu-0","allocated_bytes":200},{"kind":"accelerator","device_id":"gpu-1","allocated_bytes":300},{"kind":"cpu","allocated_bytes":100}]`,
+	} {
+		req := localRequest("placement", "node")
+		req.Deployment.RuntimeConfigJSON = json.RawMessage(`{"runtime_backend":"colibri","placement":{"devices":` + devices + `}}`)
+		claim, err := s.claimForDeployment(context.Background(), req.Deployment)
+		want := []string{"node:node:cpu", "node:node:gpu:gpu-0", "node:node:gpu:gpu-1"}
+		if err != nil || claim.ComputeMode != "hybrid" || claim.RAMBytes != 100 || claim.VRAMBytes != 500 || !reflect.DeepEqual(claim.ResourceIDs, want) {
+			t.Fatalf("placement order lost shared resources: %+v %v", claim, err)
 		}
 	}
 }

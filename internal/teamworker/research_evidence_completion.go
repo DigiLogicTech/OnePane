@@ -66,6 +66,7 @@ func(s *Service) completeProtectedResearchTurn(
     AND tm.status='active'
    JOIN tasks task ON task.id=ss.task_id AND task.workspace_id=ss.workspace_id
     AND task.project_id=e.project_id AND task.project_workspace_id=e.project_workspace_id
+    AND task.archived_at IS NULL AND task.state IN ('created','ready','running','waiting_dependency','waiting_approval','paused','completion_requested','verifying')
    JOIN projects p ON p.id=e.project_id AND p.workspace_id=ss.workspace_id
     AND p.status='active'
    JOIN project_workspaces pw ON pw.id=e.project_workspace_id

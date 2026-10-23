@@ -150,6 +150,14 @@ func TestResearchSeatVerifiedTextDeliveryUsesRealLibraryAndArtifactGrants(t *tes
  }
  firstTurn:=bySeat[first.ID]
  secondTurn:=bySeat[second.ID]
+ // A live consent cannot authorize publication after Task cancellation.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE tasks SET state='cancel_requested' WHERE id=?`,job.ID);err!=nil{t.Fatal(err)}
+ if _,err=worker.completeProtectedResearchTurn(ctx,"tenant",session.ID,firstTurn.ID,
+  first.ID,manifest.SnapshotSHA256,frozen.Evidence.ManifestSHA256,
+  1,makeResponse("must not persist after cancellation"));err==nil{t.Fatal("cancelled Task published protected Research response")}
+ var cancellationMessages int
+ if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM team_messages WHERE session_id=? AND message_kind='agent'`,session.ID).Scan(&cancellationMessages);err!=nil||cancellationMessages!=0{t.Fatalf("cancelled Research message count: %d %v",cancellationMessages,err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE tasks SET state='created' WHERE id=?`,job.ID);err!=nil{t.Fatal(err)}
  if _,err=worker.completeProtectedResearchTurn(ctx,"tenant",session.ID,firstTurn.ID,
   first.ID,manifest.SnapshotSHA256,frozen.Evidence.ManifestSHA256,
   1,makeResponse("first protected local answer"));err!=nil{t.Fatal(err)}

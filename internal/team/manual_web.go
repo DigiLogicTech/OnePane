@@ -87,6 +87,13 @@ func (s *Service) ManualWebTurns(ctx context.Context, workspaceID string) ([]Man
     return out,rows.Err()
 }
 
+// Manual handoffs and approvals share the reasoning Task's cancellation fence.
+func requireManualReasoningTask(ctx context.Context,tx storage.Tx,sessionID,workspace string) error {
+    var taskID string
+    if err:=tx.QueryRowContext(ctx,`SELECT task_id FROM team_sessions WHERE id=? AND workspace_id=?`,sessionID,workspace).Scan(&taskID);err!=nil{return err}
+    return requireReasoningTask(ctx,tx,taskID,workspace)
+}
+
 // Invoked by TeamWorker on the exact running Council turn. A failed write
 // rolls back the turn state and the handoff atomically.
 func (s *Service) QueueManualWebTurn(ctx context.Context,c QueueManualWebTurnCommand) (ManualWebTurn,error) {
@@ -96,6 +103,7 @@ func (s *Service) QueueManualWebTurn(ctx context.Context,c QueueManualWebTurnCom
     now:=s.clock.UnixMilli()
     sha:=manualWebDigest(c.Prompt)
     err=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+        if err:=requireManualReasoningTask(ctx,tx,c.SessionID,c.WorkspaceID);err!=nil{return err}
         changed,err:=tx.ExecContext(ctx,`UPDATE team_turn_requests SET status='blocked',
             error_text='Awaiting manual Web Chat response',updated_at=?
             WHERE id=? AND session_id=? AND workspace_id=? AND member_id=? AND status='running'
@@ -133,6 +141,7 @@ func (s *Service) RestartManualWebConversation(ctx context.Context,turnID,actor 
         if n!=1{return ErrSessionState}
         t,err:=scanManualWebTurn(tx.QueryRowContext(ctx,manualWebTurnSelect+" WHERE turn_id=?",turnID))
         if err!=nil{return err}
+        if err:=requireManualReasoningTask(ctx,tx,t.SessionID,t.WorkspaceID);err!=nil{return err}
         var memberStatus string
         if err:=tx.QueryRowContext(ctx,"SELECT status FROM workspace_memberships WHERE workspace_id=? AND principal_id=?",t.WorkspaceID,actor).Scan(&memberStatus);err!=nil||memberStatus!="active"{return ErrInvalid}
         return s.emit(ctx,tx,t.WorkspaceID,"team.manual_web_new_conversation","team_session",t.SessionID,&actor,
@@ -151,6 +160,7 @@ func (s *Service) SubmitManualWebResponse(ctx context.Context,c SubmitManualWebR
     err:=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
         t,err:=scanManualWebTurn(tx.QueryRowContext(ctx,manualWebTurnSelect+" WHERE turn_id=?",c.TurnID))
         if err!=nil{return err}
+        if err:=requireManualReasoningTask(ctx,tx,t.SessionID,t.WorkspaceID);err!=nil{return err}
         var memberStatus string
         if err:=tx.QueryRowContext(ctx,"SELECT status FROM workspace_memberships WHERE workspace_id=? AND principal_id=?",t.WorkspaceID,c.SubmittedBy).Scan(&memberStatus);err!=nil||memberStatus!="active"{return ErrInvalid}
         if t.Status!="awaiting_input"||t.ConversationGeneration!=c.ConversationGeneration{return ErrSessionState}

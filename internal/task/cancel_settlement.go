@@ -117,6 +117,7 @@ func (s *Service) settleUnstartedGraph(ctx context.Context, tx storage.Tx, rootI
 		}
 		if t.WorkspaceID != root.WorkspaceID || !sameOptionalID(t.ProjectID, root.ProjectID) ||
 			!sameOptionalID(t.ProjectWorkspaceID, root.ProjectWorkspaceID) ||
+			!sameOptionalID(t.ArtifactSessionID, root.ArtifactSessionID) ||
 			(t.State != StateCancelRequested && t.State != StateCancelled) || len(t.Result) != 0 {
 			return 0, nil
 		}

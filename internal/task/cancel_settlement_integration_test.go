@@ -5,6 +5,7 @@ package task_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -14,16 +15,49 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/task"
 )
 
+var cancellationTemplate struct {
+	sync.Once
+	data []byte
+	err  error
+}
+
 func cancellationFixture(t *testing.T) (*sqlitestore.DB, *task.Service) {
 	t.Helper()
-	db, err := sqlitestore.Open(t.TempDir() + "/cancel.db")
+	path := t.TempDir() + "/cancel.db"
+	// Run the actual migrations once, then clone their fully checkpointed,
+	// closed output. Every case still owns a separate durable database; race
+	// coverage spends its budget on lifecycle behavior rather than repeatedly
+	// interpreting the same hundred migrations under the race detector.
+	cancellationTemplate.Do(func() {
+		template, err := sqlitestore.Open(path + ".template")
+		if err != nil {
+			cancellationTemplate.err = err
+			return
+		}
+		err = template.Migrate(context.Background())
+		if err == nil {
+			_, err = template.SQL().Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+		}
+		closeErr := template.Close()
+		if err == nil {
+			err = closeErr
+		}
+		if err == nil {
+			cancellationTemplate.data, err = os.ReadFile(path + ".template")
+		}
+		cancellationTemplate.err = err
+	})
+	if cancellationTemplate.err != nil {
+		t.Fatal(cancellationTemplate.err)
+	}
+	if err := os.WriteFile(path, cancellationTemplate.data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sqlitestore.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	if err = db.Migrate(context.Background()); err != nil {
-		t.Fatal(err)
-	}
 	// Prove readers are closed before transactional work on tiny hosts.
 	db.SQL().SetMaxOpenConns(1)
 	for _, ws := range []string{"ws", "foreign"} {
@@ -119,7 +153,7 @@ func TestUnstartedCancellationHistoricalEvidenceAndFairness(t *testing.T) {
 }
 
 func TestUnstartedCancellationDefersUnsafeGraphs(t *testing.T) {
-	for _, kind := range []string{"foreign", "uncancelled", "historical_child", "completed_child", "oversized", "result", "started_event", "missing_intent", "running_origin", "power_hold", "wake_attempt", "global_lease"} {
+	for _, kind := range []string{"foreign", "uncancelled", "historical_child", "completed_child", "oversized", "result", "started_event", "missing_intent", "running_origin", "power_hold", "wake_attempt", "global_lease", "artifact_session"} {
 		t.Run(kind, func(t *testing.T) {
 			db, svc := cancellationFixture(t)
 			cancellingTask(t, db, svc, "a-root", "", "ws")
@@ -132,6 +166,11 @@ func TestUnstartedCancellationDefersUnsafeGraphs(t *testing.T) {
 			switch kind {
 			case "foreign":
 				cancellingTask(t, db, svc, "z-child", "a-root", "foreign")
+			case "artifact_session":
+				cancellingTask(t, db, svc, "z-child", "a-root", "ws")
+				exec(`INSERT INTO principals(id,principal_type,display_name,status,created_at,updated_at) VALUES('human','human','Owner','active',1,1)`)
+				exec(`INSERT INTO artifact_sessions(id,workspace_id,title,format,status,created_by,created_at,updated_at) VALUES('a','ws','Other result','text','active','human',1,1)`)
+				exec(`UPDATE tasks SET artifact_session_id='a' WHERE id='z-child'`)
 			case "uncancelled", "completed_child", "historical_child":
 				cancellingTask(t, db, svc, "z-child", "a-root", "ws")
 				if kind == "uncancelled" {

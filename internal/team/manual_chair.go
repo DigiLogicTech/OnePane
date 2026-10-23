@@ -84,13 +84,14 @@ func (s *Service) QueueManualWebChair(ctx context.Context,c QueueManualWebChairC
  if c.Stage=="agenda"&&c.AfterRound!=0 || c.Stage=="review"&&c.AfterRound<1{return ManualWebChairTurn{},ErrInvalid}
  provider,model,err:=ValidateManualWebProvider(c.ProviderID,c.ModelLabel)
  if err!=nil||strings.TrimSpace(c.Prompt)==""||len(c.Prompt)>160<<10{return ManualWebChairTurn{},ErrInvalid}
- var existingID string
- err=s.db.QueryRowContext(ctx,`SELECT id FROM manual_web_council_chair_turns WHERE session_id=? AND stage=? AND after_round=?`,c.SessionID,c.Stage,c.AfterRound).Scan(&existingID)
- if err==nil{return s.ManualWebChairTurn(ctx,existingID)}
- if err!=sql.ErrNoRows{return ManualWebChairTurn{},err}
  idv,err:=s.ids.New("tchair");if err!=nil{return ManualWebChairTurn{},err}
  now:=s.clock.UnixMilli()
  err=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+   if err:=requireManualReasoningTask(ctx,tx,c.SessionID,c.WorkspaceID);err!=nil{return err}
+   var existingID string
+   err:=tx.QueryRowContext(ctx,`SELECT id FROM manual_web_council_chair_turns WHERE session_id=? AND workspace_id=? AND stage=? AND after_round=?`,c.SessionID,c.WorkspaceID,c.Stage,c.AfterRound).Scan(&existingID)
+   if err==nil{idv=existingID;return nil}
+   if err!=sql.ErrNoRows{return err}
    var status string
    var round int64
    if err:=tx.QueryRowContext(ctx,`SELECT status,round_number FROM team_sessions WHERE id=? AND workspace_id=?`,c.SessionID,c.WorkspaceID).Scan(&status,&round);err!=nil{return err}
@@ -99,7 +100,7 @@ func (s *Service) QueueManualWebChair(ctx context.Context,c QueueManualWebChairC
    if err:=tx.QueryRowContext(ctx,`SELECT snapshot_json FROM team_session_manifests WHERE session_id=? AND research_mode=1 AND execution_mode='council'`,c.SessionID).Scan(&snapshotRaw);err!=nil{return err}
    var snap SessionSnapshot
    if json.Unmarshal([]byte(snapshotRaw),&snap)!=nil||snap.Research.ChairMode!="manual"||snap.Research.ChairMemberID!=c.MemberID{return ErrInvalid}
-   _,err:=tx.ExecContext(ctx,`INSERT INTO manual_web_council_chair_turns
+   _,err=tx.ExecContext(ctx,`INSERT INTO manual_web_council_chair_turns
     (id,session_id,workspace_id,member_id,provider_id,model_label,stage,after_round,prompt_text,prompt_sha256,status,created_at)
     VALUES(?,?,?,?,?,?,?,?,?,?,'awaiting_input',?)`,
      idv,c.SessionID,c.WorkspaceID,c.MemberID,provider,model,c.Stage,c.AfterRound,c.Prompt,manualWebDigest(c.Prompt),now)
@@ -107,11 +108,7 @@ func (s *Service) QueueManualWebChair(ctx context.Context,c QueueManualWebChairC
    return s.emit(ctx,tx,c.WorkspaceID,"team.chair_turn_queued","team_session",c.SessionID,nil,
      map[string]any{"chair_turn_id":idv,"stage":c.Stage,"after_round":c.AfterRound,"prompt_sha256":manualWebDigest(c.Prompt)})
  })
- if err!=nil{
-  // Another worker may have raced the insert; the unique key preserves exactly one turn.
-  if e:=s.db.QueryRowContext(ctx,`SELECT id FROM manual_web_council_chair_turns WHERE session_id=? AND stage=? AND after_round=?`,c.SessionID,c.Stage,c.AfterRound).Scan(&existingID);e==nil{return s.ManualWebChairTurn(ctx,existingID)}
-  return ManualWebChairTurn{},err
- }
+ if err!=nil{return ManualWebChairTurn{},err}
  return s.ManualWebChairTurn(ctx,idv)
 }
 func(s *Service) chairActor(ctx context.Context,tx storage.Tx,ws,actor string)bool{
@@ -125,6 +122,7 @@ func(s *Service) SubmitManualWebChair(ctx context.Context,c SubmitManualWebChair
  now:=s.clock.UnixMilli()
  err:=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
    t,err:=scanManualChair(tx.QueryRowContext(ctx,manualChairSelect+" WHERE id=?",c.ID));if err!=nil{return err}
+   if err:=requireManualReasoningTask(ctx,tx,t.SessionID,t.WorkspaceID);err!=nil{return err}
    if !s.chairActor(ctx,tx,t.WorkspaceID,c.Actor){return ErrHumanRequired}
    if t.Status!="awaiting_input"{return ErrSessionState}
    var round int64
@@ -160,6 +158,7 @@ func(s *Service) ApproveManualWebChair(ctx context.Context,c ApproveManualWebCha
  now:=s.clock.UnixMilli()
  err:=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
    t,err:=scanManualChair(tx.QueryRowContext(ctx,manualChairSelect+" WHERE id=?",c.ID));if err!=nil{return err}
+   if err:=requireManualReasoningTask(ctx,tx,t.SessionID,t.WorkspaceID);err!=nil{return err}
    if !s.chairActor(ctx,tx,t.WorkspaceID,c.Actor){return ErrHumanRequired}
    if t.Status!="awaiting_approval"{return ErrSessionState}
    var round int64

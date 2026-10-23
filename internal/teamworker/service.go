@@ -115,8 +115,11 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]Result, error) {
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT tr.id,tr.workspace_id,tr.session_id,tr.member_id,tr.round_number,tr.research_phase
 		FROM team_turn_requests tr
-		JOIN team_sessions ss ON ss.id=tr.session_id
+		JOIN team_sessions ss ON ss.id=tr.session_id AND ss.workspace_id=tr.workspace_id
+		JOIN tasks t ON t.id=ss.task_id AND t.workspace_id=ss.workspace_id
 		WHERE tr.status='pending' AND ss.status='deliberating'
+		AND ss.round_number=tr.round_number AND t.archived_at IS NULL
+		AND t.state IN ('created','ready','running','waiting_dependency','waiting_approval','paused','completion_requested','verifying')
 		ORDER BY tr.created_at,tr.id LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -159,20 +162,10 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		return s.fail(ctx, res, err)
 	}
 	if ss.Status != "deliberating" {
-		res.Status = "paused"
-		res.Error = "team session is not dispatching"
-		return res
+		return s.observeReasoningTurn(ctx,res,team.ErrSessionState)
 	}
-	now := s.clock.UnixMilli()
-	r, err := s.db.ExecContext(ctx, `UPDATE team_turn_requests SET status='running',updated_at=? WHERE id=? AND status='pending'`, now, turnID)
-	if err != nil {
-		res.Error = err.Error()
-		return res
-	}
-	n, _ := r.RowsAffected()
-	if n != 1 {
-		res.Error = "turn already claimed"
-		return res
+	if err := s.claimReasoningTurn(ctx, ws, sessionID, turnID, memberID, turnRound); err != nil {
+		return s.observeReasoningTurn(ctx,res,err)
 	}
 	if ss.WorkspaceID != ws {
 		return s.fail(ctx, res, team.ErrWorkspaceMismatch)
@@ -475,6 +468,10 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		if researchMode{return s.pauseResearch(ctx,res,ss,turnID,proofErr)}
 		return s.fail(ctx,res,proofErr)
 	}
+	if err := s.requireRunningReasoningTurn(ctx,ws,sessionID,turnID,member.ID,turnRound); err != nil {
+		s.release(ctx,reservationID)
+		return s.fail(ctx,res,err)
+	}
 	response, err := s.dispatch(ctx, areq, cand, label, reservationID)
 	if err != nil {
 		s.release(ctx, reservationID)
@@ -512,16 +509,8 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 				fmt.Errorf("protected Research response discarded: %w",completeErr))
 		}
 	}else{
-		msg,postErr:=s.teams.PostMessage(ctx,team.PostMessageCommand{
-			SessionID:ss.ID,AuthorPrincipalID:WorkerPrincipal,
-			AuthorMemberID:&member.ID,Kind:"agent",Content:content,
-		})
+		_,postErr:=s.teams.CompleteReasoningTurn(ctx,ss.ID,turnID,member.ID,WorkerPrincipal,turnRound,content)
 		if postErr!=nil{return s.fail(ctx,res,postErr)}
-		completed:=s.clock.UnixMilli()
-		_,err=s.db.ExecContext(ctx,`UPDATE team_turn_requests
-		 SET status='succeeded',response_message_id=?,updated_at=?,completed_at=?
-		 WHERE id=? AND status='running'`,msg.ID,completed,completed,turnID)
-		if err!=nil{return s.fail(ctx,res,err)}
 	}
 	res.Status = "succeeded"
 	return res
@@ -788,18 +777,10 @@ func (s *Service) release(ctx context.Context, idv string) {
 	}
 }
 func (s *Service) fail(ctx context.Context, r Result, err error) Result {
-	now := s.clock.UnixMilli()
-	_, _ = s.db.ExecContext(ctx, `UPDATE team_turn_requests SET status='failed',error_text=?,updated_at=?,completed_at=? WHERE id=?`, bound(err.Error(), 2048), now, now, r.TurnID)
-	r.Status = "failed"
-	r.Error = err.Error()
-	return r
+	return s.finishReasoningError(ctx,r,"failed",err)
 }
 func (s *Service) block(ctx context.Context, r Result, err error) Result {
-	now := s.clock.UnixMilli()
-	_, _ = s.db.ExecContext(ctx, `UPDATE team_turn_requests SET status='blocked',error_text=?,updated_at=?,completed_at=? WHERE id=?`, bound(err.Error(), 2048), now, now, r.TurnID)
-	r.Status = "blocked"
-	r.Error = err.Error()
-	return r
+	return s.finishReasoningError(ctx,r,"blocked",err)
 }
 func bound(v string, n int) string {
 	if len(v) > n {

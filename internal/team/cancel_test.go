@@ -79,6 +79,10 @@ func TestTeamCancellationIsAtomicScopedAndPreservesCompletedContributions(t *tes
 	if _, err = s.RequestExecutionCancellation(ctx, command); err != nil {
 		t.Fatal(err)
 	}
+	var cancellationRevision int64
+	if err = db.SQL().QueryRow(`SELECT json_extract(payload_json,'$.task_revision') FROM events WHERE event_type='team.execution_cancellation_requested' AND aggregate_id=?`, ss.ID).Scan(&cancellationRevision); err != nil || cancellationRevision != root.Revision+1 {
+		t.Fatalf("cancellation audit revision=%d err=%v", cancellationRevision, err)
+	}
 	for _, id := range []string{root.ID, parentID, descendant.ID} {
 		got, err := s.tasks.Get(ctx, id)
 		if err != nil || got.State != task.StateCancelRequested || got.CancelRequestedAt == nil {
@@ -204,5 +208,49 @@ func TestTeamCancellationPropagatesAnEarlierRootOnlyRequest(t *testing.T) {
 		if err != nil || child.State != task.StateCancelRequested {
 			t.Fatalf("root-only request was not propagated: %+v %v", child, err)
 		}
+	}
+}
+
+func TestTeamCancellationRejectsCrossProjectWorkspaceAndArtifactScope(t *testing.T) {
+	for _, mode := range []string{"project", "named_workspace", "artifact_session"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			s, db, ss, specs := assignmentFixture(t)
+			ids := acceptAssignments(t, s, ss, specs)
+			root, _ := s.tasks.Get(ctx, ss.TaskID)
+			accepted, _ := s.Session(ctx, ss.ID)
+			exec := func(query string, args ...any) {
+				t.Helper()
+				if _, err := db.SQL().Exec(query, args...); err != nil {
+					t.Fatal(err)
+				}
+			}
+			exec(`INSERT INTO projects(id,workspace_id,name,status,project_policy_json,indexing_config_json,created_by,created_at,updated_at) VALUES('p','tenant','Foreign project','active','{}','{}','human',1,1)`)
+			switch mode {
+			case "project":
+				exec(`UPDATE tasks SET project_id='p' WHERE id=?`, ids["review"])
+			case "named_workspace":
+				// Same Project, different named Workspace is still outside the graph.
+				exec(`INSERT INTO project_workspaces(id,project_id,name,created_at,updated_at) VALUES('w','p','Other',1,1)`)
+				exec(`UPDATE tasks SET project_id='p' WHERE id=? OR parent_task_id=?`, ss.TaskID, ss.TaskID)
+				exec(`UPDATE tasks SET project_workspace_id='w' WHERE id=?`, ids["review"])
+			case "artifact_session":
+				exec(`INSERT INTO artifact_sessions(id,workspace_id,title,format,status,created_by,created_at,updated_at) VALUES('a','tenant','Other result','text','active','human',1,1)`)
+				exec(`UPDATE tasks SET artifact_session_id='a' WHERE id=?`, ids["review"])
+			}
+			if _, err := s.RequestExecutionCancellation(ctx, CancelExecutionCommand{SessionID: ss.ID, PlanID: *accepted.AcceptedPlanID, ExpectedTaskRevision: root.Revision, ActorPrincipalID: "human"}); err != ErrInvalid {
+				t.Fatalf("cross-scope cancellation accepted: %v", err)
+			}
+			for _, id := range []string{root.ID, ids["build"], ids["review"]} {
+				got, err := s.tasks.Get(ctx, id)
+				if err != nil || got.CancelRequestedAt != nil || got.State == task.StateCancelRequested {
+					t.Fatalf("rejected graph changed Task: %+v %v", got, err)
+				}
+			}
+			var audits int
+			if err := db.SQL().QueryRow(`SELECT COUNT(*) FROM events WHERE event_type IN ('task.cancel_requested','team.execution_cancellation_requested')`).Scan(&audits); err != nil || audits != 0 {
+				t.Fatalf("rejected graph emitted cancellation: %d %v", audits, err)
+			}
+		})
 	}
 }

@@ -560,6 +560,7 @@ func (s *Service) PostMessage(ctx context.Context, c PostMessageCommand) (Messag
 		var status string
 		if err:=tx.QueryRowContext(ctx,`SELECT status FROM team_sessions WHERE id=? AND workspace_id=? AND team_id=?`,ss.ID,ss.WorkspaceID,ss.TeamID).Scan(&status);err!=nil{return err}
 		if !messageSessionAllows(status,c.Kind){return ErrSessionState}
+		if err := requireReasoningTask(ctx, tx, ss.TaskID, ss.WorkspaceID); err != nil { return err }
 		if err := validateGuidanceTarget(ctx, tx, ss, c.Kind, raw); err != nil { return err }
 		if c.Kind=="human" {
 			var valid int
@@ -673,6 +674,7 @@ func (s *Service) RequestRound(ctx context.Context, c RequestRoundCommand) ([]Tu
 	now := s.clock.UnixMilli()
 	var out []TurnRequest
 	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		if err := requireReasoningTask(ctx, tx, ss.TaskID, ss.WorkspaceID); err != nil { return err }
 		if c.TriggerMessageID != nil {
 			var found int
 			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_messages WHERE id=? AND session_id=? AND workspace_id=?`, *c.TriggerMessageID, ss.ID, ss.WorkspaceID).Scan(&found); err != nil {
@@ -1069,19 +1071,31 @@ func (s *Service) allowAdmission(ctx context.Context, taskID string) error {
 }
 
 func (s *Service) SyncTaskStates(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT s.id,t.state,s.status FROM team_sessions s JOIN tasks t ON t.id=s.task_id WHERE s.status NOT IN ('completed','cancelled')`)
+	rows, err := s.db.QueryContext(ctx, `SELECT s.id,s.task_id,t.state,s.status,t.revision,s.revision FROM team_sessions s JOIN tasks t ON t.id=s.task_id WHERE s.status NOT IN ('completed','cancelled')`)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	type row struct{ id, ts, ss string }
+	type row struct {
+		id, taskID, ts, ss             string
+		taskRevision, sessionRevision int64
+	}
 	var xs []row
 	for rows.Next() {
 		var x row
-		if err := rows.Scan(&x.id, &x.ts, &x.ss); err != nil {
-			return err
+		if err = rows.Scan(&x.id, &x.taskID, &x.ts, &x.ss, &x.taskRevision, &x.sessionRevision); err != nil {
+			break
 		}
 		xs = append(xs, x)
+	}
+	if err == nil {
+		err = rows.Err()
+	}
+	closeErr := rows.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 	now := s.clock.UnixMilli()
 	for _, x := range xs {
@@ -1101,10 +1115,16 @@ func (s *Service) SyncTaskStates(ctx context.Context) error {
 			next = "cancelled"
 		}
 		if next != "" && next != x.ss {
-			_, _ = s.db.ExecContext(ctx, `UPDATE team_sessions SET status=?,revision=revision+1,updated_at=? WHERE id=?`, next, now, x.id)
+			// Apply only the observed incarnation. A concurrent pause, cancellation,
+			// plan edit or Task transition must be observed again on the next tick.
+			if _, err := s.db.ExecContext(ctx, `UPDATE team_sessions SET status=?,revision=revision+1,updated_at=?
+			 WHERE id=? AND task_id=? AND status=? AND revision=?
+			 AND EXISTS(SELECT 1 FROM tasks t WHERE t.id=team_sessions.task_id AND t.state=? AND t.revision=?)`,
+				next, now, x.id, x.taskID, x.ss, x.sessionRevision, x.ts, x.taskRevision); err != nil {
+				return err
+			}
 		}
 	}
-	if err:=rows.Err();err!=nil{return err}
 	return s.syncAssignmentNotices(ctx)
 }
 

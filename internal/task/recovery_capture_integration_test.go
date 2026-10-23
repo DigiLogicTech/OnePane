@@ -4,6 +4,7 @@ package task_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"sync"
@@ -53,6 +54,20 @@ func TestRecoveryCaptureRetainsOriginalAndAcknowledgesOnlyDurableIntake(t *testi
 	}
 	if _, e = db.SQL().Exec(`UPDATE task_recovery_cases SET task_id=task_id`); e == nil {
 		t.Fatal("case identity mutable")
+	}
+	page, e := s.ListRecoveryCases(ctx, "ws", job.ID, "")
+	if e != nil || len(page.Cases) != 1 || page.Cases[0].AttemptID != attempt.ID {
+		t.Fatalf("intake metadata missing: %+v %v", page, e)
+	}
+	caseID := page.Cases[0].ID
+	if _, e = s.GetRecoveryCase(ctx, "foreign", job.ID, caseID); !errors.Is(e, sql.ErrNoRows) {
+		t.Fatalf("foreign Workspace read: %v", e)
+	}
+	if _, e = s.GetRecoveryCase(ctx, "ws", "foreign-task", caseID); !errors.Is(e, sql.ErrNoRows) {
+		t.Fatalf("foreign Task read: %v", e)
+	}
+	if c, e := s.GetRecoveryCase(ctx, "ws", job.ID, caseID); e != nil || c.Phase != "awaiting_inventory" {
+		t.Fatalf("case detail missing: %+v %v", c, e)
 	}
 }
 
@@ -242,5 +257,42 @@ func TestRecoveryCaptureHistoryBoundAndScheduledOwnership(t *testing.T) {
 				t.Fatalf("unavailable job consumed: %+v %v", r, e)
 			}
 		})
+	}
+}
+
+func TestRecoveryCaptureReadPaginationCannotCrossScope(t *testing.T) {
+	db, s, job, _ := interruptedAdmissionFixture(t)
+	ctx := context.Background()
+	if _, e := s.CaptureRecoveryCases(ctx, 1); e != nil {
+		t.Fatal(e)
+	}
+	for i := 0; i < 32; i++ {
+		id := fmt.Sprintf("history-%03d", i)
+		if _, e := db.SQL().Exec(`INSERT INTO task_attempts(id,task_id,attempt_number,status,metadata_json) VALUES(?,?,?,'interrupted','{}')`, id, job.ID, i+2); e != nil {
+			t.Fatal(e)
+		}
+		if _, e := db.SQL().Exec(`INSERT INTO events(id,workspace_id,event_type,aggregate_type,aggregate_id,payload_json,occurred_at) VALUES(?,'ws','task.attempt_interrupted','task',?,json_object('task_id',?,'attempt_id',?),1)`, id, job.ID, job.ID, id); e != nil {
+			t.Fatal(e)
+		}
+		if _, e := db.SQL().Exec(`INSERT INTO task_recovery_cases(id,workspace_id,task_id,attempt_id,interruption_event_id,source_job_id,task_revision_at_capture,created_at) VALUES(?,'ws',?,?,?,'historical-job',?,1)`, id, job.ID, id, id, job.Revision); e != nil {
+			t.Fatal(e)
+		}
+	}
+	page, e := s.ListRecoveryCases(ctx, "ws", job.ID, "")
+	if e != nil || len(page.Cases) != 32 || page.NextAfter == "" {
+		t.Fatalf("unbounded/missing page: %+v %v", page, e)
+	}
+	next, e := s.ListRecoveryCases(ctx, "ws", job.ID, page.NextAfter)
+	if e != nil || len(next.Cases) != 1 || next.NextAfter != "" || next.Cases[0].ID <= page.NextAfter {
+		t.Fatalf("cursor duplicated/omitted history: %+v %v", next, e)
+	}
+	for _, scope := range [][2]string{{"foreign", job.ID}, {"ws", "foreign-task"}} {
+		denied, e := s.ListRecoveryCases(ctx, scope[0], scope[1], "")
+		if e != nil || len(denied.Cases) != 0 {
+			t.Fatalf("foreign list leaked: %+v %v", denied, e)
+		}
+	}
+	if _, e = s.ListRecoveryCases(ctx, "ws", job.ID, string(make([]byte, 161))); !errors.Is(e, task.ErrInvalidCommand) {
+		t.Fatalf("oversized cursor accepted: %v", e)
 	}
 }

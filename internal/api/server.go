@@ -368,6 +368,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/qa/api-capture/stop", s.qaAPICaptureStop)
 	s.mux.HandleFunc("GET /v1/tasks", s.listTasks)
 	s.mux.HandleFunc("GET /v1/tasks/{taskID}", s.getTask)
+	s.mux.HandleFunc("GET /v1/tasks/{taskID}/recovery-cases", s.readTaskRecoveryCases)
+	s.mux.HandleFunc("GET /v1/tasks/{taskID}/recovery-cases/{caseID}", s.readTaskRecoveryCases)
 	s.mux.HandleFunc("POST /v1/tasks", s.createTask)
 	s.mux.HandleFunc("POST /v1/tasks/{taskID}/archive", s.archiveTask)
 	s.mux.HandleFunc("POST /v1/tasks/{taskID}/unarchive", s.unarchiveTask)

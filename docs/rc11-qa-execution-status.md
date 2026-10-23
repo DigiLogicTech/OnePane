@@ -114,3 +114,9 @@ Exact3d033a30 integration40002672331 genuinely failed Linux race fixture migrati
 ## Durable interrupted-Task recovery intake
 
 The independent daemon now atomically captures bounded recovery jobs into unique original-Attempt cases and acknowledges only durable intake. Migration0102 is additive and preserves populated v101 interrupted data; cases remain awaiting_inventory and cannot clear recovery admission. Duplicate/restart/independent-consumer, missing/foreign/ambiguous history,128/129bounds, payload cap, future/claimed ownership, audit/ack rollback and unchanged Task/Attempt regressions pass. Full local Windows Task/Team/Teamworker/SQLite/daemon integration and affected vet pass. Hosted capture race selectors are added; exact new-head evidence is still required. Human decisions, effect inventory, independent verification, scoped recovery UI/API and historical backfill remain open. No physical model, installer or final release validation is claimed.
+
+## Recovery-case inspection and hosted fairness evidence
+
+Fairness `aa0973cb` exact integration40037542336 completed SUCCESS including Linux race/full Go regression/cross-platform and Windows; QAguard40037542434 passed. Intake1e9d9510 integration40038163754 still running Linux at this checkpoint; Windows and QAguard40038163708 passed. Physical approval/package remains skipped.
+
+Task-scoped recovery intake metadata list/detail is now implemented with32+1pagination, SQL scope checks, before/after permission checks and fresh authentication before response. Credential/membership revocation, foreign Task/Workspace, oversized cursor, missing/unavailable records and raw-error redaction regressions pass. Full Task/API local integration, final focused tests and vet pass. Intake inspection is not effect verification, a human decision or safe retry. Full recovery owner/inspector, approved remaining scope and physical/final UI/platform gates remain open.

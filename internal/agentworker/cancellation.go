@@ -13,7 +13,12 @@ func (s *Service) parkIfExecutionControlRequested(ctx context.Context, run Run, 
 	parked := false
 	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
 		var state string
-		if err := tx.QueryRowContext(ctx, `SELECT t.state FROM tasks t JOIN agent_worker_runs r ON r.task_id=t.id AND r.workspace_id=t.workspace_id WHERE r.id=? AND r.task_id=? AND r.attempt_id=? AND r.revision=? AND r.status='running'`, run.ID, run.TaskID, run.AttemptID, run.Revision).Scan(&state); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT t.state FROM tasks t
+		 JOIN agent_worker_runs r ON r.task_id=t.id AND r.workspace_id=t.workspace_id
+		 JOIN task_attempts a ON a.id=r.attempt_id AND a.task_id=t.id AND a.worker_principal_id=r.worker_principal_id
+		 WHERE r.id=? AND r.task_id=? AND r.attempt_id=? AND r.revision=? AND r.status='running'
+		 AND r.worker_principal_id=? AND a.status IN ('running','waiting')
+		 AND NOT EXISTS(SELECT 1 FROM task_attempts other WHERE other.task_id=t.id AND other.id<>a.id AND other.status IN ('created','queued','running','waiting'))`, run.ID, run.TaskID, run.AttemptID, run.Revision, WorkerPrincipal).Scan(&state); err != nil {
 			return err
 		}
 		pause := false

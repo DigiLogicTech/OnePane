@@ -72,9 +72,12 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 		return immediateWorkerStep(s.failRun(ctx, run, res, err))
 	}
 	if run.Status != RunRunning || t.State != task.StateRunning {
-		if run.Status == RunRunning && t.State == task.StatePaused {
-			if stopped, ok := s.parkIfExecutionControlRequested(ctx, run, res); ok {
-				return immediateWorkerStep(stopped)
+		if run.Status == RunRunning {
+			switch t.State {
+			case task.StatePaused, task.StateCancelRequested, task.StateCancelling, task.StateCompensating:
+				if stopped, ok := s.parkIfExecutionControlRequested(ctx, run, res); ok {
+					return immediateWorkerStep(stopped)
+				}
 			}
 		}
 		return immediateWorkerStep(failedResult(res, ErrInvalidWorkerState))

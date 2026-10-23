@@ -403,6 +403,9 @@ func main() {
 	// only pristine requests; dispatched work retains its recovery boundary.
 	go func() {
 		run := func() {
+			if _, err := runtime.Tasks.CaptureRecoveryCases(ctx, 4); err != nil && ctx.Err() == nil {
+				log.Printf("task recovery intake: %v", err)
+			}
 			if _, err := runtime.Tasks.SettleUnstartedCancellations(ctx, 4); err != nil && ctx.Err() == nil {
 				log.Printf("unstarted task cancellation: %v", err)
 			}

@@ -33,6 +33,8 @@ type Service struct {
 	db           *sql.DB
 	cancelMu     sync.Mutex
 	cancelCursor string
+	recoveryMu sync.Mutex
+	recoveryCursor string
 	tx     storage.Transactor
 	repo   repository
 	events eventAppender

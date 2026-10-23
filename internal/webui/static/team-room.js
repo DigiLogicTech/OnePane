@@ -9,8 +9,8 @@
  const text=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
  function content(m){let v=field(m,"content","Content");if(typeof v==="string"){try{v=JSON.parse(v)}catch{return v}}return typeof v?.text==="string"?v.text:"Structured contribution (inspect its durable record for details)."}
  function controller({api,taskID,onChange=()=>{},alive=()=>true}){
-  const state={sessionID:"",room:null,messages:[],history:null,hasOlder:false,view:"conversation",selectedAgent:"",draft:"",busy:false,error:"",liveAfter:""};
-  const abort=new AbortController();let reading=false,stopped=false;
+  const state={sessionID:"",room:null,messages:[],history:null,hasOlder:false,view:"conversation",selectedAgent:"",draft:"",busy:false,error:"",liveAfter:"",proposedPlan:null};
+  const abort=new AbortController();let reading=false,stopped=false,planDraftRevision=0;
   const active=()=>!stopped&&alive();const emit=()=>{if(active())onChange(state)};
   const request=(path,options={})=>api(path,{...options,signal:abort.signal});
   const path=suffix=>"/v1/team-sessions/"+encodeURIComponent(state.sessionID)+suffix;
@@ -21,6 +21,7 @@
     const [room,page]=await Promise.all([request(path("/live")),request(path("/messages/page?limit=30")+(state.liveAfter?"&after="+encodeURIComponent(state.liveAfter):""))]);
     if(!active())return;
     if(room.id!==state.sessionID||room.task_id!==taskID||!Array.isArray(room.members)||room.members.length>8||!Array.isArray(page.messages)||page.messages.length>50)throw Error("Invalid Team projection");
+    if(room.assignments!==undefined&&(!Array.isArray(room.assignments)||room.assignments.length>8||room.assignments.some(a=>!room.members.some(m=>m.id===a.member_id))))throw Error("Invalid Team assignments");
     state.room=room;
     const merged=new Map(state.messages.map(m=>[id(m),m]));for(const m of page.messages){if(field(m,"session_id","SessionID")!==state.sessionID)throw Error("Foreign message");merged.set(id(m),m)}
     state.messages=Array.from(merged.values()).sort((a,b)=>Number(a.sequence||0)-Number(b.sequence||0)||(id(a)<id(b)?-1:id(a)>id(b)?1:0)).slice(-100);
@@ -46,6 +47,20 @@
    finally{state.busy=false;emit()}
   }
   return {state,refresh,older,
+   invalidatePlanReview(){planDraftRevision++;state.proposedPlan=null;emit()},
+   async readAssignment(taskID){if(!state.room?.assignments?.some(a=>a.task_id===taskID)||!active())return null;try{const task=await request("/v1/tasks/"+encodeURIComponent(taskID));if(!active()||id(task)!==taskID||field(task,"workspace_id","WorkspaceID")!==state.room?.workspace_id)return null;return task}catch{return null}},
+   async proposeAssignments(assignments){
+    if(state.busy||!state.room||state.room.task_state!=="created"||!Array.isArray(assignments)||assignments.length<1||assignments.length>8||!active())return false;
+    if(assignments.some(a=>!state.room.members.some(m=>m.id===a.member_id&&m.kind==="agent")))return false;
+    const reviewRevision=planDraftRevision;state.busy=true;state.proposedPlan=null;emit();
+    try{const out=await request(path("/plans"),{method:"POST",body:JSON.stringify({plan:{assignments}})});if(!active())return false;
+     if(!id(out)||field(out,"session_id","SessionID")!==state.sessionID)throw Error("Invalid plan scope");
+     if(reviewRevision!==planDraftRevision){state.error="The draft changed while saving. Save the updated plan for a new review.";return false}
+     state.proposedPlan={id:id(out),assignments:JSON.parse(JSON.stringify(assignments))};state.error="";return true;
+    }catch{if(active())state.error="The plan could not be confirmed. Refresh and inspect saved plans before submitting again.";return false}
+    finally{state.busy=false;emit();await refresh()}
+   },
+   async acceptAssignments(){const plan=state.proposedPlan;if(!plan||state.room?.task_state!=="created")return false;const ok=await mutate("/plans/"+encodeURIComponent(plan.id)+"/accept",{accept_open_risk:false,decision:{reviewed_named_assignments:true}});if(ok){state.proposedPlan=null;await refresh()}return ok},
    stop(){stopped=true;abort.abort()},
    switchView(view){if(view!=="conversation"&&view!=="agents")return;state.view=view;emit()},
    live(){state.history=null;emit()},
@@ -58,7 +73,7 @@
   const scope=onepaneWorkspace;
   openModal("Live Team",'<section class="team-room" id="onepaneTeamRoom"><p class="page-subtitle">One shared session. Watch contributions and observed turns, send guidance, then request replies. Tool execution still requires the accepted Task plan.</p><div class="toolbar" role="group" aria-label="Team view"><button class="btn" data-team-view="conversation" aria-pressed="true">Conversation</button><button class="btn" data-team-view="agents" aria-pressed="false">Agents</button><button class="btn" data-team-refresh>Refresh</button></div><p data-team-status role="status">Connecting to the Task’s Team…</p><div data-team-conversation><div class="toolbar"><button class="btn" data-team-older>Earlier messages</button><button class="btn" data-team-live hidden>Return to live</button></div><div class="team-room-feed" data-team-feed tabindex="0" aria-label="Team conversation"></div></div><div class="team-room-agents" data-team-agents hidden></div><form class="qa-form" data-team-form><label>Message to the room<textarea rows="3" maxlength="8000" data-team-draft required></textarea></label><div class="toolbar"><button class="btn" type="submit" data-team-send>Send message</button><label>Request replies from<select aria-label="Request replies from" data-team-target><option value="">All agents</option></select></label><button class="btn primary" type="button" data-team-ask>Request replies</button></div><p class="list-meta">Sending saves your message. Request replies queues reasoning turns. Waiting does not mean that an agent or model is running.</p></form></section>');
   const el=document.getElementById("onepaneTeamRoom");if(!el)return;
-  const get=s=>el.querySelector(s);let roster="",timer=null;
+  const get=s=>el.querySelector(s);let roster="",timer=null,planEditor=null;
   const alive=()=>el.isConnected&&scope===onepaneWorkspace;
   const c=controller({api:apiRequest,taskID,alive,onChange:draw});
   function draw(s){
@@ -67,7 +82,7 @@
    const feed=get("[data-team-feed]"),top=feed.scrollTop,atEnd=feed.scrollHeight-feed.clientHeight-top<32;
    const members=s.room?.members||[],names=new Map(members.map(m=>[m.id,m.name]));
    const msgs=s.history?.messages||s.messages;
-   feed.innerHTML=msgs.length?msgs.map(m=>'<article class="team-room-message"><strong>'+text(names.get(field(m,"author_member_id","AuthorMemberID"))||(field(m,"kind","Kind")==="human"?"You":"Team"))+'</strong><small>Round '+text(field(m,"round_number","RoundNumber"))+'</small><p>'+text(content(m))+'</p></article>').join(""):'<p class="list-meta">No messages in this window.</p>';
+   feed.innerHTML=msgs.length?msgs.map(m=>'<article class="team-room-message"><strong>'+text(names.get(field(m,"author_member_id","AuthorMemberID"))||(field(m,"kind","Kind")==="human"?"You":"Team"))+'</strong><small>'+(field(m,"kind","Kind")==="system"?"System update · ":"")+'Round '+text(field(m,"round_number","RoundNumber"))+'</small><p>'+text(content(m))+'</p></article>').join(""):'<p class="list-meta">No messages in this window.</p>';
    feed.scrollTop=atEnd&&!s.history?feed.scrollHeight:top;
    get("[data-team-conversation]").hidden=s.view!=="conversation";get("[data-team-agents]").hidden=s.view!=="agents";
    el.querySelectorAll("[data-team-view]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.teamView===s.view)));
@@ -77,10 +92,12 @@
    const enabled=!!s.room&&["deliberating","plan_proposed","paused_for_deliberation","team_review"].includes(s.room.status)&&!s.busy;
    get("[data-team-send]").disabled=!enabled;get("[data-team-ask]").disabled=!enabled;
    get("[data-team-older]").disabled=s.busy||!(s.history?s.history.has_more:s.hasOlder||s.messages.length>=100);get("[data-team-live]").hidden=!s.history;
+   planEditor?.draw(s);
   }
   el.querySelectorAll("[data-team-view]").forEach(b=>b.onclick=()=>c.switchView(b.dataset.teamView));
   get("[data-team-draft]").oninput=e=>{c.state.draft=e.target.value};get("[data-team-target]").onchange=e=>{c.state.selectedAgent=e.target.value};
   get("[data-team-form]").onsubmit=e=>{e.preventDefault();c.send()};get("[data-team-ask]").onclick=()=>c.ask();get("[data-team-refresh]").onclick=()=>c.refresh();get("[data-team-older]").onclick=()=>c.older();get("[data-team-live]").onclick=()=>c.live();
+  if(root.OnePaneTeamAssignments)planEditor=root.OnePaneTeamAssignments.mount(el,c);
   const observer=new MutationObserver(()=>{if(!alive())stop()});observer.observe(document.body,{childList:true,subtree:true});
   function stop(){clearTimeout(timer);observer.disconnect();c.stop()}
   async function tick(){if(!alive()){stop();return}if(!document.hidden)await c.refresh();if(alive())timer=setTimeout(tick,2000);else stop()}

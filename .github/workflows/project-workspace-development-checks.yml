@@ -76,10 +76,13 @@ on:
       - 'internal/goalobserveradapter/**'
       - 'internal/agentworker/**'
       - 'internal/team/**'
+      - 'internal/teamgate/**'
       - 'internal/privatekeyfile/**'
       - 'internal/node/**'
       - 'internal/vault/**'
       - 'internal/webui/static/team-room.*'
+      - 'internal/webui/static/team-assignments.js'
+      - 'scripts/validate_team_assignments.js'
       - 'scripts/validate_team_room.js'
       - 'internal/teamworker/**'
       - 'internal/runtimecoord/**'
@@ -186,6 +189,8 @@ jobs:
           node --check internal/webui/static/app.js
           node --check internal/webui/static/team-room.js
           node scripts/validate_team_room.js
+          node --check internal/webui/static/team-assignments.js
+          node scripts/validate_team_assignments.js
           node --check internal/webui/static/web-chat-page.js
           node --check internal/webui/static/web-chat-session-tabs.js
           node --check internal/webui/static/web-chat-council-launch.js
@@ -239,6 +244,7 @@ jobs:
       - name: Node approval and SQLite race checks (hosted source only)
         run: |
           go test -race -count=1 ./internal/runtimecoord ./internal/teamworker
+          go test -race -tags integration -count=1 -timeout 3m -run 'Test(TeamAssignmentsExecute|ProjectTaskGraphRecognizesReviewedTeam)' ./internal/agentworker ./internal/projectorchestrator
           go test -race -count=1 ./internal/instrumentprobe ./internal/nodefederation ./cmd/onepane-node-custody ./cmd/onepane-instrument-probe
           go test -race -tags integration -count=1 -run TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly ./internal/projectworkspace
       - name: Managed inference lease and Colibri rollback race tests (hosted Linux)
@@ -391,6 +397,9 @@ jobs:
         run: |
           go test -count=1 -timeout 3m ./internal/runtimecoord
           go test -count=1 -timeout 3m -run TestTeamDispatchShares ./internal/teamworker
+          go test -count=1 -timeout 3m -run TestTeamAuthorityRechecked ./internal/inference
+          go test -count=1 -timeout 3m -run 'Test(AcceptedTeamAssignments|TeamAssignment)' ./internal/team ./internal/tool
+          go test -tags integration -count=1 -timeout 3m -run 'Test(TeamAssignmentsExecute|ProjectTaskGraphRecognizesReviewedTeam)' ./internal/agentworker ./internal/projectorchestrator
       - name: Native Windows persistent drive-root resolution
         shell: pwsh
         run: |

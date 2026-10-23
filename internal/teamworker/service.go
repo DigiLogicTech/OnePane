@@ -144,7 +144,7 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]Result, error) {
 	if err := s.advanceResearchSessions(ctx); err != nil {
 		return out, err
 	}
-	_ = s.teams.SyncTaskStates(ctx)
+	if err := s.teams.SyncTaskStates(ctx); err != nil { return out,err }
 	return out, nil
 }
 

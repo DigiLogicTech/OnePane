@@ -13,6 +13,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/event"
 	"github.com/DigiLogicTech/OnePane/internal/policy"
 	"github.com/DigiLogicTech/OnePane/internal/storage"
+	"github.com/DigiLogicTech/OnePane/internal/teamgate"
 )
 
 func (s *Service) Request(ctx context.Context, id string) (InferenceRequest, error) {
@@ -184,6 +185,9 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 		}
 	}
 	var runtimeLease RuntimeScheduleLease
+	if cmd.TaskID!=nil {
+		if _,err:=teamgate.Require(ctx,s.scopes.DB,cmd.WorkspaceID,*cmd.TaskID);err!=nil{return s.finishPreDispatchError(ctx,q.ID,err,cmd)}
+	}
 	if s.runtimeCoordinator != nil {
 		runtimeLease, err = s.runtimeCoordinator.Acquire(ctx, RuntimeScheduleRequest{
 			WorkspaceID: cmd.WorkspaceID, TaskID: cmd.TaskID, InferenceRequestID: q.ID,
@@ -269,6 +273,12 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 		s.releaseBudgetBeforeDispatch(ctx,cmd)
 		return s.finishTransportError(ctx,q.ID,nil,
 			&TransportError{Code:"task_agent_profile_revoked",OutcomeKnown:true,Err:err},cmd)
+	}
+	if cmd.TaskID!=nil {
+		if _,err:=teamgate.Require(ctx,s.scopes.DB,cmd.WorkspaceID,*cmd.TaskID);err!=nil{
+			s.releaseBudgetBeforeDispatch(ctx,cmd)
+			return s.finishTransportError(ctx,q.ID,nil,&TransportError{Code:"team_assignment_revoked",OutcomeKnown:true,Err:err},cmd)
+		}
 	}
 	result, dispatchErr := transport.Dispatch(ctx, DispatchRequest{WorkspaceID:cmd.WorkspaceID,TaskID:cmd.TaskID,RequestID: q.ID, Model: m, Deployment: d, Provider: p, RequestJSON: requestJSON}, s.secrets)
 	if dispatchErr != nil {

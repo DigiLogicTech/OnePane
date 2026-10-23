@@ -854,68 +854,7 @@ func (s *Service) Objection(ctx context.Context, idv string) (Objection, error) 
 }
 
 func (s *Service) AcceptPlan(ctx context.Context, c AcceptPlanCommand) (Session, error) {
-	ss, err := s.Session(ctx, c.SessionID)
-	if err != nil {
-		return Session{}, err
-	}
-	if !s.isHuman(ctx, c.AcceptedByPrincipalID) || !s.workspaceMember(ctx, ss.WorkspaceID, c.AcceptedByPrincipalID) {
-		return Session{}, ErrHumanRequired
-	}
-	var planStatus string
-	if err := s.db.QueryRowContext(ctx, `SELECT status FROM team_plans WHERE id=? AND session_id=?`, c.PlanID, ss.ID).Scan(&planStatus); err != nil || planStatus != "candidate" {
-		return Session{}, ErrInvalid
-	}
-	var blocking int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_objections WHERE session_id=? AND (plan_id IS NULL OR plan_id=?) AND status='open' AND severity IN ('blocking','critical')`, ss.ID, c.PlanID).Scan(&blocking); err != nil {
-		return Session{}, err
-	}
-	if blocking > 0 && !c.AcceptOpenRisk {
-		return Session{}, ErrOpenBlockingObjection
-	}
-	decision, err := canonical(c.Decision)
-	if err != nil {
-		return Session{}, err
-	}
-	now := s.clock.UnixMilli()
-	did, _ := s.ids.New("tdecision")
-	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		if blocking > 0 {
-			if _, e := tx.ExecContext(ctx, `UPDATE team_objections SET status='accepted_risk',resolution_json=?,resolved_by_principal_id=?,resolved_at=? WHERE session_id=? AND (plan_id IS NULL OR plan_id=?) AND status='open' AND severity IN ('blocking','critical')`, string(decision), c.AcceptedByPrincipalID, now, ss.ID, c.PlanID); e != nil {
-				return e
-			}
-		}
-		if _, e := tx.ExecContext(ctx, `UPDATE team_plans SET status='accepted',accepted_by_principal_id=?,accepted_at=? WHERE id=? AND status='candidate'`, c.AcceptedByPrincipalID, now, c.PlanID); e != nil {
-			return e
-		}
-		if _, e := tx.ExecContext(ctx, `UPDATE team_plans SET status='superseded' WHERE session_id=? AND id<>? AND status='candidate'`, ss.ID, c.PlanID); e != nil {
-			return e
-		}
-		if _, e := tx.ExecContext(ctx, `UPDATE team_sessions SET status='plan_accepted',accepted_plan_id=?,revision=revision+1,updated_at=? WHERE id=?`, c.PlanID, now, ss.ID); e != nil {
-			return e
-		}
-		if _, e := tx.ExecContext(ctx, `INSERT INTO team_decisions(id,workspace_id,session_id,decision_type,decision_json,decided_by_principal_id,created_at) VALUES(?,?,?,'plan_acceptance',?,?,?)`, did, ss.WorkspaceID, ss.ID, string(decision), c.AcceptedByPrincipalID, now); e != nil {
-			return e
-		}
-		actor := c.AcceptedByPrincipalID
-		return s.emit(ctx, tx, ss.WorkspaceID, "team.plan_accepted", "team_session", ss.ID, &actor, map[string]any{"plan_id": c.PlanID, "accepted_open_risk": blocking > 0})
-	})
-	if err != nil {
-		return Session{}, err
-	}
-	tr, err := s.tasks.Get(ctx, ss.TaskID)
-	if err != nil {
-		return Session{}, err
-	}
-	if tr.State == task.StateCreated {
-		if _, err = s.tasks.MarkReady(ctx, task.TransitionCommand{TaskID: tr.ID, ExpectedRevision: tr.Revision, ActorPrincipalID: &c.AcceptedByPrincipalID, Reason: "team plan accepted"}); err != nil {
-			return Session{}, err
-		}
-	} else if tr.State == task.StatePaused {
-		if _, err = s.tasks.Resume(ctx, task.TransitionCommand{TaskID: tr.ID, ExpectedRevision: tr.Revision, ActorPrincipalID: &c.AcceptedByPrincipalID, Reason: "revised team plan accepted"}); err != nil {
-			return Session{}, err
-		}
-	}
-	return s.Session(ctx, ss.ID)
+	return s.acceptPlan(ctx, c)
 }
 
 func (s *Service) PauseResearchRound(ctx context.Context, c PauseResearchRoundCommand) (Session, error) {
@@ -1051,6 +990,9 @@ func (s *Service) ReopenDeliberation(ctx context.Context, c ReopenCommand) (Sess
 	if !s.isHuman(ctx, c.RequestedByPrincipalID) || !s.workspaceMember(ctx, ss.WorkspaceID, c.RequestedByPrincipalID) {
 		return Session{}, ErrHumanRequired
 	}
+	var assignmentRoots int
+	if err=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM team_assignment_roots WHERE session_id=?`,ss.ID).Scan(&assignmentRoots);err!=nil{return Session{},err}
+	if assignmentRoots!=0{return Session{},ErrSessionState}
 	tr, err := s.tasks.Get(ctx, ss.TaskID)
 	if err != nil {
 		return Session{}, err
@@ -1149,7 +1091,8 @@ func (s *Service) SyncTaskStates(ctx context.Context) error {
 			_, _ = s.db.ExecContext(ctx, `UPDATE team_sessions SET status=?,revision=revision+1,updated_at=? WHERE id=?`, next, now, x.id)
 		}
 	}
-	return rows.Err()
+	if err:=rows.Err();err!=nil{return err}
+	return s.syncAssignmentNotices(ctx)
 }
 
 func (s *Service) ListPlans(ctx context.Context, sessionID string) ([]Plan, error) {

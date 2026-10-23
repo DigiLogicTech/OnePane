@@ -6,6 +6,7 @@ import (
  "strings"
 
  "github.com/DigiLogicTech/OnePane/internal/authority"
+ "github.com/DigiLogicTech/OnePane/internal/teamgate"
 )
 
 // authorizeToolFeatureActions applies the current canonical Task policy.
@@ -58,6 +59,7 @@ func (g *Gateway) authorizeToolFeatureActions(ctx context.Context,cmd InvokeComm
  }
  decision,err:=g.scopes.ForTask(ctx,cmd.WorkspaceID,*cmd.TaskID)
  if err!=nil{return fmt.Errorf("canonical Task scope unavailable: %w",err)}
+ if _,err:=teamgate.Require(ctx,g.scopes.DB,cmd.WorkspaceID,*cmd.TaskID);err!=nil{return fmt.Errorf("Team assignment authority unavailable: %w",err)}
  if !decision.Configured{return nil}
  if !classified{
   return fmt.Errorf("tool effects have no permitted Workspace classification")

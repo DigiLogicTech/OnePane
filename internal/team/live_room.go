@@ -9,15 +9,16 @@ import (
 // LiveRoom exposes observed public coordination metadata, never profile
 // instructions, model reasoning, raw provider errors or tool payloads.
 type LiveRoom struct {
-	ID          string       `json:"id"`
-	WorkspaceID string       `json:"workspace_id"`
-	TeamID      string       `json:"team_id"`
-	TaskID      string       `json:"task_id"`
-	Status      string       `json:"status"`
-	TaskState   string       `json:"task_state"`
-	Round       int64        `json:"round"`
-	ObservedAt  int64        `json:"observed_at"`
-	Members     []LiveMember `json:"members"`
+	ID          string           `json:"id"`
+	WorkspaceID string           `json:"workspace_id"`
+	TeamID      string           `json:"team_id"`
+	TaskID      string           `json:"task_id"`
+	Status      string           `json:"status"`
+	TaskState   string           `json:"task_state"`
+	Round       int64            `json:"round"`
+	ObservedAt  int64            `json:"observed_at"`
+	Members     []LiveMember     `json:"members"`
+	Assignments []LiveAssignment `json:"assignments"`
 }
 type LiveMember struct {
 	ID            string `json:"id"`
@@ -127,6 +128,10 @@ func (s *Service) LiveRoom(ctx context.Context, sessionID string) (LiveRoom, err
 			}
 		}
 		out.Members = append(out.Members, v)
+	}
+	out.Assignments, err = s.liveAssignments(ctx, ss)
+	if err != nil {
+		return LiveRoom{}, err
 	}
 	return out, nil
 }

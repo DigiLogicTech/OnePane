@@ -25,6 +25,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/scheduler"
 	"github.com/DigiLogicTech/OnePane/internal/storage"
 	"github.com/DigiLogicTech/OnePane/internal/task"
+	"github.com/DigiLogicTech/OnePane/internal/teamgate"
 	"github.com/DigiLogicTech/OnePane/internal/tool"
 	"github.com/DigiLogicTech/OnePane/internal/verification"
 )
@@ -65,6 +66,7 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	if run.Status != RunRunning || t.State != task.StateRunning {
 		return failedResult(res, ErrInvalidWorkerState)
 	}
+	if _,err:=teamgate.Require(ctx,s.db,t.WorkspaceID,t.ID);err!=nil{return s.blockRun(ctx,run,res,"Team assignment or predecessor authority changed")}
 	active,scopeErr:=s.activeProjectTaskScope(ctx,t)
 	if scopeErr!=nil{
 		// A broken scope observation must not fall through to inference.
@@ -182,6 +184,7 @@ func (s *Service) step(ctx context.Context, run Run) TickResult {
 	if err:=enforceTaskAgentProfileBinding(ctx,s.db,run.WorkspaceID,agentBinding);err!=nil{
 		return s.blockRun(ctx,run,res,"pinned Agent profile revoked before proposal application: "+err.Error())
 	}
+	if _,err:=teamgate.Require(ctx,s.db,t.WorkspaceID,t.ID);err!=nil{return s.blockRun(ctx,run,res,"Team assignment revoked before proposal application")}
 	pt := string(response.ProposalType)
 	res.Proposal = pt
 	_ = s.journal(ctx, run.ID, stepKind, "succeeded", &kind, &cid, &pt, &ref, map[string]any{"message": boundedString(response.Message, 1024)})
@@ -205,6 +208,12 @@ func (s *Service) compileContext(ctx context.Context, run Run, t task.Task) (con
 			return contextcompiler.Result{},fmt.Errorf("explicit custom Agent profile is unavailable or revoked")
 		}
 	} else { return contextcompiler.Result{},err }
+	contributions,err:=teamgate.Require(ctx,s.db,t.WorkspaceID,t.ID)
+	if err!=nil{return contextcompiler.Result{},err}
+	for _,contribution:=range contributions{
+		raw,_:=json.Marshal(contribution)
+		sections=append(sections,contextcompiler.Section{ID:"team-contribution-"+contribution.Key,Kind:"team_contribution",Trust:"UNVERIFIED_DERIVED",Authoritative:false,Required:true,Priority:94,Content:raw})
+	}
 	// Resource backoff is internal scheduler bookkeeping, not an instruction
 	// to the model. Once it becomes available, don't tell the model that it is
 	// still unavailable or let historical wait data bias tool selection.
@@ -542,6 +551,9 @@ func (s *Service) handleTool(ctx context.Context, run Run, t task.Task, resp age
 }
 
 func (s *Service) handleDelegate(ctx context.Context, run Run, t task.Task, resp agentprotocol.Response, res TickResult) TickResult {
+	var acceptedTeamAssignments int
+	if err:=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM team_execution_assignments WHERE task_id=? OR parent_task_id=?`,t.ID,t.ID).Scan(&acceptedTeamAssignments);err!=nil{return s.failRun(ctx,run,res,err)}
+	if acceptedTeamAssignments>0{return s.blockRun(ctx,run,res,"Team work handoffs must follow the human-accepted assignment graph; new delegation requires a reviewed plan")}
 	rp := defaultRoutePolicy()
 	_ = json.Unmarshal(run.RoutePolicy, &rp)
 	if !rp.AllowDelegation {

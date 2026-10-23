@@ -15,6 +15,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/policy"
 	"github.com/DigiLogicTech/OnePane/internal/runtimeendpoint"
 	"github.com/DigiLogicTech/OnePane/internal/storage"
+	"github.com/DigiLogicTech/OnePane/internal/teamgate"
 )
 
 func (s *Service) Invocation(ctx context.Context, id string) (Invocation, error) {
@@ -182,6 +183,12 @@ func (s *Service) Invoke(ctx context.Context, cmd InvokeCommand) (InvokeResult, 
 	if err:=s.requireCurrentRuntimeDispatch(ctx,c,cmd);err!=nil{
 		s.releaseBudgetBeforeDispatch(ctx,cmd)
 		return s.finishInvocationError(ctx,inv.ID,InvocationExecuting,err,cmd)
+	}
+	if cmd.TaskID!=nil {
+		if _,err:=teamgate.Require(ctx,s.scopes.DB,cmd.WorkspaceID,*cmd.TaskID);err!=nil{
+			s.releaseBudgetBeforeDispatch(ctx,cmd)
+			return s.finishInvocationError(ctx,inv.ID,InvocationExecuting,err,cmd)
+		}
 	}
 	resp, callErr := transport.Invoke(ctx, c, req, s.secrets)
 	if cmd.BudgetReservationID != nil && s.budgets != nil {

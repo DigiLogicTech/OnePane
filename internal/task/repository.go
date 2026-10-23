@@ -19,6 +19,7 @@ type repository interface {
 	ActiveAttempt(context.Context, storage.Tx, string) (*Attempt, error)
 	HardDependenciesSatisfied(context.Context, storage.Tx, string) (bool, error)
 	RequireNoExecutionHold(context.Context, storage.Tx, Task) error
+	RequireRecoveryClear(context.Context, storage.Tx, Task) error
 	TransitionAttempt(context.Context, storage.Tx, string, AttemptState, AttemptState, int64) error
 	ValidCompletionEvidence(context.Context, storage.Tx, string, string) (bool, error)
 }

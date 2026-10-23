@@ -580,6 +580,9 @@ func (s *Service) transitionInternal(
 		}
 		// Verification retry also re-enters RUNNING; it cannot bypass
 		// the same persisted DAG approval as Start or Resume.
+		if next==StateReady {
+			if err:=s.requireExecutionAdmissionTx(ctx,tx,t);err!=nil{return err}
+		}
 		if next==StateRunning {
 			if err:=s.requireRuntimeDependencyIntegrityTx(ctx,tx,t);err!=nil{return err}
 		}

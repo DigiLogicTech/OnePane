@@ -369,7 +369,7 @@ func TestUnstartedCancellationIndependentServicesAndLedgerIndex(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		// SQLite may reject an obsolete read snapshot when another writer
 		// commits. That transaction must roll back and be safely retryable.
-		if err := <-results; err != nil && !strings.Contains(err.Error(), "SQLITE_BUSY") {
+		if err := <-results; err != nil && !sqlitestore.IsBusy(err) {
 			t.Fatal(err)
 		}
 	}

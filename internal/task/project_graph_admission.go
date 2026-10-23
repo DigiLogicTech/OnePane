@@ -48,6 +48,7 @@ func canonicalProjectWorkspaceActiveTx(ctx context.Context,tx storage.Tx,t Task)
 // existing-Attempt wake paths. Live SQL edges cannot silently loosen the
 // original Task graph, and stopped/archived Workspaces cannot resume work.
 func (s *Service) requireRuntimeDependencyIntegrityTx(ctx context.Context,tx storage.Tx,t Task) error {
+	if err:=s.requireExecutionAdmissionTx(ctx,tx,t);err!=nil{return err}
 	teamPredecessors:=map[string]bool{}
 	if repository,ok:=s.repo.(interface{RequireTeamDependencies(context.Context,storage.Tx,Task)([]teamgate.Contribution,error)});ok{
 		contributions,err:=repository.RequireTeamDependencies(ctx,tx,t);if err!=nil{return err}

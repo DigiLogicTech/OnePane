@@ -2,6 +2,16 @@
 
 Target: Windows installed QA first, Ubuntu afterwards. This is source progress, not a QA-ready declaration.
 
+## Automation continuation — Team execution holds
+
+The persistent whole-release queue is now `onepane-release-execution-manifest.md`. This run recovered existing unpublished commits and unfinished pause/resume edits on the same PR 228 branch. Published-head integration run 39913940725 and QA guard run 39913940776 are confirmed successful; neither validates the newer local source or an installer.
+
+Accepted Team execution now has explicit atomic pause/resume controls. A durable hold fences new dispatch across contributions and delegated descendants; only runnable Tasks are parked, leaving pre-existing dependency/approval/recovery waits intact. Resume requires current human authority, accepted plan/root revision and autonomous feature policy, retains original Attempts, and refuses while a Worker is still draining. Returned reasoning is discarded while held; unknown effects retain reconciliation semantics. The room reports hold/drain state and prevents premature resume. This is source functionality, not proof of physical process termination or interruption of external effects.
+
+Fixed an ancestry cutoff that could miss held roots above 32 delegation levels. Cycle-deduplicated traversal now matches the 256-Task bound and rejects foreign/truncated ancestry. Tests cover deep descendants, oversized graphs, atomic pause/resume rollback, revoked humans, stale API revision, dual write scopes, queued and returned reasoning, no premature checkpoints and reconstruction of the Worker service from held durable records. The same original Worker/Attempt completes after explicit resume. This is service-level synthetic restart coverage, not installed daemon crash/power-loss acceptance.
+
+Validation: all 12 affected Windows integration packages pass (Team, Team worker, Task, Agent Worker, Tool Gateway, API, inference, Project orchestrator, SQLite, web assets, runtime coordinator and scheduler). Final focused lifecycle regressions, affected `go vet`, all 25 JavaScript validators, module verification, syntax/whitespace and the negative QA packaging guard pass. Added lifecycle coverage to native Windows CI and Linux race selection. Physical model/tool execution, final browser/product review and exact-new-head hosted results remain pending.
+
 ## Team cancellation continuation — local source
 
 The live room now offers an explicit cancellation request for the accepted Team Task, contributions and descendant Tasks. The API requires both `team.write` and `task.write`; the domain rechecks current human/workspace authority inside the transaction. The displayed accepted-plan ID and parent Task revision bind the request. Task cancellation intent, audit events and the Team event commit atomically, with a bounded 256-Task scope. Completed/failed results, checkpoints and immutable assignment records remain intact. A stale revision, foreign descendant or oversized graph rejects the whole request; the controller prevents duplicate in-flight submissions and does not retry automatically.
@@ -10,7 +20,7 @@ The Task cancellation primitive can participate in an owner transaction. A reaso
 
 Verification: selected Windows integration regressions pass for Task, Team, Team worker, Agent Worker, Tool Gateway, API, inference, Project orchestrator, SQLite and web assets. Final focused cancellation tests cover transaction rollback, scope bounds, foreign descendants, completed-result preservation, stale revisions, revoked humans and propagation of a prior root-only request. API tests cover both write permissions, authenticated actor binding and conflict/forbidden responses. Controller checks cover explicit scope/revision payloads and duplicate-submit denial. `go vet`, all 25 JavaScript validators and whitespace checks pass. No hosted CI or final browser acceptance was performed for this local continuation.
 
-This is a cancellation request, not completed cancellation, physical process termination or resolution of already-started external effects. Cancellation completion/compensation, Team pause/resume and accepted-graph reassignment remain unfinished. Acceptance fixtures put the parent in READY when the plan is accepted; contribution dependencies continue to fence consolidation. This increment does not alter that admission contract. Browser/product UI and real-model/tool acceptance remain open.
+This is a cancellation request, not completed cancellation, physical process termination or resolution of already-started external effects. Cancellation completion/compensation and accepted-graph reassignment remain unfinished. The Team pause/resume source continuation above supersedes that earlier implementation gap. Acceptance fixtures put the parent in READY when the plan is accepted; contribution dependencies continue to fence consolidation. This increment does not alter that admission contract. Browser/product UI and real-model/tool acceptance remain open.
 
 ## Local continuation checkpoint — unpublished
 
@@ -49,7 +59,7 @@ An isolated browser preview used synthetic records, not model execution. Earlier
 
 ## Required before installed QA
 
-1. Complete resource-admitted concurrent Team execution, agent-authored plan drafting, dynamic help/reassignment, distinct contribution verification criteria, richer artifact/lifecycle controls and real-model two-agent acceptance. The current Worker is sequential and accepted assignment graphs cannot be replaced/reopened in place. Exercise hot swap/Colibri/queuing alongside ordinary chat and Project execution, including constrained capacity, pinned models, restart/unknown outcomes and cancellation.
+1. Complete resource-admitted concurrent Team execution, agent-authored plan drafting, dynamic help/reassignment, distinct contribution verification criteria, richer artifact/lifecycle controls and real-model two-agent acceptance. The current source supports bounded two-member concurrent inference; broader fairness and replacement/reopening of accepted assignment graphs remain incomplete. Exercise hot swap/Colibri/queuing alongside ordinary chat and Project execution, including constrained capacity, pinned models, restart/unknown outcomes and cancellation.
 2. Reconcile stacked PR requirements against integration; complete whole-product code/security review and remediation, then LAST product UI review.
 3. Obtain current-head hosted CI success and review approval; configure the protected QA environment and exact reviewed-SHA variable before manually dispatching the new packaging workflow. A skipped package job is not a built candidate.
 4. Record the operator's existing installation/data/model roots and backups. Run populated RC10 upgrade, chosen non-C: root, service/reboot, rollback and preserved credentials/data acceptance on Windows; then Ubuntu.

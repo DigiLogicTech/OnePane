@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -135,6 +136,8 @@ func runTeamAssignmentScenario(t *testing.T, pause bool, parallel string, cancel
 	if len(cancellation) > 0 {
 		cancelPhase = cancellation[0]
 	}
+	holdPhase := strings.TrimPrefix(cancelPhase, "hold_")
+	holding := holdPhase != cancelPhase
 	ctx := context.Background()
 	root := t.TempDir()
 	db, err := sqlitestore.Open(root + "/team-worker.db")
@@ -228,10 +231,29 @@ func runTeamAssignmentScenario(t *testing.T, pause bool, parallel string, cancel
 			if e != nil {
 				return e
 			}
-			_, e = teams.RequestExecutionCancellation(ctx, team.CancelExecutionCommand{SessionID: session.ID, PlanID: plan.ID, ActorPrincipalID: "human", ExpectedTaskRevision: current.Revision, Reason: "Synthetic cancellation boundary"})
+			command := team.ExecutionControlCommand{SessionID: session.ID, PlanID: plan.ID, ActorPrincipalID: "human", ExpectedTaskRevision: current.Revision, Reason: "Synthetic control boundary"}
+			if holding {
+				if _, e = teams.PauseExecution(ctx, command); e != nil {
+					return e
+				}
+				room, e := teams.LiveRoom(ctx, session.ID)
+				if e != nil || !room.ExecutionPaused || !room.PauseDraining {
+					return fmt.Errorf("missing draining projection: %+v %v", room, e)
+				}
+				current, e = tasks.Get(ctx, job.ID)
+				if e != nil {
+					return e
+				}
+				command.ExpectedTaskRevision = current.Revision
+				if _, e = teams.ResumeExecution(ctx, command); e != team.ErrSessionState {
+					return fmt.Errorf("in-flight Worker resumed: %v", e)
+				}
+				return nil
+			}
+			_, e = teams.RequestExecutionCancellation(ctx, command)
 			return e
 		}
-		if cancelPhase == "queued" {
+		if cancelPhase == "queued" || holding && holdPhase == "queued" {
 			if err = infer.ConfigureRuntimeCoordinator(pausingTeamCoordinator{inner: runtimecoord.NewService(db.SQL(), clock.Real{}), pause: cancelTeam}); err != nil {
 				t.Fatal(err)
 			}
@@ -312,6 +334,48 @@ func runTeamAssignmentScenario(t *testing.T, pause bool, parallel string, cancel
 			t.Fatal(e)
 		}
 		if cancelPhase != "" {
+			if holding {
+				room, e := teams.LiveRoom(ctx, session.ID)
+				if e != nil || !room.ExecutionPaused || room.PauseDraining || worker.dispatchReconciliationFailed {
+					t.Fatalf("pause failed to drain: %+v %v", room, e)
+				}
+				var checkpoints int
+				if e = db.SQL().QueryRow(`SELECT COUNT(*) FROM checkpoints`).Scan(&checkpoints); e != nil || checkpoints != 0 {
+					t.Fatalf("paused response applied: %d %v", checkpoints, e)
+				}
+				var runID, attemptID string
+				if e = db.SQL().QueryRow(`SELECT r.id,r.attempt_id FROM agent_worker_runs r JOIN task_attempts a ON a.id=r.attempt_id WHERE r.status='waiting' AND a.status='waiting'`).Scan(&runID, &attemptID); e != nil {
+					t.Fatal(e)
+				}
+				// Reconstruct the service from durable records while held. Merely
+				// observing/reconciling after restart must not dispatch another call.
+				worker = New(db.SQL(), db, clock.Real{}, "node", tasks, nil, nil, scheduler.NewService(db.SQL(), db, clock.Real{}), infer, nil, artifacts, nil, nil, nil, verification.NewService(db.SQL(), db, clock.Real{}))
+				callsBeforeRestart := len(model.calls)
+				if _, e = worker.Tick(ctx, 10); e != nil || len(model.calls) != callsBeforeRestart {
+					t.Fatalf("held restart dispatched: %v %v", model.calls, e)
+				}
+				if _, e = teams.ResumeExecution(ctx, team.ExecutionControlCommand{SessionID: session.ID, PlanID: plan.ID, ActorPrincipalID: "human", ExpectedTaskRevision: room.TaskRevision}); e != nil {
+					t.Fatal(e)
+				}
+				model.observe = nil
+				if e = infer.ConfigureRuntimeCoordinator(runtimecoord.NewService(db.SQL(), clock.Real{})); e != nil {
+					t.Fatal(e)
+				}
+				for n := 0; n < 5; n++ {
+					if _, e = worker.Tick(ctx, 10); e != nil {
+						t.Fatal(e)
+					}
+				}
+				current, e := tasks.Get(ctx, job.ID)
+				if e != nil || current.State != task.StateComplete {
+					t.Fatalf("resumed Team did not finish: %+v %v", current, e)
+				}
+				var retained int
+				if e = db.SQL().QueryRow(`SELECT COUNT(*) FROM agent_worker_runs WHERE id=? AND attempt_id=? AND status='succeeded'`, runID, attemptID).Scan(&retained); e != nil || retained != 1 {
+					t.Fatalf("original Worker/Attempt lost: %d %v", retained, e)
+				}
+				return
+			}
 			current, e := tasks.Get(ctx, job.ID)
 			if e != nil || current.State != task.StateCancelRequested || worker.dispatchReconciliationFailed {
 				t.Fatalf("cancellation halted unrelated scheduling or lost root intent: %+v %v", current, e)
@@ -388,5 +452,11 @@ func TestTeamAssignmentsExecuteIndependentWorkThroughSharedCapacity(t *testing.T
 func TestTeamCancellationDiscardsQueuedAndReturnedModelProposals(t *testing.T) {
 	for _, phase := range []string{"queued", "response"} {
 		t.Run(phase, func(t *testing.T) { runTeamAssignmentScenario(t, false, "", phase) })
+	}
+}
+
+func TestTeamPauseDrainsAndResumesOriginalWorkerAfterQueuedAndReturnedReasoning(t *testing.T) {
+	for _, phase := range []string{"queued", "response"} {
+		t.Run(phase, func(t *testing.T) { runTeamAssignmentScenario(t, false, "", "hold_"+phase) })
 	}
 }

@@ -53,6 +53,9 @@ async function main(){
  let releaseCancel;holdMutation=new Promise(r=>releaseCancel=r);const cancelling=c.cancelExecution(' Stop Team ');assert.equal(await c.cancelExecution('duplicate'),false,'duplicate cancellation dispatched');releaseCancel();assert.equal(await cancelling,true);holdMutation=null;
  assert.deepEqual(mutations.at(-1).body,{plan_id:'accepted',expected_task_revision:7,reason:'Stop Team'});assert.ok(mutations.at(-1).path.endsWith('/execution/cancel'));
  room={...room,task_state:'cancel_requested',task_revision:8};await c.refresh();const cancelledCount=mutations.length;assert.equal(await c.cancelExecution('again'),false);assert.equal(mutations.length,cancelledCount,'pending cancellation resubmitted itself');
+ room={...room,task_state:'ready',execution_paused:false};await c.refresh();assert.equal(await c.controlExecution('pause'),true);assert.ok(mutations.at(-1).path.endsWith('/execution/pause'));
+ room={...room,task_state:'paused',execution_paused:true,pause_draining:true,task_revision:9};await c.refresh();const beforeResume=mutations.length;assert.equal(await c.controlExecution('resume'),false);assert.equal(mutations.length,beforeResume,'in-flight Worker was resumed');
+ room={...room,pause_draining:false};await c.refresh();assert.equal(await c.controlExecution('resume'),true);assert.deepEqual(mutations.at(-1).body,{plan_id:'accepted',expected_task_revision:9,reason:''});assert.equal(await c.controlExecution('foreign'),false);
  failReads=true;await c.refresh();assert.equal(c.state.room,null);assert.equal(c.state.messages.length,0);assert.equal(c.state.history,null);assert.ok(c.state.error);assert.equal(c.state.draft,'New text written during send');
  failReads=false;room={...room,status:'deliberating'};await c.refresh();assert.equal(c.state.messages.at(-1).ID,'m0261','recovery lost newest window');
  const beforeStop=calls.length;c.stop();await c.refresh();assert.equal(calls.length,beforeStop,'closed room polled');

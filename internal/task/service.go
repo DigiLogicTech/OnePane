@@ -421,62 +421,7 @@ func (s *Service) Pause(ctx context.Context, cmd TransitionCommand) (Task, error
 // Resume resumes an existing waiting Attempt when one exists. A Task paused
 // before any Attempt began becomes READY and waits for scheduler admission.
 func (s *Service) Resume(ctx context.Context, cmd TransitionCommand) (Task, error) {
-	if strings.TrimSpace(cmd.TaskID) == "" || cmd.ExpectedRevision < 1 {
-		return Task{}, fmt.Errorf("%w: task id and expected revision are required", ErrInvalidCommand)
-	}
-	eventID, err := s.ids.New("evt")
-	if err != nil {
-		return Task{}, err
-	}
-	now := s.clock.UnixMilli()
-
-	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		t, err := s.repo.GetForUpdate(ctx, tx, cmd.TaskID)
-		if err != nil {
-			return err
-		}
-		if t.Revision != cmd.ExpectedRevision {
-			return ErrRevisionConflict
-		}
-		if t.State != StatePaused && t.State != StateWaitingDependency && t.State != StateWaitingApproval {
-			return fmt.Errorf("%w: cannot resume from %s", ErrInvalidTransition, t.State)
-		}
-		active, err := s.repo.ActiveAttempt(ctx, tx, t.ID)
-		if err != nil {
-			return err
-		}
-		next := StateReady
-		var readyAt *int64
-		if active != nil {
-			if active.State != AttemptWaiting {
-				return ErrActiveAttempt
-			}
-			if err:=s.requireRuntimeDependencyIntegrityTx(ctx,tx,t);err!=nil{return err}
-			if err := s.repo.TransitionAttempt(ctx, tx, active.ID, active.State, AttemptRunning, now); err != nil {
-				return err
-			}
-			next = StateRunning
-		} else {
-			readyAt = &now
-		}
-		if !CanTransition(t.State, next) {
-			return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, t.State, next)
-		}
-		if err := s.repo.Transition(ctx, tx, transitionRecord{
-			TaskID: t.ID, ExpectedRevision: t.Revision, From: t.State, To: next,
-			UpdatedAt: now, ReadyAt: readyAt,
-		}); err != nil {
-			return err
-		}
-		payload, _ := json.Marshal(map[string]any{
-			"task_id": t.ID, "from": t.State, "to": next, "revision": t.Revision + 1,
-		})
-		return s.events.Append(ctx, tx, event.Event{
-			ID: eventID, WorkspaceID: &t.WorkspaceID, Type: "task.resumed",
-			AggregateType: "task", AggregateID: t.ID, ActorPrincipalID: cmd.ActorPrincipalID,
-			RequestID: cmd.RequestID, TraceID: cmd.TraceID, Payload: payload, OccurredAt: now,
-		})
-	})
+	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error { return s.ResumeInTransaction(ctx, tx, cmd) })
 	if err != nil {
 		return Task{}, err
 	}

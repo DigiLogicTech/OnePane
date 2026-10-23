@@ -29,6 +29,13 @@ func (f *cancelTeamService) RequestExecutionCancellation(_ context.Context, c te
 
 type cancelTeamAuth struct{ denied string }
 
+func (f *cancelTeamService) PauseExecution(ctx context.Context, c team.ExecutionControlCommand) (team.Session, error) {
+	return f.RequestExecutionCancellation(ctx, c)
+}
+func (f *cancelTeamService) ResumeExecution(ctx context.Context, c team.ExecutionControlCommand) (team.Session, error) {
+	return f.RequestExecutionCancellation(ctx, c)
+}
+
 func (a cancelTeamAuth) Authenticate(*http.Request) (Identity, error) {
 	return Identity{PrincipalID: "human"}, nil
 }
@@ -65,5 +72,34 @@ func TestTeamCancellationAPIRequiresBothWriteScopesAndBindsHumanAndPlan(t *testi
 				t.Fatalf("request scope drift: %+v", svc.command)
 			}
 		})
+	}
+}
+
+func TestTeamPauseResumeAPIRequiresBothWriteScopesAndCurrentRevision(t *testing.T) {
+	for _, action := range []string{"pause", "resume"} {
+		for _, tc := range []struct {
+			denied        string
+			err           error
+			status, calls int
+		}{
+			{"", nil, http.StatusOK, 1},
+			{"team.write", nil, http.StatusForbidden, 0},
+			{"task.write", nil, http.StatusForbidden, 0},
+			{"", task.ErrRevisionConflict, http.StatusConflict, 1},
+			{"", team.ErrHumanRequired, http.StatusForbidden, 1},
+			{"", team.ErrSessionState, http.StatusConflict, 1},
+		} {
+			svc := &cancelTeamService{err: tc.err}
+			server := NewServer(nil, fakeEvents{}, cancelTeamAuth{denied: tc.denied})
+			server.SetTeam(svc)
+			w := httptest.NewRecorder()
+			server.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/team-sessions/room/execution/"+action, strings.NewReader(`{"plan_id":"accepted","expected_task_revision":7}`)))
+			if w.Code != tc.status || svc.calls != tc.calls {
+				t.Fatalf("%s %s %v: status=%d calls=%d body=%s", action, tc.denied, tc.err, w.Code, svc.calls, w.Body.String())
+			}
+			if svc.calls > 0 && (svc.command.ActorPrincipalID != "human" || svc.command.ExpectedTaskRevision != 7 || svc.command.PlanID != "accepted" || svc.command.SessionID != "room") {
+				t.Fatal("pause/resume scope not bound")
+			}
+		}
 	}
 }

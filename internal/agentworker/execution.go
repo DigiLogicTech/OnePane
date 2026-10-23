@@ -72,6 +72,11 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 		return immediateWorkerStep(s.failRun(ctx, run, res, err))
 	}
 	if run.Status != RunRunning || t.State != task.StateRunning {
+		if run.Status == RunRunning && t.State == task.StatePaused {
+			if stopped, ok := s.parkIfExecutionControlRequested(ctx, run, res); ok {
+				return immediateWorkerStep(stopped)
+			}
+		}
 		return immediateWorkerStep(failedResult(res, ErrInvalidWorkerState))
 	}
 	if _, err := teamgate.Require(ctx, s.db, t.WorkspaceID, t.ID); err != nil {
@@ -183,8 +188,10 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 				stepKind = "agent_runtime"
 			}
 			if !errors.Is(dispatchErr, ErrDispatchRequiresReconciliation) {
-				if stopped,ok:=s.parkIfCancellationRequested(ctx,run,res);ok {
-					if dispatchErr!=nil{s.releaseBudgetIfReserved(ctx,reservationID)}
+				if stopped, ok := s.parkIfExecutionControlRequested(ctx, run, res); ok {
+					if dispatchErr != nil {
+						s.releaseBudgetIfReserved(ctx, reservationID)
+					}
 					return stopped
 				}
 			}
@@ -205,7 +212,9 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 				return s.blockRun(ctx, run, res, "pinned Agent profile revoked before proposal application: "+err.Error())
 			}
 			if _, err := teamgate.Require(ctx, s.db, t.WorkspaceID, t.ID); err != nil {
-				if stopped,ok:=s.parkIfCancellationRequested(ctx,run,res);ok{return stopped}
+				if stopped, ok := s.parkIfExecutionControlRequested(ctx, run, res); ok {
+					return stopped
+				}
 				return s.blockRun(ctx, run, res, "Team assignment revoked before proposal application")
 			}
 			pt := string(response.ProposalType)
@@ -249,11 +258,13 @@ func (s *Service) compileContext(ctx context.Context, run Run, t task.Task) (con
 		raw, _ := json.Marshal(contribution)
 		sections = append(sections, contextcompiler.Section{ID: "team-contribution-" + contribution.Key, Kind: "team_contribution", Trust: "UNVERIFIED_DERIVED", Authoritative: false, Required: true, Priority: 94, Content: raw})
 	}
-	guidance,err:=teamgate.Guidance(ctx,s.db,t.WorkspaceID,t.ID)
-	if err!=nil{return contextcompiler.Result{},err}
-	if len(guidance)>0 {
-		raw,_:=json.Marshal(guidance)
-		sections=append(sections,contextcompiler.Section{ID:"team-human-guidance",Kind:"team_guidance",Trust:"USER_INSTRUCTION",Authoritative:true,Required:true,Priority:95,Content:raw})
+	guidance, err := teamgate.Guidance(ctx, s.db, t.WorkspaceID, t.ID)
+	if err != nil {
+		return contextcompiler.Result{}, err
+	}
+	if len(guidance) > 0 {
+		raw, _ := json.Marshal(guidance)
+		sections = append(sections, contextcompiler.Section{ID: "team-human-guidance", Kind: "team_guidance", Trust: "USER_INSTRUCTION", Authoritative: true, Required: true, Priority: 95, Content: raw})
 	}
 	// Resource backoff is internal scheduler bookkeeping, not an instruction
 	// to the model. Once it becomes available, don't tell the model that it is

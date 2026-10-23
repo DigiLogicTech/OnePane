@@ -65,6 +65,11 @@ func require(ctx context.Context, q Queryer, workspaceID, taskID string, admissi
 		}
 		return nil, nil
 	}
+	if paused, err := TaskPaused(ctx, q, workspaceID, taskID); err != nil {
+		return nil, err
+	} else if paused {
+		return nil, ErrPaused
+	}
 	var session, root, plan, sessionState, planState, rootState, body string
 	err := q.QueryRowContext(ctx, `SELECT s.id,s.task_id,p.id,s.status,p.status,t.state,p.plan_json
 	 FROM task_execution_profiles ep JOIN team_sessions s ON s.id=ep.team_session_id
@@ -86,6 +91,11 @@ func require(ctx context.Context, q Queryer, workspaceID, taskID string, admissi
 	}
 	if err != nil {
 		return nil, err
+	}
+	if paused, err := Paused(ctx, q, session); err != nil {
+		return nil, err
+	} else if paused {
+		return nil, ErrPaused
 	}
 	var manifest struct {
 		Assignments []struct {

@@ -14,6 +14,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/id"
 	"github.com/DigiLogicTech/OnePane/internal/storage"
 	"github.com/DigiLogicTech/OnePane/internal/task"
+	"github.com/DigiLogicTech/OnePane/internal/teamgate"
 )
 
 type Service struct {
@@ -1050,6 +1051,11 @@ func (s *Service) allowAdmission(ctx context.Context, taskID string) error {
 	}
 	if !session.Valid {
 		return ErrPlanRequired
+	}
+	if paused, err := teamgate.Paused(ctx, s.db, session.String); err != nil {
+		return err
+	} else if paused {
+		return teamgate.ErrPaused
 	}
 	var st string
 	var plan sql.NullString

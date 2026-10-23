@@ -135,10 +135,8 @@ func (s *Service) settleUnstartedGraph(ctx context.Context, tx storage.Tx, rootI
 		if t.State == StateCancelled {
 			revision--
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events
-		 WHERE aggregate_type='task' AND aggregate_id=? AND event_type='task.cancel_requested'
-		 AND json_extract(payload_json,'$.revision')=?
-		 AND json_extract(payload_json,'$.from') IN ('created','ready'))`, t.ID, revision).Scan(&intent); err != nil {
+		intent, err = unstartedCancellationIntent(ctx, tx, t.ID, revision)
+		if err != nil {
 			return 0, err
 		}
 		if !intent {
@@ -169,6 +167,21 @@ func (s *Service) settleUnstartedGraph(ctx context.Context, tx storage.Tx, rootI
 		}
 	}
 	return len(pending), nil
+}
+
+// A pause does not imply an Attempt. Require the immediately preceding durable
+// transition from READY; all execution evidence is checked separately.
+func unstartedCancellationIntent(ctx context.Context, tx storage.Tx, id string, revision int64) (bool, error) {
+	var intent bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e
+ WHERE e.aggregate_type='task' AND e.aggregate_id=? AND e.event_type='task.cancel_requested'
+ AND json_extract(e.payload_json,'$.revision')=? AND
+ (json_extract(e.payload_json,'$.from') IN ('created','ready') OR
+ (json_extract(e.payload_json,'$.from')='paused' AND EXISTS(SELECT 1 FROM events p
+ WHERE p.aggregate_type='task' AND p.aggregate_id=e.aggregate_id AND p.workspace_id IS e.workspace_id
+ AND p.event_type='task.paused' AND json_extract(p.payload_json,'$.revision')=?-1
+ AND json_extract(p.payload_json,'$.from')='ready' AND json_extract(p.payload_json,'$.to')='paused'))))`, id, revision, revision).Scan(&intent)
+	return intent, err
 }
 
 func sameOptionalID(a, b *string) bool {

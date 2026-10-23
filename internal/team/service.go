@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/event"
@@ -24,6 +25,8 @@ type Service struct {
 	ids    id.Generator
 	events event.Store
 	tasks  *task.Service
+	cancelMu sync.Mutex
+	cancelCursor string
 }
 
 func NewService(db *sql.DB, tx storage.Transactor, clk clock.Clock, tasks *task.Service) *Service {
@@ -750,6 +753,48 @@ func (s *Service) ProposePlan(ctx context.Context, c ProposePlanCommand) (Plan, 
 	now := s.clock.UnixMilli()
 	var version int64
 	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		// A worker may finish planning after acceptance, cancellation or
+		// authority revocation. Revalidate before saving any proposal effects.
+		var authorized bool
+		if e := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM principals p
+			JOIN workspace_memberships wm ON wm.principal_id=p.id AND wm.workspace_id=? AND wm.status='active'
+			JOIN workspaces w ON w.id=wm.workspace_id AND w.status='active'
+			JOIN teams t ON t.id=? AND t.workspace_id=w.id AND t.status='active'
+			WHERE p.id=? AND p.status='active')`, ss.WorkspaceID, ss.TeamID, c.ProposedByPrincipalID).Scan(&authorized); e != nil {
+			return e
+		}
+		if !authorized {
+			return ErrInvalid
+		}
+		if c.ProposedByMemberID != nil {
+			if e := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM team_members m JOIN principals p ON p.id=? AND p.status='active'
+				WHERE m.id=? AND m.team_id=? AND m.workspace_id=? AND m.status='active'
+				AND (m.principal_id=p.id OR (m.member_kind!='human' AND (p.principal_type='system' OR (m.principal_id IS NULL AND p.principal_type='agent')))))`,
+				c.ProposedByPrincipalID, *c.ProposedByMemberID, ss.TeamID, ss.WorkspaceID).Scan(&authorized); e != nil {
+				return e
+			}
+			if !authorized {
+				return ErrInvalid
+			}
+		}
+		if e := requireReasoningTask(ctx, tx, ss.TaskID, ss.WorkspaceID); e != nil {
+			return e
+		}
+		r, e := tx.ExecContext(ctx, `UPDATE team_sessions SET status='plan_proposed',revision=revision+1,updated_at=?
+			WHERE id=? AND workspace_id=? AND task_id=? AND team_id=? AND revision=? AND status=?
+			AND status IN ('deliberating','plan_proposed','paused_for_deliberation','team_review')
+			AND accepted_plan_id IS NULL AND NOT EXISTS(SELECT 1 FROM team_assignment_roots WHERE session_id=team_sessions.id)`,
+			now, ss.ID, ss.WorkspaceID, ss.TaskID, ss.TeamID, ss.Revision, ss.Status)
+		if e != nil {
+			return e
+		}
+		n, e := r.RowsAffected()
+		if e != nil {
+			return e
+		}
+		if n != 1 {
+			return ErrSessionState
+		}
 		if e := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version),0)+1 FROM team_plans WHERE session_id=?`, ss.ID).Scan(&version); e != nil {
 			return e
 		}
@@ -759,12 +804,12 @@ func (s *Service) ProposePlan(ctx context.Context, c ProposePlanCommand) (Plan, 
 		if _, e := tx.ExecContext(ctx, `INSERT INTO team_plans(id,workspace_id,session_id,version,status,plan_json,proposed_by_member_id,proposed_by_principal_id,created_at) VALUES(?,?,?,?,'candidate',?,?,?,?)`, pid, ss.WorkspaceID, ss.ID, version, string(body), c.ProposedByMemberID, c.ProposedByPrincipalID, now); e != nil {
 			return e
 		}
-		if _, e := tx.ExecContext(ctx, `UPDATE team_sessions SET status='plan_proposed',revision=revision+1,updated_at=? WHERE id=?`, now, ss.ID); e != nil {
-			return e
-		}
 		actor := c.ProposedByPrincipalID
 		return s.emit(ctx, tx, ss.WorkspaceID, "team.plan_proposed", "team_session", ss.ID, &actor, map[string]any{"plan_id": pid, "version": version})
 	})
+	if err != nil {
+		return Plan{}, err
+	}
 	return Plan{ID: pid, WorkspaceID: ss.WorkspaceID, SessionID: ss.ID, Version: version, Status: "candidate", Body: body, ProposedByMemberID: c.ProposedByMemberID, ProposedByPrincipalID: &c.ProposedByPrincipalID, CreatedAt: now}, err
 }
 func (s *Service) RaiseObjection(ctx context.Context, c RaiseObjectionCommand) (Objection, error) {

@@ -406,6 +406,9 @@ func main() {
 			if _, err := runtime.Tasks.SettleUnstartedCancellations(ctx, 4); err != nil && ctx.Err() == nil {
 				log.Printf("unstarted task cancellation: %v", err)
 			}
+			if _, err := runtime.Team.SettleUnstartedCancellations(ctx, 4); err != nil && ctx.Err() == nil {
+				log.Printf("unstarted Team cancellation: %v", err)
+			}
 		}
 		run()
 		ticker := time.NewTicker(2 * time.Second)

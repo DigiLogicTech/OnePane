@@ -14,21 +14,14 @@ import (
 func liveRoomFixture(t *testing.T) (*Service, *sqlitestore.DB, Session, Member) {
 	t.Helper()
 	ctx := context.Background()
-	db, err := sqlitestore.Open(t.TempDir() + "/team.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err = db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
+	db := migratedTeamDatabase(t)
 	db.SQL().SetMaxOpenConns(1)
 	for _, q := range []string{
 		`INSERT INTO workspaces(id,name,status,revision,created_at,updated_at) VALUES('tenant','Tenant','active',1,1,1)`,
 		`INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at) VALUES('human','human','Owner','active',1,1,1)`,
 		`INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at) VALUES('tenant','human','active',1,1)`,
 	} {
-		if _, err = db.SQL().Exec(q); err != nil {
+		if _, err := db.SQL().Exec(q); err != nil {
 			t.Fatal(err)
 		}
 	}

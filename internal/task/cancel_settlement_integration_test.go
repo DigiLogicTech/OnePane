@@ -21,6 +21,54 @@ var cancellationTemplate struct {
 	err  error
 }
 
+func TestUnstartedCancellationAfterReadyPauseRequiresExactHistory(t *testing.T) {
+	for _, corrupt := range []bool{false, true} {
+		t.Run(fmt.Sprintf("missing_pause_%t", corrupt), func(t *testing.T) {
+			db, s := cancellationFixture(t)
+			ctx := context.Background()
+			row, err := s.Create(ctx, task.CreateCommand{WorkspaceID: "ws", Objective: "Never dispatched"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			row, err = s.MarkReady(ctx, task.TransitionCommand{TaskID: row.ID, ExpectedRevision: row.Revision})
+			if err != nil {
+				t.Fatal(err)
+			}
+			row, err = s.Pause(ctx, task.TransitionCommand{TaskID: row.ID, ExpectedRevision: row.Revision})
+			if err != nil {
+				t.Fatal(err)
+			}
+			row, err = s.RequestCancel(ctx, task.TransitionCommand{TaskID: row.ID, ExpectedRevision: row.Revision})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if corrupt {
+				if _, err = db.SQL().Exec(`DROP TRIGGER events_no_delete`); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = db.SQL().Exec(`DELETE FROM events WHERE event_type='task.paused'`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			n, err := s.SettleUnstartedCancellations(ctx, 16)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, state := 1, task.StateCancelled
+			if corrupt {
+				want, state = 0, task.StateCancelRequested
+			}
+			if n != want {
+				t.Fatalf("settled %d want %d", n, want)
+			}
+			got, err := s.Get(ctx, row.ID)
+			if err != nil || got.State != state {
+				t.Fatalf("state %+v %v", got, err)
+			}
+		})
+	}
+}
+
 func cancellationFixture(t *testing.T) (*sqlitestore.DB, *task.Service) {
 	t.Helper()
 	path := t.TempDir() + "/cancel.db"

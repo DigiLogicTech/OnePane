@@ -5,21 +5,17 @@ package agentworker
 import (
  "context"
  "errors"
- "path/filepath"
  "testing"
  "time"
  "github.com/DigiLogicTech/OnePane/internal/clock"
- "github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
  "github.com/DigiLogicTech/OnePane/internal/task"
 )
 
 func prepareUnknownDispatch(t *testing.T)(*Service,context.Context,Run,func()){
  t.Helper()
  ctx,cancel:=context.WithTimeout(context.Background(),30*time.Second)
- db,err:=sqlite.Open(filepath.Join(t.TempDir(),"unknown-dispatch.db"))
- if err!=nil{cancel();t.Fatal(err)}
+ db:=migratedUnknownDispatchDatabase(t,ctx)
  cleanup:=func(){_ = db.Close();cancel()}
- if err:=db.Migrate(ctx);err!=nil{cleanup();t.Fatal(err)}
  db.SQL().SetMaxOpenConns(1)
  now:=clock.Real{}.UnixMilli()
  if _,err:=db.SQL().ExecContext(ctx,`INSERT INTO workspaces(

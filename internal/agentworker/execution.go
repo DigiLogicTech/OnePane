@@ -232,8 +232,13 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 				return s.blockRun(ctx, run, res, "Team assignment revoked before proposal application")
 			}
 			pt := string(response.ProposalType)
+			if err := s.journal(ctx, run.ID, stepKind, "succeeded", &kind, &cid, &pt, &ref, map[string]any{"message": boundedString(response.Message, 1024)}); err != nil {
+				// The request succeeded and may have spent quota or performed
+				// external effects. Preserve its exact response reference and
+				// original Attempt; no proposal may run without its journal.
+				return s.interruptDispatchForReconciliation(ctx, run, res, stepKind, kind, cid, ref, errors.Join(errResponseJournalUncommitted, err))
+			}
 			res.Proposal = pt
-			_ = s.journal(ctx, run.ID, stepKind, "succeeded", &kind, &cid, &pt, &ref, map[string]any{"message": boundedString(response.Message, 1024)})
 			return s.handleProposal(ctx, run, t, response, res)
 
 		}

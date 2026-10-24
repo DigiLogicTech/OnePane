@@ -166,8 +166,19 @@ func TestRecoveryDiscoveryFairnessRollbackAndCursorWrap(t *testing.T) {
 	if _, e = db.SQL().Exec(`DROP TRIGGER reject_discovery`); e != nil {
 		t.Fatal(e)
 	}
-	if r, e = s.DiscoverRecoveryCases(context.Background(), 16); e != nil || r.Captured != 1 {
-		t.Fatalf("failed cursor lost case: %+v %v", r, e)
+	// The rejected original Attempt rotates past the failed transaction. Wrap
+	// and bounded traversal of the old invalid prefix must still retry it.
+	for pass := 0; pass < 3; pass++ {
+		r, e = s.DiscoverRecoveryCases(context.Background(), 16)
+		if e != nil || r.Scanned > 16 {
+			t.Fatalf("failed cursor retry: %+v %v", r, e)
+		}
+		if r.Captured == 1 {
+			break
+		}
+	}
+	if r.Captured != 1 {
+		t.Fatalf("failed cursor lost case after rotation: %+v", r)
 	}
 	if _, e = db.SQL().Exec(`INSERT INTO task_attempts(id,task_id,attempt_number,status,metadata_json) VALUES('000-earlier',?,30,'interrupted','{}')`, row.ID); e != nil {
 		t.Fatal(e)

@@ -20,6 +20,7 @@ type RecoveryCaptureResult struct{ Scanned, Captured, Acknowledged, Deferred int
 // pending and rotate out of the way of independent valid work.
 func (s *Service) CaptureRecoveryCases(ctx context.Context, limit int) (RecoveryCaptureResult, error) {
 	var out RecoveryCaptureResult
+	var failures error
 	if limit <= 0 || limit > 16 {
 		limit = 16
 	}
@@ -125,11 +126,19 @@ func (s *Service) CaptureRecoveryCases(ctx context.Context, limit int) (Recovery
 			acknowledged = n == 1
 			return e
 		})
-		if err != nil {
-			return out, err
-		}
+		// A rejected case/audit/acknowledgement must retain durable ownership,
+		// but cannot pin this process's bounded scan ahead of healthy jobs.
+		// Rollback is complete before advancing this optimization-only cursor.
 		s.recoveryCursor = jobID
 		out.Scanned++
+		if err != nil {
+			out.Deferred++
+			failures = errors.Join(failures, err)
+			if ctx.Err() != nil {
+				return out, failures
+			}
+			continue
+		}
 		if captured {
 			out.Captured++
 		}
@@ -139,5 +148,5 @@ func (s *Service) CaptureRecoveryCases(ctx context.Context, limit int) (Recovery
 			out.Deferred++
 		}
 	}
-	return out, nil
+	return out, failures
 }

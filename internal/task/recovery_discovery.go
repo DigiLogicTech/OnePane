@@ -17,6 +17,7 @@ type RecoveryDiscoveryResult struct{ Scanned, Captured, Deferred int }
 // a job, invents a job identifier or clears the execution admission fence.
 func (s *Service) DiscoverRecoveryCases(ctx context.Context, limit int) (RecoveryDiscoveryResult, error) {
 	var out RecoveryDiscoveryResult
+	var failures error
 	if limit <= 0 || limit > 16 {
 		limit = 16
 	}
@@ -97,18 +98,25 @@ func (s *Service) DiscoverRecoveryCases(ctx context.Context, limit int) (Recover
 			captured = true
 			return nil
 		})
-		if err != nil {
-			return out, err
-		}
+		// Failed writes stay durable and are retried after cursor wrap. They
+		// cannot prevent later independent Attempts from reaching intake.
 		s.recoveryDiscoveryCursor = attemptID
 		out.Scanned++
+		if err != nil {
+			out.Deferred++
+			failures = errors.Join(failures, err)
+			if ctx.Err() != nil {
+				return out, failures
+			}
+			continue
+		}
 		if captured {
 			out.Captured++
 		} else {
 			out.Deferred++
 		}
 	}
-	return out, nil
+	return out, failures
 }
 
 // Both delivery and historical discovery require a complete bounded ledger

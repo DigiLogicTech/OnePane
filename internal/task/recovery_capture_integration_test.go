@@ -135,6 +135,11 @@ func TestRecoveryCaptureAuditAndAcknowledgementRollback(t *testing.T) {
 			if _, e := db.SQL().Exec(`DROP TRIGGER reject_capture`); e != nil {
 				t.Fatal(e)
 			}
+			// Failed records rotate so independent jobs can progress. The empty
+			// next page resets the cursor; durable ownership survives the wrap.
+			if r, e := s.CaptureRecoveryCases(context.Background(), 1); e != nil || r.Scanned != 0 {
+				t.Fatalf("failed cursor did not wrap: %+v %v", r, e)
+			}
 			r, e := s.CaptureRecoveryCases(context.Background(), 1)
 			if e != nil || r.Captured != 1 {
 				t.Fatalf("retry lost cursor: %+v %v", r, e)

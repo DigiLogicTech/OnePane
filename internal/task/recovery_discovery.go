@@ -129,6 +129,7 @@ func recoveryInterruptionEvent(ctx context.Context, tx storage.Tx, workspace, ta
 	}
 	var eventID string
 	count, matches := 0, 0
+	complete := true
 	for rows.Next() {
 		var id, body string
 		var ws sql.NullString
@@ -140,7 +141,14 @@ func recoveryInterruptionEvent(ctx context.Context, tx storage.Tx, workspace, ta
 			TaskID    string `json:"task_id"`
 			AttemptID string `json:"attempt_id"`
 		}
-		if json.Unmarshal([]byte(body), &p) == nil && ws.Valid && ws.String == workspace && p.TaskID == taskID && p.AttemptID == attemptID {
+		// An unreadable or contradictory event cannot be ruled out as another
+		// interruption of this incarnation. One readable match is insufficient
+		// to establish unique lineage across a partially understood history.
+		if json.Unmarshal([]byte(body), &p) != nil || !ws.Valid || ws.String != workspace || p.TaskID != taskID || p.AttemptID == "" {
+			complete = false
+			continue
+		}
+		if p.AttemptID == attemptID {
 			eventID = id
 			matches++
 		}
@@ -155,7 +163,7 @@ func recoveryInterruptionEvent(ctx context.Context, tx storage.Tx, workspace, ta
 	if closeErr != nil {
 		return "", closeErr
 	}
-	if count > 128 || matches != 1 {
+	if !complete || count > 128 || matches != 1 {
 		return "", nil
 	}
 	return eventID, nil

@@ -15,21 +15,14 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/budget"
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/policy"
-	sqliteStore "github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
 )
 
 func TestInferencePostDispatchBudgetCommitFailureRetainsUnknownQuota(t *testing.T) {
 	for _, outcome := range []string{"success", "rate_limit", "invalid_response"} {
 		t.Run(outcome, func(t *testing.T) {
 			ctx := context.Background()
-			db, err := sqliteStore.Open(t.TempDir() + "/budget.db")
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
-			if err = db.Migrate(ctx); err != nil {
-				t.Fatal(err)
-			}
+			db := migratedInferenceDispatchDatabase(t, ctx)
+			var err error
 			for _, q := range []string{
 				`INSERT INTO workspaces(id,name,status,created_at,updated_at) VALUES('ws','Test','active',1,1)`,
 				`INSERT INTO principals(id,principal_type,display_name,status,created_at,updated_at) VALUES('agent','agent','Agent','active',1,1)`,

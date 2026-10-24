@@ -13,7 +13,6 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/budget"
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/policy"
-	sqliteStore "github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
 )
 
 type outcomeRuntimeTransport struct {
@@ -52,14 +51,8 @@ func TestRuntimeDispatchUnusableOutcomesRemainDurablyUnknown(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			root := t.TempDir()
-			db, err := sqliteStore.Open(root + "/outcome.db")
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
-			if err = db.Migrate(ctx); err != nil {
-				t.Fatal(err)
-			}
+			db := migratedRuntimeDispatchDatabase(t, ctx)
+			var err error
 			for _, query := range []string{
 				`INSERT INTO workspaces(id,name,status,revision,created_at,updated_at) VALUES('ws','Outcome test','active',1,1,1)`,
 				`INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at) VALUES('agent','agent','Agent','active',1,1,1)`,

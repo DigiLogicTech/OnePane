@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/DigiLogicTech/OnePane/internal/storage"
-	"github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
 )
 
 type expiryClock struct{ ms int64 }
@@ -34,14 +33,8 @@ func TestBudgetExpiryRetainsBoundOrInterruptedRecoveryQuota(t *testing.T) {
 	for _, scenario := range []string{"inference_unknown", "inference_succeeded", "inference_failed", "inference_rate_limited", "runtime_unknown", "runtime_succeeded", "runtime_failed", "attempt_only", "ledger_only", "ancestor_attempt", "ancestor_ledger", "foreign_ancestry", "cyclic_ancestry", "ancestry_257", "unused_ancestry_256", "unused"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
-			db, err := sqlite.Open(t.TempDir() + "/expiry.db")
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
-			if err = db.Migrate(ctx); err != nil {
-				t.Fatal(err)
-			}
+			db := migratedBudgetDatabase(t, ctx)
+			var err error
 			for _, q := range []string{
 				`INSERT INTO workspaces(id,name,status,created_at,updated_at) VALUES('ws','Workspace','active',1,1)`,
 				`INSERT INTO principals(id,principal_type,display_name,status,created_at,updated_at) VALUES('agent','agent','Agent','active',1,1)`,
@@ -184,14 +177,8 @@ func TestBudgetExpiryRetainsBoundOrInterruptedRecoveryQuota(t *testing.T) {
 
 func TestBudgetExpiryRecoveryProbesUseOwnershipIndexes(t *testing.T) {
 	ctx := context.Background()
-	db, err := sqlite.Open(t.TempDir() + "/plans.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if err = db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
+	db := migratedBudgetDatabase(t, ctx)
+	var err error
 	for _, query := range []string{
 		`INSERT INTO workspaces(id,name,status,created_at,updated_at) VALUES('ws','Workspace','active',1,1)`,
 		`WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<512) INSERT INTO tasks(id,workspace_id,objective,state,scheduling_class,priority,completion_json,created_at,updated_at) SELECT 'unrelated-'||i,'ws','unrelated','blocked','normal_task',0,'{}',1,1 FROM n`,

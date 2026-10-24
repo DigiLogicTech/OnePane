@@ -135,6 +135,12 @@
   get("[data-team-cancel]").onclick=()=>c.cancelExecution(get("[data-team-cancel-reason]").value);
   get("[data-team-form]").onsubmit=e=>{e.preventDefault();c.send()};get("[data-team-ask]").onclick=()=>c.ask();get("[data-team-refresh]").onclick=()=>c.refresh();get("[data-team-older]").onclick=()=>c.older();get("[data-team-live]").onclick=()=>c.live();
   if(root.OnePaneTeamAssignments)planEditor=root.OnePaneTeamAssignments.mount(el,c);
+  if(root.OnePaneTaskRecovery){
+   const button=document.createElement("button"),panel=document.createElement("section");let recovery=null;
+   button.type="button";button.className="btn";button.textContent="Recovery records";button.setAttribute("aria-expanded","false");
+   panel.hidden=true;panel.setAttribute("aria-label","Team Task recovery records");el.append(panel);el.querySelector(".toolbar").append(button);
+   button.onclick=()=>{if(!alive())return;const opening=panel.hidden;recovery?.stop();recovery=null;panel.hidden=!opening;button.setAttribute("aria-expanded",String(opening));if(opening)recovery=root.OnePaneTaskRecovery.mountInto(panel,taskID,scope)};
+  }
   const observer=new MutationObserver(()=>{if(!alive())stop()});observer.observe(document.body,{childList:true,subtree:true});
   function stop(){clearTimeout(timer);observer.disconnect();c.stop()}
   async function tick(){if(!alive()){stop();return}if(!document.hidden)await c.refresh();if(alive())timer=setTimeout(tick,2000);else stop()}

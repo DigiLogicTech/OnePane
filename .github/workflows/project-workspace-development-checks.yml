@@ -84,6 +84,8 @@ on:
       - 'internal/webui/static/team-assignments.js'
       - 'scripts/validate_team_assignments.js'
       - 'scripts/validate_team_room.js'
+      - 'internal/webui/static/task-recovery.*'
+      - 'scripts/validate_task_recovery.js'
       - 'internal/teamworker/**'
       - 'internal/runtimecoord/**'
       - 'internal/agentprotocol/**'
@@ -191,6 +193,8 @@ jobs:
           node scripts/validate_team_room.js
           node --check internal/webui/static/team-assignments.js
           node scripts/validate_team_assignments.js
+          node --check internal/webui/static/task-recovery.js
+          node scripts/validate_task_recovery.js
           node --check internal/webui/static/web-chat-page.js
           node --check internal/webui/static/web-chat-session-tabs.js
           node --check internal/webui/static/web-chat-council-launch.js

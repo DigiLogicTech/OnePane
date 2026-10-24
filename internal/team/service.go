@@ -623,6 +623,8 @@ func (s *Service) messageRows(ctx context.Context, query, sessionID string, limi
 	return out, rows.Err()
 }
 
+const reasoningRunningTurnHistorySQL = `SELECT EXISTS(SELECT 1 FROM team_turn_requests WHERE session_id=? AND status='running')`
+
 func (s *Service) RequestRound(ctx context.Context, c RequestRoundCommand) ([]TurnRequest, error) {
 	ss, err := s.Session(ctx, c.SessionID)
 	if err != nil {
@@ -678,6 +680,14 @@ func (s *Service) RequestRound(ctx context.Context, c RequestRoundCommand) ([]Tu
 	var out []TurnRequest
 	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
 		if err := requireReasoningTask(ctx, tx, ss.TaskID, ss.WorkspaceID); err != nil { return err }
+		// A running turn may still be in transport, or may retain an unknown
+		// outcome awaiting reconciliation. Starting another round cannot
+		// supersede that durable owner, including historical rounds.
+		var running bool
+		if err := tx.QueryRowContext(ctx, reasoningRunningTurnHistorySQL, ss.ID).Scan(&running); err != nil {
+			return err
+		}
+		if running { return ErrSessionState }
 		if c.TriggerMessageID != nil {
 			var found int
 			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_messages WHERE id=? AND session_id=? AND workspace_id=?`, *c.TriggerMessageID, ss.ID, ss.WorkspaceID).Scan(&found); err != nil {

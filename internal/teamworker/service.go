@@ -448,13 +448,17 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		}
 	}
 	kind, cid := string(cand.Kind), cand.ID
-	_, _ = s.db.ExecContext(ctx, `UPDATE team_turn_requests SET selected_candidate_kind=?,selected_candidate_id=?,updated_at=? WHERE id=?`, kind, cid, s.clock.UnixMilli(), turnID)
+	if err := s.bindReasoningCandidate(ctx, res, ws, turnRound, kind, cid); err != nil {
+		return s.reconcileReasoningTurn(ctx, res, ws, turnRound, err)
+	}
 	reservationID, err := s.reserve(ctx, ws, ss.TaskID, rp, cand, int64((used+3)/4))
 	if err != nil {
 		return s.block(ctx, res, err)
 	}
 	if reservationID != "" {
-		_, _ = s.db.ExecContext(ctx, `UPDATE team_turn_requests SET budget_reservation_id=? WHERE id=?`, reservationID, turnID)
+		if err := s.bindReasoningReservation(ctx, res, ws, turnRound, reservationID); err != nil {
+			return s.reconcileReasoningTurn(ctx, res, ws, turnRound, errors.Join(err, s.release(ctx, reservationID)))
+		}
 	}
 	objective := fmt.Sprintf("Participate in a pre-execution Team Mode deliberation as %s. Respond to the team's latest discussion, surface assumptions or objections, and help converge on a concrete plan. Do not execute tools or side effects. Task: %s", member.RoleName, taskObjective)
 	if executionMode == "council" {
@@ -502,31 +506,44 @@ func (s *Service) process(ctx context.Context, turnID, ws, sessionID, memberID s
 		if routeErr != nil || live.Selected == nil ||
 			live.Selected.Candidate.ID != cand.ID ||
 			!researchEvidenceCandidateAllowed(live.Selected.Candidate) {
-			s.release(ctx, reservationID)
+			if releaseErr := s.release(ctx, reservationID); releaseErr != nil {
+				return s.reconcileReasoningTurn(ctx, res, ws, turnRound, releaseErr)
+			}
 			return s.pauseResearch(ctx, res, ss, turnID,
 				fmt.Errorf("Research evidence route is no longer pinned to an eligible origin-node model"))
 		}
 		fresh, freshErr := s.consentForSeat(ctx, ws, ss.ID, member.ID, manifestRecord.SnapshotSHA256)
 		if freshErr != nil || !fresh.Active || fresh.EvidenceSHA256 != evidenceConsent.EvidenceSHA256 {
-			s.release(ctx, reservationID)
+			if releaseErr := s.release(ctx, reservationID); releaseErr != nil {
+				return s.reconcileReasoningTurn(ctx, res, ws, turnRound, releaseErr)
+			}
 			return s.pauseResearch(ctx, res, ss, turnID,
 				fmt.Errorf("Research seat evidence consent revoked before local dispatch"))
 		}
 	}
 	if _, proofErr := proveResearchTurnEvidence(areq, cand); proofErr != nil {
-		s.release(ctx, reservationID)
+		if releaseErr := s.release(ctx, reservationID); releaseErr != nil {
+			return s.reconcileReasoningTurn(ctx, res, ws, turnRound, errors.Join(proofErr, releaseErr))
+		}
 		if researchMode {
 			return s.pauseResearch(ctx, res, ss, turnID, proofErr)
 		}
 		return s.fail(ctx, res, proofErr)
 	}
 	if err := s.requireRunningReasoningTurn(ctx, ws, sessionID, turnID, member.ID, turnRound); err != nil {
-		s.release(ctx, reservationID)
+		if releaseErr := s.release(ctx, reservationID); releaseErr != nil {
+			return s.reconcileReasoningTurn(ctx, res, ws, turnRound, errors.Join(err, releaseErr))
+		}
 		return s.fail(ctx, res, err)
 	}
 	response, err := s.dispatch(ctx, areq, cand, label, reservationID)
 	if err != nil {
-		s.release(ctx, reservationID)
+		if errors.Is(err, agentworker.ErrDispatchRequiresReconciliation) {
+			return s.reconcileReasoningTurn(ctx, res, ws, turnRound, err)
+		}
+		if releaseErr := s.release(ctx, reservationID); releaseErr != nil {
+			return s.reconcileReasoningTurn(ctx, res, ws, turnRound, errors.Join(err, releaseErr))
+		}
 		if researchMode {
 			return s.pauseResearch(ctx, res, ss, turnID, err)
 		}
@@ -781,10 +798,13 @@ func (s *Service) dispatch(ctx context.Context, req agentprotocol.Request, c sch
 		taskID := req.TaskID
 		out, err := s.runtimes.Invoke(ctx, agentruntime.InvokeCommand{WorkspaceID: req.WorkspaceID, TaskID: &taskID, PrincipalID: WorkerPrincipal, ConnectionID: c.ID, Role: req.Role, Objective: req.Objective, Constraints: req.Constraints, Context: req.Context, ContextManifest: req.ContextManifest, PermittedProposalTypes: req.PermittedProposalTypes, InputLabel: label, ActorPrincipalID: strptr(WorkerPrincipal), BudgetReservationID: optional(reservationID)})
 		if err != nil {
+			if out.Invocation.Status != agentruntime.InvocationFailed {
+				return agentprotocol.Response{}, fmt.Errorf("%w: runtime invocation %s: %w", agentworker.ErrDispatchRequiresReconciliation, out.Invocation.ID, err)
+			}
 			return agentprotocol.Response{}, err
 		}
-		if out.Response == nil {
-			return agentprotocol.Response{}, fmt.Errorf("runtime returned no response")
+		if out.Invocation.Status != agentruntime.InvocationSucceeded || out.Response == nil {
+			return agentprotocol.Response{}, fmt.Errorf("%w: runtime invocation %s returned no successful response", agentworker.ErrDispatchRequiresReconciliation, out.Invocation.ID)
 		}
 		return *out.Response, nil
 	}
@@ -798,24 +818,31 @@ func (s *Service) dispatch(ctx context.Context, req agentprotocol.Request, c sch
 	taskID := req.TaskID
 	q, err := s.inference.Execute(ctx, inference.ExecuteCommand{WorkspaceID: req.WorkspaceID, TaskID: &taskID, PrincipalID: WorkerPrincipal, DeploymentID: c.ID, CapabilityJSON: capJSON, ContextManifestJSON: req.ContextManifest, ClassificationMetadata: json.RawMessage(`{"team_mode":true,"deliberation_only":true}`), InputLabel: label, RequestJSON: body, ActorPrincipalID: strptr(WorkerPrincipal), BudgetReservationID: optional(reservationID)})
 	if err != nil {
+		if q.Status != inference.RequestFailed && q.Status != inference.RequestRateLimited {
+			return agentprotocol.Response{}, fmt.Errorf("%w: inference request %s: %w", agentworker.ErrDispatchRequiresReconciliation, q.ID, err)
+		}
 		return agentprotocol.Response{}, err
 	}
-	if q.ResponseArtifactID == nil {
-		return agentprotocol.Response{}, fmt.Errorf("inference returned no artifact")
+	if q.Status != inference.RequestSucceeded || q.ResponseArtifactID == nil {
+		return agentprotocol.Response{}, fmt.Errorf("%w: inference request %s returned no successful artifact", agentworker.ErrDispatchRequiresReconciliation, q.ID)
 	}
 	if err := s.artifacts.VerifyContent(ctx, *q.ResponseArtifactID); err != nil {
-		return agentprotocol.Response{}, err
+		return agentprotocol.Response{}, errors.Join(agentworker.ErrDispatchRequiresReconciliation, err)
 	}
 	rc, _, err := s.artifacts.Open(ctx, *q.ResponseArtifactID)
 	if err != nil {
-		return agentprotocol.Response{}, err
+		return agentprotocol.Response{}, errors.Join(agentworker.ErrDispatchRequiresReconciliation, err)
 	}
 	defer rc.Close()
 	raw, err := io.ReadAll(io.LimitReader(rc, 32<<20))
 	if err != nil {
-		return agentprotocol.Response{}, err
+		return agentprotocol.Response{}, errors.Join(agentworker.ErrDispatchRequiresReconciliation, err)
 	}
-	return agentworker.DecodeModelResponse(raw, req)
+	response, err := agentworker.DecodeModelResponse(raw, req)
+	if err != nil {
+		return agentprotocol.Response{}, errors.Join(agentworker.ErrDispatchRequiresReconciliation, err)
+	}
+	return response, nil
 }
 func (s *Service) reserve(ctx context.Context, ws, taskID string, rp routePolicy, c scheduler.Candidate, tokens int64) (string, error) {
 	if c.CostClass == scheduler.CostLocal || (c.CostClass == scheduler.CostFree && c.HardZeroIncrementalCost) {
@@ -851,14 +878,24 @@ func (s *Service) reserve(ctx context.Context, ws, taskID string, rp routePolicy
 	}
 	return r.ID, nil
 }
-func (s *Service) release(ctx context.Context, idv string) {
-	if idv == "" || s.budgets == nil {
-		return
+func (s *Service) release(ctx context.Context, idv string) error {
+	if idv == "" {
+		return nil
+	}
+	if s.budgets == nil {
+		return inference.ErrBudgetUnavailable
 	}
 	r, err := s.budgets.Reservation(ctx, idv)
-	if err == nil && r.Status == budget.ReservationReserved {
-		_, _ = s.budgets.Release(ctx, budget.CloseCommand{ReservationID: idv, ActorPrincipalID: strptr(WorkerPrincipal)})
+	if err != nil {
+		return err
 	}
+	if r.Status == budget.ReservationReserved {
+		if r.InferenceRequestID != nil || r.AgentRuntimeInvocationID != nil {
+			return fmt.Errorf("%w: bound Team reservation requires accounting reconciliation", agentworker.ErrDispatchRequiresReconciliation)
+		}
+		_, err = s.budgets.Release(ctx, budget.CloseCommand{ReservationID: idv, ActorPrincipalID: strptr(WorkerPrincipal)})
+	}
+	return err
 }
 func (s *Service) fail(ctx context.Context, r Result, err error) Result {
 	return s.finishReasoningError(ctx, r, "failed", err)

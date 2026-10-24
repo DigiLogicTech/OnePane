@@ -246,7 +246,7 @@ jobs:
           go test -race -count=1 ./internal/runtimecoord ./internal/teamworker
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(TeamAssignmentsExecute|TeamPause|TeamResume|TeamCancellation|CancellationBetweenWorkerTicks|ProjectTaskGraphRecognizesReviewedTeam)' ./internal/team ./internal/agentworker ./internal/projectorchestrator
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(AgentProtocolHTTPPostDispatch|RuntimeDispatchUnusable)' ./internal/agentruntime
-          go test -race -tags integration -count=1 -timeout 3m -run 'Test(UnstartedCancellation|RecoveryCapture|RecoveryAdmission|InterruptedRecoveryCannotReadmitOriginalTask|TeamHoldCannotReadmitThroughUnguardedTaskService)' ./internal/task
+          go test -race -tags integration -count=1 -timeout 3m -run 'Test(UnstartedCancellation|RecoveryCapture|RecoveryDiscovery|RecoveryAdmission|InterruptedRecoveryCannotReadmitOriginalTask|TeamHoldCannotReadmitThroughUnguardedTaskService)' ./internal/task
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(ProposePlanRejects|SyncTaskStates|ReasoningTask|CompleteReasoningTurn|ReasoningTurn|ManualCouncilTaskFences|ResearchSeatVerifiedTextDelivery)' ./internal/team ./internal/teamworker
           go test -race -count=1 ./internal/instrumentprobe ./internal/nodefederation ./cmd/onepane-node-custody ./cmd/onepane-instrument-probe
           go test -race -tags integration -count=1 -run TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly ./internal/projectworkspace
@@ -404,7 +404,7 @@ jobs:
           go test -count=1 -timeout 3m -run 'Test(RecoveryCaseReads|AcceptedTeamAssignments|TeamAssignment|TeamPause|TeamResume|TeamCancellation)' ./internal/team ./internal/tool ./internal/api
           go test -tags integration -count=1 -timeout 3m -run 'Test(TeamAssignmentsExecute|TeamPause|TeamCancellation|CancellationBetweenWorkerTicks|ProjectTaskGraphRecognizesReviewedTeam)' ./internal/agentworker ./internal/projectorchestrator
           go test -tags integration -count=1 -timeout 3m -run 'Test(AgentProtocolHTTPPostDispatch|RuntimeDispatchUnusable)' ./internal/agentruntime
-          go test -tags integration -count=1 -timeout 3m -run 'Test(UnstartedCancellation|RecoveryCapture|RecoveryAdmission|InterruptedRecoveryCannotReadmitOriginalTask|TeamHoldCannotReadmitThroughUnguardedTaskService)' ./internal/task
+          go test -tags integration -count=1 -timeout 3m -run 'Test(UnstartedCancellation|RecoveryCapture|RecoveryDiscovery|RecoveryAdmission|InterruptedRecoveryCannotReadmitOriginalTask|TeamHoldCannotReadmitThroughUnguardedTaskService)' ./internal/task
           go test -tags integration -count=1 -timeout 3m -run 'Test(ProposePlanRejects|SyncTaskStates|ReasoningTask|CompleteReasoningTurn|ReasoningTurn|ManualCouncilTaskFences|ResearchSeatVerifiedTextDelivery)' ./internal/team ./internal/teamworker
       - name: Native Windows persistent drive-root resolution
         shell: pwsh

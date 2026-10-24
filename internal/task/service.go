@@ -35,6 +35,7 @@ type Service struct {
 	cancelCursor string
 	recoveryMu sync.Mutex
 	recoveryCursor string
+	recoveryDiscoveryCursor string
 	tx     storage.Transactor
 	repo   repository
 	events eventAppender

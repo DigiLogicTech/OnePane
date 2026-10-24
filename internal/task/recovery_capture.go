@@ -56,7 +56,7 @@ func (s *Service) CaptureRecoveryCases(ctx context.Context, limit int) (Recovery
 		err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
 			var ws sql.NullString
 			var raw string
-			e := tx.QueryRowContext(ctx, `SELECT workspace_id,CASE WHEN length(payload_json)<=65536 THEN payload_json ELSE '' END FROM outbox_jobs WHERE id=? AND job_type='task.recovery.required' AND status IN ('pending','retry') AND available_at<=?`, jobID, now).Scan(&ws, &raw)
+			e := tx.QueryRowContext(ctx, `SELECT workspace_id,CASE WHEN length(CAST(payload_json AS BLOB))<=65536 THEN payload_json ELSE '' END FROM outbox_jobs WHERE id=? AND job_type='task.recovery.required' AND status IN ('pending','retry') AND available_at<=?`, jobID, now).Scan(&ws, &raw)
 			if errors.Is(e, sql.ErrNoRows) {
 				return nil
 			}
@@ -78,40 +78,11 @@ func (s *Service) CaptureRecoveryCases(ctx context.Context, limit int) (Recovery
 			if e != nil {
 				return e
 			}
-			// Bound complete interruption history; never infer identity from a prefix.
-			history, e := tx.QueryContext(ctx, `SELECT id,workspace_id,CASE WHEN length(payload_json)<=65536 THEN payload_json ELSE '' END FROM events WHERE aggregate_type='task' AND aggregate_id=? AND event_type='task.attempt_interrupted' ORDER BY sequence LIMIT 129`, payload.TaskID)
+			eventID, e := recoveryInterruptionEvent(ctx, tx, ws.String, payload.TaskID, payload.AttemptID)
 			if e != nil {
 				return e
 			}
-			var eventID string
-			count, matches := 0, 0
-			for history.Next() {
-				var id, body string
-				var eventWS sql.NullString
-				if e = history.Scan(&id, &eventWS, &body); e != nil {
-					break
-				}
-				count++
-				var p struct {
-					TaskID    string `json:"task_id"`
-					AttemptID string `json:"attempt_id"`
-				}
-				if json.Unmarshal([]byte(body), &p) == nil && eventWS.Valid && eventWS.String == ws.String && p.TaskID == payload.TaskID && p.AttemptID == payload.AttemptID {
-					eventID = id
-					matches++
-				}
-			}
-			if e == nil {
-				e = history.Err()
-			}
-			closeErr := history.Close()
-			if e != nil {
-				return e
-			}
-			if closeErr != nil {
-				return closeErr
-			}
-			if count > 128 || matches != 1 {
+			if eventID == "" {
 				return nil
 			}
 			caseID, e := s.ids.New("recovery")

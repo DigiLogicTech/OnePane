@@ -2,6 +2,8 @@
 
 Status: design dependency reviewed against source on 24 October 2026. The general effect inventory, authenticated human disposition and independent postcondition verification are **not implemented**. Intake/discovery and scoped metadata inspection do not resolve recovery cases. This document records the ownership investigation so continuation does not repeat it.
 
+Implemented dependency checkpoint: private `internal/recoveryinventory` now validates the direct Task/Attempt structural slice (40 classified tables); migrations0104–0106 add30missing direct/reverse/nested provenance lookup indexes with populated upgrade and actual planner tests. This is not a complete semantic ownership contract or collector. The later design sections retain the full requirements; their earlier statement that these prerequisites are unimplemented is superseded only for this explicit slice. No case phase, recovery authority or execution admission changes.
+
 ## Trust and implementation boundary
 
 A private immutable database observation is the next dependency. It is not actual process termination, a file-content probe, a human decision, verification of an external effect, permission to retry, or completed cancellation. Preserve the original interrupted Attempt/Worker, all admission fences and the case's truthful `awaiting_inventory` phase. Do not add a public effect-payload API or invoke adapters while collecting an inventory.

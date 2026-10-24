@@ -249,6 +249,7 @@ jobs:
         run: |
           go test -race -count=1 ./internal/runtimecoord ./internal/teamworker
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(Assurance|BudgetJournal|ResponseJournal)' ./internal/agentworker
+          go test -race -tags integration -count=1 -timeout 3m ./internal/recoveryinventory
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(TeamAssignmentsExecute|TeamPause|TeamResume|TeamCancellation|CancellationBetweenWorkerTicks|ProjectTaskGraphRecognizesReviewedTeam)' ./internal/team ./internal/agentworker ./internal/projectorchestrator
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(AgentProtocolHTTPPostDispatch|RuntimeDispatchUnusable)' ./internal/agentruntime
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(UnstartedCancellation|RecoveryCapture|RecoveryDiscovery|RecoveryAdmission|InterruptedRecoveryCannotReadmitOriginalTask|TeamHoldCannotReadmitThroughUnguardedTaskService)' ./internal/task
@@ -409,6 +410,7 @@ jobs:
           go test -count=1 -timeout 3m -run 'Test(TaskInspection|TeamReads|RecoveryCaseReads|AcceptedTeamAssignments|TeamAssignment|TeamPause|TeamResume|TeamCancellation)' ./internal/team ./internal/tool ./internal/api
           go test -tags integration -count=1 -timeout 3m -run 'Test(TeamAssignmentsExecute|TeamPause|TeamCancellation|CancellationBetweenWorkerTicks|ProjectTaskGraphRecognizesReviewedTeam)' ./internal/agentworker ./internal/projectorchestrator
           go test -tags integration -count=1 -timeout 3m -run 'Test(Assurance|BudgetJournal|ResponseJournal)' ./internal/agentworker
+          go test -tags integration -count=1 -timeout 3m ./internal/recoveryinventory
           go test -tags integration -count=1 -timeout 3m -run 'Test(AgentProtocolHTTPPostDispatch|RuntimeDispatchUnusable)' ./internal/agentruntime
           go test -tags integration -count=1 -timeout 3m -run 'Test(UnstartedCancellation|RecoveryCapture|RecoveryDiscovery|RecoveryAdmission|InterruptedRecoveryCannotReadmitOriginalTask|TeamHoldCannotReadmitThroughUnguardedTaskService)' ./internal/task
           go test -tags integration -count=1 -timeout 3m -run 'Test(ProposePlanRejects|SyncTaskStates|ReasoningTask|CompleteReasoningTurn|ReasoningTurn|ManualCouncilTaskFences|ResearchSeatVerifiedTextDelivery)' ./internal/team ./internal/teamworker

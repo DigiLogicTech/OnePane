@@ -156,38 +156,29 @@ func (s *Service) Invoke(ctx context.Context, cmd InvokeCommand) (InvokeResult, 
 	}
 	outputLabel, transport, authErr := s.authorizeInvocation(c, cmd.InputLabel)
 	if authErr != nil {
-		if cmd.BudgetReservationID != nil && s.budgets != nil {
-			_, _ = s.budgets.Release(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
-		}
-		return s.finishInvocationError(ctx, inv.ID, InvocationCreated, authErr, cmd)
+		return s.finishInvocationError(ctx, inv.ID, InvocationCreated, errors.Join(authErr,s.releaseBudgetBeforeDispatch(ctx,cmd)), cmd)
 	}
 	if err := s.transitionInvocation(ctx, inv.ID, InvocationAuthorized, nil, nil, nil, cmd, "agent_runtime_invocation.authorized", map[string]any{"adapter": c.AdapterName + "@" + c.AdapterVersion, "budget_required": requiresBudget, "budget_reservation_id": cmd.BudgetReservationID}); err != nil {
-		s.releaseBudgetBeforeDispatch(ctx, cmd)
-		return InvokeResult{}, err
+		return s.preDispatchInvocationTransitionError(ctx,inv.ID,err,cmd)
 	}
 	if err:=s.requireCurrentRuntimeDispatch(ctx,c,cmd);err!=nil{
-		s.releaseBudgetBeforeDispatch(ctx,cmd)
-		return s.finishInvocationError(ctx,inv.ID,InvocationAuthorized,err,cmd)
+		return s.finishInvocationError(ctx,inv.ID,InvocationAuthorized,errors.Join(err,s.releaseBudgetBeforeDispatch(ctx,cmd)),cmd)
 	}
 	if err := s.transitionInvocation(ctx, inv.ID, InvocationDispatched, nil, nil, nil, cmd, "agent_runtime_invocation.dispatched", nil); err != nil {
-		s.releaseBudgetBeforeDispatch(ctx, cmd)
-		return InvokeResult{}, err
+		return s.preDispatchInvocationTransitionError(ctx,inv.ID,err,cmd)
 	}
 	if err := s.transitionInvocation(ctx, inv.ID, InvocationExecuting, nil, nil, nil, cmd, "agent_runtime_invocation.executing", nil); err != nil {
-		s.releaseBudgetBeforeDispatch(ctx, cmd)
-		return InvokeResult{}, err
+		return s.preDispatchInvocationTransitionError(ctx,inv.ID,err,cmd)
 	}
 	// Revalidate the canonical peer and data policy immediately before the
 	// potentially external side-effect. A non-replayable unknown network
 	// outcome remains handled by the existing Invocation state machine.
 	if err:=s.requireCurrentRuntimeDispatch(ctx,c,cmd);err!=nil{
-		s.releaseBudgetBeforeDispatch(ctx,cmd)
-		return s.finishInvocationError(ctx,inv.ID,InvocationExecuting,err,cmd)
+		return s.finishInvocationError(ctx,inv.ID,InvocationExecuting,errors.Join(err,s.releaseBudgetBeforeDispatch(ctx,cmd)),cmd)
 	}
 	if cmd.TaskID!=nil {
 		if _,err:=teamgate.Require(ctx,s.scopes.DB,cmd.WorkspaceID,*cmd.TaskID);err!=nil{
-			s.releaseBudgetBeforeDispatch(ctx,cmd)
-			return s.finishInvocationError(ctx,inv.ID,InvocationExecuting,err,cmd)
+			return s.finishInvocationError(ctx,inv.ID,InvocationExecuting,errors.Join(err,s.releaseBudgetBeforeDispatch(ctx,cmd)),cmd)
 		}
 	}
 	resp, callErr := transport.Invoke(ctx, c, req, s.secrets)
@@ -228,11 +219,30 @@ func (s *Service) Invoke(ctx context.Context, cmd InvokeCommand) (InvokeResult, 
 	return InvokeResult{Invocation: stored, Response: &resp}, nil
 }
 
-func (s *Service) releaseBudgetBeforeDispatch(ctx context.Context, cmd InvokeCommand) {
-	if cmd.BudgetReservationID == nil || s.budgets == nil {
-		return
+func (s *Service) releaseBudgetBeforeDispatch(ctx context.Context, cmd InvokeCommand) error {
+	if cmd.BudgetReservationID == nil {
+		return nil
 	}
-	_, _ = s.budgets.Release(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+	if s.budgets == nil {
+		return ErrRuntimeBudgetUnavailable
+	}
+	_, err := s.budgets.Release(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+	if err != nil {
+		return fmt.Errorf("release undispatched Agent runtime budget: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) preDispatchInvocationTransitionError(ctx context.Context, id string, cause error, cmd InvokeCommand) (InvokeResult, error) {
+	return s.invocationErrorResult(ctx, id, errors.Join(cause, s.releaseBudgetBeforeDispatch(ctx, cmd)), cmd)
+}
+
+func (s *Service) invocationErrorResult(ctx context.Context, id string, cause error, cmd InvokeCommand) (InvokeResult, error) {
+	stored, readErr := s.invocations.Get(ctx, id)
+	if readErr != nil {
+		stored = Invocation{ID: id, WorkspaceID: cmd.WorkspaceID, TaskID: cmd.TaskID, AttemptID: cmd.AttemptID, PrincipalID: cmd.PrincipalID, ConnectionID: cmd.ConnectionID}
+	}
+	return InvokeResult{Invocation: stored}, errors.Join(cause, readErr)
 }
 
 // A third-party Agent Runtime is NOT a verified inference deployment:
@@ -392,11 +402,7 @@ func (s *Service) finishInvocationError(ctx context.Context, id string, from Inv
 	}
 	completed := s.clock.UnixMilli()
 	if err := s.transitionInvocation(ctx, id, status, nil, &code, &completed, cmd, "agent_runtime_invocation."+string(status), nil); err != nil {
-		return InvokeResult{}, err
+		return s.invocationErrorResult(ctx,id,errors.Join(cause,err),cmd)
 	}
-	stored, err := s.invocations.Get(ctx, id)
-	if err != nil {
-		return InvokeResult{}, err
-	}
-	return InvokeResult{Invocation: stored}, cause
+	return s.invocationErrorResult(ctx,id,cause,cmd)
 }

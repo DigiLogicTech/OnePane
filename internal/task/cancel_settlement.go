@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/DigiLogicTech/OnePane/internal/event"
+	"github.com/DigiLogicTech/OnePane/internal/recoveryinventory"
 	"github.com/DigiLogicTech/OnePane/internal/storage"
 )
 
@@ -192,6 +193,11 @@ func sameOptionalID(a, b *string) bool {
 // effects. Never infer safety from the absence of a *current* Attempt. Even
 // proposals, expired grants and failed requests are conservatively deferred.
 func cancellationPristine(ctx context.Context, tx storage.Tx, taskID string) (bool, error) {
+	// Caller links may never have committed. Independent reverse provenance
+	// contradicts pristine history even when a direct Task column is null/foreign.
+	if present, err := recoveryinventory.HasKnownTaskEffectProvenance(ctx, tx, taskID); err != nil || present {
+		return false, err
+	}
 	for _, table := range []string{
 		"task_attempts", "agent_worker_runs", "operations", "tool_invocations",
 		"inference_sessions", "inference_requests", "agent_runtime_invocations",

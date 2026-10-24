@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/DigiLogicTech/OnePane/internal/recoveryinventory"
 	"github.com/DigiLogicTech/OnePane/internal/storage"
 )
 
@@ -15,6 +16,9 @@ func cancellationMissing(err error) error {
 }
 
 func teamCancellationRootPristine(ctx context.Context, tx storage.Tx, id string) (bool, error) {
+	if present, err := recoveryinventory.HasKnownTaskEffectProvenance(ctx, tx, id); err != nil || present {
+		return false, err
+	}
 	for _, table := range []string{"task_attempts", "agent_worker_runs", "operations", "tool_invocations", "inference_sessions", "agent_runtime_invocations", "capability_leases", "resource_leases", "checkpoints", "verifications", "recovery_snapshots", "continuation_capsules", "assurance_runs", "workspace_file_publications", "node_power_holds", "node_wake_attempts", "edit_proposals", "project_change_proposals"} {
 		var present bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM `+table+` WHERE task_id=?)`, id).Scan(&present); err != nil {

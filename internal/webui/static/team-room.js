@@ -148,6 +148,10 @@
  }
  root.OnePaneTeamRoom={controller,mount,content,guidanceRecipient};
  if(typeof document!=="undefined"){
+  // Later canonical Inspector renderers replace the compatibility overview.
+  // Install this entry point after those renderers, where it is actually used.
+  const overview=qa4InspectorOverview;
+  qa4InspectorOverview=function(){const html=overview();return qa4Inspector.kind==="task"&&!html.includes("data-team-open-task=")?html+'<section class="spec-readable-section"><h3>Team collaboration</h3><p>Open this Task’s Team conversation and named assignments, when a Team session is available.</p><button class="btn" type="button" data-team-open-task="'+text(qa4Inspector.id)+'">Open live Team</button></section>':html};
   document.addEventListener("click",e=>{const b=e.target.closest?.("[data-team-open-task]");if(b){e.preventDefault();mount(b.dataset.teamOpenTask)}});
  }
 })(globalThis);

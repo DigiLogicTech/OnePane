@@ -8,6 +8,25 @@ const inspector=foundation.slice(foundation.indexOf('function qa4InspectorOvervi
 const inspectorContext=vm.createContext({qa4Inspector:{kind:'task',id:'task'},qa4FindEntity:()=>({state:'CREATED'}),escapeHtml:String,titleCase:String});
 vm.runInContext(inspector,inspectorContext);
 assert.match(vm.runInContext('qa4InspectorOverview()',inspectorContext),/data-team-open-task="task"/,'canonical Task Inspector must open the live room');
+// Execute the effective canonical overview replacements in shipped order. The
+// old test above only sees an earlier shadowed compatibility declaration.
+const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const shipped=vm.createContext({AbortController,Map,Array,JSON,Number,String,Promise,Error,
+ qa4Inspector:{kind:'task',id:'task"<unsafe>'},qa4FindEntity:()=>({id:'task',objective:'Actual Task',state:'blocked'}),
+ escapeHtml:escape,titleCase:String,syncLiveNotifications(){},refreshOperationalDataQA(){},qa6ComponentContent(){},bindViewActions(){},renderInspector(){},
+ document:{addEventListener(){}},globalThis:undefined
+});
+vm.runInContext('globalThis=this',shipped);
+for(const declaration of foundation.split('\n').filter(line=>line.startsWith('function qa4InspectorOverview(){')))vm.runInContext(declaration,shipped);
+vm.runInContext(fs.readFileSync('internal/webui/static/attention-inspector.js','utf8'),shipped);
+assert.doesNotMatch(vm.runInContext('qa4InspectorOverview()',shipped),/data-team-open-task=/,'baseline reproduction no longer represents the effective renderer');
+vm.runInContext(fs.readFileSync('internal/webui/static/team-room.js','utf8'),shipped);
+vm.runInContext(fs.readFileSync('internal/webui/static/task-recovery.js','utf8'),shipped);
+const effective=vm.runInContext('qa4InspectorOverview()',shipped);
+assert.match(effective,/Actual Task/);assert.match(effective,/data-team-open-task="task&quot;&lt;unsafe&gt;"/,'effective Inspector lost Team entry point');
+assert.match(effective,/data-task-recovery-open="task&quot;&lt;unsafe&gt;"/,'recovery wrapper lost its entry point');
+assert.equal((effective.match(/data-team-open-task=/g)||[]).length,1,'duplicate Team controls');
+vm.runInContext('qa4Inspector.kind="node"',shipped);assert.doesNotMatch(vm.runInContext('qa4InspectorOverview()',shipped),/data-team-open-task=|data-task-recovery-open=/,'Task controls leaked into another Inspector');
 const {controller}=context.OnePaneTeamRoom;
 assert.equal(context.OnePaneTeamRoom.guidanceRecipient({Kind:'human',Content:'{"text":"Check","target_member_id":"reviewer"}'}),'reviewer');
 assert.equal(context.OnePaneTeamRoom.guidanceRecipient({Kind:'agent',Content:{target_member_id:'reviewer'}}),'');

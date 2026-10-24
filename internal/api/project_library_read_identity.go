@@ -13,6 +13,13 @@ func (s *Server) authorizeCurrentLibraryRead(w http.ResponseWriter, r *http.Requ
 	if !s.authorizeCurrentWorkspaceRead(w, r, original, p.WorkspaceID, "project.read") {
 		return false
 	}
+	current, err := lib.ResolveWorkspaceLibraryVersion(r.Context(), p.ID, workspace, selected.AssetID, selected.Version)
+	if err != nil {
+		respondDomain(w, nil, err, 0)
+		return false
+	}
+	// The resolver may perform storage work. Check Project lifetime after that
+	// collection as well, before publishing its previously resolved content.
 	project, err := s.projects.Project(r.Context(), p.ID)
 	if err != nil {
 		respondDomain(w, nil, err, 0)
@@ -20,11 +27,6 @@ func (s *Server) authorizeCurrentLibraryRead(w http.ResponseWriter, r *http.Requ
 	}
 	if project.ID != p.ID || project.WorkspaceID != p.WorkspaceID || project.Status != "active" {
 		writeError(w, http.StatusForbidden, "Project changed during read")
-		return false
-	}
-	current, err := lib.ResolveWorkspaceLibraryVersion(r.Context(), p.ID, workspace, selected.AssetID, selected.Version)
-	if err != nil {
-		respondDomain(w, nil, err, 0)
 		return false
 	}
 	if current != selected {

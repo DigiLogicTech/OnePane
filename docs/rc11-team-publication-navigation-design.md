@@ -40,6 +40,14 @@ enabled, unexpired directional publications. Inspect actual resolver plans:
 the directional-publication branch needs a reviewed asset/version lookup index
 before repeated calls can be described as bounded negative probes.
 
+Migration0109 now provides the exact `(asset_id,asset_version,content_hash,link_id)`
+index. The unchanged production resolver is tested with1,024 unrelated
+publications before/after statistics collection; historical whole-publication
+scans and Project-wide link enumeration are replaced by exact version/hash
+probes. This removes unrelated-history dependence only. Multiple directional
+publications of the **same** version/hash still require an explicit fan-out cap
+or another bounded permission representation before wiring the new endpoint.
+
 Unchanged Library versions intentionally retain older originating Task/Attempt
 provenance. The current Task's exact receipt may associate those same bytes.
 Label the UI **Task-associated recorded publications**. Do not assert every

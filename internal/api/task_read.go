@@ -45,13 +45,5 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 func (s *Server) authorizeCurrentTaskRead(w http.ResponseWriter, r *http.Request, original Identity, workspace string) bool {
 	// The credential may have been revoked or replaced while storage was read.
 	// Authorizing an earlier Identity alone does not revalidate its credential.
-	fresh, ok := s.authenticate(w, r)
-	if !ok {
-		return false
-	}
-	if fresh.PrincipalID != original.PrincipalID || fresh.CredentialID != original.CredentialID || fresh.PrincipalType != original.PrincipalType {
-		writeError(w, http.StatusForbidden, "Identity changed during Task read")
-		return false
-	}
-	return s.authorize(w, r, fresh, workspace, "task.read")
+	return s.authorizeCurrentWorkspaceRead(w, r, original, workspace, "task.read")
 }

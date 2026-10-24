@@ -48,7 +48,7 @@ func (s *Server) pageTeamMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	// Every poll/page is newly authenticated. Recheck after collection as well,
 	// so a revocation observed during the read prevents publishing the payload.
-	if !s.authorize(w, r, identity, ss.WorkspaceID, "team.read") {
+	if !s.authorizeCurrentWorkspaceRead(w, r, identity, ss.WorkspaceID, "team.read") {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")

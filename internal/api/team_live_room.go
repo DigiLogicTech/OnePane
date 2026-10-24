@@ -37,7 +37,7 @@ func (s *Server) getTeamLiveRoom(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "Team scope mismatch")
 		return
 	}
-	if !s.authorize(w, r, identity, ss.WorkspaceID, "team.read") || !s.authorize(w, r, identity, ss.WorkspaceID, "task.read") {
+	if !s.authorizeCurrentWorkspaceRead(w, r, identity, ss.WorkspaceID, "team.read", "task.read") {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")

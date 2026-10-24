@@ -212,6 +212,7 @@ func (s *Server) revokeProjectLibraryGrant(w http.ResponseWriter,r *http.Request
  respondDomain(w,map[string]any{"revoked":err==nil},err,http.StatusOK)
 }
 func (s *Server) downloadWorkspaceLibraryVersion(w http.ResponseWriter,r *http.Request){
+ identity,ok:=s.authenticate(w,r);if !ok{return}
  lib,p,_,ok:=s.projectLibraryAccess(w,r,false);if !ok{return}
  if s.libraryArtifacts==nil{writeError(w,http.StatusServiceUnavailable,"Artifact blob store unavailable");return}
  workspaceID:=strings.TrimSpace(r.URL.Query().Get("workspace_id"))
@@ -232,6 +233,7 @@ func (s *Server) downloadWorkspaceLibraryVersion(w http.ResponseWriter,r *http.R
  if !libraryArtifactMatchesProject(selected,raw,p.ID,p.WorkspaceID){
   writeError(w,http.StatusForbidden,"Library provenance mismatch");return
  }
+ if !s.authorizeCurrentLibraryRead(w,r,identity,lib,p,workspaceID,selected){return}
  w.Header().Set("X-Content-Type-Options","nosniff")
  w.Header().Set("Cache-Control","no-store, private")
  w.Header().Set("Content-Type","application/octet-stream")

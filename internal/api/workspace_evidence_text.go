@@ -101,8 +101,9 @@ func collectVerifiedWorkspaceEvidence(
   closeErr:=reader.Close()
   if readErr!=nil||closeErr!=nil{return verifiedWorkspaceEvidence{},errEvidenceUnsafe}
   digest:=sha256.Sum256(bytes)
-  actual:="sha256:"+hex.EncodeToString(digest[:])
-  if actual!=selected.ContentHash{return verifiedWorkspaceEvidence{},errEvidenceUnsafe}
+  actual:=hex.EncodeToString(digest[:])
+  expected,validDigest:=librarySHA256Digest(selected.ContentHash)
+  if !validDigest||actual!=expected{return verifiedWorkspaceEvidence{},errEvidenceUnsafe}
   output.Entries=append(output.Entries,verifiedWorkspaceEvidenceEntry{
    WorkspaceEvidenceEntry:entry,Text:string(bytes),Trust:"untrusted_library_content",
   })

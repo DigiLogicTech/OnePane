@@ -403,8 +403,15 @@ func TestUnstartedCancellationIndependentServicesAndLedgerIndex(t *testing.T) {
 		if err := rows.Err(); err != nil {
 			t.Fatal(err)
 		}
-		rows.Close()
-		if !strings.Contains(plan, "idx_events_task_execution_evidence") {
+		if err := rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+		// Both the execution-evidence and latest-lifecycle indexes cover this
+		// exact ownership prefix. The planner may prefer either as statistics
+		// and platform versions change; absence must remain an indexed probe.
+		if !strings.Contains(plan, "SEARCH events USING ") ||
+			!strings.Contains(plan, "aggregate_type=? AND aggregate_id=? AND event_type=?") ||
+			strings.Contains(plan, "AUTOMATIC") || strings.Contains(plan, "SCAN ") || strings.Contains(plan, "TEMP B-TREE") {
 			t.Fatalf("unbounded ledger lookup: %s", plan)
 		}
 	}

@@ -47,6 +47,7 @@ func readWorkspaceLibraryPreview(reader io.Reader,expected int64)([]byte,error) 
 // effective read grant as the immutable version download. It never provides
 // an unrestricted Project-level text preview, filesystem path or blob URL.
 func (s *Server) previewWorkspaceLibraryVersion(w http.ResponseWriter,r *http.Request) {
+ identity,ok:=s.authenticate(w,r);if !ok{return}
  p,workspaceID,_,ok:=s.workspaceRuntimeContext(w,r,false);if !ok{return}
  lib,ok:=s.projects.(projectLibraryService)
  if !ok{writeError(w,http.StatusServiceUnavailable,"Workspace Library unavailable");return}
@@ -84,6 +85,7 @@ func (s *Server) previewWorkspaceLibraryVersion(w http.ResponseWriter,r *http.Re
  if err!=nil{
   writeError(w,http.StatusUnprocessableEntity,"Library content is not valid bounded UTF-8 text");return
  }
+ if !s.authorizeCurrentLibraryRead(w,r,identity,lib,p,workspaceID,selected){return}
  w.Header().Set("Content-Type","text/plain; charset=utf-8")
  w.Header().Set("X-Content-Type-Options","nosniff")
  w.Header().Set("Cache-Control","no-store, private")

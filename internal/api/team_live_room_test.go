@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/DigiLogicTech/OnePane/internal/team"
@@ -30,6 +31,7 @@ func TestTeamLiveRoomReauthorizesAndRejectsForeignProjection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			auth := &liveRoomAuth{denyTask: name == "task_permission_denied"}
 			svc := &liveRoomService{room: team.LiveRoom{ID: "room", WorkspaceID: "tenant", TaskID: "task", Members: []team.LiveMember{}}}
+			svc.room.Assignments = []team.LiveAssignment{{TaskID: "contribution", CheckpointID: "PRIVATE_CHECKPOINT_CANARY", VerificationID: "PRIVATE_VERIFICATION_CANARY", VerificationLevel: "V0"}}
 			if name == "revoked" {
 				svc.onRead = func() { auth.revoked = true }
 			}
@@ -46,6 +48,13 @@ func TestTeamLiveRoomReauthorizesAndRejectsForeignProjection(t *testing.T) {
 			}
 			if w.Code != want {
 				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+			if name == "allowed" {
+				if w.Header().Get("Cache-Control") != "no-store" || !strings.Contains(w.Body.String(), "PRIVATE_CHECKPOINT_CANARY") || !strings.Contains(w.Body.String(), `"verification_level":"V0"`) {
+					t.Fatalf("completion metadata or private cache policy lost: %s", w.Body.String())
+				}
+			} else if strings.Contains(w.Body.String(), "PRIVATE_") {
+				t.Fatal("denied live read disclosed completion evidence")
 			}
 		})
 	}

@@ -12,6 +12,9 @@
 .team-room-agents dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;overflow-wrap:anywhere}
 .team-room textarea{width:100%;min-height:88px;box-sizing:border-box;resize:vertical}
 .team-assignment-section{min-width:0;overflow-wrap:anywhere}
+.team-contribution-evidence dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px}
+.team-contribution-evidence dd{margin:0;overflow-wrap:anywhere}
+.team-contribution-result{white-space:pre-wrap;overflow-wrap:anywhere;max-height:24vh;overflow:auto}
 .team-assignment-section [data-team-assignment-status]{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:12px;max-height:34vh;overflow:auto}
 .team-assignment-section fieldset{border:1px solid var(--border);border-radius:8px;margin-block:12px;padding:12px;min-width:0}
 .team-assignment-section fieldset label{display:block;margin-block:8px}

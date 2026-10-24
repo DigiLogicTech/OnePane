@@ -44,7 +44,7 @@ func (s inspectedTeamRead) PageMessages(context.Context, string, team.MessagePag
 }
 func (s inspectedTeamRead) LiveRoom(context.Context, string) (team.LiveRoom, error) {
 	s.afterRead()
-	return team.LiveRoom{ID: "room", TaskID: "task", WorkspaceID: "tenant", Members: []team.LiveMember{{Name: "PRIVATE_ROSTER_CANARY"}}}, nil
+	return team.LiveRoom{ID: "room", TaskID: "task", WorkspaceID: "tenant", Members: []team.LiveMember{{Name: "PRIVATE_ROSTER_CANARY"}}, Assignments: []team.LiveAssignment{{TaskID: "contribution", CheckpointID: "PRIVATE_CHECKPOINT_CANARY", VerificationID: "PRIVATE_VERIFICATION_CANARY", VerificationLevel: "V0"}}}, nil
 }
 
 func (s inspectedTeamRead) Team(context.Context, string) (team.Team, error) {

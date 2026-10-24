@@ -75,7 +75,17 @@
 	 }catch{return null}
 	},
    invalidatePlanReview(){planDraftRevision++;state.proposedPlan=null;emit()},
-   async readAssignment(taskID){if(!state.room?.assignments?.some(a=>a.task_id===taskID)||!active())return null;try{const task=await request("/v1/tasks/"+encodeURIComponent(taskID));if(!active()||id(task)!==taskID||field(task,"workspace_id","WorkspaceID")!==state.room?.workspace_id)return null;return task}catch{return null}},
+   async readAssignment(assignmentID){
+    const room=state.room,assignment=room?.assignments?.find(a=>a.task_id===assignmentID);
+    if(!assignment||!active())return null;
+    // Revalidate the retained view after the asynchronous authorized Task read.
+    // A successful response must not reopen a removed or replaced assignment.
+    try{const task=await request("/v1/tasks/"+encodeURIComponent(assignmentID));
+     const current=state.room,currentAssignment=current?.assignments?.find(a=>a.task_id===assignmentID);
+     if(!active()||!currentAssignment||current.id!==room.id||current.task_id!==room.task_id||current.workspace_id!==room.workspace_id||current.accepted_plan_id!==room.accepted_plan_id||currentAssignment.key!==assignment.key||currentAssignment.member_id!==assignment.member_id||id(task)!==assignmentID||field(task,"workspace_id","WorkspaceID")!==workspaceID||field(task,"parent_task_id","ParentTaskID")!==taskID)return null;
+     return task;
+    }catch{return null}
+   },
    async proposeAssignments(assignments){
     if(state.busy||!state.room||state.room.task_state!=="created"||!Array.isArray(assignments)||assignments.length<1||assignments.length>8||!active())return false;
     if(assignments.some(a=>!state.room.members.some(m=>m.id===a.member_id&&m.kind==="agent")))return false;
@@ -143,7 +153,7 @@
    button.onclick=()=>{if(!alive())return;const opening=panel.hidden;recovery?.stop();recovery=null;panel.hidden=!opening;button.setAttribute("aria-expanded",String(opening));if(opening)recovery=root.OnePaneTaskRecovery.mountInto(panel,taskID,scope)};
   }
   const observer=new MutationObserver(()=>{if(!alive())stop()});observer.observe(document.body,{childList:true,subtree:true});
-  function stop(){clearTimeout(timer);clearTimeout(watchTimer);observer.disconnect();c.stop();el.textContent="Team view closed."}
+  function stop(){clearTimeout(timer);clearTimeout(watchTimer);observer.disconnect();planEditor?.dispose();c.stop();el.textContent="Team view closed."}
   // Scope changes must clear the room even while an HTTP read is still waiting.
   function watchScope(){if(!alive()){stop();return}watchTimer=setTimeout(watchScope,1000)}
   async function tick(){if(!alive()){stop();return}if(!document.hidden)await c.refresh();if(alive())timer=setTimeout(tick,2000);else stop()}

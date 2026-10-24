@@ -251,7 +251,7 @@ jobs:
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(Assurance|BudgetJournal|BudgetRelease|BudgetCommit|ResponseJournal)' ./internal/agentworker
           go test -race -tags integration -count=1 -timeout 3m ./internal/recoveryinventory
           go test -race -tags integration -count=1 -timeout 3m ./internal/budget
-          go test -race -tags integration -count=1 -timeout 3m -run 'Test(TeamAssignmentsExecute|TeamPause|TeamResume|TeamCancellation|CancellationBetweenWorkerTicks|ProjectTaskGraphRecognizesReviewedTeam)' ./internal/team ./internal/agentworker ./internal/projectorchestrator
+          go test -race -tags integration -count=1 -timeout 3m -run 'Test(LiveTeamAssignmentCompletion|TeamAssignmentsExecute|TeamPause|TeamResume|TeamCancellation|CancellationBetweenWorkerTicks|ProjectTaskGraphRecognizesReviewedTeam)' ./internal/team ./internal/agentworker ./internal/projectorchestrator
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(AgentProtocolHTTPPostDispatch|RuntimeDispatchUnusable|RuntimePostDispatchBudgetCommitFailure|InferencePostDispatchBudgetCommitFailure|RuntimePreDispatchErrors|InferencePreDispatchErrors)' ./internal/agentruntime ./internal/inference
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(UnstartedCancellation|RecoveryCapture|RecoveryDiscovery|RecoveryAdmission|InterruptedRecoveryCannotReadmitOriginalTask|TeamHoldCannotReadmitThroughUnguardedTaskService)' ./internal/task
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(ProposePlanRejects|SyncTaskStates|ReasoningTask|CompleteReasoningTurn|ReasoningTurn|ManualCouncilTaskFences|ResearchSeatVerifiedTextDelivery)' ./internal/team ./internal/teamworker
@@ -397,7 +397,7 @@ jobs:
       - name: Native Windows live Team history and authorization
         shell: pwsh
         run: |
-          go test -count=1 -timeout 3m -run 'Test(TeamMessagePage|LiveTeamRoom|TeamLiveRoom|TeamRoundAndReplyScope)' ./internal/team ./internal/api
+          go test -count=1 -timeout 3m -run 'Test(TeamMessagePage|LiveTeamRoom|LiveTeamAssignmentCompletion|TeamLiveRoom|TeamRoundAndReplyScope)' ./internal/team ./internal/api
       - name: Native Windows bootstrap-key privacy and identity preservation
         shell: pwsh
         run: |

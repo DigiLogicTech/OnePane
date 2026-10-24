@@ -146,6 +146,7 @@ type SeatBinding struct {
 	CreatedAt                                       int64
 }
 type Message struct {
+	Sequence int64 `json:"sequence,omitempty"`
 	ID, WorkspaceID, SessionID, Kind                    string
 	AuthorMemberID, AuthorPrincipalID, ReplyToMessageID *string
 	Content                                             json.RawMessage

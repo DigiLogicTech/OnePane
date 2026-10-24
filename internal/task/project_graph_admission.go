@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/DigiLogicTech/OnePane/internal/storage"
+	"github.com/DigiLogicTech/OnePane/internal/teamgate"
 )
 
 func hasTaskGraphProvenance(raw json.RawMessage) bool {
@@ -47,13 +48,33 @@ func canonicalProjectWorkspaceActiveTx(ctx context.Context,tx storage.Tx,t Task)
 // existing-Attempt wake paths. Live SQL edges cannot silently loosen the
 // original Task graph, and stopped/archived Workspaces cannot resume work.
 func (s *Service) requireRuntimeDependencyIntegrityTx(ctx context.Context,tx storage.Tx,t Task) error {
+	if err:=s.requireExecutionAdmissionTx(ctx,tx,t);err!=nil{return err}
+	teamPredecessors:=map[string]bool{}
+	if repository,ok:=s.repo.(interface{RequireTeamDependencies(context.Context,storage.Tx,Task)([]teamgate.Contribution,error)});ok{
+		contributions,err:=repository.RequireTeamDependencies(ctx,tx,t);if err!=nil{return err}
+		for _,contribution:=range contributions{teamPredecessors[contribution.TaskID]=true}
+	}else{
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(t.Completion,&fields)==nil&&fields["team_assignment"]!=nil{return teamgate.ErrExecution}
+	}
 	satisfied,err:=s.repo.HardDependenciesSatisfied(ctx,tx,t.ID)
 	if err!=nil{return err}
 	if !satisfied{return ErrHardDependencyUnsatisfied}
 	if err:=canonicalProjectWorkspaceActiveTx(ctx,tx,t);err!=nil{return err}
 	if t.ProjectWorkspaceID!=nil||hasTaskGraphProvenance(t.Completion){
-		return approvedTaskGraphDependenciesTx(ctx,tx,t)
+		return approvedTaskGraphDependenciesTx(ctx,tx,t,teamPredecessors)
 	}
+	return nil
+}
+
+func (r *sqlRepository) RequireTeamDependencies(ctx context.Context,tx storage.Tx,t Task)([]teamgate.Contribution,error){
+	return teamgate.RequireAdmission(ctx,tx,t.WorkspaceID,t.ID)
+}
+
+func (r *sqlRepository) RequireNoExecutionHold(ctx context.Context, tx storage.Tx, t Task) error {
+	paused, err := teamgate.TaskPaused(ctx, tx, t.WorkspaceID, t.ID)
+	if err != nil { return err }
+	if paused { return teamgate.ErrPaused }
 	return nil
 }
 
@@ -64,7 +85,7 @@ func (s *Service) requireRuntimeDependencyIntegrityTx(ctx context.Context,tx sto
 //
 // Legacy/unattested graph nodes fail closed. Ordinary non-graph Tasks retain
 // their historical dependency policy and are not impacted.
-func approvedTaskGraphDependenciesTx(ctx context.Context, tx storage.Tx, t Task) error {
+func approvedTaskGraphDependenciesTx(ctx context.Context, tx storage.Tx, t Task,teamPredecessors ...map[string]bool) error {
 	var graphID,nodeKey,nodeWorkspace,projectID,tenant,approvedJSON string
 	var recorded int
 	var activeWorkspace sql.NullString
@@ -109,7 +130,7 @@ func approvedTaskGraphDependenciesTx(ctx context.Context, tx storage.Tx, t Task)
 		COALESCE(pred.approved_dependencies_recorded,0),
 		COALESCE(pw.status,''),dep.workspace_id,dep.project_id,
 		dep.project_workspace_id,pred.project_workspace_id,
-		dep.archived_at
+		dep.archived_at,dep.id
 		FROM task_dependencies d
 		JOIN tasks dep ON dep.id=d.depends_on_task_id
 		LEFT JOIN project_orchestrator_task_graph_nodes pred
@@ -120,13 +141,14 @@ func approvedTaskGraphDependenciesTx(ctx context.Context, tx storage.Tx, t Task)
 	if err!=nil{return err}
 	seen:=map[string]bool{}
 	for rows.Next(){
-		var key,kind,mode,predTenant string
+		var key,kind,mode,predTenant,predID string
 		var recordedPred int
 		var status string
 		var predProject,predActual,predCanonical sql.NullString
 		var archived sql.NullInt64
 		if err=rows.Scan(&key,&kind,&mode,&recordedPred,&status,
-			&predTenant,&predProject,&predActual,&predCanonical,&archived);err!=nil{break}
+			&predTenant,&predProject,&predActual,&predCanonical,&archived,&predID);err!=nil{break}
+		if len(teamPredecessors)>0&&teamPredecessors[0][predID]{continue}
 		if kind!="hard"||mode!="all"||!expectedKeys[key]||seen[key]||
 			recordedPred!=1||status!="active"||predTenant!=tenant||
 			!predProject.Valid||predProject.String!=projectID||

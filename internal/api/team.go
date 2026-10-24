@@ -24,7 +24,15 @@ func (s *Server) listTeams(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := s.team.ListTeams(r.Context(), ws)
-	respondDomain(w, out, err, 200)
+	if err != nil {
+		respondDomain(w, nil, err, 0)
+		return
+	}
+	if !s.authorizeCurrentWorkspaceRead(w, r, i, ws, "team.read") {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, out)
 }
 func (s *Server) createTeam(w http.ResponseWriter, r *http.Request) {
 	i, ok := s.authenticate(w, r)
@@ -51,18 +59,26 @@ func (s *Server) teamFor(w http.ResponseWriter, r *http.Request, cap string) (Id
 		respondDomain(w, nil, err, 0)
 		return Identity{}, team.Team{}, false
 	}
-	if !s.authorize(w, r, i, t.WorkspaceID, cap) {
+	if !s.authorizeCurrentWorkspaceRead(w, r, i, t.WorkspaceID, cap) {
 		return Identity{}, team.Team{}, false
 	}
 	return i, t, true
 }
 func (s *Server) listTeamMembers(w http.ResponseWriter, r *http.Request) {
-	_, t, ok := s.teamFor(w, r, "team.read")
+	i, t, ok := s.teamFor(w, r, "team.read")
 	if !ok {
 		return
 	}
 	out, err := s.team.ListMembers(r.Context(), t.ID)
-	respondDomain(w, out, err, 200)
+	if err != nil {
+		respondDomain(w, nil, err, 0)
+		return
+	}
+	if !s.authorizeCurrentWorkspaceRead(w, r, i, t.WorkspaceID, "team.read") {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, out)
 }
 func (s *Server) addTeamMember(w http.ResponseWriter, r *http.Request) {
 	i, t, ok := s.teamFor(w, r, "team.write")
@@ -121,9 +137,10 @@ func (s *Server) getTaskTeamSession(w http.ResponseWriter, r *http.Request) {
 		respondDomain(w, nil, err, 0)
 		return
 	}
-	if !s.authorize(w, r, i, out.WorkspaceID, "team.read") {
+	if !s.authorizeCurrentWorkspaceRead(w, r, i, out.WorkspaceID, "team.read") {
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, 200, out)
 }
 func (s *Server) sessionFor(w http.ResponseWriter, r *http.Request, cap string) (Identity, team.Session, bool) {
@@ -136,14 +153,15 @@ func (s *Server) sessionFor(w http.ResponseWriter, r *http.Request, cap string) 
 		respondDomain(w, nil, err, 0)
 		return Identity{}, team.Session{}, false
 	}
-	if !s.authorize(w, r, i, ss.WorkspaceID, cap) {
+	if !s.authorizeCurrentWorkspaceRead(w, r, i, ss.WorkspaceID, cap) {
 		return Identity{}, team.Session{}, false
 	}
 	return i, ss, true
 }
 func (s *Server) getTeamSession(w http.ResponseWriter, r *http.Request) {
-	_, ss, ok := s.sessionFor(w, r, "team.read")
-	if ok {
+	i, ss, ok := s.sessionFor(w, r, "team.read")
+	if ok && s.authorizeCurrentWorkspaceRead(w, r, i, ss.WorkspaceID, "team.read") {
+		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, 200, ss)
 	}
 }
@@ -167,16 +185,29 @@ func(s *Server) freezeResearchEvidence(w http.ResponseWriter,r *http.Request){
   identity.PrincipalID,request.Selections)
  respondDomain(w,out,err,http.StatusCreated)
 }
-func(s *Server) readResearchEvidence(w http.ResponseWriter,r *http.Request){
- identity,_,ok:=s.sessionFor(w,r,"team.read")
- if !ok{return}
- svc,ok:=s.projects.(researchEvidenceService)
- if !ok{writeError(w,http.StatusServiceUnavailable,"Research evidence selection unavailable");return}
- out,err:=svc.ResearchEvidence(r.Context(),r.PathValue("sessionID"),identity.PrincipalID)
- respondDomain(w,out,err,http.StatusOK)
+func (s *Server) readResearchEvidence(w http.ResponseWriter, r *http.Request) {
+	identity, session, ok := s.sessionFor(w, r, "team.read")
+	if !ok {
+		return
+	}
+	svc, ok := s.projects.(researchEvidenceService)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "Research evidence selection unavailable")
+		return
+	}
+	out, err := svc.ResearchEvidence(r.Context(), r.PathValue("sessionID"), identity.PrincipalID)
+	if err != nil {
+		respondDomain(w, nil, err, 0)
+		return
+	}
+	if !s.authorizeCurrentWorkspaceRead(w, r, identity, session.WorkspaceID, "team.read") {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, out)
 }
 func (s *Server) getTeamSessionManifest(w http.ResponseWriter, r *http.Request) {
-	_, ss, ok := s.sessionFor(w, r, "team.read")
+	i, ss, ok := s.sessionFor(w, r, "team.read")
 	if !ok {
 		return
 	}
@@ -190,16 +221,28 @@ func (s *Server) getTeamSessionManifest(w http.ResponseWriter, r *http.Request) 
 		respondDomain(w, nil, err, 0)
 		return
 	}
+	if !s.authorizeCurrentWorkspaceRead(w, r, i, ss.WorkspaceID, "team.read") {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]any{"manifest": manifest, "seat_bindings": bindings})
 }
 func (s *Server) listTeamMessages(w http.ResponseWriter, r *http.Request) {
-	_, ss, ok := s.sessionFor(w, r, "team.read")
+	i, ss, ok := s.sessionFor(w, r, "team.read")
 	if !ok {
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	out, err := s.team.ListMessages(r.Context(), ss.ID, limit)
-	respondDomain(w, out, err, 200)
+	if err != nil {
+		respondDomain(w, nil, err, 0)
+		return
+	}
+	if !s.authorizeCurrentWorkspaceRead(w, r, i, ss.WorkspaceID, "team.read") {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, out)
 }
 func (s *Server) postTeamMessage(w http.ResponseWriter, r *http.Request) {
 	i, ss, ok := s.sessionFor(w, r, "team.write")
@@ -233,12 +276,20 @@ func (s *Server) requestTeamRound(w http.ResponseWriter, r *http.Request) {
 	respondDomain(w, out, err, 202)
 }
 func (s *Server) listTeamTurns(w http.ResponseWriter, r *http.Request) {
-	_, ss, ok := s.sessionFor(w, r, "team.read")
+	i, ss, ok := s.sessionFor(w, r, "team.read")
 	if !ok {
 		return
 	}
 	out, err := s.team.ListTurns(r.Context(), ss.ID)
-	respondDomain(w, out, err, 200)
+	if err != nil {
+		respondDomain(w, nil, err, 0)
+		return
+	}
+	if !s.authorizeCurrentWorkspaceRead(w, r, i, ss.WorkspaceID, "team.read") {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) retryResearchRound(w http.ResponseWriter, r *http.Request) {
@@ -252,12 +303,20 @@ func (s *Server) retryResearchRound(w http.ResponseWriter, r *http.Request) {
 	respondDomain(w, out, err, http.StatusOK)
 }
 func (s *Server) listTeamPlans(w http.ResponseWriter, r *http.Request) {
-	_, ss, ok := s.sessionFor(w, r, "team.read")
+	i, ss, ok := s.sessionFor(w, r, "team.read")
 	if !ok {
 		return
 	}
 	out, err := s.team.ListPlans(r.Context(), ss.ID)
-	respondDomain(w, out, err, 200)
+	if err != nil {
+		respondDomain(w, nil, err, 0)
+		return
+	}
+	if !s.authorizeCurrentWorkspaceRead(w, r, i, ss.WorkspaceID, "team.read") {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, out)
 }
 func (s *Server) proposeTeamPlan(w http.ResponseWriter, r *http.Request) {
 	i, ss, ok := s.sessionFor(w, r, "team.write")
@@ -290,12 +349,20 @@ func (s *Server) acceptTeamPlan(w http.ResponseWriter, r *http.Request) {
 	respondDomain(w, out, err, 200)
 }
 func (s *Server) listTeamObjections(w http.ResponseWriter, r *http.Request) {
-	_, ss, ok := s.sessionFor(w, r, "team.read")
+	i, ss, ok := s.sessionFor(w, r, "team.read")
 	if !ok {
 		return
 	}
 	out, err := s.team.ListObjections(r.Context(), ss.ID)
-	respondDomain(w, out, err, 200)
+	if err != nil {
+		respondDomain(w, nil, err, 0)
+		return
+	}
+	if !s.authorizeCurrentWorkspaceRead(w, r, i, ss.WorkspaceID, "team.read") {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, out)
 }
 func (s *Server) raiseTeamObjection(w http.ResponseWriter, r *http.Request) {
 	i, ss, ok := s.sessionFor(w, r, "team.write")
@@ -339,12 +406,20 @@ func (s *Server) resolveTeamObjection(w http.ResponseWriter, r *http.Request) {
 	respondDomain(w, out, err, 200)
 }
 func (s *Server) listTeamDecisions(w http.ResponseWriter, r *http.Request) {
-	_, ss, ok := s.sessionFor(w, r, "team.read")
+	i, ss, ok := s.sessionFor(w, r, "team.read")
 	if !ok {
 		return
 	}
 	out, err := s.team.ListDecisions(r.Context(), ss.ID)
-	respondDomain(w, out, err, 200)
+	if err != nil {
+		respondDomain(w, nil, err, 0)
+		return
+	}
+	if !s.authorizeCurrentWorkspaceRead(w, r, i, ss.WorkspaceID, "team.read") {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, out)
 }
 func (s *Server) reopenTeamDeliberation(w http.ResponseWriter, r *http.Request) {
 	i, ss, ok := s.sessionFor(w, r, "team.write")

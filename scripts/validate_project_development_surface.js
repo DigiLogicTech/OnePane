@@ -104,29 +104,30 @@ assertContains(workflowUI,'"&project_id="+encodeURIComponent(project.id)', 'Work
 assertContains(workflowUI,'"&project_workspace_id="+encodeURIComponent(canonical.id)', 'Workspace Task inventory must pass canonical Workspace selector');
 const workspaceExecSource=read('internal/agentworker/workspace_execution_manifest.go');
 const agentExecSource=read('internal/agentworker/execution.go');
-assertContains(agentExecSource,'ID:"workspace-execution-manifest"','Agent Worker must supply Task-owned OCI execution inventory');
+assert.match(agentExecSource,/ID:\s*"workspace-execution-manifest"/,'Agent Worker must supply Task-owned OCI execution inventory');
 const delegateSource=read('internal/agentworker/execution.go');
+const assertCodeContains=(source,token,message)=>assertContains(source.replace(/\s+/g,''),token.replace(/\s+/g,''),message);
 const ancestrySource=read('internal/agentworker/delegation_ancestry.go');
-assertContains(delegateSource,'verifyDelegationAncestry(ctx,tx,t)',
+assertCodeContains(delegateSource,'verifyDelegationAncestry(ctx,tx,t)',
  'delegation must validate persisted ancestry inside child creation transaction');
 assertContains(ancestrySource,'maxAutonomousDelegationDepth = 6',
  'untrusted recursive delegation must be capped');
 assertContains(ancestrySource,'project_workspace_id,parent_task_id',
  'delegation ancestry must verify persisted Project Workspace ownership');
-assertContains(delegateSource,'WaitDependencyInTransaction(ctx,tx',
+assertCodeContains(delegateSource,'WaitDependencyInTransaction(ctx,tx',
  'delegated Task/Attempt wait must join child creation transaction');
-assertContains(delegateSource,'s.journalInTransaction(ctx,tx',
+assertCodeContains(delegateSource,'s.journalInTransaction(ctx,tx',
  'delegated child journal must be part of the same durable transaction');
-assertContains(delegateSource,"AND status='running' AND revision=?",
+assertCodeContains(delegateSource,"AND status='running' AND revision=?",
  'delegated Worker continuation must use a status/revision compare-and-swap');
-assertContains(delegateSource,'return failedResult(res,err)',
+assertCodeContains(delegateSource,'return failedResult(res,err)',
  'failed delegation transaction must not overwrite a concurrent Worker incarnation');
 const taskTransitionSource=read('internal/task/service.go');
 assertContains(taskTransitionSource,'func (s *Service) WaitDependencyInTransaction(',
  'running Task/Attempt must expose a transaction-scoped dependency transition');
 assert.ok(delegateSource.replace(/\s+/g,'').includes('ProjectWorkspaceID:t.ProjectWorkspaceID'),
  'delegated child Tasks must retain canonical Project Workspace ownership');
-assertContains(delegateSource,'inheritOnePaneRouting(t.Completion, p.Completion)',
+assertCodeContains(delegateSource,'inheritOnePaneRouting(t.Completion, p.Completion)',
  'delegation must preserve parent model, sandbox and Vault restrictions');
 assertContains(workspaceExecSource,'p.workspace_id=?','OCI execution inventory must respect Task tenant ownership');
 assertContains(workspaceExecSource,'pw.id=? AND pw.status=','OCI execution inventory must enforce Task Project Workspace ownership');

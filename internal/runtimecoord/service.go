@@ -83,6 +83,9 @@ func NewService(db *sql.DB, clk clock.Clock) *Service {
 }
 
 func (s *Service) Acquire(ctx context.Context, req inference.RuntimeScheduleRequest) (inference.RuntimeScheduleLease, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if s == nil || s.db == nil || strings.TrimSpace(req.Deployment.ID) == "" {
 		return nil, errors.New("runtime coordinator unavailable or deployment missing")
 	}
@@ -111,6 +114,10 @@ func (s *Service) Acquire(ctx context.Context, req inference.RuntimeScheduleRequ
 
 	select {
 	case lease := <-w.ready:
+		if err := ctx.Err(); err != nil {
+			lease.Release(context.Background(), err)
+			return nil, err
+		}
 		return lease, nil
 	case <-ctx.Done():
 		s.mu.Lock()
@@ -119,6 +126,14 @@ func (s *Service) Acquire(ctx context.Context, req inference.RuntimeScheduleRequ
 				s.waiters = append(s.waiters[:i], s.waiters[i+1:]...)
 				break
 			}
+		}
+		// Admission and cancellation may become ready together. If scheduling
+		// already handed this waiter a lease, reclaim it before admitting the
+		// next request; no caller will receive or release that abandoned lease.
+		select {
+		case lease := <-w.ready:
+			delete(s.active, lease.id)
+		default:
 		}
 		s.scheduleLocked()
 		s.mu.Unlock()
@@ -272,9 +287,10 @@ func (s *Service) claimForDeployment(ctx context.Context, d inference.ModelDeplo
 	backend = firstNonEmpty(cfg.Placement.Backend, cfg.RuntimeBackend)
 	devices := []string{}
 	mode = "cpu"
+	hasCPU, hasGPU := false, false
 	for _, dev := range cfg.Placement.Devices {
 		if dev.Kind == "accelerator" {
-			mode = "gpu"
+			hasGPU = true
 			id := strings.TrimSpace(dev.DeviceID)
 			if id == "" {
 				id = fmt.Sprintf("gpu-%d", dev.DeviceIndex)
@@ -282,11 +298,15 @@ func (s *Service) claimForDeployment(ctx context.Context, d inference.ModelDeplo
 			devices = append(devices, id)
 			claim.VRAMBytes += dev.AllocatedBytes
 		}
-		if dev.Kind == "cpu" && mode == "gpu" {
-			mode = "hybrid"
-		}
 		if dev.Kind == "cpu" {
+			hasCPU = true
 			claim.RAMBytes += dev.AllocatedBytes
+		}
+	}
+	if hasGPU {
+		mode = "gpu"
+		if hasCPU {
+			mode = "hybrid"
 		}
 	}
 	if cfg.Placement.Mode == "cpu_offload" {

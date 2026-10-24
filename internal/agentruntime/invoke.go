@@ -15,6 +15,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/policy"
 	"github.com/DigiLogicTech/OnePane/internal/runtimeendpoint"
 	"github.com/DigiLogicTech/OnePane/internal/storage"
+	"github.com/DigiLogicTech/OnePane/internal/teamgate"
 )
 
 func (s *Service) Invocation(ctx context.Context, id string) (Invocation, error) {
@@ -183,6 +184,12 @@ func (s *Service) Invoke(ctx context.Context, cmd InvokeCommand) (InvokeResult, 
 		s.releaseBudgetBeforeDispatch(ctx,cmd)
 		return s.finishInvocationError(ctx,inv.ID,InvocationExecuting,err,cmd)
 	}
+	if cmd.TaskID!=nil {
+		if _,err:=teamgate.Require(ctx,s.scopes.DB,cmd.WorkspaceID,*cmd.TaskID);err!=nil{
+			s.releaseBudgetBeforeDispatch(ctx,cmd)
+			return s.finishInvocationError(ctx,inv.ID,InvocationExecuting,err,cmd)
+		}
+	}
 	resp, callErr := transport.Invoke(ctx, c, req, s.secrets)
 	if cmd.BudgetReservationID != nil && s.budgets != nil {
 		// A transport dispatch attempt may consume external quota even if its
@@ -190,17 +197,21 @@ func (s *Service) Invoke(ctx context.Context, cmd InvokeCommand) (InvokeResult, 
 		_, _ = s.budgets.Commit(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 	}
 	if callErr != nil {
+		var transportErr *RuntimeTransportError
+		if !errors.As(callErr, &transportErr) {
+			callErr = &RuntimeTransportError{Code: "runtime_transport_error", OutcomeKnown: false, Err: callErr}
+		}
 		return s.finishInvocationError(ctx, inv.ID, InvocationExecuting, callErr, cmd)
 	}
 	if err := resp.ValidateFor(req); err != nil {
-		return s.finishInvocationError(ctx, inv.ID, InvocationExecuting, &RuntimeTransportError{Code: "invalid_agent_response", OutcomeKnown: true, Err: err}, cmd)
+		return s.finishInvocationError(ctx, inv.ID, InvocationExecuting, &RuntimeTransportError{Code: "invalid_agent_response", OutcomeKnown: false, Err: err}, cmd)
 	}
 	body, _ := json.Marshal(resp)
 	meta, _ := json.Marshal(map[string]any{"agent_runtime_invocation_id": inv.ID, "connection_id": c.ID, "runtime_kind": c.RuntimeKind, "proposal_type": resp.ProposalType})
 	creator := cmd.PrincipalID
 	a, err := s.artifacts.Create(ctx, artifact.CreateCommand{WorkspaceID: cmd.WorkspaceID, MediaType: "application/vnd.harness.agent-response+json", Label: outputLabel, Status: artifact.StatusActive, Metadata: meta, CreatedBy: &creator, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID}, bytes.NewReader(body))
 	if err != nil {
-		return s.finishInvocationError(ctx, inv.ID, InvocationExecuting, &RuntimeTransportError{Code: "response_persist_failed", OutcomeKnown: true, Err: err}, cmd)
+		return s.finishInvocationError(ctx, inv.ID, InvocationExecuting, &RuntimeTransportError{Code: "response_persist_failed", OutcomeKnown: false, Err: err}, cmd)
 	}
 	completed := s.clock.UnixMilli()
 	if err := s.transitionInvocation(ctx, inv.ID, InvocationSucceeded, &a.ID, nil, &completed, cmd, "agent_runtime_invocation.succeeded", map[string]any{"response_artifact_id": a.ID, "proposal_type": resp.ProposalType}); err != nil {

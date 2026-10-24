@@ -194,7 +194,11 @@ func (s *Service) Invoke(ctx context.Context, cmd InvokeCommand) (InvokeResult, 
 	if cmd.BudgetReservationID != nil && s.budgets != nil {
 		// A transport dispatch attempt may consume external quota even if its
 		// final outcome is failed/unknown. Commit conservatively.
-		_, _ = s.budgets.Commit(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+		if _, err := s.budgets.Commit(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID}); err != nil {
+			// Transport has run. Neither a successful response nor a known
+			// transport failure permits refund/fallback with uncommitted quota.
+			return s.finishInvocationError(ctx, inv.ID, InvocationExecuting, &RuntimeTransportError{Code: "budget_commit_failed", OutcomeKnown: false, Err: errors.Join(callErr, err)}, cmd)
+		}
 	}
 	if callErr != nil {
 		var transportErr *RuntimeTransportError

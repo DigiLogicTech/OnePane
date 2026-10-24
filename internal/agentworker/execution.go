@@ -171,28 +171,43 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 			// reservation cannot refund potentially spent quota. Release failure
 			// leaves its durable accounting intact and is reported to the caller.
 			releaseErr := s.releaseBudgetIfReserved(ctx, reservationID)
+			if releaseErr != nil {
+				s.dispatchReconciliationFailed = true
+			}
 			return immediateWorkerStep(failedResult(res, fmt.Errorf("record reasoning budget reservation: %w", errors.Join(journalErr, releaseErr))))
 		}
 	}
 	// A human may update or archive an Agent during model queue selection.
 	// Do not dispatch inference with stale prompt/Agent provenance.
 	if err := enforceTaskAgentProfileBinding(ctx, s.db, run.WorkspaceID, agentBinding); err != nil {
-		s.releaseBudgetIfReserved(ctx, reservationID)
-		return immediateWorkerStep(s.blockRun(ctx, run, res, "pinned Agent profile changed during model selection: "+err.Error()))
+		releaseErr := s.releaseBudgetIfReserved(ctx, reservationID)
+		if releaseErr != nil {
+			return immediateWorkerStep(s.interruptDispatchForReconciliation(ctx, run, res, "route", kind, cid, reservationID, errors.Join(errBudgetReleaseUncommitted, err, releaseErr)))
+		}
+		return immediateWorkerStep(s.blockRun(ctx, run, res, "pinned Agent profile changed during model selection: "+errors.Join(err, releaseErr).Error()))
 	}
 	if err := s.markReasoningDispatch(ctx, &run, kind, cid); err != nil {
-		s.releaseBudgetIfReserved(ctx, reservationID)
+		releaseErr := s.releaseBudgetIfReserved(ctx, reservationID)
+		if releaseErr != nil {
+			// Ownership was rejected: no terminal write may guess a current
+			// owner. Prevent another paid preparation until startup recovery
+			// parks the original durable incarnation for reconciliation.
+			s.dispatchReconciliationFailed = true
+		}
 		// Dispatch ownership may have changed while selecting a model.
 		// Do not mutate a potentially foreign Task/Attempt through failRun.
-		return immediateWorkerStep(failedResult(res, err))
+		return immediateWorkerStep(failedResult(res, errors.Join(err, releaseErr)))
 	}
 
 	constraints, _ := json.Marshal(map[string]any{"completion": json.RawMessage(t.Completion), "worker": map[string]any{"max_steps": run.MaxSteps, "steps_used": run.StepCount, "max_replans": run.MaxReplans, "replans_used": run.ReplanCount, "max_escalations": run.MaxEscalations, "escalations_used": run.EscalationCount}})
 	// Repeat the revision check at the last Worker-owned call boundary.
 	// Inference and gateway paths must still enforce their own revocations.
 	if err := enforceTaskAgentProfileBinding(ctx, s.db, run.WorkspaceID, agentBinding); err != nil {
-		s.releaseBudgetIfReserved(ctx, reservationID)
-		return immediateWorkerStep(s.blockRun(ctx, run, res, "pinned Agent profile changed before dispatch: "+err.Error()))
+		releaseErr := s.releaseBudgetIfReserved(ctx, reservationID)
+		if releaseErr != nil {
+			return immediateWorkerStep(s.interruptDispatchForReconciliation(ctx, run, res, "route", kind, cid, reservationID, errors.Join(errBudgetReleaseUncommitted, err, releaseErr)))
+		}
+		return immediateWorkerStep(s.blockRun(ctx, run, res, "pinned Agent profile changed before dispatch: "+errors.Join(err, releaseErr).Error()))
 	}
 	return preparedWorkerStep{result: res, dispatch: func() func() TickResult {
 		response, ref, dispatchErr := s.dispatch(ctx, run, t, cand, compiled, constraints, label, reservationID)
@@ -202,10 +217,16 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 				stepKind = "agent_runtime"
 			}
 			if !errors.Is(dispatchErr, ErrDispatchRequiresReconciliation) {
-				if stopped, ok := s.parkIfExecutionControlRequested(ctx, run, res); ok {
-					if dispatchErr != nil {
-						s.releaseBudgetIfReserved(ctx, reservationID)
+				// Finish known-failure accounting before parking for a pause or
+				// cancellation. Otherwise a waiting Worker can lose a process-only
+				// cleanup alarm on restart and resume with unresolved quota.
+				if dispatchErr != nil {
+					if releaseErr := s.releaseBudgetIfReserved(ctx, reservationID); releaseErr != nil {
+						cause := errors.Join(errBudgetReleaseUncommitted, dispatchErr, releaseErr)
+						return s.interruptDispatchForReconciliation(ctx, run, res, stepKind, kind, cid, ref, cause)
 					}
+				}
+				if stopped, ok := s.parkIfExecutionControlRequested(ctx, run, res); ok {
 					return stopped
 				}
 			}
@@ -215,7 +236,6 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 					// Atomically interrupt the Task, Attempt and Worker with evidence.
 					return s.interruptDispatchForReconciliation(ctx, run, res, stepKind, kind, cid, ref, dispatchErr)
 				}
-				s.releaseBudgetIfReserved(ctx, reservationID)
 				_ = s.journal(ctx, run.ID, stepKind, "failed", &kind, &cid, nil, &ref, map[string]any{"error": dispatchErr.Error()})
 				return s.handleDispatchFailure(ctx, run, res, cid, dispatchErr)
 			}
@@ -243,8 +263,11 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 
 		}
 	}, abort: func() TickResult {
-		s.releaseBudgetIfReserved(ctx, reservationID)
-		return failedResult(res, ErrDispatchRequiresReconciliation)
+		releaseErr := s.releaseBudgetIfReserved(ctx, reservationID)
+		if releaseErr != nil {
+			s.dispatchReconciliationFailed = true
+		}
+		return failedResult(res, errors.Join(ErrDispatchRequiresReconciliation, releaseErr))
 	}}
 }
 

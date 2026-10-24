@@ -21,6 +21,8 @@ var ErrDispatchRequiresReconciliation = errors.New("agent worker dispatch requir
 // commit. This does not change the inference/Invocation's durable success.
 var errResponseJournalUncommitted = errors.New("agent worker response journal did not commit")
 
+var errBudgetReleaseUncommitted = errors.New("agent worker budget release did not commit")
+
 func dispatchReconciliationError(err error) error {
 	return fmt.Errorf("%w: %w", ErrDispatchRequiresReconciliation, err)
 }
@@ -131,15 +133,28 @@ func (s *Service) interruptDispatchForReconciliation(
 				detail["result_ref_kind"] = "agent_runtime_invocation"
 			}
 		}
+		if errors.Is(cause, errBudgetReleaseUncommitted) {
+			detail["outcome"] = "budget_release_uncommitted"
+			detail["result_ref_kind"] = "inference_request"
+			if stepKind == "agent_runtime" {
+				detail["result_ref_kind"] = "agent_runtime_invocation"
+			}
+			if stepKind == "route" {
+				detail["result_ref_kind"] = "budget_reservation"
+			}
+		}
 		return s.journalInTransaction(ctx, tx, run.ID, stepKind, "unknown",
 			&candidateKind, &candidateID, nil, &resultRef, detail)
 	})
 	if err != nil {
 		s.dispatchReconciliationFailed = true
 		return failedResult(res, fmt.Errorf(
-			"external dispatch recovery commit failed; Worker scheduling halted until reconciliation: %w", err))
+			"external dispatch recovery commit failed; Worker scheduling halted until reconciliation: %w", errors.Join(err, cause)))
 	}
 	res.Status = "blocked"
 	res.Error = "external dispatch requires operator reconciliation; automatic fallback disabled"
+	if errors.Is(cause, errBudgetReleaseUncommitted) {
+		res.Error = "budget cleanup requires operator reconciliation; automatic fallback disabled: " + cause.Error()
+	}
 	return res
 }

@@ -286,19 +286,26 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 			// Once transport dispatch was attempted, account conservatively: the
 			// provider/subscription may have consumed quota even when the outcome
 			// is unknown or failed.
-			_, _ = s.budgets.Commit(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+			if _, err := s.budgets.Commit(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID}); err != nil {
+				// A known transport error does not prove quota was unspent.
+				// Keep the held reservation and prevent caller cleanup/fallback
+				// from treating failed accounting as a safe preflight failure.
+				return s.finishTransportError(ctx, q.ID, p, &TransportError{Code: "budget_commit_failed", OutcomeKnown: false, Err: errors.Join(dispatchErr, err)}, cmd)
+			}
 		}
 		return s.finishTransportError(ctx, q.ID, p, dispatchErr, cmd)
 	}
 	if !json.Valid(result.ResponseJSON) {
 		if cmd.BudgetReservationID != nil && s.budgets != nil {
-			_, _ = s.budgets.Commit(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+			if _, err := s.budgets.Commit(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID}); err != nil {
+				return s.finishTransportError(ctx, q.ID, p, &TransportError{Code: "budget_commit_failed", OutcomeKnown: false, Err: err}, cmd)
+			}
 		}
 		return s.finishTransportError(ctx, q.ID, p, &TransportError{Code: "invalid_transport_result", OutcomeKnown: true}, cmd)
 	}
 	if cmd.BudgetReservationID != nil && s.budgets != nil {
 		if _, err := s.budgets.CommitFromUsage(ctx, *cmd.BudgetReservationID, result.UsageJSON, cmd.ActorPrincipalID); err != nil {
-			return s.finishTransportError(ctx, q.ID, p, &TransportError{Code: "budget_commit_failed", OutcomeKnown: true, Err: err}, cmd)
+			return s.finishTransportError(ctx, q.ID, p, &TransportError{Code: "budget_commit_failed", OutcomeKnown: false, Err: err}, cmd)
 		}
 	}
 

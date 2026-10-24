@@ -513,14 +513,32 @@ func (s *Service) CommitFromUsage(ctx context.Context, reservationID string, usa
 	return s.Commit(ctx, CloseCommand{ReservationID: reservationID, ActualAmount: &actual, ActorPrincipalID: actor})
 }
 
+// Match execution admission's bounded ancestry/ledger fence. A clock expiry
+// cannot disposition an interrupted original execution, even if its current
+// Task state or Attempt row no longer exposes that history. UNION terminates
+// cycles; missing, foreign, rootless or over-bound ancestry fails closed.
+// The fixed br.task_id reference is used by both candidate and transactional
+// queries, so the candidate optimization cannot weaken the durable fence.
+const reservationTaskRecoveryFenceSQL = `(WITH RECURSIVE ancestry(id,parent,workspace) AS (
+ SELECT id,parent_task_id,workspace_id FROM tasks WHERE id=br.task_id
+ UNION SELECT p.id,p.parent_task_id,p.workspace_id FROM tasks p JOIN ancestry a ON p.id=a.parent LIMIT 257
+ ) SELECT COUNT(*)=0 OR COUNT(*)>256
+ OR NOT EXISTS(SELECT 1 FROM ancestry WHERE parent IS NULL)
+ OR EXISTS(SELECT 1 FROM ancestry WHERE workspace<>(SELECT workspace_id FROM tasks WHERE id=br.task_id))
+ OR EXISTS(SELECT 1 FROM ancestry a WHERE
+  EXISTS(SELECT 1 FROM task_attempts attempt WHERE attempt.task_id=a.id AND attempt.status='interrupted')
+  OR EXISTS(SELECT 1 FROM events e WHERE e.aggregate_type='task' AND e.aggregate_id=a.id AND e.event_type='task.attempt_interrupted'))
+ FROM ancestry)`
+
 func (s *Service) ExpireDue(ctx context.Context, limit int) (int, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT br.id FROM budget_reservations br WHERE br.status='reserved' AND br.expires_at<=?
 AND (br.task_id IS NULL OR NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id=br.task_id AND t.state IN ('running','completion_requested','verifying')))
-AND (br.inference_request_id IS NULL OR NOT EXISTS (SELECT 1 FROM inference_requests ir WHERE ir.id=br.inference_request_id AND ir.status IN ('created','routed','budget_reserved','dispatched','executing')))
-AND (br.agent_runtime_invocation_id IS NULL OR NOT EXISTS (SELECT 1 FROM agent_runtime_invocations ai WHERE ai.id=br.agent_runtime_invocation_id AND ai.status IN ('created','authorized','dispatched','executing')))
+AND (br.task_id IS NULL OR NOT `+reservationTaskRecoveryFenceSQL+`)
+AND br.inference_request_id IS NULL
+AND br.agent_runtime_invocation_id IS NULL
 ORDER BY br.expires_at LIMIT ?`, s.clock.UnixMilli(), limit)
 	if err != nil {
 		return 0, err
@@ -557,28 +575,25 @@ func (s *Service) expire(ctx context.Context, idv string) error {
 		if r.ExpiresAt > now {
 			return ErrInvalidCommand
 		}
+		// Binding proves a service owned the reservation, not that it stayed
+		// undispatched. Historical failed/succeeded/unknown records may retain
+		// quota after a failed commit. Only the owner can explicitly release
+		// proven pre-dispatch work; elapsed TTL is not that evidence.
+		if r.InferenceRequestID != nil || r.AgentRuntimeInvocationID != nil {
+			return ErrReservationActive
+		}
 		// Re-check active bindings inside the expiry transaction. ExpireDue's
 		// candidate query is only advisory; work may become active after that
 		// query but before this transaction acquires the write lock.
 		var active int
 		if r.TaskID != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT `+reservationTaskRecoveryFenceSQL+` FROM (SELECT ? AS task_id) br`, *r.TaskID).Scan(&active); err != nil {
+				return err
+			}
+			if active > 0 {
+				return ErrReservationActive
+			}
 			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE id=? AND state IN ('running','completion_requested','verifying')`, *r.TaskID).Scan(&active); err != nil {
-				return err
-			}
-			if active > 0 {
-				return ErrReservationActive
-			}
-		}
-		if r.InferenceRequestID != nil {
-			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM inference_requests WHERE id=? AND status IN ('created','routed','budget_reserved','dispatched','executing')`, *r.InferenceRequestID).Scan(&active); err != nil {
-				return err
-			}
-			if active > 0 {
-				return ErrReservationActive
-			}
-		}
-		if r.AgentRuntimeInvocationID != nil {
-			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_runtime_invocations WHERE id=? AND status IN ('created','authorized','dispatched','executing')`, *r.AgentRuntimeInvocationID).Scan(&active); err != nil {
 				return err
 			}
 			if active > 0 {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -16,6 +18,52 @@ type inspectedTaskService struct {
 	value  task.Task
 	err    error
 	onRead func()
+}
+
+type inspectedTaskAuth struct {
+	liveRoomAuth
+	identity Identity
+	err      error
+}
+
+func (a *inspectedTaskAuth) Authenticate(*http.Request) (Identity, error) {
+	return a.identity, a.err
+}
+
+func TestTaskInspectionRejectsCredentialChangesDuringRead(t *testing.T) {
+	for _, scenario := range []string{"revoked", "principal_changed", "credential_changed", "principal_type_changed", "auth_failed"} {
+		t.Run(scenario, func(t *testing.T) {
+			auth := &inspectedTaskAuth{identity: Identity{PrincipalID: "human", CredentialID: "original", PrincipalType: "human"}}
+			service := inspectedTaskService{value: task.Task{ID: "task", WorkspaceID: "tenant", Objective: "PRIVATE_OBJECTIVE_CANARY"}}
+			want := 403
+			service.onRead = func() {
+				switch scenario {
+				case "revoked":
+					auth.err = ErrUnauthenticated
+					want = 401
+				case "principal_changed":
+					auth.identity.PrincipalID = "another-human"
+				case "credential_changed":
+					auth.identity.CredentialID = "replacement"
+				case "principal_type_changed":
+					auth.identity.PrincipalType = "agent"
+				case "auth_failed":
+					auth.err = errors.New("PRIVATE_AUTH_CANARY")
+					want = 500
+				}
+			}
+			s := NewServer(nil, fakeEvents{}, auth)
+			s.tasks = service
+			w := httptest.NewRecorder()
+			s.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/v1/tasks/task", nil))
+			if w.Code != want {
+				t.Fatalf("status %d want %d body %s", w.Code, want, w.Body.String())
+			}
+			if strings.Contains(w.Body.String(), "CANARY") {
+				t.Fatal("revoked inspection disclosed private Task/auth data")
+			}
+		})
+	}
 }
 
 func (f inspectedTaskService) Get(context.Context, string) (task.Task, error) {

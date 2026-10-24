@@ -32,20 +32,20 @@ assert.equal(context.OnePaneTeamRoom.guidanceRecipient({Kind:'human',Content:'{"
 assert.equal(context.OnePaneTeamRoom.guidanceRecipient({Kind:'agent',Content:{target_member_id:'reviewer'}}),'');
 const message=i=>({ID:'m'+String(i).padStart(4,'0'),sequence:i+1,SessionID:'room',Kind:'agent',Content:{text:'Contribution '+i},CreatedAt:100+Math.floor(i/60),RoundNumber:1,AuthorMemberID:'builder'});
 async function main(){
- let calls=[],mutations=[],failReads=false,alive=true,room={id:'room',task_id:'task',status:'deliberating',execution_mode:'team',task_state:'CREATED',members:[{id:'builder',name:'Builder',kind:'agent',status:'running'},{id:'reviewer',name:'Reviewer',kind:'agent',status:'pending'}]},messages=Array.from({length:261},(_,i)=>message(i));
+ let calls=[],mutations=[],failReads=false,alive=true,room={id:'room',workspace_id:'tenant',task_id:'task',status:'deliberating',execution_mode:'team',task_state:'CREATED',members:[{id:'builder',name:'Builder',kind:'agent',status:'running'},{id:'reviewer',name:'Reviewer',kind:'agent',status:'pending'}]},messages=Array.from({length:261},(_,i)=>message(i));
  let holdMutation=null;
  const api=async(path,opts={})=>{
   calls.push(path);
   if(opts.method==='POST'){mutations.push({path,body:JSON.parse(opts.body)});if(holdMutation)await holdMutation;return {}}
   if(failReads)throw Error('Access revoked');
-  if(path.includes('/tasks/'))return {ID:'room'};
+  if(path.includes('/tasks/'))return {ID:'room',TaskID:'task',WorkspaceID:'tenant'};
   if(path.endsWith('/live'))return {...room};
   const url=new URL(path,'http://onepane.invalid');let rows=messages;const before=url.searchParams.get('before'),after=url.searchParams.get('after'),limit=Number(url.searchParams.get('limit'));
   if(before)rows=rows.filter(m=>m.ID<before);if(after)rows=rows.filter(m=>m.ID>after);
   const has_more=rows.length>limit;rows=after?rows.slice(0,limit):rows.slice(-limit);
   return {messages:rows,has_more,first_id:rows[0]?.ID,last_id:rows.at(-1)?.ID};
  };
- let notifications=0;const c=controller({api,taskID:'task',alive:()=>alive,onChange:()=>notifications++});
+ let notifications=0;const c=controller({api,taskID:'task',workspaceID:'tenant',alive:()=>alive,onChange:()=>notifications++});
  await c.refresh();assert.equal(c.state.messages[0].ID,'m0231');assert.equal(c.state.messages.at(-1).ID,'m0260');
  c.state.draft='Keep this draft';c.state.selectedAgent='reviewer';const beforeCalls=calls.length;
  c.switchView('agents');c.switchView('conversation');assert.equal(calls.length,beforeCalls,'view switch must not dispatch or read');assert.equal(c.state.draft,'Keep this draft');assert.equal(c.state.selectedAgent,'reviewer');
@@ -79,8 +79,39 @@ async function main(){
  failReads=true;await c.refresh();assert.equal(c.state.room,null);assert.equal(c.state.messages.length,0);assert.equal(c.state.history,null);assert.ok(c.state.error);assert.equal(c.state.draft,'New text written during send');
  failReads=false;room={...room,status:'deliberating'};await c.refresh();assert.equal(c.state.messages.at(-1).ID,'m0261','recovery lost newest window');
  const beforeStop=calls.length;c.stop();await c.refresh();assert.equal(calls.length,beforeStop,'closed room polled');
- let resolveRead;const slow=controller({api:()=>new Promise(r=>resolveRead=r),taskID:'task',alive:()=>alive,onChange:()=>{throw Error('detached update')}});const pending=slow.refresh();alive=false;resolveRead({ID:'room'});await pending;slow.stop();
+ assert.equal(c.state.room,null,'closed room retained another Workspace projection');assert.equal(c.state.messages.length,0,'closed room retained its transcript');assert.equal(c.state.history,null);assert.equal(c.state.proposedPlan,null);assert.equal(c.state.draft,'','closed room retained private draft guidance');
+ let resolveRead;const slow=controller({api:()=>new Promise(r=>resolveRead=r),taskID:'task',workspaceID:'tenant',alive:()=>alive,onChange:()=>{throw Error('detached update')}});const pending=slow.refresh();alive=false;resolveRead({ID:'room',TaskID:'task',WorkspaceID:'tenant'});await pending;slow.stop();
  const index=fs.readFileSync('internal/webui/static/index.html','utf8');assert.ok(index.includes('/team-room.js'));assert.ok(index.includes('/team-room.css'));
+ // Mount the actual Team module and change tenant without a DOM mutation
+ // while its API ignores cancellation. The independent watcher must still
+ // erase the rendered room and abort the retained controller's requests.
+ let mountedReadHold=null,releaseMountedRead,observerDisconnected=false,timerSerial=0;
+ const timers=new Map(),nodes=new Map(),mountedCalls=[];
+ const mountedHost={isConnected:true,textContent:'',querySelector(selector){if(!nodes.has(selector))nodes.set(selector,{innerHTML:'',textContent:'',scrollTop:0,scrollHeight:0,clientHeight:0,parentElement:{},value:'',setAttribute(){}});return nodes.get(selector)},querySelectorAll:()=>[]};
+ const mountedContext=vm.createContext({AbortController,Map,Array,JSON,Number,String,Date,Promise,Error,
+  onepaneWorkspace:'tenant',qa4InspectorOverview:()=>'',qa4Inspector:{kind:'task',id:'task'},openModal(){},
+  apiRequest:async(path,options)=>{mountedCalls.push({path,options});if(mountedReadHold)await mountedReadHold;if(path.includes('/tasks/'))return {ID:'room',TaskID:'task',WorkspaceID:'tenant'};if(path.endsWith('/live'))return {id:'room',task_id:'task',workspace_id:'tenant',status:'deliberating',task_state:'created',members:[],observed_at:1};return {messages:[],has_more:false}},
+  document:{body:{},hidden:false,getElementById:()=>mountedHost,addEventListener(){}},
+  MutationObserver:class{observe(){}disconnect(){observerDisconnected=true}},
+  setTimeout:(fn,delay)=>{const key=++timerSerial;timers.set(key,{fn,delay});return key},clearTimeout:key=>timers.delete(key)
+ });
+ vm.runInContext(fs.readFileSync('internal/webui/static/team-room.js','utf8'),mountedContext);
+ const mounted=mountedContext.OnePaneTeamRoom.mount('task');for(let i=0;i<12;i++)await Promise.resolve();assert.equal(mounted.state.room.id,'room');
+ mounted.state.draft='PRIVATE_DRAFT_CANARY';mounted.state.proposedPlan={id:'PRIVATE_PLAN_CANARY'};
+ mountedReadHold=new Promise(r=>releaseMountedRead=r);const waiting=mounted.refresh();
+ mountedContext.onepaneWorkspace='different-tenant';const watcher=[...timers.values()].find(item=>item.delay===1000);assert.ok(watcher);watcher.fn();
+ assert.equal(mountedHost.textContent,'Team view closed.');assert.equal(mounted.state.room,null);assert.equal(mounted.state.draft,'');assert.equal(mounted.state.proposedPlan,null);assert.equal(timers.size,0);assert.ok(observerDisconnected);assert.ok(mountedCalls.at(-1).options.signal.aborted);
+ releaseMountedRead();await waiting;assert.equal(mounted.state.room,null,'late API repopulated a closed Workspace');assert.equal(mountedHost.textContent,'Team view closed.');
+ for(const scenario of ['lookup_workspace','lookup_task','projection_workspace']){
+  let readCount=0;
+  const scoped=controller({taskID:'task',workspaceID:'tenant',api:async path=>{
+   readCount++;
+   if(path.includes('/tasks/'))return {ID:'room',TaskID:scenario==='lookup_task'?'other-task':'task',WorkspaceID:scenario==='lookup_workspace'?'other-tenant':'tenant'};
+   if(path.endsWith('/live'))return {id:'room',task_id:'task',workspace_id:'other-tenant',members:[]};
+   return {messages:[]};
+  }});
+  await scoped.refresh();assert.equal(scoped.state.room,null);assert.equal(scoped.state.messages.length,0);assert.ok(scoped.state.error);assert.equal(await scoped.ask(),false);assert.equal(readCount,scenario==='projection_workspace'?3:1,'foreign session followed into another Workspace');scoped.stop();
+ }
  console.log('PASS: live Team views, long history, targeted replies, draft retention, no duplicate dispatch, revocation and disposal');
 }
 main().catch(e=>{console.error(e);process.exitCode=1});

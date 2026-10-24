@@ -22,13 +22,18 @@ type recoveryReadFixture struct {
 type recoveryReadAuth struct {
 	liveRoomAuth
 	credentialRevoked bool
+	identityPatch     func(Identity) Identity
 }
 
 func (a *recoveryReadAuth) Authenticate(r *http.Request) (Identity, error) {
 	if a.credentialRevoked {
 		return Identity{}, ErrUnauthenticated
 	}
-	return a.liveRoomAuth.Authenticate(r)
+	i, err := a.liveRoomAuth.Authenticate(r)
+	if a.identityPatch != nil {
+		i = a.identityPatch(i)
+	}
+	return i, err
 }
 
 func (f recoveryReadFixture) ListRecoveryCases(context.Context, string, string, string) (task.RecoveryCasePage, error) {
@@ -45,7 +50,7 @@ func (f recoveryReadFixture) GetRecoveryCase(ctx context.Context, ws, id, caseID
 
 func TestRecoveryCaseReadsRequireLiveScopedTaskPermission(t *testing.T) {
 	for _, detail := range []bool{false, true} {
-		for _, scenario := range []string{"allowed", "foreign", "denied", "revoked_during_read", "credential_revoked", "unauthenticated", "task_missing", "missing", "read_error", "bad_cursor"} {
+		for _, scenario := range []string{"allowed", "foreign", "denied", "revoked_during_read", "credential_revoked", "credential_revoked_task_read", "principal_changed", "credential_changed", "principal_type_changed", "unauthenticated", "task_missing", "missing", "read_error", "bad_cursor"} {
 			t.Run(scenario+fmtBoolAPI(detail), func(t *testing.T) {
 				auth := &recoveryReadAuth{liveRoomAuth: liveRoomAuth{denyTask: scenario == "denied"}}
 				reads := 0
@@ -69,6 +74,24 @@ func TestRecoveryCaseReadsRequireLiveScopedTaskPermission(t *testing.T) {
 				case "credential_revoked":
 					fixture.onCases = func() { auth.credentialRevoked = true }
 					want = 401
+				case "credential_revoked_task_read":
+					fixture.onRead = func() { auth.credentialRevoked = true }
+					want = 401
+				case "principal_changed", "credential_changed", "principal_type_changed":
+					fixture.onCases = func() {
+						auth.identityPatch = func(i Identity) Identity {
+							switch scenario {
+							case "principal_changed":
+								i.PrincipalID = "another-human"
+							case "credential_changed":
+								i.CredentialID = "replacement"
+							case "principal_type_changed":
+								i.PrincipalType = "agent"
+							}
+							return i
+						}
+					}
+					want = 403
 				case "missing":
 					fixture.readErr = sql.ErrNoRows
 					want = 404
@@ -97,7 +120,7 @@ func TestRecoveryCaseReadsRequireLiveScopedTaskPermission(t *testing.T) {
 				if strings.Contains(w.Body.String(), "CANARY") {
 					t.Fatal("raw read failure leaked")
 				}
-				if (scenario == "foreign" || scenario == "denied" || scenario == "bad_cursor" || scenario == "unauthenticated" || scenario == "task_missing") && reads != 0 {
+				if (scenario == "foreign" || scenario == "denied" || scenario == "bad_cursor" || scenario == "unauthenticated" || scenario == "task_missing" || scenario == "credential_revoked_task_read") && reads != 0 {
 					t.Fatal("unauthorized/unbounded read executed")
 				}
 				if want == 200 && (w.Header().Get("Cache-Control") != "no-store" || !strings.Contains(w.Body.String(), "awaiting_inventory")) {

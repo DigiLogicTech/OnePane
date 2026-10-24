@@ -21,13 +21,13 @@ async function main(){
    if(path.endsWith('/accept')){room={...room,status:'plan_accepted',task_state:'ready',assignments:[{key:'build',member_id:'a',task_id:'child'}]};return {ID:'session'}}
    throw Error('unexpected mutation');
   }
-  if(path==='/v1/tasks/root/team-session')return {ID:'session'};
+  if(path==='/v1/tasks/root/team-session')return {ID:'session',TaskID:'root',WorkspaceID:'tenant'};
   if(path==='/v1/tasks/child')return {ID:'child',WorkspaceID:'tenant',Objective:'Build'};
   if(path.endsWith('/live'))return room;
   if(path.includes('/messages/page'))return {messages:[],has_more:false};
   throw Error('unexpected read: '+path);
  };
- const c=controller({api,taskID:'root'});await c.refresh();
+ const c=controller({api,taskID:'root',workspaceID:'tenant'});await c.refresh();
  const suggest=assignments=>({id:'suggestion',kind:'agent',author_member_id:'a',content:{proposal_type:'replan',proposal:{assignments}}});
  const draft=[{key:'review',member_id:'b',objective:'Review',depends_on:['build']},{key:'build',member_id:'a',objective:'Build',depends_on:[],required_verification:'V2',verification_spec:{result_checks:[{pointer:'/summary',operator:'not_empty'}],artifacts:[{media_type:'text/plain'}]}}];
  c.state.messages=[suggest(draft)];

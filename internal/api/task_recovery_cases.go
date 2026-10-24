@@ -34,7 +34,7 @@ func (s *Server) readTaskRecoveryCases(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Task unavailable")
 		return
 	}
-	if !s.authorize(w, r, i, t.WorkspaceID, "task.read") {
+	if !s.authorizeCurrentTaskRead(w, r, i, t.WorkspaceID) {
 		return
 	}
 	var result any
@@ -57,15 +57,7 @@ func (s *Server) readTaskRecoveryCases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Live revocation during the database read denies the returned metadata.
-	fresh, ok := s.authenticate(w, r)
-	if !ok {
-		return
-	}
-	if fresh.PrincipalID != i.PrincipalID || fresh.CredentialID != i.CredentialID || fresh.PrincipalType != i.PrincipalType {
-		writeError(w, http.StatusForbidden, "Identity changed during recovery read")
-		return
-	}
-	if !s.authorize(w, r, fresh, t.WorkspaceID, "task.read") {
+	if !s.authorizeCurrentTaskRead(w, r, i, t.WorkspaceID) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")

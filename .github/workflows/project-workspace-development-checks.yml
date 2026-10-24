@@ -405,7 +405,7 @@ jobs:
           go test -count=1 -timeout 3m ./internal/runtimecoord
           go test -count=1 -timeout 3m -run TestTeamDispatchShares ./internal/teamworker
           go test -count=1 -timeout 3m -run TestTeamAuthorityRechecked ./internal/inference
-          go test -count=1 -timeout 3m -run 'Test(RecoveryCaseReads|AcceptedTeamAssignments|TeamAssignment|TeamPause|TeamResume|TeamCancellation)' ./internal/team ./internal/tool ./internal/api
+          go test -count=1 -timeout 3m -run 'Test(TaskInspection|RecoveryCaseReads|AcceptedTeamAssignments|TeamAssignment|TeamPause|TeamResume|TeamCancellation)' ./internal/team ./internal/tool ./internal/api
           go test -tags integration -count=1 -timeout 3m -run 'Test(TeamAssignmentsExecute|TeamPause|TeamCancellation|CancellationBetweenWorkerTicks|ProjectTaskGraphRecognizesReviewedTeam)' ./internal/agentworker ./internal/projectorchestrator
           go test -tags integration -count=1 -timeout 3m -run 'Test(AgentProtocolHTTPPostDispatch|RuntimeDispatchUnusable)' ./internal/agentruntime
           go test -tags integration -count=1 -timeout 3m -run 'Test(UnstartedCancellation|RecoveryCapture|RecoveryDiscovery|RecoveryAdmission|InterruptedRecoveryCannotReadmitOriginalTask|TeamHoldCannotReadmitThroughUnguardedTaskService)' ./internal/task

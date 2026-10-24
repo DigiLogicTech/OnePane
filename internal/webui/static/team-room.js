@@ -9,7 +9,7 @@
  const text=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
  function content(m){let v=field(m,"content","Content");if(typeof v==="string"){try{v=JSON.parse(v)}catch{return v}}return typeof v?.text==="string"?v.text:"Structured contribution (inspect its durable record for details)."}
  function guidanceRecipient(m){if(field(m,"kind","Kind")!=="human")return "";let v=field(m,"content","Content");if(typeof v==="string"){try{v=JSON.parse(v)}catch{return ""}}return typeof v?.target_member_id==="string"?v.target_member_id:""}
- function controller({api,taskID,onChange=()=>{},alive=()=>true}){
+ function controller({api,taskID,workspaceID,onChange=()=>{},alive=()=>true}){
   const state={sessionID:"",room:null,messages:[],history:null,hasOlder:false,view:"conversation",selectedAgent:"",guidanceTarget:"",draft:"",busy:false,error:"",liveAfter:"",proposedPlan:null};
   const abort=new AbortController();let reading=false,stopped=false,planDraftRevision=0;
   const active=()=>!stopped&&alive();const emit=()=>{if(active())onChange(state)};
@@ -18,10 +18,11 @@
   async function refresh(){
    if(reading||!active())return;reading=true;
    try{
-    if(!state.sessionID){const ss=await request("/v1/tasks/"+encodeURIComponent(taskID)+"/team-session");if(!active())return;state.sessionID=id(ss);if(!state.sessionID)throw Error("No Team session")}
+    if(typeof workspaceID!=="string"||!workspaceID)throw Error("No Workspace scope");
+    if(!state.sessionID){const ss=await request("/v1/tasks/"+encodeURIComponent(taskID)+"/team-session");if(!active())return;if(field(ss,"workspace_id","WorkspaceID")!==workspaceID||field(ss,"task_id","TaskID")!==taskID)throw Error("Foreign Team session");state.sessionID=id(ss);if(!state.sessionID)throw Error("No Team session")}
     const [room,page]=await Promise.all([request(path("/live")),request(path("/messages/page?limit=30")+(state.liveAfter?"&after="+encodeURIComponent(state.liveAfter):""))]);
     if(!active())return;
-    if(room.id!==state.sessionID||room.task_id!==taskID||!Array.isArray(room.members)||room.members.length>8||!Array.isArray(page.messages)||page.messages.length>50)throw Error("Invalid Team projection");
+    if(room.id!==state.sessionID||room.task_id!==taskID||room.workspace_id!==workspaceID||!Array.isArray(room.members)||room.members.length>8||!Array.isArray(page.messages)||page.messages.length>50)throw Error("Invalid Team projection");
     if(room.assignments!==undefined&&(!Array.isArray(room.assignments)||room.assignments.length>8||room.assignments.some(a=>!room.members.some(m=>m.id===a.member_id))))throw Error("Invalid Team assignments");
     state.room=room;
     const merged=new Map(state.messages.map(m=>[id(m),m]));for(const m of page.messages){if(field(m,"session_id","SessionID")!==state.sessionID)throw Error("Foreign message");merged.set(id(m),m)}
@@ -88,7 +89,7 @@
     finally{state.busy=false;emit();await refresh()}
    },
    async acceptAssignments(){const plan=state.proposedPlan;if(!plan||state.room?.task_state!=="created")return false;const ok=await mutate("/plans/"+encodeURIComponent(plan.id)+"/accept",{accept_open_risk:false,decision:{reviewed_named_assignments:true}});if(ok){state.proposedPlan=null;await refresh()}return ok},
-   stop(){stopped=true;abort.abort()},
+   stop(){stopped=true;abort.abort();state.sessionID="";state.room=null;state.messages=[];state.history=null;state.hasOlder=false;state.liveAfter="";state.proposedPlan=null;state.draft="";state.selectedAgent="";state.guidanceTarget="";state.error="";state.busy=false},
    switchView(view){if(view!=="conversation"&&view!=="agents")return;state.view=view;emit()},
    live(){state.history=null;emit()},
    async send(){const original=state.draft,draft=original.trim(),target=state.guidanceTarget;if(!draft||draft.length>8000||target&&(state.room?.execution_mode!=="team"||!state.room.members.some(m=>m.id===target&&m.kind==="agent")))return false;const ok=await mutate("/messages",{content:{text:draft,...(target?{target_member_id:target}:{})}});if(ok){if(state.draft===original)state.draft="";emit();await refresh()}return ok},
@@ -100,9 +101,9 @@
   const scope=onepaneWorkspace;
   openModal("Live Team",'<section class="team-room" id="onepaneTeamRoom"><p class="page-subtitle">One shared session. Watch contributions and observed turns, send guidance, then request replies. Tool execution still requires the accepted Task plan.</p><div class="toolbar" role="group" aria-label="Team view"><button class="btn" data-team-view="conversation" aria-pressed="true">Conversation</button><button class="btn" data-team-view="agents" aria-pressed="false">Agents</button><button class="btn" data-team-refresh>Refresh</button></div><p data-team-status role="status">Connecting to the Task’s Team…</p><div data-team-execution-controls hidden><button class="btn" type="button" data-team-pause>Pause Team</button><button class="btn" type="button" data-team-resume>Resume Team</button><p data-team-hold-status role="status"></p></div><details data-team-cancel-controls hidden><summary>Cancel Team work</summary><p>Request cancellation of this Task, its contributions and their descendant Tasks. Completed results remain available. This records a request; already-started external actions may still need reconciliation.</p><label>Reason (optional)<input data-team-cancel-reason maxlength="2048"></label><button class="btn" type="button" data-team-cancel>Request cancellation</button></details><div data-team-conversation><div class="toolbar"><button class="btn" data-team-older>Earlier messages</button><button class="btn" data-team-live hidden>Return to live</button></div><div class="team-room-feed" data-team-feed tabindex="0" aria-label="Team conversation"></div></div><div class="team-room-agents" data-team-agents hidden></div><form class="qa-form" data-team-form><label>Guidance recipient<select aria-label="Guidance recipient" data-team-guidance-target><option value="">Whole team</option></select></label><p class="list-meta">Addressed guidance stays visible in the shared room and reaches the selected agent on its next reasoning step. It does not change the accepted plan or grant permissions.</p><label>Message to the room<textarea rows="3" maxlength="8000" data-team-draft required></textarea></label><div class="toolbar"><button class="btn" type="submit" data-team-send>Send message</button><label>Request replies from<select aria-label="Request replies from" data-team-target><option value="">All agents</option></select></label><button class="btn primary" type="button" data-team-ask>Request replies</button></div><p class="list-meta">Sending saves your message. Request replies queues reasoning turns. Waiting does not mean that an agent or model is running.</p></form></section>');
   const el=document.getElementById("onepaneTeamRoom");if(!el)return;
-  const get=s=>el.querySelector(s);let roster="",timer=null,planEditor=null;
+  const get=s=>el.querySelector(s);let roster="",timer=null,watchTimer=null,planEditor=null;
   const alive=()=>el.isConnected&&scope===onepaneWorkspace;
-  const c=controller({api:apiRequest,taskID,alive,onChange:draw});
+  const c=controller({api:apiRequest,taskID,workspaceID:scope,alive,onChange:draw});
   function draw(s){
    if(!alive())return;
    get("[data-team-status]").textContent=s.error||(s.room?"Task: "+s.room.task_state+" · Team: "+s.room.status+" · Round "+s.room.round+" · observed "+new Date(s.room.observed_at).toLocaleTimeString():"Connecting…");
@@ -142,9 +143,11 @@
    button.onclick=()=>{if(!alive())return;const opening=panel.hidden;recovery?.stop();recovery=null;panel.hidden=!opening;button.setAttribute("aria-expanded",String(opening));if(opening)recovery=root.OnePaneTaskRecovery.mountInto(panel,taskID,scope)};
   }
   const observer=new MutationObserver(()=>{if(!alive())stop()});observer.observe(document.body,{childList:true,subtree:true});
-  function stop(){clearTimeout(timer);observer.disconnect();c.stop()}
+  function stop(){clearTimeout(timer);clearTimeout(watchTimer);observer.disconnect();c.stop();el.textContent="Team view closed."}
+  // Scope changes must clear the room even while an HTTP read is still waiting.
+  function watchScope(){if(!alive()){stop();return}watchTimer=setTimeout(watchScope,1000)}
   async function tick(){if(!alive()){stop();return}if(!document.hidden)await c.refresh();if(alive())timer=setTimeout(tick,2000);else stop()}
-  tick();return c;
+  watchScope();tick();return c;
  }
  root.OnePaneTeamRoom={controller,mount,content,guidanceRecipient};
  if(typeof document!=="undefined"){

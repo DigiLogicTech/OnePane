@@ -35,9 +35,23 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Task unavailable")
 		return
 	}
-	if !s.authorize(w, r, i, t.WorkspaceID, "task.read") {
+	if !s.authorizeCurrentTaskRead(w, r, i, t.WorkspaceID) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, taskResponse(t))
+}
+
+func (s *Server) authorizeCurrentTaskRead(w http.ResponseWriter, r *http.Request, original Identity, workspace string) bool {
+	// The credential may have been revoked or replaced while storage was read.
+	// Authorizing an earlier Identity alone does not revalidate its credential.
+	fresh, ok := s.authenticate(w, r)
+	if !ok {
+		return false
+	}
+	if fresh.PrincipalID != original.PrincipalID || fresh.CredentialID != original.CredentialID || fresh.PrincipalType != original.PrincipalType {
+		writeError(w, http.StatusForbidden, "Identity changed during Task read")
+		return false
+	}
+	return s.authorize(w, r, fresh, workspace, "task.read")
 }

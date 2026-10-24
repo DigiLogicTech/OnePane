@@ -157,11 +157,22 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 	_ = s.journal(ctx, run.ID, "route", "succeeded", &kind, &cid, nil, nil, map[string]any{"score": decision.Selected.Score, "protocol_level": cand.ProtocolLevel, "cost_class": cand.CostClass, "qualification": cand.Qualification})
 	reservationID, err := s.reserveReasoningBudget(ctx, run, rp, cand, tokens)
 	if err != nil {
-		_ = s.journal(ctx, run.ID, "budget", "failed", &kind, &cid, nil, nil, map[string]any{"error": err.Error(), "cost_class": cand.CostClass})
+		if journalErr := s.journal(ctx, run.ID, "route", "failed", &kind, &cid, nil, nil, map[string]any{"action": "budget_reservation", "reservation_status": "denied", "budget_account_id": rp.BudgetAccountID, "error": err.Error(), "cost_class": cand.CostClass}); journalErr != nil {
+			return immediateWorkerStep(failedResult(res, fmt.Errorf("record reasoning budget denial: %w", errors.Join(err, journalErr))))
+		}
 		return immediateWorkerStep(s.blockRun(ctx, run, res, "budget unavailable: "+err.Error()))
 	}
 	if reservationID != "" {
-		_ = s.journal(ctx, run.ID, "budget", "reserved", &kind, &cid, nil, &reservationID, map[string]any{"budget_account_id": rp.BudgetAccountID})
+		// Budget is a routing observation, not a schema-supported Step kind.
+		// Persist the actual reservation and audit before dispatch ownership is
+		// consumed. A failed observation cannot authorize paid inference.
+		if journalErr := s.journal(ctx, run.ID, "route", "succeeded", &kind, &cid, nil, &reservationID, map[string]any{"action": "budget_reservation", "reservation_status": "reserved", "budget_account_id": rp.BudgetAccountID}); journalErr != nil {
+			// No transport has run at this boundary, so releasing this exact
+			// reservation cannot refund potentially spent quota. Release failure
+			// leaves its durable accounting intact and is reported to the caller.
+			releaseErr := s.releaseBudgetIfReserved(ctx, reservationID)
+			return immediateWorkerStep(failedResult(res, fmt.Errorf("record reasoning budget reservation: %w", errors.Join(journalErr, releaseErr))))
+		}
 	}
 	// A human may update or archive an Agent during model queue selection.
 	// Do not dispatch inference with stale prompt/Agent provenance.
@@ -433,14 +444,21 @@ func (s *Service) reserveReasoningBudget(ctx context.Context, run Run, rp routeP
 	return r.ID, nil
 }
 
-func (s *Service) releaseBudgetIfReserved(ctx context.Context, reservationID string) {
-	if strings.TrimSpace(reservationID) == "" || s.budgets == nil {
-		return
+func (s *Service) releaseBudgetIfReserved(ctx context.Context, reservationID string) error {
+	if strings.TrimSpace(reservationID) == "" {
+		return nil
+	}
+	if s.budgets == nil {
+		return inference.ErrBudgetUnavailable
 	}
 	r, err := s.budgets.Reservation(ctx, reservationID)
-	if err == nil && r.Status == budget.ReservationReserved {
-		_, _ = s.budgets.Release(ctx, budget.CloseCommand{ReservationID: reservationID, ActorPrincipalID: strPtr(AuthorityPrincipal)})
+	if err != nil {
+		return err
 	}
+	if r.Status == budget.ReservationReserved {
+		_, err = s.budgets.Release(ctx, budget.CloseCommand{ReservationID: reservationID, ActorPrincipalID: strPtr(AuthorityPrincipal)})
+	}
+	return err
 }
 
 func (s *Service) handleDispatchFailure(ctx context.Context, run Run, res TickResult, candidateID string, cause error) TickResult {

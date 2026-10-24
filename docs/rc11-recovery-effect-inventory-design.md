@@ -53,8 +53,8 @@ Verified from `internal/agentworker/execution.go`, `dispatch_outcome.go`, `worke
 | `delegate`, waiting | Child Task ID and `detail_json.child_task_id`; continuation and descendant graph must agree. |
 | `verification`, waiting | Verification ID, with `detail_json.verification_id`, required level and awaiting-assurance state. |
 | `verification`, succeeded | Checkpoint ID, with explicit verification/checkpoint IDs. Both V0 Worker completion and independent assurance use this shape; kind alone cannot prove independence. |
-| Historical assurance retry | `assurance_bridge.go` attempts to journal `verification`/`retry` with Verification ID, while the original step schema's status CHECK excludes `retry`. Treat source intent and actual persisted supported rows separately; this review did not reproduce or remediate that path. |
-| Routing/resource/control waits | References may be absent. Budget journal attempts use a reservation ID, but original step kind/status constraints do not include every attempted budget label. Missing journal entries are not proof of no reservation: direct/reverse durable owner tables remain authoritative. |
+| Assurance retry | A schema-valid `verification`/`succeeded` step references the Verification ID and explicitly records `detail_json.action='retry'` and `verification_passed=false`. Success means the original Task/Attempt/Worker continuation committed with its audit, not that verification passed. Historical source attempted unsupported status `retry`; absence of that journal cannot establish absence of continuation. |
+| Routing/resource/control waits | References may be absent. Budget observations use schema-valid `route`/`succeeded` or `route`/`failed`, explicit `action='budget_reservation'` and `reservation_status`, and the actual reservation ID when reserved. Earlier source attempted unsupported budget labels and ignored write errors. Missing journal entries are not proof of no reservation: direct/reverse durable owner tables remain authoritative. |
 
 ## Immutable observation and freshness protocol
 

@@ -633,8 +633,21 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 		if state == string(task.StateRunning) {
 			// External Task resumption is not authority to revive a
 			// different, stale, duplicate or unapproved Worker Attempt.
-			// Reuse the exact dispatch ownership predicate under CAS.
-			updated,err:=s.db.ExecContext(ctx,`UPDATE agent_worker_runs AS r
+			// Recheck durable assistance and reuse the exact dispatch ownership
+			// predicate inside the SAME transaction as the Worker promotion.
+			return s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+			var attemptID string
+			err:=tx.QueryRowContext(ctx,`SELECT attempt_id FROM agent_worker_runs
+			 WHERE id=? AND task_id=? AND status='waiting'`,v.run,v.task).Scan(&attemptID)
+			if errors.Is(err,sql.ErrNoRows){return nil}
+			if err!=nil{return err}
+			if err=task.RequireOrdinaryResumeInTransaction(ctx,tx,v.task,attemptID);err!=nil{
+				if errors.Is(err,task.ErrInvalidTransition){
+					return fmt.Errorf("%w: assisted human wait requires explicit Continue; operator reconciliation required",ErrInvalidWorkerState)
+				}
+				return err
+			}
+			updated,err:=tx.ExecContext(ctx,`UPDATE agent_worker_runs AS r
 			 SET status='running',revision=revision+1,updated_at=?
 			 WHERE r.id=? AND r.task_id=? AND r.status='waiting'
 			 AND `+activeWorkerExecutionBindingPredicate,
@@ -644,7 +657,7 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 			if err!=nil{return err}
 			if n!=1{
 				var stranded int
-				err=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM agent_worker_runs r
+				err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM agent_worker_runs r
 				 JOIN tasks t ON t.id=r.task_id WHERE r.id=? AND r.task_id=?
 				 AND r.status='waiting' AND t.state='running'`,
 				 v.run,v.task).Scan(&stranded)
@@ -653,6 +666,8 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 					return fmt.Errorf("%w: resumed Task has no valid original Worker Attempt; operator reconciliation required",ErrInvalidWorkerState)
 				}
 			}
+			return nil
+			})
 		}
 		return nil
 		}();runErr!=nil{

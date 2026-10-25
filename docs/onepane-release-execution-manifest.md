@@ -2,7 +2,7 @@
 
 Updated: 2026-10-25 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
 
-Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Published increments `28601917` and `9f624c4a` remediate managed component ownership/privacy/atomicity/restart, OmniRoute policy observation and deployment onboarding, Evidence stale private views, and recorded Team wait authority. The following stale-wait redelivery fix preserves newer legitimate owners without weakening failed-commit recovery. Exact validation, genuine historical failures, current CI observations and the next functional boundary are recorded in the latest sections below. Inspect the newly published source commit's own complete Windows/Linux/race/regression checks; successful guards do not imply packaging or physical acceptance. Continue immutable durable Team assistance and original-owner continuation, closed recovery attribution, Library ingestion and all remaining approved functionality. Ordered human audits/sign-offs, real AI/Node/L4, LAST UI, installed Windows/Ubuntu and final versioned artifact gates remain OPEN. No final build is claimed.
+Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Durable Team human requests, pinned original scope, bounded private request/answer reads and authenticated immutable answer writes are implemented. Latest work fences generic Task/Worker resumption from bypassing the pending explicit Continue protocol. Exact commits, genuine failures, validation and current CI observations are in the latest sections below. Continue exact original-owner Continue with retained answer delivery to the actual next model context, session discovery/UI, reviewed reassignment, closed recovery attribution, Library ingestion and all remaining approved functionality. Inspect each new commit's own Windows/Linux/race/regression checks; source guards do not imply packaging or physical acceptance. Ordered human audits/sign-offs, real AI/Node/L4, LAST UI, installed Windows/Ubuntu and final versioned artifact gates remain OPEN. No final build is claimed.
 ## Authority and continuation
 
 The Git repository is `D:\Codex\OnePane\source`; its parent is an unrelated unborn wrapper repository. Continue `codex/team-live-ci-completion`, existing draft PR [228](https://github.com/DigiLogicTech/OnePane/pull/228), based on `feature/rc11-policy-worker-diagnostics-integration-20261011` (`fb7f5df7`). Preserve the stacked integration route; do not merge the historical feature PRs independently or reset local work.
@@ -1112,3 +1112,42 @@ request-specific REQUIRED model input must survive resource waits and more than
 8room messages. Session discovery/UI and peer help/reassignment/fairness remain
 open. All broader release scope/reviews/physical/installed/artifact gates remain
 OPEN; no installer, checksum or FINAL BUILD COMPLETE is claimed.
+
+## TEAM-HELP-RESUME-001 — blocking continuation bypass, 25 October 12:41 UTC
+
+Exact18443fcba3eb813d157a3bf75dc381c67ffd6afa integration40193322312 and
+Windows/Ubuntu guards40193322292/40193322257 SUCCESS. Exact predecessor ded125f5
+integration40192815962 and both guards also SUCCESS. Physical approval SKIPPED;
+these are source results, not installed/model/Node or release acceptance.
+
+Actual accepted Team human wait baseline reproduced generic Task.Resume restoring
+execution with no Continue receipt, both unanswered and answered1.631s. Separate
+preexisting Task+Attempt-running/Worker-waiting projections also bypassed during
+reconstructed Worker reconciliation1.671s. Human answer storage is not execution
+approval. Fix both boundaries before treating the help flow as governed.
+
+Production SQL Task repository now denies generic resume on the exact current
+active Attempt, waiting Worker, latest committed human step and its immutable
+request before lifecycle writes. The same deny-only guard runs in the SAME TX
+as Worker promotion for preexisting resumed projections; records remain for
+explicit reconciliation. Answer presence does not lift it. Later ordinary steps,
+replacement Attempts and old schemas without assistance history retain their
+behavior; an affected owner does not starve independent waits. In-memory private
+Task test repositories have no raw-SQL surface, so the guard is a production SQL
+repository hook, not an unconditional query against fake transactors. Public
+NewService always uses that guarded SQL repository; actual migrated handler tests
+exercise it. The first full Task attempt exposed that fake-transactor SQL panic;
+the hook preserves the test repository contract without weakening production.
+
+Focused final resume/reconciliation/old-schema/nonTeam/independent progress matrix
+5.879s PASS; full Task23.095s PASS. Exact production SQL on1024histories before/
+afterANALYZE uses persistent SEARCH for all populated owner/step/request relations,
+with exact present/missing/foreignAttempt results; isolated1.630s PASS. No new
+index/schema change. Affected integration vet/whitespace PASS. Final full
+Worker/Task/Team/API regression is running before publication. This is a deny
+fence, not an implemented Continue endpoint or applied-answer execution receipt.
+
+Final affected integration PASS on the resume-guard source: Worker202.172s,
+Task46.335s, Team60.912s, API101.040s; affected integration vet/whitespace PASS.
+Publish same branch/PR and require exact new-source hosted checks. Keep the
+approved full feature/review/physical/UI/installed/final-artifact gates OPEN.

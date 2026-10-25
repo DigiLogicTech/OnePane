@@ -295,6 +295,7 @@ jobs:
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(Assurance|BudgetJournal|BudgetRelease|BudgetCommit|ResponseJournal|ProposalContinuation|RouteJournal)' ./internal/agentworker
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(WorkerWait|ExternalWorkerWake|TeamAssistance(Human|Production|Model|Writes|Question|Changed))' ./internal/agentworker
           go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceAnswer ./internal/agentworker ./internal/team
+          go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceGenericResume ./internal/agentworker
           go test -race -tags integration -count=1 -timeout 3m ./internal/recoveryinventory
           go test -race -tags integration -count=1 -timeout 3m ./internal/budget
 
@@ -520,6 +521,7 @@ jobs:
           go test -tags integration -count=1 -timeout 3m -run 'Test(Assurance|BudgetJournal|BudgetRelease|BudgetCommit|ResponseJournal|ProposalContinuation|RouteJournal)' ./internal/agentworker
           go test -tags integration -count=1 -timeout 3m -run 'Test(WorkerWait|ExternalWorkerWake|TeamAssistance(Human|Production|Model|Writes|Question|Changed))' ./internal/agentworker
           go test -tags integration -count=1 -timeout 3m -run TestTeamAssistanceAnswer ./internal/agentworker ./internal/team
+          go test -tags integration -count=1 -timeout 3m -run TestTeamAssistanceGenericResume ./internal/agentworker
           go test -tags integration -count=1 -timeout 3m ./internal/recoveryinventory
           go test -tags integration -count=1 -timeout 3m ./internal/budget
           go test -tags integration -count=1 -timeout 3m -run 'Test(AgentProtocolHTTPPostDispatch|RuntimeDispatchUnusable|RuntimePostDispatchBudgetCommitFailure|InferencePostDispatchBudgetCommitFailure|RuntimePreDispatchErrors|InferencePreDispatchErrors)' ./internal/agentruntime ./internal/inference

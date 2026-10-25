@@ -74,6 +74,14 @@ func (s *Service) ResumeInTransaction(ctx context.Context, tx storage.Tx, cmd Tr
 	if t.State != StatePaused && t.State != StateWaitingDependency && t.State != StateWaitingApproval {
 		return fmt.Errorf("%w: cannot resume from %s", ErrInvalidTransition, t.State)
 	}
+	// A retained Team human request needs its own explicit, answer-bound
+	// Continue transaction. Generic resume must not promote the original
+	// Attempt and let Worker reconciliation silently bypass that protocol.
+	if repository, ok := s.repo.(ordinaryResumeRepository); ok {
+		if err := repository.RequireOrdinaryResume(ctx, tx, t.ID); err != nil {
+			return err
+		}
+	}
 	if err := s.requireExecutionAdmissionTx(ctx, tx, t); err != nil {
 		return err
 	}

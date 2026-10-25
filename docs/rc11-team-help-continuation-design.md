@@ -85,8 +85,12 @@ authority/CAS and reuse journals. Atomically resume Task/original Attempt/Worker
 with exact request/final answer/revisions, required journal/audits and retained
 immutable applied-answer evidence. Avoid importing agentworker into team (cycle)
 or duplicating Worker journal semantics. Generic Task.Resume plus syncResumedRuns
-can currently reactivate an assisted human wait without an answer/Continue receipt;
-add a dedicated fence while preserving ordinary non-Team operator resumes.
+could reactivate an assisted human wait without an answer/Continue receipt.
+The dedicated current-wait fence now denies generic SQL Task resume and the
+preexisting running-Task/Attempt reconciliation projection, in the same
+transaction as Worker promotion. It preserves ordinary non-Team operator resumes,
+later ordinary waits and replacement Attempts. The fence has no Continue bypass;
+implement the narrow positively authorized continuation transaction above.
 
 Keep the applied-answer identity independent of continuation_json, which resource
 waits, replan and tool handlers replace. Resolve required authored human input

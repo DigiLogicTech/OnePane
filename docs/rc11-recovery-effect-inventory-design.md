@@ -112,3 +112,22 @@ Verified from `internal/agentworker/execution.go`, `dispatch_outcome.go`, `worke
 Required negative matrix: missing/foreign/duplicate interruption; wrong original Attempt; same-tenant foreign Project/named Workspace/artifact session; missing/foreign descendant; 256/257 graph boundary; all historical Attempts including noncurrent ones; null/foreign Task with owned Attempt; every reverse request/turn/reservation/Operation/Worker/evidence reference; malformed/ambiguous typed references; complete per-family limit/limit+one; UTF-8 byte cap and total byte cap; new schema ownership table/column; payload mutation without revision; status/revision/closure mutation; insertion/deletion after observation; canonical order/duplicate-path equivalence; null/empty distinction; concurrent services, audit failure, capture rollback, restart/redelivery, stale decision/revoked credentials, and no Task/Attempt/Worker/lease/budget/outbox transition from observation alone.
 
 These are future source acceptance requirements. No physical model execution, process cleanup, hardware resource release, browser/installed UI review, Windows/Ubuntu installed acceptance, terminal human recovery or final release completion is established by this design review.
+
+## Indirect structural prerequisite implemented — 25 October 2026
+
+`ValidateIndirectOwnershipSchema` now checks the bounded main-schema structural
+boundary for21reviewed indirect tables and existing direct-table anchors. The
+embedded contract includes normalized table DDL to bind CHECK/default/unique
+definitions as well as columns, keys and FKs. It detects new/changed relevant
+Worker/Operation/Event/artifact/Library/recovery/delivery references and respects
+main-schema isolation, UTF-8 byte budgets and read-only observation. Actual
+migrated-SQLite positive/negative evidence is in the execution manifest. Tests
+validate reviewed source without rewriting the contract during execution.
+
+This does not close steps1–4 above. Standalone indexes/triggers, typed Worker
+step/reference discriminators, row vocabularies, polymorphic dependencies,
+dual Event delivery pointers, ambiguous request encodings and durable bounded
+attribution still need their separate semantic protocols. The descriptor text
+documents those paths; it is not executable attribution. No observation
+collector, immutable snapshot/decision schema, independent postcondition proof
+or recovery authority is enabled by structural success.

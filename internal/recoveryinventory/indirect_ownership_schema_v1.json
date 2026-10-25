@@ -1,0 +1,2995 @@
+[
+  {
+    "table": "agent_runtime_invocations",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "workspace_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "task_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "attempt_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "principal_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "connection_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "request_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "response_artifact_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "error_code",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "revision",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "updated_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "completed_at",
+        "type": "INTEGER",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "response_artifact_id",
+        "target": "artifacts",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      },
+      {
+        "from": "connection_id",
+        "target": "agent_runtime_connections",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 1,
+        "sequence": 0
+      },
+      {
+        "from": "principal_id",
+        "target": "principals",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 2,
+        "sequence": 0
+      },
+      {
+        "from": "attempt_id",
+        "target": "task_attempts",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 3,
+        "sequence": 0
+      },
+      {
+        "from": "task_id",
+        "target": "tasks",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 4,
+        "sequence": 0
+      },
+      {
+        "from": "workspace_id",
+        "target": "workspaces",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 5,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE agent_runtime_invocations (\n    id                      TEXT PRIMARY KEY,\n    workspace_id            TEXT NOT NULL REFERENCES workspaces(id),\n    task_id                 TEXT REFERENCES tasks(id),\n    attempt_id              TEXT REFERENCES task_attempts(id),\n    principal_id            TEXT NOT NULL REFERENCES principals(id),\n    connection_id           TEXT NOT NULL REFERENCES agent_runtime_connections(id),\n    status                  TEXT NOT NULL CHECK (status IN (\n        'created','authorized','dispatched','executing','succeeded','failed','unknown','cancelled'\n    )),\n    request_json            TEXT NOT NULL CHECK (json_valid(request_json)),\n    response_artifact_id    TEXT REFERENCES artifacts(id),\n    error_code              TEXT,\n    revision                INTEGER NOT NULL DEFAULT 1 CHECK (revision \u003e= 1),\n    created_at              INTEGER NOT NULL,\n    updated_at              INTEGER NOT NULL,\n    completed_at            INTEGER\n) STRICT"
+  },
+  {
+    "table": "agent_worker_steps",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "run_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "step_number",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "step_kind",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "candidate_kind",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "candidate_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "proposal_type",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "request_ref",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "result_ref",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "detail_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "started_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "completed_at",
+        "type": "INTEGER",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "run_id",
+        "target": "agent_worker_runs",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE agent_worker_steps (\n    id                      TEXT PRIMARY KEY,\n    run_id                  TEXT NOT NULL REFERENCES agent_worker_runs(id),\n    step_number             INTEGER NOT NULL CHECK (step_number \u003e= 1),\n    step_kind               TEXT NOT NULL CHECK (step_kind IN (\n        'route','model','agent_runtime','tool','operation','delegate','replan',\n        'complete','human','escalate','wait','fail','verification'\n    )),\n    status                  TEXT NOT NULL CHECK (status IN ('started','succeeded','failed','waiting','unknown')),\n    candidate_kind          TEXT CHECK (candidate_kind IS NULL OR candidate_kind IN ('model_deployment','agent_runtime')),\n    candidate_id            TEXT,\n    proposal_type           TEXT CHECK (proposal_type IS NULL OR proposal_type IN ('tool','delegate','replan','complete','human','escalate','wait','fail')),\n    request_ref             TEXT,\n    result_ref              TEXT,\n    detail_json             TEXT NOT NULL CHECK (json_valid(detail_json)),\n    started_at              INTEGER NOT NULL,\n    completed_at            INTEGER,\n    UNIQUE (run_id, step_number)\n) STRICT"
+  },
+  {
+    "table": "approvals",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "workspace_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "operation_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "requested_by",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "approved_by",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "operation_hash",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "requirement_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "policy_revision",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "expires_at",
+        "type": "INTEGER",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "resolved_at",
+        "type": "INTEGER",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "revision",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "approved_by",
+        "target": "principals",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      },
+      {
+        "from": "requested_by",
+        "target": "principals",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 1,
+        "sequence": 0
+      },
+      {
+        "from": "operation_id",
+        "target": "operations",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 2,
+        "sequence": 0
+      },
+      {
+        "from": "workspace_id",
+        "target": "workspaces",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 3,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE approvals (\n    id                      TEXT PRIMARY KEY,\n    workspace_id            TEXT NOT NULL REFERENCES workspaces(id),\n    operation_id            TEXT REFERENCES operations(id),\n    requested_by            TEXT NOT NULL REFERENCES principals(id),\n    approved_by             TEXT REFERENCES principals(id),\n    status                  TEXT NOT NULL CHECK (status IN (\n        'pending','approved','denied','expired','invalidated','revoked','consumed'\n    )),\n    operation_hash          TEXT NOT NULL,\n    requirement_json        TEXT NOT NULL CHECK (json_valid(requirement_json)),\n    policy_revision         INTEGER NOT NULL,\n    created_at              INTEGER NOT NULL,\n    expires_at              INTEGER,\n    resolved_at             INTEGER,\n    revision                INTEGER NOT NULL DEFAULT 1 CHECK (revision \u003e= 1)\n) STRICT"
+  },
+  {
+    "table": "artifact_revisions",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "session_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "parent_revision_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "artifact_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "content_hash",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "author_principal_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "source_type",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "author_principal_id",
+        "target": "principals",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      },
+      {
+        "from": "artifact_id",
+        "target": "artifacts",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 1,
+        "sequence": 0
+      },
+      {
+        "from": "parent_revision_id",
+        "target": "artifact_revisions",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 2,
+        "sequence": 0
+      },
+      {
+        "from": "session_id",
+        "target": "artifact_sessions",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 3,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE artifact_revisions (\n    id                  TEXT PRIMARY KEY,\n    session_id          TEXT NOT NULL REFERENCES artifact_sessions(id),\n    parent_revision_id  TEXT REFERENCES artifact_revisions(id),\n    artifact_id         TEXT NOT NULL REFERENCES artifacts(id),\n    content_hash        TEXT NOT NULL,\n    author_principal_id TEXT NOT NULL REFERENCES principals(id),\n    source_type         TEXT NOT NULL CHECK (source_type IN ('human','agent','import','merge','publish')),\n    created_at          INTEGER NOT NULL\n) STRICT"
+  },
+  {
+    "table": "artifact_sessions",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "workspace_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "project_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "title",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "format",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "source_artifact_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "current_revision_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "revision",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_by",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "updated_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "created_by",
+        "target": "principals",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      },
+      {
+        "from": "current_revision_id",
+        "target": "artifact_revisions",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 1,
+        "sequence": 0
+      },
+      {
+        "from": "source_artifact_id",
+        "target": "artifacts",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 2,
+        "sequence": 0
+      },
+      {
+        "from": "project_id",
+        "target": "projects",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 3,
+        "sequence": 0
+      },
+      {
+        "from": "workspace_id",
+        "target": "workspaces",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 4,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE artifact_sessions (\n    id                  TEXT PRIMARY KEY,\n    workspace_id        TEXT NOT NULL REFERENCES workspaces(id),\n    project_id          TEXT REFERENCES projects(id),\n    title               TEXT NOT NULL,\n    format              TEXT NOT NULL,\n    source_artifact_id  TEXT REFERENCES artifacts(id),\n    current_revision_id TEXT REFERENCES artifact_revisions(id),\n    status              TEXT NOT NULL CHECK (status IN ('active','published','archived')),\n    revision            INTEGER NOT NULL DEFAULT 1 CHECK (revision \u003e= 1),\n    created_by          TEXT NOT NULL REFERENCES principals(id),\n    created_at          INTEGER NOT NULL,\n    updated_at          INTEGER NOT NULL\n) STRICT"
+  },
+  {
+    "table": "artifacts",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "workspace_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "project_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "content_hash",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "media_type",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "size_bytes",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "storage_ref",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "confidentiality",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "residency",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "trust",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "origin_node_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "metadata_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_by",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "created_by",
+        "target": "principals",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      },
+      {
+        "from": "origin_node_id",
+        "target": "harness_nodes",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 1,
+        "sequence": 0
+      },
+      {
+        "from": "project_id",
+        "target": "projects",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 2,
+        "sequence": 0
+      },
+      {
+        "from": "workspace_id",
+        "target": "workspaces",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 3,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE artifacts (\n    id                  TEXT PRIMARY KEY,\n    workspace_id        TEXT NOT NULL REFERENCES workspaces(id),\n    project_id          TEXT REFERENCES projects(id),\n    content_hash        TEXT NOT NULL,\n    media_type          TEXT NOT NULL,\n    size_bytes          INTEGER NOT NULL CHECK (size_bytes \u003e= 0),\n    storage_ref         TEXT NOT NULL,\n    confidentiality     TEXT NOT NULL CHECK (confidentiality IN (\n        'public','internal','confidential','secret'\n    )),\n    residency           TEXT NOT NULL CHECK (residency IN ('any','trusted_nodes','origin_node')),\n    trust               TEXT NOT NULL CHECK (trust IN (\n        'trusted_control','trusted_procedure','authoritative_data','user_instruction',\n        'untrusted_content','unverified_derived','verified_derived'\n    )),\n    origin_node_id      TEXT REFERENCES harness_nodes(id),\n    status              TEXT NOT NULL CHECK (status IN ('active','quarantined','corrupted','archived')),\n    metadata_json       TEXT NOT NULL CHECK (json_valid(metadata_json)),\n    created_by          TEXT REFERENCES principals(id),\n    created_at          INTEGER NOT NULL\n) STRICT"
+  },
+  {
+    "table": "assurance_runs",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "verification_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "workspace_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "task_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "operation_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "worker_run_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "required_level",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "achieved_level",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "evidence_hash",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "result_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "failure_reason",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "revision",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "started_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "updated_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "completed_at",
+        "type": "INTEGER",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "worker_run_id",
+        "target": "agent_worker_runs",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      },
+      {
+        "from": "operation_id",
+        "target": "operations",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 1,
+        "sequence": 0
+      },
+      {
+        "from": "task_id",
+        "target": "tasks",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 2,
+        "sequence": 0
+      },
+      {
+        "from": "workspace_id",
+        "target": "workspaces",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 3,
+        "sequence": 0
+      },
+      {
+        "from": "verification_id",
+        "target": "verifications",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 4,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE assurance_runs (\n    id                  TEXT PRIMARY KEY,\n    verification_id     TEXT NOT NULL UNIQUE REFERENCES verifications(id),\n    workspace_id        TEXT NOT NULL REFERENCES workspaces(id),\n    task_id             TEXT REFERENCES tasks(id),\n    operation_id        TEXT REFERENCES operations(id),\n    worker_run_id       TEXT REFERENCES agent_worker_runs(id),\n    status              TEXT NOT NULL CHECK (status IN (\n        'queued','running','waiting_evidence','waiting_human','passed','failed','inconclusive','interrupted'\n    )),\n    required_level      TEXT NOT NULL CHECK (required_level IN ('V1','V2','V3','V4','V5')),\n    achieved_level      TEXT CHECK (achieved_level IS NULL OR achieved_level IN ('V0','V1','V2','V3','V4','V5')),\n    evidence_hash       TEXT,\n    result_json         TEXT NOT NULL CHECK (json_valid(result_json)),\n    failure_reason      TEXT,\n    revision            INTEGER NOT NULL DEFAULT 1 CHECK (revision \u003e= 1),\n    started_at          INTEGER NOT NULL,\n    updated_at          INTEGER NOT NULL,\n    completed_at        INTEGER\n) STRICT"
+  },
+  {
+    "table": "dependency_refs",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "workspace_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "owner_type",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "owner_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "target_type",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "target_ref",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "target_revision",
+        "type": "INTEGER",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "dependency_kind",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "workspace_id",
+        "target": "workspaces",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE dependency_refs (\n    id                  TEXT PRIMARY KEY,\n    workspace_id        TEXT NOT NULL REFERENCES workspaces(id),\n    owner_type          TEXT NOT NULL,\n    owner_id            TEXT NOT NULL,\n    target_type         TEXT NOT NULL,\n    target_ref          TEXT NOT NULL,\n    target_revision     INTEGER,\n    dependency_kind     TEXT NOT NULL,\n    created_at          INTEGER NOT NULL\n) STRICT"
+  },
+  {
+    "table": "events",
+    "columns": [
+      {
+        "name": "sequence",
+        "type": "INTEGER",
+        "not_null": 0,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "workspace_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "event_type",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "aggregate_type",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "aggregate_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "actor_principal_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "request_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "trace_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "payload_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "occurred_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "actor_principal_id",
+        "target": "principals",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      },
+      {
+        "from": "workspace_id",
+        "target": "workspaces",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 1,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE events (\n    sequence            INTEGER PRIMARY KEY AUTOINCREMENT,\n    id                  TEXT NOT NULL UNIQUE,\n    workspace_id        TEXT REFERENCES workspaces(id),\n    event_type          TEXT NOT NULL,\n    aggregate_type      TEXT NOT NULL,\n    aggregate_id        TEXT NOT NULL,\n    actor_principal_id  TEXT REFERENCES principals(id),\n    request_id          TEXT,\n    trace_id            TEXT,\n    payload_json        TEXT NOT NULL CHECK (json_valid(payload_json)),\n    occurred_at         INTEGER NOT NULL\n) STRICT"
+  },
+  {
+    "table": "incidents",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "workspace_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "task_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "operation_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "severity",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "state",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "incident_type",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "summary",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "details_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "opened_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "updated_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "resolved_at",
+        "type": "INTEGER",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "operation_id",
+        "target": "operations",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      },
+      {
+        "from": "task_id",
+        "target": "tasks",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 1,
+        "sequence": 0
+      },
+      {
+        "from": "workspace_id",
+        "target": "workspaces",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 2,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE incidents (\n    id                  TEXT PRIMARY KEY,\n    workspace_id        TEXT REFERENCES workspaces(id),\n    task_id             TEXT REFERENCES tasks(id),\n    operation_id        TEXT REFERENCES operations(id),\n    severity            TEXT NOT NULL CHECK (severity IN ('info','warning','high','critical')),\n    state               TEXT NOT NULL CHECK (state IN (\n        'open','classified','remediating','verifying','resolved','blocked','escalated','suppressed','recurring'\n    )),\n    incident_type       TEXT NOT NULL,\n    summary             TEXT NOT NULL,\n    details_json        TEXT NOT NULL CHECK (json_valid(details_json)),\n    opened_at           INTEGER NOT NULL,\n    updated_at          INTEGER NOT NULL,\n    resolved_at         INTEGER\n) STRICT"
+  },
+  {
+    "table": "inference_requests",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "workspace_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "task_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "session_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "principal_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "deployment_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "provider_connection_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "origin_node_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "execution_node_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "capability_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "context_manifest_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "classification_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "request_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "response_artifact_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "usage_json",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "error_code",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "updated_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "completed_at",
+        "type": "INTEGER",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "response_artifact_id",
+        "target": "artifacts",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      },
+      {
+        "from": "execution_node_id",
+        "target": "harness_nodes",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 1,
+        "sequence": 0
+      },
+      {
+        "from": "origin_node_id",
+        "target": "harness_nodes",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 2,
+        "sequence": 0
+      },
+      {
+        "from": "provider_connection_id",
+        "target": "provider_connections",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 3,
+        "sequence": 0
+      },
+      {
+        "from": "deployment_id",
+        "target": "model_deployments",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 4,
+        "sequence": 0
+      },
+      {
+        "from": "principal_id",
+        "target": "principals",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 5,
+        "sequence": 0
+      },
+      {
+        "from": "session_id",
+        "target": "inference_sessions",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 6,
+        "sequence": 0
+      },
+      {
+        "from": "task_id",
+        "target": "tasks",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 7,
+        "sequence": 0
+      },
+      {
+        "from": "workspace_id",
+        "target": "workspaces",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 8,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE inference_requests (\n    id                      TEXT PRIMARY KEY,\n    workspace_id            TEXT NOT NULL REFERENCES workspaces(id),\n    task_id                 TEXT REFERENCES tasks(id),\n    session_id              TEXT REFERENCES inference_sessions(id),\n    principal_id            TEXT NOT NULL REFERENCES principals(id),\n    deployment_id           TEXT REFERENCES model_deployments(id),\n    provider_connection_id  TEXT REFERENCES provider_connections(id),\n    origin_node_id          TEXT REFERENCES harness_nodes(id),\n    execution_node_id       TEXT REFERENCES harness_nodes(id),\n    status                  TEXT NOT NULL CHECK (status IN (\n        'created','routed','budget_reserved','dispatched','executing','succeeded',\n        'rate_limited','failed','cancelled','unknown'\n    )),\n    capability_json         TEXT NOT NULL CHECK (json_valid(capability_json)),\n    context_manifest_json   TEXT NOT NULL CHECK (json_valid(context_manifest_json)),\n    classification_json     TEXT NOT NULL CHECK (json_valid(classification_json)),\n    request_json            TEXT NOT NULL CHECK (json_valid(request_json)),\n    response_artifact_id    TEXT REFERENCES artifacts(id),\n    usage_json              TEXT CHECK (usage_json IS NULL OR json_valid(usage_json)),\n    error_code              TEXT,\n    created_at              INTEGER NOT NULL,\n    updated_at              INTEGER NOT NULL,\n    completed_at            INTEGER\n) STRICT"
+  },
+  {
+    "table": "notification_deliveries",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "workspace_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "rule_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "target_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "source_event_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "source_event_seq",
+        "type": "INTEGER",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "idempotency_key",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "message_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "attempts",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "max_attempts",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "next_attempt_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "operation_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "verification_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "receipt_json",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "last_error",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "updated_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "verification_id",
+        "target": "verifications",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      },
+      {
+        "from": "operation_id",
+        "target": "operations",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 1,
+        "sequence": 0
+      },
+      {
+        "from": "source_event_seq",
+        "target": "events",
+        "to": "sequence",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 2,
+        "sequence": 0
+      },
+      {
+        "from": "source_event_id",
+        "target": "events",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 3,
+        "sequence": 0
+      },
+      {
+        "from": "target_id",
+        "target": "gateway_targets",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 4,
+        "sequence": 0
+      },
+      {
+        "from": "rule_id",
+        "target": "notification_rules",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 5,
+        "sequence": 0
+      },
+      {
+        "from": "workspace_id",
+        "target": "workspaces",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 6,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE notification_deliveries (\n    id                  TEXT PRIMARY KEY,\n    workspace_id        TEXT NOT NULL REFERENCES workspaces(id),\n    rule_id             TEXT REFERENCES notification_rules(id),\n    target_id           TEXT NOT NULL REFERENCES gateway_targets(id),\n    source_event_id     TEXT REFERENCES events(id),\n    source_event_seq    INTEGER REFERENCES events(sequence),\n    idempotency_key     TEXT NOT NULL,\n    message_json        TEXT NOT NULL CHECK (json_valid(message_json)),\n    status              TEXT NOT NULL CHECK (status IN ('pending','sending','accepted','failed','unknown','cancelled')),\n    attempts            INTEGER NOT NULL DEFAULT 0 CHECK (attempts \u003e= 0),\n    max_attempts        INTEGER NOT NULL DEFAULT 5 CHECK (max_attempts \u003e= 1),\n    next_attempt_at     INTEGER NOT NULL,\n    operation_id        TEXT REFERENCES operations(id),\n    verification_id     TEXT REFERENCES verifications(id),\n    receipt_json        TEXT CHECK (receipt_json IS NULL OR json_valid(receipt_json)),\n    last_error          TEXT,\n    created_at          INTEGER NOT NULL,\n    updated_at          INTEGER NOT NULL,\n    UNIQUE(workspace_id,idempotency_key)\n) STRICT"
+  },
+  {
+    "table": "operation_receipts",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "operation_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "receipt_type",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "external_request_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "receipt_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "integrity_hash",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "operation_id",
+        "target": "operations",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE operation_receipts (\n    id                  TEXT PRIMARY KEY,\n    operation_id        TEXT NOT NULL REFERENCES operations(id),\n    receipt_type        TEXT NOT NULL,\n    external_request_id TEXT,\n    receipt_json        TEXT NOT NULL CHECK (json_valid(receipt_json)),\n    integrity_hash      TEXT NOT NULL,\n    created_at          INTEGER NOT NULL\n) STRICT"
+  },
+  {
+    "table": "operations",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "workspace_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "task_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "attempt_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "principal_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "compensates_operation_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "idempotency_key",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "state",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "capability_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "resource_ref",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "tool_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "tool_version",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "adapter_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "adapter_version",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "desired_state_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "precondition_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "reconciliation_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "compensation_json",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "policy_revision",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "input_hash",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "revision",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "updated_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "capability_lease_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "capability_lease_revision",
+        "type": "INTEGER",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "resource_lease_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "required_verification",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "required_approval",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "global_resource_lease_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "global_resource_lease_id",
+        "target": "global_resource_leases",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      },
+      {
+        "from": "resource_lease_id",
+        "target": "resource_leases",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 1,
+        "sequence": 0
+      },
+      {
+        "from": "capability_lease_id",
+        "target": "capability_leases",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 2,
+        "sequence": 0
+      },
+      {
+        "from": "compensates_operation_id",
+        "target": "operations",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 3,
+        "sequence": 0
+      },
+      {
+        "from": "principal_id",
+        "target": "principals",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 4,
+        "sequence": 0
+      },
+      {
+        "from": "attempt_id",
+        "target": "task_attempts",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 5,
+        "sequence": 0
+      },
+      {
+        "from": "task_id",
+        "target": "tasks",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 6,
+        "sequence": 0
+      },
+      {
+        "from": "workspace_id",
+        "target": "workspaces",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 7,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE operations (\n    id                      TEXT PRIMARY KEY,\n    workspace_id            TEXT NOT NULL REFERENCES workspaces(id),\n    task_id                 TEXT REFERENCES tasks(id),\n    attempt_id              TEXT REFERENCES task_attempts(id),\n    principal_id            TEXT NOT NULL REFERENCES principals(id),\n    compensates_operation_id TEXT REFERENCES operations(id),\n    idempotency_key         TEXT NOT NULL,\n    state                   TEXT NOT NULL CHECK (state IN (\n        'proposed','authorized','prepared','executing','observing','verified','committed',\n        'denied','failed','aborted','unknown_outcome','blocked_unknown_outcome',\n        'compensating','compensated','compensation_failed'\n    )),\n    capability_id           TEXT NOT NULL,\n    resource_ref            TEXT NOT NULL,\n    tool_id                 TEXT NOT NULL,\n    tool_version            TEXT NOT NULL,\n    adapter_id              TEXT NOT NULL,\n    adapter_version         TEXT NOT NULL,\n    desired_state_json      TEXT NOT NULL CHECK (json_valid(desired_state_json)),\n    precondition_json       TEXT NOT NULL CHECK (json_valid(precondition_json)),\n    reconciliation_json     TEXT NOT NULL CHECK (json_valid(reconciliation_json)),\n    compensation_json       TEXT CHECK (compensation_json IS NULL OR json_valid(compensation_json)),\n    policy_revision         INTEGER NOT NULL,\n    input_hash              TEXT NOT NULL,\n    revision                INTEGER NOT NULL DEFAULT 1 CHECK (revision \u003e= 1),\n    created_at              INTEGER NOT NULL,\n    updated_at              INTEGER NOT NULL, capability_lease_id TEXT REFERENCES capability_leases(id), capability_lease_revision INTEGER CHECK (capability_lease_revision IS NULL OR capability_lease_revision \u003e= 1), resource_lease_id TEXT REFERENCES resource_leases(id), required_verification TEXT CHECK (required_verification IS NULL OR required_verification IN ('V0','V1','V2','V3','V4','V5')), required_approval TEXT CHECK (required_approval IS NULL OR required_approval IN ('none','approver','admin')), global_resource_lease_id TEXT REFERENCES global_resource_leases(id),\n    UNIQUE (workspace_id, idempotency_key)\n) STRICT"
+  },
+  {
+    "table": "outbox_jobs",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "workspace_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "job_type",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "payload_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "available_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "claimed_by",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "claim_expires_at",
+        "type": "INTEGER",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "attempts",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "max_attempts",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "last_error",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "updated_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "workspace_id",
+        "target": "workspaces",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE outbox_jobs (\n    id                  TEXT PRIMARY KEY,\n    workspace_id        TEXT REFERENCES workspaces(id),\n    job_type            TEXT NOT NULL,\n    payload_json        TEXT NOT NULL CHECK (json_valid(payload_json)),\n    status              TEXT NOT NULL CHECK (status IN ('pending','claimed','succeeded','retry','failed')),\n    available_at        INTEGER NOT NULL,\n    claimed_by          TEXT,\n    claim_expires_at    INTEGER,\n    attempts            INTEGER NOT NULL DEFAULT 0 CHECK (attempts \u003e= 0),\n    max_attempts        INTEGER NOT NULL DEFAULT 10 CHECK (max_attempts \u003e= 1),\n    last_error          TEXT,\n    created_at          INTEGER NOT NULL,\n    updated_at          INTEGER NOT NULL\n) STRICT"
+  },
+  {
+    "table": "project_change_proposals",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "project_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "project_runtime_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "task_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "proposal_kind",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "summary",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "base_revision",
+        "type": "INTEGER",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "patch_artifact_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "metadata_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "revision",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "proposed_by",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "reviewed_by",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "updated_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "reviewed_at",
+        "type": "INTEGER",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "reviewed_by",
+        "target": "principals",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      },
+      {
+        "from": "proposed_by",
+        "target": "principals",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 1,
+        "sequence": 0
+      },
+      {
+        "from": "patch_artifact_id",
+        "target": "artifacts",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 2,
+        "sequence": 0
+      },
+      {
+        "from": "task_id",
+        "target": "tasks",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 3,
+        "sequence": 0
+      },
+      {
+        "from": "project_runtime_id",
+        "target": "project_runtimes",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 4,
+        "sequence": 0
+      },
+      {
+        "from": "project_id",
+        "target": "projects",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 5,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE project_change_proposals (\n    id                      TEXT PRIMARY KEY,\n    project_id              TEXT NOT NULL REFERENCES projects(id),\n    project_runtime_id      TEXT REFERENCES project_runtimes(id),\n    task_id                 TEXT REFERENCES tasks(id),\n    proposal_kind           TEXT NOT NULL CHECK (proposal_kind IN (\n        'code','content','runtime_config','application_install','application_update','application_remove','endpoint','routine_binding'\n    )),\n    status                  TEXT NOT NULL CHECK (status IN (\n        'draft','proposed','reviewing','approved','rejected','applied','superseded','cancelled'\n    )),\n    summary                 TEXT NOT NULL,\n    base_revision           INTEGER CHECK (base_revision IS NULL OR base_revision \u003e= 1),\n    patch_artifact_id       TEXT REFERENCES artifacts(id),\n    metadata_json           TEXT NOT NULL CHECK (json_valid(metadata_json)),\n    revision                INTEGER NOT NULL DEFAULT 1 CHECK (revision \u003e= 1),\n    proposed_by             TEXT NOT NULL REFERENCES principals(id),\n    reviewed_by             TEXT REFERENCES principals(id),\n    created_at              INTEGER NOT NULL,\n    updated_at              INTEGER NOT NULL,\n    reviewed_at             INTEGER\n) STRICT"
+  },
+  {
+    "table": "project_library_asset_versions",
+    "columns": [
+      {
+        "name": "asset_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 2,
+        "hidden": 0
+      },
+      {
+        "name": "content_hash",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "size_bytes",
+        "type": "INTEGER",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "mime_type",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "storage_uri",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "provenance_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "asset_id",
+        "target": "project_library_assets",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "id": 0,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE project_library_asset_versions (\n    asset_id            TEXT NOT NULL REFERENCES project_library_assets(id) ON DELETE CASCADE,\n    version             INTEGER NOT NULL CHECK (version \u003e= 1),\n    content_hash        TEXT NOT NULL,\n    size_bytes          INTEGER,\n    mime_type           TEXT,\n    storage_uri         TEXT NOT NULL,\n    provenance_json     TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(provenance_json)),\n    created_at          INTEGER NOT NULL,\n    PRIMARY KEY(asset_id,version)\n) STRICT"
+  },
+  {
+    "table": "project_workspace_publications",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "link_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "asset_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "asset_version",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "content_hash",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "published_by",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "published_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "asset_id",
+        "target": "project_library_asset_versions",
+        "to": "asset_id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      },
+      {
+        "from": "asset_version",
+        "target": "project_library_asset_versions",
+        "to": "version",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 1
+      },
+      {
+        "from": "published_by",
+        "target": "principals",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 1,
+        "sequence": 0
+      },
+      {
+        "from": "asset_id",
+        "target": "project_library_assets",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "RESTRICT",
+        "id": 2,
+        "sequence": 0
+      },
+      {
+        "from": "link_id",
+        "target": "project_workspace_links",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "id": 3,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE project_workspace_publications (\n  id TEXT PRIMARY KEY,\n  link_id TEXT NOT NULL REFERENCES project_workspace_links(id) ON DELETE CASCADE,\n  asset_id TEXT NOT NULL REFERENCES project_library_assets(id) ON DELETE RESTRICT,\n  asset_version INTEGER NOT NULL,\n  content_hash TEXT NOT NULL,\n  published_by TEXT NOT NULL REFERENCES principals(id),\n  published_at INTEGER NOT NULL,\n  FOREIGN KEY(asset_id,asset_version)\n    REFERENCES project_library_asset_versions(asset_id,version),\n  UNIQUE(link_id,asset_id,asset_version)\n) STRICT"
+  },
+  {
+    "table": "task_recovery_cases",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "workspace_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "task_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "attempt_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "interruption_event_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "source_job_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "source_kind",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "phase",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "task_revision_at_capture",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "revision",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "interruption_event_id",
+        "target": "events",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      },
+      {
+        "from": "attempt_id",
+        "target": "task_attempts",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 1,
+        "sequence": 0
+      },
+      {
+        "from": "task_id",
+        "target": "tasks",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 2,
+        "sequence": 0
+      },
+      {
+        "from": "workspace_id",
+        "target": "workspaces",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 3,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE task_recovery_cases (\n    id TEXT PRIMARY KEY,\n    workspace_id TEXT NOT NULL REFERENCES workspaces(id),\n    task_id TEXT NOT NULL REFERENCES tasks(id),\n    attempt_id TEXT NOT NULL UNIQUE REFERENCES task_attempts(id),\n    interruption_event_id TEXT NOT NULL REFERENCES events(id),\n    source_job_id TEXT,\n    source_kind TEXT NOT NULL DEFAULT 'outbox' CHECK (source_kind IN ('outbox','interruption_ledger')),\n    phase TEXT NOT NULL DEFAULT 'awaiting_inventory' CHECK (phase='awaiting_inventory'),\n    task_revision_at_capture INTEGER NOT NULL CHECK (task_revision_at_capture\u003e=1),\n    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision\u003e=1),\n    created_at INTEGER NOT NULL,\n    CHECK ((source_kind='outbox' AND source_job_id IS NOT NULL AND length(source_job_id)\u003e0)\n        OR (source_kind='interruption_ledger' AND source_job_id IS NULL))\n) STRICT"
+  },
+  {
+    "table": "tool_invocations",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "workspace_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "task_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "attempt_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "principal_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "operation_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "tool_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "tool_version",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "adapter_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "adapter_version",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "mode",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "resource_ref",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "input_hash",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "summary",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "result_json",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "error_code",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "started_at",
+        "type": "INTEGER",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "ended_at",
+        "type": "INTEGER",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "updated_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "operation_id",
+        "target": "operations",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      },
+      {
+        "from": "principal_id",
+        "target": "principals",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 1,
+        "sequence": 0
+      },
+      {
+        "from": "attempt_id",
+        "target": "task_attempts",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 2,
+        "sequence": 0
+      },
+      {
+        "from": "task_id",
+        "target": "tasks",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 3,
+        "sequence": 0
+      },
+      {
+        "from": "workspace_id",
+        "target": "workspaces",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 4,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE tool_invocations (\n    id                  TEXT PRIMARY KEY,\n    workspace_id        TEXT NOT NULL REFERENCES workspaces(id),\n    task_id             TEXT REFERENCES tasks(id),\n    attempt_id          TEXT REFERENCES task_attempts(id),\n    principal_id        TEXT NOT NULL REFERENCES principals(id),\n    operation_id        TEXT REFERENCES operations(id),\n    tool_id             TEXT NOT NULL,\n    tool_version        TEXT NOT NULL,\n    adapter_id          TEXT NOT NULL,\n    adapter_version     TEXT NOT NULL,\n    mode                TEXT NOT NULL CHECK (mode IN (\n        'observe','read','execute_sandboxed','mutate','external_send'\n    )),\n    resource_ref        TEXT,\n    input_hash          TEXT NOT NULL,\n    status              TEXT NOT NULL CHECK (status IN (\n        'created','authorized','running','succeeded','failed','timed_out','cancelled','interrupted'\n    )),\n    summary             TEXT,\n    result_json         TEXT CHECK (result_json IS NULL OR json_valid(result_json)),\n    error_code          TEXT,\n    started_at          INTEGER,\n    ended_at            INTEGER,\n    created_at          INTEGER NOT NULL,\n    updated_at          INTEGER NOT NULL\n) STRICT"
+  },
+  {
+    "table": "verifications",
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "workspace_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "task_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "operation_id",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "subject_ref",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "required_level",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "achieved_level",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "spec_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "result_json",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "verified_by",
+        "type": "TEXT",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "started_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "completed_at",
+        "type": "INTEGER",
+        "not_null": 0,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "revision",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "verified_by",
+        "target": "principals",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      },
+      {
+        "from": "operation_id",
+        "target": "operations",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 1,
+        "sequence": 0
+      },
+      {
+        "from": "task_id",
+        "target": "tasks",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 2,
+        "sequence": 0
+      },
+      {
+        "from": "workspace_id",
+        "target": "workspaces",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 3,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE verifications (\n    id                  TEXT PRIMARY KEY,\n    workspace_id        TEXT NOT NULL REFERENCES workspaces(id),\n    task_id             TEXT REFERENCES tasks(id),\n    operation_id        TEXT REFERENCES operations(id),\n    subject_ref         TEXT NOT NULL,\n    required_level      TEXT NOT NULL CHECK (required_level IN ('V0','V1','V2','V3','V4','V5')),\n    achieved_level      TEXT CHECK (achieved_level IS NULL OR achieved_level IN ('V0','V1','V2','V3','V4','V5')),\n    status              TEXT NOT NULL CHECK (status IN ('pending','pass','fail','inconclusive','stale')),\n    spec_json           TEXT NOT NULL CHECK (json_valid(spec_json)),\n    result_json         TEXT CHECK (result_json IS NULL OR json_valid(result_json)),\n    verified_by         TEXT REFERENCES principals(id),\n    started_at          INTEGER NOT NULL,\n    completed_at        INTEGER,\n    revision            INTEGER NOT NULL DEFAULT 1 CHECK (revision \u003e= 1)\n) STRICT"
+  }
+]

@@ -54,21 +54,14 @@ func TestLibraryArtifactPublishedWorkspaceBytesRemainResearchEvidence(t *testing
 func publishedLibraryHTTPFixture(t *testing.T, wrap func(artifact.BlobStore) artifact.BlobStore) *publishedLibraryFixture {
 	t.Helper()
 	ctx := context.Background()
-	db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "published-library.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err = db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
+	db := migratedLibraryFixtureDatabase(t, ctx)
 	for _, q := range []string{
 		`INSERT INTO harness_nodes(id,name,local,identity_fingerprint,trust_state,protocol_json,capabilities_json,revision,created_at,updated_at) VALUES('local-node','Local Node',1,'publisher-api-local-node','local','{}','{}',1,1,1)`,
 		`INSERT INTO workspaces(id,name,status,revision,created_at,updated_at) VALUES('tenant','Tenant','active',1,1,1)`,
 		`INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at) VALUES('human','human','Operator','active',1,1,1)`,
 		`INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at) VALUES('tenant','human','active',1,1)`,
 	} {
-		if _, err = db.SQL().Exec(q); err != nil {
+		if _, err := db.SQL().Exec(q); err != nil {
 			t.Fatal(err)
 		}
 	}

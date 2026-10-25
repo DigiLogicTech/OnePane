@@ -2,7 +2,7 @@
 
 Updated: 2026-10-25 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
 
-Current continuation: `codex/team-live-ci-completion`, draft PR228, retains the approved full scope. Published `33320b25b3b273fc29619647fb83c1a287a0d17d` integration40133701277 has native Windows SUCCESS and Linux race in progress; QAguard40133701257 SUCCESS. Earlier da81aca2 integration40133115332 genuinely failed index test assertions; semantic fixes are retained and its skipped checks are not passes. The next increment adds the justified Library publication index and final Project-lifetime collection fence below; inspect its new exact-head CI before any rerun, then continue `rc11-team-publication-navigation-design.md` or the recovery semantic ownership dependency. Historical checkpoints describe only their own commits. Full human recovery, collaboration lifecycle, whole-product reviews, physical and installed Windows/Ubuntu acceptance remain open.
+Current continuation: `codex/team-live-ci-completion`, draft PR228, retains the approved full scope. Published `9e8de164ed93aac6b2fae45959ec14e8a2270f68` integration40134328766 and QAguard40134328855 both SUCCESS: native Windows, hosted Linux/race, managed inference/Colibri source regression and full regression/cross-platform compilation passed; physical approval/MSI were skipped. The next increment implements bounded assignment publication navigation and a private indirect recovery schema prerequisite, documented below. Inspect its exact-head CI before rerunning anything, then continue durable Team help/original-owner continuation or recovery semantic attribution. Historical checkpoints describe only their own commits. Full human recovery, collaboration lifecycle, whole-product reviews, physical and installed Windows/Ubuntu acceptance remain open.
 
 ## Authority and continuation
 
@@ -22,7 +22,7 @@ Runtime/control remediation `f7cd569f300d716234efa0e5ec2d385bc778d5d2` subsequen
 | --- | --- | --- | --- |
 | TEAM-HOLD | Source validated; hosted/physical acceptance pending | Atomic accepted-Team pause/resume, original Attempt retention, draining observation, authority and descendant dispatch fences; backend/controller/migration regressions | Publish to existing PR and inspect exact-head CI; physical effects and final browser review remain open |
 | TEAM-CANCEL | Intent/parking, pristine ordinary-Task and attributed local-reasoning Team settlement source validated; executed/unknown recovery owner missing | Scoped atomic intent, proposal discard and between-tick parking of the exact original Worker/Attempt; bounded durable intake/discovery and read-only case inspection implemented | Complete versioned effect inventory, authenticated human decisions and independent actual postconditions before settlement. Intake/read APIs do not authorize recovery or replay |
-| TEAM-COLLAB | Partial source; recorded contribution preview implemented, hosted validation pending | Bounded two-member concurrency and constrained queueing, agent draft adoption, criteria and guidance (`95fb4470`); current ledger-bound completion metadata and explicit text result preview; Library navigation, dynamic help/reassignment and broader fairness remain open | Inspect new exact-head CI, then implement scoped published Library associations, durable help requests and reviewed reassignment; preserve immutable graph and original ownership, keep physical acceptance separate |
+| TEAM-COLLAB | Partial source; result and bounded Library contribution navigation implemented, newest hosted validation pending | Bounded two-member concurrency and constrained queueing, agent draft adoption, criteria/guidance; current ledger-bound completion metadata, explicit result preview and exact Task-associated publication controls; dynamic help/reassignment and broader fairness remain open | Inspect new exact-head CI, then implement durable help requests/answers with original-owner continuation and versioned reviewed reassignment; preserve immutable graph and physical acceptance |
 | SCOPE-AUDIT | Open | Trace approved Alpha/RC requirements to code, tests and missing acceptance across core AI, autonomy, application and infrastructure | Reconcile whole branch, open issues and integration manifests; do not treat old gap descriptions as current defects |
 | L4-E2E | Open blocking acceptance | Real local objective → authorized Workspace Tasks → tools/build/tests → verified Library deliverable, restart and resource-wait recovery, no unintended cloud or duplicate effects | Complete functional gaps from scope audit; capture real CPU-only evidence |
 | AI-LIFECYCLE | Open blocking acceptance | Real model download/install/verify/remove; CPU/GPU inference; Colibri and OmniRoute; queuing, swap, memory reclamation, fallback and provider health | Follow physical lifecycle protocol; fixtures/compilation cannot close gate |
@@ -388,3 +388,101 @@ The populated repeated upgrade preserves all1,024 historical publication/link/ve
 AUTH-LIBRARY-002 (blocking Project-lifetime race): focused source review reproduced both endpoints returning200/actual private bytes when a real persisted Project was archived during the final version resolution (original33320b25 overlay2.321s). Project lifetime/scope is now checked after that final storage collection and before credential revalidation/publication. Six real-resolver wrapper cases cover both endpoints × allowed/archive/tenant substitution; final8.055s passes. There is no invented grant/content in the wrapper and no claim of globally atomic response lifetime or continuous stream authorization. Hosted native/race Library selectors already include this new TestLibraryContentReads suite; both platforms now explicitly include the new production publication-lookup suite.
 
 Final combined native API integration42.554s passes with migration0109 and the final collection fence. Final focused Library/Research/credential suites9.910s and actual production resolver1.688s pass; final API/Projectworkspace/SQLite integration vet and whitespace pass. Publish this dependency increment on the same branch and inspect its exact-source CI. The next source boundary is bounded same-version directional fan-out, then actual assignment-scoped Library projection/controls; broader help/reassignment and recovery inventory remain pending. No installed data, runtime, model or release artifact was changed/produced.
+
+## Bounded Task-associated publications and indirect recovery schema — 25 October continuation
+
+Reconciled retained uncommitted work beyond the previous memory checkpoint rather
+than discarding or assuming it passed. Exact published9e8de164 integration
+[40134328766](https://github.com/DigiLogicTech/OnePane/actions/runs/40134328766)
+and QAguard40134328855 both completed SUCCESS. Windows, Linux/race, managed
+inference/Colibri source regression and full regression/cross-platform compilation
+passed. Physical approval and MSI remained skipped. GitHub still has15open
+approved workstreams (#19–30,#85,#86,#114), including mandatory review sign-offs
+and native Unreal/UEFN; no issue was closed or scope removed.
+
+Implemented `GET /v1/team-sessions/{sessionID}/assignments/{taskID}/outputs`.
+It binds the exact accepted immutable assignment/root, sealed root/child criteria,
+Task revision, latest succeeded Attempt/start event, current completion ledger,
+valid checkpoint and verification. Actual Task-prefixed raw publication receipts
+are ordered and capped at33 before permission filtering; over32 refuses the whole
+projection. Bounded metadata is checked before SQL strings are materialized.
+Exact immutable Library hash/storage, managed artifact status/hash/size,
+Project/named Workspace and runtime/application provenance are independently
+checked. Stopped historical publishers remain valid recorded provenance.
+
+A separate bounded Library resolver materializes at most129 raw exact-version/hash
+directional publications before filtering. More than128 explicitly defers the
+decision, even if a visible candidate grants access. Current direct latest/pinned
+grants avoid this set. Actual production query plans before/after ANALYZE with
+1,024unrelated records require persistent exact-key probes and no persistent-table
+scan/temp sort; SQLite VM evidence retains the raw129limit. Existing content
+readers retain their semantics and are not claimed to have this global fan-out
+bound. The endpoint recollects receipts/grants and compares completion identity,
+checks Project lifetime after final collection and reauthenticates original
+credential/principal/type plus team.read/task.read/project.read. Responses are
+private no-store, at most256KiB, with no partial output or raw storage/provenance.
+These are explicit read fences, not continuous or globally atomic authorization.
+
+Both Team views expose an explicit publication action outside live polling.
+The controller validates exact Task/accepted completion identity, UTF-8 and
+safe-integer limits, duplicate receipt keys and response size, and drops changed
+scope/evidence/late or disposed replies. Same-origin preview/download URLs are
+derived only from validated metadata. Preview appears only for supported textual
+MIME types up to256KiB; Download remains available. Labels say **Task-associated
+recorded publications**: unchanged versions retain their earlier originating
+Task/Attempt provenance, never fabricated final-Attempt ownership.
+
+Real accepted Team graph → original Task/Attempt → genuine Workspace publisher
+receipt/managed bytes → verification/completion ledger → metadata response tests
+pass, including historical version reuse. Receipt32/33, encoded-response overflow,
+unknown/foreign runtime/application/scope, invalid paths/hash/storage/bytes,
+archived/quarantined assets/artifacts, changed grants/latest/pins, completion
+invalidation, root criteria drift, Project archival and credential/principal/type/
+capability revocation refuse private metadata. The content endpoint separately
+denies a later click after grant revocation. Reads create no execution, Attempt,
+model/tool/runtime invocation, audit or new publication. This fixture declares
+OCI/runtime identity; no OCI process, model or installed app runs.
+
+Retained test defects fixed before publication: a removed local `err` declaration
+prevented API compilation; a runtime-scope negative fixture occupied its target
+Workspace before changing scope, violating the unique constraint before its
+assertion. The Library fixture now clones only the real fully migrated,
+WAL-checkpointed/closed schema bytes into isolated per-test databases. Six
+parallel clone checks retain actual embedded migrations, live FK/WAL/connection
+settings, independent identical keys/triggers, read-only rejection and unchanged
+template bytes. Native and Linux race CI explicitly include these new suites.
+
+RCV-SCHEMA-001 (blocking test/provenance defect in retained work): ordinary
+integration execution regenerated the reviewed indirect-schema source and omitted
+required table DDL. Replaced that generator with read-only contract regressions
+and restored the reviewed normalized DDL for21tables. The private validator binds
+bounded main-schema metadata plus CHECK/default/unique table definitions,
+recognized reverse/typed/polymorphic/delivery ownership descriptors and exact
+existing direct-table shapes. Review also corrected nonexistent
+`assurance_runs.spec_json` and a Worker-anchor relevance blind spot.31negative
+schema/byte cases and baseline/read-only/shared-context/temp-shadow/CRLF positives
+pass. This is structural coverage only: standalone indexes/triggers, closed row
+and JSON vocabularies, bounded durable attribution, immutable observations and
+hash/freshness, authenticated decisions and independent actual postconditions
+remain unimplemented. No collector, case phase or admission boundary was enabled.
+
+Final Windows validation (`CGO_ENABLED=0`, portable Go1.23.12): full API69.896s,
+Projectworkspace88.865s, Team53.384s, recoveryinventory20.909s,
+Workspacepublisher5.876s and WebUI0.818s pass. Final focused actual publication/
+endpoint/schema-clone suite10.573s passes; bounded Library5.699s and completion
+3.003s initial targeted checks pass. All26JavaScript validators, affected
+integration vet and whitespace pass. No installed Alpha, configuration, models,
+runtimes, Projects or user data changed. Publish on the same branch/PR and inspect
+new exact-source CI; prior green runs cannot validate this increment.
+
+Next eligible Team dependency: persist exact existing `human` Worker wait as a
+durable Team help request, authenticated reply and explicit same-owner
+continuation, with atomic journal/audit rollback and held/recovery admission
+fences. Replies must survive unrelated room traffic; do not infer them from only
+the latest8messages or reopen0098immutable assignments. Peer help, versioned
+reviewed reassignment and broader fairness remain separate approved work. Next
+recovery dependency remains closed typed/JSON/polymorphic/delivery vocabularies
+and bounded durable attribution before any constrained observation collector.
+All physical/local-model/Node/L4, full code/security sign-offs, LAST UI,
+Windows-first/Ubuntu installed acceptance and final-source packaging gates remain
+OPEN. No installer/checksum/final build is claimed.

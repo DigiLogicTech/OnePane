@@ -16,15 +16,29 @@
  function completion(a){
   if(a.state!=="complete"||typeof a.checkpoint_id!=="string"||!a.checkpoint_id||typeof a.verification_id!=="string"||!a.verification_id||!/^V[0-5]$/.test(a.verification_level))return "";
   const label=a.verification_level==="V0"?"V0 (declaration only)":a.verification_level;
-  return '<div class="team-contribution-evidence"><p>Recorded verification: '+escape(label)+'</p><dl><dt>Checkpoint</dt><dd>'+escape(a.checkpoint_id)+'</dd><dt>Verification</dt><dd>'+escape(a.verification_id)+'</dd></dl><button class="btn" type="button" data-team-contribution-read="'+escape(a.task_id)+'">Read recorded result</button><p class="list-meta">Recorded completion evidence. Linked artifacts require their own access checks.</p></div>';
+  return '<div class="team-contribution-evidence"><p>Recorded verification: '+escape(label)+'</p><dl><dt>Checkpoint</dt><dd>'+escape(a.checkpoint_id)+'</dd><dt>Verification</dt><dd>'+escape(a.verification_id)+'</dd></dl><button class="btn" type="button" data-team-contribution-read="'+escape(a.task_id)+'">Read recorded result</button><button class="btn" type="button" data-team-publications-read="'+escape(a.task_id)+'">Show recorded publications</button><p class="list-meta">Recorded completion evidence. Linked artifacts require their own access checks.</p></div>';
+ }
+ function previewablePublication(output){
+  const type=output.mime_type.split(';',1)[0].trim().toLowerCase();
+  return output.size_bytes<=262144&&(/^text\/[!#$%&'*+.^_`|~0-9a-z-]+$/.test(type)||['application/json','application/xml','application/javascript','application/x-yaml','application/yaml','application/toml'].includes(type));
  }
  function mount(room,controller){
   const host=document.createElement("section");host.className="team-assignment-section";
   host.innerHTML='<h3>Team work</h3><div data-team-assignment-status></div><details data-team-plan-editor><summary>Plan named assignments</summary><p>Define each contribution and which earlier results it needs. The original Task consolidates the result after all contributions pass its verification requirements. Work inherits the Task’s permissions, model restrictions and verification criteria.</p><form class="qa-form" data-team-plan-form><div data-team-agent-drafts></div><div data-team-plan-rows></div><div class="toolbar"><button class="btn" type="button" data-team-plan-add>Add assignment</button><button class="btn" type="submit" data-team-plan-save>Save plan for review</button></div></form><div data-team-plan-review></div></details>';
   room.append(host);
   const get=s=>host.querySelector(s);let drafts=[],initialized=false,disposed=false;
-  const results=new Map();
+  const results=new Map(),publications=new Map();
+  const publicationIdentity=(room,a)=>room&&a?JSON.stringify([room.id,room.task_id,room.workspace_id,room.accepted_plan_id,a.task_id,a.key,a.member_id,a.state,a.checkpoint_id,a.verification_id,a.verification_level]):"";
   get("[data-team-assignment-status]").onclick=async e=>{
+   const publicationsButton=e.target.closest("[data-team-publications-read]");
+   if(publicationsButton){
+    const taskID=publicationsButton.dataset.teamPublicationsRead,room=controller.state.room,a=room?.assignments?.find(a=>a.task_id===taskID),identity=publicationIdentity(room,a);
+    if(disposed||!a||!completion(a)||publications.get(taskID)?.loading)return;
+    const pending={identity,loading:true};publications.set(taskID,pending);draw(controller.state);
+    const value=await controller.readAssignmentOutputs(taskID),current=controller.state.room,now=current?.assignments?.find(a=>a.task_id===taskID);
+    if(disposed||!host.isConnected||!now||!completion(now)||publicationIdentity(current,now)!==identity||publications.get(taskID)!==pending)return;
+    publications.set(taskID,{identity,value});draw(controller.state);return;
+   }
    const resultButton=e.target.closest("[data-team-contribution-read]");
    if(resultButton){
     const taskID=resultButton.dataset.teamContributionRead,room=controller.state.room,a=room?.assignments?.find(a=>a.task_id===taskID);
@@ -66,9 +80,20 @@
    const roster=members(),names=new Map(roster.map(m=>[m.id,m.name]));
    if(!initialized&&roster.length){initialized=true;drafts=roster.slice(0,2).map((m,i)=>({key:"work-"+(i+1),member_id:m.id,objective:"",depends_on:[]}));rows()}
    const assignments=state.room?.assignments||[];
+   for(const [id,publication] of publications){const a=assignments.find(a=>a.task_id===id);if(!a||!completion(a)||publicationIdentity(state.room,a)!==publication.identity)publications.delete(id)}
    for(const [id,result] of results){const a=assignments.find(a=>a.task_id===id);if(!a||!completion(a)||state.room.id!==result.session||state.room.workspace_id!==result.workspace||state.room.accepted_plan_id!==result.plan||a.checkpoint_id!==result.checkpoint||a.verification_id!==result.verification||a.verification_level!==result.level)results.delete(id)}
    get("[data-team-assignment-status]").innerHTML=assignments.length?assignments.map(a=>'<article class="panel-card"><h4>'+escape(names.get(a.member_id)||"Team agent")+' · '+escape(a.key)+'</h4><p>'+escape(a.objective)+'</p><p>Task: '+escape(a.state)+(a.compute_state?' · Compute: '+escape(a.compute_state):'')+'</p>'+(a.depends_on?.length?'<p>Requires: '+a.depends_on.map(escape).join(", ")+'</p>':'')+(a.last_step_kind?'<p>Observed '+escape(a.last_step_kind)+': '+escape(a.last_step_status)+'</p>':'')+completion(a)+'<button class="btn" type="button" data-team-assignment-open="'+escape(a.task_id)+'">Inspect task</button></article>').join(""):'<p class="list-meta">No accepted execution assignments.</p>';
    for(const a of assignments){const result=results.get(a.task_id);if(result){const button=Array.from(host.querySelectorAll("[data-team-contribution-read]")).find(b=>b.dataset.teamContributionRead===a.task_id);if(button){const preview=document.createElement("pre");preview.className="team-contribution-result";preview.textContent=result.text;button.parentElement.append(preview)}}}
+   for(const a of assignments){const publication=publications.get(a.task_id);if(publication){const button=Array.from(host.querySelectorAll("[data-team-publications-read]")).find(b=>b.dataset.teamPublicationsRead===a.task_id);if(button){
+    const panel=document.createElement("section");panel.className="team-recorded-publications";
+    const value=publication.value;
+    button.disabled=!!publication.loading;
+    panel.innerHTML='<h5>Task-associated recorded publications</h5>'+(publication.loading?'<p role="status">Loading recorded publications…</p>':!value?'<p role="status">Recorded publications unavailable. Refresh and check access and completion evidence.</p>':!value.outputs.length?'<p>No Task-associated publications were recorded.</p>':'<ul>'+value.outputs.map(o=>{
+     const c=value.completion,p=encodeURIComponent(c.project_id),w=encodeURIComponent(c.project_workspace_id),asset=encodeURIComponent(o.asset_id),v=String(o.version);
+     const preview='/v1/projects/'+p+'/workspaces/'+w+'/library/'+asset+'/versions/'+v+'/preview',download='/v1/projects/'+p+'/library/'+asset+'/versions/'+v+'/content?workspace_id='+w;
+     return '<li><span>'+escape(o.relative_path)+'</span> · version '+escape(v)+' · '+escape(o.size_bytes)+' bytes '+(previewablePublication(o)?'<a href="'+escape(preview)+'" target="_blank" rel="noopener" title="Plain text preview, limited to 256 KiB">Preview</a> ':'')+'<a href="'+escape(download)+'" target="_blank" rel="noopener">Download</a></li>';
+    }).join('')+'</ul>');button.parentElement.append(panel);
+   }}}
    const canPlan=!!state.room&&roster.length>0&&state.room.task_state==="created"&&!assignments.length;
    get("[data-team-plan-editor]").hidden=!canPlan;
 	get("[data-team-agent-drafts]").innerHTML=canPlan?state.messages.filter(m=>controller.assignmentDraft(String(m.id||m.ID))).slice(-4).map(m=>'<button class="btn" type="button" data-team-adopt-draft="'+escape(m.id||m.ID)+'">Review '+escape(names.get(m.author_member_id||m.AuthorMemberID)||'agent')+'’s suggested assignments</button>').join(""):"";
@@ -77,7 +102,7 @@
    const review=state.proposedPlan;
    get("[data-team-plan-review]").innerHTML=review?'<h4>Review this saved plan</h4><ol>'+review.assignments.map(a=>'<li><strong>'+escape(names.get(a.member_id)||"Team agent")+'</strong>: '+escape(a.objective)+(a.depends_on.length?' (after '+a.depends_on.map(escape).join(", ")+')':' (independent)')+' · Verification: '+escape(a.required_verification||'Task requirement')+(a.verification_spec?'<pre>'+escape(JSON.stringify(a.verification_spec,null,2))+'</pre>':'')+'</li>').join("")+'</ol><p>Approval queues these Tasks under the existing execution and tool controls. Blocking objections require separate resolution.</p><button class="btn primary" type="button" data-team-plan-accept'+(!canPlan||state.busy?' disabled':'')+'>Approve plan and queue work</button>':"";
   }
-  return {draw,dispose(){disposed=true;results.clear();drafts=[];host.textContent=""}};
+  return {draw,dispose(){disposed=true;results.clear();publications.clear();drafts=[];host.textContent=""}};
  }
  root.OnePaneTeamAssignments={mount};
 })(globalThis);

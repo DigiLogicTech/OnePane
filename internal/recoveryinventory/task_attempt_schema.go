@@ -125,28 +125,13 @@ func ValidateTaskAttemptSchema(ctx context.Context, db SchemaQueryer) error {
 	if len(want) != len(taskAttemptFamilies) {
 		return fmt.Errorf("%w: incomplete contract", ErrTaskAttemptSchemaUnreviewed)
 	}
-	rows, err := db.QueryContext(ctx, `SELECT name FROM main.sqlite_schema WHERE type='table' AND name NOT GLOB 'sqlite_*' ORDER BY name LIMIT 513`)
+	tables, err := readMainSchemaTables(ctx, db)
 	if err != nil {
 		return err
 	}
-	var names []string
-	for rows.Next() {
-		var name string
-		if err = rows.Scan(&name); err != nil {
-			break
-		}
-		if len(names) == 512 || len(name) > 256 {
-			err = fmt.Errorf("%w: schema bounds exceeded", ErrTaskAttemptSchemaUnreviewed)
-			break
-		}
-		names = append(names, name)
-	}
-	err = errors.Join(err, rows.Err(), rows.Close())
-	if err != nil {
-		return err
-	}
-	for _, name := range names {
-		actual, relevant, err := readTaskAttemptTable(ctx, db, name)
+	for _, flags := range tables {
+		name := flags.Table
+		actual, relevant, err := readTaskAttemptTable(ctx, db, flags)
 		if err != nil {
 			return err
 		}
@@ -168,28 +153,38 @@ func ValidateTaskAttemptSchema(ctx context.Context, db SchemaQueryer) error {
 	return nil
 }
 
-func readTaskAttemptTable(ctx context.Context, db SchemaQueryer, name string) (schemaTable, bool, error) {
-	table := schemaTable{Table: name, Columns: make([]schemaColumn, 0), ForeignKeys: make([]schemaForeignKey, 0)}
+// Read main-table identity and flags together once per observation. table_list
+// is a schema-wide PRAGMA; repeating it once for each table caused quadratic
+// metadata work. No result survives this validation call or its transaction.
+func readMainSchemaTables(ctx context.Context, db SchemaQueryer) ([]schemaTable, error) {
+	rows, err := db.QueryContext(ctx, `SELECT CASE WHEN length(CAST(name AS BLOB))<=256 THEN name ELSE '' END,length(CAST(name AS BLOB)),wr,strict FROM main.pragma_table_list() WHERE schema='main' AND type IN ('table','virtual','shadow') AND name NOT GLOB 'sqlite_*' ORDER BY name LIMIT 513`)
+	if err != nil {
+		return nil, err
+	}
+	var tables []schemaTable
+	for rows.Next() {
+		var table schemaTable
+		var size int
+		if err = rows.Scan(&table.Table, &size, &table.WithoutRowID, &table.Strict); err != nil {
+			break
+		}
+		if len(tables) == 512 || size > 256 {
+			err = fmt.Errorf("%w: schema bounds exceeded", ErrTaskAttemptSchemaUnreviewed)
+			break
+		}
+		tables = append(tables, table)
+	}
+	err = errors.Join(err, rows.Err(), rows.Close())
+	return tables, err
+}
+
+func readTaskAttemptTable(ctx context.Context, db SchemaQueryer, flags schemaTable) (schemaTable, bool, error) {
+	name := flags.Table
+	table := schemaTable{Table: name, WithoutRowID: flags.WithoutRowID, Strict: flags.Strict, Columns: make([]schemaColumn, 0), ForeignKeys: make([]schemaForeignKey, 0)}
 	relevant := name == "tasks" || name == "task_attempts"
 	// Table identifiers are bound arguments to SQLite's table-valued PRAGMAs,
 	// never interpolated SQL from an imported schema or external caller.
-	rows, err := db.QueryContext(ctx, `SELECT wr,strict FROM pragma_table_list WHERE schema='main' AND name=?`, name)
-	if err != nil {
-		return table, false, err
-	}
-	if !rows.Next() {
-		err = errors.Join(rows.Err(), rows.Close())
-		if err == nil {
-			err = ErrTaskAttemptSchemaUnreviewed
-		}
-		return table, false, err
-	}
-	err = rows.Scan(&table.WithoutRowID, &table.Strict)
-	err = errors.Join(err, rows.Err(), rows.Close())
-	if err != nil {
-		return table, false, err
-	}
-	rows, err = db.QueryContext(ctx, `SELECT name,type,"notnull",pk,hidden FROM pragma_table_xinfo(?, 'main') ORDER BY cid LIMIT 129`, name)
+	rows, err := db.QueryContext(ctx, `SELECT name,type,"notnull",pk,hidden FROM pragma_table_xinfo(?, 'main') ORDER BY cid LIMIT 129`, name)
 	if err != nil {
 		return table, false, err
 	}

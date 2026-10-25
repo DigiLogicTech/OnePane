@@ -802,3 +802,38 @@ combined wait/wake/proposal10.744s and affected integration vet PASS. Earlier
 unchanged Task42.109s/Team52.746s and final localai6.254s remain valid for their
 source. Publish this source on the same branch/PR and inspect its own hosted CI;
 no final-source hosted success or release acceptance is implied by these results.
+
+## Hosted recovery metadata timeout remediation — 25 October 06:53 UTC
+
+28601917 integration40169703273 genuinely FAILED Linux recoveryinventory race at
+180.031s in readTaskAttemptTable's pragma_table_list metadata VM. Native Windows
+SUCCESS; later managed-inference and full-regression/cross-compilation stages
+SKIPPED. This differs from the older redundant-migration timeout and was not a
+race report. Windows/Ubuntu source guards passed, actual package/physical jobs
+skipped.9f624c4a and47ee863d runs were in progress when separately observed; they
+contain the same pre-fix metadata reader and are not proof of this remediation.
+
+RECOVERY-SCHEMA-WORK-001 (blocking mandatory CI/performance): real migrated
+schema plus64unrelated tables reproduced272schema-wide flag reads per direct or
+indirect validation call (baseline2.146s failure). Filtering table_list by name
+still repeatedly built the entire schema metadata. Both readers now obtain table
+identity/STRICT/WITHOUT ROWID flags in one bounded main-schema PRAGMA snapshot,
+then retain every existing bounded column/FK/DDL comparison. No result survives a
+validation call or its caller's observation transaction; no global schema cache,
+collector, recovery authority, fixture approval or case phase was introduced.
+
+The function call is explicitly main.pragma_table_list() so TEMP table/PRAGMA
+shadows cannot hide main ownership. Actual storage tests prove one flag snapshot
+with64unrelated tables, correct STRICT/WITHOUT ROWID flags, view exclusion, temp
+shadows and discovery of new direct/indirect ownership after an earlier success
+on the same transaction. Existing malformed/generated/changed/deleted ownership,
+constraints/defaults/DDL/CRLF, limits/read-only and clone isolation cases remain
+unchanged and passing. Final full native recoveryinventory10.637s, integration
+vet and whitespace PASS. No C compiler is available locally, so Linux race needs
+new exact-source hosted evidence. The mandatory three-minute timeout is unchanged;
+no negative case was dropped or made permissive. No task/effect payload was read.
+
+Publish this necessary remediation on the same branch/PR and inspect the new
+exact-source complete workflow before resuming the durable Team assistance slice.
+The functional/review/physical/UI/installed Windows/Ubuntu/final-artifact gates
+remain OPEN. No final release or installed data change is claimed.

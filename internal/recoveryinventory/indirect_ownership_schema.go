@@ -141,32 +141,16 @@ func ValidateIndirectOwnershipSchema(ctx context.Context, db SchemaQueryer) erro
 	for _, table := range direct {
 		directWant[table.Table] = table
 	}
-	rows, err := db.QueryContext(ctx, `SELECT CASE WHEN length(CAST(name AS BLOB))<=256 THEN name ELSE '' END,length(CAST(name AS BLOB)) FROM main.sqlite_schema WHERE type='table' AND name NOT GLOB 'sqlite_*' LIMIT 513`)
+	tables, err := readMainSchemaTables(ctx, db)
 	if err != nil {
-		return err
+		return errors.Join(ErrIndirectOwnershipSchemaUnreviewed, err)
 	}
-	var names []string
-	for rows.Next() {
-		var name string
-		var size int
-		if err = rows.Scan(&name, &size); err != nil {
-			break
-		}
-		if len(names) == 512 || size > 256 {
-			err = fmt.Errorf("%w: table bounds exceeded", ErrIndirectOwnershipSchemaUnreviewed)
-			break
-		}
-		names = append(names, name)
-	}
-	err = errors.Join(err, rows.Err(), rows.Close())
-	if err != nil {
-		return err
-	}
-	for _, name := range names {
+	for _, flags := range tables {
+		name := flags.Table
 		if err = indirectMetadataBounds(ctx, db, name); err != nil {
 			return err
 		}
-		actual, _, e := readTaskAttemptTable(ctx, db, name)
+		actual, _, e := readTaskAttemptTable(ctx, db, flags)
 		if e != nil {
 			return errors.Join(ErrIndirectOwnershipSchemaUnreviewed, e)
 		}

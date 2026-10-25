@@ -31,6 +31,8 @@ func TestRecoveryTaskAttemptSchemaRejectsUnreviewedOwnership(t *testing.T) {
 		{"unconstrained_prefixed_task_column", `CREATE TABLE new_effect(id TEXT PRIMARY KEY, source_task_id TEXT)`},
 		{"unconstrained_prefixed_attempt_column", `CREATE TABLE new_effect(id TEXT PRIMARY KEY, original_attempt_id TEXT)`},
 		{"unreviewed_payload_on_existing_owner", `ALTER TABLE tool_invocations ADD COLUMN new_effect_json TEXT`},
+		{"changed_assistance_attempt", `ALTER TABLE team_assistance_requests RENAME COLUMN attempt_id TO inferred_attempt`},
+		{"new_assistance_payload", `ALTER TABLE team_assistance_requests ADD COLUMN human_decision_json TEXT`},
 		{"unreviewed_generated_payload", `ALTER TABLE tool_invocations ADD COLUMN generated_effect TEXT GENERATED ALWAYS AS (task_id) VIRTUAL`},
 		{"ordinary_column_replaced_with_generated", `ALTER TABLE agent_runtime_invocations DROP COLUMN completed_at; ALTER TABLE agent_runtime_invocations ADD COLUMN completed_at INTEGER GENERATED ALWAYS AS (1) VIRTUAL`},
 		{"renamed_owner", `ALTER TABLE agent_worker_runs RENAME COLUMN attempt_id TO original_incarnation`},

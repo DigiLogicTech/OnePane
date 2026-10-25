@@ -45,6 +45,7 @@ var recoveryDirectOwnershipEdges = map[string][]string{
 	"tasks":                                 {"parent_task_id"},
 	"team_assignment_notices":               {"task_id"},
 	"team_assignment_roots":                 {"task_id"},
+	"team_assistance_requests":             {"task_id", "attempt_id"},
 	"team_execution_assignments":            {"task_id", "parent_task_id"},
 	"team_execution_held_tasks":             {"task_id"},
 	"team_execution_holds":                  {"root_task_id"},
@@ -79,6 +80,11 @@ func TestRecoveryDirectOwnershipPlans(t *testing.T) {
 	seedRecoveryDirectOwnershipRows(t, db.SQL())
 	var tables []string
 	for table := range recoveryDirectOwnershipEdges {
+		// Assistance is introduced by110, after this prior106 upgrade fixture.
+		// Its populated109 preservation is tested in its own migration suite.
+		if table == "team_assistance_requests" {
+			continue
+		}
 		tables = append(tables, table)
 	}
 	before := recoveryProvenanceRows(t, db.SQL(), tables)

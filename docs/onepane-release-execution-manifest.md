@@ -837,3 +837,85 @@ Publish this necessary remediation on the same branch/PR and inspect the new
 exact-source complete workflow before resuming the durable Team assistance slice.
 The functional/review/physical/UI/installed Windows/Ubuntu/final-artifact gates
 remain OPEN. No final release or installed data change is claimed.
+
+## Durable Team requests and current authority — 25 October 07:12 UTC
+
+Continue SAME codex/team-live-ci-completion / draft PR228. This is source
+progress, not final functionality or installed/physical release acceptance.
+GitHub still has15open approved issues (#19-30,#85,#86,#114); no scope removed.
+
+Migration0110 adds retained immutable assistance requests for accepted contribution
+human waits. Actual Worker handling derives session/plan/assignment/member from
+persisted accepted identity, binds the exact returned committed waiting-step ID
+and original Task/Attempt/Worker, and commits request/system notice/request audit
+with the existing waiting journal and all state changes in ONE transaction.
+Model-supplied identity/author fields are ignored; question text remains untrusted
+and bounded to512UTF-8 bytes. Ordinary non-Team human waits and Team pause waits
+retain their separate behavior. Reconstructed-service stale redelivery cannot
+create another request or execution. Answer storage, scoped API, explicit Continue,
+next-model-context and Needs your input UI are NOT implemented by this increment.
+
+WORKER-AUTHORITY-002 (blocking revocation): actual ordinary/accepted-Team handlers
+human/wait/replan/escalate applied recorded proposals after principal disabled,
+revoked or changed to human (24baseline failures6.630s); suspended/revoked/missing
+Workspace membership likewise applied them (24failures9.247s). Shared preflight,
+atomic dispatch and continuation/wait predicate now requires the original current
+active system principal AND active membership in the exact Workspace. This matches
+existing bootstrap access policy; it does not introduce new permissions or revive
+revoked rows.48new cases retain original Task/Attempt/Worker/counters/prior model
+journal with no waiting/continuation/request/notice/audit mutation, no global halt
+on definitive pre-write rejection, and deny subsequent dispatch. Combined source
+wait/assistance/proposal29.888s plus existing dispatch1.824s and affected vet PASS.
+No model/tool transport or physical effects were executed by these tests.
+
+Recovery structural review initially rejected the new direct ownership table
+(actual1.728s); hand-reviewed explicit direct and indirect shape/DDL/semantics were
+added without regenerating prior contracts. Two new reverse help ownership cases
+initially escaped classification3.952s; target and unconstrained reference-name
+recognition now reject both2.791s. New changed-question/wait/Attempt/payload negatives
+remain required. This is structural metadata review, NOT semantic inventory,
+human decision authority, replay clearance or an implemented recovery collector.
+
+The required full direct-edge test identified the new Task/Attempt references.
+After explicit coverage review, four actual lookup baselines showed SCAN2.593s.
+Additive0110 now provides independent Task/Attempt/Worker indexes; exact wait-step
+already has a unique index. No tenant/status filter may hide historical ownership.
+Prior109 populated1024Task/Attempt/wait histories survive repeated110upgrade
+unchanged with exact migration checksum, orderedBINARY session index and FK checks.
+Combined direct plans+populated upgrade4.026s PASS. First broader integration:
+Task45.532s/Team60.032s/recovery20.664s PASS; SQLite46.174s genuinely FAILED the
+coverage prerequisite before remediation. Final affected whole suites follow.
+
+Hosted582c2bcc integration40170732658 is CANCELLED, not green: native Windows
+SUCCESS; Node/SQLite race step SUCCESS including recoveryinventory128.456s. The
+Linux15minute overall job timed out06:53:41->07:08:54 during managed inference;
+full regression skipped. Earlier28601917/9f624c4a recovery180s failures remain
+historical genuine failures. No historical rerun dispatched.
+
+CI now splits independent Linux source/observer, Worker/recovery race,
+Library/Team/Node race, managed inference/Colibri race and full/cross-platform
+regression into five jobs. The existing required check name is retained as an
+always-running aggregate that requires ALL five success; cancelled/skipped/failed
+families deny it. All165prior Go/Node/build commands and existing per-suite/job
+deadlines retained; both OS wait selectors add TeamAssistance. YAML parsed using
+existing dependency and dependency/deadline/command coverage checked locally.
+Exact new-source hosted execution remains necessary; source guards are not builds.
+
+Full final Worker, SQLite and recovery evidence is pending before publication.
+Next functional work: request-scoped bounded reads + immutable authenticated human
+answers, then exact original-owner Continue with ordinary admission and atomic
+journals, request-specific next-model-context and Team UI per the retained design.
+Broader semantic recovery/Library ingestion/engine scope remains open. All ordered
+human code/security/vision reviews, real inference/CPU/GPU/Colibri/OmniRoute/Node/L4,
+final UI and installed Windows/Ubuntu/customroot/upgrade/provenance/artifact gates
+remain OPEN. No installed Alpha/config/models/runtimes/projects/user data changed;
+no installer/final build/checksum or release completion is claimed.
+
+Final first-slice validation: full Worker integration140.996s PASS with final
+principal/membership source (compiled just before reverse-index-only110addition).
+Final110bytes+complete assistance4.623s PASS, including1024actual request histories,
+positive/absent Task/Attempt/Worker/wait-step reverse lookups and unchanged production
+binding before/after ANALYZE. Final full SQLite28.148s and recovery14.898s PASS;
+affected integration vet/whitespace PASS. Earlier unchanged Task45.532s/Team60.032s
+remain source evidence. No physical reasoning/tool/installed acceptance implied.
+Publish same branch/PR and inspect exact new-source partitioned hosted CI.

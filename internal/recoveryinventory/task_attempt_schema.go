@@ -89,6 +89,7 @@ var taskAttemptFamilies = map[string]string{
 	"runtime_execution_queue":               "unconstrained_task_and_request_reference",
 	"task_execution_profiles":               "task_and_team_execution_context",
 	"team_assignment_notices":               "task_checkpoint_message_context",
+	"team_assistance_requests":              "immutable_original_task_attempt_worker_human_wait_context_not_resume_authority",
 	"team_assignment_roots":                 "team_assignment_and_plan_context",
 	"team_execution_assignments":            "task_and_parent_task_assignment_context_composite_key",
 	"team_execution_held_tasks":             "held_task_context_composite_hold_task_key",

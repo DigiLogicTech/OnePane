@@ -16,6 +16,18 @@ import (
 const activeWorkerExecutionBindingPredicate = `
 	r.worker_principal_id='system:agent-worker'
 	AND EXISTS (
+		SELECT 1 FROM principals worker_principal
+		WHERE worker_principal.id=r.worker_principal_id
+			AND worker_principal.principal_type='system'
+			AND worker_principal.status='active'
+	)
+	AND EXISTS (
+		SELECT 1 FROM workspace_memberships worker_membership
+		WHERE worker_membership.workspace_id=r.workspace_id
+			AND worker_membership.principal_id=r.worker_principal_id
+			AND worker_membership.status='active'
+	)
+	AND EXISTS (
 		SELECT 1 FROM task_attempts a
 		WHERE a.id=r.attempt_id AND a.task_id=r.task_id
 			AND a.worker_principal_id=r.worker_principal_id

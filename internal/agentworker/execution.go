@@ -10,6 +10,7 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/DigiLogicTech/OnePane/internal/agentprotocol"
 	"github.com/DigiLogicTech/OnePane/internal/agentruntime"
@@ -798,6 +799,10 @@ func (s *Service) handleHuman(ctx context.Context, run Run, t task.Task, resp ag
 	var p humanProposal
 	_ = json.Unmarshal(resp.Proposal, &p)
 	question := boundedString(p.Question, 512)
+	// Preserve a UTF-8 boundary when the byte budget cuts a multibyte rune.
+	for !utf8.ValidString(question) && len(question) > 0 {
+		question = question[:len(question)-1]
+	}
 	cont, _ := json.Marshal(map[string]any{"human_input_required": question})
 	return s.waitRunAtomically(ctx, run, res, task.StateWaitingApproval,
 		"human input required", cont, "human", "waiting_human")

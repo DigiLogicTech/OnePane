@@ -35,6 +35,11 @@ type indirectReferenceDescriptor struct {
 // row-vocabulary contracts are implemented. Shared context never recursively
 // owns all rows in its tenant, Project, Workspace or artifact session.
 var indirectReferenceDescriptors = map[string][]indirectReferenceDescriptor{
+	"team_assistance_requests": {
+		{[]string{"session_id", "plan_id", "assignment_key", "member_id"}, "immutable accepted contribution context; shared Team session does not own unrelated assignments"},
+		{[]string{"task_id", "attempt_id", "run_id", "wait_step_id"}, "exact original Task/Attempt/Worker and committed human waiting step; request is not permission to resume or replay"},
+		{[]string{"notice_message_id", "author_principal_id", "question"}, "trusted system notice pointer and authored untrusted question text; no answer or human decision authority"},
+	},
 	"agent_worker_steps": {
 		{[]string{"run_id"}, "exact original Worker journal ownership"},
 		{[]string{"step_kind", "status", "result_ref", "request_ref", "detail_json"}, "discriminated typed references: successful model -> agent response artifact; failed/unknown model -> inference request; runtime -> Invocation; tool -> Observation with invocation_id/observation_id; operation -> Operation; delegate -> child Task; verification waiting -> Verification, succeeded -> checkpoint except explicit retry; uncommitted response/accounting outcomes require result_ref_kind. Unsupported discriminator combinations defer"},
@@ -68,6 +73,7 @@ var indirectOwnershipTargets = map[string]bool{
 	"agent_worker_runs": true, "agent_worker_steps": true, "operations": true,
 	"events": true, "artifacts": true, "project_library_asset_versions": true,
 	"notification_deliveries": true, "outbox_jobs": true, "dependency_refs": true,
+	"team_assistance_requests": true,
 }
 
 func indirectOwnershipRelevant(table schemaTable) bool {
@@ -84,7 +90,7 @@ func indirectOwnershipRelevant(table schemaTable) bool {
 	}
 	for _, column := range table.Columns {
 		name := strings.ToLower(column.Name)
-		for _, owner := range []string{"operation_id", "worker_run_id", "artifact_id", "event_id", "event_seq"} {
+		for _, owner := range []string{"operation_id", "worker_run_id", "artifact_id", "event_id", "event_seq", "assistance_request_id"} {
 			if name == owner || strings.HasSuffix(name, "_"+owner) {
 				return true
 			}

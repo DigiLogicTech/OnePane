@@ -80,8 +80,15 @@ func (s *Service) waitRunAtomically(
 		default:
 			return fmt.Errorf("unknown Worker wait reason kind %q", kind)
 		}
-		return s.journalInTransaction(ctx, tx, run.ID, kind, "waiting",
+		stepID, err := s.journalStepInTransaction(ctx, tx, run.ID, kind, "waiting",
 			nil, nil, &proposalType, nil, map[string]any{"reason": "worker_wait_safely_committed"})
+		if err != nil {
+			return err
+		}
+		if kind == "human" {
+			return s.materializeTeamAssistance(ctx, tx, run, stepID, continuation)
+		}
+		return nil
 	})
 	if err != nil {
 		safeRejection := errors.Is(err, ErrInvalidWorkerState) || errors.Is(err, teamgate.ErrExecution) || errors.Is(err, teamgate.ErrPaused)

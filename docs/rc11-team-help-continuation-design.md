@@ -1,6 +1,7 @@
 # Durable Team assistance and original-owner continuation
 
-Status: source-reviewed dependency design,25October2026; not implemented.
+Status: durable request/wait source implemented,25October2026; authenticated
+answers, explicit Continue and request-specific context/UI remain unimplemented.
 The release execution manifest remains authoritative for open gates. This is
 human assistance for an accepted contribution; peer execution, new helpers and
 versioned reviewed reassignment remain separate approved work.
@@ -10,18 +11,21 @@ versioned reviewed reassignment remain separate approved work.
 Agent Protocol `human` proposals already carry a question. The actual execution
 Worker's `handleHuman` uses `waitRunAtomically`: original running Task/Attempt,
 Worker continuation, waiting journal and audits commit together or all roll
-back. The request is currently retained only in Worker continuation. Team-room
-human guidance exists, but no request-specific durable answer/continuation
-protocol does. Do not represent generic chat or a generic Task resume as that
-complete protocol.
+back. Migration0110 adds immutable request history for accepted contributions,
+binding the returned exact waiting journal identity, original Task/Attempt/Worker
+and persisted accepted assignment. A trusted system notice and request audit
+commit inside that same transaction. Questions have a UTF-8-safe512byte bound.
+Team-room human guidance exists, but no request-specific durable answer/
+continuation protocol does. Generic chat or Task resume does not complete it.
 
 The25October continuation reproduced six human/wait proposals parking Task,
 Attempt and Worker after tenancy or sealed root/child criteria drift. The wait
 transaction now repeats the shared exact active execution binding and accepted
 Team/dependency/ancestor checks before any mutation. Actual handler authority
 and rejected-write matrices preserve the original lineage and prior model
-journal. This prerequisite does not implement request storage, answers or
-explicit continuation; all seven steps below remain required.
+journal. Current active system principal and exact Workspace membership are
+also required at preflight and atomic claim/continuation. The request half of
+steps1/2 below is implemented; answer storage and steps3-7 remain required.
 
 The immutable0098accepted assignment/root cannot be reopened or replaced in
 place. Existing shared admission applies to Task start/resume, each Worker
@@ -91,6 +95,6 @@ cancellation, recovery, dependency, capability, routing or verification fence.
   scope/request replacement, late replies, access denial and disposal. Final
   Windows/Ubuntu browser/product review remains separately required.
 
-No schema or execution authority is added by this design. All broader Team,
+The new request schema adds no execution or human decision authority. All broader Team,
 recovery, code/security review, physical and installed acceptance gates remain
 open until independently implemented and validated.

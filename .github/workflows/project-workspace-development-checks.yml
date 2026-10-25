@@ -163,8 +163,32 @@ jobs:
             echo 'Preflight reads only rootless Podman status and approved local image presence. No images are pulled or containers changed.'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Retain the existing required check name while each independent family has
+  # its own unchanged deadline. Skipped, cancelled and failed families deny it.
   development-contract:
     name: Validate honest Workspace runtime boundaries
+    if: ${{ always() }}
+    needs: [development-source-contract, worker-recovery-race, library-team-node-race, managed-inference-race, full-regression]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require every source validation family
+        env:
+          SOURCE_RESULT: ${{ needs.development-source-contract.result }}
+          WORKER_RESULT: ${{ needs.worker-recovery-race.result }}
+          TEAM_RESULT: ${{ needs.library-team-node-race.result }}
+          MANAGED_RESULT: ${{ needs.managed-inference-race.result }}
+          FULL_RESULT: ${{ needs.full-regression.result }}
+        run: |
+          for result in "$SOURCE_RESULT" "$WORKER_RESULT" "$TEAM_RESULT" "$MANAGED_RESULT" "$FULL_RESULT"; do
+            if [ "$result" != success ]; then
+              echo "A required source validation family did not succeed: $result"
+              exit 1
+            fi
+          done
+
+  development-source-contract:
+    name: Validate Workspace source and observer contracts
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -252,13 +276,42 @@ jobs:
           GOGC: '50'
         run: |
           go test -tags integration -count=1 -timeout 5m -run '^TestObserverFenceBoundedRestartWALDurabilitySoak$' -v ./internal/projectworkspace
-      - name: Node approval and SQLite race checks (hosted source only)
+  worker-recovery-race:
+    name: Validate Worker and recovery race boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Worker and recovery SQLite race checks (hosted source only)
         run: |
           go test -race -count=1 ./internal/runtimecoord ./internal/teamworker
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(Assurance|BudgetJournal|BudgetRelease|BudgetCommit|ResponseJournal|ProposalContinuation|RouteJournal)' ./internal/agentworker
-          go test -race -tags integration -count=1 -timeout 3m -run 'Test(WorkerWait|ExternalWorkerWake)' ./internal/agentworker
+          go test -race -tags integration -count=1 -timeout 3m -run 'Test(WorkerWait|ExternalWorkerWake|TeamAssistance)' ./internal/agentworker
           go test -race -tags integration -count=1 -timeout 3m ./internal/recoveryinventory
           go test -race -tags integration -count=1 -timeout 3m ./internal/budget
+
+  library-team-node-race:
+    name: Validate Library Team and Node race boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Library Team and Node race checks (hosted source only)
+        run: |
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(LibraryArtifact|LibraryContentReads|VerifiedWorkspaceEvidence|WorkspaceLibraryPreview)' ./internal/api
           go test -race -tags integration -count=1 -timeout 3m -run TestWorkspaceLibraryPublication ./internal/projectworkspace
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(TaskLibraryPublications|TeamAssignmentOutputs|LibrarySchemaFixture)' ./internal/api
@@ -269,6 +322,20 @@ jobs:
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(ProposePlanRejects|SyncTaskStates|ReasoningTask|CompleteReasoningTurn|ReasoningTurn|ManualCouncilTaskFences|ResearchSeatVerifiedTextDelivery)' ./internal/team ./internal/teamworker
           go test -race -count=1 ./internal/instrumentprobe ./internal/nodefederation ./cmd/onepane-node-custody ./cmd/onepane-instrument-probe
           go test -race -tags integration -count=1 -run TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly ./internal/projectworkspace
+
+  managed-inference-race:
+    name: Validate managed inference and Colibri race boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
       - name: Managed inference lease and Colibri rollback race tests (hosted Linux)
         env:
           GOMEMLIMIT: 256MiB
@@ -304,6 +371,20 @@ jobs:
           go test -race -count=1 -timeout 3m -run 'TestColibri(ReplacementUnknownResult|ConfirmedNoChildFailure)' ./internal/localai
           go test -race -count=1 -timeout 3m -run TestColibriUnknownStoppedOrFailedPID ./internal/localai
           go test -race -count=1 -timeout 3m -run TestColibriHealthyBusyWithoutPIDCannotClaimSafeEviction ./internal/localai
+
+  full-regression:
+    name: Validate full regression and cross-platform compilation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
       - name: Full Go regression and cross-platform compilation
         run: |
           go test ./internal/featurepolicy ./internal/inference ./internal/tool ./internal/webui
@@ -338,6 +419,7 @@ jobs:
           printf 'CI compile fixture' > packaging/windows/setup/payload/qa-compile-fixture.bin
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-legacy-setup.exe ./packaging/windows/setup
           bash -n scripts/install-ubuntu.sh
+
 
   offline-msi-evidence:
     name: Validate Windows instance lock and offline MSI evidence
@@ -431,7 +513,7 @@ jobs:
           go test -count=1 -timeout 3m -run 'Test(TaskInspection|TeamReads|RecoveryCaseReads|AcceptedTeamAssignments|TeamAssignment|TeamPause|TeamResume|TeamCancellation)' ./internal/team ./internal/tool ./internal/api
           go test -tags integration -count=1 -timeout 3m -run 'Test(TeamAssignmentsExecute|TeamPause|TeamCancellation|CancellationBetweenWorkerTicks|ProjectTaskGraphRecognizesReviewedTeam)' ./internal/agentworker ./internal/projectorchestrator
           go test -tags integration -count=1 -timeout 3m -run 'Test(Assurance|BudgetJournal|BudgetRelease|BudgetCommit|ResponseJournal|ProposalContinuation|RouteJournal)' ./internal/agentworker
-          go test -tags integration -count=1 -timeout 3m -run 'Test(WorkerWait|ExternalWorkerWake)' ./internal/agentworker
+          go test -tags integration -count=1 -timeout 3m -run 'Test(WorkerWait|ExternalWorkerWake|TeamAssistance)' ./internal/agentworker
           go test -tags integration -count=1 -timeout 3m ./internal/recoveryinventory
           go test -tags integration -count=1 -timeout 3m ./internal/budget
           go test -tags integration -count=1 -timeout 3m -run 'Test(AgentProtocolHTTPPostDispatch|RuntimeDispatchUnusable|RuntimePostDispatchBudgetCommitFailure|InferencePostDispatchBudgetCommitFailure|RuntimePreDispatchErrors|InferencePreDispatchErrors)' ./internal/agentruntime ./internal/inference

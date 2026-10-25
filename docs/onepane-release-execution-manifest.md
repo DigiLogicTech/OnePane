@@ -1151,3 +1151,40 @@ Final affected integration PASS on the resume-guard source: Worker202.172s,
 Task46.335s, Team60.912s, API101.040s; affected integration vet/whitespace PASS.
 Publish same branch/PR and require exact new-source hosted checks. Keep the
 approved full feature/review/physical/UI/installed/final-artifact gates OPEN.
+
+## STORAGE-TX-CAUSE-001 — hosted cancellation error-chain failure
+
+Exact28a6deb644998797268e27ad2d539dc87ce35446 integration40194353525
+genuinely FAILED Worker race job121171887895. The unchanged actual answer test
+TestTeamAssistanceAnswerRequiresCommittedAudit/cancel_after_prepared rejected
+`transaction failed: context canceled; rollback failed: sql: transaction has
+already been committed or rolled back`: errors.Is no longer recognized the
+original cancellation. Other Worker suites after that command, including the
+new generic-resume suite and recovery/budget, were SKIPPED. Windows, all four
+other Linux families and both guards40194353507/40194353548 SUCCESS; required
+aggregate FAILURE correctly reflects the mandatory Worker failure. Physical
+approval SKIPPED. No historical rerun or relabeling as cancelled/superseded.
+
+Confirmed production defect: SQLite Within formatted callback errors with %v,
+preserving only a concurrent rollback error as %w. database/sql can finish its
+automatic cancellation rollback before the application calls Rollback. This
+loses machine-readable cancellation and other callback causes despite durable
+rollback. Two deterministic actual SQLite prepared-write baselines reproduced
+the cause loss0.626s. Test-only explicit closure forces the already-finished
+transaction state without sleeps or scheduler assumptions; both causes and
+absence of committed writes are asserted, with ordinary rollback/commit controls.
+
+Change the original callback to %w as well: Go1.23 supports multiple wrapped
+causes, preserving original and rollback errors without changing error text or
+transaction lifecycle. Deterministic tests0.634s PASS; unchanged actual Worker
+answer rejected-write/cancellation suite repeated5times5.283s PASS. Independent
+source review found no blocker. Native CI already runs full SQLite; add direct
+Linux-race TestWithin without changing existing failure assertions or deadlines.
+Full affected SQLite/Worker/API integration and vet are pending before publication;
+the new source must pass its own hosted race run. All release gates remain OPEN.
+
+Final affected integration after error-chain remediation PASS: SQLite37.562s,
+Worker185.843s, API87.161s; affected integration vet/whitespace PASS. Publish
+same branch/PR and inspect new-source Worker race, full regression, other required
+families and guards. Keep the preceding28a6deb6failure in the history. No assertion
+was weakened and no historical CI rerun was requested.

@@ -292,6 +292,7 @@ jobs:
       - name: Worker and recovery SQLite race checks (hosted source only)
         run: |
           go test -race -count=1 ./internal/runtimecoord ./internal/teamworker
+          go test -race -count=1 -timeout 3m -run TestWithin ./internal/storage/sqlite
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(Assurance|BudgetJournal|BudgetRelease|BudgetCommit|ResponseJournal|ProposalContinuation|RouteJournal)' ./internal/agentworker
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(WorkerWait|ExternalWorkerWake|TeamAssistance(Human|Production|Model|Writes|Question|Changed))' ./internal/agentworker
           go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceAnswer ./internal/agentworker ./internal/team

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/DigiLogicTech/OnePane/internal/storage"
@@ -21,6 +22,7 @@ func (s *Service) waitRunAtomically(
 	if s == nil || s.tx == nil || s.tasks == nil {
 		return failedResult(res, ErrInvalidWorkerState)
 	}
+	writePrepared := false
 	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
 		var state string
 		var revision int64
@@ -31,6 +33,9 @@ func (s *Service) waitRunAtomically(
 			run.ID, run.WorkspaceID, run.TaskID, run.AttemptID, run.Revision,
 		).Scan(&state, &revision)
 		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrInvalidWorkerState
+			}
 			return err
 		}
 		if state != string(RunRunning) {
@@ -43,6 +48,7 @@ func (s *Service) waitRunAtomically(
 			return err
 		}
 		actor := WorkerPrincipal
+		writePrepared = true
 		if err := s.tasks.WorkerWaitInTransaction(ctx, tx, task.TransitionCommand{
 			TaskID: run.TaskID, ExpectedRevision: revision, ActorPrincipalID: &actor,
 			Reason: boundedString(reason, 512),
@@ -78,11 +84,15 @@ func (s *Service) waitRunAtomically(
 			nil, nil, &proposalType, nil, map[string]any{"reason": "worker_wait_safely_committed"})
 	})
 	if err != nil {
-		s.dispatchReconciliationFailed = true
-		if err == sql.ErrNoRows {
-			err = ErrInvalidWorkerState
+		safeRejection := errors.Is(err, ErrInvalidWorkerState) || errors.Is(err, teamgate.ErrExecution) || errors.Is(err, teamgate.ErrPaused)
+		if writePrepared || !safeRejection {
+			// An unavailable/cancelled observation or rejected write leaves the
+			// recorded response unapplied and requires explicit recovery. An exact
+			// owner/authority denial before writes must not stop a newer owner.
+			s.dispatchReconciliationFailed = true
+			return failedResult(res, fmt.Errorf("Worker wait commit failed; scheduling halted until recovery: %w", err))
 		}
-		return failedResult(res, fmt.Errorf("Worker wait commit failed; scheduling halted until recovery: %w", err))
+		return failedResult(res, err)
 	}
 	res.Status = resultStatus
 	return res

@@ -28,6 +28,48 @@ func applyWorkerWait(t *testing.T, w *Service, ctx context.Context, run Run, kin
 	return w.handleWait(ctx, run, current, response, result)
 }
 
+func TestWorkerWaitStaleRedeliveryDoesNotHaltNewerOwner(t *testing.T) {
+	for _, kind := range []string{"human", "wait"} {
+		t.Run(kind, func(t *testing.T) {
+			w, ctx, old := prepareProposalContinuation(t, kind)
+			if result := applyWorkerWait(t, w, ctx, old, kind); result.Status == "failed" {
+				t.Fatalf("healthy wait: %+v", result)
+			}
+			current, err := w.tasks.Get(ctx, old.TaskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = w.tasks.Resume(ctx, task.TransitionCommand{TaskID: current.ID, ExpectedRevision: current.Revision}); err != nil {
+				t.Fatal(err)
+			}
+			if err = w.syncResumedRuns(ctx); err != nil {
+				t.Fatal(err)
+			}
+			before, err := w.getRun(ctx, old.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if before.Status != RunRunning || before.Revision <= old.Revision {
+				t.Fatal("fixture did not resume exact original owner")
+			}
+			result := applyWorkerWait(t, w, ctx, old, kind)
+			after, err := w.getRun(ctx, old.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			steps, audits := proposalContinuationJournalCounts(t, w, ctx, old.ID, kind)
+			if result.Status != "failed" || !reflect.DeepEqual(before, after) || w.dispatchReconciliationFailed || steps != 1 || audits != 1 {
+				t.Fatalf("stale returned wait changed/blocked resumed owner: result=%+v halted=%v steps=%d audits=%d", result, w.dispatchReconciliationFailed, steps, audits)
+			}
+			// Exact original binding still admits the next dispatch; no model or
+			// scheduler is invoked and no new Attempt is created by this check.
+			if err = w.markReasoningDispatch(ctx, &after, "model_deployment", "resumed-checked-candidate"); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestWorkerWaitRejectsChangedOriginalBinding(t *testing.T) {
 	for _, kind := range []string{"human", "wait"} {
 		for _, change := range []string{"worker_principal", "attempt_provenance", "task_archived", "stale_revision"} {

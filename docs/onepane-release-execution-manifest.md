@@ -2,8 +2,7 @@
 
 Updated: 2026-10-25 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
 
-Current continuation: `codex/team-live-ci-completion`, draft PR228, retains the approved full scope. Published `0faf8b49fe57c3357b246ab255aa77935073f190` integration40160849723 SUCCESS (Windows, Linux/race, managed inference/Colibri source checks, full Go/cross-platform); Windows guard40160849842 and new Ubuntu guard40160849777 SUCCESS. Physical and actual packaging jobs skipped. The prior e0b3ad17 Linux timeout remains a genuine historical failure. The next increment remediates confirmed OmniRoute process ownership/privacy, component action/progress/recovery persistence and Evidence stale-Workspace defects; whole-scope reconciliation is in `rc11-current-release-scope-matrix.md`. Inspect the next published commit's own CI, then continue eligible durable Team help/recovery/Library ingestion and remaining approved functionality. Historical checkpoints describe only their own commits. Full human recovery, collaboration lifecycle, whole-product reviews, physical and installed Windows/Ubuntu acceptance remain open.
-
+Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Published increments `28601917` and `9f624c4a` remediate managed component ownership/privacy/atomicity/restart, OmniRoute policy observation and deployment onboarding, Evidence stale private views, and recorded Team wait authority. The following stale-wait redelivery fix preserves newer legitimate owners without weakening failed-commit recovery. Exact validation, genuine historical failures, current CI observations and the next functional boundary are recorded in the latest sections below. Inspect the newly published source commit's own complete Windows/Linux/race/regression checks; successful guards do not imply packaging or physical acceptance. Continue immutable durable Team assistance and original-owner continuation, closed recovery attribution, Library ingestion and all remaining approved functionality. Ordered human audits/sign-offs, real AI/Node/L4, LAST UI, installed Windows/Ubuntu and final versioned artifact gates remain OPEN. No final build is claimed.
 ## Authority and continuation
 
 The Git repository is `D:\Codex\OnePane\source`; its parent is an unrelated unborn wrapper repository. Continue `codex/team-live-ci-completion`, existing draft PR [228](https://github.com/DigiLogicTech/OnePane/pull/228), based on `feature/rc11-policy-worker-diagnostics-integration-20261011` (`fb7f5df7`). Preserve the stacked integration route; do not merge the historical feature PRs independently or reset local work.
@@ -770,3 +769,36 @@ following rc11-team-help-continuation-design.md. Recovery semantic attribution,
 Library ingestion and all remaining approved scope remain eligible. All physical,
 review/sign-off/finalUI/installed Windows/Ubuntu/artifact gates remain OPEN.
 No final build, release artifact or installed user-state change is claimed.
+
+## Stale wait response and independent progress — final continuation slice
+
+WORKER-WAIT-PROGRESS-001 (blocking scheduler availability): two actual handler
+baselines1.435s showed old human/wait responses globally halting scheduling after
+Task.Resume and Worker reconciliation had legitimately resumed the same original
+Attempt with a newer Worker revision. The stale response did not mutate history,
+but its rejected read set the service-wide recovery halt. This was not physical
+model replay; the fixture uses durable recorded model history only.
+
+Wait handling now distinguishes exact pre-write ownership/Team authority denial
+from an unavailable/cancelled observation or any prepared-write/commit failure,
+matching the existing proposal-continuation policy. Only the latter unresolved
+outcomes halt scheduling. Two actual wait -> same Attempt resume -> stale response
+-> next dispatch-claim cases preserve the newer owner and original journal. The
+existing stale-Attempt test now checks refusal without a false global halt; all
+cancelled/failed-journal cases still require recovery. Combined final wait/wake/
+proposal integration10.744s and affected integration vet PASS. Full final Worker
+regression is pending below before publication.
+
+Current GitHub #86 was re-read: finish scoped functionality first, then ordered
+whole-tree audit/user-reviewed findings, vision decisions/sign-off, second audit/
+remediation/sign-off, then final validation/packaging and hands-on operator QA.
+Current #114 still requires the authenticated paired native Windows Unreal
+companion and separate UEFN pack; the identity-only OCI probe does not close it.
+Neither issue is closed. All previously tracked physical/installed/UI/release
+gates remain open and no user data or installed Alpha was changed.
+
+Final stale-response source validation: full Worker integration116.967s PASS;
+combined wait/wake/proposal10.744s and affected integration vet PASS. Earlier
+unchanged Task42.109s/Team52.746s and final localai6.254s remain valid for their
+source. Publish this source on the same branch/PR and inspect its own hosted CI;
+no final-source hosted success or release acceptance is implied by these results.

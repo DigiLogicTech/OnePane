@@ -1,8 +1,9 @@
 # Durable Team assistance and original-owner continuation
 
-Status: durable request/wait and bounded single-request read source implemented,
-25October2026; authenticated answers, explicit Continue, session request listing
-and request-specific context/UI remain unimplemented.
+Status: durable request/wait, bounded single-request read and immutable human
+answer storage plus authenticated answer POST source implemented,25October2026.
+Explicit Continue, stored-answer observation, session request listing and
+request-specific context/UI remain unimplemented.
 The release execution manifest remains authoritative for open gates. This is
 human assistance for an accepted contribution; peer execution, new helpers and
 versioned reviewed reassignment remain separate approved work.
@@ -33,7 +34,35 @@ and rejected-write matrices preserve the original lineage and prior model
 journal. Current active system principal and exact Workspace membership are
 also required at preflight and atomic claim/continuation. The request half of
 steps1/2 below is implemented. Bounded single-request reads in steps3/4 exist;
-answer storage/writes, list discovery and steps5-7 remain required.
+answer storage/writes are implemented as described below. Stored-answer
+observation, list discovery and steps5-7 remain required.
+
+## Current answer boundary
+
+Migration0112 retains one final immutable authored answer per request. This first
+answer API deliberately refuses conflicting replacements; identical original
+actor/submission/text/revision retries return the retained answer while its
+original contribution remains waiting. The service shares the bounded request
+reader within its write transaction, revalidates original scope/accepted graph/
+current active human membership and exact Task/Attempt/Worker/wait-step/revisions,
+then commits answer and audit together. It adds no room-message duplicate and
+never resumes execution, releases holds or alters accounting.
+
+POST /v1/team-sessions/{sessionID}/assistance/{requestID}/answers derives its author
+from the current human credential and requires team.read/task.read/team.write,
+with project.read only when a Project is bound. A narrow query-only verifier
+rechecks the original bearer credential or browser session, expiry, CSRF, current
+scopes/roles and exact active tenant membership in the SAME supplied transaction.
+It never invokes the session-refreshing authenticator inside that transaction.
+The verifier runs for retries too. Raw JSON has32KiB, authored text4096UTF8bytes,
+submission key128bytes and identifiers256byte limits. Text remains untrusted.
+Final response reauthentication can withhold a private response after a successful
+commit; an authorized identical retry retrieves the retained answer. This does
+not promise continuous authorization after commit/publication.
+
+Current GET request responses remain unchanged and contain no stored answer.
+There is no Continue endpoint or model-context consumer. Do not describe this
+answer boundary as complete assistance or permission to execute/recover/replay.
 
 The immutable0098accepted assignment/root cannot be reopened or replaced in
 place. Existing shared admission applies to Task start/resume, each Worker

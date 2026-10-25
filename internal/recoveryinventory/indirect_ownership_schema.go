@@ -35,6 +35,10 @@ type indirectReferenceDescriptor struct {
 // row-vocabulary contracts are implemented. Shared context never recursively
 // owns all rows in its tenant, Project, Workspace or artifact session.
 var indirectReferenceDescriptors = map[string][]indirectReferenceDescriptor{
+	"team_assistance_answers": {
+		{[]string{"request_id"}, "one immutable authored answer owned through the exact original assistance request; never infer ownership from shared human or Team membership"},
+		{[]string{"id", "author_principal_id", "idempotency_key", "answer", "task_revision", "worker_revision", "created_at"}, "bounded untrusted human input and observed waiting revisions; neither execution approval nor recovery disposition, effect clearance or independent postcondition evidence"},
+	},
 	"team_assistance_request_scopes": {
 		{[]string{"request_id"}, "exact immutable assistance request ownership; missing historical scope is unresolved, never backfilled from current Task state"},
 		{[]string{"project_id", "project_workspace_id", "artifact_session_id"}, "nullable original scope recorded atomically at the human wait; shared scope never owns unrelated work and grants no authority"},
@@ -79,6 +83,7 @@ var indirectOwnershipTargets = map[string]bool{
 	"notification_deliveries": true, "outbox_jobs": true, "dependency_refs": true,
 	"team_assistance_requests":       true,
 	"team_assistance_request_scopes": true,
+	"team_assistance_answers":        true,
 }
 
 func indirectOwnershipRelevant(table schemaTable) bool {
@@ -95,7 +100,7 @@ func indirectOwnershipRelevant(table schemaTable) bool {
 	}
 	for _, column := range table.Columns {
 		name := strings.ToLower(column.Name)
-		for _, owner := range []string{"operation_id", "worker_run_id", "artifact_id", "event_id", "event_seq", "assistance_request_id"} {
+		for _, owner := range []string{"operation_id", "worker_run_id", "artifact_id", "event_id", "event_seq", "assistance_request_id", "assistance_answer_id"} {
 			if name == owner || strings.HasSuffix(name, "_"+owner) {
 				return true
 			}

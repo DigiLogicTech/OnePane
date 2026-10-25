@@ -1013,3 +1013,65 @@ Existing Authorizer methods use separate DB connections; browser authentication
 may refresh idle expiry. Do not call them inside a held answer transaction or
 claim credential-at-write atomicity without a query-only transaction verifier.
 All broader approved development/review/physical/install/final gates remain OPEN.
+
+## Durable authenticated assistance answers — 25 October 12:21 UTC
+
+Exact published7bb36e79793357ac737daca67544547449e2a39d now has integration
+40191962423 SUCCESS: Windows and all five Linux families plus required aggregate;
+both QA guards40191962374/40191962372 SUCCESS. Physical approval SKIPPED; no
+installed package or inference acceptance follows from these source checks.
+
+Next increment implements one final immutable human answer per original request,
+same actor/key/text/expected-revision idempotent retry, exact original waiting
+Task/Attempt/Worker/wait-step, accepted graph/pinned scope/current human authority,
+and atomic answer+audit. Held Teams may receive input without releasing any hold
+or execution/accounting state. Read-helper extraction preserves existing GET
+shape. Stored answers do not yet appear in GET; Continue/context/list/UI remain
+required before the workflow is end to end.
+
+Authenticated POST requires human team.read/task.read/team.write plus conditional
+project.read. Query-only transaction-aware bearer and browser-session verification
+uses the same domain transaction, retaining original credential/principal/type/
+method and checking revoke/expiry/current scopes/roles/CSRF/active membership and
+tenant. No session-refreshing authentication inside a held write transaction.
+API fails closed if a configured authorizer lacks that interface. Final private
+response authentication may deny after a successful commit; retry uses the same
+submission key. No globally atomic or continuous publication guarantee is made.
+
+Additive0112 preserves prior111waiting request/scope and1024journal rows across
+repeated upgrades; no historical answer is invented. Actual recovery schema
+correctly FAILED on the unclassified new indirect owner1.970s. Added only the
+hand-reviewed eight-column shape/DDL and exact request ownership meaning, plus
+new FK/name/shape negatives. Authored text and observed revisions grant neither
+execution nor recovery decision/postcondition authority. General semantic
+inventory remains unimplemented. Final new schema tests8.726s and populated
+upgrade2.296s PASS; full SQLite29.698s/recovery17.773s PASS.
+
+Actual Worker human handler -> domain answer/reconstructed retry/held preservation,
+30changed authority/input negatives, answer/audit/cancel and trusted sameTX guard
+rollback with existing read regressions21.667s PASS.1024schema-valid answer-history
+production SQL exact present/missing persistent plans before/afterANALYZE plus
+UTF8boundaries/malformed-store guards2.253s PASS. Transactional credential tests
+3.436s PASS, including changes visible only inside supplied TX and absent session
+refresh with old lastseen. Expanded actual HTTP bearer/session waiting/held,
+retry/conflict, prewrite revocation/scope changes, session expiry/role/CSRF/identity,
+conditional Project permission and escaped4KiBanswer input18.888s PASS. Initial
+new HTTP session test genuinely failed on a test-only granted_at column6.432s;
+corrected to actual principal_roles.created_at and reran. No production migration
+or installed data was modified to accommodate a fixture.
+
+Full final Worker/Team/API regressions and affected vet are pending; publish only
+after they pass. Independent source reviews found no blocking domain/HTTP issue.
+Existing full native Windows sandboxrunner environment failure remains recorded,
+not a native full-suite pass. Native and Linux-race selectors explicitly add
+domain answers, HTTP and transactional authentication. All broader scope/review/
+physical/UI/installed/final-artifact gates stay OPEN; no final build is claimed.
+
+Final answer-increment affected integration PASS: Worker186.034s,
+Team43.798s, API75.920s, WebUI0.681s. Final affected integration vet,
+formatting and whitespace PASS. SQLite29.698s/recovery17.773s above cover
+the final unchanged112schema and reviewed contracts. Publish on the same branch
+and inspect its OWN mandatory hosted Windows/Linux/race/regression/guard results.
+Next functional boundary is bounded retained-answer observation/discovery, then
+exact authenticated original-owner Continue and request-specific model context;
+ordinary Task resume must not bypass the answer or Team/approval/recovery fences.

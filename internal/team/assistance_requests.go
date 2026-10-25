@@ -115,6 +115,21 @@ func (s *Service) AssistanceRequest(ctx context.Context, workspaceID, sessionID,
 		}
 	}
 	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		var err error
+		out, err = s.assistanceRequestTx(ctx, tx, workspaceID, sessionID, requestID, readerPrincipalID)
+		return err
+	})
+	if err != nil {
+		return AssistanceRequest{}, err
+	}
+	return out, nil
+}
+
+// assistanceRequestTx shares the exact bounded observation with domain writes.
+// The caller owns the transaction; this helper never starts another one.
+func (s *Service) assistanceRequestTx(ctx context.Context, tx storage.Tx, workspaceID, sessionID, requestID, readerPrincipalID string) (AssistanceRequest, error) {
+	var out AssistanceRequest
+	err := func() error {
 		var completion, seal, parentCompletion, parentSeal, planRaw, snapshotRaw, snapshotSeal, priorRaw, memberConfig, noticeRaw, teamID string
 		var role, capability, protocol, memberPrincipal, routePolicy string
 		err := tx.QueryRowContext(ctx, assistanceRequestReadSQL, readerPrincipalID, requestID, workspaceID, sessionID).Scan(&out.RequestID, &out.WorkspaceID, &out.SessionID, &out.PlanID, &out.AssignmentKey, &out.MemberID, &out.MemberName, &out.ParentTaskID, &out.TaskID, &out.AttemptID, &out.RunID, &out.WaitStepID, &out.NoticeMessageID, &out.AuthorPrincipalID, &out.Question, &out.ProjectID, &out.ProjectWorkspaceID, &out.ArtifactSessionID, &out.TaskState, &out.TaskRevision, &out.WorkerRevision, &out.CreatedAt, &completion, &seal, &parentCompletion, &parentSeal, &planRaw, &snapshotRaw, &snapshotSeal, &priorRaw, &memberConfig, &noticeRaw, &teamID, &role, &capability, &protocol, &memberPrincipal, &routePolicy)
@@ -166,7 +181,7 @@ func (s *Service) AssistanceRequest(ctx context.Context, workspaceID, sessionID,
 			return ErrInvalid
 		}
 		return validateAssistanceGraph(ctx, tx, out, planRaw, priorRaw, memberConfig, snapshot)
-	})
+	}()
 	if err != nil {
 		return AssistanceRequest{}, err
 	}

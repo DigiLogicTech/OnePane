@@ -475,6 +475,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/live", s.getTeamLiveRoom)
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/assignments/{taskID}/outputs", s.getTeamAssignmentOutputs)
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/assistance/{requestID}", s.getTeamAssistanceRequest)
+	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/assistance", s.listTeamAssistanceRequests)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/assistance/{requestID}/answers", s.answerTeamAssistanceRequest)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/assistance/{requestID}/continue", s.continueTeamAssistance)
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/assistance/{requestID}/answer", s.getTeamAssistanceAnswer)

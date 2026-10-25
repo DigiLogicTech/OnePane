@@ -144,7 +144,7 @@
   const scope=onepaneWorkspace;
   openModal("Live Team",'<section class="team-room" id="onepaneTeamRoom"><p class="page-subtitle">One shared session. Watch contributions and observed turns, send guidance, then request replies. Tool execution still requires the accepted Task plan.</p><div class="toolbar" role="group" aria-label="Team view"><button class="btn" data-team-view="conversation" aria-pressed="true">Conversation</button><button class="btn" data-team-view="agents" aria-pressed="false">Agents</button><button class="btn" data-team-refresh>Refresh</button></div><p data-team-status role="status">Connecting to the Task’s Team…</p><div data-team-execution-controls hidden><button class="btn" type="button" data-team-pause>Pause Team</button><button class="btn" type="button" data-team-resume>Resume Team</button><p data-team-hold-status role="status"></p></div><details data-team-cancel-controls hidden><summary>Cancel Team work</summary><p>Request cancellation of this Task, its contributions and their descendant Tasks. Completed results remain available. This records a request; already-started external actions may still need reconciliation.</p><label>Reason (optional)<input data-team-cancel-reason maxlength="2048"></label><button class="btn" type="button" data-team-cancel>Request cancellation</button></details><div data-team-conversation><div class="toolbar"><button class="btn" data-team-older>Earlier messages</button><button class="btn" data-team-live hidden>Return to live</button></div><div class="team-room-feed" data-team-feed tabindex="0" aria-label="Team conversation"></div></div><div class="team-room-agents" data-team-agents hidden></div><form class="qa-form" data-team-form><label>Guidance recipient<select aria-label="Guidance recipient" data-team-guidance-target><option value="">Whole team</option></select></label><p class="list-meta">Addressed guidance stays visible in the shared room and reaches the selected agent on its next reasoning step. It does not change the accepted plan or grant permissions.</p><label>Message to the room<textarea rows="3" maxlength="8000" data-team-draft required></textarea></label><div class="toolbar"><button class="btn" type="submit" data-team-send>Send message</button><label>Request replies from<select aria-label="Request replies from" data-team-target><option value="">All agents</option></select></label><button class="btn primary" type="button" data-team-ask>Request replies</button></div><p class="list-meta">Sending saves your message. Request replies queues reasoning turns. Waiting does not mean that an agent or model is running.</p></form></section>');
   const el=document.getElementById("onepaneTeamRoom");if(!el)return;
-  const get=s=>el.querySelector(s);let roster="",timer=null,watchTimer=null,planEditor=null;
+  const get=s=>el.querySelector(s);let roster="",timer=null,watchTimer=null,planEditor=null,assistance=null;
   const alive=()=>el.isConnected&&scope===onepaneWorkspace;
   const c=controller({api:apiRequest,taskID,workspaceID:scope,alive,onChange:draw});
   function draw(s){
@@ -171,6 +171,7 @@
    const cancellable=!!s.room&&s.room.execution_mode==="team"&&s.room.assignments?.length&&s.room.accepted_plan_id&&["created","ready","running","waiting_dependency","waiting_approval","paused","blocked","completion_requested","verifying"].includes(s.room.task_state);
    get("[data-team-cancel-controls]").hidden=!cancellable;get("[data-team-cancel]").disabled=!cancellable||s.busy;
    planEditor?.draw(s);
+   assistance?.draw(s);
   }
   el.querySelectorAll("[data-team-view]").forEach(b=>b.onclick=()=>c.switchView(b.dataset.teamView));
   get("[data-team-guidance-target]").onchange=e=>{c.state.guidanceTarget=e.target.value};
@@ -179,6 +180,7 @@
   get("[data-team-cancel]").onclick=()=>c.cancelExecution(get("[data-team-cancel-reason]").value);
   get("[data-team-form]").onsubmit=e=>{e.preventDefault();c.send()};get("[data-team-ask]").onclick=()=>c.ask();get("[data-team-refresh]").onclick=()=>c.refresh();get("[data-team-older]").onclick=()=>c.older();get("[data-team-live]").onclick=()=>c.live();
   if(root.OnePaneTeamAssignments)planEditor=root.OnePaneTeamAssignments.mount(el,c);
+  if(root.OnePaneTeamAssistance)assistance=root.OnePaneTeamAssistance.mount(el,c,{api:apiRequest,taskID,workspaceID:scope,alive});
   if(root.OnePaneTaskRecovery){
    const button=document.createElement("button"),panel=document.createElement("section");let recovery=null;
    button.type="button";button.className="btn";button.textContent="Recovery records";button.setAttribute("aria-expanded","false");
@@ -186,7 +188,7 @@
    button.onclick=()=>{if(!alive())return;const opening=panel.hidden;recovery?.stop();recovery=null;panel.hidden=!opening;button.setAttribute("aria-expanded",String(opening));if(opening)recovery=root.OnePaneTaskRecovery.mountInto(panel,taskID,scope)};
   }
   const observer=new MutationObserver(()=>{if(!alive())stop()});observer.observe(document.body,{childList:true,subtree:true});
-  function stop(){clearTimeout(timer);clearTimeout(watchTimer);observer.disconnect();planEditor?.dispose();c.stop();el.textContent="Team view closed."}
+  function stop(){clearTimeout(timer);clearTimeout(watchTimer);observer.disconnect();planEditor?.dispose();assistance?.dispose();c.stop();el.textContent="Team view closed."}
   // Scope changes must clear the room even while an HTTP read is still waiting.
   function watchScope(){if(!alive()){stop();return}watchTimer=setTimeout(watchScope,1000)}
   async function tick(){if(!alive()){stop();return}if(!document.hidden)await c.refresh();if(alive())timer=setTimeout(tick,2000);else stop()}

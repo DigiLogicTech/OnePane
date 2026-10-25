@@ -2,8 +2,8 @@
 
 Status: durable request/wait, bounded single-request/answer reads and immutable
 authenticated human answer storage implemented. Explicit Continue and required
-request-specific next-model context source are under final regression on26October2026.
-Bounded session discovery and the input UI remain unimplemented.
+request-specific next-model context source are published as abebacc6. Bounded
+session discovery and the input panel source are under final regression on26October2026.
 The release execution manifest remains authoritative for open gates. This is
 human assistance for an accepted contribution; peer execution, new helpers and
 versioned reviewed reassignment remain separate approved work.
@@ -207,4 +207,51 @@ Source tests exercise actual human handler -> retained domain answer -> Continue
 -> next model request, with separate production bearer/browser HTTP credential
 tests. The transport is deterministic; this is neither physical AI nor installed
 acceptance, nor a single authenticated product/UI end-to-end acceptance run.
-Bounded session discovery and Needs your input UI remain the next boundary.
+Bounded session discovery and the input panel are described below.
+
+## Current-request discovery and input panel source — 26 October 2026
+
+GET /v1/team-sessions/{sessionID}/assistance returns at most eight current
+requests. Discovery starts from the accepted assignment graph and follows the
+latest exact original Attempt/Worker/committed human wait to its unique request;
+unrelated newer history and room traffic cannot evict pending work. Root/child
+seals, accepted manifest/graph, frozen/current member binding, active scope and
+reader membership are checked in one transaction, including an empty result.
+The endpoint repeats comparable collections, canonical root scope/revision,
+conditional Project permission and original credential checks before private
+128KiB output. Discovery changes no assistance/execution/audit/accounting rows.
+
+The existing Team room mounts a Needs your input panel showing the named
+contributor and actual question as text. Save reply stores one final reply;
+Continue original task is a separate explicit action after a saved reply is
+observed. It retains current original-owner IDs/revisions, suppresses duplicate
+submits and never retries execution automatically. Unknown outcomes direct the
+operator to inspect the saved reply/current work. Existing replies can be loaded;
+a genuine missing-answer404 preserves the draft, while denied reads clear private
+state. The shared API helper retains HTTP status without changing CSRF behavior.
+
+Drafts survive ordinary polls, revision changes and holds. Same session/plan
+assignment or member replacement, scope changes, denied reads and disposal
+invalidate retained data and in-flight responses. Room snapshots prevent external
+in-place mutation from evading these checks. Retained request revisions never
+move backward on delayed list/answer responses. Unchanged answer retries retain
+their submission identity; a newer waiting revision creates a fresh submission
+identity and still cannot replace a committed final answer. Required permissions,
+holds and exact CAS remain server-enforced.
+
+Node controller and mounted renderer tests cover inert markup, byte bounds,
+draft/focus/selection retention, actual labels and disabled pending controls,
+separate Save/Continue, revised holds, duplicate operations, both late-response
+orders, source API HTTP statuses/CSRF, scope replacement and disposal. This is
+source UI evidence. Final page-by-page Windows/Ubuntu product review, physical
+inference/hardware and installed acceptance remain outstanding.
+
+Combined source integration additionally exercises both real bearer and browser
+HTTP authentication: after an explicitly synthetic bootstrap wait, public Worker
+Tick and production loopback inference create a new actual human question and
+request. Authenticated discovery/answer/Continue retains the original owner and
+exact receipt. A reconstructed Worker includes exact authored question/answer
+and continuation provenance in its actual next model request after12later room
+messages. Another waiting Tick dispatches nothing without another approval.
+This closes the separate-backend-flow source-test gap; it remains deterministic
+source evidence and does not establish browser, physical AI or installed QA.

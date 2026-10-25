@@ -2,7 +2,7 @@
 
 Updated: 2026-10-26 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
 
-Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Durable Team human requests, pinned original scope, bounded private request/answer reads and authenticated immutable answer writes are implemented. Retained interrupted-session explicit Continue/context work is being remediated and validated: exact original Task/Attempt/Worker, same-transaction human credential/admission, immutable applied-answer receipt and required next-model context. Generic resume fences remain. Exact commits, genuine failures, validation and current CI observations are in the latest sections below. Next functional boundary is bounded session discovery/UI, followed by reviewed reassignment, closed recovery attribution, Library ingestion and all remaining approved functionality. Inspect each new commit's own Windows/Linux/race/regression checks; source guards do not imply packaging or physical acceptance. Ordered human audits/sign-offs, real AI/Node/L4, LAST UI, installed Windows/Ubuntu and final versioned artifact gates remain OPEN. No final build is claimed.
+Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Original-owner authenticated Continue, immutable applied-answer receipt and required next-model context are published as abebacc6 and pass their own mandatory hosted source workflows. Bounded current-request discovery and the existing Team room's separate Save reply/Continue panel are under final source regression. Generic resume fences remain. Exact commits, genuine failures, validation and current CI observations are in the latest sections below. Next functional boundary is reviewed peer help/reassignment/fairness, closed recovery attribution, Library ingestion and all remaining approved functionality; authenticated product/physical/UI acceptance remains required. Inspect each new commit's own Windows/Linux/race/regression checks; source guards do not imply packaging or physical acceptance. Ordered human audits/sign-offs, real AI/Node/L4, LAST UI, installed Windows/Ubuntu and final versioned artifact gates remain OPEN. No final build is claimed.
 ## Authority and continuation
 
 The Git repository is `D:\Codex\OnePane\source`; its parent is an unrelated unborn wrapper repository. Continue `codex/team-live-ci-completion`, existing draft PR [228](https://github.com/DigiLogicTech/OnePane/pull/228), based on `feature/rc11-policy-worker-diagnostics-integration-20261011` (`fb7f5df7`). Preserve the stacked integration route; do not merge the historical feature PRs independently or reset local work.
@@ -21,7 +21,7 @@ Runtime/control remediation `f7cd569f300d716234efa0e5ec2d385bc778d5d2` subsequen
 | --- | --- | --- | --- |
 | TEAM-HOLD | Source validated; hosted/physical acceptance pending | Atomic accepted-Team pause/resume, original Attempt retention, draining observation, authority and descendant dispatch fences; backend/controller/migration regressions | Publish to existing PR and inspect exact-head CI; physical effects and final browser review remain open |
 | TEAM-CANCEL | Intent/parking, pristine ordinary-Task and attributed local-reasoning Team settlement source validated; executed/unknown recovery owner missing | Scoped atomic intent, proposal discard and between-tick parking of the exact original Worker/Attempt; bounded durable intake/discovery and read-only case inspection implemented | Complete versioned effect inventory, authenticated human decisions and independent actual postconditions before settlement. Intake/read APIs do not authorize recovery or replay |
-| TEAM-COLLAB | Partial source; result and bounded Library contribution navigation implemented, newest hosted validation pending | Bounded two-member concurrency and constrained queueing, agent draft adoption, criteria/guidance; current ledger-bound completion metadata, explicit result preview and exact Task-associated publication controls; dynamic help/reassignment and broader fairness remain open | Inspect new exact-head CI, then implement durable help requests/answers with original-owner continuation and versioned reviewed reassignment; preserve immutable graph and physical acceptance |
+| TEAM-COLLAB | Partial source; original-owner human assistance backend/required model context passes hosted CI, discovery/input UI under source validation | Bounded two-member concurrency, agent draft adoption, criteria/guidance, ledger-bound completion/publications and durable human request/answer/explicit Continue; peer help/reassignment and broader fairness remain open | Publish and inspect exact discovery/UI CI, then reviewed peer help/versioned reassignment; preserve immutable accepted graph, authenticated product and physical acceptance |
 | SCOPE-AUDIT | Current15issue source reconciliation recorded; full acceptance trace still open | `rc11-current-release-scope-matrix.md` separates existing source from genuine Library/toolchain/service/native-engine/Team/recovery/product gaps and physical/review/installed gates | Preserve implemented Council, L4 DAG and runtime foundations; continue actual remaining functionality rather than reimplementing historical unchecked bullets |
 | L4-E2E | Open blocking acceptance | Real local objective → authorized Workspace Tasks → tools/build/tests → verified Library deliverable, restart and resource-wait recovery, no unintended cloud or duplicate effects | Complete functional gaps from scope audit; capture real CPU-only evidence |
 | AI-LIFECYCLE | Open blocking acceptance | Real model download/install/verify/remove; CPU/GPU inference; Colibri and OmniRoute; queuing, swap, memory reclamation, fallback and provider health | Follow physical lifecycle protocol; fixtures/compilation cannot close gate |
@@ -1253,3 +1253,68 @@ whole-tree/user reviews, real AI/CPU/GPU/Node/L4/Colibri/OmniRoute/constrained
 hardware, final UI, Windows-first/Ubuntu install/upgrade/custom roots and final
 versioned artifacts/checksums/provenance gates remain OPEN. No installer, final
 build or release acceptance is claimed. Existing installed data is preserved.
+
+## TEAM-HELP-DISCOVERY-001 — bounded current requests and human input panel
+
+Exact abebacc698795b450ff55e7f44b0770218fdd3e0 integration40219727151,
+Windows source guard40219727075 and Ubuntu source guard40219727157 SUCCESS.
+Windows and all five Linux source/race/full-regression families passed; physical
+approval SKIPPED. This validates the published continuation source only. It
+does not establish installed packages or physical AI/Node acceptance.
+
+Current-request discovery starts with at most8accepted assignments, not a
+global latest-N history filter. Same-TX root/child seals, accepted manifest,
+frozen/current member/profile/graph/scope/reader checks precede current latest
+Attempt/Worker/committed human wait/request lookup and existing bounded request
+materialization. Empty lists retain reader/tenant/root/graph/scope checks.
+Production candidate plans with1024unrelated Tasks/Attempts/Workers/requests
+use persistent indexed SEARCH before/afterANALYZE. PRAGMA query_only tests
+confirm observation performs no writes; holds and accounting remain intact.
+
+New GET /v1/team-sessions/{sessionID}/assistance repeats comparable collections
+and canonical root scope/revision. Team/task reads, conditional Project reads
+even for empty lists, final active Project/named scope and original credential
+precede private no-store <=8request/128KiBoutput. Scope/malformed/duplicate/
+unsafe/changed observations fail closed. No answer or execution is inferred.
+
+The existing Team room mounts Needs your input with named contributor, actual
+question, bounded authored reply, Save reply, Check for saved reply and separate
+Continue original task. Saving cannot implicitly Continue. It retains exact
+owner/revisions, suppresses pending duplicates and never auto-retries execution.
+Draft/focus/selection survive polls and revised holds. Denied reads, scope/
+same-plan assignment/member replacement and disposal clear private state and
+invalidate late responses. In-place external room mutation cannot alter the
+retained binding. Genuine missing-answer404 preserves drafts; shared API helper
+now retains error.status while preserving existing CSRF/credentials behavior.
+
+Read-only review reproduced older answer reads overwriting newer paused Task
+revisions and the reverse older list/newer answer order. Monotonic revision/state
+guards and successful-load/Continue read invalidation fix both. Tests cover
+both orders, unchanged retry keys versus revised-owner fresh keys, scope/plan/
+Attempt/Worker replacement, duplicate actions, revoked reads and late disposal.
+Mounted fake DOM forbids innerHTML, checks authored text/actual labels/buttons,
+pending disabled controls, paused Continue, draft/focus/selection and cleared
+private rendering. This is source UI evidence, not final product/browser review.
+
+Local affected full integration PASS: API101.445s, Team44.682s, WebUI0.719s.
+All Worker assistance suites65.124s PASS; focused discoveryWorker9.686s,
+HTTP10.626s, WebUI0.547s; independent production-plan/readonly suite6.672s.
+All29JavaScript validators PASS8.323s, affected integration vet/whitespace PASS.
+The combined authenticated source-flow test2.640s PASS for bearer and browser:
+after an explicitly synthetic bootstrap wait, public Worker Tick/production
+loopback inference creates a new actual human question/request; authenticated
+discovery/answer/Continue commits exact receipts; reconstructed Worker receives
+the exact question/answer/continuation in its actual next model request after
+12later room messages. Same Task/Attempt/Worker retained, no dispatch on another
+waiting Tick. API integration vet/whitespace PASS. This is deterministic source
+integration, not browser or physical inference acceptance. New-source hosted CI
+remains required; previous abebacc6success is not transferred.
+
+Next continuation: same branch/PR, publish validated discovery/input source and
+inspect its own mandatory workflows. Then reviewed peer help/versioned
+reassignment/fairness and semantic recovery inventory/disposition/postconditions,
+Library/toolchain/service/native-engine functionality and full release queue.
+All ordered whole-tree/user signoffs, real CPU/GPU/Node/L4/Colibri/OmniRoute/
+constrained hardware, final Windows/Ubuntu UI and installed clean/upgrade/custom
+root/migration/backup/rollback/artifact/checksum gates remain OPEN. No final
+build, installer, physical AI or completed product acceptance is claimed.

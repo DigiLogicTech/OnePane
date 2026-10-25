@@ -24,6 +24,17 @@ Still required: broader fair concurrent teamwork; dynamic help/reassignment; ric
 
 ## Required experience
 
+26October source continuation: durable original-owner human assistance now has
+immutable requests/answers, explicit authenticated Continue, atomic applied-input
+receipts and required next-model provenance. Bounded current-request discovery
+and Needs your input controls are wired to the existing Team room, with separate
+Save reply/Continue actions, draft retention and denied/stale-response fencing.
+Actual authenticated HTTP -> Worker wait -> answer/Continue -> reconstructed
+Worker -> next-model transport source tests cover bearer and browser credentials.
+Deterministic source/controller/renderer tests do not establish real two-agent
+execution, final Windows/Ubuntu product review or installed acceptance. Peer
+help, reviewed versioned reassignment and broader fairness remain required.
+
 - One objective and a reusable roster of named agents with roles, model choices, scoped capabilities and persistent project context.
 - **Conversation view:** a shared room showing human guidance, agent messages, requests for help, replies, assignments, handoffs, review and the consolidated result. Show actual authored messages and concise progress updates.
 - **Agents view:** individual panels showing each agent's assignment, current observed state, selected model/runtime, tool activity, dependencies, outputs and blockers. Selecting a panel opens its history and artifacts.

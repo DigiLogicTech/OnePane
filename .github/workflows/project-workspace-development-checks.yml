@@ -86,6 +86,8 @@ on:
       - 'internal/vault/**'
       - 'internal/webui/static/team-room.*'
       - 'internal/webui/static/team-assignments.js'
+      - 'internal/webui/static/team-assistance.js'
+      - 'scripts/validate_team_assistance.js'
       - 'scripts/validate_team_assignments.js'
       - 'scripts/validate_team_room.js'
       - 'internal/webui/static/task-recovery.*'
@@ -221,6 +223,8 @@ jobs:
           node scripts/validate_team_room.js
           node --check internal/webui/static/team-assignments.js
           node scripts/validate_team_assignments.js
+          node --check internal/webui/static/team-assistance.js
+          node scripts/validate_team_assistance.js
           node --check internal/webui/static/task-recovery.js
           node scripts/validate_task_recovery.js
           node --check internal/webui/static/web-chat-page.js
@@ -298,6 +302,8 @@ jobs:
           go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceAnswer ./internal/agentworker ./internal/team
           go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceGenericResume ./internal/agentworker
           go test -race -tags integration -count=1 -timeout 3m -run 'TestTeamAssistance(Continue|Context)' ./internal/agentworker
+          go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceDiscovery ./internal/agentworker ./internal/api
+          go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceFlowHTTP ./internal/api
           go test -race -tags integration -count=1 -timeout 3m -run TestApprovalContinuation ./internal/task
           go test -race -tags integration -count=1 -timeout 3m ./internal/recoveryinventory
           go test -race -tags integration -count=1 -timeout 3m ./internal/budget
@@ -528,6 +534,8 @@ jobs:
           go test -tags integration -count=1 -timeout 3m -run TestTeamAssistanceAnswer ./internal/agentworker ./internal/team
           go test -tags integration -count=1 -timeout 3m -run TestTeamAssistanceGenericResume ./internal/agentworker
           go test -tags integration -count=1 -timeout 3m -run 'TestTeamAssistance(Continue|Context)' ./internal/agentworker
+          go test -tags integration -count=1 -timeout 3m -run TestTeamAssistanceDiscovery ./internal/agentworker ./internal/api
+          go test -tags integration -count=1 -timeout 3m -run TestTeamAssistanceFlowHTTP ./internal/api
           go test -tags integration -count=1 -timeout 3m -run TestApprovalContinuation ./internal/task
           go test -tags integration -count=1 -timeout 3m ./internal/recoveryinventory
           go test -tags integration -count=1 -timeout 3m ./internal/budget

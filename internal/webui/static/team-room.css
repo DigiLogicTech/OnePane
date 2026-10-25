@@ -18,3 +18,8 @@
 .team-assignment-section [data-team-assignment-status]{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:12px;max-height:34vh;overflow:auto}
 .team-assignment-section fieldset{border:1px solid var(--border);border-radius:8px;margin-block:12px;padding:12px;min-width:0}
 .team-assignment-section fieldset label{display:block;margin-block:8px}
+.team-assistance-section{min-width:0;display:grid;gap:12px;overflow-wrap:anywhere}
+.team-assistance-section .panel-card{min-width:0}
+.team-assistance-section label{display:block;margin-block:8px}
+.team-assistance-section button{margin-inline-end:8px;margin-block:4px;white-space:normal;max-width:100%}
+.team-assistance-section article>p{white-space:pre-wrap}

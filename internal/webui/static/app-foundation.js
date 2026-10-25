@@ -678,7 +678,7 @@ async function apiRequest(path,opts={}){
   const res=await fetch(path,{credentials:'same-origin',...opts,method,headers});
   const text=await res.text(); let body={};
   try{body=text?JSON.parse(text):{}}catch{body={error:text}}
-  if(!res.ok) throw new Error(body?.error||body?.message||`HTTP ${res.status}`);
+  if(!res.ok){const error=new Error(body?.error||body?.message||`HTTP ${res.status}`);error.status=res.status;throw error}
   return body;
 }
 api.json=async function(path,opts={}){try{return await apiRequest(path,opts)}catch(err){console.warn('OnePane API',path,err);return null}};

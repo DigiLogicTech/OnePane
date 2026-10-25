@@ -6,24 +6,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/DigiLogicTech/OnePane/internal/recoveryinventory"
-	"github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
 )
 
 func TestRecoveryTaskAttemptSchemaRejectsUnreviewedOwnership(t *testing.T) {
 	ctx := context.Background()
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "contract.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if err = db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
+	db := recoveryinventory.OpenMigratedRecoveryFixture(t, ctx)
+	var err error
 	if err = recoveryinventory.ValidateTaskAttemptSchema(ctx, db.SQL()); err != nil {
 		t.Fatal(err)
 	}
@@ -91,14 +83,8 @@ func TestRecoveryTaskAttemptSchemaRejectsUnreviewedOwnership(t *testing.T) {
 
 func TestRecoveryTaskAttemptSchemaIsBoundedAndReadOnly(t *testing.T) {
 	ctx := context.Background()
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "bounds.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if err = db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
+	db := recoveryinventory.OpenMigratedRecoveryFixture(t, ctx)
+	var err error
 	conn, err := db.SQL().Conn(ctx)
 	if err != nil {
 		t.Fatal(err)

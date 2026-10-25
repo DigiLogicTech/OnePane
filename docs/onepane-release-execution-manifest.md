@@ -2,7 +2,7 @@
 
 Updated: 2026-10-25 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
 
-Current continuation: `codex/team-live-ci-completion`, draft PR228, retains the approved full scope. Published `9e8de164ed93aac6b2fae45959ec14e8a2270f68` integration40134328766 and QAguard40134328855 both SUCCESS: native Windows, hosted Linux/race, managed inference/Colibri source regression and full regression/cross-platform compilation passed; physical approval/MSI were skipped. The next increment implements bounded assignment publication navigation and a private indirect recovery schema prerequisite, documented below. Inspect its exact-head CI before rerunning anything, then continue durable Team help/original-owner continuation or recovery semantic attribution. Historical checkpoints describe only their own commits. Full human recovery, collaboration lifecycle, whole-product reviews, physical and installed Windows/Ubuntu acceptance remain open.
+Current continuation: `codex/team-live-ci-completion`, draft PR228, retains the approved full scope. Published `e0b3ad17239994b49cac42da0cd7c637068533c4` integration40153464377 genuinely FAILED the Linux recovery-inventory race package's three-minute deadline during repeated migrations. Windows passed; later managed-inference/race/full-regression stages were skipped. QAguard40153464410 SUCCESS. The next increment fixes that fixture without extending its deadline, makes proposal continuation/journaling atomic, fences sealed parent criteria for every Team contribution, and refuses inference preparation after routing-journal failure. It also supplies guarded current-source Ubuntu packaging source without producing a package. Inspect the next published commit's exact-head CI before rerunning anything, then continue durable Team help/original-owner continuation or recovery semantic attribution. Historical checkpoints describe only their own commits. Full human recovery, collaboration lifecycle, whole-product reviews, physical and installed Windows/Ubuntu acceptance remain open.
 
 ## Authority and continuation
 
@@ -34,7 +34,7 @@ Runtime/control remediation `f7cd569f300d716234efa0e5ec2d385bc778d5d2` subsequen
 | EXACT-CI | Pending final source | All applicable mandatory workflows pass against exact release commit; inspect job results/skips, distinguish superseded runs | Publish validated source to existing PR; reconcile stacked PRs and required workflow coverage |
 | WINDOWS-INSTALL | Open blocking acceptance | Versioned x64 MSI, clean install, populated Alpha/RC upgrade, chosen install/data drive, service/reboot, rollback, uninstall/reinstall preserving models/Projects/credentials | Final reviews; reviewed-SHA/protected-environment workflow configuration; record existing roots/backups before installed QA |
 | UBUNTU-INSTALL | Open blocking acceptance | Versioned amd64 artifact; clean install, upgrade, restart, rollback and preserved data | Windows-first sequence; Ubuntu host and applicable installed QA |
-| UBUNTU-PROVENANCE | Open release dependency | Existing `ubuntu-alpha3.yml` and `alpha3-build.yml` restore historical Alpha2 source/patches; they cannot establish current RC11 artifact identity | Use the current-source Debian builder only through a reviewed exact-SHA workflow after the mandatory review/UI/Windows-first gates; do not dispatch legacy packaging as current RC11 |
+| UBUNTU-PROVENANCE | Guarded current-source workflow implemented; actual assembly/provenance unverified | `rc11-ubuntu-qa.yml` and builder bind current clean source, exact workflow/review/Windows acceptance SHA, authoritative CI, Debian/ELF/Go metadata and lifecycle-hook hashes;39 source checks pass. Legacy Alpha workflows remain unsuitable | Configure protected environment and obtain actual review/UI/Windows-first evidence before dispatch; source tests do not establish a package or installed acceptance |
 | RELEASE | Blocked by preceding gates | Final version/commit, artifacts, SHA-256, provenance, notes and final regression; explicit manual acceptance complete | No installer generated or final release claimed in this checkpoint |
 
 ## Evidence register
@@ -486,3 +486,101 @@ and bounded durable attribution before any constrained observation collector.
 All physical/local-model/Node/L4, full code/security sign-offs, LAST UI,
 Windows-first/Ubuntu installed acceptance and final-source packaging gates remain
 OPEN. No installer/checksum/final build is claimed.
+
+## Published increment and next confirmed defect
+
+Published the preceding increment as
+`e0b3ad17239994b49cac42da0cd7c637068533c4` on the same branch/PR228.
+Integration40153464377 is IN_PROGRESS; QAguard40153464410 SUCCESS. Inspect the
+exact new-head job conclusions before reruns or completion claims.
+
+PROPOSAL-CONTINUATION-001 (blocking journal/authority defect): direct actual
+replan/escalation handlers reproduced4rejected step/audit writes still reporting
+successful continuation with changed counters/revision/route but no matching
+journal/audit.14additional changed-binding cases mutate after real Task pause or
+cancellation, interrupted/foreign Attempt principal, inactive tenant and supplied/
+persisted Workspace drift. Two healthy controls pass. Baseline3.360s uses actual
+migrated SQLite/handlers and retained prior successful model journal; no transport
+or physical effects execute, and no duplicate external replay is proved. Atomic
+exact-owner continuation remediation and its full validation are in progress;
+do not mark it resolved until the final source and affected tests pass.
+
+The subsequent human-assistance implementation boundary is now persisted in
+`rc11-team-help-continuation-design.md`; it remains design, not an implemented
+reply/resume protocol. A separate current-source protected Ubuntu packaging
+workflow is being prepared as source only. Mandatory sign-offs/Windows-first
+installed evidence and protected environment approval remain prerequisites to
+any actual Ubuntu package build or installer acceptance.
+
+## Atomic proposal continuation, route journals and current-source Ubuntu path
+
+Reconciled the retained proposal/helper/help-design/Ubuntu-builder changes instead
+of discarding them. Remote branch and draft/unmerged PR228 still match e0b3ad17;
+base remains fb7f5df7. Current GitHub scope remains15open issues #19–30,#85,#86,
+#114. Required ordered human reviews and native Unreal/UEFN scope remain intact.
+
+Exact-source integration40153464377 FAILED Linux race: recoveryinventory timed
+out at180.024s while redundantly migrating another isolated database (stack in
+migration0035 parent-table rebuilding). This was not a race report. Windows
+passed; later managed inference/race/full regression skipped. QAguard40153464410
+passed. Five redundant migrations now share only immutable bytes from one actual
+fully migrated/WAL-checkpointed/closed schema per test process, then open separate
+files/pools. Three parallel isolation checks verify real migrations, WAL/FK,
+private rows/triggers, rejected writes/read-only observation and unchanged source
+bytes. Full native recoveryinventory29.022s and clone checks2.218s pass. No
+production recovery behavior or race deadline changed; hosted confirmation open.
+
+PROPOSAL-CONTINUATION-001 source remediated: replan/escalation now select and CAS
+the exact active original Task/Attempt/Worker/tenant/Project/Workspace owner,
+repeat accepted-Team/dependency/ancestor-hold checks, derive counters/route/last
+candidate from durable state and commit continuation plus immutable journal/audit
+in one transaction. Rejected writes roll back. Failed/cancelled observations or
+commits halt scheduling pending startup recovery; explicit stale/denied owner
+rejection before writes does not halt a newer incarnation. Prior successful model
+history is preserved; startup recovery parks the original lineage, never replays
+a claimed external effect.38actual SQLite/accepted-Team cases pass13.911s; no
+transport, model, runtime or tool executes in these focused handler tests.
+
+TEAM-ROOT-CRITERIA-001 (blocking authority defect): actual accepted child replan
+and escalation continued after its sealed root completion criteria changed.
+The shared teamgate previously checked the root hash only for the root itself.
+Every accepted contribution now checks the same persisted parent's exact sealed
+hash. Two baseline failures4.184s now refuse alongside healthy real accepted graph,
+child drift, foreign ancestry and durable pause-hold controls. This shared fence
+also applies at normal admission/dispatch callers; broad regression follows.
+
+ROUTE-JOURNAL-001 (blocking provenance/accounting boundary): real scheduler and
+budget fixtures reproduced two selected routes admitting prepared dispatch after
+rejected routing step/audit and two unavailable routes concealing the failed
+journal behind a BLOCKED transition. Targeted baseline2.696s failed all4cases.
+Both route outcomes now require committed journal/audit before reserving quota,
+claiming dispatch, waiting or changing Task/Worker state. Patched route+existing
+budget-journal suite2.600s passes with unchanged owner, no reservation/dispatch,
+no partial journal/audit and no false unknown-outcome alarm. Rejected triggers
+specifically exclude separate budget observations, so this is not a downstream
+budget-journal failure. Windows/Linux race selectors include both new suites.
+
+UBUNTU-PROVENANCE now has an implemented protected manual current-source path:
+rc11-ubuntu-qa.yml plus guarded builder,39source checks and provenance guide.
+It requires exact source/workflow/review/approval/Windows-installed-acceptance SHA
+and bounded evidence references, protected environment and latest successful
+exact-source authoritative CI. Output stays outside checkout. Inspection verifies
+Debian version/amd64, ELF64 amd64, embedded Go/VCS/source metadata and reviewed
+service/hook hashes plus postbuild clean source; emits candidate manifest and
+SHA256SUMS only after those checks. Retained literal-escape/source-dirtiness bugs
+were fixed. Tests inject command results; no Go/dpkg/build/install/service/model
+execution or actual checksum/artifact qualification occurred. Review references
+are operator declarations, not independent acceptance proof. Environment protection
+and genuine review/UI/Windows-first records remain human prerequisites. The
+artifact is explicitly unsigned QA, never a final release.
+
+Persisted rc11-team-help-continuation-design.md records the next actual human
+request/answer/explicit original-owner resume protocol. It remains design only;
+generic chat/Task resume is not that implementation. Recovery row vocabularies,
+bounded durable attribution/hash/freshness/immutable human decisions/independent
+actual postconditions remain open. All physical AI/Node/L4, code/security/vision
+sign-offs, LAST UI, installed Windows/Ubuntu and final release gates remain OPEN.
+No installed Alpha, user state, models or runtime was changed; no installer or
+final build is claimed. Continue the same branch after exact new-source CI.
+
+Final changed-source Windows CGO0 integration passes Worker156.643s, Team65.314s, Task54.433s, Projectorchestrator49.658s, Teamworker28.956s, inference32.394s and Agentruntime21.322s. Affected integration vet and whitespace pass; unit Worker8.886s/recoveryinventory0.450s; Windows denied-packaging guard and39Ubuntu source/provenance checks pass. Commit this exact reviewed source to existing PR228; new hosted race and source guard evidence remains required.

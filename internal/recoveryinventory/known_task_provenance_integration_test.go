@@ -7,12 +7,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/DigiLogicTech/OnePane/internal/recoveryinventory"
-	"github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
 )
 
 type provenancePlanRecorder struct {
@@ -45,14 +43,8 @@ func (p *provenancePlanRecorder) QueryRowContext(ctx context.Context, query stri
 
 func TestKnownTaskProvenanceActualGuardUsesIndexedAbsenceProbes(t *testing.T) {
 	ctx := context.Background()
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "provenance.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if err = db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
+	db := recoveryinventory.OpenMigratedRecoveryFixture(t, ctx)
+	var err error
 	if _, err = db.SQL().Exec(`INSERT INTO workspaces(id,name,status,revision,created_at,updated_at) VALUES('ws','Unrelated','active',1,1,1)`); err != nil {
 		t.Fatal(err)
 	}

@@ -6,11 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
 )
 
 // A contract fixture is reviewed source. Integration tests must never regenerate
@@ -18,14 +15,8 @@ import (
 // retained authoring test omitted the required table DDL entirely.
 func TestRecoveryIndirectOwnershipSchemaRejectsChanges(t *testing.T) {
 	ctx := context.Background()
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "indirect.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if err = db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
+	db := OpenMigratedRecoveryFixture(t, ctx)
+	var err error
 	if err = ValidateIndirectOwnershipSchema(ctx, db.SQL()); err != nil {
 		t.Fatal(err)
 	}
@@ -137,14 +128,8 @@ func TestRecoveryIndirectOwnershipSchemaRejectsChanges(t *testing.T) {
 
 func TestRecoveryIndirectOwnershipSchemaBoundsAndReadOnly(t *testing.T) {
 	ctx := context.Background()
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "bounds.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if err = db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
+	db := OpenMigratedRecoveryFixture(t, ctx)
+	var err error
 	conn, err := db.SQL().Conn(ctx)
 	if err != nil {
 		t.Fatal(err)

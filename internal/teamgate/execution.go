@@ -70,12 +70,12 @@ func require(ctx context.Context, q Queryer, workspaceID, taskID string, admissi
 	} else if paused {
 		return nil, ErrPaused
 	}
-	var session, root, plan, sessionState, planState, rootState, body string
-	err := q.QueryRowContext(ctx, `SELECT s.id,s.task_id,p.id,s.status,p.status,t.state,p.plan_json
+	var session, root, plan, sessionState, planState, rootState, body, rootCompletion string
+	err := q.QueryRowContext(ctx, `SELECT s.id,s.task_id,p.id,s.status,p.status,t.state,p.plan_json,t.completion_json
 	 FROM task_execution_profiles ep JOIN team_sessions s ON s.id=ep.team_session_id
 	 JOIN tasks t ON t.id=s.task_id AND t.workspace_id=s.workspace_id AND t.archived_at IS NULL
 	 JOIN team_plans p ON p.id=s.accepted_plan_id AND p.session_id=s.id AND p.workspace_id=s.workspace_id
-	 WHERE ep.task_id=? AND ep.workspace_id=? AND s.workspace_id=? AND ep.execution_mode='team'`, taskID, workspaceID, workspaceID).Scan(&session, &root, &plan, &sessionState, &planState, &rootState, &body)
+	 WHERE ep.task_id=? AND ep.workspace_id=? AND s.workspace_id=? AND ep.execution_mode='team'`, taskID, workspaceID, workspaceID).Scan(&session, &root, &plan, &sessionState, &planState, &rootState, &body, &rootCompletion)
 	if errors.Is(err, sql.ErrNoRows) {
 		if marked {
 			return nil, ErrExecution
@@ -194,11 +194,11 @@ func require(ctx context.Context, q Queryer, workspaceID, taskID string, admissi
 			return nil, ErrExecution
 		}
 	}
-	if taskID == root {
-		sum := sha256.Sum256([]byte(completion))
-		if hex.EncodeToString(sum[:]) != rootHash {
-			return nil, ErrExecution
-		}
+	// Every contribution belongs to this sealed root, even when the current
+	// Task is a child. Valid child criteria cannot authorize a changed parent.
+	rootSum := sha256.Sum256([]byte(rootCompletion))
+	if hex.EncodeToString(rootSum[:]) != rootHash {
+		return nil, ErrExecution
 	}
 	for _, spec := range manifest.Assignments {
 		a, ok := byKey[spec.Key]

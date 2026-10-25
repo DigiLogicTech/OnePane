@@ -145,7 +145,9 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 		if err == nil {
 			err = scheduler.ErrNoEligibleCandidate
 		}
-		_ = s.journal(ctx, run.ID, "route", "failed", nil, nil, nil, nil, map[string]any{"error": err.Error(), "rejected": decision.Rejected})
+		if journalErr := s.journal(ctx, run.ID, "route", "failed", nil, nil, nil, nil, map[string]any{"error": err.Error(), "rejected": decision.Rejected}); journalErr != nil {
+			return immediateWorkerStep(failedResult(res, fmt.Errorf("record unsuccessful reasoning route: %w", errors.Join(err, journalErr))))
+		}
 		if shouldWaitForLocalModel(t, err, decision.Rejected) {
 			return immediateWorkerStep(s.waitForLocalModel(ctx, run, res, "awaiting qualified local model: "+err.Error()))
 		}
@@ -154,7 +156,9 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 	cand := decision.Selected.Candidate
 	kind := string(cand.Kind)
 	cid := cand.ID
-	_ = s.journal(ctx, run.ID, "route", "succeeded", &kind, &cid, nil, nil, map[string]any{"score": decision.Selected.Score, "protocol_level": cand.ProtocolLevel, "cost_class": cand.CostClass, "qualification": cand.Qualification})
+	if journalErr := s.journal(ctx, run.ID, "route", "succeeded", &kind, &cid, nil, nil, map[string]any{"score": decision.Selected.Score, "protocol_level": cand.ProtocolLevel, "cost_class": cand.CostClass, "qualification": cand.Qualification}); journalErr != nil {
+		return immediateWorkerStep(failedResult(res, fmt.Errorf("record selected reasoning route: %w", journalErr)))
+	}
 	reservationID, err := s.reserveReasoningBudget(ctx, run, rp, cand, tokens)
 	if err != nil {
 		if journalErr := s.journal(ctx, run.ID, "route", "failed", &kind, &cid, nil, nil, map[string]any{"action": "budget_reservation", "reservation_status": "denied", "budget_account_id": rp.BudgetAccountID, "error": err.Error(), "cost_class": cand.CostClass}); journalErr != nil {
@@ -765,40 +769,27 @@ func (s *Service) handleDelegate(ctx context.Context, run Run, t task.Task, resp
 }
 
 func (s *Service) handleReplan(ctx context.Context, run Run, resp agentprotocol.Response, res TickResult) TickResult {
-	if run.ReplanCount >= run.MaxReplans {
-		return s.blockRun(ctx, run, res, ErrReplanLimit.Error())
-	}
 	var p replanProposal
 	_ = json.Unmarshal(resp.Proposal, &p)
-	cont, _ := json.Marshal(map[string]any{"replan": map[string]any{"reason": p.Reason, "instructions": p.Instructions}})
-	if err := s.updateRun(ctx, run.ID, run.Revision, RunRunning, cont, nil, 0, 1, nil, nil, nil); err != nil {
+	if err := s.commitProposalContinuation(ctx, run, "replan", p.Reason, p.Instructions); err != nil {
+		if errors.Is(err, ErrReplanLimit) {
+			return s.blockRun(ctx, run, res, ErrReplanLimit.Error())
+		}
 		return failedResult(res, err)
 	}
-	_ = s.journal(ctx, run.ID, "replan", "succeeded", nil, nil, strPtr("replan"), nil, map[string]any{"reason": p.Reason})
 	res.Status = "replanning"
 	return res
 }
 
 func (s *Service) handleEscalate(ctx context.Context, run Run, resp agentprotocol.Response, res TickResult) TickResult {
-	rp := defaultRoutePolicy()
-	_ = json.Unmarshal(run.RoutePolicy, &rp)
-	if !rp.RoutingEnabled {
-		return s.blockRun(ctx, run, res, "automatic escalation is disabled by workspace routing policy")
-	}
-	if run.EscalationCount >= run.MaxEscalations {
-		return s.blockRun(ctx, run, res, ErrEscalationLimit.Error())
-	}
 	var p escalateProposal
 	_ = json.Unmarshal(resp.Proposal, &p)
-	if run.LastCandidateID != nil && !contains(rp.ExcludedCandidateIDs, *run.LastCandidateID) {
-		rp.ExcludedCandidateIDs = append(rp.ExcludedCandidateIDs, *run.LastCandidateID)
-	}
-	rb, _ := json.Marshal(rp)
-	cont, _ := json.Marshal(map[string]any{"escalation": map[string]any{"reason": p.Reason, "excluded": rp.ExcludedCandidateIDs}})
-	if err := s.updateRun(ctx, run.ID, run.Revision, RunRunning, cont, rb, 1, 0, nil, nil, nil); err != nil {
+	if err := s.commitProposalContinuation(ctx, run, "escalate", p.Reason, ""); err != nil {
+		if errors.Is(err, ErrEscalationLimit) || errors.Is(err, errProposalRoutingDisabled) {
+			return s.blockRun(ctx, run, res, err.Error())
+		}
 		return failedResult(res, err)
 	}
-	_ = s.journal(ctx, run.ID, "escalate", "succeeded", nil, nil, strPtr("escalate"), nil, map[string]any{"reason": p.Reason})
 	res.Status = "escalating"
 	return res
 }

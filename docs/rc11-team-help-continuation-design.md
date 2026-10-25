@@ -15,6 +15,14 @@ human guidance exists, but no request-specific durable answer/continuation
 protocol does. Do not represent generic chat or a generic Task resume as that
 complete protocol.
 
+The25October continuation reproduced six human/wait proposals parking Task,
+Attempt and Worker after tenancy or sealed root/child criteria drift. The wait
+transaction now repeats the shared exact active execution binding and accepted
+Team/dependency/ancestor checks before any mutation. Actual handler authority
+and rejected-write matrices preserve the original lineage and prior model
+journal. This prerequisite does not implement request storage, answers or
+explicit continuation; all seven steps below remain required.
+
 The immutable0098accepted assignment/root cannot be reopened or replaced in
 place. Existing shared admission applies to Task start/resume, each Worker
 step and downstream dispatch. An assistance answer must never release a pause,

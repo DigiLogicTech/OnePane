@@ -724,3 +724,49 @@ Windows/Linux/race/full regression and guard conclusions, then immediately
 continue eligible Team help/recovery/Library functionality. All15approved issues,
 physical AI/Node/L4, human audits/sign-offs, LAST UI, installed Windows/Ubuntu,
 source-bound final artifacts/checksums and full release gates remain OPEN.
+
+## Team assistance prerequisite and component crash points — 25 October 06:44 UTC
+
+Continued beyond publication286019170384e7366f24d04229e60c148c64a9cf. Its Windows
+40169703300 and Ubuntu40169703330 source guards SUCCESS; integration40169703273
+still IN_PROGRESS at observation (native managed/component and history checks
+passed, Linux race/full stages not all concluded). Physical/package jobs skipped.
+
+WORKER-WAIT-AUTHORITY-001 (blocking stale proposal authority): actual accepted
+Team human/wait handler baselines2.966s reproduced six committed waits after
+suspended tenancy or altered sealed root/child criteria. The wait transaction
+now repeats the shared exact active Task/original Attempt/Worker provenance,
+principal, active tenancy/Project/Workspace and sealed Team/dependency/ancestor
+fences before Task/Attempt/Worker mutation. Both healthy accepted controls remain
+valid. Changed Worker principal, missing Attempt provenance, archived Task,
+stale revision, ancestor hold and ten rejected Task/Attempt/Worker/step/audit
+writes preserve original state/history with no partial waiting journal/audit.
+Failed commits retain the existing fail-closed recovery halt. Durable request,
+answer and explicit original-owner continuation remain unimplemented.
+
+Focused wait/wake5.489s and proposal/wait combined13.591s PASS. Full final Worker
+integration140.016s, Task42.109s and Team52.746s plus affected integration vet PASS.
+Native Windows and Linux race select the wait matrix as an independent bounded
+suite without raising the deadline or dropping prior continuation controls.
+No actual reasoning transport/model/tool executed in these handler fixtures.
+
+COMPONENT-RECOVERY-002 (blocking restart lineage): four actual storage baselines
+1.499s showed a running lifecycle job becoming interrupted while its owning
+component remained queued/running/installed_disabled/removed with a stale active
+job. Recovery previously inferred interruption only from transient UI stages.
+It now follows the exact same-component interrupted job in the existing atomic
+transaction across every crash stage. Ownerless legacy transient observations
+retain their conservative interruption path; unmatched missing/terminal/foreign-
+component owners are preserved for reconciliation rather than erased. Repeated
+recovery is idempotent. No interrupted lifecycle effect is automatically replayed.
+Final full localai6.254s and affected localai/bootstrap vet PASS, including five
+crash-stage controls and three unmatched-owner cases. No package/component/model
+was installed or launched by these new recovery fixtures.
+
+Continue same branch/PR; inspect final-source hosted checks. Next functional
+boundary remains immutable durable Team assistance records plus exact committed
+human wait identity, authenticated answers and explicit original-owner resume,
+following rc11-team-help-continuation-design.md. Recovery semantic attribution,
+Library ingestion and all remaining approved scope remain eligible. All physical,
+review/sign-off/finalUI/installed Windows/Ubuntu/artifact gates remain OPEN.
+No final build, release artifact or installed user-state change is claimed.

@@ -18,6 +18,82 @@ type rejectComponentRecoveryCommit struct {
 	err   error
 }
 
+// A crash can occur after the job claim and before first progress, or after
+// the component action and before terminal job persistence. Recovery must use
+// exact job ownership rather than only a list of intermediate UI states.
+func TestManagedComponentRecoveryClaimedOwnerAcrossProgressStages(t *testing.T) {
+	for _, observed := range []string{"queued", "running", "installed_disabled", "removed", "downloading"} {
+		t.Run(observed, func(t *testing.T) {
+			s, ctx := componentTestService(t)
+			if _, err := s.db.ExecContext(ctx, `INSERT INTO managed_component_jobs(id,component_id,action,status,stage,revision,created_at,updated_at) VALUES('claimed-job','colibri','disable','running','queued',1,1,1)`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.db.ExecContext(ctx, `UPDATE managed_component_states SET observed_state=?,active_job_id='claimed-job' WHERE component_id='colibri'`, observed); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.RecoverManagedComponents(ctx); err != nil {
+				t.Fatal(err)
+			}
+			job, err := s.ComponentJob(ctx, "claimed-job")
+			if err != nil {
+				t.Fatal(err)
+			}
+			states, err := s.ManagedComponents(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := states["colibri"]
+			if job.Status != "interrupted" || state.State != "interrupted" || state.ActiveJobID != nil {
+				t.Fatalf("crash at %s left claimed owner stranded: job=%+v state=%+v", observed, job, state)
+			}
+			if err = s.RecoverManagedComponents(ctx); err != nil {
+				t.Fatal(err)
+			}
+			repeated, err := s.ManagedComponents(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(states, repeated) {
+				t.Fatal("repeated interruption changed preserved component state")
+			}
+		})
+	}
+}
+
+func TestManagedComponentRecoveryPreservesUnmatchedJobOwner(t *testing.T) {
+	for _, owner := range []string{"missing", "terminal", "foreign_component"} {
+		t.Run(owner, func(t *testing.T) {
+			s, ctx := componentTestService(t)
+			if owner != "missing" {
+				component, status := "colibri", "succeeded"
+				if owner == "foreign_component" {
+					component, status = "omniroute", "interrupted"
+				}
+				if _, err := s.db.ExecContext(ctx, `INSERT INTO managed_component_jobs(id,component_id,action,status,stage,revision,created_at,updated_at) VALUES('unmatched-job',?,'disable',?,'complete',1,1,1)`, component, status); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := s.db.ExecContext(ctx, `UPDATE managed_component_states SET observed_state='downloading',active_job_id='unmatched-job' WHERE component_id='colibri'`); err != nil {
+				t.Fatal(err)
+			}
+			before, err := s.ManagedComponents(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = s.RecoverManagedComponents(ctx); err != nil {
+				t.Fatal(err)
+			}
+			after, err := s.ManagedComponents(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(before, after) {
+				t.Fatalf("unmatched %s owner was silently cleared", owner)
+			}
+		})
+	}
+}
+
 func (r rejectComponentRecoveryCommit) Within(ctx context.Context, f func(context.Context, storage.Tx) error) error {
 	return r.inner.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
 		if err := f(ctx, tx); err != nil {

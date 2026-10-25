@@ -410,7 +410,7 @@ func (s *Service) RecoverManagedComponents(ctx context.Context) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE managed_component_jobs SET status='interrupted',stage='interrupted',failure_reason='OnePane restarted during component lifecycle operation',completed_at=?,updated_at=?,revision=revision+1 WHERE status='running'`, now, now); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE managed_component_states SET observed_state='interrupted',last_error='OnePane restarted during component lifecycle operation',active_job_id=NULL,revision=revision+1,updated_at=? WHERE observed_state IN ('downloading','verifying','installing','enabling','disabling','updating','repairing','removing')`, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE managed_component_states SET observed_state='interrupted',last_error='OnePane restarted during component lifecycle operation',active_job_id=NULL,revision=revision+1,updated_at=? WHERE EXISTS(SELECT 1 FROM managed_component_jobs j WHERE j.id=managed_component_states.active_job_id AND j.component_id=managed_component_states.component_id AND j.status='interrupted') OR (active_job_id IS NULL AND observed_state IN ('downloading','verifying','installing','enabling','disabling','updating','repairing','removing'))`, now); err != nil {
 			return err
 		}
 		rows, err := tx.QueryContext(ctx, `SELECT id FROM managed_component_jobs WHERE status='queued' ORDER BY created_at,id`)

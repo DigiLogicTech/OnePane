@@ -136,20 +136,34 @@ func completionAssuranceCriteria(raw json.RawMessage) json.RawMessage {
 
 func (s *Service) markReasoningDispatch(ctx context.Context, r *Run, kind, id string) error {
 	now := s.clock.UnixMilli()
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE agent_worker_runs AS r
+	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		// A human author or original scope may be revoked while routing. The
+		// immutable receipt must still resolve before consuming dispatch ownership.
+		if _, err := assistanceContext(ctx, tx, *r); err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx,
+			`UPDATE agent_worker_runs AS r
 		 SET step_count=step_count+1,last_candidate_kind=?,
 			 last_candidate_id=?,revision=revision+1,updated_at=?
 		 WHERE r.id=? AND r.revision=? AND r.status='running'
 			AND r.step_count<r.max_steps AND `+
-			activeWorkerExecutionBindingPredicate,
-		kind,id,now,r.ID,r.Revision)
+				activeWorkerExecutionBindingPredicate,
+			kind, id, now, r.ID, r.Revision)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return ErrInvalidWorkerState
+		}
+		return nil
+	})
 	if err != nil {
 		return err
-	}
-	n, _ := res.RowsAffected()
-	if n != 1 {
-		return ErrInvalidWorkerState
 	}
 	r.StepCount++
 	r.LastCandidateKind = &kind

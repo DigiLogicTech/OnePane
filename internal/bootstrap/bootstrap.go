@@ -394,6 +394,7 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 		return nil, fmt.Errorf("recover interrupted routine worker attempts: %w", err)
 	}
 	agentWorkerService := agentworker.New(db.SQL(), db, clk, localNode.ID, taskService, authorityService, budgetService, schedulerService, inferenceService, agentRuntimeService, artifactService, toolGateway, operationCoordinator, observationService, verificationService)
+	teamService.SetAssistanceContinuationWorker(agentWorkerService)
 	teamWorkerService := teamworker.New(db.SQL(), db, clk, teamService, schedulerService, inferenceService, agentRuntimeService, artifactService, budgetService)
 	if err := teamWorkerService.EnsureSystemPrincipal(ctx); err != nil {
 		_ = db.Close()

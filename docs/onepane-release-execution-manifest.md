@@ -1,8 +1,8 @@
 # OnePane release execution manifest
 
-Updated: 2026-10-25 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
+Updated: 2026-10-26 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
 
-Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Durable Team human requests, pinned original scope, bounded private request/answer reads and authenticated immutable answer writes are implemented. Latest work fences generic Task/Worker resumption from bypassing the pending explicit Continue protocol. Exact commits, genuine failures, validation and current CI observations are in the latest sections below. Continue exact original-owner Continue with retained answer delivery to the actual next model context, session discovery/UI, reviewed reassignment, closed recovery attribution, Library ingestion and all remaining approved functionality. Inspect each new commit's own Windows/Linux/race/regression checks; source guards do not imply packaging or physical acceptance. Ordered human audits/sign-offs, real AI/Node/L4, LAST UI, installed Windows/Ubuntu and final versioned artifact gates remain OPEN. No final build is claimed.
+Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Durable Team human requests, pinned original scope, bounded private request/answer reads and authenticated immutable answer writes are implemented. Retained interrupted-session explicit Continue/context work is being remediated and validated: exact original Task/Attempt/Worker, same-transaction human credential/admission, immutable applied-answer receipt and required next-model context. Generic resume fences remain. Exact commits, genuine failures, validation and current CI observations are in the latest sections below. Next functional boundary is bounded session discovery/UI, followed by reviewed reassignment, closed recovery attribution, Library ingestion and all remaining approved functionality. Inspect each new commit's own Windows/Linux/race/regression checks; source guards do not imply packaging or physical acceptance. Ordered human audits/sign-offs, real AI/Node/L4, LAST UI, installed Windows/Ubuntu and final versioned artifact gates remain OPEN. No final build is claimed.
 ## Authority and continuation
 
 The Git repository is `D:\Codex\OnePane\source`; its parent is an unrelated unborn wrapper repository. Continue `codex/team-live-ci-completion`, existing draft PR [228](https://github.com/DigiLogicTech/OnePane/pull/228), based on `feature/rc11-policy-worker-diagnostics-integration-20261011` (`fb7f5df7`). Preserve the stacked integration route; do not merge the historical feature PRs independently or reset local work.
@@ -1188,3 +1188,68 @@ Worker185.843s, API87.161s; affected integration vet/whitespace PASS. Publish
 same branch/PR and inspect new-source Worker race, full regression, other required
 families and guards. Keep the preceding28a6deb6failure in the history. No assertion
 was weakened and no historical CI rerun was requested.
+
+## TEAM-HELP-CONTINUE-001 — original-owner approval and required input, 26 October
+
+Reconciled published a41a62a2ec83f575e9026400761dd20cf7268fb9: integration
+40195352583 and source guards40195352553/40195352459 SUCCESS. Earlier28a6deb6
+Worker race failure remains genuine history. Physical/package acceptance was
+not established. Same authoritative branch/base and draft PR228 remain; fetched
+current remote and15open issues #19-30/#85/#86/#114, with no scope/issue closure.
+
+Recovered retained uncommitted Continue/context implementation rather than
+discarding it. Initial targeted run genuinely FAILED: running-step teamgate
+rejected waiting_approval before transition; the autonomy negative also used a
+nonexistent settings column. Fixed pre-transition RequireAdmission (exact Task
+approval helper independently rejects paused/dependency/foreign Attempts); policy
+test now captures a real Project before wait, then revokes only its live policy.
+Domain/HTTP hold errors return409. No existing generic resume fence was weakened.
+
+Additive0113 retains immutable composite request/answer continuation, original
+waiting revisions, authenticated human and committed Worker journal. Same-TX
+original credential/capabilities/CSRF/current membership plus exact accepted
+request/answer/Task/Attempt/Worker/current autonomy/dependency/recovery/root holds
+precede transition, journals, receipt and audits. Failed writes roll back all;
+no new Attempt, hold release or refund. Repeated approval conflicts without
+reexecution, including a response withheld for postcommit credential revocation.
+Bootstrap wires narrow Worker collaborator; no team->Worker import cycle.
+
+Applied answer identity is independent of replaceable continuation_json. Required
+next-model context uses latest original human wait partial index and exact
+request/answer/receipt/journals, SQL byte budgets and original active scope/human
+provenance. Question and answer authors remain distinct. Required overflow or
+revocation fails closed. Read-only source review found and remediated blank
+retained answers, unbounded latest wait ID, and revoked input during deferred
+dispatch/in-flight response. Latest malformed wait never falls back to old input.
+Admission, dispatch claim, deferred transport and proposal checks retain ordinary
+authority. Recovery schema vocabulary updated structurally; semantic recovery
+inventory/dispositions/postconditions are still unimplemented.
+
+Source evidence: actual human wait -> domain answer -> explicit Continue ->
+reconstructed original Worker -> actual next inference gateway/HTTP request;
+separate production bearer/browser credential tests cover same-TX revoke/expiry/
+roles/scopes/CSRF/membership and postcommit response withholding. Twelve later
+room messages and actual resource suspension/resume preserve input. Independent
+answer author/continuing human revocation, latest unanswered wait, original scope
+drift, required overflow, rejected writes/cancellation and immutable upgrade
+history are covered. Production query plans with1024histories before/afterANALYZE
+use persistent indexed searches; no filtered-latest fallback or automatic index.
+Deterministic transport tests are source integration, not physical inference or
+an authenticated whole-product/UI end-to-end acceptance run.
+
+Final affected local CGO0 integration PASS: Worker213.174s, Team68.971s,
+Task57.787s, API127.305s, SQLite59.885s, recovery24.548s. The first multi-package
+command had Worker compile failure while a new test file was being written;
+all other packages passed, then independent full Worker passed. Final additional
+context/provenance/plan tests6.398s and malformed-answer/context7.024s PASS;
+affected integration vet and whitespace PASS. New native/race selectors include
+Continue/Context/ApprovalContinuation/HTTP; new source needs its own hosted CI.
+
+Next: publish this reviewed source to SAME draft PR228, inspect exact new-source
+mandatory CI; continue bounded session discovery then input UI, authenticated
+product flow and reviewed reassignment/fairness. Full approved functionality,
+semantic recovery, Library/toolchains/service/native Unreal/UEFN, ordered #86
+whole-tree/user reviews, real AI/CPU/GPU/Node/L4/Colibri/OmniRoute/constrained
+hardware, final UI, Windows-first/Ubuntu install/upgrade/custom roots and final
+versioned artifacts/checksums/provenance gates remain OPEN. No installer, final
+build or release acceptance is claimed. Existing installed data is preserved.

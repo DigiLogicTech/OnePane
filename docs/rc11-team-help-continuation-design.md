@@ -1,9 +1,9 @@
 # Durable Team assistance and original-owner continuation
 
-Status: durable request/wait, bounded single-request read and immutable human
-answer storage plus authenticated answer POST source implemented,25October2026.
-Retained-answer observation is implemented; explicit Continue, session request listing and
-request-specific context/UI remain unimplemented.
+Status: durable request/wait, bounded single-request/answer reads and immutable
+authenticated human answer storage implemented. Explicit Continue and required
+request-specific next-model context source are under final regression on26October2026.
+Bounded session discovery and the input UI remain unimplemented.
 The release execution manifest remains authoritative for open gates. This is
 human assistance for an accepted contribution; peer execution, new helpers and
 versioned reviewed reassignment remain separate approved work.
@@ -35,7 +35,7 @@ journal. Current active system principal and exact Workspace membership are
 also required at preflight and atomic claim/continuation. The request half of
 steps1/2 below is implemented. Bounded single-request reads in steps3/4 exist;
 answer storage/writes are implemented as described below. Stored-answer
-observation, list discovery and steps5-7 remain required.
+observation and steps5-6 now have source implementations described below; list discovery and step7 remain required.
 
 ## Current answer boundary
 
@@ -67,11 +67,11 @@ final active Project/named scope and original credential reauthentication preced
 bounded48KiBprivate output. Missing answers are absent, not generated; malformed
 retained rows require reconciliation. Observation changes no execution/answer/
 audit/hold/accounting history. Existing browser authentication may separately
-refresh session timestamps. There is no Continue endpoint or model-context
-consumer. Do not describe these answer boundaries as complete assistance or
+refresh session timestamps. The dedicated Continue endpoint and model-context
+consumer are described below. Do not describe these answer boundaries as complete assistance or
 permission to execute/recover/replay.
 
-## Exact next Continue boundary
+## Continue boundary contract
 
 Task.ResumeInTransaction already checks Team holds, recovery, canonical scope
 and dependency admission, but permits paused/dependency waits and a READY fallback
@@ -172,3 +172,39 @@ cancellation, recovery, dependency, capability, routing or verification fence.
 The new request schema adds no execution or human decision authority. All broader Team,
 recovery, code/security review, physical and installed acceptance gates remain
 open until independently implemented and validated.
+
+## Explicit continuation source — 26 October 2026
+
+Migration0113 retains one immutable applied-answer receipt per original wait,
+with composite original request/answer identity, authenticated continuing human,
+exact committed continuation journal and pre-transition revisions. It neither
+backfills approvals nor modifies existing waiting/answer/history rows. Reviewed
+indirect recovery vocabulary includes the receipt and human journal provenance;
+this structural vocabulary grants no recovery disposition or replay authority.
+
+POST .../assistance/{requestID}/continue requires current human team/task reads
+and writes plus Project reads/writes when bound. Original bearer/browser
+credential/expiry/revocation/scopes/roles/CSRF/membership are checked in the SAME
+transaction as exact original waiting Task/Attempt/Worker, answer, current
+autonomy policy, dependency/recovery/Team/root admission, revisions, transition,
+Worker journal, receipt and audits. Manual pauses and holds cannot be released.
+The narrow approval-only Task helper requires an original started waiting
+Attempt and never falls back to READY or a new Attempt. Duplicate approvals
+conflict without another execution. Postcommit credential denial withholds the
+private receipt; it cannot undo a committed continuation.
+
+Required context resolves the latest original human wait through a partial
+run/step index and exact request/answer/receipt/journal keys. SQL bounds precede
+materialization; a malformed latest step produces an error, never an older
+answer. Question and authenticated human input have separate authored provenance.
+The answer survives later room traffic and resource-wait continuation replacement.
+Required overflow, revoked author/continuing human, original scope drift or a
+new unanswered wait fail closed. Rechecks occur at transactional dispatch claim,
+deferred transport invocation and successful-response proposal application.
+
+Source tests exercise actual human handler -> retained domain answer -> Continue
+-> reconstructed original Worker -> production inference gateway/HTTP transport
+-> next model request, with separate production bearer/browser HTTP credential
+tests. The transport is deterministic; this is neither physical AI nor installed
+acceptance, nor a single authenticated product/UI end-to-end acceptance run.
+Bounded session discovery and Needs your input UI remain the next boundary.

@@ -23,9 +23,12 @@ import (
 
 // Actual human wait handler -> retained request -> domain answer. No HTTP
 // credential, model transport, tool, physical inference or Continue is exercised.
-func prepareTeamAssistanceAnswer(t *testing.T) (*Service, context.Context, Run, *team.Service, team.AnswerAssistanceCommand) {
+func prepareTeamAssistanceAnswer(t *testing.T, configure ...func(*Service, context.Context, Run)) (*Service, context.Context, Run, *team.Service, team.AnswerAssistanceCommand) {
 	t.Helper()
 	w, ctx, run, teams, session, _ := prepareTeamProposalContinuation(t, "human")
+	for _, setup := range configure {
+		setup(w, ctx, run)
+	}
 	if result := applyWorkerWait(t, w, ctx, run, "human"); result.Status != "waiting_human" {
 		t.Fatalf("wait %+v", result)
 	}

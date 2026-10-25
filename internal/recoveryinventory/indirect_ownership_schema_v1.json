@@ -3301,5 +3301,116 @@
   "without_rowid": 0,
   "strict": 1,
   "create_sql": "CREATE TABLE team_assistance_answers (\n request_id TEXT PRIMARY KEY REFERENCES team_assistance_requests(id),\n id TEXT NOT NULL UNIQUE,\n author_principal_id TEXT NOT NULL REFERENCES principals(id),\n idempotency_key TEXT NOT NULL CHECK(length(CAST(idempotency_key AS BLOB)) BETWEEN 1 AND 128),\n answer TEXT NOT NULL CHECK(length(CAST(answer AS BLOB)) BETWEEN 1 AND 4096),\n task_revision INTEGER NOT NULL CHECK(task_revision>0),\n worker_revision INTEGER NOT NULL CHECK(worker_revision>0),\n created_at INTEGER NOT NULL CHECK(created_at>0)\n) STRICT"
+},
+{
+  "table": "team_assistance_continuations",
+  "columns": [
+    {
+      "name": "request_id",
+      "type": "TEXT",
+      "not_null": 1,
+      "primary_key": 1,
+      "hidden": 0
+    },
+    {
+      "name": "id",
+      "type": "TEXT",
+      "not_null": 1,
+      "primary_key": 0,
+      "hidden": 0
+    },
+    {
+      "name": "answer_id",
+      "type": "TEXT",
+      "not_null": 1,
+      "primary_key": 0,
+      "hidden": 0
+    },
+    {
+      "name": "actor_principal_id",
+      "type": "TEXT",
+      "not_null": 1,
+      "primary_key": 0,
+      "hidden": 0
+    },
+    {
+      "name": "continue_step_id",
+      "type": "TEXT",
+      "not_null": 1,
+      "primary_key": 0,
+      "hidden": 0
+    },
+    {
+      "name": "task_revision",
+      "type": "INTEGER",
+      "not_null": 1,
+      "primary_key": 0,
+      "hidden": 0
+    },
+    {
+      "name": "worker_revision",
+      "type": "INTEGER",
+      "not_null": 1,
+      "primary_key": 0,
+      "hidden": 0
+    },
+    {
+      "name": "created_at",
+      "type": "INTEGER",
+      "not_null": 1,
+      "primary_key": 0,
+      "hidden": 0
+    }
+  ],
+  "foreign_keys": [
+    {
+      "from": "request_id",
+      "target": "team_assistance_answers",
+      "to": "request_id",
+      "on_update": "NO ACTION",
+      "on_delete": "NO ACTION",
+      "id": 0,
+      "sequence": 0
+    },
+    {
+      "from": "answer_id",
+      "target": "team_assistance_answers",
+      "to": "id",
+      "on_update": "NO ACTION",
+      "on_delete": "NO ACTION",
+      "id": 0,
+      "sequence": 1
+    },
+    {
+      "from": "continue_step_id",
+      "target": "agent_worker_steps",
+      "to": "id",
+      "on_update": "NO ACTION",
+      "on_delete": "NO ACTION",
+      "id": 1,
+      "sequence": 0
+    },
+    {
+      "from": "actor_principal_id",
+      "target": "principals",
+      "to": "id",
+      "on_update": "NO ACTION",
+      "on_delete": "NO ACTION",
+      "id": 2,
+      "sequence": 0
+    },
+    {
+      "from": "request_id",
+      "target": "team_assistance_requests",
+      "to": "id",
+      "on_update": "NO ACTION",
+      "on_delete": "NO ACTION",
+      "id": 3,
+      "sequence": 0
+    }
+  ],
+  "without_rowid": 0,
+  "strict": 1,
+  "create_sql": "CREATE TABLE team_assistance_continuations (\n request_id TEXT PRIMARY KEY REFERENCES team_assistance_requests(id),\n id TEXT NOT NULL UNIQUE,\n answer_id TEXT NOT NULL UNIQUE,\n actor_principal_id TEXT NOT NULL REFERENCES principals(id),\n continue_step_id TEXT NOT NULL UNIQUE REFERENCES agent_worker_steps(id),\n task_revision INTEGER NOT NULL CHECK(task_revision>0),\n worker_revision INTEGER NOT NULL CHECK(worker_revision>0),\n created_at INTEGER NOT NULL CHECK(created_at>0),\n FOREIGN KEY(request_id,answer_id) REFERENCES team_assistance_answers(request_id,id)\n) STRICT"
 }
 ]

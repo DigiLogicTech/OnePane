@@ -25,6 +25,7 @@ type Service struct {
 	ids    id.Generator
 	events event.Store
 	tasks  *task.Service
+	assistanceWorker AssistanceContinuationWorker
 	cancelMu sync.Mutex
 	cancelCursor string
 }

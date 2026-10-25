@@ -35,6 +35,10 @@ type indirectReferenceDescriptor struct {
 // row-vocabulary contracts are implemented. Shared context never recursively
 // owns all rows in its tenant, Project, Workspace or artifact session.
 var indirectReferenceDescriptors = map[string][]indirectReferenceDescriptor{
+	"team_assistance_continuations": {
+		{[]string{"request_id", "answer_id"}, "one immutable applied answer bound by composite identity to the exact original assistance request; shared Team session or author never owns unrelated work"},
+		{[]string{"id", "actor_principal_id", "continue_step_id", "task_revision", "worker_revision", "created_at"}, "authenticated human continuation provenance and original waiting revisions with an independent committed Worker journal reference; not reusable execution admission, recovery disposition, replay clearance or independent postcondition evidence"},
+	},
 	"team_assistance_answers": {
 		{[]string{"request_id"}, "one immutable authored answer owned through the exact original assistance request; never infer ownership from shared human or Team membership"},
 		{[]string{"id", "author_principal_id", "idempotency_key", "answer", "task_revision", "worker_revision", "created_at"}, "bounded untrusted human input and observed waiting revisions; neither execution approval nor recovery disposition, effect clearance or independent postcondition evidence"},
@@ -50,7 +54,7 @@ var indirectReferenceDescriptors = map[string][]indirectReferenceDescriptor{
 	},
 	"agent_worker_steps": {
 		{[]string{"run_id"}, "exact original Worker journal ownership"},
-		{[]string{"step_kind", "status", "result_ref", "request_ref", "detail_json"}, "discriminated typed references: successful model -> agent response artifact; failed/unknown model -> inference request; runtime -> Invocation; tool -> Observation with invocation_id/observation_id; operation -> Operation; delegate -> child Task; verification waiting -> Verification, succeeded -> checkpoint except explicit retry; uncommitted response/accounting outcomes require result_ref_kind. Unsupported discriminator combinations defer"},
+		{[]string{"step_kind", "status", "result_ref", "request_ref", "detail_json"}, "discriminated typed references: successful model -> agent response artifact; failed/unknown model -> inference request; runtime -> Invocation; tool -> Observation with invocation_id/observation_id; operation -> Operation; delegate -> child Task; verification waiting -> Verification, succeeded -> checkpoint except explicit retry; human succeeded with proposal_type human and detail action assistance_continued -> exact request_id/answer_id/wait_step_id/actor_principal_id provenance, independently bound by immutable continuation receipt; uncommitted response/accounting outcomes require result_ref_kind. Unsupported discriminator combinations defer"},
 	},
 	"artifacts":                      {{[]string{"metadata_json"}, "reverse JSON $.task_id,$.attempt_id,$.inference_request_id,$.agent_request_id,$.agent_runtime_invocation_id; orphan or disagreeing forward references remain relevant"}},
 	"project_library_asset_versions": {{[]string{"asset_id", "version", "provenance_json", "storage_uri", "content_hash"}, "composite immutable identity; reverse JSON $.task_id,$.attempt_id,$.artifact_id; reused versions preserve original provenance, not exclusive Task ownership"}},
@@ -84,6 +88,7 @@ var indirectOwnershipTargets = map[string]bool{
 	"team_assistance_requests":       true,
 	"team_assistance_request_scopes": true,
 	"team_assistance_answers":        true,
+	"team_assistance_continuations":  true,
 }
 
 func indirectOwnershipRelevant(table schemaTable) bool {

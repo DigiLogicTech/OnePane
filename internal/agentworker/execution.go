@@ -215,6 +215,16 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 		return immediateWorkerStep(s.blockRun(ctx, run, res, "pinned Agent profile changed before dispatch: "+errors.Join(err, releaseErr).Error()))
 	}
 	return preparedWorkerStep{result: res, dispatch: func() func() TickResult {
+		// Prepared steps can wait before transport. Recheck retained human
+		// provenance at this last Worker-owned boundary, after dispatch claim.
+		if _, err := assistanceContext(ctx, s.db, run); err != nil {
+			return func() TickResult {
+				if releaseErr := s.releaseBudgetIfReserved(ctx, reservationID); releaseErr != nil {
+					return s.interruptDispatchForReconciliation(ctx, run, res, "route", kind, cid, reservationID, errors.Join(errBudgetReleaseUncommitted, err, releaseErr))
+				}
+				return s.blockRun(ctx, run, res, "Team assistance authority changed before dispatch: "+err.Error())
+			}
+		}
 		response, ref, dispatchErr := s.dispatch(ctx, run, t, cand, compiled, constraints, label, reservationID)
 		return func() TickResult {
 			stepKind := "model"
@@ -249,6 +259,9 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 			// any tool, file, network or delegation effect is interpreted.
 			if err := enforceTaskAgentProfileBinding(ctx, s.db, run.WorkspaceID, agentBinding); err != nil {
 				return s.blockRun(ctx, run, res, "pinned Agent profile revoked before proposal application: "+err.Error())
+			}
+			if _, err := assistanceContext(ctx, s.db, run); err != nil {
+				return s.blockRun(ctx, run, res, "Team assistance authority changed before proposal application: "+err.Error())
 			}
 			if _, err := teamgate.Require(ctx, s.db, t.WorkspaceID, t.ID); err != nil {
 				if stopped, ok := s.parkIfExecutionControlRequested(ctx, run, res); ok {
@@ -313,6 +326,11 @@ func (s *Service) compileContext(ctx context.Context, run Run, t task.Task) (con
 		raw, _ := json.Marshal(guidance)
 		sections = append(sections, contextcompiler.Section{ID: "team-human-guidance", Kind: "team_guidance", Trust: "USER_INSTRUCTION", Authoritative: true, Required: true, Priority: 95, Content: raw})
 	}
+	assistance, err := assistanceContext(ctx, s.db, run)
+	if err != nil {
+		return contextcompiler.Result{}, err
+	}
+	sections = append(sections, assistance...)
 	// Resource backoff is internal scheduler bookkeeping, not an instruction
 	// to the model. Once it becomes available, don't tell the model that it is
 	// still unavailable or let historical wait data bias tool selection.

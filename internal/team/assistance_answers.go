@@ -24,7 +24,15 @@ type AssistanceAnswer struct {
 	CreatedAt         int64  `json:"created_at"`
 }
 
-// AnswerAssistanceCommand comes from a trusted domain caller. A future HTTP
+// AssistanceAnswerObservation retains separate original-question and authored
+// human-answer provenance. Reading either grants no continuation authority.
+// Both values are comparable so a private boundary can recollect exact state.
+type AssistanceAnswerObservation struct {
+	Request AssistanceRequest `json:"request"`
+	Answer  AssistanceAnswer  `json:"answer"`
+}
+
+// AnswerAssistanceCommand comes from a trusted domain caller. An HTTP
 // boundary must independently authenticate the original credential, require
 // current human team.write and relevant read permissions, and derive the
 // author from that credential. This service does not authorize API credentials.
@@ -52,10 +60,64 @@ const assistanceAnswerReadSQL = `SELECT id,request_id,author_principal_id,idempo
  AND worker_revision BETWEEN 1 AND 9007199254740991
  AND created_at BETWEEN 1 AND 9007199254740991`
 
+// AssistanceAnswer observes one retained answer alongside the exact current
+// original waiting contribution, in one transaction. Held Teams remain readable;
+// a missing answer is not fabricated. It writes nothing and never releases a
+// hold, resumes an Attempt, or establishes reusable authorization.
+func (s *Service) AssistanceAnswer(ctx context.Context, workspaceID, sessionID, requestID, readerPrincipalID string) (AssistanceAnswerObservation, error) {
+	var out AssistanceAnswerObservation
+	if s == nil || s.db == nil || s.tx == nil {
+		return out, ErrInvalid
+	}
+	for _, value := range []string{workspaceID, sessionID, requestID, readerPrincipalID} {
+		if value == "" || len(value) > 256 || !utf8.ValidString(value) {
+			return out, ErrInvalid
+		}
+	}
+	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		var err error
+		out.Request, err = s.assistanceRequestTx(ctx, tx, workspaceID, sessionID, requestID, readerPrincipalID)
+		if err != nil {
+			return err
+		}
+		answer := &out.Answer
+		err = tx.QueryRowContext(ctx, assistanceAnswerReadSQL, requestID).Scan(&answer.AnswerID, &answer.RequestID, &answer.AuthorPrincipalID, &answer.IdempotencyKey, &answer.Text, &answer.TaskRevision, &answer.WorkerRevision, &answer.CreatedAt)
+		if errors.Is(err, sql.ErrNoRows) {
+			// SQL budgets suppress malformed rows before materialization. Keep
+			// genuine absence distinct from a retained but invalid record.
+			var exists bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM team_assistance_answers WHERE request_id=?)`, requestID).Scan(&exists); err != nil {
+				return err
+			}
+			if exists {
+				return ErrInvalid
+			}
+			return sql.ErrNoRows
+		}
+		if err != nil {
+			return err
+		}
+		for _, value := range []string{answer.AnswerID, answer.RequestID, answer.AuthorPrincipalID, answer.IdempotencyKey, answer.Text} {
+			if !utf8.ValidString(value) {
+				return ErrInvalid
+			}
+		}
+		if answer.RequestID != requestID || strings.TrimSpace(answer.IdempotencyKey) == "" || strings.TrimSpace(answer.Text) == "" {
+			return ErrInvalid
+		}
+		return nil
+	})
+	if err != nil {
+		return AssistanceAnswerObservation{}, err
+	}
+	return out, nil
+}
+
 // AnswerAssistance atomically retains one final answer and its audit. It never
 // resumes an owner, releases a Team hold, changes admission or refunds accounting.
 // Accepted graph, original scope and human membership are observed in the SAME
-// transaction as both writes. No API/UI boundary exposes this method yet.
+// transaction as both writes. The API supplies original-credential authority
+// through AuthorizeInTransaction; UI and explicit Continue are separate work.
 func (s *Service) AnswerAssistance(ctx context.Context, c AnswerAssistanceCommand) (AssistanceAnswer, error) {
 	var out AssistanceAnswer
 	if s == nil || s.db == nil || s.tx == nil || s.clock == nil {

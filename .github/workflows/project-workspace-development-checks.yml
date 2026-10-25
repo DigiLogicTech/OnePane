@@ -317,7 +317,7 @@ jobs:
           go test -race -tags integration -count=1 -timeout 3m -run TestWorkspaceLibraryPublication ./internal/projectworkspace
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(TaskLibraryPublications|TeamAssignmentOutputs|LibrarySchemaFixture)' ./internal/api
           go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceRead ./internal/agentworker ./internal/team ./internal/api
-          go test -race -tags integration -count=1 -timeout 3m -run 'Test(TeamAssistanceAnswerHTTP|TransactionalAuthorization)' ./internal/api
+          go test -race -tags integration -count=1 -timeout 3m -run 'Test(TeamAssistanceAnswer(Read)?HTTP|TransactionalAuthorization)' ./internal/api
           go test -race -count=1 -timeout 3m -run TestAssignmentCompletion ./internal/team
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(LiveTeamAssignmentCompletion|TeamAssignmentsExecute|TeamPause|TeamResume|TeamCancellation|CancellationBetweenWorkerTicks|ProjectTaskGraphRecognizesReviewedTeam)' ./internal/team ./internal/agentworker ./internal/projectorchestrator
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(AgentProtocolHTTPPostDispatch|RuntimeDispatchUnusable|RuntimePostDispatchBudgetCommitFailure|InferencePostDispatchBudgetCommitFailure|RuntimePreDispatchErrors|InferencePreDispatchErrors)' ./internal/agentruntime ./internal/inference
@@ -503,7 +503,7 @@ jobs:
           go test -tags integration -count=1 -timeout 3m -run TestWorkspaceLibraryPublication ./internal/projectworkspace
           go test -tags integration -count=1 -timeout 3m -run 'Test(TaskLibraryPublications|TeamAssignmentOutputs|LibrarySchemaFixture)' ./internal/api
           go test -tags integration -count=1 -timeout 3m -run TestTeamAssistanceRead ./internal/agentworker ./internal/team ./internal/api
-          go test -tags integration -count=1 -timeout 3m -run 'Test(TeamAssistanceAnswerHTTP|TransactionalAuthorization)' ./internal/api
+          go test -tags integration -count=1 -timeout 3m -run 'Test(TeamAssistanceAnswer(Read)?HTTP|TransactionalAuthorization)' ./internal/api
           go test -count=1 -timeout 3m -run TestAssignmentCompletion ./internal/team
       - name: Native Windows bootstrap-key privacy and identity preservation
         shell: pwsh

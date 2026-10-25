@@ -1075,3 +1075,40 @@ and inspect its OWN mandatory hosted Windows/Linux/race/regression/guard results
 Next functional boundary is bounded retained-answer observation/discovery, then
 exact authenticated original-owner Continue and request-specific model context;
 ordinary Task resume must not bypass the answer or Team/approval/recovery fences.
+
+## Retained answer observation — 25 October 12:29 UTC
+
+Published ded125f538488a4d0b5a1bee8aa78eeeb89a8c5e adds the authenticated
+answer-write boundary above. Its exact integration40192815962 remains IN_PROGRESS
+at this observation: managed/source/full-regression SUCCESS, Windows/Worker/Library
+families still running. Both guards40192815953/40192815974 SUCCESS. Physical
+approval SKIPPED. Do not transfer predecessor success or call this run complete.
+
+Continue source adds dedicated GET .../assistance/{requestID}/answer with bounded
+sameTX retained request+answer observation, no response-shape change to original
+request GET. Exact current waiting/held accepted owner and reader membership
+remain required. True missing answer differs from malformed suppressed storage;
+no answer is invented. Two comparable HTTP collections, conditional Project
+permission, final scalar active scope and original credential checks precede
+private48KiBresponse. No execution/answer/audit/hold/accounting changes; browser
+authentication can still refresh its own session timestamps separately.
+
+Actual Worker wait -> answer -> reconstructed read and held preservation plus
+17authority/input, missing/cancel/unavailable and6malformed-store negatives pass
+with all answer suites18.364s. Initial new replacement-Attempt fixture failed
+the actual single-active constraint; fixed fixture to terminate old owner first.
+HTTP14initialcases5.988s pass; final full API75.085s/Team39.981s includes added
+no-Project and escaped4KiBanswer cases. Affected integration vet/format/whitespace
+PASS; independent source review found no blocker. Native and Linux-race selectors
+include new read tests. Prior unchanged Worker186.034s and SQLite/recovery source
+evidence remains above; no schema or existing write behavior changes here.
+
+Next exact source boundary is documented in rc11-team-help-continuation-design.md:
+approval-only exact-original-Attempt Task helper, sameTX authenticated Continue/
+Worker journal/applied-answer receipt and autonomy/ordinary admission. Generic
+Task.Resume + syncResumedRuns currently bypasses an assistance receipt; fence it
+before finalizing this workflow. Continuation_json is replaceable; retained
+request-specific REQUIRED model input must survive resource waits and more than
+8room messages. Session discovery/UI and peer help/reassignment/fairness remain
+open. All broader release scope/reviews/physical/installed/artifact gates remain
+OPEN; no installer, checksum or FINAL BUILD COMPLETE is claimed.

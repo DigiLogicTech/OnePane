@@ -2,7 +2,7 @@
 
 Status: durable request/wait, bounded single-request read and immutable human
 answer storage plus authenticated answer POST source implemented,25October2026.
-Explicit Continue, stored-answer observation, session request listing and
+Retained-answer observation is implemented; explicit Continue, session request listing and
 request-specific context/UI remain unimplemented.
 The release execution manifest remains authoritative for open gates. This is
 human assistance for an accepted contribution; peer execution, new helpers and
@@ -61,8 +61,41 @@ commit; an authorized identical retry retrieves the retained answer. This does
 not promise continuous authorization after commit/publication.
 
 Current GET request responses remain unchanged and contain no stored answer.
-There is no Continue endpoint or model-context consumer. Do not describe this
-answer boundary as complete assistance or permission to execute/recover/replay.
+Dedicated GET .../assistance/{requestID}/answer observes a comparable request+
+answer pair in one transaction; two HTTP collections, current read permissions,
+final active Project/named scope and original credential reauthentication precede
+bounded48KiBprivate output. Missing answers are absent, not generated; malformed
+retained rows require reconciliation. Observation changes no execution/answer/
+audit/hold/accounting history. Existing browser authentication may separately
+refresh session timestamps. There is no Continue endpoint or model-context
+consumer. Do not describe these answer boundaries as complete assistance or
+permission to execute/recover/replay.
+
+## Exact next Continue boundary
+
+Task.ResumeInTransaction already checks Team holds, recovery, canonical scope
+and dependency admission, but permits paused/dependency waits and a READY fallback
+without an active Attempt. Add an approval-only exact-original-Attempt helper;
+ResumeWaitingAttemptInTransaction is deliberately dependency-only. Continue must
+reject manually paused Tasks and active Team/root holds, require task.write and
+repeat featurepolicy.StoredScopes.AuthorizeTaskTx(...,"tasks.autonomous").
+
+Use a narrow injected Worker transaction collaborator to check current Worker
+authority/CAS and reuse journals. Atomically resume Task/original Attempt/Worker
+with exact request/final answer/revisions, required journal/audits and retained
+immutable applied-answer evidence. Avoid importing agentworker into team (cycle)
+or duplicating Worker journal semantics. Generic Task.Resume plus syncResumedRuns
+can currently reactivate an assisted human wait without an answer/Continue receipt;
+add a dedicated fence while preserving ordinary non-Team operator resumes.
+
+Keep the applied-answer identity independent of continuation_json, which resource
+waits, replan and tool handlers replace. Resolve required authored human input
+through the exact latest committed human-wait/continuation/answer keys for the
+original Worker, not optional worker-continuation context or the last8roommessages.
+Fail on required-context overflow rather than silently omit the answer. Validate
+actual wait -> authenticated reply -> explicit Continue -> same Attempt/Worker ->
+answer in the actual next model context, including later room traffic, resource
+wait replacement, stale owners, holds, recovery and every rejected journal/write.
 
 The immutable0098accepted assignment/root cannot be reopened or replaced in
 place. Existing shared admission applies to Task start/resume, each Worker

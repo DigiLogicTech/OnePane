@@ -24,7 +24,11 @@ func TestManagedRuntimeEmptyEnvHelper(t *testing.T){
   os.Getenv("AZURE_CLIENT_SECRET")!=""
  verdict:="isolated"
  if exposed{verdict="leaked"}
- if err:=os.WriteFile(out,[]byte(verdict),0600);err!=nil{t.Fatal(err)}
+ // Publish only the complete verdict. A direct WriteFile exposes an empty
+ // created/truncated file before its bytes reach the polling parent.
+ pending:=out+".pending"
+ if err:=os.WriteFile(pending,[]byte(verdict),0600);err!=nil{t.Fatal(err)}
+ if err:=os.Rename(pending,out);err!=nil{t.Fatal(err)}
 }
 
 // Verify the actual OS child environment. Prior behaviour assigned a nil

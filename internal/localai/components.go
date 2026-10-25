@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/DigiLogicTech/OnePane/internal/storage"
 )
 
 type ManagedComponent struct {
@@ -142,47 +144,136 @@ func validComponentAction(a string) bool {
 	switch a {case "install","enable","disable","update","repair","retry","resume","remove":return true};return false
 }
 
-func (s *Service) RequestComponentAction(ctx context.Context,idv,action string,actor *string)(ComponentJob,error){
-	idv,action=strings.ToLower(strings.TrimSpace(idv)),strings.ToLower(strings.TrimSpace(action))
-	if _,ok:=componentDefinition(idv);!ok||!validComponentAction(action){return ComponentJob{},errors.New("unsupported managed component action")}
-	componentMu.Lock();defer componentMu.Unlock()
-	all,err:=s.ManagedComponents(ctx);if err!=nil{return ComponentJob{},err};c:=all[idv]
-	if c.ActiveJobID!=nil {
-		if j,e:=s.ComponentJob(ctx,*c.ActiveJobID);e==nil&&(j.Status=="queued"||j.Status=="running"){return ComponentJob{},errors.New("component already has an active lifecycle job")}
+func (s *Service) RequestComponentAction(ctx context.Context, idv, action string, actor *string) (ComponentJob, error) {
+	idv, action = strings.ToLower(strings.TrimSpace(idv)), strings.ToLower(strings.TrimSpace(action))
+	if _, ok := componentDefinition(idv); !ok || !validComponentAction(action) {
+		return ComponentJob{}, errors.New("unsupported managed component action")
+	}
+	componentMu.Lock()
+	defer componentMu.Unlock()
+	all, err := s.ManagedComponents(ctx)
+	if err != nil {
+		return ComponentJob{}, err
+	}
+	c := all[idv]
+	if c.ID != idv {
+		return ComponentJob{}, errors.New("managed component state unavailable")
 	}
 	switch action {
 	case "enable":
-		if !c.Installed{return ComponentJob{},errors.New("component must be installed before it can be enabled")}
-	case "disable","remove","repair","update":
-		if !c.Installed{return ComponentJob{},errors.New("component is not installed")}
+		if !c.Installed {
+			return ComponentJob{}, errors.New("component must be installed before it can be enabled")
+		}
+	case "disable", "remove", "repair", "update":
+		if !c.Installed {
+			return ComponentJob{}, errors.New("component is not installed")
+		}
 	case "resume":
-		if c.State!="interrupted"{return ComponentJob{},errors.New("resume requires an interrupted component job")}
+		if c.State != "interrupted" {
+			return ComponentJob{}, errors.New("resume requires an interrupted component job")
+		}
 	case "retry":
-		if c.State!="failed"{return ComponentJob{},errors.New("retry requires a failed component job")}
+		if c.State != "failed" {
+			return ComponentJob{}, errors.New("retry requires a failed component job")
+		}
 	}
-	jid,err:=s.ids.New("cjob");if err!=nil{return ComponentJob{},err};now:=s.clock.UnixMilli();target:=c.AvailableVersion
-	_,err=s.db.ExecContext(ctx,`INSERT INTO managed_component_jobs(id,component_id,action,target_version,status,stage,attempt_count,failure_reason,requested_by,detail_json,revision,created_at,updated_at) VALUES(?,?,?,?,'queued','queued',0,NULL,?,'{}',1,?,?)`,jid,idv,action,target,actor,now,now);if err!=nil{return ComponentJob{},err}
-	_,err=s.db.ExecContext(ctx,`UPDATE managed_component_states SET active_job_id=?,observed_state='queued',last_error=NULL,revision=revision+1,updated_at=? WHERE component_id=?`,jid,now,idv);if err!=nil{return ComponentJob{},err}
-	job,err:=s.ComponentJob(ctx,jid);if err!=nil{return ComponentJob{},err}
-	go s.runComponentJob(context.Background(),jid)
-	return job,nil
+	jid, err := s.ids.New("cjob")
+	if err != nil {
+		return ComponentJob{}, err
+	}
+	now := s.clock.UnixMilli()
+	target := c.AvailableVersion
+	var job ComponentJob
+	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		if c.ActiveJobID != nil {
+			var status string
+			if err := tx.QueryRowContext(ctx, `SELECT status FROM managed_component_jobs WHERE id=? AND component_id=?`, *c.ActiveJobID, idv).Scan(&status); err != nil {
+				return err
+			}
+			if status == "queued" || status == "running" {
+				return errors.New("component already has an active lifecycle job")
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO managed_component_jobs(id,component_id,action,target_version,status,stage,attempt_count,failure_reason,requested_by,detail_json,revision,created_at,updated_at) VALUES(?,?,?,?,'queued','queued',0,NULL,?,'{}',1,?,?)`, jid, idv, action, target, actor, now, now); err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE managed_component_states SET active_job_id=?,observed_state='queued',last_error=NULL,revision=revision+1,updated_at=? WHERE component_id=? AND revision=? AND active_job_id IS ? AND observed_state=? AND desired_state=? AND installed_version IS ?`, jid, now, idv, c.Revision, c.ActiveJobID, c.State, c.DesiredState, c.InstalledVersion)
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count != 1 {
+			return errors.New("managed component ownership changed before lifecycle request")
+		}
+		job, err = scanComponentJob(tx.QueryRowContext(ctx, `SELECT id,component_id,action,target_version,status,stage,attempt_count,failure_reason,requested_by,detail_json,revision,created_at,started_at,completed_at,updated_at FROM managed_component_jobs WHERE id=?`, jid))
+		return err
+	})
+	if err != nil {
+		return ComponentJob{}, err
+	}
+	go s.runComponentJob(context.Background(), jid)
+	return job, nil
 }
 
-func (s *Service) updateComponentProgress(ctx context.Context,jobID,jobStatus,stage,state string,failure *string,terminal bool) error {
-	now:=s.clock.UnixMilli()
-	var completed any=nil;if terminal{completed=now}
-	_,err:=s.db.ExecContext(ctx,`UPDATE managed_component_jobs SET status=?,stage=?,failure_reason=?,attempt_count=CASE WHEN status='queued' THEN attempt_count+1 ELSE attempt_count END,started_at=COALESCE(started_at,?),completed_at=?,revision=revision+1,updated_at=? WHERE id=?`,jobStatus,stage,failure,now,completed,now,jobID);if err!=nil{return err}
-	var cid string;if err:=s.db.QueryRowContext(ctx,`SELECT component_id FROM managed_component_jobs WHERE id=?`,jobID).Scan(&cid);err!=nil{return err}
-	active:=any(jobID);if terminal{active=nil}
-	_,err=s.db.ExecContext(ctx,`UPDATE managed_component_states SET observed_state=?,last_error=?,active_job_id=?,revision=revision+1,updated_at=? WHERE component_id=?`,state,failure,active,now,cid);return err
+func (s *Service) updateComponentProgress(ctx context.Context, jobID, jobStatus, stage, state string, failure *string, terminal bool) error {
+	now := s.clock.UnixMilli()
+	var completed any = nil
+	if terminal {
+		completed = now
+	}
+	return s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		var cid, status string
+		var owner sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT j.component_id,j.status,c.active_job_id FROM managed_component_jobs j JOIN managed_component_states c ON c.component_id=j.component_id WHERE j.id=?`, jobID).Scan(&cid, &status, &owner); err != nil {
+			return err
+		}
+		if !owner.Valid || owner.String != jobID || (status != "queued" && status != "running") {
+			return errors.New("managed component progress does not own the active lifecycle job")
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE managed_component_jobs SET status=?,stage=?,failure_reason=?,attempt_count=CASE WHEN status='queued' THEN attempt_count+1 ELSE attempt_count END,started_at=COALESCE(started_at,?),completed_at=?,revision=revision+1,updated_at=? WHERE id=? AND status=?`, jobStatus, stage, failure, now, completed, now, jobID, status)
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count != 1 {
+			return errors.New("managed component job changed during progress")
+		}
+		active := any(jobID)
+		if terminal {
+			active = nil
+		}
+		result, err = tx.ExecContext(ctx, `UPDATE managed_component_states SET observed_state=?,last_error=?,active_job_id=?,revision=revision+1,updated_at=? WHERE component_id=? AND active_job_id=?`, state, failure, active, now, cid, jobID)
+		if err != nil {
+			return err
+		}
+		count, err = result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count != 1 {
+			return errors.New("managed component state changed during progress")
+		}
+		return nil
+	})
 }
-func (s *Service) failComponentJob(ctx context.Context,jobID string,err error){
-	msg:=err.Error();_ = s.updateComponentProgress(ctx,jobID,"failed","failed","failed",&msg,true)
+func (s *Service) failComponentJob(ctx context.Context, jobID string, err error) error {
+	msg := err.Error()
+	state := "failed"
+	if errors.Is(err, errOmniRouteOwnershipDeferred) {
+		state = "degraded"
+	}
+	return s.updateComponentProgress(ctx, jobID, "failed", "failed", state, &msg, true)
 }
 func (s *Service) colibriInUse(ctx context.Context) bool {
 	var n int
-	_ = s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM local_runtime_instances i JOIN managed_local_runtimes r ON r.id=i.runtime_id WHERE r.runtime_name LIKE 'colibri%' AND i.status IN ('starting','healthy','busy','stopping')`).Scan(&n)
-	return n>0
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM local_runtime_instances i JOIN managed_local_runtimes r ON r.id=i.runtime_id WHERE r.runtime_name LIKE 'colibri%' AND (i.status!='stopped' OR i.pid IS NOT NULL)`).Scan(&n)
+	return err != nil || n > 0
 }
 func (s *Service) installColibri(ctx context.Context,jobID string) error {
 	a,err:=colibriArtifact();if err!=nil{return err}
@@ -207,69 +298,195 @@ func (s *Service) installColibri(ctx context.Context,jobID string) error {
 	meta,_:=json.Marshal(map[string]any{"os":a.Manifest.OS,"arch":a.Manifest.Architecture,"source_url":a.Manifest.SourceURL,"sha256":a.Manifest.SHA256,"engine_rel":a.EngineRel,"server_rel":a.Manifest.ExecutableRel})
 	_,err=s.db.ExecContext(ctx,`UPDATE managed_component_states SET installed_version=?,available_version=?,desired_state='disabled',observed_state='installed_disabled',last_error=NULL,metadata_json=?,revision=revision+1,updated_at=? WHERE component_id='colibri'`,a.Manifest.Version,a.Manifest.Version,string(meta),now);return err
 }
-func (s *Service) runComponentJob(ctx context.Context,jobID string){
-	j,err:=s.ComponentJob(ctx,jobID);if err!=nil{return}
-	action:=j.Action
-	if action=="retry"||action=="resume"{action="repair"}
+func (s *Service) runComponentJob(ctx context.Context, jobID string) error {
+	j, err := s.ComponentJob(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	// Claim once, before any component action. Duplicate/recovered dispatches
+	// cannot both pass a queued job and ownership change cannot authorize work.
+	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		now := s.clock.UnixMilli()
+		result, err := tx.ExecContext(ctx, `UPDATE managed_component_jobs SET status='running',attempt_count=attempt_count+1,started_at=COALESCE(started_at,?),updated_at=?,revision=revision+1 WHERE id=? AND status='queued' AND EXISTS(SELECT 1 FROM managed_component_states c WHERE c.component_id=managed_component_jobs.component_id AND c.active_job_id=managed_component_jobs.id)`, now, now, jobID)
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count != 1 {
+			return errors.New("managed component job is not queued under its current owner")
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	action := j.Action
+	if action == "retry" || action == "resume" {
+		action = "repair"
+	}
 	var runErr error
 	switch j.ComponentID {
 	case "colibri":
 		switch action {
-		case "install","update","repair":
-			runErr=s.installColibri(ctx,jobID)
+		case "install", "update", "repair":
+			runErr = s.installColibri(ctx, jobID)
 		case "enable":
-			now:=s.clock.UnixMilli();_,runErr=s.db.ExecContext(ctx,`UPDATE managed_component_states SET desired_state='enabled',observed_state='running',last_error=NULL,revision=revision+1,updated_at=? WHERE component_id='colibri' AND installed_version IS NOT NULL`,now)
+			now := s.clock.UnixMilli()
+			_, runErr = s.db.ExecContext(ctx, `UPDATE managed_component_states SET desired_state='enabled',observed_state='running',last_error=NULL,revision=revision+1,updated_at=? WHERE component_id='colibri' AND installed_version IS NOT NULL`, now)
 		case "disable":
-			now:=s.clock.UnixMilli();_,runErr=s.db.ExecContext(ctx,`UPDATE managed_component_states SET desired_state='disabled',observed_state='installed_disabled',last_error=NULL,revision=revision+1,updated_at=? WHERE component_id='colibri'`,now)
+			now := s.clock.UnixMilli()
+			_, runErr = s.db.ExecContext(ctx, `UPDATE managed_component_states SET desired_state='disabled',observed_state='installed_disabled',last_error=NULL,revision=revision+1,updated_at=? WHERE component_id='colibri'`, now)
 		case "remove":
-			if s.colibriInUse(ctx){runErr=errors.New("stop active Colibri model runtimes before removing Colibri");break}
-			_ = s.updateComponentProgress(ctx,jobID,"running","removing","removing",nil,false)
-			runErr=os.RemoveAll(s.componentRuntimeRoot())
-			if runErr==nil{now:=s.clock.UnixMilli();_,runErr=s.db.ExecContext(ctx,`UPDATE managed_component_states SET installed_version=NULL,desired_state='removed',observed_state='removed',last_error=NULL,metadata_json='{}',revision=revision+1,updated_at=? WHERE component_id='colibri'`,now)}
+			if s.colibriInUse(ctx) {
+				runErr = errors.New("stop active Colibri model runtimes before removing Colibri")
+				break
+			}
+			if runErr = s.updateComponentProgress(ctx, jobID, "running", "removing", "removing", nil, false); runErr != nil {
+				break
+			}
+			runErr = os.RemoveAll(s.componentRuntimeRoot())
+			if runErr == nil {
+				now := s.clock.UnixMilli()
+				_, runErr = s.db.ExecContext(ctx, `UPDATE managed_component_states SET installed_version=NULL,desired_state='removed',observed_state='removed',last_error=NULL,metadata_json='{}',revision=revision+1,updated_at=? WHERE component_id='colibri'`, now)
+			}
 		}
 	case "omniroute":
 		switch action {
-		case "install","update","repair":
-			runErr=s.installOmniRoute(ctx,jobID)
+		case "install", "update", "repair":
+			runErr = s.installOmniRoute(ctx, jobID)
 		case "enable":
-			runErr=s.startOmniRoute(ctx)
+			runErr = s.startOmniRoute(ctx)
 		case "disable":
-			runErr=s.stopOmniRoute(ctx)
+			runErr = s.stopOmniRoute(ctx)
 		case "remove":
-			_ = s.updateComponentProgress(ctx,jobID,"running","removing","removing",nil,false)
-			runErr=s.removeOmniRoute(ctx)
+			if runErr = s.updateComponentProgress(ctx, jobID, "running", "removing", "removing", nil, false); runErr != nil {
+				break
+			}
+			runErr = s.removeOmniRoute(ctx)
 		}
 	case "llamacpp":
 		switch action {
-		case "install","update","repair":
-			runErr=s.installLlamaCpp(ctx,jobID)
+		case "install", "update", "repair":
+			runErr = s.installLlamaCpp(ctx, jobID)
 		case "remove":
-			_ = s.updateComponentProgress(ctx,jobID,"running","removing","removing",nil,false)
-			runErr=s.removeLlamaCpp(ctx)
+			if runErr = s.updateComponentProgress(ctx, jobID, "running", "removing", "removing", nil, false); runErr != nil {
+				break
+			}
+			runErr = s.removeLlamaCpp(ctx)
 		default:
-			runErr=errors.New("llama.cpp runtime package does not have a start/stop lifecycle")
+			runErr = errors.New("llama.cpp runtime package does not have a start/stop lifecycle")
 		}
 	default:
-		runErr=errors.New("unsupported managed component")
+		runErr = errors.New("unsupported managed component")
 	}
-	if runErr!=nil{s.failComponentJob(ctx,jobID,runErr);return}
-	all,e:=s.ManagedComponents(ctx);state:="installed_disabled";if e==nil{if x,ok:=all[j.ComponentID];ok{state=x.State}}
-	_ = s.updateComponentProgress(ctx,jobID,"succeeded","complete",state,nil,true)
+	if runErr != nil {
+		return errors.Join(runErr, s.failComponentJob(ctx, jobID, runErr))
+	}
+	all, e := s.ManagedComponents(ctx)
+	if e != nil {
+		return errors.Join(e, s.failComponentJob(ctx, jobID, e))
+	}
+	x, ok := all[j.ComponentID]
+	if !ok {
+		return errors.New("managed component state unavailable after lifecycle action")
+	}
+	return s.updateComponentProgress(ctx, jobID, "succeeded", "complete", x.State, nil, true)
 }
 func (s *Service) RecoverManagedComponents(ctx context.Context) error {
-	if err:=s.migrateLegacyComponentState(ctx);err!=nil{return err}
-	now:=s.clock.UnixMilli()
-	_,_ = s.db.ExecContext(ctx,`UPDATE managed_component_jobs SET status='interrupted',stage='interrupted',failure_reason='OnePane restarted during component lifecycle operation',completed_at=?,updated_at=?,revision=revision+1 WHERE status='running'`,now,now)
-	_,_ = s.db.ExecContext(ctx,`UPDATE managed_component_states SET observed_state='interrupted',last_error='OnePane restarted during component lifecycle operation',active_job_id=NULL,revision=revision+1,updated_at=? WHERE observed_state IN ('downloading','verifying','installing','enabling','disabling','updating','repairing','removing')`,now)
-	rows,err:=s.db.QueryContext(ctx,`SELECT id FROM managed_component_jobs WHERE status='queued' ORDER BY created_at`);if err!=nil{return err};defer rows.Close();var ids []string;for rows.Next(){var idv string;if rows.Scan(&idv)==nil{ids=append(ids,idv)}};for _,idv:=range ids{go s.runComponentJob(context.Background(),idv)};if rows.Err()!=nil{return rows.Err()};if err:=s.recoverOmniRoute(ctx);err!=nil{_ = err};return nil
+	if s == nil || s.db == nil || s.tx == nil || s.clock == nil {
+		return errors.New("managed component recovery unavailable")
+	}
+	if err := s.migrateLegacyComponentState(ctx); err != nil {
+		return err
+	}
+	now := s.clock.UnixMilli()
+	var queued []string
+	// Interruption and queued-work observation commit together. A rejected write,
+	// read, close or commit cannot dispatch partially recovered lifecycle work.
+	if err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		if _, err := tx.ExecContext(ctx, `UPDATE managed_component_jobs SET status='interrupted',stage='interrupted',failure_reason='OnePane restarted during component lifecycle operation',completed_at=?,updated_at=?,revision=revision+1 WHERE status='running'`, now, now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE managed_component_states SET observed_state='interrupted',last_error='OnePane restarted during component lifecycle operation',active_job_id=NULL,revision=revision+1,updated_at=? WHERE observed_state IN ('downloading','verifying','installing','enabling','disabling','updating','repairing','removing')`, now); err != nil {
+			return err
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT id FROM managed_component_jobs WHERE status='queued' ORDER BY created_at,id`)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id string
+			if err = rows.Scan(&id); err != nil {
+				return errors.Join(err, rows.Close())
+			}
+			queued = append(queued, id)
+		}
+		return errors.Join(rows.Err(), rows.Close())
+	}); err != nil {
+		return err
+	}
+	// An optional component's durably recorded ownership deferral does not stop
+	// unrelated startup. Persistence/cancellation/operational failures still do.
+	if err := s.recoverOmniRoute(ctx); err != nil && !errors.Is(err, errOmniRouteRecoveryDeferred) {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for _, id := range queued {
+		go s.runComponentJob(context.Background(), id)
+	}
+	return nil
 }
 
 func (s *Service) migrateLegacyComponentState(ctx context.Context) error {
-	path:=s.legacyComponentStatePath();b,err:=os.ReadFile(path);if errors.Is(err,os.ErrNotExist){return nil};if err!=nil{return err}
-	var legacy struct{Components map[string]struct{Installed bool `json:"installed"`;Enabled bool `json:"enabled"`;State string `json:"state"`;LastError string `json:"last_error"`;UpdatedAt int64 `json:"updated_at"`} `json:"components"`}
-	if json.Unmarshal(b,&legacy)!=nil{return nil}
-	if st,ok:=legacy.Components["colibri"];ok&&st.Installed{desired:="disabled";observed:="installed_disabled";if st.Enabled{desired="enabled";observed="running"};updated:=st.UpdatedAt;if updated==0{updated=s.clock.UnixMilli()};_,_ = s.db.ExecContext(ctx,`UPDATE managed_component_states SET installed_version='1.12.1',desired_state=?,observed_state=?,last_error=NULLIF(?,''),revision=revision+1,updated_at=? WHERE component_id='colibri'`,desired,observed,st.LastError,updated)}
-	return os.Rename(path,path+".migrated")
+	path := s.legacyComponentStatePath()
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var legacy struct {
+		Components map[string]struct {
+			Installed bool   `json:"installed"`
+			Enabled   bool   `json:"enabled"`
+			State     string `json:"state"`
+			LastError string `json:"last_error"`
+			UpdatedAt int64  `json:"updated_at"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(b, &legacy); err != nil {
+		return fmt.Errorf("read legacy managed component state: %w", err)
+	}
+	if st, ok := legacy.Components["colibri"]; ok && st.Installed {
+		desired, observed := "disabled", "installed_disabled"
+		if st.Enabled {
+			desired, observed = "enabled", "running"
+		}
+		updated := st.UpdatedAt
+		if updated == 0 {
+			updated = s.clock.UnixMilli()
+		}
+		result, err := s.db.ExecContext(ctx, `UPDATE managed_component_states SET installed_version='1.12.1',desired_state=?,observed_state=?,last_error=NULLIF(?,''),revision=revision+1,updated_at=? WHERE component_id='colibri'`, desired, observed, st.LastError, updated)
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count != 1 {
+			return errors.New("legacy Colibri state was not imported")
+		}
+	}
+	// Archive the exact source only after its durable import succeeds. A rename
+	// failure remains visible and preserves the source for operator recovery.
+	return os.Rename(path, path+".migrated")
 }
 
 // ManageComponent is retained for internal/test compatibility. Product/API

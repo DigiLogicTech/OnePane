@@ -2,7 +2,7 @@
 
 Updated: 2026-10-25 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
 
-Current continuation: `codex/team-live-ci-completion`, draft PR228, retains the approved full scope. Published `e0b3ad17239994b49cac42da0cd7c637068533c4` integration40153464377 genuinely FAILED the Linux recovery-inventory race package's three-minute deadline during repeated migrations. Windows passed; later managed-inference/race/full-regression stages were skipped. QAguard40153464410 SUCCESS. The next increment fixes that fixture without extending its deadline, makes proposal continuation/journaling atomic, fences sealed parent criteria for every Team contribution, and refuses inference preparation after routing-journal failure. It also supplies guarded current-source Ubuntu packaging source without producing a package. Inspect the next published commit's exact-head CI before rerunning anything, then continue durable Team help/original-owner continuation or recovery semantic attribution. Historical checkpoints describe only their own commits. Full human recovery, collaboration lifecycle, whole-product reviews, physical and installed Windows/Ubuntu acceptance remain open.
+Current continuation: `codex/team-live-ci-completion`, draft PR228, retains the approved full scope. Published `0faf8b49fe57c3357b246ab255aa77935073f190` integration40160849723 SUCCESS (Windows, Linux/race, managed inference/Colibri source checks, full Go/cross-platform); Windows guard40160849842 and new Ubuntu guard40160849777 SUCCESS. Physical and actual packaging jobs skipped. The prior e0b3ad17 Linux timeout remains a genuine historical failure. The next increment remediates confirmed OmniRoute process ownership/privacy, component action/progress/recovery persistence and Evidence stale-Workspace defects; whole-scope reconciliation is in `rc11-current-release-scope-matrix.md`. Inspect the next published commit's own CI, then continue eligible durable Team help/recovery/Library ingestion and remaining approved functionality. Historical checkpoints describe only their own commits. Full human recovery, collaboration lifecycle, whole-product reviews, physical and installed Windows/Ubuntu acceptance remain open.
 
 ## Authority and continuation
 
@@ -23,7 +23,7 @@ Runtime/control remediation `f7cd569f300d716234efa0e5ec2d385bc778d5d2` subsequen
 | TEAM-HOLD | Source validated; hosted/physical acceptance pending | Atomic accepted-Team pause/resume, original Attempt retention, draining observation, authority and descendant dispatch fences; backend/controller/migration regressions | Publish to existing PR and inspect exact-head CI; physical effects and final browser review remain open |
 | TEAM-CANCEL | Intent/parking, pristine ordinary-Task and attributed local-reasoning Team settlement source validated; executed/unknown recovery owner missing | Scoped atomic intent, proposal discard and between-tick parking of the exact original Worker/Attempt; bounded durable intake/discovery and read-only case inspection implemented | Complete versioned effect inventory, authenticated human decisions and independent actual postconditions before settlement. Intake/read APIs do not authorize recovery or replay |
 | TEAM-COLLAB | Partial source; result and bounded Library contribution navigation implemented, newest hosted validation pending | Bounded two-member concurrency and constrained queueing, agent draft adoption, criteria/guidance; current ledger-bound completion metadata, explicit result preview and exact Task-associated publication controls; dynamic help/reassignment and broader fairness remain open | Inspect new exact-head CI, then implement durable help requests/answers with original-owner continuation and versioned reviewed reassignment; preserve immutable graph and physical acceptance |
-| SCOPE-AUDIT | Open | Trace approved Alpha/RC requirements to code, tests and missing acceptance across core AI, autonomy, application and infrastructure | Reconcile whole branch, open issues and integration manifests; do not treat old gap descriptions as current defects |
+| SCOPE-AUDIT | Current15issue source reconciliation recorded; full acceptance trace still open | `rc11-current-release-scope-matrix.md` separates existing source from genuine Library/toolchain/service/native-engine/Team/recovery/product gaps and physical/review/installed gates | Preserve implemented Council, L4 DAG and runtime foundations; continue actual remaining functionality rather than reimplementing historical unchecked bullets |
 | L4-E2E | Open blocking acceptance | Real local objective → authorized Workspace Tasks → tools/build/tests → verified Library deliverable, restart and resource-wait recovery, no unintended cloud or duplicate effects | Complete functional gaps from scope audit; capture real CPU-only evidence |
 | AI-LIFECYCLE | Open blocking acceptance | Real model download/install/verify/remove; CPU/GPU inference; Colibri and OmniRoute; queuing, swap, memory reclamation, fallback and provider health | Follow physical lifecycle protocol; fixtures/compilation cannot close gate |
 | NODE-SANDBOX | Open blocking acceptance | Trusted paired transport, isolated rootless Workspaces, grants/revocation and runtime/model management | Approved physical machines and runtimes; service-health Task adapter remains disabled pending acceptance/review |
@@ -584,3 +584,143 @@ No installed Alpha, user state, models or runtime was changed; no installer or
 final build is claimed. Continue the same branch after exact new-source CI.
 
 Final changed-source Windows CGO0 integration passes Worker156.643s, Team65.314s, Task54.433s, Projectorchestrator49.658s, Teamworker28.956s, inference32.394s and Agentruntime21.322s. Affected integration vet and whitespace pass; unit Worker8.886s/recoveryinventory0.450s; Windows denied-packaging guard and39Ubuntu source/provenance checks pass. Commit this exact reviewed source to existing PR228; new hosted race and source guard evidence remains required.
+
+## Whole-scope audit, component ownership and Evidence scope — subsequent increment
+
+Published0faf8b49 exact integration40160849723 SUCCESS: native Windows and Linux
+race, managed inference/Colibri source checks, full Go regression and cross-platform
+compilation passed. Windows guard40160849842 and first Ubuntu guard40160849777
+SUCCESS; actual MSI/Debian packaging and physical approval SKIPPED. This proves
+that source increment, not the following additional changes or final acceptance.
+
+Reconciled current15open approved issues against actual code/tests, persisted in
+rc11-current-release-scope-matrix.md. Substantial Council, governed objective-to-DAG,
+Workspace lifecycle, toolchain desired manifests/presence preflight and immutable
+Library exchange already exist. Content parsing/indexing/search/page-line citations,
+installed toolchain/SBOM/provisioning, general service execution, authenticated native
+Unreal/UEFN, durable Team help/reassignment, full recovery decisions/postconditions
+and product/physical/review/installed acceptance remain real unfinished scope. No
+issue was closed, no requirement removed and no new runtime authority enabled.
+
+OMNIROUTE-OWNERSHIP-001 (blocking process/data safety): actual disposable foreign
+child baseline1.232s was killed solely from stored PID; metadata was erased and
+component falsely disabled. Per-Service exact retained exec.Cmd/Wait ownership now
+replaces numeric-PID reopen/signals. Recovered PID or preexisting health listener
+never grants authority. Start/stop/install/update/remove serialize and refuse
+unknown owner while preserving runtime/data/metadata. Initial/running/stopped state
+writes use revision+exact metadata fences; rejected writes retain known-exit proof
+for safe retry. Optional recovery may continue bootstrap only after a distinct
+successfully persisted degraded observation; failed observation/CAS/cancellation
+propagates. A missing optional executable does not prevent operator UI after its
+safe degraded record commits. Windows install fence precedes its platform branch.
+
+OMNIROUTE-PRIVACY-001: runtime/npm launches receive scoped allowlisted host settings,
+owned caches, no inherited service credentials/proxy/Node injection; private bounded
+log writers/ACL helpers and static public failures replace raw log tails. Focused
+OmniRoute2.566s passes with real disposable parent launch/stop/concurrent stop,
+spontaneous exit, rejected initial/final/stop writes+retry, unknown owner start/
+install/remove refusal and actual child environment/log privacy. No actual
+OmniRoute download/installation/provider/model occurred. Exact retained parent
+ownership is not descendant-tree release or authenticated health-socket attribution;
+those remain integration/physical dependencies, not passed acceptance.
+
+COMPONENT-ATOMICITY-001 (blocking durable lifecycle defect): actual SQLite baselines
+11.472s plus stale-owner1.673s reproduced six failures: rejected API action persisted
+a queued job; failed state progress left changed job; failed terminal persistence
+silently mismatched state; cancelled/closed usage queries claimed idle; old terminal
+progress cleared newer active owner. No goroutine/effect ran in these reproductions,
+but retained queued jobs are selected by startup recovery. Requests now commit
+job+exact component CAS+returned job together before dispatch. Progress atomically
+requires exact current active job and queued/running status. One queued claim is
+required before effects; duplicate running calls refuse. Failure/completion errors
+surface; rejected removal progress precedes filesystem deletion. Known-disabled
+OmniRoute private runtime removal completes one succeeded job while preserving data;
+unknown ownership preserves bytes/PID and reports degraded. Colibri usage fails
+closed on DB error, any non-stopped state (including failed without PID), or any
+recorded PID; only stopped+NULLPID is idle.14actual-schema state/PID cases and
+all action/claim/removal/ownership controls pass in final2.092s.
+
+COMPONENT-RECOVERY-001 (blocking state/upgrade defect): baseline8.841s reproduced
+five ignored/partial interruption/legacy failures. Running-job interruption plus
+component state and queued observation now commit together; reads close before
+execution. Failed writes/reads/commit cannot dispatch. Legacy failed/zero-row/
+malformed imports retain their source; archive follows actual one-row DB success.
+Focused final recovery/legacy1.910s passes, including single-connection queue and
+failed transaction/degraded-write cases. No component/model/real install ran.
+
+The expanded component tests share immutable bytes from one real fully migrated,
+checkpointed/closed schema, each with its own durable database/pool. Three parallel
+checks1.461s prove real migration presence/WAL/FK/private trigger and row/read-only
+isolation; no migration/upgrade test was replaced. This avoids repeating a full
+schema migration per failure case in the bounded Linux race stage. Native Windows
+and Linux race explicitly select TestOmniRoute/TestManagedComponent and oversized
+fetch cleanup, retaining existing model/Colibri coverage.
+
+QA-FIXTURE-ENV-001: broad native run exposed empty child verdict during os.WriteFile
+publication; parent could observe truncation before bytes. The helper now writes a
+private pending file and atomically renames it; parent assertions/deadlines unchanged.
+20actual OS child environment repetitions2.719s pass. This was not evidence of
+credential disclosure. Standalone affected vet also found unreachable oversize
+fetch cleanup in provision.go. Cleanup now precedes return; new TLS fetch tests
+reject both fresh and resumed oversized Content-Length and remove rejected partials.
+Final targeted0.162s passes; this is a disposable HTTP fixture, not model download.
+
+EVIDENCE-SCOPE-001 (blocking private-data UI lifetime defect): retained actual
+controller failed11deferred-response cases. Per-render epoch binds exact Workspace,
+tab, host and list; stale success/errors cannot replace/clear newer state. New/
+denied/empty/invalidated views scrub cached rows and old controls.12controller cases
+pass, retaining escaping/filter/sort/100-row controls. Legacy cleanup validator and
+WebUI0.623s pass; authoritative workflow includes the new actual-controller validator.
+No browser acceptance, full canonical UI or linked Evidence historical search is
+claimed. Global wrapper/duplicate-function canonicalization remains approved work.
+
+Latest full changed-source localai10.256s and integration API64.418s pass; affected
+localai/API/bootstrap integration vet and whitespace pass. Full native Go regression
+is running with a temporary clearly labelled legacy setup embed fixture; it is
+removed in finally and is not an installer payload or release artifact. Record its
+actual result before claiming broad native pass or committing this increment.
+Continue same branch/PR and inspect new exact-source CI. Full approved scope,
+ordered sign-offs, LAST UI, physical inference/Node/L4 and Windows/Ubuntu installed
+acceptance remain OPEN. Installed Alpha, credentials, models, runtimes, Projects
+and user data were not altered. No release artifact/checksum/final build is claimed.
+
+Full native Windows go test ./... completed FAIL: affected localai/API and all other listed packages passed, but sandboxrunner retains Windows-incompatible POSIX/private-mode helper and Python Store-stub failures (credential staging, file edit/no-follow preview/publication/large chunks/startup sweep). This reproduces the previously recorded native environment limitations; it is not a full Windows pass. Legacy setup embed fixture was removed in finally; no installer remains. Linux full regression against0faf8b49 passed hosted, but latest source still needs its own CI. Do not weaken POSIX isolation assertions or represent this local sweep as physical/rootless acceptance. OmniRoute exact-settings/cost-label review found an additional reproduced onboarding assertion defect; remediation/affected validation is in progress before publication.
+
+## Resumed validation and OmniRoute onboarding — 25 October 2026 06:36 UTC
+
+Retained source changes were preserved and reviewed on the same development
+branch/PR228. Prior exact0faf8b49 workflow conclusions were freshly confirmed:
+integration40160849723 and Windows40160849842/Ubuntu40160849777 guards SUCCESS.
+This does not qualify the following source or skipped physical/package acceptance.
+
+OMNIROUTE-POLICY-001: exact settings.freeAccessPolicy lower-case strict is now
+observed configuration only. Recursive unrelated backup/provider objects and
+case variants cannot assert the active policy. New require_strict_policy is
+additive; legacy require_strict_zero_cost still refuses unproven economic claims.
+New provider/deployment records remain provider_managed with hard-zero false;
+legacy records are preserved and shown unobserved/unverified. Both active/saved
+UI handlers use explicit policy/cost distinctions. No economic/spend bypass was
+proven in the prior scheduler; this fixes onboarding metadata and user assurance.
+Actual HTTP and migrated-registration cases replace assumptions about that path.
+
+OMNIROUTE-ONBOARDING-001: enabling the new integration test exposed three successful
+connect cases failing with invalid state transition. Existing AddOmniRoute skipped
+required discovered -> qualifying -> ready. It now uses both existing revision-
+fenced transitions without changing the shared state machine; real storage tests
+verify both durable ordered events and revision3. Connectivity qualification is
+not real model execution. Provider-onboarding integration is explicitly selected
+with -tags integration on Windows and Linux race, so these cases are not skipped.
+
+Final changed-source native Windows CGO0: full localai6.685s, onboarding unit0.810s,
+full API integration44.796s, final onboarding integration1.286s PASS. Affected
+integration vet, all28JavaScript validators and whitespace checks PASS. The first
+onboarding integration run FAILED the three lifecycle controls before remediation;
+its failure is retained here. Earlier full Windows regression remains FAILED in
+sandboxrunner for the recorded environment limitations, not a broad native pass.
+No real OmniRoute/provider/model/installed platform acceptance was exercised.
+
+Publish this validated increment on the same branch, inspect its own hosted
+Windows/Linux/race/full regression and guard conclusions, then immediately
+continue eligible Team help/recovery/Library functionality. All15approved issues,
+physical AI/Node/L4, human audits/sign-offs, LAST UI, installed Windows/Ubuntu,
+source-bound final artifacts/checksums and full release gates remain OPEN.

@@ -49,6 +49,10 @@ on:
       - 'internal/webui/static/debug-centre.js'
       - 'internal/webui/static/debug-centre.css'
       - 'internal/webui/static/settings-redesign.js'
+      - 'internal/webui/static/evidence-audit-page.js'
+      - 'scripts/validate_evidence_audit.js'
+      - 'scripts/validate_omniroute_policy_observation.js'
+      - 'internal/provideronboarding/**'
       - 'internal/webui/static/app.js'
       - 'scripts/validate_debug_centre.js'
       - 'internal/projectworkspace/**'
@@ -219,6 +223,9 @@ jobs:
           node --check internal/webui/static/debug-centre.js
           node --check internal/webui/static/qa-trace-correlation.js
           node scripts/validate_qa_trace_correlation.js
+          node --check internal/webui/static/evidence-audit-page.js
+          node scripts/validate_evidence_audit.js
+          node scripts/validate_omniroute_policy_observation.js
           node scripts/validate_debug_centre.js
           node --check internal/webui/static/policy-diagnostic-review.js
           node scripts/validate_policy_diagnostic_review.js
@@ -267,6 +274,8 @@ jobs:
           GOMAXPROCS: '2'
         run: |
           # No live model or GPU. Real SQLite-backed concurrent lease tests.
+          go test -race -count=1 -timeout 3m -run 'Test(OmniRoute|ManagedComponent|FetcherOversizedContentLength)' ./internal/localai
+          go test -race -tags integration -count=1 -timeout 3m ./internal/provideronboarding
           go test -race -count=1 -timeout 3m -run TestManagedStop ./internal/localai
           go test -race -count=1 -timeout 3m -run TestColibriRollbackCanStopWhileHoldingResidencyLock ./internal/localai
           go test -race -count=1 -timeout 3m -run TestChatColibriReplacementCancelledAfterEvictionRestoresPreviousWithIndependentDeadline ./internal/localai
@@ -358,6 +367,8 @@ jobs:
         run: |
           # Real Windows process-launch credential isolation and NTFS ACL tests.
           # No Colibri downloads, installs, or user data root access.
+          go test -count=1 -timeout 3m -run 'Test(OmniRoute|ManagedComponent|FetcherOversizedContentLength)' ./internal/localai
+          go test -tags integration -count=1 -timeout 3m ./internal/provideronboarding
           go test -count=1 -timeout 4m -run TestManagedRuntimeLaunchWithNilOrEmptyEnvDoesNotInheritSecrets ./internal/localai
           go test -count=1 -timeout 4m -run TestWindowsManagedRuntimeLog ./internal/localai
           # Verify exact launched-model PID ownership and cancelled Colibri

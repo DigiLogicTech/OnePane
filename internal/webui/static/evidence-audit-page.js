@@ -4,13 +4,37 @@
  * artifact content or the independent verification APIs.
  */
 let a51AuditRows=[];
+let a51AuditEpoch=0;
+let a51AuditScope=null;
+
+function a51ClearAudit(scope=a51AuditScope){
+ // A stale read must never clear a newer read's records or controls.
+ if(scope!==a51AuditScope)return;
+ if(scope&&scope.host.querySelector("#a51AuditList")===scope.list){
+  scope.list.innerHTML="";
+  const type=scope.host.querySelector("#a51AuditType"),filter=scope.host.querySelector("#a51AuditFilter"),count=scope.host.querySelector("#a51AuditCount");
+  if(type){type.innerHTML='<option value="">All types</option>';type.onchange=null}
+  if(filter){filter.value="";filter.oninput=null}
+  if(count)count.textContent="";
+ }
+ a51AuditRows=[];
+ a51AuditScope=null;
+ ++a51AuditEpoch;
+}
+function a51CurrentAudit(scope){
+ const tab=currentTab();
+ return !!scope&&scope===a51AuditScope&&scope.epoch===a51AuditEpoch&&
+  scope.workspaceID===String(onepaneWorkspace||"")&&tab?.route==="evidence"&&
+  tab.id===scope.tabID&&scope.host.isConnected&&$("#viewHost")===scope.host&&
+  scope.host.querySelector("#a51AuditList")===scope.list;
+}
 
 function a51AuditText(value){
  return escapeHtml(value===null||value===undefined?"—":String(value));
 }
 function a51PaintAudit(){
  const host=$("#viewHost");
- if(!host||currentTab()?.route!=="evidence")return;
+ if(!a51CurrentAudit(a51AuditScope)){a51ClearAudit();return}
  const type=host.querySelector("#a51AuditType")?.value||"";
  const query=(host.querySelector("#a51AuditFilter")?.value||"").trim().toLowerCase();
  const items=a51AuditRows.filter(row=>{
@@ -46,8 +70,10 @@ function a51PaintAudit(){
  }).join("");
 }
 async function a51RenderAudit(){
+ a51ClearAudit();
  const host=$("#viewHost");
- if(!host)return;
+ const tab=currentTab();
+ if(!host||tab?.route!=="evidence")return;
  const workspaceID=String(onepaneWorkspace||"");
  host.innerHTML='<section class="page a51-evidence-page">'+
   pageHeader("Evidence / Audit","Recent, permission-checked backend event records for the current OnePane tenancy Workspace.")+
@@ -63,18 +89,22 @@ async function a51RenderAudit(){
   host.querySelector("#a51AuditList").innerHTML='<div class="empty-state">Select an active OnePane Workspace to view its event ledger.</div>';
   return;
  }
+ const scope={epoch:a51AuditEpoch,workspaceID,tabID:tab.id,host,list:host.querySelector("#a51AuditList")};
+ a51AuditScope=scope;
  let rows;
  try{
   rows=await apiRequest("/v1/events?workspace_id="+encodeURIComponent(workspaceID)+"&latest=1&limit=100");
  }catch(error){
-  if(host.isConnected&&currentTab()?.route==="evidence"){
+  if(a51CurrentAudit(scope)){
+   a51ClearAudit(scope);
    host.querySelector("#a51AuditCount").textContent="Event ledger unavailable";
    host.querySelector("#a51AuditList").innerHTML='<div class="error" role="alert">'+
     a51AuditText(error.message||"The current user lacks events.read permission.")+'</div>';
   }
+  else a51ClearAudit(scope);
   return;
  }
- if(!host.isConnected||currentTab()?.route!=="evidence")return;
+ if(!a51CurrentAudit(scope)){a51ClearAudit(scope);return}
  a51AuditRows=(Array.isArray(rows)?rows:[]).slice(0,100).sort((a,b)=>Number(b.sequence||0)-Number(a.sequence||0));
  const types=[...new Set(a51AuditRows.map(x=>x.event_type).filter(Boolean))].sort();
  host.querySelector("#a51AuditType").insertAdjacentHTML("beforeend",
@@ -86,7 +116,7 @@ async function a51RenderAudit(){
 const a51PreviousRenderActiveView=renderActiveView;
 renderActiveView=async function(){
  const tab=currentTab();
- if(tab?.route!=="evidence")return a51PreviousRenderActiveView();
+ if(tab?.route!=="evidence"){a51ClearAudit();return a51PreviousRenderActiveView()}
  const epoch=++qa31ViewEpoch;
  if(tab.state==="suspended")tab.state="active";
  try{await a51RenderAudit()}

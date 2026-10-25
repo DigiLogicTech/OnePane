@@ -2483,6 +2483,7 @@ func (s *Server) addOmniRoute(w http.ResponseWriter, r *http.Request) {
 		BaseURL               string  `json:"base_url"`
 		SecretRef             *string `json:"secret_ref"`
 		RequireStrictZeroCost bool    `json:"require_strict_zero_cost"`
+		RequireStrictPolicy   bool    `json:"require_strict_policy"`
 		DefaultModel          string  `json:"default_model"`
 	}
 	if !decodeJSON(w, r, &in) {
@@ -2497,7 +2498,7 @@ func (s *Server) addOmniRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	ws := in.WorkspaceID
 	actor := i.PrincipalID
-	out, err := s.providers.AddOmniRoute(r.Context(), provideronboarding.OmniRouteCommand{WorkspaceID: &ws, BaseURL: in.BaseURL, SecretRef: in.SecretRef, RequireStrictZeroCost: in.RequireStrictZeroCost, DefaultModel: in.DefaultModel, ActorPrincipalID: &actor, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
+	out, err := s.providers.AddOmniRoute(r.Context(), provideronboarding.OmniRouteCommand{WorkspaceID: &ws, BaseURL: in.BaseURL, SecretRef: in.SecretRef, RequireStrictZeroCost: in.RequireStrictZeroCost, RequireStrictPolicy: in.RequireStrictPolicy, DefaultModel: in.DefaultModel, ActorPrincipalID: &actor, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

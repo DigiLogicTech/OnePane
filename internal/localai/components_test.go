@@ -3,24 +3,15 @@ package localai
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/DigiLogicTech/OnePane/internal/clock"
-	sqliteStore "github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
 )
 
 func componentTestService(t *testing.T) (*Service, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	db, err := sqliteStore.Open(filepath.Join(t.TempDir(), "harness.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
+	db := componentSchemaDatabase(t, ctx)
 	svc := NewService(db.SQL(), db, clock.Real{}, nil, t.TempDir(), nil)
 	return svc, ctx
 }

@@ -61,6 +61,15 @@ func TestTeamAssistanceHumanWaitCommitsExactOriginalOwner(t *testing.T) {
 	if err := w.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_assistance_requests`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("duplicate requests count=%d err=%v", count, err)
 	}
+	var scopeCount int
+	if err := w.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_assistance_request_scopes WHERE request_id=? AND project_id IS NULL AND project_workspace_id IS NULL AND artifact_session_id IS NULL`, request).Scan(&scopeCount); err != nil || scopeCount != 1 {
+		t.Fatalf("original NULL scope not captured: %d %v", scopeCount, err)
+	}
+	for _, statement := range []string{`UPDATE team_assistance_request_scopes SET project_id=NULL WHERE request_id=?`, `DELETE FROM team_assistance_request_scopes WHERE request_id=?`} {
+		if _, err := w.db.ExecContext(ctx, statement, request); err == nil {
+			t.Fatal("immutable scope mutation accepted")
+		}
+	}
 	for _, sql := range []string{`UPDATE team_assistance_requests SET question='replacement' WHERE id=?`, `DELETE FROM team_assistance_requests WHERE id=?`, `INSERT INTO team_assistance_requests SELECT 'duplicate',workspace_id,session_id,plan_id,assignment_key,member_id,task_id,attempt_id,run_id,wait_step_id,notice_message_id,author_principal_id,question,created_at FROM team_assistance_requests WHERE id=?`} {
 		if _, err := w.db.ExecContext(ctx, sql, request); err == nil {
 			t.Fatalf("immutable/unique request allowed %s", sql)
@@ -229,7 +238,7 @@ func TestTeamAssistanceModelCannotChooseOwnership(t *testing.T) {
 }
 
 func TestTeamAssistanceWritesRollbackWithOriginalWait(t *testing.T) {
-	for _, failure := range []string{"request", "notice", "audit"} {
+	for _, failure := range []string{"request", "notice", "scope", "audit"} {
 		t.Run(failure, func(t *testing.T) {
 			w, ctx, run, _, _, _ := prepareTeamProposalContinuation(t, "human")
 			statement := `CREATE TRIGGER reject_help BEFORE INSERT ON team_assistance_requests BEGIN SELECT RAISE(ABORT,'request rejected'); END`
@@ -238,6 +247,9 @@ func TestTeamAssistanceWritesRollbackWithOriginalWait(t *testing.T) {
 			}
 			if failure == "audit" {
 				statement = `CREATE TRIGGER reject_help BEFORE INSERT ON events WHEN NEW.event_type='team.assistance_requested' BEGIN SELECT RAISE(ABORT,'help audit rejected'); END`
+			}
+			if failure == "scope" {
+				statement = `CREATE TRIGGER reject_help BEFORE INSERT ON team_assistance_request_scopes BEGIN SELECT RAISE(ABORT,'scope rejected'); END`
 			}
 			if _, err := w.db.ExecContext(ctx, statement); err != nil {
 				t.Fatal(err)
@@ -263,12 +275,12 @@ func TestTeamAssistanceWritesRollbackWithOriginalWait(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var requests, events, messages, steps int
+			var requests, scopes, events, messages, steps int
 			var attempt string
-			if err = w.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM team_assistance_requests),(SELECT COUNT(*) FROM events),(SELECT COUNT(*) FROM team_messages),(SELECT COUNT(*) FROM agent_worker_steps WHERE run_id=? AND step_kind='human'),status FROM task_attempts WHERE id=?`, run.ID, run.AttemptID).Scan(&requests, &events, &messages, &steps, &attempt); err != nil {
+			if err = w.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM team_assistance_requests),(SELECT COUNT(*) FROM team_assistance_request_scopes),(SELECT COUNT(*) FROM events),(SELECT COUNT(*) FROM team_messages),(SELECT COUNT(*) FROM agent_worker_steps WHERE run_id=? AND step_kind='human'),status FROM task_attempts WHERE id=?`, run.ID, run.AttemptID).Scan(&requests, &scopes, &events, &messages, &steps, &attempt); err != nil {
 				t.Fatal(err)
 			}
-			if result.Status != "failed" || !w.dispatchReconciliationFailed || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(beforeTask, afterTask) || requests != 0 || steps != 0 || events != beforeEvents || messages != beforeMessages || attempt != "running" {
+			if result.Status != "failed" || !w.dispatchReconciliationFailed || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(beforeTask, afterTask) || requests != 0 || scopes != 0 || steps != 0 || events != beforeEvents || messages != beforeMessages || attempt != "running" {
 				t.Fatalf("partial %s: result=%+v requests=%d steps=%d events=%d->%d messages=%d->%d attempt=%s", failure, result, requests, steps, beforeEvents, events, beforeMessages, messages, attempt)
 			}
 		})

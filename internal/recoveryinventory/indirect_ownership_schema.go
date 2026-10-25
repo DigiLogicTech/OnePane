@@ -35,6 +35,10 @@ type indirectReferenceDescriptor struct {
 // row-vocabulary contracts are implemented. Shared context never recursively
 // owns all rows in its tenant, Project, Workspace or artifact session.
 var indirectReferenceDescriptors = map[string][]indirectReferenceDescriptor{
+	"team_assistance_request_scopes": {
+		{[]string{"request_id"}, "exact immutable assistance request ownership; missing historical scope is unresolved, never backfilled from current Task state"},
+		{[]string{"project_id", "project_workspace_id", "artifact_session_id"}, "nullable original scope recorded atomically at the human wait; shared scope never owns unrelated work and grants no authority"},
+	},
 	"team_assistance_requests": {
 		{[]string{"session_id", "plan_id", "assignment_key", "member_id"}, "immutable accepted contribution context; shared Team session does not own unrelated assignments"},
 		{[]string{"task_id", "attempt_id", "run_id", "wait_step_id"}, "exact original Task/Attempt/Worker and committed human waiting step; request is not permission to resume or replay"},
@@ -73,7 +77,8 @@ var indirectOwnershipTargets = map[string]bool{
 	"agent_worker_runs": true, "agent_worker_steps": true, "operations": true,
 	"events": true, "artifacts": true, "project_library_asset_versions": true,
 	"notification_deliveries": true, "outbox_jobs": true, "dependency_refs": true,
-	"team_assistance_requests": true,
+	"team_assistance_requests":       true,
+	"team_assistance_request_scopes": true,
 }
 
 func indirectOwnershipRelevant(table schemaTable) bool {

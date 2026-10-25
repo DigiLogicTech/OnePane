@@ -1,7 +1,8 @@
 # Durable Team assistance and original-owner continuation
 
-Status: durable request/wait source implemented,25October2026; authenticated
-answers, explicit Continue and request-specific context/UI remain unimplemented.
+Status: durable request/wait and bounded single-request read source implemented,
+25October2026; authenticated answers, explicit Continue, session request listing
+and request-specific context/UI remain unimplemented.
 The release execution manifest remains authoritative for open gates. This is
 human assistance for an accepted contribution; peer execution, new helpers and
 versioned reviewed reassignment remain separate approved work.
@@ -15,6 +16,12 @@ back. Migration0110 adds immutable request history for accepted contributions,
 binding the returned exact waiting journal identity, original Task/Attempt/Worker
 and persisted accepted assignment. A trusted system notice and request audit
 commit inside that same transaction. Questions have a UTF-8-safe512byte bound.
+Migration0111 records the exact nullable Project/named Workspace/artifact-session
+scope in that same transaction, with retained immutable history and no backfill.
+Old requests without original scope remain unavailable for reconciliation.
+The dedicated request GET rechecks accepted identity, original waiting owner,
+current membership, frozen policy, bounded private metadata and original scope;
+it repeats credential and active Project/named scope checks before publication.
 Team-room human guidance exists, but no request-specific durable answer/
 continuation protocol does. Generic chat or Task resume does not complete it.
 
@@ -25,7 +32,8 @@ Team/dependency/ancestor checks before any mutation. Actual handler authority
 and rejected-write matrices preserve the original lineage and prior model
 journal. Current active system principal and exact Workspace membership are
 also required at preflight and atomic claim/continuation. The request half of
-steps1/2 below is implemented; answer storage and steps3-7 remain required.
+steps1/2 below is implemented. Bounded single-request reads in steps3/4 exist;
+answer storage/writes, list discovery and steps5-7 remain required.
 
 The immutable0098accepted assignment/root cannot be reopened or replaced in
 place. Existing shared admission applies to Task start/resume, each Worker

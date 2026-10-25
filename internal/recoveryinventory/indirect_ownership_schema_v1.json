@@ -3207,5 +3207,79 @@
   "without_rowid": 0,
   "strict": 1,
   "create_sql": "CREATE TABLE team_assistance_requests (\n id TEXT PRIMARY KEY,\n workspace_id TEXT NOT NULL REFERENCES workspaces(id),\n session_id TEXT NOT NULL REFERENCES team_sessions(id),\n plan_id TEXT NOT NULL REFERENCES team_plans(id),\n assignment_key TEXT NOT NULL,\n member_id TEXT NOT NULL REFERENCES team_members(id),\n task_id TEXT NOT NULL REFERENCES tasks(id),\n attempt_id TEXT NOT NULL REFERENCES task_attempts(id),\n run_id TEXT NOT NULL REFERENCES agent_worker_runs(id),\n wait_step_id TEXT NOT NULL UNIQUE REFERENCES agent_worker_steps(id),\n notice_message_id TEXT NOT NULL UNIQUE REFERENCES team_messages(id),\n author_principal_id TEXT NOT NULL REFERENCES principals(id),\n question TEXT NOT NULL CHECK(length(CAST(question AS BLOB)) BETWEEN 1 AND 512),\n created_at INTEGER NOT NULL,\n FOREIGN KEY(session_id,assignment_key) REFERENCES team_execution_assignments(session_id,assignment_key)\n) STRICT"
+},
+{
+  "table": "team_assistance_request_scopes",
+  "columns": [
+    {
+      "name": "request_id",
+      "type": "TEXT",
+      "not_null": 1,
+      "primary_key": 1,
+      "hidden": 0
+    },
+    {
+      "name": "project_id",
+      "type": "TEXT",
+      "not_null": 0,
+      "primary_key": 0,
+      "hidden": 0
+    },
+    {
+      "name": "project_workspace_id",
+      "type": "TEXT",
+      "not_null": 0,
+      "primary_key": 0,
+      "hidden": 0
+    },
+    {
+      "name": "artifact_session_id",
+      "type": "TEXT",
+      "not_null": 0,
+      "primary_key": 0,
+      "hidden": 0
+    }
+  ],
+  "foreign_keys": [
+    {
+      "from": "artifact_session_id",
+      "target": "artifact_sessions",
+      "to": "id",
+      "on_update": "NO ACTION",
+      "on_delete": "NO ACTION",
+      "id": 0,
+      "sequence": 0
+    },
+    {
+      "from": "project_workspace_id",
+      "target": "project_workspaces",
+      "to": "id",
+      "on_update": "NO ACTION",
+      "on_delete": "NO ACTION",
+      "id": 1,
+      "sequence": 0
+    },
+    {
+      "from": "project_id",
+      "target": "projects",
+      "to": "id",
+      "on_update": "NO ACTION",
+      "on_delete": "NO ACTION",
+      "id": 2,
+      "sequence": 0
+    },
+    {
+      "from": "request_id",
+      "target": "team_assistance_requests",
+      "to": "id",
+      "on_update": "NO ACTION",
+      "on_delete": "NO ACTION",
+      "id": 3,
+      "sequence": 0
+    }
+  ],
+  "without_rowid": 0,
+  "strict": 1,
+  "create_sql": "CREATE TABLE team_assistance_request_scopes (\n request_id TEXT PRIMARY KEY REFERENCES team_assistance_requests(id),\n project_id TEXT REFERENCES projects(id),\n project_workspace_id TEXT REFERENCES project_workspaces(id),\n artifact_session_id TEXT REFERENCES artifact_sessions(id)\n) STRICT"
 }
 ]

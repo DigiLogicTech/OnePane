@@ -40,6 +40,8 @@ func TestRecoveryIndirectOwnershipSchemaRejectsChanges(t *testing.T) {
 		{"new_worker_step_payload", `ALTER TABLE agent_worker_steps ADD COLUMN new_effect_json TEXT`},
 		{"new_assistance_request_fk", `CREATE TABLE new_help_effect(owner TEXT REFERENCES team_assistance_requests(id))`},
 		{"new_assistance_request_name", `CREATE TABLE new_help_effect(assistance_request_id TEXT)`},
+		{"changed_assistance_scope", `ALTER TABLE team_assistance_request_scopes ADD COLUMN answer_json TEXT`},
+		{"new_assistance_scope_owner", `CREATE TABLE new_help_effect(owner TEXT REFERENCES team_assistance_request_scopes(request_id))`},
 		{"changed_assistance_wait_identity", `ALTER TABLE team_assistance_requests RENAME COLUMN wait_step_id TO inferred_step`},
 		{"changed_assistance_question", `ALTER TABLE team_assistance_requests RENAME COLUMN question TO answer_json`},
 		{"new_assistance_payload", `ALTER TABLE team_assistance_requests ADD COLUMN human_decision_json TEXT`},

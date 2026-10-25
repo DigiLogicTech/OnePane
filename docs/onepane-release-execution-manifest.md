@@ -919,3 +919,97 @@ binding before/after ANALYZE. Final full SQLite28.148s and recovery14.898s PASS;
 affected integration vet/whitespace PASS. Earlier unchanged Task45.532s/Team60.032s
 remain source evidence. No physical reasoning/tool/installed acceptance implied.
 Publish same branch/PR and inspect exact new-source partitioned hosted CI.
+
+## Bounded assistance request observation — 25 October 07:24 UTC
+
+Published first-slice f9827c2cc773bcf5fef9b544dbd229b7388d86dd has exact-source
+integration40172113244 SUCCESS: native Windows, all five Linux source/race/managed/
+full regression families and aggregate passed. Windowsguard40172113250 and
+Ubuntuguard40172113252 SUCCESS; actual packages/physical acceptance not passed.
+Do not transfer that hosted result to the following unpublished read increment.
+
+Dedicated GET /v1/team-sessions/{sessionID}/assistance/{requestID} observes one
+exact original waiting contribution. Service collects in one transaction with
+SQL byte budgets before materialization, raw graph9/accepted8 and dependency41/
+allowed40 limits, exact accepted session/plan/manifest/sealed root+child criteria,
+Task/Attempt/Worker provenance/latest committed human step/notice, canonical
+Project/named Workspace/artifact-session scope, frozen profile/member policy and
+current active reader/requester principals and memberships. Duplicate active
+Attempts and stale/replaced/terminal owners fail closed. Genuine Team pauses
+remain readable and retain their holds; no admission, answer or resume is called.
+
+HTTP retains original credential/principal/type, requires current team.read+
+task.read+project.read, recollects exact comparable request and denies changes.
+JSON question remains authored untrusted text; response has16KiB budget, safe JSON
+integers, private no-store/nosniff and no unrelated content/storage retrieval.
+AUTH-HELP-READ-001 (blocking private read): actual second-collection named Workspace
+archive baseline1.892s returned200/private question. Final scalar active tenant+
+Project+exact named Workspace association now revalidates scope after collection,
+without reading policy/layout/private content. Two further final-collection
+Project/tenant and Workspace/Project substitutions deny. Six unsafe JSON revision/
+timestamp baselines0.123s fixed with positive2^53-1 bounds. These checks do not
+claim globally atomic or continuous authorization after publication.
+
+Actual Worker-produced request -> service read/real held-Team positive and42
+changed-authority/oversize/cancellation negatives10.526s PASS. Actual accepted
+Team/Task/HTTP fixture30endpoint cases+numeric boundaries final8.867s PASS; its
+stored Worker/wait records are explicitly synthetic, separately backed by actual
+Worker-handler tests. Populated1024histories production request/graph plans2.536s
+PASS before/afterANALYZE; exact history lookups use persistentSEARCH while tiny
+singleton principal/roster relations may use a one-rowSCAN. Do not assert noSCAN
+or constant total work across arbitrary schema/history. New dedicated native/
+Linux-race selectors cover read suites without duplicating existing request suites.
+
+Full final API/Team/Projectworkspace integration and affected vet are pending
+before publication. Authenticated append-only answers, bounded session discovery,
+explicit original-owner Continue, request-specific next-context and UI remain
+unimplemented. All other approved scope and review/physical/installed/final-artifact
+gates remain open; existing installed Alpha and user storage are unchanged.
+
+Original-scope dependency discovered before read publication:
+AUTH-HELP-SCOPE-001: three actual service baselines1.758s returned old questions
+after both root+child Tasks coherently moved Project/named Workspace/artifact
+session together. Current canonical parent-child equality is not original scope.
+Additive0111 records all three nullable original fields in retained immutable
+request-scoped storage at the actual human wait transaction. Read requires exact
+IS binding. Existing110requests with no original scope are denied for reconciliation;
+no current-scope backfill or assumed historical provenance is performed.
+Three moved-scope negatives2.169s PASS;1024historyplans with pinnedPK2.085s PASS.
+Actual prior110request plus1024events survives repeated111upgrade unchanged;
+no scope row is invented. Migrationchecksum/FK/unique/update/delete controls
+1.915s PASS. New schema correctly failed indirectreview1.894s before explicit
+hand-reviewed scope descriptor/shape/DDL; snapshot+changedscope/newowner negatives
+2.698s PASS. No past request or installed user data was rewritten.
+
+Read capability clarification: all request reads require team.read/task.read;
+project.read additionally applies when a Project is actually bound. No-Project
+Teams do not acquire an unrelated Project permission requirement. Revoked current
+reader principal/membership may now fail earlier403 at the conditional Project
+permission check; denied private bytes remain absent. Final111affected broad
+integration and full Worker regression are running; do not publish partial tests.
+
+### Read increment publication validation — 25 October 12:10 UTC
+
+Resumed retained source on the same integration branch/PR228; inspected GitHub
+again: all15approved issues remain open, including ordered review gate86 and
+native Unreal/UEFN114. Prior exact f9827c2c integration40172113244 and both QA
+guards are SUCCESS; physical Node approval was SKIPPED. This is not packaging or
+installed acceptance. Independent source review found no blocking read defect.
+
+Full affected integration: Team71.593s, Projectworkspace109.842s,
+Worker198.052s, SQLite55.001s and recovery20.633s PASS. The first API sweep
+genuinely FAILED103.693s: the newly retained no-Project fixture accidentally
+recorded a nonnull Project/Workspace scope, correctly rejected by111. Corrected
+the synthetic request fixture to pin its original nullable CreateCommand fields;
+production authority checks are unchanged. All assistance HTTP tests12.435s and
+the full API50.951s PASS after correction. Affected integration vet, formatting
+and whitespace pass. These are disposable source tests, not real model/tool,
+hardware, browser or installed application evidence.
+
+Publish bounded single-request observation plus original-scope capture now.
+Continue domain answer storage/audit in one transaction, then authenticated
+HTTP writes, explicit original-owner Continue, request-specific context and UI.
+Existing Authorizer methods use separate DB connections; browser authentication
+may refresh idle expiry. Do not call them inside a held answer transaction or
+claim credential-at-write atomicity without a query-only transaction verifier.
+All broader approved development/review/physical/install/final gates remain OPEN.

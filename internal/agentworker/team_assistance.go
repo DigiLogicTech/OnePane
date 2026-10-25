@@ -79,6 +79,18 @@ func (s *Service) materializeTeamAssistance(ctx context.Context, tx storage.Tx, 
 	if _, err = tx.ExecContext(ctx, `INSERT INTO team_assistance_requests(id,workspace_id,session_id,plan_id,assignment_key,member_id,task_id,attempt_id,run_id,wait_step_id,notice_message_id,author_principal_id,question,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, requestID, run.WorkspaceID, session, plan, key, member, run.TaskID, run.AttemptID, run.ID, stepID, messageID, WorkerPrincipal, input.Question, now); err != nil {
 		return err
 	}
+	result, err := tx.ExecContext(ctx, `INSERT INTO team_assistance_request_scopes(request_id,project_id,project_workspace_id,artifact_session_id)
+ SELECT ?,project_id,project_workspace_id,artifact_session_id FROM tasks WHERE id=? AND workspace_id=?`, requestID, run.TaskID, run.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrInvalidWorkerState
+	}
 	payload, err := json.Marshal(map[string]string{"request_id": requestID, "session_id": session, "plan_id": plan, "assignment_key": key, "task_id": run.TaskID, "attempt_id": run.AttemptID, "run_id": run.ID, "wait_step_id": stepID, "message_id": messageID})
 	if err != nil {
 		return err

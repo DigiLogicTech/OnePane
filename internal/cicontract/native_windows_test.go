@@ -67,6 +67,7 @@ var windowsJobs = []string{"offline-msi-evidence", "windows-library-team", "wind
 var gateFamilies = map[string]string{
 	"development-source-contract": "SOURCE_RESULT", "worker-recovery-race": "WORKER_RESULT", "library-team-node-race": "TEAM_RESULT", "managed-inference-race": "MANAGED_RESULT", "full-regression": "FULL_RESULT",
 	"library-document-race": "DOCUMENT_RESULT",
+	"recovery-schema-race":  "RECOVERY_RESULT",
 	"offline-msi-evidence":  "WINDOWS_CORE_RESULT", "windows-library-team": "WINDOWS_LIBRARY_RESULT", "windows-worker-recovery": "WINDOWS_WORKER_RESULT", "windows-team-dispatch": "WINDOWS_DISPATCH_RESULT",
 }
 

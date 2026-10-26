@@ -180,7 +180,7 @@ jobs:
   development-contract:
     name: Validate honest Workspace runtime boundaries
     if: ${{ always() }}
-    needs: [development-source-contract, worker-recovery-race, library-team-node-race, library-document-race, managed-inference-race, full-regression, offline-msi-evidence, windows-library-team, windows-worker-recovery, windows-team-dispatch]
+    needs: [development-source-contract, worker-recovery-race, recovery-schema-race, library-team-node-race, library-document-race, managed-inference-race, full-regression, offline-msi-evidence, windows-library-team, windows-worker-recovery, windows-team-dispatch]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -188,6 +188,7 @@ jobs:
         env:
           SOURCE_RESULT: ${{ needs.development-source-contract.result }}
           WORKER_RESULT: ${{ needs.worker-recovery-race.result }}
+          RECOVERY_RESULT: ${{ needs.recovery-schema-race.result }}
           TEAM_RESULT: ${{ needs.library-team-node-race.result }}
           DOCUMENT_RESULT: ${{ needs.library-document-race.result }}
           MANAGED_RESULT: ${{ needs.managed-inference-race.result }}
@@ -197,7 +198,7 @@ jobs:
           WINDOWS_WORKER_RESULT: ${{ needs.windows-worker-recovery.result }}
           WINDOWS_DISPATCH_RESULT: ${{ needs.windows-team-dispatch.result }}
         run: |
-          for result in "$SOURCE_RESULT" "$WORKER_RESULT" "$TEAM_RESULT" "$DOCUMENT_RESULT" "$MANAGED_RESULT" "$FULL_RESULT" "$WINDOWS_CORE_RESULT" "$WINDOWS_LIBRARY_RESULT" "$WINDOWS_WORKER_RESULT" "$WINDOWS_DISPATCH_RESULT"; do
+          for result in "$SOURCE_RESULT" "$WORKER_RESULT" "$RECOVERY_RESULT" "$TEAM_RESULT" "$DOCUMENT_RESULT" "$MANAGED_RESULT" "$FULL_RESULT" "$WINDOWS_CORE_RESULT" "$WINDOWS_LIBRARY_RESULT" "$WINDOWS_WORKER_RESULT" "$WINDOWS_DISPATCH_RESULT"; do
             if [ "$result" != success ]; then
               echo "A required source validation family did not succeed: $result"
               exit 1
@@ -325,8 +326,24 @@ jobs:
           go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceFlowHTTP ./internal/api
           go test -race -tags integration -count=1 -timeout 3m -run TestTeamPairing ./internal/agentworker
           go test -race -tags integration -count=1 -timeout 3m -run TestApprovalContinuation ./internal/task
-          go test -race -tags integration -count=1 -timeout 3m ./internal/recoveryinventory
           go test -race -tags integration -count=1 -timeout 3m ./internal/budget
+
+  recovery-schema-race:
+    name: Validate complete recovery ownership race contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Indirect ownership schema mutation and bounds race checks
+        run: |
+          go test -race -tags integration -count=1 -timeout 3m -run '^TestRecoveryIndirect' ./internal/recoveryinventory
+      - name: Direct ownership snapshot attribution and fixture race checks
+        run: |
+          go test -race -tags integration -count=1 -timeout 3m -run '^Test(Recovery(Schema|TaskAttempt)|KnownTaskProvenance|ModelRequest)' ./internal/recoveryinventory
 
   library-document-race:
     name: Validate document extraction race boundaries

@@ -2,7 +2,7 @@
 
 Updated: 2026-10-26 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
 
-Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. DOCX source `7125a026` passed all four Windows families, document race and the other Linux families except recovery, which timed out at180.017s; required integration40370686079 correctly failed. Current validated follow-up accepts leading UTF-8 XML signatures under parser v2 with migration0117 preserving every v1 receipt, adds actual authenticated multipart upload/revoke coverage and bounded parser fuzzing, and isolates independent recovery mutation cases with concurrency2 while retaining every assertion/deadline. New-source hosted CI must be checked after publication. PDF/page-aware ingestion, unified DOCX discovery, semantic/full attachments, Team/recovery/toolchain/service/engine gaps and all human/physical/UI/installed/versioned release gates remain OPEN. No final build is claimed.
+Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. DOCX parser v2/source migration and every other family pass on4fb9cf4d except the complete recovery race package, which again reached its180.019s deadline; independent fixture concurrency alone did not resolve the hosted budget. Recovery validation is now partitioned into two exhaustive groups in a mandatory dedicated Linux family, each retaining3minute command deadlines. An AST/build-tag contract assigns every actual Linux integration test exactly once and preserves all67native Windows Go commands. Required aggregate covers all7Linux+4Windows families. New hosted results remain pending publication. Full functional, human/physical/UI/installed/versioned release gates remain OPEN; no final build.
 
 ## Authority and continuation
 
@@ -1747,3 +1747,42 @@ approved ingestion/retrieval or independent functional boundary. All final
 physical/review/UI/installed/versioned release gates remain OPEN.
 
 Final recovery fixture correction verification: full recoveryinventory suite PASS15.088s with every original negative/rollback check retained; affected integration vet and whitespace PASS. Hosted race remains pending for the new source.
+
+## RECOVERY-RACE-003 — exhaustive independent race partitions (2026-10-26)
+
+Exact4fb9 integration40373364886 genuinely failed recovery race job121749721870:
+recoveryinventory again exceeded its3minute package invocation180.019s, now in
+TestRecoveryTaskAttemptSchemaIsBoundedAndReadOnly after reaching a later direct
+schema boundary. No race/assertion report was present. The previous fixture
+concurrency correction improved progress but did not close the hosted timeout.
+There were six Linux families total on4fb9, and the
+other FIVE Linux families plus all FOUR native Windows families passed. Required
+aggregate failed. Guards40373364983/40373365659 passed; physical approval skipped.
+
+Move the full recovery race workload off the serial Worker family into a new
+mandatory15minute Linux family. Partition actual test cases into indirect-schema
+and direct/snapshot/attribution/fixture groups, with the existing3minute timeout
+for each invocation, race instrumentation, integration tags and count1 retained.
+This gives independent groups their own command budget; it does not claim the
+old single whole-package3minute invocation has passed. Existing native Windows
+full-package command and all67native commands remain unchanged. No assertion,
+negative case, race flag, platform acceptance or underlying production validation
+is removed. The now11family aggregate includes the new recovery result and
+continues rejecting failure, cancellation, skip and missing results.
+
+The CI contract parses actual Linux/amd64+integration Go test declarations using
+Go build constraints and AST, and requires every current12test to match exactly
+one real workflow selector, with neither empty partition nor silent future
+omission/duplication. Runner,15minute job budget,3minute invocations, mandatory
+steps and absence of duplicate serial recovery work are checked. Existing native
+command inventory and aggregate contracts still pass; hosted Bash now covers
+all-success plus44individual non-success conditions. Local Windows explicitly
+skips Bash execution; hosted Linux must prove it.
+
+Local CI contract PASS2.488s. Actual non-race partition invocations pass10.947s
+and6.499s; affected vet/whitespace pass. These are source checks, not evidence
+that the hosted race correction has passed. Publish to the same branch/PR and
+inspect the dedicated recovery family, retained Worker family and final
+aggregate against that exact source. Continue remaining approved functionality
+after genuine failures are remediated; all final review/hardware/UI/installed/
+versioned artifact gates remain OPEN.

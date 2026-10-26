@@ -5,6 +5,7 @@ package recoveryinventory
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -35,6 +36,22 @@ var recoverySchemaTemplate struct {
 func OpenMigratedRecoveryFixture(t *testing.T, ctx context.Context) *sqlitestore.DB {
 	t.Helper()
 	recoverySchemaTemplate.Do(func() {
+		// Race instrumentation makes the SQLite driver's first process-wide
+		// initialization slower than an ordinary connection. Initialize only
+		// the disposable in-memory driver here, under the caller/test budget,
+		// before production Open starts its unchanged five-second ping clock.
+		// This fixture does not qualify real cold-start or installed acceptance.
+		warm, err := sql.Open("sqlite", ":memory:")
+		if err != nil {
+			recoverySchemaTemplate.err = err
+			return
+		}
+		warm.SetMaxOpenConns(1)
+		err = errors.Join(warm.PingContext(ctx), warm.Close())
+		if err != nil {
+			recoverySchemaTemplate.err = err
+			return
+		}
 		templatePath := filepath.Join(t.TempDir(), "recovery-schema-template.db")
 		template, err := sqlitestore.Open(templatePath)
 		if err != nil {

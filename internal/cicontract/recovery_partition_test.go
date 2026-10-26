@@ -56,7 +56,8 @@ func TestRecoveryRacePartitionCoversEveryIntegrationTestExactlyOnce(t *testing.T
 	}
 	buildContext := build.Default
 	buildContext.GOOS, buildContext.GOARCH = "linux", "amd64"
-	buildContext.BuildTags = []string{"integration"}
+	buildContext.CgoEnabled = true
+	buildContext.BuildTags = []string{"integration", "race"}
 	counts := make([]int, len(patterns))
 	total := 0
 	for _, entry := range entries {

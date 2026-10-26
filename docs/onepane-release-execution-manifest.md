@@ -2,7 +2,7 @@
 
 Updated: 2026-10-26 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
 
-Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. DOCX parser v2/source migration and every other family pass on4fb9cf4d except the complete recovery race package, which again reached its180.019s deadline; independent fixture concurrency alone did not resolve the hosted budget. Recovery validation is now partitioned into two exhaustive groups in a mandatory dedicated Linux family, each retaining3minute command deadlines. An AST/build-tag contract assigns every actual Linux integration test exactly once and preserves all67native Windows Go commands. Required aggregate covers all7Linux+4Windows families. New hosted results remain pending publication. Full functional, human/physical/UI/installed/versioned release gates remain OPEN; no final build.
+Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. DOCX v2 and its migration/source checks are published. Recovery race partitions and exhaustive coverage guards are published in5cae9e15; own CI exposed a Linux-excluded shared helper file and first race-instrumented SQLite driver initialization exceeding the production5second ping budget. Corrections retain the production limit, initialize only the disposable test driver before fixture creation, and compile the shared workflow contracts on Linux and Windows. New exact-source hosted validation is mandatory. No real AI, human review, final UI, installed Windows/Ubuntu or versioned artifact gates have been closed; no final build.
 
 ## Authority and continuation
 
@@ -1786,3 +1786,40 @@ inspect the dedicated recovery family, retained Worker family and final
 aggregate against that exact source. Continue remaining approved functionality
 after genuine failures are remediated; all final review/hardware/UI/installed/
 versioned artifact gates remain OPEN.
+
+## CI-PLATFORM-001 / RECOVERY-COLD-001 — platform and fixture boundaries
+
+Exact5cae integration40376016581 exposed two genuine failures, distinct from
+previous package timeouts. Full regression job121759163580 failed compilation:
+recovery_partition_test.go referenced readSourceWorkflow, defined in a file named
+native_windows_test.go. Go treats that suffix as Windows-only. The shared file
+is now source_workflow_contract_test.go, retaining every test and helper on both
+platforms. Earlier Linux full-regression success did NOT establish execution of
+the embedded Bash aggregate truth table because that whole file was excluded.
+The new Linux run must execute its actual all-success/44negative checks. Native
+PowerShell remains mandatory on Windows; no source contract is removed.
+
+Dedicated recovery job121759163302 failed6.930s before schema validation with
+ping sqlite: context deadline exceeded; its second test inherited the recorded
+fixture-initialization error. Isolating this family made SQLite's first
+race-instrumented process initialization occur within production Open's5second
+ping window, whereas earlier Worker commands had already initialized the driver.
+This is a fixture bootstrap boundary, not proof of a production installed startup
+pass or a reason to relax production startup limits.
+
+The integration fixture now initializes a disposable in-memory SQLite connection
+under the caller/test context before starting the real fully migrated private
+fixture through production Open. It closes that connection, propagates errors,
+retains the unchanged5second production ping limit, and changes no runtime code,
+user file, test assertion, command or job deadline. Real cold-start/installed and
+constrained-host acceptance remains explicitly OPEN. The coverage guard now
+models Linux+amd64+integration+race with CGO enabled, matching the actual job
+rather than inheriting native Windows build tags.
+
+Validation: native CI contracts PASS2.524s; Linux/amd64 CGO0 test compilation PASS
+(which detects the missing shared helper, but does not execute Linux tests).
+Complete local recovery integration PASS15.836s, affected integration vet and
+whitespace PASS. New hosted execution is required for race cold initialization,
+actual Bash truth table and every mandatory family. Keep5cae's observed failures
+in history; distinguish unfinished/superseded jobs after publication from those
+real failures. All final physical/review/UI/installed/release gates remain OPEN.

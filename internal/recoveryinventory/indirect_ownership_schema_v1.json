@@ -3412,5 +3412,198 @@
   "without_rowid": 0,
   "strict": 1,
   "create_sql": "CREATE TABLE team_assistance_continuations (\n request_id TEXT PRIMARY KEY REFERENCES team_assistance_requests(id),\n id TEXT NOT NULL UNIQUE,\n answer_id TEXT NOT NULL UNIQUE,\n actor_principal_id TEXT NOT NULL REFERENCES principals(id),\n continue_step_id TEXT NOT NULL UNIQUE REFERENCES agent_worker_steps(id),\n task_revision INTEGER NOT NULL CHECK(task_revision>0),\n worker_revision INTEGER NOT NULL CHECK(worker_revision>0),\n created_at INTEGER NOT NULL CHECK(created_at>0),\n FOREIGN KEY(request_id,answer_id) REFERENCES team_assistance_answers(request_id,id)\n) STRICT"
-}
+},
+{
+    "columns": [
+      {
+        "hidden": 0,
+        "name": "asset_id",
+        "not_null": 1,
+        "primary_key": 1,
+        "type": "TEXT"
+      },
+      {
+        "hidden": 0,
+        "name": "version",
+        "not_null": 1,
+        "primary_key": 2,
+        "type": "INTEGER"
+      },
+      {
+        "hidden": 0,
+        "name": "parser_version",
+        "not_null": 1,
+        "primary_key": 3,
+        "type": "INTEGER"
+      },
+      {
+        "hidden": 0,
+        "name": "content_hash",
+        "not_null": 1,
+        "primary_key": 0,
+        "type": "TEXT"
+      },
+      {
+        "hidden": 0,
+        "name": "size_bytes",
+        "not_null": 1,
+        "primary_key": 0,
+        "type": "INTEGER"
+      },
+      {
+        "hidden": 0,
+        "name": "status",
+        "not_null": 1,
+        "primary_key": 0,
+        "type": "TEXT"
+      },
+      {
+        "hidden": 0,
+        "name": "line_count",
+        "not_null": 1,
+        "primary_key": 0,
+        "type": "INTEGER"
+      },
+      {
+        "hidden": 0,
+        "name": "created_by",
+        "not_null": 1,
+        "primary_key": 0,
+        "type": "TEXT"
+      },
+      {
+        "hidden": 0,
+        "name": "created_at",
+        "not_null": 1,
+        "primary_key": 0,
+        "type": "INTEGER"
+      }
+    ],
+    "create_sql": "CREATE TABLE project_library_text_indexes (\n asset_id TEXT NOT NULL,\n version INTEGER NOT NULL CHECK(version\u003e=1),\n parser_version INTEGER NOT NULL CHECK(parser_version=1),\n content_hash TEXT NOT NULL CHECK(length(content_hash)=71),\n size_bytes INTEGER NOT NULL CHECK(size_bytes\u003e=0),\n status TEXT NOT NULL CHECK(status IN ('ready','unsupported','too_large','invalid_text')),\n line_count INTEGER NOT NULL CHECK(line_count BETWEEN 0 AND 16384),\n created_by TEXT NOT NULL REFERENCES principals(id),\n created_at INTEGER NOT NULL CHECK(created_at\u003e0),\n PRIMARY KEY(asset_id,version,parser_version),\n FOREIGN KEY(asset_id,version) REFERENCES project_library_asset_versions(asset_id,version),\n CHECK(status='ready' OR line_count=0)\n) STRICT",
+    "foreign_keys": [
+      {
+        "from": "asset_id",
+        "id": 0,
+        "on_delete": "NO ACTION",
+        "on_update": "NO ACTION",
+        "sequence": 0,
+        "target": "project_library_asset_versions",
+        "to": "asset_id"
+      },
+      {
+        "from": "version",
+        "id": 0,
+        "on_delete": "NO ACTION",
+        "on_update": "NO ACTION",
+        "sequence": 1,
+        "target": "project_library_asset_versions",
+        "to": "version"
+      },
+      {
+        "from": "created_by",
+        "id": 1,
+        "on_delete": "NO ACTION",
+        "on_update": "NO ACTION",
+        "sequence": 0,
+        "target": "principals",
+        "to": "id"
+      }
+    ],
+    "strict": 1,
+    "table": "project_library_text_indexes",
+    "without_rowid": 0
+  },
+  {
+    "columns": [
+      {
+        "hidden": 0,
+        "name": "asset_id",
+        "not_null": 1,
+        "primary_key": 1,
+        "type": "TEXT"
+      },
+      {
+        "hidden": 0,
+        "name": "version",
+        "not_null": 1,
+        "primary_key": 2,
+        "type": "INTEGER"
+      },
+      {
+        "hidden": 0,
+        "name": "parser_version",
+        "not_null": 1,
+        "primary_key": 3,
+        "type": "INTEGER"
+      },
+      {
+        "hidden": 0,
+        "name": "line_number",
+        "not_null": 1,
+        "primary_key": 4,
+        "type": "INTEGER"
+      },
+      {
+        "hidden": 0,
+        "name": "byte_start",
+        "not_null": 1,
+        "primary_key": 0,
+        "type": "INTEGER"
+      },
+      {
+        "hidden": 0,
+        "name": "byte_end",
+        "not_null": 1,
+        "primary_key": 0,
+        "type": "INTEGER"
+      },
+      {
+        "hidden": 0,
+        "name": "content",
+        "not_null": 1,
+        "primary_key": 0,
+        "type": "TEXT"
+      },
+      {
+        "hidden": 0,
+        "name": "line_hash",
+        "not_null": 1,
+        "primary_key": 0,
+        "type": "TEXT"
+      }
+    ],
+    "create_sql": "CREATE TABLE project_library_text_lines (\n asset_id TEXT NOT NULL,\n version INTEGER NOT NULL,\n parser_version INTEGER NOT NULL CHECK(parser_version=1),\n line_number INTEGER NOT NULL CHECK(line_number BETWEEN 1 AND 16384),\n byte_start INTEGER NOT NULL CHECK(byte_start\u003e=0),\n byte_end INTEGER NOT NULL CHECK(byte_end\u003e=byte_start AND byte_end-byte_start\u003c=16384),\n content TEXT NOT NULL CHECK(length(CAST(content AS BLOB))\u003c=16384),\n line_hash TEXT NOT NULL CHECK(length(line_hash)=71),\n PRIMARY KEY(asset_id,version,parser_version,line_number),\n FOREIGN KEY(asset_id,version,parser_version) REFERENCES project_library_text_indexes(asset_id,version,parser_version)\n) STRICT",
+    "foreign_keys": [
+      {
+        "from": "asset_id",
+        "id": 0,
+        "on_delete": "NO ACTION",
+        "on_update": "NO ACTION",
+        "sequence": 0,
+        "target": "project_library_text_indexes",
+        "to": "asset_id"
+      },
+      {
+        "from": "version",
+        "id": 0,
+        "on_delete": "NO ACTION",
+        "on_update": "NO ACTION",
+        "sequence": 1,
+        "target": "project_library_text_indexes",
+        "to": "version"
+      },
+      {
+        "from": "parser_version",
+        "id": 0,
+        "on_delete": "NO ACTION",
+        "on_update": "NO ACTION",
+        "sequence": 2,
+        "target": "project_library_text_indexes",
+        "to": "parser_version"
+      }
+    ],
+    "strict": 1,
+    "table": "project_library_text_lines",
+    "without_rowid": 0
+  }
 ]

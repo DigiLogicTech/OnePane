@@ -13,7 +13,14 @@ async function a46MountWorkspaceLibrary(project,workspace,container){
 }
 async function a46RenderLibrary(project,workspace,root){
  if(!root?.isConnected)return;
- const prefix=`/v1/projects/${encodeURIComponent(project.id)}`;
+ const projectID=String(project.id),workspaceID=String(workspace.id);
+ const generation=String((Number(root.dataset.libraryGeneration)||0)+1);
+ root.dataset.libraryGeneration=generation;
+ const current=()=>root.isConnected&&root.dataset.libraryGeneration===generation;
+ // Clear prior private excerpts immediately when a new scope/render starts.
+ // A slow replacement request must not keep the previous Workspace visible.
+ root.textContent="Loading authorised Library…";
+ const prefix=`/v1/projects/${encodeURIComponent(projectID)}`;
  const globalLibrary=root.dataset.globalLibrary==="true";
  const query=String(root.dataset.libraryQuery||"").trim().slice(0,256);
  const suffix=query?"?q="+encodeURIComponent(query):"";
@@ -21,13 +28,13 @@ async function a46RenderLibrary(project,workspace,root){
  try{
   const list=await apiRequest(prefix+"/workspaces");
   workspaces=Array.isArray(list)?list:[];
-  source=globalLibrary?{id:"",name:"Project Library"}:workspaces.find(w=>a45BackendLegacyID(w)===String(workspace.id));
+  source=globalLibrary?{id:"",name:"Project Library"}:workspaces.find(w=>a45BackendLegacyID(w)===workspaceID);
   // A Workspace may see ONLY its explicit grant/published inventory; the
   // broader Project Library is accessible from the Project-owned Library page.
   if(globalLibrary){const response=await apiRequest(prefix+"/library"+suffix);assets=Array.isArray(response)?response:[]}
   else if(source?.id){const response=await apiRequest(prefix+"/workspaces/"+encodeURIComponent(source.id)+"/library"+suffix);assets=Array.isArray(response)?response:[]}
- }catch(e){if(root.isConnected)root.innerHTML=`<h3>Project Library</h3><div class="error" role="alert">${escapeHtml(e.message)}</div>`;return}
- if(!root.isConnected)return;
+ }catch(e){if(current())root.innerHTML=`<h3>Project Library</h3><div class="error" role="alert">${escapeHtml(e.message)}</div>`;return}
+ if(!current())return;
  const labelOf=w=>escapeHtml(w.name||w.id||"Workspace");
  const targets=workspaces.filter(w=>w.status==="active");
  const options=targets.map(w=>`<option value="${escapeHtml(w.id)}" ${w.id===source?.id?"selected":""}>${labelOf(w)}</option>`).join("");
@@ -59,6 +66,14 @@ async function a46RenderLibrary(project,workspace,root){
  </form>
  <div class="a46-library-items">${cards||'<div class="empty-state compact">No Project Library assets. Upload a document, source artifact or asset to begin.</div>'}</div>
  ${source?.id?'<div class="a62-evidence-panel"><div class="toolbar"><button type="button" class="btn" data-a62-build disabled>Build scoped evidence manifest</button><button type="button" class="btn" data-a63-read disabled>Read verified text (up to 8)</button><button type="button" class="btn" data-a65-freeze disabled>Approve Research evidence metadata</button></div><p class="list-meta">Metadata: choose up to 16 exact versions. Text retrieval: choose up to 8 UTF-8 documents, 64 KiB each, 256 KiB total. Every read is hash checked and permissions are rechecked. Untrusted text is for operator review only: it is not sent to the Orchestrator or Council.</p><pre class="a62-evidence-receipt" data-a62-result hidden aria-label="Scoped Workspace evidence metadata manifest"></pre><pre class="a62-evidence-receipt" data-a63-result hidden aria-label="Verified untrusted Workspace Library text"></pre><label class="a64-search-label">Search selected verified text (2–64 characters)<input type="search" data-a64-query maxlength="64" placeholder="Phrase to find in approved versions"></label><div class="toolbar"><button type="button" class="btn" data-a64-search disabled>Search selected text</button></div><pre class="a62-evidence-receipt" data-a64-results hidden aria-label="Permission-checked evidence search snippets"></pre></div>':""}`;
+ if(source?.id){
+  for(const asset of assets){
+   const card=root.querySelector(`[data-a46-asset="${CSS.escape(asset.id)}"]`);
+   if(!card)continue;
+   const textHost=document.createElement("section");textHost.className="a62-evidence-panel";card.append(textHost);
+   mountLibraryTextIndex(textHost,{projectID,workspaceID:String(source.id),assetID:String(asset.id),version:Number(asset.accessible_version||asset.current_version)},current);
+  }
+ }
  // An operator can reopen previously frozen Research approvals without
  // copying opaque Council IDs, including after leaving the approval dialog.
  if(source?.id){

@@ -26,6 +26,13 @@ func TestRecoveryIndirectOwnershipSchemaRejectsChanges(t *testing.T) {
 		{"new_event_fk", `CREATE TABLE new_effect(owner INTEGER REFERENCES events(sequence))`},
 		{"new_artifact_fk", `CREATE TABLE new_effect(owner TEXT REFERENCES artifacts(id))`},
 		{"new_composite_library_fk", `CREATE TABLE new_effect(owner TEXT,version INTEGER,FOREIGN KEY(owner,version) REFERENCES project_library_asset_versions(asset_id,version))`},
+		{"new_composite_text_index_fk", `CREATE TABLE new_effect(owner TEXT,version INTEGER,parser INTEGER,FOREIGN KEY(owner,version,parser) REFERENCES project_library_text_indexes(asset_id,version,parser_version))`},
+		{"new_composite_text_line_fk", `CREATE TABLE new_effect(owner TEXT,version INTEGER,parser INTEGER,line INTEGER,FOREIGN KEY(owner,version,parser,line) REFERENCES project_library_text_lines(asset_id,version,parser_version,line_number))`},
+		{"changed_text_index_hash", `ALTER TABLE project_library_text_indexes RENAME COLUMN content_hash TO inferred_hash`},
+		{"changed_text_index_parser", `ALTER TABLE project_library_text_indexes RENAME COLUMN parser_version TO inferred_parser`},
+		{"new_text_index_clearance", `ALTER TABLE project_library_text_indexes ADD COLUMN recovery_clearance_json TEXT`},
+		{"changed_text_line_bytes", `ALTER TABLE project_library_text_lines RENAME COLUMN byte_start TO inferred_start`},
+		{"new_text_line_effect", `ALTER TABLE project_library_text_lines ADD COLUMN effect_json TEXT`},
 		{"new_operation_name", `CREATE TABLE new_effect(operation_id TEXT)`},
 		{"new_prefixed_operation_name", `CREATE TABLE new_effect(compensates_operation_id TEXT)`},
 		{"new_worker_name", `CREATE TABLE new_effect(worker_run_id TEXT)`},
@@ -79,10 +86,13 @@ func TestRecoveryIndirectOwnershipSchemaRejectsChanges(t *testing.T) {
 	// Table DDL catches semantic constraints that column/FK metadata cannot:
 	// defaults, CHECK vocabulary and inline uniqueness. Standalone indexes and
 	// triggers remain explicitly outside this prerequisite.
-	for _, tc := range []struct{ name, old, next string }{
-		{"changed_default", "DEFAULT 5", "DEFAULT 6"},
-		{"changed_check", "max_attempts >= 1", "max_attempts >= 0"},
-		{"changed_inline_unique", "UNIQUE(workspace_id,idempotency_key)", "CHECK(length(idempotency_key)>0)"},
+	for _, tc := range []struct{ name, table, old, next string }{
+		{"changed_default", "notification_deliveries", "DEFAULT 5", "DEFAULT 6"},
+		{"changed_check", "notification_deliveries", "max_attempts >= 1", "max_attempts >= 0"},
+		{"changed_inline_unique", "notification_deliveries", "UNIQUE(workspace_id,idempotency_key)", "CHECK(length(idempotency_key)>0)"},
+		{"changed_text_index_status", "project_library_text_indexes", "'invalid_text'", "'effect_verified'"},
+		{"changed_text_index_count_bound", "project_library_text_indexes", "line_count BETWEEN 0 AND 16384", "line_count BETWEEN 0 AND 32768"},
+		{"changed_text_line_byte_bound", "project_library_text_lines", "byte_end-byte_start<=16384", "byte_end-byte_start<=32768"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tx, err := db.SQL().BeginTx(ctx, nil)
@@ -94,7 +104,7 @@ func TestRecoveryIndirectOwnershipSchemaRejectsChanges(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer tx.ExecContext(ctx, `PRAGMA writable_schema=OFF`)
-			res, err := tx.ExecContext(ctx, `UPDATE main.sqlite_schema SET sql=replace(sql,?,?) WHERE type='table' AND name='notification_deliveries' AND instr(sql,?)>0`, tc.old, tc.next, tc.old)
+			res, err := tx.ExecContext(ctx, `UPDATE main.sqlite_schema SET sql=replace(sql,?,?) WHERE type='table' AND name=? AND instr(sql,?)>0`, tc.old, tc.next, tc.table, tc.old)
 			if err != nil {
 				t.Fatal(err)
 			}

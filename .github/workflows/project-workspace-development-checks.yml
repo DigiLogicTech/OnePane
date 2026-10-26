@@ -9,6 +9,8 @@ on:
       - 'internal/webui/static/project-*.js'
       - 'internal/webui/static/project-*.css'
       - 'internal/webui/static/workspace-*.js'
+      - 'internal/webui/static/library-text-index.js'
+      - 'scripts/validate_library_text_index.js'
       - 'internal/webui/static/models-page.js'
       - 'scripts/validate_colibri_pin.js'
       - 'internal/webui/static/model-agentcheck-diagnostics.js'
@@ -209,6 +211,8 @@ jobs:
           node scripts/validate_project_task_graphs_ui.js
           node --check internal/webui/static/workspace-collaboration.js
           node --check internal/webui/static/workspace-library.js
+          node --check internal/webui/static/library-text-index.js
+          node scripts/validate_library_text_index.js
           node scripts/validate_workspace_evidence_ui.js
           node --check internal/webui/static/workspace-runtime-controls.js
           node --check internal/webui/static/workspace-ai-workflow.js
@@ -325,6 +329,7 @@ jobs:
       - name: Library Team and Node race checks (hosted source only)
         run: |
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(LibraryArtifact|LibraryContentReads|VerifiedWorkspaceEvidence|WorkspaceLibraryPreview)' ./internal/api
+          go test -race -tags integration -count=1 -timeout 3m -run TestLibraryTextIndex ./internal/projectworkspace ./internal/api
           go test -race -tags integration -count=1 -timeout 3m -run TestWorkspaceLibraryPublication ./internal/projectworkspace
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(TaskLibraryPublications|TeamAssignmentOutputs|LibrarySchemaFixture)' ./internal/api
           go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceRead ./internal/agentworker ./internal/team ./internal/api
@@ -525,6 +530,7 @@ jobs:
       - name: Native Windows shared Team compute admission and cancellation
         shell: pwsh
         run: |
+          go test -tags integration -count=1 -timeout 3m -run TestLibraryTextIndex ./internal/projectworkspace ./internal/api
           go test -count=1 -timeout 3m ./internal/runtimecoord
           go test -count=1 -timeout 3m -run TestTeamDispatchShares ./internal/teamworker
           go test -count=1 -timeout 3m -run TestTeamAuthorityRechecked ./internal/inference

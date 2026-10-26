@@ -35,6 +35,14 @@ type indirectReferenceDescriptor struct {
 // row-vocabulary contracts are implemented. Shared context never recursively
 // owns all rows in its tenant, Project, Workspace or artifact session.
 var indirectReferenceDescriptors = map[string][]indirectReferenceDescriptor{
+	"project_library_text_indexes": {
+		{[]string{"asset_id", "version", "parser_version", "content_hash", "size_bytes"}, "exact composite immutable Library source version and derived parser identity; reused source versions and their indexes remain shared context, not exclusive Task or Attempt effects"},
+		{[]string{"status", "line_count", "created_by", "created_at"}, "bounded text-ingestion outcome and authenticated indexing author provenance; no Library read grant, Task admission, recovery disposition, replay clearance or independent execution postcondition evidence"},
+	},
+	"project_library_text_lines": {
+		{[]string{"asset_id", "version", "parser_version", "line_number"}, "exact composite derived-index and original source line identity; source association does not recursively own unrelated Project, Workspace, Task or Attempt rows"},
+		{[]string{"byte_start", "byte_end", "content", "line_hash"}, "untrusted retained line bytes with end-exclusive original-byte offsets and source-bound digest; citation material grants neither read authority nor execution or recovery clearance and is not independent effect verification"},
+	},
 	"team_assistance_continuations": {
 		{[]string{"request_id", "answer_id"}, "one immutable applied answer bound by composite identity to the exact original assistance request; shared Team session or author never owns unrelated work"},
 		{[]string{"id", "actor_principal_id", "continue_step_id", "task_revision", "worker_revision", "created_at"}, "authenticated human continuation provenance and original waiting revisions with an independent committed Worker journal reference; not reusable execution admission, recovery disposition, replay clearance or independent postcondition evidence"},
@@ -84,6 +92,7 @@ var indirectReferenceDescriptors = map[string][]indirectReferenceDescriptor{
 var indirectOwnershipTargets = map[string]bool{
 	"agent_worker_runs": true, "agent_worker_steps": true, "operations": true,
 	"events": true, "artifacts": true, "project_library_asset_versions": true,
+	"project_library_text_indexes": true, "project_library_text_lines": true,
 	"notification_deliveries": true, "outbox_jobs": true, "dependency_refs": true,
 	"team_assistance_requests":       true,
 	"team_assistance_request_scopes": true,

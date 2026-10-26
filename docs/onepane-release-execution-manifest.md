@@ -2,7 +2,7 @@
 
 Updated: 2026-10-26 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
 
-Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Original-owner authenticated Continue, immutable applied-answer receipt and required next-model context are published as abebacc6. Bounded current-request discovery and the existing Team room's separate Save reply/Continue panel are published as f7204def; all three exact-source hosted workflows passed. Generic resume fences remain. Current work completes bounded nonadjacent Team pairing inside the selected scheduling opportunities; source and physical acceptance remain distinct. Exact commits, genuine failures, validation and current CI observations are in the latest sections below. Next functional boundary is reviewed peer help/reassignment/fairness, closed recovery attribution, Library ingestion and all remaining approved functionality. Inspect each new commit's own Windows/Linux/race/regression checks; source guards do not imply packaging or physical acceptance. Ordered human audits/sign-offs, real AI/Node/L4, LAST UI, installed Windows/Ubuntu and final versioned artifact gates remain OPEN. No final build is claimed.
+Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Human assistance/discovery/UI and bounded nonadjacent Team pairing are published as abebacc6/f7204def/1d8e3caf and pass exact-source hosted workflows. Current work adds explicit immutable Library text/line indexing, honest status and exact-version literal retrieval/citations with authenticated API and Workspace-card controls. Local affected full suites pass after reviewed recovery-fixture remediation; see the latest sections for exact evidence/continuation. Next boundaries include Workspace/Project-wide text discovery, PDF/DOCX/page citations/semantic retrieval/full attachments, peer help/versioned reassignment, closed recovery and all remaining approved functionality. Each new source needs its own CI. Ordered human audits/sign-offs, real AI/Node/L4, LAST UI, installed Windows/Ubuntu and final versioned artifact gates remain OPEN. No final build is claimed.
 ## Authority and continuation
 
 The Git repository is `D:\Codex\OnePane\source`; its parent is an unrelated unborn wrapper repository. Continue `codex/team-live-ci-completion`, existing draft PR [228](https://github.com/DigiLogicTech/OnePane/pull/228), based on `feature/rc11-policy-worker-diagnostics-integration-20261011` (`fb7f5df7`). Preserve the stacked integration route; do not merge the historical feature PRs independently or reset local work.
@@ -1375,3 +1375,61 @@ scoped literal retrieval. Existing metadata search is preserved. PDF/DOCX,
 semantic retrieval, full attachments, peer help/versioned reassignment,
 semantic recovery and the remaining scope/review/physical/install gates remain
 required. Installed Alpha/configuration/model/runtime/Project data untouched.
+
+## LIBRARY-TEXT-001 — immutable bounded text indexing and citations
+
+26October07:16UTC: recovered pairing source is published as1d8e3caf6301999c0eda76a26a3bdad9131c1ab4.
+Its integration40283343916, Windows guard40283343352 and Ubuntu guard40283343331
+all SUCCESS. Windows+five Linux families+required aggregate passed; physical
+approval SKIPPED and no package produced. New Library source needs its own CI.
+
+Approved #22 next increment now implements explicit exact-version indexing,
+status and literal case-sensitive search, with up to8complete raw-line citations.
+Migration0114 retains immutable version/parser/hash/byte-range/line-hash records;
+current actor, canonical Project/Workspace, bounded direct/pinned/directional
+grant and original credential are rechecked in the transaction. Source bytes
+independently match the persisted SHA/size before ready text is committed.
+Header+all lines+one audit commit atomically; identical retries are observations.
+Every read reconstructs and verifies the <=1MiB original, detects malformed/
+forged/missing/orphan rows and retains grants. Unsupported/too_large/invalid_text
+are explicit outcomes, absent history not_indexed. No automatic old-file index.
+
+Actual authenticated bearer/browser API provides POST/GET /index and GET /search
+on the canonical Workspace exact Library version. No replacement body/path,
+runtime execution, new grant or model attachment is accepted. Managed source
+integrity/provenance is verified; same-TX Project tenant and source active
+identity/hash/size/storage-ref protect collection-time changes. Final source,
+grant, Project and credential checks withhold private responses after revocation,
+including when a valid immutable index already committed. Review found these
+tenant/source races before publication and added actual negative matrices.
+
+Workspace Library cards now expose Check indexing, Index text and Search
+document, literal status and immutable citations. Source text uses textContent.
+Duplicate operations, UTF8query/citation/result bounds and detached/late responses
+are fenced. Parent render generations clear private excerpts before replacement
+loading; actual old-success/old-error renderer races cannot repaint the new
+scope. No model/Task/Research access follows from local indexing/search.
+
+Local full integration PASS: Projectworkspace121.193s, API125.083s,
+SQLite42.269s, WebUI1.223s/final0.575s. Focused domain25.597s and real-auth HTTP
+16.866s PASS. Actual v0113->current populated upgrade/private backup/repeated
+migration/reopen/preserved configuration+Library/grants+artifact metadata test
+PASS1.991s; installed/real-root upgrade remains outstanding. Recovery full
+intermediate10.282s FAILED because it compiled the pre-review fixture while
+created_at>0 was added; reviewer separately reproduced mismatch6.924s and
+explicitly reviewed updated DDL. Final current recovery22.219s and root rerun
+16.210s PASS. No runtime guard or assertion was relaxed. Reviewed derivative
+ownership and ten schema negatives confer no replay/disposition authority.
+All30JavaScript validators and affected integration vet/whitespace PASS; final
+controller/mounted renderer/actual parent scope-race validator PASS. Current
+native/race workflow selectors include the new domain/API suites and JS validator.
+
+Design/bounds/provenance details: rc11-library-text-index.md. This is exact-version
+UTF-8 line indexing/retrieval, not complete Library ingestion, parsed PDF/DOCX,
+semantic retrieval, full attachment lifecycle or final product/platform QA.
+Next: inspect own exact-source CI, then bounded Workspace-wide indexed-text
+discovery over independently authorised immutable versions with honest paging;
+continue remaining required ingestion/attachments and the full execution queue.
+All physical AI/Node/L4/Colibri/OmniRoute/constrained hardware, ordered #86 human
+reviews, final Windows/Ubuntu UI/install/upgrade/customroot/backup/rollback and
+versioned final artifacts/checksums gates remain OPEN. No final build exists.

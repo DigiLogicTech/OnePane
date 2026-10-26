@@ -7,7 +7,7 @@ function createLibraryDocumentController({api,selection,current=()=>true,change=
  const alive=()=>!disposed&&current();
  const snapshot=()=>({index:index?{...index,parts:index.parts.map(p=>({...p}))}:null,units:units.map(u=>({...u})),pending,error,query,hasMore,read});
  const publish=()=>{if(alive())change(snapshot())};
- const validIndex=x=>x&&x.asset_id===scope.assetID&&x.version===scope.version&&x.parser_id==="docx-wordml-paragraphs-v1"&&hash(x.raw_source_sha)&&
+ const validIndex=x=>x&&x.asset_id===scope.assetID&&x.version===scope.version&&x.parser_id==="docx-wordml-paragraphs-v2"&&hash(x.raw_source_sha)&&
   Number.isSafeInteger(x.raw_source_size)&&x.raw_source_size>=0&&["ready","not_indexed","unsupported","too_large","invalid_document"].includes(x.status)&&
   Number.isSafeInteger(x.unit_count)&&x.unit_count>=0&&x.unit_count<=8192&&Number.isSafeInteger(x.derived_utf8_bytes)&&x.derived_utf8_bytes>=0&&x.derived_utf8_bytes<=1048576&&
   typeof x.coverage==="string"&&new TextEncoder().encode(x.coverage).length<=512&&Array.isArray(x.parts)&&x.parts.length<=64&&

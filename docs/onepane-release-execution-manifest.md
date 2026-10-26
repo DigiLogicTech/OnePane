@@ -2,7 +2,7 @@
 
 Updated: 2026-10-26 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
 
-Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Published CI correction `aa05f249` passes its own hosted integration40326328154 and both source guards40326328103/40326328226: all four native Windows and five Linux families passed. Source-bound DOCX paragraph extraction, authenticated retrieval, Workspace controls and reviewed recovery ownership are now locally validated and ready for publication; the checkpoint below records the exact evidence. Its dedicated Linux document race family and native Windows selector require fresh exact-source CI. Next functional boundaries include PDF/page-aware ingestion, unified Workspace DOCX discovery, semantic retrieval/full attachments, peer help/versioned reassignment, closed recovery and the remaining approved scope. Ordered human reviews, real AI/Node/L4, final UI, installed Windows/Ubuntu and versioned artifacts remain OPEN. No final build is claimed.
+Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. DOCX source `7125a026` passed all four Windows families, document race and the other Linux families except recovery, which timed out at180.017s; required integration40370686079 correctly failed. Current validated follow-up accepts leading UTF-8 XML signatures under parser v2 with migration0117 preserving every v1 receipt, adds actual authenticated multipart upload/revoke coverage and bounded parser fuzzing, and isolates independent recovery mutation cases with concurrency2 while retaining every assertion/deadline. New-source hosted CI must be checked after publication. PDF/page-aware ingestion, unified DOCX discovery, semantic/full attachments, Team/recovery/toolchain/service/engine gaps and all human/physical/UI/installed/versioned release gates remain OPEN. No final build is claimed.
 
 ## Authority and continuation
 
@@ -1679,3 +1679,71 @@ failures, then continue approved missing ingestion/retrieval or independent
 functional work. PDF/page-aware ingestion, semantic/full attachment lifecycle,
 all broader functionality and physical/review/UI/installed/versioned release
 gates remain OPEN. No package, checksum or FINAL BUILD COMPLETE claim.
+
+## DOCX-BOM-001 / RECOVERY-RACE-002 — revision and QA correction (2026-10-26)
+
+P2 interoperability defect reproduced: v1 rejected otherwise valid leading UTF-8
+XML signatures in each of five package/story roles. All five regression cases
+failed with invalid_document before correction. XML1.0 section4.3.3 permits this
+signature. Parser v2 removes exactly one signature from byte zero of the decoder
+view only; raw source/part hashes retain original bytes. Repeated/misplaced
+signatures remain invalid and literal interior U+FEFF remains stored text.
+
+Migration0117 copies both document tables before dropping child/parent and
+renaming their replacements, with foreign keys enabled throughout. It allows
+only the reviewed v1/v2 parser vocabulary and recreates immutable retention
+triggers. Original0116 is unchanged. Existing v1 success/error records and units
+remain byte-for-byte history; explicit v2 extraction creates a separate record
+at the same source version. No reclassification, automatic reindex, grant or
+source-data rewrite occurs. Reviewed recovery fixture changes only the two DDL
+strings for that vocabulary/SQLite rename quoting; old fields/FKs/bounds remain.
+Two new vocabulary negatives deny unreviewed header/unit parser revisions.
+
+Actual populated schema116->117 upgrade and idempotency, v1 success/error/unit
+retention, current-source grants/configuration, foreign-key check, v2 coexistence,
+unknown-parser denial and immutable retention pass. Failure injected AFTER the
+actual copy/drop/rename/recreated-trigger operations restores original schema
+and every original row through the production transaction owner. The normal
+pre117 backup preserves all old rows and old DDL with quick_check=ok. Final
+migration/backup regression PASS2.264s; domain independently proves old v1 invalid
+outcome remains unchanged while explicit v2 extraction of the same source is ready.
+
+Real bearer/browser multipart upload->canonical MIME/source grant/hash->explicit
+extract->paragraph literal query->authenticated HTTP grant revocation passes
+1.694s. This starts at the production FormData endpoint rather than bypassing
+upload via a directly created artifact. Missing browser CSRF produces no artifact.
+An initial new-test attempt used a nonexistent revoked_at column and failed1.787s;
+corrected to the actual HTTP grant API. This was fixture error, not a product
+revocation defect. Originals remain unchanged after extraction and revoked reads
+disclose no source text.
+
+Two fuzz targets exercise arbitrary ZIP bytes and XML inside valid packages,
+checking rejected-output emptiness, limits, canonical paragraph/part/text hashes
+and repeatable receipts. Initial fixture oracle expected unprefixed SHA and was
+corrected to the existing canonical sha256: format. Initial30second ZIP3908exec
+and XML8exec runs pass; after v2,20second ZIP8759exec/21.203s and XML9exec/21.158s
+pass. These small campaigns do not establish exhaustive format qualification.
+
+Current broad integration PASS: Projectworkspace106.446s, API153.679s,
+SQLite49.791s, recovery23.380s, WebUI0.778s, CI contract3.192s. All31JavaScript
+validators pass. New backup assertions pass separately after the broad run.
+Affected vet and whitespace pass; the final recovery fixture correction below
+has its own targeted verification before publication.
+
+Exact7125 integration40370686079 genuinely FAILED Worker/recovery race job
+121740295518: recoveryinventory package exceeded its3minute deadline180.017s
+while in indirect-schema type_bytes validation. Prior Worker/Task commands passed;
+no data-race/assertion failure was reported. All other five Linux families and
+all four native Windows families passed; required aggregate failed, as intended.
+Both source guards40370686044/40370686021 passed; physical approval was skipped.
+
+Independent mutation/rollback and DDL-negative cases now own separate clones
+of the real fully migrated immutable fixture, with maximum concurrency2. Every
+original assertion and post-rollback validation remains; no production schema
+validation or command/package/job deadline is weakened, no negative is skipped.
+New hosted source must prove the correction; local non-race success alone cannot
+close a hosted race timeout. Continue exact-source CI diagnosis, then the next
+approved ingestion/retrieval or independent functional boundary. All final
+physical/review/UI/installed/versioned release gates remain OPEN.
+
+Final recovery fixture correction verification: full recoveryinventory suite PASS15.088s with every original negative/rollback check retained; affected integration vet and whitespace PASS. Hosted race remains pending for the new source.

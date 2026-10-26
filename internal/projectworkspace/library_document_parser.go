@@ -127,6 +127,10 @@ func documentXML(body []byte, visit func(xml.Token, int) error) error {
 	if !utf8.Valid(body) || bytes.IndexByte(body, 0) >= 0 {
 		return documentInvalid
 	}
+	// XML permits exactly one encoding signature at byte zero. Remove it only
+	// from the decoder view; raw source/part hashes still bind original bytes.
+	// Interior/repeated signatures retain the ordinary invalid-content checks.
+	body = bytes.TrimPrefix(body, []byte{0xef, 0xbb, 0xbf})
 	d := xml.NewDecoder(bytes.NewReader(body))
 	depth := 0
 	tokens := 0

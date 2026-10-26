@@ -32,13 +32,25 @@ Original bytes and all existing user roots/versions/grants are preserved.
 
 ## Supported stored text and honest coverage
 
-The first parser is `docx-wordml-paragraphs-v1`, for the exact canonical media
+The current parser is `docx-wordml-paragraphs-v2`, for the exact canonical media
 type `application/vnd.openxmlformats-officedocument.wordprocessingml.document`.
 It reads declared Word main/header/footer/footnote/endnote/comment stories,
 sorted by part name, and retains literal paragraph text, tabs and line breaks.
 Normal tables and empty paragraphs preserve their paragraph ordinals. Main
 WordML requires one direct body; internal office-document relationships support
 relative or package-absolute targets. No external relationship is followed.
+
+Revision v2 accepts XML's single leading UTF-8 encoding signature, as specified
+by [XML 1.0 section 4.3.3](https://www.w3.org/TR/xml/#charencoding), with or
+without an XML declaration, in package metadata and every selected story. The
+signature is removed only from the decoder view: raw source and XML-part hashes
+still bind its original bytes. Repeated/misplaced signatures are rejected;
+literal U+FEFF within paragraph text is retained. Revision v1 rejected these
+otherwise valid documents. Migration0117 preserves every v1 header/unit and
+permits distinct immutable v2 records for the same original source version.
+Current controls require explicit extraction under v2; no old outcome is
+rewritten or relabelled as newly verified. The transactional table rebuild
+retains foreign keys and insertion-only history, with normal upgrade backups.
 
 This extracts stored text, including stored field display text. It does not
 evaluate fields, render layout/page numbers, compute list numbering, OCR images
@@ -104,6 +116,18 @@ actor/tenant/Workspace/source drift, rejected units/audits and retained corrupti
 Real bearer/browser HTTP tests cover source collection, same-transaction
 credentials, final publication, CSRF, client body denial, source retention,
 metadata-only statuses and self-consistent forged derived data.
+
+The multipart upload-to-extraction test uses the production upload endpoint,
+canonical browser media type, actual managed bytes, real bearer/browser
+credentials and browser CSRF. It verifies independent raw hashes, original
+source grants, explicit extraction, paragraph search and authenticated HTTP
+grant revocation. Parser fuzz targets separately mutate raw ZIP packages and
+XML inside valid packages; they check bounded output, no partial rejected
+content, canonical paragraph/hash identities and deterministic receipts. Small
+bounded fuzz runs are supplementary robustness evidence, not exhaustive format
+or hardware qualification. Populated revision upgrades and an injected failure
+after the copy/drop/rename/trigger operations verify unchanged v1 history,
+atomic rollback, foreign keys, v2 coexistence and immutable retention.
 
 The additive recovery ownership contract is explicitly reviewed with15new
 negative schema cases. It records shared derived context, never Task ownership,

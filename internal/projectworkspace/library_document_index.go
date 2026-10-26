@@ -18,7 +18,7 @@ import (
 
 const LibraryDocumentIndexLimit = 8 << 20
 const LibraryDocumentMIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-const LibraryDocumentParserID = "docx-wordml-paragraphs-v1"
+const LibraryDocumentParserID = "docx-wordml-paragraphs-v2"
 const LibraryDocumentCoverage = "stored paragraph text across declared Word stories; no layout/pagination/field evaluation/images/embedded documents"
 
 var ErrLibraryDocumentIndex = errors.New("Library document index requires reconciliation")

@@ -3,7 +3,7 @@ const source=fs.readFileSync('internal/webui/static/library-document-index.js','
 const context=vm.createContext({TextEncoder});vm.runInContext(source,context);
 const scope={projectID:'project',workspaceID:'workspace',assetID:'asset',version:1};
 const raw='sha256:'+'a'.repeat(64),derived='sha256:'+'b'.repeat(64);
-const index=()=>({asset_id:'asset',version:1,parser_id:'docx-wordml-paragraphs-v1',raw_source_sha:raw,raw_source_size:1024,derived_sha:derived,derived_utf8_bytes:512,status:'ready',coverage:'stored paragraph text; no layout or pages',parts:[{part_name:'word/document.xml',source_sha:raw,paragraph_count:10}],unit_count:10});
+const index=()=>({asset_id:'asset',version:1,parser_id:'docx-wordml-paragraphs-v2',raw_source_sha:raw,raw_source_size:1024,derived_sha:derived,derived_utf8_bytes:512,status:'ready',coverage:'stored paragraph text; no layout or pages',parts:[{part_name:'word/document.xml',source_sha:raw,paragraph_count:10}],unit_count:10});
 const unit=n=>({ordinal:n,part_name:'word/document.xml',paragraph_number:n,text:'<script>needle</script>',text_hash:derived});
 const page=(after=0,q='')=>({index:index(),query:q,units:Array.from({length:after?2:8},(_,i)=>unit(after+i+1)),has_more:!after,next_after:after?10:8});
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return{resolve,promise}};

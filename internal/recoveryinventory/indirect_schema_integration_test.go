@@ -16,6 +16,10 @@ import (
 func TestRecoveryIndirectOwnershipSchemaRejectsChanges(t *testing.T) {
 	ctx := context.Background()
 	db := OpenMigratedRecoveryFixture(t, ctx)
+	// Each mutation and its rollback checks retain their own real migrated DB.
+	// Bound concurrency to two: repeated full-catalog checks need not serialize
+	// unrelated cases, nor share a mutable schema/transaction/connection.
+	caseSlots := make(chan struct{}, 2)
 	var err error
 	if err = ValidateIndirectOwnershipSchema(ctx, db.SQL()); err != nil {
 		t.Fatal(err)
@@ -74,6 +78,10 @@ func TestRecoveryIndirectOwnershipSchemaRejectsChanges(t *testing.T) {
 		{"missing_polymorphic_table", `DROP TABLE dependency_refs`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			caseSlots <- struct{}{}
+			defer func() { <-caseSlots }()
+			db := OpenMigratedRecoveryFixture(t, ctx)
 			tx, err := db.SQL().BeginTx(ctx, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -104,12 +112,18 @@ func TestRecoveryIndirectOwnershipSchemaRejectsChanges(t *testing.T) {
 		{"changed_text_index_count_bound", "project_library_text_indexes", "line_count BETWEEN 0 AND 16384", "line_count BETWEEN 0 AND 32768"},
 		{"changed_text_line_byte_bound", "project_library_text_lines", "byte_end-byte_start<=16384", "byte_end-byte_start<=32768"},
 		{"changed_document_parser_vocabulary", "project_library_document_indexes", "docx-wordml-paragraphs-v1", "effect-verified-parser-v1"},
+		{"changed_document_parser_revision", "project_library_document_indexes", "docx-wordml-paragraphs-v2", "effect-verified-parser-v2"},
+		{"changed_document_unit_parser_revision", "project_library_document_units", "docx-wordml-paragraphs-v2", "effect-verified-parser-v2"},
 		{"changed_document_status_vocabulary", "project_library_document_indexes", "'invalid_document'", "'effect_verified'"},
 		{"changed_document_text_bound", "project_library_document_indexes", "derived_utf8_bytes BETWEEN 0 AND 1048576", "derived_utf8_bytes BETWEEN 0 AND 2097152"},
 		{"changed_document_count_bound", "project_library_document_indexes", "unit_count BETWEEN 0 AND 8192", "unit_count BETWEEN 0 AND 16384"},
 		{"changed_document_unit_byte_bound", "project_library_document_units", "length(CAST(content AS BLOB))<=16384", "length(CAST(content AS BLOB))<=32768"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			caseSlots <- struct{}{}
+			defer func() { <-caseSlots }()
+			db := OpenMigratedRecoveryFixture(t, ctx)
 			tx, err := db.SQL().BeginTx(ctx, nil)
 			if err != nil {
 				t.Fatal(err)

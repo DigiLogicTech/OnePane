@@ -111,7 +111,7 @@ func TestLibraryDocumentHTTPRealAuthPersistedCitationFlow(t *testing.T) {
 				t.Fatalf("unindexed read status=%d body=%s", w.Code, w.Body.String())
 			}
 			index := decodeDocumentIndex(t, textLibraryHTTP(t, f, "POST", "document-index", auth))
-			if index.Status != "ready" || index.UnitCount != 11 || index.AssetID != f.assetID || index.Version != 1 || index.RawSourceSHA != f.contentHash || index.RawSourceSize != int64(len(raw)) || index.DerivedSHA == index.RawSourceSHA || index.DerivedSHA == "" || index.DerivedUTF8Bytes <= 0 || index.ParserID != "docx-wordml-paragraphs-v1" || index.Coverage == "" {
+			if index.Status != "ready" || index.UnitCount != 11 || index.AssetID != f.assetID || index.Version != 1 || index.RawSourceSHA != f.contentHash || index.RawSourceSize != int64(len(raw)) || index.DerivedSHA == index.RawSourceSHA || index.DerivedSHA == "" || index.DerivedUTF8Bytes <= 0 || index.ParserID != "docx-wordml-paragraphs-v2" || index.Coverage == "" {
 				t.Fatalf("wrong raw/derived document identity %+v", index)
 			}
 			retry := decodeDocumentIndex(t, textLibraryHTTP(t, f, "POST", "document-index", auth))

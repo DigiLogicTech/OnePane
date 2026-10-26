@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func documentFixtureZIP(t *testing.T, changes map[string]string) []byte {
+func documentFixtureZIP(t testing.TB, changes map[string]string) []byte {
 	t.Helper()
 	files := map[string]string{
 		"[Content_Types].xml": `<Types xmlns="` + contentTypesNS + `"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/><Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/></Types>`,
@@ -86,6 +86,57 @@ func TestLibraryDocumentParserCanonicalDirectories(t *testing.T) {
 	// A same-path directory/file alias cannot create ambiguous ZIP identities.
 	if preflightDOCX(documentFixtureZIP(t, map[string]string{"word": "", "word/": ""})) == nil {
 		t.Fatal("directory/file alias accepted")
+	}
+}
+
+func TestLibraryDocumentParserUTF8ByteOrderMark(t *testing.T) {
+	// XML permits a UTF-8 signature before the optional declaration. Preserve
+	// stored paragraph text while accepting that encoding signature in every
+	// XML role, rather than interpreting it as out-of-root document content.
+	for _, part := range []string{"[Content_Types].xml", "_rels/.rels", "word/document.xml", "word/header1.xml", "word/footnotes.xml"} {
+		t.Run(part, func(t *testing.T) {
+			original := documentFixtureZIP(t, nil)
+			zr, err := zip.NewReader(bytes.NewReader(original), int64(len(original)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var content string
+			for _, entry := range zr.File {
+				if entry.Name == part {
+					r, err := entry.Open()
+					if err != nil {
+						t.Fatal(err)
+					}
+					var b bytes.Buffer
+					if _, err = b.ReadFrom(r); err != nil {
+						t.Fatal(err)
+					}
+					r.Close()
+					content = b.String()
+				}
+			}
+			wantParts, wantUnits, _ := parseDOCX(original)
+			gotParts, gotUnits, status := parseDOCX(documentFixtureZIP(t, map[string]string{part: "\ufeff<?xml version=\"1.0\" encoding=\"UTF-8\"?>" + content}))
+			if status != "ready" || len(gotParts) != len(wantParts) || len(gotUnits) != len(wantUnits) {
+				t.Fatalf("UTF-8 signature in %s: status=%s parts=%d units=%d", part, status, len(gotParts), len(gotUnits))
+			}
+			for i := range wantUnits {
+				if gotUnits[i] != wantUnits[i] {
+					t.Fatal("encoding signature changed stored paragraph coordinates/text")
+				}
+			}
+		})
+	}
+	story := `<w:document xmlns:w="` + wordML + `"><w:body><w:p><w:r><w:t>literal \ufeff text</w:t></w:r></w:p></w:body></w:document>`
+	for _, prefix := range []string{"\ufeff\ufeff", " \ufeff", "\n\ufeff"} {
+		if _, _, status := parseDOCX(documentFixtureZIP(t, map[string]string{"word/document.xml": prefix + story})); status != "invalid_document" {
+			t.Fatalf("misplaced/repeated signature accepted: %q %s", prefix, status)
+		}
+	}
+	story = strings.ReplaceAll(story, `\ufeff`, "\ufeff")
+	_, units, status := parseDOCX(documentFixtureZIP(t, map[string]string{"word/document.xml": story}))
+	if status != "ready" || units[0].Text != "literal \ufeff text" {
+		t.Fatal("literal interior U+FEFF was stripped from stored text", status, units)
 	}
 }
 func TestLibraryDocumentParserRejectsAmbiguityAndBounds(t *testing.T) {

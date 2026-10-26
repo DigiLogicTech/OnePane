@@ -16,6 +16,32 @@ func documentCommand(t *testing.T, f *libraryTextFixture, body []byte) IndexLibr
 	c := f.command(t, body, LibraryDocumentMIME)
 	return IndexLibraryDocumentCommand{Selection: c.Selection, Selected: c.Selected, Content: c.Content}
 }
+
+func TestLibraryDocumentIndexRevisionRetainsPriorOutcome(t *testing.T) {
+	f := newLibraryTextFixture(t)
+	ctx := context.Background()
+	story := "\ufeff" + `<w:document xmlns:w="` + wordML + `"><w:body><w:p><w:r><w:t>retained source</w:t></w:r></w:p></w:body></w:document>`
+	cmd := documentCommand(t, f, documentFixtureZIP(t, map[string]string{"word/document.xml": story}))
+	// Simulate the real v1 outcome for a BOM-bearing source. It is retained as
+	// v1, never rewritten or relabelled as a successful v2 extraction.
+	f.exec(`INSERT INTO project_library_document_indexes(asset_id,version,parser_id,raw_source_sha,raw_source_size,derived_sha,manifest_sha,derived_utf8_bytes,status,coverage,parts_json,unit_count,created_by,created_at) VALUES(?,?,'docx-wordml-paragraphs-v1',?,?,'',?,0,'invalid_document','','[]',0,'human',1)`, cmd.Selected.AssetID, cmd.Selected.Version, cmd.Selected.ContentHash, cmd.Selected.SizeBytes, libraryTextDigest([]byte("historical manifest")))
+	absent, err := f.service.WorkspaceLibraryDocumentIndex(ctx, f.selection)
+	if err != nil || absent.ParserID != "docx-wordml-paragraphs-v2" || absent.Status != "not_indexed" {
+		t.Fatal("prior parser outcome confused with current extraction", absent, err)
+	}
+	idx, err := f.service.IndexWorkspaceLibraryDocument(ctx, cmd)
+	if err != nil || idx.Status != "ready" || idx.ParserID != "docx-wordml-paragraphs-v2" || VerifyLibraryDocumentContent(idx, cmd.Content) != nil {
+		t.Fatal(idx, err)
+	}
+	var count int
+	var priorStatus string
+	if err = f.db.SQL().QueryRow(`SELECT COUNT(*) FROM project_library_document_indexes WHERE asset_id=? AND version=?`, cmd.Selected.AssetID, cmd.Selected.Version).Scan(&count); err != nil || count != 2 {
+		t.Fatal("parser revisions did not coexist", count, err)
+	}
+	if err = f.db.SQL().QueryRow(`SELECT status FROM project_library_document_indexes WHERE asset_id=? AND version=? AND parser_id='docx-wordml-paragraphs-v1'`, cmd.Selected.AssetID, cmd.Selected.Version).Scan(&priorStatus); err != nil || priorStatus != "invalid_document" {
+		t.Fatal("v2 changed the historical v1 outcome", priorStatus, err)
+	}
+}
 func TestLibraryDocumentIndexPersistedGrantsAndRetry(t *testing.T) {
 	f := newLibraryTextFixture(t)
 	ctx := context.Background()

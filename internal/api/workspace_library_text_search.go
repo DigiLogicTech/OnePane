@@ -190,7 +190,7 @@ func (s *Server) searchWorkspaceIndexedText(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		id := strings.TrimPrefix(selected.StorageURI, "artifact:")
-		if err = s.libraryArtifacts.VerifyContent(r.Context(), id); err != nil {
+		if err = s.libraryArtifacts.VerifyExpectedContent(r.Context(), id, "sha256:"+digest, selected.SizeBytes); err != nil {
 			writeError(w, 503, "Indexed source failed integrity verification")
 			return
 		}

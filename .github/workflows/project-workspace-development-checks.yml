@@ -328,6 +328,7 @@ jobs:
           cache: false
       - name: Library Team and Node race checks (hosted source only)
         run: |
+          go test -race -count=1 -timeout 3m ./internal/artifact
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(LibraryArtifact|LibraryContentReads|VerifiedWorkspaceEvidence|WorkspaceLibraryPreview)' ./internal/api
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(LibraryTextIndex|WorkspaceLibraryText)' ./internal/projectworkspace ./internal/api
           go test -race -tags integration -count=1 -timeout 3m -run TestWorkspaceLibraryPublication ./internal/projectworkspace
@@ -530,6 +531,7 @@ jobs:
       - name: Native Windows shared Team compute admission and cancellation
         shell: pwsh
         run: |
+          go test -count=1 -timeout 3m ./internal/artifact
           go test -tags integration -count=1 -timeout 3m -run 'Test(LibraryTextIndex|WorkspaceLibraryText)' ./internal/projectworkspace ./internal/api
           go test -count=1 -timeout 3m ./internal/runtimecoord
           go test -count=1 -timeout 3m -run TestTeamDispatchShares ./internal/teamworker

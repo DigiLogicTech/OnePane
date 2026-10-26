@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,13 +109,26 @@ func (s *LocalStore) Open(_ context.Context, storageRef string) (io.ReadCloser, 
 }
 
 func (s *LocalStore) Verify(ctx context.Context, storageRef, contentHash string, sizeBytes int64) error {
+	if sizeBytes < 0 || sizeBytes == math.MaxInt64 {
+		return ErrCorruptContent
+	}
 	r, err := s.Open(ctx, storageRef)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
+	return verifyBoundedContent(ctx, r, contentHash, sizeBytes)
+}
+
+// Read one extra byte to detect appended data, then stop. Corrupt/growing
+// blobs must not turn verification of a small immutable version into an
+// unbounded stream. Callers still choose the independently expected size.
+func verifyBoundedContent(ctx context.Context, r io.Reader, contentHash string, sizeBytes int64) error {
+	if sizeBytes < 0 || sizeBytes == math.MaxInt64 {
+		return ErrCorruptContent
+	}
 	h := sha256.New()
-	n, err := copyContext(ctx, h, r)
+	n, err := copyContext(ctx, h, io.LimitReader(r, sizeBytes+1))
 	if err != nil {
 		return err
 	}

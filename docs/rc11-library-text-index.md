@@ -24,8 +24,11 @@ The API routes share the version path
 - `GET /search?q=...` returns literal, case-sensitive matches from that exact
   version. Search requires a ready retained index and current read access.
 
-Before indexing, the managed artifact is independently SHA-256 verified and its
-active status, Project, tenant, hash and size are matched to the selected version.
+Before indexing eligible bounded text, the managed artifact is independently
+SHA-256 verified against the independently resolved version hash and size. Its
+active status, Project, tenant, hash and size are matched to that exact version.
+Unsupported/oversized status is derived from current source metadata; no binary
+content is read merely to record that non-ready outcome, which is not verified text.
 The transaction repeats current Project/Workspace lifetime and original tenant,
 actor eligibility, exact bounded version grant, current source identity/status/
 storage reference and the original credential/capabilities. Changed identities
@@ -131,7 +134,7 @@ private response or next cursor is returned on those failures.
 
 The two collections can reconstruct at most16MiB total; independent verification
 of up to8distinct sources adds at most8MiB. Thus source traversal per HTTP page
-is bounded by24MiB, with at most128KiB of raw matching line text and a1MiB JSON
+is bounded by24MiB plus at most8sentinel bytes, with at most128KiB of raw matching line text and a1MiB JSON
 response limit. Those figures are source/data bounds, not hardware-performance
 or physical inference claims. The UI never follows cursors automatically and
 clears prior excerpts before requests, denial, disposal or replacement scope.
@@ -146,3 +149,33 @@ Controller and mounted renderer tests cover honest empty pages, explicit
 continuation, duplicate/late responses, query changes, inert markup and denial.
 PDF/DOCX/page parsing, semantic retrieval, broader Project discovery/permissions,
 full attachment lifecycle and final product/platform acceptance remain open.
+
+## Verification read budgets and next format boundary
+
+The artifact store now stops verification after the independently expected size
+plus one sentinel byte. Appended/growing corrupt blobs cannot force EOF scanning
+for a small selected version. Library text paths pin expected hash/size before
+storage verification; changed artifact metadata cannot enlarge that budget.
+Valid complete hashes and byte counts remain mandatory. Source metadata/status
+is still rechecked before publication; a bounded probe is not a new read grant.
+
+DOCX ingestion needs a distinct derived-document contract. WordprocessingML has
+a main document part with paragraphs/runs/text and can also carry headers,
+footers, notes and comments. A body-only extraction must explicitly describe its
+coverage and cannot claim full document or page fidelity. [Microsoft WordprocessingML structure](https://learn.microsoft.com/en-us/office/open-xml/word/structure-of-a-wordprocessingml-document).
+
+Preserve the raw immutable source SHA/version separately from derived text hash,
+parser identity, component/paragraph positions and coverage. Raw-source line byte
+offsets from parser1 must not be reused for extracted DOCX/PDF text or invented
+page numbers. Compressed package entries require bounds on raw input, entries,
+declared and actual expanded bytes, nesting and output; never extract arbitrary
+paths or follow external relationships. Go's ZIP reader exposes declared sizes
+and file readers, but application budgets must still cap actual reads.
+[Go archive/zip documentation](https://pkg.go.dev/archive/zip).
+
+Next implementation must connect that independently versioned provenance to
+actual authorised ingestion/status/retrieval and UI, with source grants retained
+on every read. Do not create a broadly granted derived Library asset that
+launders access after the original source grant is revoked. Additive schema
+ownership review, corrupt/package/rollback/revocation tests and genuine format
+acceptance remain required; this note does not implement DOCX or PDF parsing.

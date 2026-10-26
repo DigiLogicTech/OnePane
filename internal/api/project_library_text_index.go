@@ -90,9 +90,14 @@ func (s *Server) workspaceLibraryText(w http.ResponseWriter, r *http.Request, in
 		return
 	}
 	artifactID := strings.TrimPrefix(selected.StorageURI, "artifact:")
-	if err = s.libraryArtifacts.VerifyContent(r.Context(), artifactID); err != nil {
-		writeError(w, 503, "Library text source failed integrity verification")
-		return
+	// Unsupported/oversized status is metadata, not verified text. Reading a
+	// large binary merely to record that outcome would defeat the parser budget.
+	if selected.SizeBytes <= projectworkspace.LibraryTextIndexLimit && projectworkspace.LibraryTextMIME(selected.MIMEType) {
+		digest, valid := librarySHA256Digest(selected.ContentHash)
+		if !valid || s.libraryArtifacts.VerifyExpectedContent(r.Context(), artifactID, "sha256:"+digest, selected.SizeBytes) != nil {
+			writeError(w, 503, "Library text source failed integrity verification")
+			return
+		}
 	}
 	reader, raw, err := s.libraryArtifacts.Open(r.Context(), artifactID)
 	if err != nil {

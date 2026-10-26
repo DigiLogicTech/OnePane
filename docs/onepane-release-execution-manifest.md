@@ -2,7 +2,7 @@
 
 Updated: 2026-10-26 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
 
-Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Human assistance/discovery/UI and bounded nonadjacent Team pairing pass exact-source hosted workflows. Library text indexing is published asb505025b; its genuine race-fixture timeout is corrected in7aab8e81, whose integration40317944804 is still pending. Current locally validated work completes bounded Workspace-wide indexed-text discovery, opaque scoped navigation and explicit Search/Continue UI. The latest sections record exact source/test/CI evidence. Next boundaries include PDF/DOCX/page citations/semantic retrieval/full attachments, broader Project discovery/permissions, peer help/versioned reassignment, closed recovery and all remaining approved functionality. Every new source needs its own CI. Ordered human audits/sign-offs, real AI/Node/L4, LAST UI, installed Windows/Ubuntu and final versioned artifact gates remain OPEN. No final build is claimed.
+Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Human assistance/discovery/UI, nonadjacent Team pairing and Library fixture correction7aab8e81 pass exact-source hosted workflows. Workspace-wide text discovery/UI is published asc13edb0b; own integration40319458362 remains pending. Current work corrects artifact verification budgets so appended blobs or changed source metadata cannot turn bounded text retrieval into EOF scanning. The latest sections record exact source/test/CI evidence. Next boundaries include independently versioned DOCX/PDF derived-text/page citations/semantic retrieval/full attachments, broader Project discovery/permissions, peer help/versioned reassignment, closed recovery and all remaining approved functionality. Every new source needs its own CI. Ordered human audits/sign-offs, real AI/Node/L4, LAST UI, installed Windows/Ubuntu and final versioned artifact gates remain OPEN. No final build is claimed.
 ## Authority and continuation
 
 The Git repository is `D:\Codex\OnePane\source`; its parent is an unrelated unborn wrapper repository. Continue `codex/team-live-ci-completion`, existing draft PR [228](https://github.com/DigiLogicTech/OnePane/pull/228), based on `feature/rc11-policy-worker-diagnostics-integration-20261011` (`fb7f5df7`). Preserve the stacked integration route; do not merge the historical feature PRs independently or reset local work.
@@ -1523,3 +1523,51 @@ approved queue. Source slice reviews do not replace #86 whole-tree audits/user
 vision/signoffs. Physical AI/Node/L4/Colibri/OmniRoute/constrained hardware,
 final Windows/Ubuntu product UI and installed upgrade/data-preservation/final
 versioned artifacts/checksums gates remain OPEN. No final release build exists.
+
+## LIBRARY-VERIFY-BOUND-001 — independently pinned artifact verification
+
+P2 resource-bound defect, blocking the bounded retrieval acceptance until fixed:
+LocalStore.Verify read through EOF even for a small expected immutable size.
+An appended/growing corrupt file could exceed the promised read budget. Further,
+VerifyContent fetched current artifact metadata, so a changed metadata size could
+enlarge work before the Library path rejected its source identity. Neither case
+granted content access, but both violated predictable constrained-resource work.
+
+Stock artifact verification now stops at expected size plus one sentinel byte,
+rejects negative/overflowing sizes before I/O, preserves real hash/size integrity
+and cancellation/error causes, and rejects appended/truncated content. New
+VerifyExpectedContent compares the independently selected canonical source hash
+and size before passing captured expectations to storage. Exact and Workspace-
+wide Library text paths use it; metadata changes cannot enlarge their budget.
+Unsupported/oversized status records metadata without reading the binary source
+and remains explicitly non-ready, never represented as verified text. Valid
+Workspace-page source traversal is24MiB plus at most8sentinel bytes, with no
+unbounded EOF scan. No source/Library/artifact row or user file is rewritten.
+
+Actual tests cover counted/infinite corrupt readers, exact/zero/negative/overflow/
+truncated/cancelled inputs and an appended real temporary content-addressed blob.
+Authenticated HTTP metadata drift proves no storage verification is attempted
+when source size no longer matches; non-ready POST/status/search prove zero
+binary reads/verification attempts. All final Library revocation/provenance
+matrices remain enforced. Full local artifact3.662s/API105.679s PASS; affected
+focused artifact0.988s/API23.463s, final new budget cases1.930s, integration vet
+and whitespace PASS. Hosted Linux-race/native Windows selectors now directly
+exercise artifact tests as well as Library suites. Own exact CI remains required.
+
+Predecessor7aab8e81 integration40317944804 and both guards40317944808/40317944927
+are now SUCCESS. c13edb0be859ee2cbd290be6ae6ad4fd9c353407 is published with local
+full integration recorded above; source guards40319458645/40319457941 passed.
+Its integration40319458362 has passed Windows+four Linux families while the
+Library/Team/Node race family remains running at12:14UTC. No predecessor result
+is transferred to this new verification source, and historical b505 failure is
+retained. No physical approval/package/installer/final build was produced.
+
+Continuation: inspect this correction's own exact-source jobs after publication,
+then implement the DOCX/PDF derived-document contract outlined in
+rc11-library-text-index.md. Raw source SHA/version must remain separate from
+derived hashes/parser/component/paragraph/page provenance; parser1 raw byte
+citations cannot stand in for extracted document locations. Preserve source
+grant revocation and avoid derived-asset permission laundering. Independent
+format acceptance, semantic/full attachment work, all broader approved feature,
+physical hardware/AI, ordered reviews/final UI and installed release gates stay
+OPEN. No FINAL BUILD COMPLETE classification is warranted.

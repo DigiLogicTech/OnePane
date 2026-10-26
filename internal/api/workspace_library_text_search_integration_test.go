@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -392,5 +393,89 @@ func TestWorkspaceLibraryTextSearchHTTPSameHashSourceRebindingDenied(t *testing.
 	w := workspaceTextSearchHTTP(t, f, "PRIVATE_LIBRARY_TEXT", "", auth)
 	if !fired || w.Code == 200 || strings.Contains(w.Body.String(), "PRIVATE_LIBRARY_TEXT") || strings.Contains(w.Body.String(), f.assetID) {
 		t.Fatalf("same-hash source rebound after verification: %d %s", w.Code, w.Body.String())
+	}
+}
+
+type inspectedVerificationAttempts struct {
+	artifact.BlobStore
+	calls int
+	reads int
+}
+
+func (s *inspectedVerificationAttempts) Verify(ctx context.Context, ref, hash string, size int64) error {
+	s.calls++
+	return s.BlobStore.Verify(ctx, ref, hash, size)
+}
+
+type inspectedBudgetReadCloser struct {
+	io.ReadCloser
+	read *int
+}
+
+func (r *inspectedBudgetReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	*r.read += n
+	return n, err
+}
+func (s *inspectedVerificationAttempts) Open(ctx context.Context, ref string) (io.ReadCloser, error) {
+	r, err := s.BlobStore.Open(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	return &inspectedBudgetReadCloser{ReadCloser: r, read: &s.reads}, nil
+}
+
+func TestLibraryTextIndexHTTPNonReadyMetadataDoesNotReadBinaryContent(t *testing.T) {
+	for _, scenario := range []string{"unsupported", "too_large"} {
+		t.Run(scenario, func(t *testing.T) {
+			var store *inspectedVerificationAttempts
+			body, media := []byte("binary non-text input"), "application/pdf"
+			if scenario == "too_large" {
+				body = bytes.Repeat([]byte("x"), projectworkspace.LibraryTextIndexLimit+1)
+				media = "text/plain"
+			}
+			f := textLibraryHTTPFixture(t, body, media, func(base artifact.BlobStore) artifact.BlobStore {
+				store = &inspectedVerificationAttempts{BlobStore: base}
+				return store
+			})
+			auth := textLibraryHTTPAuth(t, f, "bearer")
+			store.calls = 0
+			store.reads = 0
+			indexed := decodeTextIndex(t, textLibraryHTTP(t, f, "POST", "index", auth))
+			if indexed.Status != scenario {
+				t.Fatalf("nonready input labelled ready %+v", indexed)
+			}
+			decodeTextIndex(t, textLibraryHTTP(t, f, "GET", "index", auth))
+			if w := textLibraryHTTP(t, f, "GET", "search?q=private", auth); w.Code != 409 {
+				t.Fatalf("nonready search status%d", w.Code)
+			}
+			if store.calls != 0 || store.reads != 0 {
+				t.Fatalf("nonready metadata read binary bytes verify=%d bytes=%d", store.calls, store.reads)
+			}
+		})
+	}
+}
+func TestWorkspaceLibraryTextSearchHTTPChangedSizeCannotEnlargeVerificationBudget(t *testing.T) {
+	var store *inspectedVerificationAttempts
+	f := textLibraryHTTPFixture(t, []byte("PRIVATE_LIBRARY_TEXT bounded source"), "text/plain", func(base artifact.BlobStore) artifact.BlobStore {
+		store = &inspectedVerificationAttempts{BlobStore: base}
+		return store
+	})
+	auth := textLibraryHTTPAuth(t, f, "bearer")
+	decodeTextIndex(t, textLibraryHTTP(t, f, "POST", "index", auth))
+	store.calls = 0
+	fired := false
+	f.server.projects = &workspaceTextSearchHook{Service: f.projects, after: func() {
+		if fired {
+			return
+		}
+		fired = true
+		if _, err := f.db.SQL().Exec(`UPDATE artifacts SET size_bytes=67108864 WHERE id=?`, f.artifactID); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	w := workspaceTextSearchHTTP(t, f, "PRIVATE_LIBRARY_TEXT", "", auth)
+	if !fired || w.Code == 200 || store.calls != 0 || strings.Contains(w.Body.String(), "PRIVATE_LIBRARY_TEXT") {
+		t.Fatalf("changed metadata enlarged verification work called=%d status=%d body=%s", store.calls, w.Code, w.Body.String())
 	}
 }

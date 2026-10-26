@@ -67,6 +67,9 @@ async function a46RenderLibrary(project,workspace,root){
  <div class="a46-library-items">${cards||'<div class="empty-state compact">No Project Library assets. Upload a document, source artifact or asset to begin.</div>'}</div>
  ${source?.id?'<div class="a62-evidence-panel"><div class="toolbar"><button type="button" class="btn" data-a62-build disabled>Build scoped evidence manifest</button><button type="button" class="btn" data-a63-read disabled>Read verified text (up to 8)</button><button type="button" class="btn" data-a65-freeze disabled>Approve Research evidence metadata</button></div><p class="list-meta">Metadata: choose up to 16 exact versions. Text retrieval: choose up to 8 UTF-8 documents, 64 KiB each, 256 KiB total. Every read is hash checked and permissions are rechecked. Untrusted text is for operator review only: it is not sent to the Orchestrator or Council.</p><pre class="a62-evidence-receipt" data-a62-result hidden aria-label="Scoped Workspace evidence metadata manifest"></pre><pre class="a62-evidence-receipt" data-a63-result hidden aria-label="Verified untrusted Workspace Library text"></pre><label class="a64-search-label">Search selected verified text (2–64 characters)<input type="search" data-a64-query maxlength="64" placeholder="Phrase to find in approved versions"></label><div class="toolbar"><button type="button" class="btn" data-a64-search disabled>Search selected text</button></div><pre class="a62-evidence-receipt" data-a64-results hidden aria-label="Permission-checked evidence search snippets"></pre></div>':""}`;
  if(source?.id){
+  const searchHost=document.createElement("section");searchHost.className="a62-evidence-panel";
+  root.append(searchHost);
+  mountWorkspaceTextSearch(searchHost,{projectID,workspaceID:String(source.id)},current);
   for(const asset of assets){
    const card=root.querySelector(`[data-a46-asset="${CSS.escape(asset.id)}"]`);
    if(!card)continue;

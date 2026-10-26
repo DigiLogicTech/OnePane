@@ -2,7 +2,7 @@
 
 Updated: 2026-10-26 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
 
-Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Human assistance/discovery/UI and bounded nonadjacent Team pairing are published as abebacc6/f7204def/1d8e3caf and pass exact-source hosted workflows. Current work adds explicit immutable Library text/line indexing, honest status and exact-version literal retrieval/citations with authenticated API and Workspace-card controls. Local affected full suites pass after reviewed recovery-fixture remediation; see the latest sections for exact evidence/continuation. Next boundaries include Workspace/Project-wide text discovery, PDF/DOCX/page citations/semantic retrieval/full attachments, peer help/versioned reassignment, closed recovery and all remaining approved functionality. Each new source needs its own CI. Ordered human audits/sign-offs, real AI/Node/L4, LAST UI, installed Windows/Ubuntu and final versioned artifact gates remain OPEN. No final build is claimed.
+Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Human assistance/discovery/UI and bounded nonadjacent Team pairing pass exact-source hosted workflows. Library text indexing is published asb505025b; its genuine race-fixture timeout is corrected in7aab8e81, whose integration40317944804 is still pending. Current locally validated work completes bounded Workspace-wide indexed-text discovery, opaque scoped navigation and explicit Search/Continue UI. The latest sections record exact source/test/CI evidence. Next boundaries include PDF/DOCX/page citations/semantic retrieval/full attachments, broader Project discovery/permissions, peer help/versioned reassignment, closed recovery and all remaining approved functionality. Every new source needs its own CI. Ordered human audits/sign-offs, real AI/Node/L4, LAST UI, installed Windows/Ubuntu and final versioned artifact gates remain OPEN. No final build is claimed.
 ## Authority and continuation
 
 The Git repository is `D:\Codex\OnePane\source`; its parent is an unrelated unborn wrapper repository. Continue `codex/team-live-ci-completion`, existing draft PR [228](https://github.com/DigiLogicTech/OnePane/pull/228), based on `feature/rc11-policy-worker-diagnostics-integration-20261011` (`fb7f5df7`). Preserve the stacked integration route; do not merge the historical feature PRs independently or reset local work.
@@ -1459,3 +1459,67 @@ was prepared; scheduled wakeups did not complete that commit. Resumed26October
 11:46UTC on the same branch/PR with all retained work preserved. First publish
 the tested fixture correction and inspect its exact CI, then continue bounded
 Workspace-wide indexed text search/API/opaque navigation/UI and the full queue.
+
+## LIBRARY-TEXT-DISCOVERY-001 — bounded Workspace-wide forward search
+
+Current fixture correction is published as7aab8e81ecac2892bc0924773fa88cb9cbb4855d.
+Its Windows/Ubuntu guards40317944808/40317944927 passed; integration40317944804
+has passed Windows, Worker/recovery, inference, Workspace and full-regression
+families while Library/Team/Node remains running at12:00UTC. Earlierb505 failure
+remains genuine. Own exact-source hosted race validation is required for all
+subsequent search changes below.
+
+Approved #22 continuation implements current-grant Workspace-wide indexed text
+search with dual8raw-asset/8indexed-version scan budgets and8matching lines.
+Stable Project/archived/asset keyset indexing in additive0115 avoids sorting all
+assets or scanning global history. Unindexed and denied candidates consume the
+budget; empty partial pages retain honest continuation, including mid-document
+line positions. Sources are independently authorised before loading, their
+bounded original bytes reconstructed/verified, and malformed retained data
+fails closed. This is live forward paging; a new search includes earlier
+concurrently inserted keys/versions. No Project-wide content privilege is added.
+
+Private raw positions/counts are replaced by per-Server32random-byte opaque
+navigation. Cursor state binds original tenant/Project/Workspace/identity/
+credential/authmethod and hashed scopes/query. TTL5minutes, global256 and
+percredential32 LRU bounds prevent unbounded memory or one credential filling
+the registry. Restart/expired/evicted navigation returns409; no authority or
+durable Task continuation follows from a token. Wrong-binding reuse cannot
+consume a valid original cursor.
+
+Authenticated GET /library/search-text repeats current original credential and
+captured tenant in each transaction, including empty pages. Every unique match
+gets actual managed-source integrity/provenance verification before a second
+comparable collection. Final FULL version/sourceURI, active artifact/storageRef,
+grant, Project/canonical Workspace and credential checks prevent same-hash
+source rebinding and publication after revocation. Bounded traversal is24MiB
+per HTTP page (two<=8MiB collections plus<=8MiB source verification), not8MiB
+total; response<=1MiB. No private next cursor is allocated after denial.
+
+The existing Workspace Library exposes explicit Search text/Continue search,
+case-sensitive phrase labels, honest empty-page/exhaustion states and inert
+source citations. Each page replaces old excerpts. No automatic paging, model
+prompt/Task attachment or broad browse authority; old scope/late responses,
+duplicates, denied reads, changed queries and disposal are fenced.
+
+Local full integration PASS: Projectworkspace95.747s, API130.679s, SQLite43.473s,
+recovery22.381s, WebUI0.805s. Focused domain5.564s, API7.440s/final7.416s,
+cursor0.164s PASS. Initial new domain test used an invalid membership fixture
+status and FAILED2.681s; corrected to actual suspended status and all affected
+tests passed. Actual1024foreign-asset persistent SEARCH plans pass before/after
+ANALYZE; tests include16unindexed/denied candidates before late10line matches,
+pinned/directional revocation, corruption, cursor scope/query/credential/expiry,
+LRU/concurrent reads and authenticated collection/final-source negatives.
+All30JavaScript validators, final mounted Workspace-search controller/renderer,
+and affected integration vet/whitespace PASS. Native and hosted-race selectors
+include all new WorkspaceLibraryText suites. No physical/model/platform/UI
+acceptance is inferred.
+
+Next: publish this validated source on the same branch/PR, inspect its own CI
+and remediate genuine failures. Continue PDF/DOCX/page ingestion with independently
+bound source/derived provenance and bounded parsers, semantic retrieval/full
+attachments, peer help/versioned reassignment, closed recovery and the complete
+approved queue. Source slice reviews do not replace #86 whole-tree audits/user
+vision/signoffs. Physical AI/Node/L4/Colibri/OmniRoute/constrained hardware,
+final Windows/Ubuntu product UI and installed upgrade/data-preservation/final
+versioned artifacts/checksums gates remain OPEN. No final release build exists.

@@ -88,3 +88,61 @@ rejects innerHTML. Source tests establish no physical model, parsed PDF/DOCX,
 semantic retrieval, final browser/product UI, platform installation or release
 acceptance. Exact-source CI and remaining whole-release gates are recorded in
 onepane-release-execution-manifest.md.
+
+## Workspace-wide indexed text discovery
+
+`GET /v1/projects/{projectID}/workspaces/{workspaceID}/library/search-text?q=...`
+searches saved indexes across independently permitted immutable versions. The
+Workspace Library adds Search text and a separate Continue search action.
+Each response replaces the previous page. Source citations stay as inert text;
+neither rendering nor navigation attaches them to a model or Task.
+
+Migration0115 adds only `(project_id,archived,id)` asset keyset indexing. A domain
+page inspects at most8raw Project assets and8raw indexed versions, with at most
+8matching lines. Unindexed assets and versions without a current grant consume
+the same bounded scan budget. They cannot force an unlimited walk or disappear
+behind a global latest-N filter. Grant resolution precedes source-text loading.
+Every eligible source still undergoes bounded line/source-hash verification.
+
+An empty page with has_more=true means more candidates remain; it never means
+that no documents match. Continuation can resume within a document after the
+last returned line. Has_more is conservative and can require a final empty page
+to establish forward exhaustion. This is a live forward scan, not a snapshot
+across requests: a fresh search includes newly inserted earlier keys or newer
+versions of an already drained asset. Metadata filename filtering remains a
+separate operation and does not silently change text-search scope.
+
+Raw candidate identities, line positions and scanned-candidate counts never
+leave the server. A32byte cryptographically random opaque cursor retains only
+navigation, bound to original tenant/Project/canonical Workspace, principal/type,
+credential/auth method, hashed scopes and literal query. It confers no access.
+The process-local registry has a fixed5minute TTL, maximum256entries and a
+32entry-per-credential LRU bound. Restart, expiry and eviction return409 with an
+explicit new-search instruction. Failed wrong-scope reuse does not consume a
+valid cursor. No plaintext source/query or raw credential scope is cached.
+
+Every page repeats original credential and captured Project-tenant authority in
+the domain transaction, including empty pages. After independently verifying and
+opening each distinct matching managed source, the API repeats the comparable
+bounded domain collection. It finally re-resolves the FULL LibraryVersion,
+active artifact/storage reference, Project/canonical Workspace and credential.
+Matching hashes alone cannot hide a changed underlying source URI. No partial
+private response or next cursor is returned on those failures.
+
+The two collections can reconstruct at most16MiB total; independent verification
+of up to8distinct sources adds at most8MiB. Thus source traversal per HTTP page
+is bounded by24MiB, with at most128KiB of raw matching line text and a1MiB JSON
+response limit. Those figures are source/data bounds, not hardware-performance
+or physical inference claims. The UI never follows cursors automatically and
+clears prior excerpts before requests, denial, disposal or replacement scope.
+
+Actual source tests cover denied/unindexed empty pages before later matches,
+more than8matching lines in one version without duplication, pinned/directional
+grant revocation, malformed data, expiry/scope/query/credential cursor binding,
+LRU/concurrent cursor reads and actual1024foreign-asset production plans before
+and after ANALYZE. Real bearer/browser API paths include source verification,
+same-hash source rebinding, original-tenant and final publication negatives.
+Controller and mounted renderer tests cover honest empty pages, explicit
+continuation, duplicate/late responses, query changes, inert markup and denial.
+PDF/DOCX/page parsing, semantic retrieval, broader Project discovery/permissions,
+full attachment lifecycle and final product/platform acceptance remain open.

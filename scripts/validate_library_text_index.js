@@ -66,6 +66,29 @@ function descendants(root){return [root,...root.children.flatMap(descendants)]}
  assert.ok(workspace.includes('root.textContent="Loading authorised Library…"'),'new scope retained private old content');
  assert.ok(workspace.includes('if(!current())return;'),'late replacement scope not fenced');
  const html=fs.readFileSync('internal/webui/static/index.html','utf8');assert.ok(html.indexOf('/library-text-index.js')<html.indexOf('/workspace-library.js'));
+ const token='A'.repeat(43),workspacePage=(more=false)=>({query:'source',matches:[{index:metadata(),line:citation()}],has_more:more,next_cursor:more?token:''});
+ let pages=[],response={query:'source',matches:[],has_more:true,next_cursor:token};
+ const searchController=context.createWorkspaceTextSearchController({selection,api:async path=>{pages.push(path);return response}});
+ assert.equal(pages.length,0);await searchController.start('source');assert.equal(searchController.snapshot().hasMore,true);assert.equal(searchController.snapshot().matches.length,0);
+ response=workspacePage();await searchController.next();assert.match(pages[1],/cursor=A{43}$/);assert.equal(searchController.snapshot().matches.length,1);assert.equal(searchController.snapshot().hasMore,false);
+ const copied=searchController.snapshot();copied.matches[0].line.text='changed';assert.equal(searchController.snapshot().matches[0].line.text,'<b>source</b>');
+ before=pages.length;await searchController.start('😀'.repeat(65));assert.equal(pages.length,before);assert.equal(searchController.snapshot().matches.length,0);
+ for(const mutate of [p=>p.query='foreign',p=>p.next_cursor='PRIVATE_RAW_ASSET_POSITION',p=>p.matches[0].index.content_hash='bad',p=>p.matches[0].line.byte_end=999,p=>p.matches.push(p.matches[0])]){
+  response=workspacePage(true);mutate(response);await searchController.start('source');assert.ok(searchController.snapshot().error);assert.equal(searchController.snapshot().matches.length,0);assert.equal(searchController.snapshot().hasMore,false);
+ }
+ const latePage=deferred();let workspaceAlive=true,workspaceChanges=0,workspaceCalls=0;
+ const lateSearch=context.createWorkspaceTextSearchController({selection,api:()=>{workspaceCalls++;return latePage.promise},current:()=>workspaceAlive,change:()=>workspaceChanges++});
+ const firstPage=lateSearch.start('source');await lateSearch.start('other');assert.equal(workspaceCalls,1);workspaceAlive=false;before=workspaceChanges;latePage.resolve(workspacePage());await firstPage;assert.equal(workspaceChanges,before);assert.equal(lateSearch.snapshot().matches.length,0);
+ const workspaceHost=new Element('section');workspaceHost.connected=true;
+ handler=async()=>({query:'source',matches:[],has_more:true,next_cursor:token});
+ const workspaceMount=mounted.mountWorkspaceTextSearch(workspaceHost,selection);
+ const workspaceButtons=descendants(workspaceHost).filter(x=>x.tagName==='button'),workspaceInput=descendants(workspaceHost).find(x=>x.tagName==='input'),workspaceForm=descendants(workspaceHost).find(x=>x.tagName==='form');
+ assert.deepEqual(workspaceButtons.map(x=>x.textContent),['Search text','Continue search']);assert.equal(workspaceButtons[1].disabled,true);
+ workspaceInput.value='source';workspaceForm.events.submit({preventDefault(){}});await settle();assert.match(workspaceHost.textContent,/No matches on this page. Continue search/);assert.equal(workspaceButtons[1].disabled,false);
+ workspaceInput.value='changed';workspaceInput.events.input();assert.equal(workspaceButtons[1].disabled,true);workspaceInput.value='source';workspaceInput.events.input();assert.equal(workspaceButtons[1].disabled,false);
+ handler=async()=>workspacePage();await workspaceButtons[1].events.click();assert.match(workspaceHost.textContent,/<b>source<\/b>/);assert.equal(workspaceButtons[1].disabled,true);
+ handler=async()=>{throw Error('Workspace access revoked')};workspaceForm.events.submit({preventDefault(){}});await settle();assert.ok(!workspaceHost.textContent.includes('<b>source</b>'));assert.match(workspaceHost.textContent,/Workspace access revoked/);
+ workspaceMount.dispose();assert.equal(workspaceHost.children.length,0);
  // Exercise the actual parent renderer, including old-success/old-error races.
  for(const fail of [false,true]){
   let complete,deny;

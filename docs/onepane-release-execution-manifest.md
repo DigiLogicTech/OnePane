@@ -1571,3 +1571,53 @@ grant revocation and avoid derived-asset permission laundering. Independent
 format acceptance, semantic/full attachment work, all broader approved feature,
 physical hardware/AI, ordered reviews/final UI and installed release gates stay
 OPEN. No FINAL BUILD COMPLETE classification is warranted.
+
+## CI-WINDOWS-PARTITION-001 / CI-NATIVE-EXIT-001 — mandatory native evidence
+
+26October12:42UTC reconciliation: exactc68693a8 integration40321161057 ended
+CANCELLED, not an assertion failure. Windows job121566137060 logged passing
+commands through12:27:59 then cancellation12:28:10 after starting about12:15:40;
+this is consistent with its12minute job budget, but the log does not explicitly
+identify the cancellation actor/reason. Later Windows commands/drive-root/MSI
+steps were skipped. All5Linux families passed. Both source guards passed.
+No complete native Windows or final-source integration acceptance is inferred.
+
+P1 gate defect: the named required aggregate had dependencies only on5Linux
+families, so it reported SUCCESS despite native cancellation. P1 native-exit
+defect: multi-command PowerShell steps could overwrite an earlier nonzero Go
+exit with a later success. Historical step-green evidence alone is not a proof
+that every native command passed; do not invent historical failing assertions.
+
+The source workflow now partitions Windows into4independent12minute jobs:
+existing core/process/service/model/SQLite/privacy/drive/MSI, Library/liveTeam,
+Worker journals/assistance/recovery and compute/Team/task/runtime dispatch.
+Independent read-only review compared all65original Go commands directly to
+c686 source: exact multiset preserved, with every selector/package/command
+timeout unchanged. The sole MSI script and its legacy PowerShell shell remain.
+One additional native contract command validates the workflow itself. All66Go
+commands now immediately exit on nonzero LASTEXITCODE before another command
+can overwrite it. No test assertion/deadline is weakened and no CI rerun of old
+source is substituted for new-source evidence.
+
+The retained required check name now always waits for all5Linux+4Windows jobs
+and requires all9results to equal success. Failure/cancellation/skip/missing
+results deny the gate. New source-change filters include artifact/recovery/
+budget/CI-contract packages and Go dependency manifests so those changes cannot
+silently bypass this authoritative workflow.
+
+New internal/cicontract tests freeze the reviewed65-command inventory, verify
+all4Windows runners/12minute budgets/no conditional or allowed-failure steps,
+preserve MSI invocation, enforce immediate native guards and all9aggregate
+needs/env/result checks. Actual native PowerShell launches the real Go binary:
+an early failing Go process must prevent a later success/marker, while the
+positive case reaches it. Parent suite PASS2.575s and independent review2.501s;
+affected vet/whitespace PASS. Hosted Linux must execute the actual aggregate
+truth table (all-success plus36individual non-success cases); that Linux-only
+execution was explicitly SKIPPED locally. No mocked shell/installer/AI proof.
+
+Continuation: publish the reviewed source CI correction to the same branch/PR
+and inspect every new Windows family plus the aggregate. New native fail-fast
+behavior may reveal previously hidden failures; remediate them, do not remove
+guards. Continue independent eligible derived-document ingestion while hosted
+source runs. All functional/physical/review/UI/installed/final release gates
+remain OPEN; no final build has been produced.

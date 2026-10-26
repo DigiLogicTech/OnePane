@@ -136,7 +136,62 @@ Controller/mounted-renderer tests establish safe source UI behavior. Hosted
 native Windows and a dedicated Linux document race family remain required for
 each published source; the required aggregate includes that new family.
 
-PDF/page-aware ingestion, unified Workspace-wide DOCX retrieval, semantic search,
+## Workspace-wide Word discovery
+
+The Workspace Library now has an explicit Search extracted Word text panel,
+separate from original UTF-8 line/byte search. Search Word text and Continue Word
+search scan current v2 extraction records with the optional next page represented
+by an opaque, credential/scope/query-bound token. No index, query, continuation
+or model delivery runs automatically. Every page replaces prior excerpts; errors,
+scope changes and disposal clear private content and fence stale replies.
+
+GET `library/search-documents?q=...&cursor=...` uses at most8raw assets,
+2raw indexed versions and8complete matching paragraphs per page. Denied or
+unindexed assets and metadata-only statuses may yield empty intermediate pages;
+only exhaustion ends the current forward scan. This is live keyset navigation,
+so newly inserted earlier keys require a fresh search. It does not prove absence
+across unindexed sources or a frozen multi-request snapshot.
+
+Migration0118 adds a parser-first `(asset_id,parser_id,version)` navigation index.
+Queries explicitly use that index so retained older-parser histories cannot
+turn the v2 candidate budget into a latest-N/filter scan. The new endpoint uses
+the same source-grant and transaction/final-credential fences as exact retrieval.
+Every authorized eligible candidate is independently raw-verified, bounded-read
+and reparsed, including candidates without matching paragraphs. Thus forged
+derived text cannot silently hide a match merely by producing an empty result.
+Unsupported/oversized metadata outcomes require no binary reads. A second
+comparable bounded collection and final full source/artifact/Workspace/Project
+identity checks precede output. No private raw positions, denied IDs, scan
+counts, verification candidate list or artifact paths are returned.
+
+At most two8MiB originals are hashed and read per HTTP page:16MiB verification
+plus16MiB reads, each bounded by the independently selected size plus a sentinel.
+Reparsing uses those bytes in memory and retains the existing per-source8MiB
+XML expansion/work limits. Each of two comparable domain collections materializes
+at most2MiB derived text, for4MiB across both. The1MiB response emits at most two
+matched source receipts once in `sources`; each `matches` entry refers to its
+source by array position and includes its exact part/paragraph unit. Large part
+receipts are not repeated for each paragraph. Unmatched verification identities
+remain private. No ZIP byte or rendered-page citation is invented.
+
+Navigation registries contain no source text: cryptographic32byte tokens expire
+after5minutes, bind the original principal/type/credential/auth method, tenant,
+Project/canonical Workspace, original scopes and query, and use global256/
+per-credential32LRU bounds. Restart/expiry/eviction returns409 and requires a
+new search. Tokens are navigation, never grants, and cannot transfer to the
+separate raw-text search registry.
+
+Source tests cover late matches after unindexed/denied prefixes, paragraph
+continuation, query-only reads, authorized nonmatches, current/grant revocation,
+real bearer/browser paging and cursor/query/registry expiry, both collection
+and final-publication drift, original credentials even on empty collections,
+self-consistent nonmatching derived forgery, two-source I/O budgets and zero
+binary reads for unsupported/oversized metadata. Actual1024older-parser rows
+and production query plans before/after ANALYZE retain persistent indexed SEARCH.
+Controller/mounted-renderer tests retain inert text, source/derived separation,
+compact receipts, duplicate/late/scope/denial cleanup and explicit paging.
+
+PDF/page-aware ingestion, unified cross-format retrieval, semantic search,
 full Assistant/Task/Council attachment provenance and genuine format/UI/platform
 qualification remain open. Generated ZIP/source tests do not prove Word or
 LibreOffice rendering, final Windows/Ubuntu product review, physical AI or

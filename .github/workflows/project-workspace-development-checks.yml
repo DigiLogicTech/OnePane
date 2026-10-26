@@ -13,6 +13,8 @@ on:
       - 'scripts/validate_library_text_index.js'
       - 'internal/webui/static/library-document-index.js'
       - 'scripts/validate_library_document_index.js'
+      - 'internal/webui/static/library-document-search.js'
+      - 'scripts/validate_library_document_search.js'
       - 'internal/webui/static/models-page.js'
       - 'scripts/validate_colibri_pin.js'
       - 'internal/webui/static/model-agentcheck-diagnostics.js'
@@ -229,6 +231,8 @@ jobs:
           node scripts/validate_library_text_index.js
           node --check internal/webui/static/library-document-index.js
           node scripts/validate_library_document_index.js
+          node --check internal/webui/static/library-document-search.js
+          node scripts/validate_library_document_search.js
           node scripts/validate_workspace_evidence_ui.js
           node --check internal/webui/static/workspace-runtime-controls.js
           node --check internal/webui/static/workspace-ai-workflow.js

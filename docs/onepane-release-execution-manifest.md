@@ -2,7 +2,7 @@
 
 Updated: 2026-10-26 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
 
-Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. DOCX v2 and its migration/source checks are published. Recovery race partitions and exhaustive coverage guards are published in5cae9e15; own CI exposed a Linux-excluded shared helper file and first race-instrumented SQLite driver initialization exceeding the production5second ping budget. Corrections retain the production limit, initialize only the disposable test driver before fixture creation, and compile the shared workflow contracts on Linux and Windows. New exact-source hosted validation is mandatory. No real AI, human review, final UI, installed Windows/Ubuntu or versioned artifact gates have been closed; no final build.
+Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Exact73a32677 passes integration40376877227 (all7Linux+4Windows families and aggregate) and both source guards40376876586/40376876181. Current validated increment adds explicit bounded Workspace-wide Word discovery, source verification even for authorized nonmatches, opaque continuation and paragraph-citation UI; it needs its own hosted CI after publication. PDF/page-aware ingestion, cross-format/semantic/full attachments, remaining Team/recovery/toolchain/service/engine functionality and all human/physical/UI/installed/versioned release gates remain OPEN. No final build.
 
 ## Authority and continuation
 
@@ -22,7 +22,8 @@ Runtime/control remediation `f7cd569f300d716234efa0e5ec2d385bc778d5d2` subsequen
 | --- | --- | --- | --- |
 | TEAM-HOLD | Source validated; hosted/physical acceptance pending | Atomic accepted-Team pause/resume, original Attempt retention, draining observation, authority and descendant dispatch fences; backend/controller/migration regressions | Publish to existing PR and inspect exact-head CI; physical effects and final browser review remain open |
 | TEAM-CANCEL | Intent/parking, pristine ordinary-Task and attributed local-reasoning Team settlement source validated; executed/unknown recovery owner missing | Scoped atomic intent, proposal discard and between-tick parking of the exact original Worker/Attempt; bounded durable intake/discovery and read-only case inspection implemented | Complete versioned effect inventory, authenticated human decisions and independent actual postconditions before settlement. Intake/read APIs do not authorize recovery or replay |
-| TEAM-COLLAB | Partial source; original-owner human assistance backend/required model context passes hosted CI, discovery/input UI under source validation | Bounded two-member concurrency, agent draft adoption, criteria/guidance, ledger-bound completion/publications and durable human request/answer/explicit Continue; peer help/reassignment and broader fairness remain open | Publish and inspect exact discovery/UI CI, then reviewed peer help/versioned reassignment; preserve immutable accepted graph, authenticated product and physical acceptance |
+| TEAM-COLLAB | Partial functionality; assistance/context/discovery/input UI and bounded nonadjacent pairing pass hosted source CI | Bounded two-member concurrency, agent draft adoption, criteria/guidance, ledger-bound completion/publications and original-owner human assistance; peer help/reassignment and broader fairness remain open | Continue reviewed peer help/versioned reassignment and closed recovery; preserve immutable accepted graph and independent authenticated product/physical acceptance |
+| LIBRARY-DOCUMENTS | DOCX extraction and Workspace discovery source validated; current discovery hosted check pending | Immutable raw/derived/part/paragraph provenance, explicit UI and authenticated source-grant-bound search; UTF-8 source line citations remain separate | Inspect exact new CI; continue PDF/page-aware pipeline, cross-format/semantic retrieval and full attachments with original source authority retained |
 | SCOPE-AUDIT | Current15issue source reconciliation recorded; full acceptance trace still open | `rc11-current-release-scope-matrix.md` separates existing source from genuine Library/toolchain/service/native-engine/Team/recovery/product gaps and physical/review/installed gates | Preserve implemented Council, L4 DAG and runtime foundations; continue actual remaining functionality rather than reimplementing historical unchecked bullets |
 | L4-E2E | Open blocking acceptance | Real local objective → authorized Workspace Tasks → tools/build/tests → verified Library deliverable, restart and resource-wait recovery, no unintended cloud or duplicate effects | Complete functional gaps from scope audit; capture real CPU-only evidence |
 | AI-LIFECYCLE | Open blocking acceptance | Real model download/install/verify/remove; CPU/GPU inference; Colibri and OmniRoute; queuing, swap, memory reclamation, fallback and provider health | Follow physical lifecycle protocol; fixtures/compilation cannot close gate |
@@ -1823,3 +1824,78 @@ whitespace PASS. New hosted execution is required for race cold initialization,
 actual Bash truth table and every mandatory family. Keep5cae's observed failures
 in history; distinguish unfinished/superseded jobs after publication from those
 real failures. All final physical/review/UI/installed/release gates remain OPEN.
+
+## LIBRARY-DOC-DISCOVERY-001 — real bounded Workspace Word discovery
+
+Exact73a32677 integration40376877227 and both guards40376876586/40376876181
+SUCCESS: all7Linux and4native Windows source families and aggregate passed.
+Dedicated recovery race119.990s+65.996s now passes independent3minute groups;
+Linux full regression runs the common contracts and actual Bash rejection cases.
+Physical approval remains SKIPPED and no installed/final release gate is closed.
+
+Current approved #22 increment adds GETsearch-documents plus explicit Search
+Word text/Continue Word search controls. Actual managed DOCX version content is
+searched across the canonical Workspace without requiring the operator to know
+each asset ID. It does not relabel raw UTF-8 line/byte citations or invent pages.
+Each page scans at most8raw assets and2raw indexed versions and returns at most
+8complete matching paragraph units. Direct/pinned/directional source grants are
+resolved before derived content; original actor, captured tenant/Project/current
+Workspace and original production credential/capabilities are checked even for
+empty collections. The existing bounded exact-version authority is retained.
+
+Migration0118 adds a parser-first source-version index. Candidate SQL explicitly
+uses it so retained v1 history cannot become an unbounded filter scan. Pagination
+is stable forward keyset navigation, including same-version paragraph resume,
+with honest empty intermediate pages; it is not a frozen snapshot. Nonmatching
+and non-ready authorized candidates remain private verification work. Every
+eligible candidate is independently source-hashed, read to selected size+1 and
+reparsed, even with zero matches. A self-consistent forged derived nonmatch is
+rejected against unchanged raw bytes. Unsupported/oversized metadata requires
+zero binary reads. Indexing/execution/Research/model delivery is never automatic.
+
+A second comparable bounded collection follows artifact I/O; final full source
+version/storage reference, active artifact/project/Workspace, captured tenant and
+original credential fences withhold all output on drift. Cursor registries hold
+no source text and expire5minutes,32random bytes/token,256global/32credentialLRU,
+bound to tenant/project/Workspace/principal/type/credential/auth method/scopes/
+query. Raw navigation, scan counts, denied IDs and candidate lists stay private;
+query, registry transfer, scope drift, expiry/eviction/restart require a new search.
+
+Each HTTP page has at most16MiB source hashing plus16MiB source reads (selected
+size+sentinel bounds),2in-memory source reparses under existing8MiB XML expansion
+limits, and two domain collections of at most2MiB derived text each. The1MiB
+JSON response deduplicates at most two matched source receipts in sources and
+references them from matches, keeping large64part receipts from being repeated
+8times. Only matching source identities are disclosed. All text is inert DOM
+textContent; explicit paging replaces old results, and pending/denied/changed/
+disposed or late scopes cannot revive old excerpts. Full source/parser/derived/
+part/paragraph hashes/coordinates remain distinct.
+
+Local broad integration PASS: Projectworkspace104.461s/API155.233s/SQLite50.331s/
+recovery19.183s/WebUI0.845s/CI contract3.309s. Focused new domain2.146s includes
+16unindexed/denied assets before later matches, query-only paging/no duplicates,
+authorized nonmatches/current grant revocation and actual1024older-parser rows
+with production persistent SEARCH plans before/after ANALYZE. Real bearer/browser
+HTTP discovery, opaque continuation/expiry/raw-text registry separation, ten
+collection/publication drift cases, forged derived nonmatch and two-source I/O/
+metadata-zero-read cases pass6.070s; final selected-size tightening5.426s passes.
+Empty-collection original credential fences at both boundaries pass1.851s. An
+actual never-ending post-verification reader is closed after selected size+1 and
+rejected without private output: PASS1.546s. Unit cursor memory/binding/concurrent
+navigation cases pass with the suite. Final WebUI0.690s/CI contract2.605s and
+integration vet/whitespace pass. All32JavaScript validators pass, including actual
+Word search controller/mounted renderer and retained parent scope replacement.
+
+The new118 migration required the earlier116->current backup test to derive the
+latest backup version instead of hardcoding117; old DDL/data/grants/quick_check
+assertions remain and pass2.262s. An initial all-validator run failed because
+formatting server.go changed an unrelated existing source-contract literal;
+restored original formatting while retaining only the two intended field/route
+additions, then all32validators passed. No unrelated Task projection was changed.
+
+New source still requires exact hosted document race/native/aggregate and source
+guards after publication. Source fixtures/fake-DOM checks do not prove physical
+model execution, real Word layout, final Windows/Ubuntu UI or installed upgrades.
+Continue PDF/page-aware ingestion, cross-format/semantic/full attachment lifecycle
+or another eligible approved functional boundary after genuine failures are
+remediated. All final reviews/hardware/installed/versioned artifact gates stay OPEN.

@@ -252,6 +252,7 @@ type Server struct {
 	attentionDB     *sql.DB
 	libraryArtifacts *artifact.Service
 	libraryTextSearchCursors libraryTextSearchCursorRegistry
+	libraryDocumentSearchCursors libraryDocumentSearchCursorRegistry
 	projects        projectService
 	events          eventReader
 	auth            Authorizer
@@ -653,6 +654,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /v1/projects/{projectID}", s.deleteProject)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library", s.listWorkspaceLibrary)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library/search-text", s.searchWorkspaceIndexedText)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library/search-documents", s.searchWorkspaceIndexedDocuments)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces/{workspaceID}/evidence-packets", s.buildWorkspaceEvidencePacket)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/research/evidence-sessions", s.listEligibleResearchEvidenceSessions)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/research/frozen-evidence-sessions", s.listFrozenResearchEvidenceSessions)

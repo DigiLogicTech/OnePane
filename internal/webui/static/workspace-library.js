@@ -70,6 +70,9 @@ async function a46RenderLibrary(project,workspace,root){
   const searchHost=document.createElement("section");searchHost.className="a62-evidence-panel";
   root.append(searchHost);
   mountWorkspaceTextSearch(searchHost,{projectID,workspaceID:String(source.id)},current);
+  const documentSearchHost=document.createElement("section");documentSearchHost.className="a62-evidence-panel";
+  root.append(documentSearchHost);
+  mountWorkspaceDocumentSearch(documentSearchHost,{projectID,workspaceID:String(source.id)},current);
   for(const asset of assets){
    const card=root.querySelector(`[data-a46-asset="${CSS.escape(asset.id)}"]`);
    if(!card)continue;

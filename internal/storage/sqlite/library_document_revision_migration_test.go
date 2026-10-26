@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -28,7 +29,11 @@ func TestLibraryDocumentRevisionMigrationPreservesV1AndRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	var upgrade migration
+	latest := 116
 	for _, m := range items {
+		if m.version > latest {
+			latest = m.version
+		}
 		if m.version < 117 {
 			if err = db.applyMigration(ctx, m); err != nil {
 				t.Fatal(err)
@@ -80,7 +85,7 @@ func TestLibraryDocumentRevisionMigrationPreservesV1AndRollback(t *testing.T) {
 	if !reflect.DeepEqual(before, recoveryProvenanceRows(t, db.SQL(), tables)) {
 		t.Fatal("revision upgrade changed v1 receipts, units, grants or source/configuration")
 	}
-	backups, err := filepath.Glob(path + ".pre-migrate-v0117-*.bak")
+	backups, err := filepath.Glob(fmt.Sprintf("%s.pre-migrate-v%04d-*.bak", path, latest))
 	if err != nil || len(backups) != 1 {
 		t.Fatal("missing unique pre-revision recovery snapshot", backups, err)
 	}

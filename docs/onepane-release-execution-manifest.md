@@ -2,7 +2,8 @@
 
 Updated: 2026-10-26 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
 
-Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Human assistance/discovery/UI, nonadjacent Team pairing and Library fixture correction7aab8e81 pass exact-source hosted workflows. Workspace-wide text discovery/UI is published asc13edb0b; own integration40319458362 remains pending. Current work corrects artifact verification budgets so appended blobs or changed source metadata cannot turn bounded text retrieval into EOF scanning. The latest sections record exact source/test/CI evidence. Next boundaries include independently versioned DOCX/PDF derived-text/page citations/semantic retrieval/full attachments, broader Project discovery/permissions, peer help/versioned reassignment, closed recovery and all remaining approved functionality. Every new source needs its own CI. Ordered human audits/sign-offs, real AI/Node/L4, LAST UI, installed Windows/Ubuntu and final versioned artifact gates remain OPEN. No final build is claimed.
+Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Published CI correction `aa05f249` passes its own hosted integration40326328154 and both source guards40326328103/40326328226: all four native Windows and five Linux families passed. Source-bound DOCX paragraph extraction, authenticated retrieval, Workspace controls and reviewed recovery ownership are now locally validated and ready for publication; the checkpoint below records the exact evidence. Its dedicated Linux document race family and native Windows selector require fresh exact-source CI. Next functional boundaries include PDF/page-aware ingestion, unified Workspace DOCX discovery, semantic retrieval/full attachments, peer help/versioned reassignment, closed recovery and the remaining approved scope. Ordered human reviews, real AI/Node/L4, final UI, installed Windows/Ubuntu and versioned artifacts remain OPEN. No final build is claimed.
+
 ## Authority and continuation
 
 The Git repository is `D:\Codex\OnePane\source`; its parent is an unrelated unborn wrapper repository. Continue `codex/team-live-ci-completion`, existing draft PR [228](https://github.com/DigiLogicTech/OnePane/pull/228), based on `feature/rc11-policy-worker-diagnostics-integration-20261011` (`fb7f5df7`). Preserve the stacked integration route; do not merge the historical feature PRs independently or reset local work.
@@ -1621,3 +1622,60 @@ behavior may reveal previously hidden failures; remediate them, do not remove
 guards. Continue independent eligible derived-document ingestion while hosted
 source runs. All functional/physical/review/UI/installed/final release gates
 remain OPEN; no final build has been produced.
+
+## DOCX-001 — bounded source-bound paragraph ingestion (2026-10-26)
+
+Approved #22 source increment: migration0116 retains immutable document headers
+and paragraph units beneath the original Library version. Actual OOXML ZIP/XML
+extraction covers declared main/header/footer/notes/comments, tables, Unicode,
+tabs/breaks and empty paragraphs with explicit stored-text coverage. Source ZIP
+SHA/version/size, XML part SHA, derived SHA and paragraph citations stay distinct.
+No invented page or raw ZIP byte citation is presented as extracted text.
+See `rc11-library-document-ingestion.md` for the exact operator path and bounds.
+
+Canonical MIME only; 8MiB source,256 ZIP entries,32MiB declared expansion,8MiB
+actual XML expansion,4MiB per XML part,64stories/depth,262144tokens per XML part,
+8192units,16KiB per unit and1MiB derived text. Unsafe/ambiguous ZIP/XML and
+unsupported structures fail closed without truncation or external execution.
+Metadata-only unsupported/oversize statuses require zero binary reads.
+
+Production bearer/browser credentials, write CSRF, current tenant/Project/
+canonical Workspace, bounded exact-version source grants, active artifact and
+storage reference are fenced inside transactions and before publication.
+POST accepts no replacement text/path. Index, units and audit commit atomically;
+identical retry is idempotent. Every eligible GET reparses independently verified
+raw bytes and compares the full retained receipt: self-consistent forged derived
+hashes alone do not establish provenance. No new asset, artifact, grant, model
+attachment or execution authority is created. Derived text stays in local DB and
+normal backups. Recovery ownership adds two explicitly reviewed shared-context
+tables and15negative schema cases, with no replay/disposition authority.
+
+Workspace cards expose explicit Check/Extract/Read/Next and optional literal
+query controls. textContent, immutable binding snapshots, duplicate/late reply
+fences and clearing on denial/scope/disposal protect private excerpts. The
+Workspace-wide text search is still labelled text-file search; unified DOCX
+search remains open. Controller/fake-DOM evidence is not final visual QA.
+
+Local broad regression PASS: Projectworkspace102.675s, API146.546s,
+SQLite45.630s, recovery25.580s, WebUI0.948s and CI contract3.601s.
+After final body/relationship parser and bounded final resolver corrections,
+affected document domain4.644s/API16.080s PASS; affected vet PASS. All31JS
+validators PASS, including actual mounted DOCX controls, existing TXT and scope
+races. Final WebUI0.636s/CI contract3.492s, integration vet and whitespace PASS.
+Generated OOXML, migrated isolated SQLite, real bearer/browser requests,
+revocation/rollback/drift/corruption and current-source checks establish source
+behavior; they do not prove Word rendering, physical AI or installed acceptance.
+
+CI adds a dedicated Linux document race family plus one native Windows command;
+all65reviewed original commands, existing test deadlines and immediate native
+failure guards remain. The required aggregate now requires all6Linux+4Windows
+families. New-source hosted results are pending publication and must be checked
+before advancing this slice. Prior aa05f249 integration40326328154 and guards
+40326328103/40326328226 SUCCESS do not validate the new document source.
+
+Continuation: publish this validated increment on the same branch/PR, inspect
+its exact-source native/document-race/aggregate results, remediate genuine
+failures, then continue approved missing ingestion/retrieval or independent
+functional work. PDF/page-aware ingestion, semantic/full attachment lifecycle,
+all broader functionality and physical/review/UI/installed/versioned release
+gates remain OPEN. No package, checksum or FINAL BUILD COMPLETE claim.

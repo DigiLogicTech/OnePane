@@ -11,6 +11,8 @@ on:
       - 'internal/webui/static/workspace-*.js'
       - 'internal/webui/static/library-text-index.js'
       - 'scripts/validate_library_text_index.js'
+      - 'internal/webui/static/library-document-index.js'
+      - 'scripts/validate_library_document_index.js'
       - 'internal/webui/static/models-page.js'
       - 'scripts/validate_colibri_pin.js'
       - 'internal/webui/static/model-agentcheck-diagnostics.js'
@@ -178,7 +180,7 @@ jobs:
   development-contract:
     name: Validate honest Workspace runtime boundaries
     if: ${{ always() }}
-    needs: [development-source-contract, worker-recovery-race, library-team-node-race, managed-inference-race, full-regression, offline-msi-evidence, windows-library-team, windows-worker-recovery, windows-team-dispatch]
+    needs: [development-source-contract, worker-recovery-race, library-team-node-race, library-document-race, managed-inference-race, full-regression, offline-msi-evidence, windows-library-team, windows-worker-recovery, windows-team-dispatch]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -187,6 +189,7 @@ jobs:
           SOURCE_RESULT: ${{ needs.development-source-contract.result }}
           WORKER_RESULT: ${{ needs.worker-recovery-race.result }}
           TEAM_RESULT: ${{ needs.library-team-node-race.result }}
+          DOCUMENT_RESULT: ${{ needs.library-document-race.result }}
           MANAGED_RESULT: ${{ needs.managed-inference-race.result }}
           FULL_RESULT: ${{ needs.full-regression.result }}
           WINDOWS_CORE_RESULT: ${{ needs.offline-msi-evidence.result }}
@@ -194,7 +197,7 @@ jobs:
           WINDOWS_WORKER_RESULT: ${{ needs.windows-worker-recovery.result }}
           WINDOWS_DISPATCH_RESULT: ${{ needs.windows-team-dispatch.result }}
         run: |
-          for result in "$SOURCE_RESULT" "$WORKER_RESULT" "$TEAM_RESULT" "$MANAGED_RESULT" "$FULL_RESULT" "$WINDOWS_CORE_RESULT" "$WINDOWS_LIBRARY_RESULT" "$WINDOWS_WORKER_RESULT" "$WINDOWS_DISPATCH_RESULT"; do
+          for result in "$SOURCE_RESULT" "$WORKER_RESULT" "$TEAM_RESULT" "$DOCUMENT_RESULT" "$MANAGED_RESULT" "$FULL_RESULT" "$WINDOWS_CORE_RESULT" "$WINDOWS_LIBRARY_RESULT" "$WINDOWS_WORKER_RESULT" "$WINDOWS_DISPATCH_RESULT"; do
             if [ "$result" != success ]; then
               echo "A required source validation family did not succeed: $result"
               exit 1
@@ -223,6 +226,8 @@ jobs:
           node --check internal/webui/static/workspace-library.js
           node --check internal/webui/static/library-text-index.js
           node scripts/validate_library_text_index.js
+          node --check internal/webui/static/library-document-index.js
+          node scripts/validate_library_document_index.js
           node scripts/validate_workspace_evidence_ui.js
           node --check internal/webui/static/workspace-runtime-controls.js
           node --check internal/webui/static/workspace-ai-workflow.js
@@ -322,6 +327,20 @@ jobs:
           go test -race -tags integration -count=1 -timeout 3m -run TestApprovalContinuation ./internal/task
           go test -race -tags integration -count=1 -timeout 3m ./internal/recoveryinventory
           go test -race -tags integration -count=1 -timeout 3m ./internal/budget
+
+  library-document-race:
+    name: Validate document extraction race boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Bounded DOCX source extraction and authenticated provenance
+        run: |
+          go test -race -tags integration -count=1 -timeout 3m -run '^TestLibraryDocument' ./internal/projectworkspace ./internal/api
 
   library-team-node-race:
     name: Validate Library Team and Node race boundaries
@@ -610,6 +629,8 @@ jobs:
       - name: Native Windows artifact and indexed Library text
         shell: pwsh
         run: |
+          go test -tags integration -count=1 -timeout 3m -run '^TestLibraryDocument' ./internal/projectworkspace ./internal/api
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 3m ./internal/artifact
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -tags integration -count=1 -timeout 3m -run 'Test(LibraryTextIndex|WorkspaceLibraryText)' ./internal/projectworkspace ./internal/api

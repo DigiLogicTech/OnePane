@@ -126,7 +126,7 @@ function createWorkspaceTextSearchController({api,selection,current=()=>true,cha
 
 function mountWorkspaceTextSearch(host,selection,current=()=>true){
  const make=(tag,text,className)=>{const e=document.createElement(tag);if(text)e.textContent=text;if(className)e.className=className;return e};
- host.append(make("strong","Search indexed document text"),make("p","Search saved text indexes with current Workspace access. Continue search checks another group of documents or lines. Start a new search to include earlier documents changed during paging.","list-meta"));
+ host.append(make("strong","Search indexed text files"),make("p","Search saved UTF-8 text indexes with current Workspace access. Word paragraphs are available from each document's extraction controls. Continue search checks another group of files or lines. Start a new search to include earlier files changed during paging.","list-meta"));
  const form=make("form","","toolbar"),label=make("label","Literal phrase (case sensitive)","a64-search-label"),input=make("input");input.type="search";input.maxLength=256;input.setAttribute("aria-label","Search indexed text in this Workspace");label.append(input);
  const search=make("button","Search text","btn"),next=make("button","Continue search","btn");search.type="submit";next.type="button";next.disabled=true;form.append(label,search,next);host.append(form);
  const status=make("p","No document text is loaded automatically.","list-meta");status.setAttribute("role","status");const output=make("div");output.setAttribute("aria-label","Current page of authorised source citations");host.append(status,output);

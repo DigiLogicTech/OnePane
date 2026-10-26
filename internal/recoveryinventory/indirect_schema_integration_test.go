@@ -28,6 +28,16 @@ func TestRecoveryIndirectOwnershipSchemaRejectsChanges(t *testing.T) {
 		{"new_composite_library_fk", `CREATE TABLE new_effect(owner TEXT,version INTEGER,FOREIGN KEY(owner,version) REFERENCES project_library_asset_versions(asset_id,version))`},
 		{"new_composite_text_index_fk", `CREATE TABLE new_effect(owner TEXT,version INTEGER,parser INTEGER,FOREIGN KEY(owner,version,parser) REFERENCES project_library_text_indexes(asset_id,version,parser_version))`},
 		{"new_composite_text_line_fk", `CREATE TABLE new_effect(owner TEXT,version INTEGER,parser INTEGER,line INTEGER,FOREIGN KEY(owner,version,parser,line) REFERENCES project_library_text_lines(asset_id,version,parser_version,line_number))`},
+		{"new_composite_document_index_fk", `CREATE TABLE new_effect(owner TEXT,version INTEGER,parser TEXT,FOREIGN KEY(owner,version,parser) REFERENCES project_library_document_indexes(asset_id,version,parser_id))`},
+		{"new_composite_document_unit_fk", `CREATE TABLE new_effect(owner TEXT,version INTEGER,parser TEXT,unit INTEGER,FOREIGN KEY(owner,version,parser,unit) REFERENCES project_library_document_units(asset_id,version,parser_id,ordinal))`},
+		{"changed_document_raw_identity", `ALTER TABLE project_library_document_indexes RENAME COLUMN raw_source_sha TO inferred_source`},
+		{"changed_document_derived_identity", `ALTER TABLE project_library_document_indexes RENAME COLUMN derived_sha TO inferred_derived`},
+		{"changed_document_manifest_identity", `ALTER TABLE project_library_document_indexes RENAME COLUMN manifest_sha TO inferred_manifest`},
+		{"changed_document_parser", `ALTER TABLE project_library_document_indexes RENAME COLUMN parser_id TO inferred_parser`},
+		{"new_document_recovery_clearance", `ALTER TABLE project_library_document_indexes ADD COLUMN recovery_clearance_json TEXT`},
+		{"changed_document_component", `ALTER TABLE project_library_document_units RENAME COLUMN part_name TO inferred_page`},
+		{"changed_document_paragraph", `ALTER TABLE project_library_document_units RENAME COLUMN paragraph_number TO inferred_offset`},
+		{"new_document_unit_effect", `ALTER TABLE project_library_document_units ADD COLUMN effect_json TEXT`},
 		{"changed_text_index_hash", `ALTER TABLE project_library_text_indexes RENAME COLUMN content_hash TO inferred_hash`},
 		{"changed_text_index_parser", `ALTER TABLE project_library_text_indexes RENAME COLUMN parser_version TO inferred_parser`},
 		{"new_text_index_clearance", `ALTER TABLE project_library_text_indexes ADD COLUMN recovery_clearance_json TEXT`},
@@ -93,6 +103,11 @@ func TestRecoveryIndirectOwnershipSchemaRejectsChanges(t *testing.T) {
 		{"changed_text_index_status", "project_library_text_indexes", "'invalid_text'", "'effect_verified'"},
 		{"changed_text_index_count_bound", "project_library_text_indexes", "line_count BETWEEN 0 AND 16384", "line_count BETWEEN 0 AND 32768"},
 		{"changed_text_line_byte_bound", "project_library_text_lines", "byte_end-byte_start<=16384", "byte_end-byte_start<=32768"},
+		{"changed_document_parser_vocabulary", "project_library_document_indexes", "docx-wordml-paragraphs-v1", "effect-verified-parser-v1"},
+		{"changed_document_status_vocabulary", "project_library_document_indexes", "'invalid_document'", "'effect_verified'"},
+		{"changed_document_text_bound", "project_library_document_indexes", "derived_utf8_bytes BETWEEN 0 AND 1048576", "derived_utf8_bytes BETWEEN 0 AND 2097152"},
+		{"changed_document_count_bound", "project_library_document_indexes", "unit_count BETWEEN 0 AND 8192", "unit_count BETWEEN 0 AND 16384"},
+		{"changed_document_unit_byte_bound", "project_library_document_units", "length(CAST(content AS BLOB))<=16384", "length(CAST(content AS BLOB))<=32768"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tx, err := db.SQL().BeginTx(ctx, nil)

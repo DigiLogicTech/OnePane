@@ -35,6 +35,15 @@ type indirectReferenceDescriptor struct {
 // row-vocabulary contracts are implemented. Shared context never recursively
 // owns all rows in its tenant, Project, Workspace or artifact session.
 var indirectReferenceDescriptors = map[string][]indirectReferenceDescriptor{
+	"project_library_document_indexes": {
+		{[]string{"asset_id", "version", "parser_id", "raw_source_sha", "raw_source_size"}, "exact composite immutable original Library version and DOCX parser identity; raw package provenance remains distinct from derived text and does not confer exclusive Task or Attempt ownership"},
+		{[]string{"derived_sha", "manifest_sha", "derived_utf8_bytes", "status", "coverage", "parts_json", "unit_count"}, "bounded untrusted extracted paragraph representation and manifest integrity with explicit story coverage; no invented page or raw ZIP byte citations, Library grant, independent execution evidence, recovery disposition or replay clearance"},
+		{[]string{"created_by", "created_at"}, "authenticated extraction provenance only; membership or shared author never owns unrelated Project, Workspace, Task or Attempt effects"},
+	},
+	"project_library_document_units": {
+		{[]string{"asset_id", "version", "parser_id", "ordinal", "part_name", "paragraph_number"}, "exact original version/parser-bound derived paragraph ordinal and package component position; source grants remain authoritative, not transferred to a separately granted derivative asset"},
+		{[]string{"content", "text_hash"}, "bounded untrusted extracted text and its digest, independently compared with verified original package extraction before API publication; neither Task admission, effect postcondition proof nor recovery or replay authority"},
+	},
 	"project_library_text_indexes": {
 		{[]string{"asset_id", "version", "parser_version", "content_hash", "size_bytes"}, "exact composite immutable Library source version and derived parser identity; reused source versions and their indexes remain shared context, not exclusive Task or Attempt effects"},
 		{[]string{"status", "line_count", "created_by", "created_at"}, "bounded text-ingestion outcome and authenticated indexing author provenance; no Library read grant, Task admission, recovery disposition, replay clearance or independent execution postcondition evidence"},
@@ -93,6 +102,7 @@ var indirectOwnershipTargets = map[string]bool{
 	"agent_worker_runs": true, "agent_worker_steps": true, "operations": true,
 	"events": true, "artifacts": true, "project_library_asset_versions": true,
 	"project_library_text_indexes": true, "project_library_text_lines": true,
+	"project_library_document_indexes": true, "project_library_document_units": true,
 	"notification_deliveries": true, "outbox_jobs": true, "dependency_refs": true,
 	"team_assistance_requests":       true,
 	"team_assistance_request_scopes": true,

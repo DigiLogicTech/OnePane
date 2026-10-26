@@ -3605,5 +3605,233 @@
     "strict": 1,
     "table": "project_library_text_lines",
     "without_rowid": 0
+  },
+  {
+    "table": "project_library_document_indexes",
+    "columns": [
+      {
+        "name": "asset_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 2,
+        "hidden": 0
+      },
+      {
+        "name": "parser_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 3,
+        "hidden": 0
+      },
+      {
+        "name": "raw_source_sha",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "raw_source_size",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "derived_sha",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "manifest_sha",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "derived_utf8_bytes",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "coverage",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "parts_json",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "unit_count",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_by",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "created_at",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "asset_id",
+        "target": "project_library_asset_versions",
+        "to": "asset_id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      },
+      {
+        "from": "version",
+        "target": "project_library_asset_versions",
+        "to": "version",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 1
+      },
+      {
+        "from": "created_by",
+        "target": "principals",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 1,
+        "sequence": 0
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE project_library_document_indexes (\n asset_id TEXT NOT NULL, version INTEGER NOT NULL CHECK(version>=1),\n parser_id TEXT NOT NULL CHECK(parser_id='docx-wordml-paragraphs-v1'),\n raw_source_sha TEXT NOT NULL CHECK(length(raw_source_sha)=71),\n raw_source_size INTEGER NOT NULL CHECK(raw_source_size>=0),\n derived_sha TEXT NOT NULL, manifest_sha TEXT NOT NULL CHECK(length(manifest_sha)=71), derived_utf8_bytes INTEGER NOT NULL CHECK(derived_utf8_bytes BETWEEN 0 AND 1048576),\n status TEXT NOT NULL CHECK(status IN ('ready','unsupported','too_large','invalid_document')),\n coverage TEXT NOT NULL, parts_json TEXT NOT NULL CHECK(length(CAST(parts_json AS BLOB))<=32768),\n unit_count INTEGER NOT NULL CHECK(unit_count BETWEEN 0 AND 8192),\n created_by TEXT NOT NULL REFERENCES principals(id), created_at INTEGER NOT NULL CHECK(created_at>0),\n PRIMARY KEY(asset_id,version,parser_id),\n FOREIGN KEY(asset_id,version) REFERENCES project_library_asset_versions(asset_id,version),\n CHECK(status='ready' OR (unit_count=0 AND derived_utf8_bytes=0 AND derived_sha='' AND coverage='' AND parts_json='[]'))\n) STRICT"
+  },
+  {
+    "table": "project_library_document_units",
+    "columns": [
+      {
+        "name": "asset_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 1,
+        "hidden": 0
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 2,
+        "hidden": 0
+      },
+      {
+        "name": "parser_id",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 3,
+        "hidden": 0
+      },
+      {
+        "name": "ordinal",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 4,
+        "hidden": 0
+      },
+      {
+        "name": "part_name",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "paragraph_number",
+        "type": "INTEGER",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "content",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      },
+      {
+        "name": "text_hash",
+        "type": "TEXT",
+        "not_null": 1,
+        "primary_key": 0,
+        "hidden": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "from": "asset_id",
+        "target": "project_library_document_indexes",
+        "to": "asset_id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 0
+      },
+      {
+        "from": "version",
+        "target": "project_library_document_indexes",
+        "to": "version",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 1
+      },
+      {
+        "from": "parser_id",
+        "target": "project_library_document_indexes",
+        "to": "parser_id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "id": 0,
+        "sequence": 2
+      }
+    ],
+    "without_rowid": 0,
+    "strict": 1,
+    "create_sql": "CREATE TABLE project_library_document_units (\n asset_id TEXT NOT NULL,version INTEGER NOT NULL,parser_id TEXT NOT NULL CHECK(parser_id='docx-wordml-paragraphs-v1'),\n ordinal INTEGER NOT NULL CHECK(ordinal BETWEEN 1 AND 8192),\n part_name TEXT NOT NULL CHECK(length(CAST(part_name AS BLOB))<=256),\n paragraph_number INTEGER NOT NULL CHECK(paragraph_number BETWEEN 1 AND 8192),\n content TEXT NOT NULL CHECK(length(CAST(content AS BLOB))<=16384),\n text_hash TEXT NOT NULL CHECK(length(text_hash)=71),\n PRIMARY KEY(asset_id,version,parser_id,ordinal),\n FOREIGN KEY(asset_id,version,parser_id) REFERENCES project_library_document_indexes(asset_id,version,parser_id)\n) STRICT"
   }
 ]

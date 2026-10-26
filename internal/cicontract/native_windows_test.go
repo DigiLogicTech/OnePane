@@ -66,7 +66,8 @@ func readSourceWorkflow(t *testing.T) sourceWorkflow {
 var windowsJobs = []string{"offline-msi-evidence", "windows-library-team", "windows-worker-recovery", "windows-team-dispatch"}
 var gateFamilies = map[string]string{
 	"development-source-contract": "SOURCE_RESULT", "worker-recovery-race": "WORKER_RESULT", "library-team-node-race": "TEAM_RESULT", "managed-inference-race": "MANAGED_RESULT", "full-regression": "FULL_RESULT",
-	"offline-msi-evidence": "WINDOWS_CORE_RESULT", "windows-library-team": "WINDOWS_LIBRARY_RESULT", "windows-worker-recovery": "WINDOWS_WORKER_RESULT", "windows-team-dispatch": "WINDOWS_DISPATCH_RESULT",
+	"library-document-race": "DOCUMENT_RESULT",
+	"offline-msi-evidence":  "WINDOWS_CORE_RESULT", "windows-library-team": "WINDOWS_LIBRARY_RESULT", "windows-worker-recovery": "WINDOWS_WORKER_RESULT", "windows-team-dispatch": "WINDOWS_DISPATCH_RESULT",
 }
 
 const nativeGoGuard = "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"
@@ -81,6 +82,7 @@ func TestNativeWindowsPartitionPreservesReviewedCommandsAndFailFast(t *testing.T
 		t.Fatalf("reviewed baseline changed: %d", len(want))
 	}
 	want = append(want, "go test -count=1 -timeout 3m ./internal/cicontract")
+	want = append(want, "go test -tags integration -count=1 -timeout 3m -run '^TestLibraryDocument' ./internal/projectworkspace ./internal/api")
 	var got []string
 	msi := 0
 	for _, id := range windowsJobs {

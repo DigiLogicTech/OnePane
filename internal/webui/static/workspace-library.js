@@ -74,7 +74,9 @@ async function a46RenderLibrary(project,workspace,root){
    const card=root.querySelector(`[data-a46-asset="${CSS.escape(asset.id)}"]`);
    if(!card)continue;
    const textHost=document.createElement("section");textHost.className="a62-evidence-panel";card.append(textHost);
-   mountLibraryTextIndex(textHost,{projectID,workspaceID:String(source.id),assetID:String(asset.id),version:Number(asset.accessible_version||asset.current_version)},current);
+   const selection={projectID,workspaceID:String(source.id),assetID:String(asset.id),version:Number(asset.accessible_version||asset.current_version)};
+   if(asset.asset_type==="application/vnd.openxmlformats-officedocument.wordprocessingml.document")mountLibraryDocumentIndex(textHost,selection,current);
+   else mountLibraryTextIndex(textHost,selection,current);
   }
  }
  // An operator can reopen previously frozen Research approvals without

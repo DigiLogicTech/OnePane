@@ -343,11 +343,22 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
  if activeQuota>0{runs,activeErr=s.activeRuns(ctx,activeQuota)}
  tickErrors:=errors.Join(wakeErr,admissionErr,readyErr,activeErr)
  out:=make([]TickResult,0,limit)
+ consumedRuns:=make([]bool,len(runs))
  for runIndex:=0;runIndex<len(runs);runIndex++ {
+  if consumedRuns[runIndex]{continue}
+  consumedRuns[runIndex]=true
   r:=runs[runIndex]
-  if runIndex+1<len(runs) && len(out)+2<=limit && s.parallelTeamPair(ctx,r.TaskID,runs[runIndex+1].TaskID) {
-   out=append(out,s.stepTeamPair(ctx,r,runs[runIndex+1])...)
-   runIndex++
+  partner:=-1
+  if len(out)+2<=limit {
+   ids:=make([]string,0,len(runs)-runIndex-1)
+   positions:=make([]int,0,cap(ids))
+   for i:=runIndex+1;i<len(runs);i++{if !consumedRuns[i]{ids=append(ids,runs[i].TaskID);positions=append(positions,i)}}
+   match,err:=s.parallelTeamPartner(ctx,r.TaskID,ids)
+   if err!=nil{tickErrors=errors.Join(tickErrors,err)}else if match>=0{partner=positions[match]}
+  }
+  if partner>=0 {
+   consumedRuns[partner]=true
+   out=append(out,s.stepTeamPair(ctx,r,runs[partner])...)
   } else { out=append(out,s.step(ctx,r)) }
   // A terminal/wait/completion persistence failure may have left this
   // Attempt running. Do not dispatch the NEXT selected Task in this
@@ -357,20 +368,34 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
   }
   if len(out)>=limit{return out,tickErrors}
  }
+ consumedReady:=make([]bool,len(ready))
  for readyIndex:=0;readyIndex<len(ready);readyIndex++ {
+  if consumedReady[readyIndex]{continue}
   t:=ready[readyIndex]
   if len(out)>=limit{break}
   if s.dispatchReconciliationFailed{
    return out,errors.Join(tickErrors,ErrDispatchRequiresReconciliation)
   }
+  consumedReady[readyIndex]=true
   r,res:=s.startRun(ctx,t)
   if res.Error!=""{
    out=append(out,res)
    continue
   }
-  if readyIndex+1<len(ready) && len(out)+2<=limit && s.parallelTeamPair(ctx,t.ID,ready[readyIndex+1].ID) {
-   next,nextResult:=s.startRun(ctx,ready[readyIndex+1])
-   readyIndex++
+  partner:=-1
+  if len(out)+2<=limit {
+   ids:=make([]string,0,len(ready)-readyIndex-1)
+   positions:=make([]int,0,cap(ids))
+   // ACTIVE work may already have consumed part of this Tick. Restrict
+   // pairing to the remaining READY opportunities, so a later partner
+   // cannot displace an earlier ordinary Task from the bounded prefix.
+   for i:=readyIndex+1;i<len(ready)&&len(ids)<limit-len(out)-1;i++{if !consumedReady[i]{ids=append(ids,ready[i].ID);positions=append(positions,i)}}
+   match,err:=s.parallelTeamPartner(ctx,t.ID,ids)
+   if err!=nil{tickErrors=errors.Join(tickErrors,err)}else if match>=0{partner=positions[match]}
+  }
+  if partner>=0 {
+   consumedReady[partner]=true
+   next,nextResult:=s.startRun(ctx,ready[partner])
    if nextResult.Error!="" { out=append(out,nextResult); out=append(out,s.step(ctx,r)) } else {
     out=append(out,s.stepTeamPair(ctx,r,next)...)
    }

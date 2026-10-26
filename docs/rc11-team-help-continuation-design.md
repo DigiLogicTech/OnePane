@@ -3,7 +3,8 @@
 Status: durable request/wait, bounded single-request/answer reads and immutable
 authenticated human answer storage implemented. Explicit Continue and required
 request-specific next-model context source are published as abebacc6. Bounded
-session discovery and the input panel source are under final regression on26October2026.
+session discovery and the input panel source are published as f7204def and pass
+their exact-source hosted workflows as confirmed on26October2026.
 The release execution manifest remains authoritative for open gates. This is
 human assistance for an accepted contribution; peer execution, new helpers and
 versioned reviewed reassignment remain separate approved work.
@@ -23,8 +24,9 @@ Old requests without original scope remain unavailable for reconciliation.
 The dedicated request GET rechecks accepted identity, original waiting owner,
 current membership, frozen policy, bounded private metadata and original scope;
 it repeats credential and active Project/named scope checks before publication.
-Team-room human guidance exists, but no request-specific durable answer/
-continuation protocol does. Generic chat or Task resume does not complete it.
+Team-room human guidance remains separate from the implemented request-specific
+durable answer/continuation protocol. Generic chat cannot answer a request and
+generic Task resume is fenced from its current assistance wait.
 
 The25October continuation reproduced six human/wait proposals parking Task,
 Attempt and Worker after tenancy or sealed root/child criteria drift. The wait
@@ -35,7 +37,8 @@ journal. Current active system principal and exact Workspace membership are
 also required at preflight and atomic claim/continuation. The request half of
 steps1/2 below is implemented. Bounded single-request reads in steps3/4 exist;
 answer storage/writes are implemented as described below. Stored-answer
-observation and steps5-6 now have source implementations described below; list discovery and step7 remain required.
+observation and steps5-7 now have source implementations described below,
+including bounded discovery and the existing Team-room input panel.
 
 ## Current answer boundary
 

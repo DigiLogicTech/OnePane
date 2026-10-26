@@ -32,7 +32,9 @@ Named accepted contributions, checkpoint handoffs, bounded concurrency/shared
 compute, both live views, human guidance, pause/resume/scoped cancellation,
 ledger-bound result and Task-associated Library navigation exist. Preserve their
 immutable accepted graph and distinct V0 declarations. Durable help/answer/explicit
-original-owner continuation (`rc11-team-help-continuation-design.md`), peer help,
+original-owner continuation (`rc11-team-help-continuation-design.md`) now has
+published requests/answers/explicit Continue, required model context, bounded
+discovery and the Team-room input panel, with exact-source hosted CI. Peer help,
 versioned human-reviewed reassignment, broader fair concurrent scheduling and
 precise observed runtime/swap/loading stages remain functional work. Queue admission
 must not be labelled physical model execution. Complete safe effect recovery and
@@ -49,8 +51,10 @@ Source runtime declarations and synthetic HTTP/model transports cannot close the
 1. Finish the confirmed OmniRoute ownership/privacy/recovery and Evidence
    scope-lifetime defects, validate affected code and exact-source CI. Leave
    physical listener attribution and installed acceptance explicit.
-2. Continue durable Team assistance/original-owner continuation or closed recovery
-   semantic attribution; immutable decisions/postconditions must precede replay.
+2. Durable Team assistance/original-owner continuation source is published;
+   nonadjacent bounded pairing extends scheduling without new admission. Continue
+   peer help/versioned reassignment or closed recovery semantic attribution;
+   immutable decisions/postconditions must precede replay.
 3. Advance missing Library content ingestion: bounded immutable version/hash-bound
    TXT/MD/CSV/code line indexing/status/scoped keyword excerpts, then governed
    PDF/DOCX/page citations/semantic retrieval with reviewed dependencies. Existing

@@ -2,7 +2,7 @@
 
 Updated: 2026-10-26 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
 
-Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Original-owner authenticated Continue, immutable applied-answer receipt and required next-model context are published as abebacc6 and pass their own mandatory hosted source workflows. Bounded current-request discovery and the existing Team room's separate Save reply/Continue panel are under final source regression. Generic resume fences remain. Exact commits, genuine failures, validation and current CI observations are in the latest sections below. Next functional boundary is reviewed peer help/reassignment/fairness, closed recovery attribution, Library ingestion and all remaining approved functionality; authenticated product/physical/UI acceptance remains required. Inspect each new commit's own Windows/Linux/race/regression checks; source guards do not imply packaging or physical acceptance. Ordered human audits/sign-offs, real AI/Node/L4, LAST UI, installed Windows/Ubuntu and final versioned artifact gates remain OPEN. No final build is claimed.
+Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Original-owner authenticated Continue, immutable applied-answer receipt and required next-model context are published as abebacc6. Bounded current-request discovery and the existing Team room's separate Save reply/Continue panel are published as f7204def; all three exact-source hosted workflows passed. Generic resume fences remain. Current work completes bounded nonadjacent Team pairing inside the selected scheduling opportunities; source and physical acceptance remain distinct. Exact commits, genuine failures, validation and current CI observations are in the latest sections below. Next functional boundary is reviewed peer help/reassignment/fairness, closed recovery attribution, Library ingestion and all remaining approved functionality. Inspect each new commit's own Windows/Linux/race/regression checks; source guards do not imply packaging or physical acceptance. Ordered human audits/sign-offs, real AI/Node/L4, LAST UI, installed Windows/Ubuntu and final versioned artifact gates remain OPEN. No final build is claimed.
 ## Authority and continuation
 
 The Git repository is `D:\Codex\OnePane\source`; its parent is an unrelated unborn wrapper repository. Continue `codex/team-live-ci-completion`, existing draft PR [228](https://github.com/DigiLogicTech/OnePane/pull/228), based on `feature/rc11-policy-worker-diagnostics-integration-20261011` (`fb7f5df7`). Preserve the stacked integration route; do not merge the historical feature PRs independently or reset local work.
@@ -1318,3 +1318,60 @@ All ordered whole-tree/user signoffs, real CPU/GPU/Node/L4/Colibri/OmniRoute/
 constrained hardware, final Windows/Ubuntu UI and installed clean/upgrade/custom
 root/migration/backup/rollback/artifact/checksum gates remain OPEN. No final
 build, installer, physical AI or completed product acceptance is claimed.
+
+## TEAM-PAIRING-001 — bounded nonadjacent independent members (source validated)
+
+Next eligible approved concurrency work: Tick currently pairs only adjacent
+selected accepted Team members. A bounded selected batch containing independent
+TeamA, ordinary work, TeamB serializes both Team calls even when shared capacity
+permits overlap. Extend pairing only inside the already selected ACTIVE or READY
+batch, retain the two-call ceiling, process each selected owner once, preserve
+ACTIVE/READY opportunity split/limits/cursors and serialized preparation/proposal
+effects/recovery halts. A bounded shared query must avoid quadratic database
+lookups. Nonadjacent scheduling must respect selected priority/class barriers
+and retain ordinary work progress. Current capacity/routing/Task/Worker fences
+remain authoritative; pairing does not admit extra Tasks or create residency.
+
+Source implementation now searches one bounded remaining-batch query per lead
+owner, preserving priority/class barriers and recording consumed positions.
+Only two inference calls overlap; preparation and proposal effects remain
+serialized. No extra Task admission or independent runtime pool is created.
+The ordinary coordinator queues the second contribution on shared capacity.
+
+Review reproduced TEAM-PAIRING-READY-001: after ACTIVE work consumed one of
+three Tick slots, the retained draft could pair READY A with third READY B
+and displace the intervening ordinary Task. Actual mixed ACTIVE/READY source
+regression failed before remediation1.920s; the READY candidate window now
+counts only the remaining opportunities. Same regression passes2.426s and in
+the full suite. Limit, priority/class/missing-row barriers, distinct members,
+dependency drift/current authority, rejected response journals/recovery halt,
+Team hold/ordinary progress, read-only hints, no duplicate calls and shared
+queue drain all have actual SQLite/production HTTP source regressions.
+
+Local full integration PASS: Worker233.071s, Team58.164s, Task48.818s,
+runtime coordinator9.673s, Team worker25.400s. Final focused pairing14.238s,
+affected integration vet and whitespace PASS. Hosted native Windows and Linux
+race selectors explicitly include all TestTeamPairing cases. Synthetic transport
+and per-Task capacity identities prove source orchestration only; physical
+parallel models/Nodes/CPU/GPU/Colibri and product review remain outstanding.
+
+Exact predecessor f7204def integration40221128677 and both source guards
+40221128682/40221128673 are now SUCCESS. No package or physical approval was
+performed. New pairing source still requires its own hosted CI after publication.
+
+Versioned reassignment remains a separate larger dependency: immutable0098 roots/
+assignments and shared teamgate consumers cannot be reopened or patched in
+place. Started/interrupted transfer requires semantic effect inventory, immutable
+authenticated disposition and independent postconditions. Existing pristine
+cancellation predicates do not prove complete absence of effects for reassignment.
+Peer advice can be separately implemented as derived input bound to original
+owners without execution transfer or bypassing human Continue. Preserve these
+boundaries and full approved release scope/physical/review/installed gates.
+
+Continuation26October07:01UTC: same branch/PR/base after remote reconciliation;
+all15approved issues #19-30/#85/#86/#114 remain open. Finish exact pairing CI
+then advance approved Library immutable bounded text/line indexing, status and
+scoped literal retrieval. Existing metadata search is preserved. PDF/DOCX,
+semantic retrieval, full attachments, peer help/versioned reassignment,
+semantic recovery and the remaining scope/review/physical/install gates remain
+required. Installed Alpha/configuration/model/runtime/Project data untouched.

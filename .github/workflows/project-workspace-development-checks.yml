@@ -304,6 +304,7 @@ jobs:
           go test -race -tags integration -count=1 -timeout 3m -run 'TestTeamAssistance(Continue|Context)' ./internal/agentworker
           go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceDiscovery ./internal/agentworker ./internal/api
           go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceFlowHTTP ./internal/api
+          go test -race -tags integration -count=1 -timeout 3m -run TestTeamPairing ./internal/agentworker
           go test -race -tags integration -count=1 -timeout 3m -run TestApprovalContinuation ./internal/task
           go test -race -tags integration -count=1 -timeout 3m ./internal/recoveryinventory
           go test -race -tags integration -count=1 -timeout 3m ./internal/budget
@@ -536,6 +537,7 @@ jobs:
           go test -tags integration -count=1 -timeout 3m -run 'TestTeamAssistance(Continue|Context)' ./internal/agentworker
           go test -tags integration -count=1 -timeout 3m -run TestTeamAssistanceDiscovery ./internal/agentworker ./internal/api
           go test -tags integration -count=1 -timeout 3m -run TestTeamAssistanceFlowHTTP ./internal/api
+          go test -tags integration -count=1 -timeout 3m -run TestTeamPairing ./internal/agentworker
           go test -tags integration -count=1 -timeout 3m -run TestApprovalContinuation ./internal/task
           go test -tags integration -count=1 -timeout 3m ./internal/recoveryinventory
           go test -tags integration -count=1 -timeout 3m ./internal/budget

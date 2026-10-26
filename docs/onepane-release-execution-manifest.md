@@ -1433,3 +1433,29 @@ continue remaining required ingestion/attachments and the full execution queue.
 All physical AI/Node/L4/Colibri/OmniRoute/constrained hardware, ordered #86 human
 reviews, final Windows/Ubuntu UI/install/upgrade/customroot/backup/rollback and
 versioned final artifacts/checksums gates remain OPEN. No final build exists.
+
+## LIBRARY-TEXT-CI-001 — isolated schema fixture reuse
+
+Exact b505025b integration40284842377 genuinely FAILED its Library/Team/Node
+race job121445964447: TestLibraryTextIndex package hit180.019s while the final
+negative case was still preparing migration0085. API43.860s passed in the same
+command; no assertion or race report preceded the timeout. Other Windows,
+Worker/recovery, Workspace source, inference and full-regression families passed;
+the required aggregate failed. Both source guards passed. Do not relabel this
+as cancelled, superseded or a successful release checkpoint.
+
+The text-only integration fixture now migrates/checkpoints/closes the actual
+schema once and retains immutable database bytes. Every case opens its own
+private file/pool/transactions and seeds the same Project/two-version/128-raw-
+publication records. Fault triggers and mutations remain isolated. Existing
+bounded-resolver tests and historical migration/upgrade tests are unchanged;
+no deadline or assertion was weakened. Local focused suite improved from25.597s
+to3.999s and root-confirmed3.921s, with integration vet and whitespace passing. This corrective source
+requires its own hosted race evidence. Retained in-progress Workspace-wide
+search files are separate and must not enter this narrow corrective commit.
+
+Execution was interrupted by account usage limits after the fixture correction
+was prepared; scheduled wakeups did not complete that commit. Resumed26October
+11:46UTC on the same branch/PR with all retained work preserved. First publish
+the tested fixture correction and inspect its exact CI, then continue bounded
+Workspace-wide indexed text search/API/opaque navigation/UI and the full queue.

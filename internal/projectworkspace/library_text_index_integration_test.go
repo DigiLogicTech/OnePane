@@ -24,7 +24,31 @@ type libraryTextFixture struct {
 
 func newLibraryTextFixture(t *testing.T) *libraryTextFixture {
 	t.Helper()
-	db, s, exec := boundedLibraryFixture(t)
+	db := libraryTextFixtureDatabase(t)
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := db.SQL().Exec(query, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Same populated Project, two versions and 128 raw directional receipts as
+	// the bounded-resolver fixture, without remigrating for every negative case.
+	for _, query := range []string{
+		`INSERT INTO workspaces(id,name,status,revision,created_at,updated_at) VALUES('tenant','Tenant','active',1,1,1)`,
+		`INSERT INTO principals(id,principal_type,display_name,status,revision,created_at,updated_at) VALUES('human','human','Owner','active',1,1,1)`,
+		`INSERT INTO projects(id,workspace_id,name,status,project_policy_json,indexing_config_json,created_by,created_at,updated_at) VALUES('p','tenant','Project','active','{}','{}','human',1,1)`,
+		`INSERT INTO projects(id,workspace_id,name,status,project_policy_json,indexing_config_json,created_by,created_at,updated_at) VALUES('other','tenant','Other','active','{}','{}','human',1,1)`,
+		`INSERT INTO project_workspaces(id,project_id,name,created_at,updated_at) VALUES('target','p','Target',1,1),('other-target','other','Other',1,1)`,
+		`INSERT INTO project_library_assets(id,project_id,name,asset_type,current_version,created_at,updated_at) VALUES('wanted','p','Wanted','text/plain',2,1,1)`,
+		`INSERT INTO project_library_asset_versions(asset_id,version,content_hash,size_bytes,mime_type,storage_uri,created_at) VALUES('wanted',1,printf('%064x',2048),3,'text/plain','artifact:wanted',1),('wanted',2,printf('%064x',4096),4,'text/plain','artifact:wanted-v2',1)`,
+		`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<129) INSERT INTO project_workspaces(id,project_id,name,created_at,updated_at) SELECT printf('source-%03d',x),'p','Source',1,1 FROM n`,
+		`INSERT INTO project_workspace_links(id,project_id,source_workspace_id,target_workspace_id,name,enabled,created_by,created_at,updated_at) SELECT id,'p',id,'target','Source',0,'human',1,1 FROM project_workspaces WHERE id LIKE 'source-%'`,
+		`INSERT INTO project_workspace_publications(id,link_id,asset_id,asset_version,content_hash,published_by,published_at) SELECT id,id,'wanted',1,printf('%064x',2048),'human',1 FROM project_workspace_links WHERE id<>'source-129'`,
+		`UPDATE project_workspace_links SET enabled=1 WHERE id='source-128'`,
+	} {
+		exec(query)
+	}
+	s := NewService(db.SQL(), db, clock.Real{})
 	exec(`INSERT INTO workspace_memberships(workspace_id,principal_id,status,created_at,updated_at) VALUES('tenant','human','active',1,1)`)
 	exec(`INSERT INTO workspace_library_grants(id,project_workspace_id,asset_id,enabled,version_policy,pinned_version,permissions_json,created_at,updated_at) VALUES('text-direct','target','wanted',1,'pinned',1,'{"read":true}',1,1)`)
 	return &libraryTextFixture{db: db, service: s, exec: exec, selection: LibraryTextSelection{ProjectID: "p", WorkspaceID: "target", AssetID: "wanted", ActorPrincipalID: "human", Version: 1}}

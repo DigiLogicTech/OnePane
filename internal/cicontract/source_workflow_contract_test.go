@@ -26,6 +26,12 @@ import (
 //go:embed native_windows_commands_v1.json
 var nativeCommandsJSON []byte
 
+// Exact command inventory from ad5dc4f8 before the measured fifteen-minute
+// Library/Team/Node job timeout. Partitioning must not omit or relax a command.
+//
+//go:embed library_team_node_commands_v1.json
+var libraryTeamNodeCommandsJSON []byte
+
 type workflowStep struct {
 	Name, Shell, Run string
 	If               string `yaml:"if"`
@@ -66,12 +72,54 @@ func readSourceWorkflow(t *testing.T) sourceWorkflow {
 var windowsJobs = []string{"offline-msi-evidence", "windows-library-team", "windows-worker-recovery", "windows-team-dispatch"}
 var gateFamilies = map[string]string{
 	"development-source-contract": "SOURCE_RESULT", "worker-recovery-race": "WORKER_RESULT", "library-team-node-race": "TEAM_RESULT", "managed-inference-race": "MANAGED_RESULT", "full-regression": "FULL_RESULT",
-	"library-document-race": "DOCUMENT_RESULT",
-	"recovery-schema-race":  "RECOVERY_RESULT",
-	"offline-msi-evidence":  "WINDOWS_CORE_RESULT", "windows-library-team": "WINDOWS_LIBRARY_RESULT", "windows-worker-recovery": "WINDOWS_WORKER_RESULT", "windows-team-dispatch": "WINDOWS_DISPATCH_RESULT",
+	"library-document-race":  "DOCUMENT_RESULT",
+	"recovery-schema-race":   "RECOVERY_RESULT",
+	"team-coordination-race": "COORDINATION_RESULT",
+	"offline-msi-evidence":   "WINDOWS_CORE_RESULT", "windows-library-team": "WINDOWS_LIBRARY_RESULT", "windows-worker-recovery": "WINDOWS_WORKER_RESULT", "windows-team-dispatch": "WINDOWS_DISPATCH_RESULT",
 }
 
 const nativeGoGuard = "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"
+
+func TestLibraryTeamNodePartitionPreservesEveryCommandAndDeadline(t *testing.T) {
+	w := readSourceWorkflow(t)
+	var want, got []string
+	if err := json.Unmarshal(libraryTeamNodeCommandsJSON, &want); err != nil {
+		t.Fatal(err)
+	}
+	if len(want) != 15 {
+		t.Fatal("reviewed Library/Team/Node baseline changed")
+	}
+	for _, name := range []string{"library-team-node-race", "team-coordination-race"} {
+		job, ok := w.Jobs[name]
+		if name == "library-team-node-race" && job.Name != "Validate Library Team and Node race boundaries" {
+			t.Fatal("existing Library/Team/Node check name changed")
+		}
+		if !ok || job.RunsOn != "ubuntu-latest" || job.Timeout != 15 || job.If != "" || job.ContinueOnError {
+			t.Fatalf("race family missing or weakened: %s", name)
+		}
+		commands := 0
+		for _, step := range job.Steps {
+			if step.Run != "" && (step.If != "" || step.ContinueOnError) {
+				t.Fatal("mandatory race step can skip or fail softly")
+			}
+			for _, line := range strings.Split(step.Run, "\n") {
+				command := strings.TrimSpace(line)
+				if strings.HasPrefix(command, "go test ") {
+					got = append(got, command)
+					commands++
+				}
+			}
+		}
+		if commands == 0 {
+			t.Fatal("empty race partition")
+		}
+	}
+	sort.Strings(want)
+	sort.Strings(got)
+	if !reflect.DeepEqual(want, got) {
+		t.Fatalf("race coverage changed: want=%q got=%q", want, got)
+	}
+}
 
 func TestNativeWindowsPartitionPreservesReviewedCommandsAndFailFast(t *testing.T) {
 	w := readSourceWorkflow(t)

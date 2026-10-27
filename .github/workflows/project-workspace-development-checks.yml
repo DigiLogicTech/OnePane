@@ -188,7 +188,7 @@ jobs:
   development-contract:
     name: Validate honest Workspace runtime boundaries
     if: ${{ always() }}
-    needs: [development-source-contract, worker-recovery-race, recovery-schema-race, library-team-node-race, library-document-race, managed-inference-race, full-regression, offline-msi-evidence, windows-library-team, windows-worker-recovery, windows-team-dispatch]
+    needs: [development-source-contract, worker-recovery-race, recovery-schema-race, library-team-node-race, team-coordination-race, library-document-race, managed-inference-race, full-regression, offline-msi-evidence, windows-library-team, windows-worker-recovery, windows-team-dispatch]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -198,6 +198,7 @@ jobs:
           WORKER_RESULT: ${{ needs.worker-recovery-race.result }}
           RECOVERY_RESULT: ${{ needs.recovery-schema-race.result }}
           TEAM_RESULT: ${{ needs.library-team-node-race.result }}
+          COORDINATION_RESULT: ${{ needs.team-coordination-race.result }}
           DOCUMENT_RESULT: ${{ needs.library-document-race.result }}
           MANAGED_RESULT: ${{ needs.managed-inference-race.result }}
           FULL_RESULT: ${{ needs.full-regression.result }}
@@ -206,7 +207,7 @@ jobs:
           WINDOWS_WORKER_RESULT: ${{ needs.windows-worker-recovery.result }}
           WINDOWS_DISPATCH_RESULT: ${{ needs.windows-team-dispatch.result }}
         run: |
-          for result in "$SOURCE_RESULT" "$WORKER_RESULT" "$RECOVERY_RESULT" "$TEAM_RESULT" "$DOCUMENT_RESULT" "$MANAGED_RESULT" "$FULL_RESULT" "$WINDOWS_CORE_RESULT" "$WINDOWS_LIBRARY_RESULT" "$WINDOWS_WORKER_RESULT" "$WINDOWS_DISPATCH_RESULT"; do
+          for result in "$SOURCE_RESULT" "$WORKER_RESULT" "$RECOVERY_RESULT" "$TEAM_RESULT" "$COORDINATION_RESULT" "$DOCUMENT_RESULT" "$MANAGED_RESULT" "$FULL_RESULT" "$WINDOWS_CORE_RESULT" "$WINDOWS_LIBRARY_RESULT" "$WINDOWS_WORKER_RESULT" "$WINDOWS_DISPATCH_RESULT"; do
             if [ "$result" != success ]; then
               echo "A required source validation family did not succeed: $result"
               exit 1
@@ -396,13 +397,31 @@ jobs:
         with:
           go-version: '1.23.x'
           cache: false
-      - name: Library Team and Node race checks (hosted source only)
+      - name: Library and Node race checks (hosted source only)
         run: |
           go test -race -count=1 -timeout 3m ./internal/artifact
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(LibraryArtifact|LibraryContentReads|VerifiedWorkspaceEvidence|WorkspaceLibraryPreview)' ./internal/api
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(LibraryTextIndex|WorkspaceLibraryText)' ./internal/projectworkspace ./internal/api
           go test -race -tags integration -count=1 -timeout 3m -run TestWorkspaceLibraryPublication ./internal/projectworkspace
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(TaskLibraryPublications|TeamAssignmentOutputs|LibrarySchemaFixture)' ./internal/api
+          go test -race -count=1 ./internal/instrumentprobe ./internal/nodefederation ./cmd/onepane-node-custody ./cmd/onepane-instrument-probe
+          go test -race -tags integration -count=1 -run TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly ./internal/projectworkspace
+
+  team-coordination-race:
+    name: Validate Team coordination and scoped recovery races
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Team coordination and scoped recovery race checks (hosted source only)
+        run: |
           go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceRead ./internal/agentworker ./internal/team ./internal/api
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(TeamAssistanceAnswer(Read)?HTTP|TransactionalAuthorization|RecoveryCaseReadsJournal)' ./internal/api
           go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceContinueHTTP ./internal/api
@@ -411,8 +430,6 @@ jobs:
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(AgentProtocolHTTPPostDispatch|RuntimeDispatchUnusable|RuntimePostDispatchBudgetCommitFailure|InferencePostDispatchBudgetCommitFailure|RuntimePreDispatchErrors|InferencePreDispatchErrors)' ./internal/agentruntime ./internal/inference
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(UnstartedCancellation|RecoveryCapture|RecoveryDiscovery|RecoveryAdmission|InterruptedRecoveryCannotReadmitOriginalTask|TeamHoldCannotReadmitThroughUnguardedTaskService)' ./internal/task
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(ProposePlanRejects|SyncTaskStates|ReasoningTask|CompleteReasoningTurn|ReasoningTurn|ManualCouncilTaskFences|ResearchSeatVerifiedTextDelivery)' ./internal/team ./internal/teamworker
-          go test -race -count=1 ./internal/instrumentprobe ./internal/nodefederation ./cmd/onepane-node-custody ./cmd/onepane-instrument-probe
-          go test -race -tags integration -count=1 -run TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly ./internal/projectworkspace
 
   managed-inference-race:
     name: Validate managed inference and Colibri race boundaries

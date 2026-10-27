@@ -297,6 +297,7 @@ func TestAssuranceRetryJournalPreservesOriginalAttemptAndAudit(t *testing.T) {
 	if taskState != "running" || attemptState != "running" || workerState != "running" || status != "succeeded" || action != "retry" || ref != verificationID || attempts != 1 || retries != 1 || journals != 1 {
 		t.Fatalf("inconsistent continuation: %s/%s/%s step=%s/%s ref=%s attempts=%d retries=%d journals=%d", taskState, attemptState, workerState, status, action, ref, attempts, retries, journals)
 	}
+	assertStoredWorkerReference(t, w, ctx, r.ID, "verification", "succeeded", "", "verifications", verificationID)
 	var storedFeedback string
 	if err := w.db.QueryRow(`SELECT json_extract(continuation_json,'$.verification_feedback.result.reason') FROM agent_worker_runs WHERE id=?`, r.ID).Scan(&storedFeedback); err != nil || storedFeedback != "stored evidence" {
 		t.Fatalf("callback replaced persisted verification result: %q %v", storedFeedback, err)

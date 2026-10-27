@@ -131,3 +131,41 @@ attribution still need their separate semantic protocols. The descriptor text
 documents those paths; it is not executable attribution. No observation
 collector, immutable snapshot/decision schema, independent postcondition proof
 or recovery authority is enabled by structural success.
+
+## Worker result-reference interpretation — 27 October 2026
+
+`ClassifyWorkerStepReferences` implements a private, bounded interpreter for the
+`step_kind`, `status`, nullable `result_ref` and exact `detail_json` slice. This
+is one semantic prerequisite, not an inventory collector or complete Worker
+ownership contract. No production maintenance, API, admission or case phase
+calls it. `request_ref`, candidate/proposal metadata, continuation, original
+Worker/Task/Attempt lineage and reverse evidence still require independent
+collection and validation.
+
+The reviewed vocabulary separates successful model response artifacts from
+failed/unknown inference requests and external-runtime invocations. Explicit
+`response_journal_uncommitted` and `budget_release_uncommitted` discriminators
+retain their different artifact/request/invocation/reservation meanings. Tool
+steps name both invocation and Observation; Operation and delegated-Task IDs
+must agree with details. Verification waits and retry journals reference a
+Verification, while V0/independent completion journals reference both the
+Verification and checkpoint. A schema-valid succeeded retry never means the
+verification passed. Candidate family identification never proves scope,
+producer identity, external state, rollback or independence.
+
+Input is capped at64KiB JSON,32nested containers,8192tokens,2048object entries,
+512byte references and64byte kind/status. Duplicate decoded keys, unsupported
+fields/discriminators, invalid identities, mismatched result/detail IDs and
+over-budget input yield no partial references. There is no absence/no-effects
+result. At most two candidate references are returned in fixed semantic order.
+Domain-separated length framing hashes the exact input bytes and distinguishes
+null from empty result references; oversized input is not hashed. The hash is
+only this parser observation's identity, not a complete effect fingerprint.
+
+Unit negative/boundary cases and existing real Worker loopback/failure-injection
+tests exercise persisted journals: unknown inference, retained successful
+model/runtime responses whose journal commit failed, and actual assurance retry.
+Linux mandatory recovery race selection and its exhaustive AST coverage contract
+include these new parser tests; native Windows keeps the full package command.
+Full semantic collection, immutable observations/decisions, independent actual
+postconditions and final recovery disposition remain unimplemented requirements.

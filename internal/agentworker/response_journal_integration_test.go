@@ -214,6 +214,11 @@ func TestResponseJournalFailureDoesNotApplySuccessfulProposal(t *testing.T) {
 			if err := w.db.QueryRowContext(ctx, `SELECT result_ref,json_extract(detail_json,'$.result_ref_kind'),json_extract(detail_json,'$.outcome') FROM agent_worker_steps WHERE run_id=? AND step_kind=? AND status='unknown'`, run.ID, stepKind).Scan(&ref, &refKind, &outcome); err != nil || ref != expectedRef || refKind != expectedKind || outcome != "response_journal_uncommitted" {
 				t.Fatalf("uncommitted response lost typed successful reference: %s/%s/%s want=%s err=%v", ref, refKind, outcome, expectedRef, err)
 			}
+			family := "artifacts"
+			if stepKind == "agent_runtime" {
+				family = "agent_runtime_invocations"
+			}
+			assertStoredWorkerReference(t, w, ctx, run.ID, stepKind, "unknown", "response_journal_uncommitted", family, expectedRef)
 			if _, err := w.Tick(ctx, 1); err != nil || calls.Load() != 1 {
 				t.Fatalf("held response retried: calls=%d err=%v", calls.Load(), err)
 			}

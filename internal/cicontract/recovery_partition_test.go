@@ -21,7 +21,7 @@ func TestRecoveryRacePartitionCoversEveryIntegrationTestExactlyOnce(t *testing.T
 	}
 	patterns := []string{
 		"^TestRecoveryIndirect",
-		"^Test(Recovery(Schema|TaskAttempt)|KnownTaskProvenance|ModelRequest)",
+		"^Test(Recovery(Schema|TaskAttempt|WorkerStep)|KnownTaskProvenance|ModelRequest)",
 	}
 	want := make([]string, len(patterns))
 	for i, pattern := range patterns {

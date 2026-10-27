@@ -1938,3 +1938,43 @@ checks. The user confirmed the formal RC11 candidate with every existing gate;
 an internal snapshot is not the requested milestone. These
 are disposable-source checks; no service, installation, model or user root was
 changed. Exact new-source hosted CI and all retained release gates remain open.
+
+## RECOVERY-REFERENCE-001 — bounded Worker result interpretation
+
+Evidence-reader source `ae6d6bdd7603bd2d8d083d3d466a87c8173af71b` was committed
+locally and pushed through ordinary Git to the same PR228 branch. No GitHub
+blob/tree/commit API publication was used for this continuation. Integration
+40486682533 is still running at this checkpoint; both QA source guards
+40486682476/40486682523 passed. Packaging remains skipped. Do not transfer
+earlier source results to this source or the following increment.
+
+Implemented the private Worker result-reference interpreter described in
+`rc11-recovery-effect-inventory-design.md`. Successful model artifacts,
+failed/unknown inference requests, external invocations and explicit retained
+response/accounting discriminators have separate candidate families. Tool
+invocation/Observation, Operation, child Task, Verification and checkpoint
+references retain their exact typed meaning and must agree with detail IDs.
+Succeeded assurance retry resolves to its Verification, never a passed
+checkpoint. Unknown fields/discriminators, duplicate decoded keys, malformed
+encodings, null/invalid/mismatched IDs and byte/depth/token/entry overflow yield
+no partial references. Exact domain-separated length framing distinguishes
+null/empty and original JSON bytes. Output is at most two candidate references.
+
+This interprets only the result_ref/detail slice, not complete Worker ownership,
+request_ref or continuation. Original scoped lineage, actual target rows,
+reverse provenance, complete inventories, immutable human dispositions and
+independent actual postconditions remain required. No production collector,
+daemon, API, admission or case phase calls it. There is no no-effects result,
+Task settlement, replay, budget release or process/physical acceptance claim.
+
+Local complete recovery integration PASS15.866s and CI-contract3.076s; affected
+integration vet/whitespace PASS. Production Worker journals from actual
+loopback response-journal failure injection, unknown-dispatch parking and
+assurance retry pass6.355s with typed parser assertions added to their existing
+tests. Final ambiguity/depth/token/entry/64KiB byte and512byte UTF-8 identity
+checks and CI contract pass0.424s/2.700s. All32JavaScript validators pass.
+Linux recovery race selectors and the exhaustive AST partition contract include
+all new parser tests; the native Windows full-package command is retained.
+Exact new-source hosted evidence remains required. Continue actual recovery
+row attribution/collection and all remaining functionality/review/physical/UI/
+installed/versioned build gates; the formal RC11 milestone is unchanged.

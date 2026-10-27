@@ -50,6 +50,7 @@ func TestUnknownDispatchAtomicInterruptAndJournal(t *testing.T){
  if state!="blocked"||attemptStatus!="interrupted"||runStatus!="interrupted"||stepStatus!="unknown"||count!=1{
   t.Fatalf("not atomic: task=%s attempt=%s run=%s journal=%s count=%d",state,attemptStatus,runStatus,stepStatus,count)
  }
+ assertStoredWorkerReference(t,worker,ctx,run.ID,"model","unknown","unknown_or_response_unreadable","inference_requests","inference-1")
  recovered,err:=worker.RecoverLostRuns(ctx)
  if err!=nil||recovered!=0{t.Fatalf("completed recovery repeated: count=%d err=%v",recovered,err)}
 }

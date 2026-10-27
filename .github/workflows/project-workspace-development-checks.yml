@@ -347,7 +347,7 @@ jobs:
           go test -race -tags integration -count=1 -timeout 3m -run '^TestRecoveryIndirect' ./internal/recoveryinventory
       - name: Direct ownership snapshot attribution and fixture race checks
         run: |
-          go test -race -tags integration -count=1 -timeout 3m -run '^Test(Recovery(Schema|TaskAttempt)|KnownTaskProvenance|ModelRequest)' ./internal/recoveryinventory
+          go test -race -tags integration -count=1 -timeout 3m -run '^Test(Recovery(Schema|TaskAttempt|WorkerStep)|KnownTaskProvenance|ModelRequest)' ./internal/recoveryinventory
 
   library-document-race:
     name: Validate document extraction race boundaries

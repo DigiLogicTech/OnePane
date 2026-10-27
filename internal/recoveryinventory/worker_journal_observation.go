@@ -31,6 +31,8 @@ type WorkerJournalScope struct {
 type WorkerJournalStepObservation struct {
 	ID               string
 	Number           int64
+	Kind             string
+	Status           string
 	RowSHA256        string
 	ResultReferences WorkerStepReferences
 }
@@ -250,7 +252,7 @@ func ObserveWorkerJournalSlice(ctx context.Context, tx *sql.Tx, scope WorkerJour
 		if e != nil {
 			return empty, e
 		}
-		out.Steps = append(out.Steps, WorkerJournalStepObservation{ID: step.ID, Number: step.Number, RowSHA256: rowHash, ResultReferences: ClassifyWorkerStepReferences(step.Kind, step.Status, step.ResultRef, []byte(step.Detail))})
+		out.Steps = append(out.Steps, WorkerJournalStepObservation{ID: step.ID, Number: step.Number, Kind: step.Kind, Status: step.Status, RowSHA256: rowHash, ResultReferences: ClassifyWorkerStepReferences(step.Kind, step.Status, step.ResultRef, []byte(step.Detail))})
 	}
 	if err = rows.Err(); err != nil {
 		return empty, err

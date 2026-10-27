@@ -7,12 +7,10 @@ $ErrorActionPreference = 'Stop'
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Native Windows is required' }
 if ($env:ONEPANE_WINDOWS_QA_REVIEWED_SHA -cne $ExpectedCommitSha) { throw 'This exact source SHA has not been approved for QA packaging' }
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+. (Join-Path $PSScriptRoot 'rc11-windows-qa-source.ps1')
 Push-Location $repo
 try {
-    $actual = (& git rev-parse HEAD).Trim()
-    if ($LASTEXITCODE -ne 0 -or $actual -cne $ExpectedCommitSha) { throw 'Checked-out source differs from approved SHA' }
-    $dirty = @(& git status --porcelain --untracked-files=all)
-    if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) { throw 'Refusing to package a modified source tree' }
+    Assert-OnePaneWindowsQASource -RepositoryRoot $repo -ExpectedCommitSha $ExpectedCommitSha
     if (-not (Test-Path -LiteralPath $WixExecutable -PathType Leaf)) { throw 'Pinned WiX executable unavailable' }
     $wixVersion = (& $WixExecutable --version | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $wixVersion -notmatch '^5\.0\.2(?:[+.\s-]|$)') { throw 'WiX 5.0.2 is required; do not mislabel another compiler' }
@@ -63,6 +61,9 @@ try {
         if (-not $record -or $record.StringData(1) -ne $property.Expected) { throw "MSI identity mismatch: $($property.Name)" }
         $view.Close()
     }
+    # Compilation and MSI assembly are slow boundaries. Do not stamp an
+    # approved source identity onto output after the checkout has drifted.
+    Assert-OnePaneWindowsQASource -RepositoryRoot $repo -ExpectedCommitSha $ExpectedCommitSha -GeneratedOutputDirectory $output
     $files = @((Get-ChildItem -LiteralPath $payload -File) + (Get-Item -LiteralPath $msi))
     $hashes = @($files | ForEach-Object { @{ name=$_.Name; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); bytes=$_.Length } })
     $manifest = @{
@@ -87,6 +88,7 @@ Back up the existing OnePane data/configuration/model/Project roots before QA.
 Use the approved Windows-first install/upgrade/rollback checklist.
 No automatic model, Node or Level 5 action is authorized by installation.
 "@ | Set-Content -LiteralPath (Join-Path $output 'QA-README.txt') -Encoding utf8
+    Assert-OnePaneWindowsQASource -RepositoryRoot $repo -ExpectedCommitSha $ExpectedCommitSha -GeneratedOutputDirectory $output
     Write-Output "QA candidate assembled from approved source $ExpectedCommitSha"
 } finally {
     Pop-Location

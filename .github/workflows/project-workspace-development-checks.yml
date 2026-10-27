@@ -15,6 +15,8 @@ on:
       - 'scripts/validate_library_document_index.js'
       - 'internal/webui/static/library-document-search.js'
       - 'scripts/validate_library_document_search.js'
+      - 'internal/webui/static/library-content-search.js'
+      - 'scripts/validate_library_content_search.js'
       - 'internal/webui/static/models-page.js'
       - 'scripts/validate_colibri_pin.js'
       - 'internal/webui/static/model-agentcheck-diagnostics.js'
@@ -120,6 +122,7 @@ on:
       - 'packaging/windows/service/**'
       - 'packaging/windows/msi/**'
       - 'scripts/build-rc11-windows-qa.ps1'
+      - 'scripts/rc11-windows-qa-source.ps1'
       - 'scripts/test_rc11_qa_guard.ps1'
       - '.github/workflows/rc11-windows-qa.yml'
       - 'packaging/windows/setup/**'
@@ -233,6 +236,7 @@ jobs:
           node scripts/validate_library_document_index.js
           node --check internal/webui/static/library-document-search.js
           node scripts/validate_library_document_search.js
+          node scripts/validate_library_content_search.js
           node scripts/validate_workspace_evidence_ui.js
           node --check internal/webui/static/workspace-runtime-controls.js
           node --check internal/webui/static/workspace-ai-workflow.js
@@ -387,7 +391,7 @@ jobs:
           go test -race -tags integration -count=1 -timeout 3m -run TestWorkspaceLibraryPublication ./internal/projectworkspace
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(TaskLibraryPublications|TeamAssignmentOutputs|LibrarySchemaFixture)' ./internal/api
           go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceRead ./internal/agentworker ./internal/team ./internal/api
-          go test -race -tags integration -count=1 -timeout 3m -run 'Test(TeamAssistanceAnswer(Read)?HTTP|TransactionalAuthorization)' ./internal/api
+          go test -race -tags integration -count=1 -timeout 3m -run 'Test(TeamAssistanceAnswer(Read)?HTTP|TransactionalAuthorization|RecoveryCaseReadsJournal)' ./internal/api
           go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceContinueHTTP ./internal/api
           go test -race -count=1 -timeout 3m -run TestAssignmentCompletion ./internal/team
           go test -race -tags integration -count=1 -timeout 3m -run 'Test(LiveTeamAssignmentCompletion|TeamAssignmentsExecute|TeamPause|TeamResume|TeamCancellation|CancellationBetweenWorkerTicks|ProjectTaskGraphRecognizesReviewedTeam)' ./internal/team ./internal/agentworker ./internal/projectorchestrator

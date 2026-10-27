@@ -170,96 +170,9 @@ func (s *Server) searchWorkspaceIndexedDocuments(w http.ResponseWriter, r *http.
 		}
 		return verifier.AuthorizeWorkspaceInTransaction(ctx, tx, r, identity, p.WorkspaceID, "project.read")
 	}}
-	page, err := reader.SearchWorkspaceIndexedLibraryDocuments(r.Context(), selection, query, position)
-	if err != nil {
-		s.workspaceIndexedDocumentError(w, err)
+	page, finalize, verified := s.collectVerifiedWorkspaceDocumentsSearch(w, r, p, workspace, reader, selection, query, position)
+	if !verified || !finalize() {
 		return
-	}
-	if len(page.Matches) > 8 || len(page.Candidates) > 2 || page.Query != query || page.HasMore && page.NextPosition.AssetID == "" {
-		writeError(w, 503, "Invalid bounded search result")
-		return
-	}
-	type versionKey struct {
-		asset   string
-		version int64
-	}
-	verified := make(map[versionKey]verifiedLibraryDocumentVersion)
-	for _, candidate := range page.Candidates {
-		key := versionKey{candidate.Index.AssetID, candidate.Index.Version}
-		if _, exists := verified[key]; exists {
-			writeError(w, 503, "Duplicate document verification candidate")
-			return
-		}
-		selected, err := reader.ResolveBoundedWorkspaceLibraryVersion(r.Context(), p.ID, workspace, key.asset, key.version)
-		if err != nil {
-			s.workspaceIndexedDocumentError(w, err)
-			return
-		}
-		digest, valid := librarySHA256Digest(selected.ContentHash)
-		if !valid || selected != candidate.Version || candidate.Index.RawSourceSHA != "sha256:"+digest || candidate.Index.RawSourceSize != selected.SizeBytes || candidate.Index.ParserID != projectworkspace.LibraryDocumentParserID || candidate.Index.Status == "not_indexed" || !strings.HasPrefix(selected.StorageURI, "artifact:") {
-			writeError(w, 409, "Indexed source identity changed")
-			return
-		}
-		id := strings.TrimPrefix(selected.StorageURI, "artifact:")
-		raw, err := s.libraryArtifacts.Get(r.Context(), id)
-		if err != nil || !libraryArtifactMatchesProject(selected, raw, p.ID, p.WorkspaceID) {
-			writeError(w, 403, "Indexed source provenance changed")
-			return
-		}
-		eligible := selected.MIMEType == projectworkspace.LibraryDocumentMIME && selected.SizeBytes <= projectworkspace.LibraryDocumentIndexLimit
-		if eligible {
-			if err = s.libraryArtifacts.VerifyExpectedContent(r.Context(), id, "sha256:"+digest, selected.SizeBytes); err != nil {
-				writeError(w, 503, "Indexed document source failed integrity verification")
-				return
-			}
-			stream, opened, openErr := s.libraryArtifacts.Open(r.Context(), id)
-			if openErr != nil {
-				writeError(w, 503, "Indexed document source unavailable")
-				return
-			}
-			content, readErr := io.ReadAll(io.LimitReader(stream, selected.SizeBytes+1))
-			closeErr := stream.Close()
-			if readErr != nil || closeErr != nil || opened.StorageRef != raw.StorageRef || !libraryArtifactMatchesProject(selected, opened, p.ID, p.WorkspaceID) {
-				writeError(w, 503, "Indexed document read or provenance changed")
-				return
-			}
-			if err = projectworkspace.VerifyLibraryDocumentContent(candidate.Index, content); err != nil {
-				s.workspaceIndexedDocumentError(w, err)
-				return
-			}
-		}
-		verified[key] = verifiedLibraryDocumentVersion{selected: selected, raw: raw, index: candidate.Index}
-	}
-	for _, match := range page.Matches {
-		key := versionKey{match.Index.AssetID, match.Index.Version}
-		entry, ok := verified[key]
-		if !ok || !reflect.DeepEqual(entry.index, match.Index) {
-			writeError(w, 503, "Document match has no independently verified source")
-			return
-		}
-	}
-	// Repeat the same bounded read after all potentially slow artifact I/O. Do
-	// not expose a partial result or allocate a cursor from changed collections.
-	current, err := reader.SearchWorkspaceIndexedLibraryDocuments(r.Context(), selection, query, position)
-	if err != nil {
-		s.workspaceIndexedDocumentError(w, err)
-		return
-	}
-	if !reflect.DeepEqual(page, current) {
-		writeError(w, 409, "Search sources changed; retry the page")
-		return
-	}
-	for key, entry := range verified {
-		selected, err := reader.ResolveBoundedWorkspaceLibraryVersion(r.Context(), p.ID, workspace, key.asset, key.version)
-		if err != nil {
-			s.workspaceIndexedDocumentError(w, err)
-			return
-		}
-		raw, err := s.libraryArtifacts.Get(r.Context(), entry.raw.ID)
-		if err != nil || selected != entry.selected || raw.StorageRef != entry.raw.StorageRef || !libraryArtifactMatchesProject(selected, raw, p.ID, p.WorkspaceID) {
-			writeError(w, 403, "Indexed source changed before publication")
-			return
-		}
 	}
 	project, err := s.projects.Project(r.Context(), p.ID)
 	if err != nil || project.ID != p.ID || project.WorkspaceID != p.WorkspaceID || project.Status != "active" {
@@ -280,6 +193,10 @@ func (s *Server) searchWorkspaceIndexedDocuments(w http.ResponseWriter, r *http.
 		return
 	}
 	out := workspaceIndexedDocumentResponse{Query: query, Sources: []projectworkspace.LibraryDocumentIndex{}, Matches: []workspaceDocumentSearchMatch{}, HasMore: page.HasMore}
+	type versionKey struct {
+		asset   string
+		version int64
+	}
 	sourcePositions := map[versionKey]int{}
 	for _, match := range page.Matches {
 		key := versionKey{match.Index.AssetID, match.Index.Version}
@@ -306,6 +223,104 @@ func (s *Server) searchWorkspaceIndexedDocuments(w http.ResponseWriter, r *http.
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
 	_, _ = w.Write(body)
+}
+
+func (s *Server) collectVerifiedWorkspaceDocumentsSearch(w http.ResponseWriter, r *http.Request, p projectworkspace.Project, workspace string, reader workspaceIndexedDocumentService, selection projectworkspace.LibraryTextSelection, query string, position projectworkspace.LibraryDocumentSearchPosition) (projectworkspace.LibraryWorkspaceDocumentSearch, func() bool, bool) {
+	page, err := reader.SearchWorkspaceIndexedLibraryDocuments(r.Context(), selection, query, position)
+	if err != nil {
+		s.workspaceIndexedDocumentError(w, err)
+		return projectworkspace.LibraryWorkspaceDocumentSearch{}, nil, false
+	}
+	if len(page.Matches) > 8 || len(page.Candidates) > 2 || page.Query != query || page.HasMore && page.NextPosition.AssetID == "" {
+		writeError(w, 503, "Invalid bounded search result")
+		return projectworkspace.LibraryWorkspaceDocumentSearch{}, nil, false
+	}
+	type versionKey struct {
+		asset   string
+		version int64
+	}
+	verified := make(map[versionKey]verifiedLibraryDocumentVersion)
+	for _, candidate := range page.Candidates {
+		key := versionKey{candidate.Index.AssetID, candidate.Index.Version}
+		if _, exists := verified[key]; exists {
+			writeError(w, 503, "Duplicate document verification candidate")
+			return projectworkspace.LibraryWorkspaceDocumentSearch{}, nil, false
+		}
+		selected, err := reader.ResolveBoundedWorkspaceLibraryVersion(r.Context(), p.ID, workspace, key.asset, key.version)
+		if err != nil {
+			s.workspaceIndexedDocumentError(w, err)
+			return projectworkspace.LibraryWorkspaceDocumentSearch{}, nil, false
+		}
+		digest, valid := librarySHA256Digest(selected.ContentHash)
+		if !valid || selected != candidate.Version || candidate.Index.RawSourceSHA != "sha256:"+digest || candidate.Index.RawSourceSize != selected.SizeBytes || candidate.Index.ParserID != projectworkspace.LibraryDocumentParserID || candidate.Index.Status == "not_indexed" || !strings.HasPrefix(selected.StorageURI, "artifact:") {
+			writeError(w, 409, "Indexed source identity changed")
+			return projectworkspace.LibraryWorkspaceDocumentSearch{}, nil, false
+		}
+		id := strings.TrimPrefix(selected.StorageURI, "artifact:")
+		raw, err := s.libraryArtifacts.Get(r.Context(), id)
+		if err != nil || !libraryArtifactMatchesProject(selected, raw, p.ID, p.WorkspaceID) {
+			writeError(w, 403, "Indexed source provenance changed")
+			return projectworkspace.LibraryWorkspaceDocumentSearch{}, nil, false
+		}
+		eligible := selected.MIMEType == projectworkspace.LibraryDocumentMIME && selected.SizeBytes <= projectworkspace.LibraryDocumentIndexLimit
+		if eligible {
+			if err = s.libraryArtifacts.VerifyExpectedContent(r.Context(), id, "sha256:"+digest, selected.SizeBytes); err != nil {
+				writeError(w, 503, "Indexed document source failed integrity verification")
+				return projectworkspace.LibraryWorkspaceDocumentSearch{}, nil, false
+			}
+			stream, opened, openErr := s.libraryArtifacts.Open(r.Context(), id)
+			if openErr != nil {
+				writeError(w, 503, "Indexed document source unavailable")
+				return projectworkspace.LibraryWorkspaceDocumentSearch{}, nil, false
+			}
+			content, readErr := io.ReadAll(io.LimitReader(stream, selected.SizeBytes+1))
+			closeErr := stream.Close()
+			if readErr != nil || closeErr != nil || opened.StorageRef != raw.StorageRef || !libraryArtifactMatchesProject(selected, opened, p.ID, p.WorkspaceID) {
+				writeError(w, 503, "Indexed document read or provenance changed")
+				return projectworkspace.LibraryWorkspaceDocumentSearch{}, nil, false
+			}
+			if err = projectworkspace.VerifyLibraryDocumentContent(candidate.Index, content); err != nil {
+				s.workspaceIndexedDocumentError(w, err)
+				return projectworkspace.LibraryWorkspaceDocumentSearch{}, nil, false
+			}
+		}
+		verified[key] = verifiedLibraryDocumentVersion{selected: selected, raw: raw, index: candidate.Index}
+	}
+	for _, match := range page.Matches {
+		key := versionKey{match.Index.AssetID, match.Index.Version}
+		entry, ok := verified[key]
+		if !ok || !reflect.DeepEqual(entry.index, match.Index) {
+			writeError(w, 503, "Document match has no independently verified source")
+			return projectworkspace.LibraryWorkspaceDocumentSearch{}, nil, false
+		}
+	}
+	return page, func() bool {
+		// Repeat the same bounded read after all potentially slow artifact I/O. Do
+		// not expose a partial result or allocate a cursor from changed collections.
+		current, err := reader.SearchWorkspaceIndexedLibraryDocuments(r.Context(), selection, query, position)
+		if err != nil {
+			s.workspaceIndexedDocumentError(w, err)
+			return false
+		}
+		if !reflect.DeepEqual(page, current) {
+			writeError(w, 409, "Search sources changed; retry the page")
+			return false
+		}
+		for key, entry := range verified {
+			selected, err := reader.ResolveBoundedWorkspaceLibraryVersion(r.Context(), p.ID, workspace, key.asset, key.version)
+			if err != nil {
+				s.workspaceIndexedDocumentError(w, err)
+				return false
+			}
+			raw, err := s.libraryArtifacts.Get(r.Context(), entry.raw.ID)
+			if err != nil || selected != entry.selected || raw.StorageRef != entry.raw.StorageRef || !libraryArtifactMatchesProject(selected, raw, p.ID, p.WorkspaceID) {
+				writeError(w, 403, "Indexed source changed before publication")
+				return false
+			}
+		}
+
+		return true
+	}, true
 }
 
 func (s *Server) workspaceIndexedDocumentError(w http.ResponseWriter, err error) {

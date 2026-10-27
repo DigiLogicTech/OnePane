@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/rc11-windows-qa.yml'
       - 'scripts/build-rc11-windows-qa.ps1'
+      - 'scripts/rc11-windows-qa-source.ps1'
       - 'scripts/test_rc11_qa_guard.ps1'
       - 'packaging/windows/msi/OnePane.wxs'
   workflow_dispatch:

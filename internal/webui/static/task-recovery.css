@@ -3,4 +3,6 @@
 .task-recovery-records{display:grid;gap:12px;max-height:44vh;overflow:auto;min-width:0}
 .task-recovery dl{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:8px 12px;margin:0 0 12px}
 .task-recovery dd{margin:0;min-width:0}
+.task-recovery-journal ol{padding-inline-start:24px;display:grid;gap:12px}
+.task-recovery-journal h4{margin-block:12px 8px}
 @media(max-width:480px){.task-recovery dl{grid-template-columns:minmax(0,1fr)}.task-recovery dd{margin-block-end:8px}}

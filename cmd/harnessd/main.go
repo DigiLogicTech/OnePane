@@ -27,15 +27,38 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/nodefederation"
 	"github.com/DigiLogicTech/OnePane/internal/processlock"
 	"github.com/DigiLogicTech/OnePane/internal/sandboxrunner"
+	"github.com/DigiLogicTech/OnePane/internal/serviceinstall"
 	"github.com/DigiLogicTech/OnePane/internal/startupevidence"
 	"github.com/DigiLogicTech/OnePane/internal/webui"
 )
 
 func main() {
 	var configPath, offlineRoot string
+	var previewSystemdStorage, configureSystemdStorage bool
 	flag.StringVar(&configPath, "config", "", "path to bootstrap YAML configuration")
 	flag.StringVar(&offlineRoot, "startup-evidence-root", "", "read only: print sanitized offline startup evidence for an explicit data root")
+	flag.BoolVar(&previewSystemdStorage, "preview-systemd-storage", false, "read only: print the systemd storage boundary for an explicit configuration")
+	flag.BoolVar(&configureSystemdStorage, "configure-systemd-storage", false, "Linux root only: provision dedicated storage and write its systemd drop-in; does not start OnePane")
 	flag.Parse()
+	if previewSystemdStorage || configureSystemdStorage {
+		if configPath == "" || offlineRoot != "" || previewSystemdStorage && configureSystemdStorage || flag.NArg() != 0 {
+			fmt.Fprintln(os.Stderr, "Select one systemd storage mode and an explicit -config path")
+			os.Exit(2)
+		}
+		var plan serviceinstall.StoragePlan
+		var err error
+		if configureSystemdStorage {
+			plan, err = serviceinstall.ConfigureSystemdStorage(configPath)
+		} else {
+			plan, err = serviceinstall.PreviewSystemdStorage(configPath)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Systemd storage configuration unavailable:", err)
+			os.Exit(1)
+		}
+		fmt.Print(plan.DropIn())
+		return
+	}
 
 	// Capture the SCM launch credential then remove it from the backend's
 	// environment BEFORE bootstrap or any model/tool subprocess can inherit it.

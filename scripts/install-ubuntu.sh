@@ -142,6 +142,9 @@ ReadWritePaths=$DATA_DIR /run/onepane
 WantedBy=multi-user.target
 EOF_SERVICE
 
+# The actual preserved configuration, not installer defaults, defines storage.
+# Fail before restart on unsafe ownership, symlinks or ProtectHome-masked roots.
+"$PREFIX/bin/onepane" -config "$CONFIG_DIR/config.yaml" -configure-systemd-storage
 systemctl daemon-reload
 systemctl enable --now onepane.service
 

@@ -133,6 +133,9 @@ chown onepane:onepane "$DATA_DIR/.config/containers/containers.conf"
 chmod 0600 "$DATA_DIR/.config/containers/containers.conf"
 
 if command -v systemctl >/dev/null 2>&1; then
+  # Honor the preserved YAML roots without widening the unit's sandbox or
+  # changing ownership of existing directories. This mode never starts SQLite.
+  /usr/bin/onepane -config "$CONFIG_DIR/config.yaml" -configure-systemd-storage
   # Always test the newly unpacked package without an old recovery override.
   clear_rollback_override
   systemctl daemon-reload

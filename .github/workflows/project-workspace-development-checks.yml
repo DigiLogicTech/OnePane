@@ -118,6 +118,7 @@ on:
       - 'internal/startupevidence/**'
       - 'internal/processlock/**'
       - 'internal/serviceproof/**'
+      - 'internal/serviceinstall/**'
       - 'cmd/harnessd/**'
       - 'packaging/windows/service/**'
       - 'packaging/windows/msi/**'
@@ -129,6 +130,7 @@ on:
       - 'packaging/windows/Read-OnePaneMsiLog.ps1'
       - 'scripts/test_offline_msi_evidence.ps1'
       - 'packaging/debian/onepane.service'
+      - 'packaging/debian/postinst'
       - 'packaging/systemd/onepane.service'
       - 'scripts/install-ubuntu.sh'
       - 'internal/scheduler/**'
@@ -291,6 +293,11 @@ jobs:
       - name: Existing sandbox and Project contract tests
         run: |
           go test ./internal/runtimecoord ./internal/runtimeendpoint ./internal/agentruntime ./internal/projectworkspace ./internal/projectruntime ./internal/sandboxrunner ./internal/agentprotocol ./internal/agentworker ./internal/team ./internal/teamworker ./internal/task ./internal/storage/sqlite ./internal/scheduler ./internal/localai ./internal/api ./internal/nodepreflight
+      - name: Linux storage provisioning boundaries (source only, no installed service)
+        run: |
+          bash -n scripts/install-ubuntu.sh
+          bash -n packaging/debian/postinst
+          go test -race -count=1 -timeout 3m ./internal/serviceinstall
           go test -tags integration ./internal/agentruntime ./internal/scheduler ./internal/inference ./internal/tool ./internal/projectworkspace ./internal/sandboxrunner ./internal/agentworker ./internal/task ./internal/workspacepublisher ./internal/projectorchestrator ./internal/workspacebroker ./internal/nodefederation ./internal/operation ./internal/goalobserveradapter
       - name: Bounded low-memory L5 observer lifecycle (hosted simulation)
         env:

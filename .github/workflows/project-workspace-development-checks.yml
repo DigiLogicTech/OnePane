@@ -131,6 +131,7 @@ on:
       - 'scripts/test_offline_msi_evidence.ps1'
       - 'packaging/debian/onepane.service'
       - 'packaging/debian/postinst'
+      - 'packaging/debian/preinst'
       - 'packaging/systemd/onepane.service'
       - 'scripts/install-ubuntu.sh'
       - 'internal/scheduler/**'
@@ -296,9 +297,14 @@ jobs:
       - name: Linux storage provisioning boundaries (source only, no installed service)
         run: |
           bash -n scripts/install-ubuntu.sh
+          bash -n packaging/debian/preinst
           bash -n packaging/debian/postinst
           go test -race -count=1 -timeout 3m ./internal/serviceinstall
-          go test -tags integration ./internal/agentruntime ./internal/scheduler ./internal/inference ./internal/tool ./internal/projectworkspace ./internal/sandboxrunner ./internal/agentworker ./internal/task ./internal/workspacepublisher ./internal/projectorchestrator ./internal/workspacebroker ./internal/nodefederation ./internal/operation ./internal/goalobserveradapter
+      - name: Existing integration contracts (hosted source only)
+        run: go test -tags integration ./internal/agentruntime ./internal/scheduler ./internal/inference ./internal/tool ./internal/projectworkspace ./internal/sandboxrunner ./internal/agentworker ./internal/task ./internal/workspacepublisher ./internal/projectorchestrator ./internal/workspacebroker ./internal/nodefederation ./internal/operation ./internal/goalobserveradapter
+      - name: Protected package recovery in disposable root-owned fixtures (no install)
+        run: |
+          sudo env "PATH=$PATH" "GOCACHE=$RUNNER_TEMP/onepane-root-recovery-cache" "GOMODCACHE=$RUNNER_TEMP/onepane-root-recovery-modcache" "GOPATH=$RUNNER_TEMP/onepane-root-recovery-gopath" ONEPANE_REQUIRE_ROOT_RECOVERY_TESTS=1 "$(command -v go)" test -count=1 -timeout 3m -run '^TestPackageRecovery' ./internal/serviceinstall
       - name: Bounded low-memory L5 observer lifecycle (hosted simulation)
         env:
           GOMEMLIMIT: 256MiB

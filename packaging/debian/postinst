@@ -4,11 +4,78 @@ set -eu
 DATA_DIR=/var/lib/onepane
 CONFIG_DIR=/etc/onepane
 MODEL_POOL="$DATA_DIR/models"
-RECOVERY_ROOT="$DATA_DIR/recovery/package-upgrade"
+RECOVERY_ROOT=/var/lib/onepane-package-recovery
 PENDING_ROLLBACK="$RECOVERY_ROOT/pending"
 ACTIVE_ROLLBACK="$RECOVERY_ROOT/active"
 ROLLBACK_DROPIN_DIR=/etc/systemd/system/onepane.service.d
 ROLLBACK_DROPIN="$ROLLBACK_DROPIN_DIR/rollback.conf"
+
+# ONEPANE RECOVERY COMMON BEGIN
+recovery_require_directory() {
+  [ ! -L "$1" ] && [ -d "$1" ] || return 1
+  [ "$(stat -c %u -- "$1")" = 0 ] || return 1
+  recovery_mode="$(stat -c %a -- "$1")"
+  case "$recovery_mode" in ''|*[!0-7]*) return 1 ;; esac
+  [ "$((0$recovery_mode & 022))" -eq 0 ]
+}
+
+recovery_require_file() {
+  [ ! -L "$1" ] && [ -f "$1" ] || return 1
+  [ "$(stat -c %u -- "$1")" = 0 ] && [ "$(stat -c %h -- "$1")" = 1 ] || return 1
+  recovery_mode="$(stat -c %a -- "$1")"
+  case "$recovery_mode" in ''|*[!0-7]*) return 1 ;; esac
+  [ "$((0$recovery_mode & 022))" -eq 0 ] || return 1
+  recovery_size="$(stat -c %s -- "$1")"
+  [ "$recovery_size" -gt 0 ] && [ "$recovery_size" -le "$2" ]
+}
+
+recovery_require_executable_directory() {
+  recovery_require_directory "$1" || return 1
+  [ "$((0$recovery_mode & 001))" -eq 1 ]
+}
+
+recovery_initialize_root() {
+  # The production root is fixed below these trusted ancestors. Never place
+  # executable recovery or pointer files below the service-owned data home.
+  for recovery_parent in / /var /var/lib; do
+    recovery_require_executable_directory "$recovery_parent" || return 1
+  done
+  if [ ! -e "$RECOVERY_ROOT" ] && [ ! -L "$RECOVERY_ROOT" ]; then
+    mkdir -m 0755 -- "$RECOVERY_ROOT" || return 1
+  fi
+  recovery_require_executable_directory "$RECOVERY_ROOT"
+}
+
+recovery_candidate_valid() {
+  [ "$(dirname -- "$1")" = "$RECOVERY_ROOT" ] || return 1
+  recovery_leaf="$(basename -- "$1")"
+  case "$recovery_leaf" in snapshot.*) ;; *) return 1 ;; esac
+  case "$recovery_leaf" in *[!A-Za-z0-9._-]*) return 1 ;; esac
+  recovery_require_executable_directory "$1" || return 1
+  recovery_require_file "$1/onepane" 536870912 && [ -x "$1/onepane" ] || return 1
+  [ "$((0$recovery_mode & 001))" -eq 1 ] || return 1
+  recovery_require_file "$1/binary.sha256" 65 || return 1
+  recovery_digest="$(cat -- "$1/binary.sha256")"
+  [ "${#recovery_digest}" = 64 ] || return 1
+  case "$recovery_digest" in *[!0-9a-f]*) return 1 ;; esac
+  recovery_actual="$(sha256sum -- "$1/onepane")"
+  recovery_actual="${recovery_actual%% *}"
+  [ "$recovery_digest" = "$recovery_actual" ]
+}
+
+recovery_publish_pointer() {
+  recovery_candidate_valid "$2" || return 1
+  case "$1" in "$RECOVERY_ROOT/pending"|"$RECOVERY_ROOT/active") ;; *) return 1 ;; esac
+  if [ -e "$1" ] || [ -L "$1" ]; then
+    recovery_require_file "$1" 4096 || return 1
+  fi
+  recovery_temporary="$(mktemp "$RECOVERY_ROOT/.pointer.XXXXXXXXXX")" || return 1
+  if ! printf '%s\n' "$2" > "$recovery_temporary"; then rm -f -- "$recovery_temporary"; return 1; fi
+  if ! sync -f "$recovery_temporary"; then rm -f -- "$recovery_temporary"; return 1; fi
+  if ! mv -fT -- "$recovery_temporary" "$1"; then rm -f -- "$recovery_temporary"; return 1; fi
+  sync -f "$RECOVERY_ROOT"
+}
+# ONEPANE RECOVERY COMMON END
 
 health_port() {
   port=8080
@@ -54,10 +121,10 @@ clear_rollback_override() {
 }
 
 activate_previous_binary() {
-  [ -s "$PENDING_ROLLBACK" ] || return 1
-  candidate="$(cat "$PENDING_ROLLBACK" 2>/dev/null || true)"
-  [ -n "$candidate" ] || return 1
-  [ -x "$candidate/onepane" ] || return 1
+  recovery_initialize_root || return 1
+  recovery_require_file "$PENDING_ROLLBACK" 4096 || return 1
+  candidate="$(cat -- "$PENDING_ROLLBACK")"
+  recovery_candidate_valid "$candidate" || return 1
 
   install -d -o root -g root -m 0755 "$ROLLBACK_DROPIN_DIR"
   cat > "$ROLLBACK_DROPIN" <<EOF_ROLLBACK
@@ -67,8 +134,7 @@ ExecStart=$candidate/onepane --config $CONFIG_DIR/config.yaml
 EOF_ROLLBACK
   chown root:root "$ROLLBACK_DROPIN"
   chmod 0644 "$ROLLBACK_DROPIN"
-  printf '%s\n' "$candidate" > "$ACTIVE_ROLLBACK"
-  chmod 0600 "$ACTIVE_ROLLBACK"
+  recovery_publish_pointer "$ACTIVE_ROLLBACK" "$candidate" || return 1
   systemctl daemon-reload >/dev/null 2>&1 || true
   systemctl restart onepane.service >/dev/null 2>&1 || return 1
   wait_healthy 30
@@ -95,6 +161,7 @@ if command -v systemctl >/dev/null 2>&1; then
   # Honor the preserved YAML roots without widening the unit's sandbox or
   # changing ownership of existing directories. This mode never starts SQLite.
   /usr/bin/onepane -config "$CONFIG_DIR/config.yaml" -configure-systemd-storage
+  recovery_initialize_root || { echo 'OnePane recovery root requires trusted root-owned unlinked directories.' >&2; exit 1; }
   # Always test the newly unpacked package without an old recovery override.
   clear_rollback_override
   systemctl daemon-reload

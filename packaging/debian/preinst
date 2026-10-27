@@ -1,44 +1,109 @@
 #!/bin/sh
 set -eu
 
-RECOVERY_ROOT=/var/lib/onepane/recovery/package-upgrade
+RECOVERY_ROOT=/var/lib/onepane-package-recovery
 PENDING="$RECOVERY_ROOT/pending"
 ACTIVE="$RECOVERY_ROOT/active"
 
-sanitize_version() {
-  printf '%s' "${1:-unknown}" | tr -c 'A-Za-z0-9._+-' '_'
+# ONEPANE RECOVERY COMMON BEGIN
+recovery_require_directory() {
+  [ ! -L "$1" ] && [ -d "$1" ] || return 1
+  [ "$(stat -c %u -- "$1")" = 0 ] || return 1
+  recovery_mode="$(stat -c %a -- "$1")"
+  case "$recovery_mode" in ''|*[!0-7]*) return 1 ;; esac
+  [ "$((0$recovery_mode & 022))" -eq 0 ]
 }
 
+recovery_require_file() {
+  [ ! -L "$1" ] && [ -f "$1" ] || return 1
+  [ "$(stat -c %u -- "$1")" = 0 ] && [ "$(stat -c %h -- "$1")" = 1 ] || return 1
+  recovery_mode="$(stat -c %a -- "$1")"
+  case "$recovery_mode" in ''|*[!0-7]*) return 1 ;; esac
+  [ "$((0$recovery_mode & 022))" -eq 0 ] || return 1
+  recovery_size="$(stat -c %s -- "$1")"
+  [ "$recovery_size" -gt 0 ] && [ "$recovery_size" -le "$2" ]
+}
+
+recovery_require_executable_directory() {
+  recovery_require_directory "$1" || return 1
+  [ "$((0$recovery_mode & 001))" -eq 1 ]
+}
+
+recovery_initialize_root() {
+  # The production root is fixed below these trusted ancestors. Never place
+  # executable recovery or pointer files below the service-owned data home.
+  for recovery_parent in / /var /var/lib; do
+    recovery_require_executable_directory "$recovery_parent" || return 1
+  done
+  if [ ! -e "$RECOVERY_ROOT" ] && [ ! -L "$RECOVERY_ROOT" ]; then
+    mkdir -m 0755 -- "$RECOVERY_ROOT" || return 1
+  fi
+  recovery_require_executable_directory "$RECOVERY_ROOT"
+}
+
+recovery_candidate_valid() {
+  [ "$(dirname -- "$1")" = "$RECOVERY_ROOT" ] || return 1
+  recovery_leaf="$(basename -- "$1")"
+  case "$recovery_leaf" in snapshot.*) ;; *) return 1 ;; esac
+  case "$recovery_leaf" in *[!A-Za-z0-9._-]*) return 1 ;; esac
+  recovery_require_executable_directory "$1" || return 1
+  recovery_require_file "$1/onepane" 536870912 && [ -x "$1/onepane" ] || return 1
+  [ "$((0$recovery_mode & 001))" -eq 1 ] || return 1
+  recovery_require_file "$1/binary.sha256" 65 || return 1
+  recovery_digest="$(cat -- "$1/binary.sha256")"
+  [ "${#recovery_digest}" = 64 ] || return 1
+  case "$recovery_digest" in *[!0-9a-f]*) return 1 ;; esac
+  recovery_actual="$(sha256sum -- "$1/onepane")"
+  recovery_actual="${recovery_actual%% *}"
+  [ "$recovery_digest" = "$recovery_actual" ]
+}
+
+recovery_publish_pointer() {
+  recovery_candidate_valid "$2" || return 1
+  case "$1" in "$RECOVERY_ROOT/pending"|"$RECOVERY_ROOT/active") ;; *) return 1 ;; esac
+  if [ -e "$1" ] || [ -L "$1" ]; then
+    recovery_require_file "$1" 4096 || return 1
+  fi
+  recovery_temporary="$(mktemp "$RECOVERY_ROOT/.pointer.XXXXXXXXXX")" || return 1
+  if ! printf '%s\n' "$2" > "$recovery_temporary"; then rm -f -- "$recovery_temporary"; return 1; fi
+  if ! sync -f "$recovery_temporary"; then rm -f -- "$recovery_temporary"; return 1; fi
+  if ! mv -fT -- "$recovery_temporary" "$1"; then rm -f -- "$recovery_temporary"; return 1; fi
+  sync -f "$RECOVERY_ROOT"
+}
+# ONEPANE RECOVERY COMMON END
+
 if [ "${1:-}" = "upgrade" ]; then
-  install -d -o root -g root -m 0755 "$RECOVERY_ROOT"
+  legacy_active=/var/lib/onepane/recovery/package-upgrade/active
+  if [ -e "$legacy_active" ] || [ -L "$legacy_active" ]; then
+    echo 'Legacy service-writable recovery is active. Retain it and reconcile a trusted protected recovery candidate before upgrading; it will not be imported automatically.' >&2
+    exit 1
+  fi
+  recovery_initialize_root || { echo 'OnePane recovery root requires trusted root-owned unlinked directories.' >&2; exit 1; }
 
   # If a previous package configure already fell back to a known-good binary,
   # keep that binary as the rollback candidate rather than snapshotting the
   # newer package file that dpkg may have already unpacked.
-  if [ -s "$ACTIVE" ]; then
-    candidate="$(cat "$ACTIVE" 2>/dev/null || true)"
-    if [ -n "$candidate" ] && [ -x "$candidate/onepane" ]; then
-      printf '%s\n' "$candidate" > "$PENDING"
-      chmod 0600 "$PENDING"
-      exit 0
-    fi
+  if [ -e "$ACTIVE" ] || [ -L "$ACTIVE" ]; then
+    recovery_require_file "$ACTIVE" 4096 || { echo 'Invalid protected recovery pointer; operator reconciliation required.' >&2; exit 1; }
+    candidate="$(cat -- "$ACTIVE")"
+    recovery_publish_pointer "$PENDING" "$candidate" || { echo 'Invalid protected recovery candidate; operator reconciliation required.' >&2; exit 1; }
+    exit 0
   fi
 
   if [ -x /usr/bin/onepane ]; then
-    old_version="$(sanitize_version "${2:-unknown}")"
-    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-    candidate="$RECOVERY_ROOT/${old_version}-${stamp}"
-    install -d -o root -g root -m 0755 "$candidate"
+    recovery_require_directory /usr && recovery_require_directory /usr/bin && recovery_require_file /usr/bin/onepane 536870912 || { echo 'Installed binary requires a trusted regular root-owned source.' >&2; exit 1; }
+    candidate="$(mktemp -d "$RECOVERY_ROOT/snapshot.XXXXXXXXXX")"
     cp -p /usr/bin/onepane "$candidate/onepane"
     chown root:root "$candidate/onepane"
     chmod 0755 "$candidate/onepane"
-    if [ -f /lib/systemd/system/onepane.service ]; then
-      cp -p /lib/systemd/system/onepane.service "$candidate/onepane.service"
-      chown root:root "$candidate/onepane.service"
-      chmod 0644 "$candidate/onepane.service"
-    fi
-    printf '%s\n' "$candidate" > "$PENDING"
-    chmod 0600 "$PENDING"
+    digest="$(sha256sum -- "$candidate/onepane")"
+    printf '%s\n' "${digest%% *}" > "$candidate/binary.sha256"
+    chmod 0600 "$candidate/binary.sha256"
+    chmod 0755 "$candidate"
+    sync -f "$candidate/onepane"
+    sync -f "$candidate/binary.sha256"
+    sync -f "$candidate"
+    recovery_publish_pointer "$PENDING" "$candidate"
   fi
 fi
 

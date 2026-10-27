@@ -104,6 +104,36 @@ func TestCPUOnlyPlacementIsFirstClass(t *testing.T) {
 	}
 }
 
+// A Windows host with an integrated and a discrete Vulkan GPU exposed a
+// fall-through into automatic sharding even when CPU-only was required.
+func TestExplicitCPUPlacementDoesNotFallThroughToGPUSharding(t *testing.T) {
+	p := testProfile()
+	p.GPUs = []GPU{
+		{Vendor: "intel", Name: "integrated", DeviceID: "integrated", VRAMBytes: 1 << 30, Backends: []string{"vulkan"}},
+		{Vendor: "nvidia", Name: "discrete", DeviceID: "discrete", VRAMBytes: 6 << 30, Backends: []string{"vulkan"}},
+	}
+	for _, preference := range []PlacementMode{PlacementCPUOnly, PlacementCPUOffload} {
+		t.Run(string(preference), func(t *testing.T) {
+			plan, mode, _, fit := bestPlacement(p, 700<<20, preference)
+			if fit == FitTooTight || plan.Mode != preference {
+				t.Fatalf("explicit placement changed: preference=%s mode=%s fit=%s plan=%+v", preference, mode, fit, plan)
+			}
+			if preference == PlacementCPUOnly && (mode != RunCPU || plan.Backend != "cpu" || len(plan.Devices) != 1 || plan.Devices[0].Kind != "cpu") {
+				t.Fatalf("CPU-only request allocated accelerator resources: %+v", plan)
+			}
+			if preference == PlacementCPUOffload && mode != RunCPUGPU {
+				t.Fatalf("hybrid request became GPU-only: mode=%s plan=%+v", mode, plan)
+			}
+		})
+	}
+	// CPU capacity must remain a hard limit even when both GPUs could fit.
+	p.Memory.AvailableBytes = 128 << 20
+	plan, _, _, fit := bestPlacement(p, 700<<20, PlacementCPUOnly)
+	if fit != FitTooTight || len(plan.Devices) != 0 {
+		t.Fatalf("CPU-only memory pressure silently enabled GPUs: fit=%s plan=%+v", fit, plan)
+	}
+}
+
 func TestQ40SizingRequiresExactVerifiedArtifact(t *testing.T){
  // Q4_0 is a supported llama.cpp tensor quantization. Its memory estimate
  // is allowed, but the separate artifact resolver still requires a

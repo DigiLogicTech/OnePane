@@ -17,6 +17,9 @@ func TestVerifiedResearchEvidenceBytesEnforcesExactUTF8AndSHA(t *testing.T){
  got,err:=verifiedResearchEvidenceBytes(strings.NewReader(data),int64(len(data)),
   testResearchDigest(data))
  if err!=nil||string(got)!=data{t.Fatalf("verified frozen bytes rejected: %s %v",got,err)}
+ if got,err=verifiedResearchEvidenceBytes(strings.NewReader(data),int64(len(data)),strings.TrimPrefix(testResearchDigest(data),"sha256:"));err!=nil||string(got)!=data{
+  t.Fatalf("published bare digest rejected: %s %v",got,err)
+ }
  cases:=[]struct{
   name,body,hash string
   size int64
@@ -27,6 +30,9 @@ func TestVerifiedResearchEvidenceBytesEnforcesExactUTF8AndSHA(t *testing.T){
   {"invalid_utf8",string([]byte{0xff,0xfe}),testResearchDigest(string([]byte{0xff,0xfe})),2},
   {"missing_hash",data,"",int64(len(data))},
   {"wrong_hash_format",data,"sha512:"+strings.Repeat("a",64),int64(len(data))},
+  {"upper_hex",data,strings.ToUpper(strings.TrimPrefix(testResearchDigest(data),"sha256:")),int64(len(data))},
+  {"double_prefix",data,"sha256:"+testResearchDigest(data),int64(len(data))},
+  {"whitespace",data," "+strings.TrimPrefix(testResearchDigest(data),"sha256:"),int64(len(data))},
   {"oversized","",testResearchDigest(""),researchSeatDeliveryMaxFileBytes+1},
   {"negative","",testResearchDigest(""),-1},
  }

@@ -224,12 +224,12 @@ assertContains(lib,'version_policy','Library must offer pinned and latest Worksp
 assertContains(lib,'X-OnePane-CSRF','uploads must include CSRF protection');
 assertContains(api,'http.MaxBytesReader','uploads must have bounded streaming size');
 assertContains(api,'ResolveWorkspaceLibraryVersion','Library download must enforce explicit Workspace access');
-assertContains(api,'VerifyContent','downloads must verify immutable artifact bytes');
+assertContains(api,'VerifyExpectedContent','downloads must verify selected immutable artifact bytes');
 const previewAPI=read('internal/api/project_library_preview.go');
 assertContains(routes,'s.previewWorkspaceLibraryVersion','Workspace text preview must be routed under Project+Workspace');
 assertContains(previewAPI,'workspaceRuntimeContext(w,r,false)','preview must authenticate canonical Workspace access');
 assertContains(previewAPI,'ResolveWorkspaceLibraryVersion','preview must recheck current version grants');
-assertContains(previewAPI,'VerifyContent','preview must independently verify managed content');
+assertContains(previewAPI,'VerifyExpectedContent','preview must independently verify selected managed content');
 assertContains(previewAPI,'text/plain; charset=utf-8','preview must not execute uploaded HTML');
 assertContains(previewAPI,'nosniff','text preview response must resist MIME sniffing');
 assertContains(lib,'pane.textContent=content','Workspace Library must render untrusted source as plain text');

@@ -36,7 +36,7 @@ func readWorkspaceLibraryPreview(reader io.Reader,expected int64)([]byte,error) 
  if expected<0||expected>workspaceLibraryTextPreviewLimit {
   return nil,errInvalidWorkspaceLibraryPreview
  }
- body,err:=io.ReadAll(io.LimitReader(reader,workspaceLibraryTextPreviewLimit+1))
+ body,err:=io.ReadAll(io.LimitReader(reader,expected+1))
  if err!=nil||int64(len(body))!=expected||!utf8.Valid(body) {
   return nil,errInvalidWorkspaceLibraryPreview
  }
@@ -72,7 +72,8 @@ func (s *Server) previewWorkspaceLibraryVersion(w http.ResponseWriter,r *http.Re
  if artifactID==""{
   writeError(w,http.StatusServiceUnavailable,"Missing managed Library artifact");return
  }
- if err=s.libraryArtifacts.VerifyContent(r.Context(),artifactID);err!=nil{
+ digest,validDigest:=librarySHA256Digest(selected.ContentHash)
+ if !validDigest||s.libraryArtifacts.VerifyExpectedContent(r.Context(),artifactID,"sha256:"+digest,selected.SizeBytes)!=nil{
   writeError(w,http.StatusServiceUnavailable,"Library content failed integrity verification");return
  }
  reader,raw,err:=s.libraryArtifacts.Open(r.Context(),artifactID)

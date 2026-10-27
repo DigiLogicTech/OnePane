@@ -1,8 +1,8 @@
 # OnePane release execution manifest
 
-Updated: 2026-10-26 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
+Updated: 2026-10-27 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
 
-Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Exact73a32677 passes integration40376877227 (all7Linux+4Windows families and aggregate) and both source guards40376876586/40376876181. Current validated increment adds explicit bounded Workspace-wide Word discovery, source verification even for authorized nonmatches, opaque continuation and paragraph-citation UI; it needs its own hosted CI after publication. PDF/page-aware ingestion, cross-format/semantic/full attachments, remaining Team/recovery/toolchain/service/engine functionality and all human/physical/UI/installed/versioned release gates remain OPEN. No final build.
+Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Exact `c622df46748d3727938acf3f79caf48e842c4d8f` passes integration40381360198 (all7Linux+4Windows families and aggregate); source guards40381360136/40381360066 pass. Physical approval and actual packaging remain skipped. Local evidence-reader continuation pins verification to the selected immutable size/hash and closes a reproduced HTTP revocation disclosure; see EVIDENCE-READ-002 below. PDF/page-aware ingestion, cross-format/semantic/full attachments, remaining Team/recovery/toolchain/service/engine functionality and all human/physical/UI/installed/versioned release gates remain OPEN. No final build.
 
 ## Authority and continuation
 
@@ -1899,3 +1899,42 @@ model execution, real Word layout, final Windows/Ubuntu UI or installed upgrades
 Continue PDF/page-aware ingestion, cross-format/semantic/full attachment lifecycle
 or another eligible approved functional boundary after genuine failures are
 remediated. All final reviews/hardware/installed/versioned artifact gates stay OPEN.
+
+## EVIDENCE-READ-002 — selected-version budgets and HTTP revocation (2026-10-27)
+
+Confirmed exact `c622df46748d3727938acf3f79caf48e842c4d8f` integration
+[40381360198](https://github.com/DigiLogicTech/OnePane/actions/runs/40381360198)
+SUCCESS, including all seven Linux and four native Windows families and their
+required aggregate. Windows/Ubuntu source guards40381360066/40381360136 passed;
+actual packaging and physical approval were skipped. PR228 remains draft and
+unmerged. These results apply to c622, not the following local continuation.
+
+Retained and completed the existing uncommitted evidence-reader work. Operator
+verified evidence, Library preview/download and consented Research seat delivery
+now verify the selected immutable version's hash and size before blob I/O. A
+changed artifact metadata row cannot enlarge its verification budget. Preview
+and evidence text collection stop after the selected size plus one sentinel,
+including zero-byte selections and never-ending streams. Research verification
+accepts the two existing canonical persisted SHA-256 forms without rewriting
+the frozen manifest, consent hash or published source receipt; malformed,
+uppercase, whitespace and repeated-prefix digests remain rejected.
+
+Extended the existing slow-read revocation matrix to the verified-evidence HTTP
+endpoint. Before remediation, actual tests reproduced HTTP200 with private text
+after revoked authentication, changed principal/credential/type or revoked read
+permission at verification, opening and reading boundaries. The endpoint now
+captures the original credential, checks it before collection and again before
+publication, and checks the original Project tenant and active named Workspace.
+Existing grant/manifest and untrusted-content checks remain mandatory. Genuine
+bearer/browser session and membership revocation tests exercise each boundary.
+
+Focused API content/budget/authority tests and real bearer/browser revocation
+tests pass; full Teamworker, artifact and CI-contract integration suites pass.
+All32JavaScript validators, pinned module verification and the negative Windows
+QA packaging guard pass. Broad API integration passes190.867s, WebUI0.660s and
+Windows service1.210s; affected API/Teamworker/artifact vet passes. All three
+current Windows targets (backend, service and desktop) compile as development
+checks. The user confirmed the formal RC11 candidate with every existing gate;
+an internal snapshot is not the requested milestone. These
+are disposable-source checks; no service, installation, model or user root was
+changed. Exact new-source hosted CI and all retained release gates remain open.

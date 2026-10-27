@@ -3,7 +3,9 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http/httptest"
@@ -11,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/DigiLogicTech/OnePane/internal/artifact"
+	"github.com/DigiLogicTech/OnePane/internal/projectworkspace"
 )
 
 type inspectedLibraryStore struct {
@@ -54,9 +57,9 @@ func (r *inspectedLibraryReader) Read(p []byte) (int, error) {
 }
 
 func TestLibraryContentReadsRevalidateCredentialAndGrantAfterCollection(t *testing.T) {
-	for _, endpoint := range []string{"preview", "download"} {
+	for _, endpoint := range []string{"preview", "download", "evidence"} {
 		stages := []string{"verify", "open"}
-		if endpoint == "preview" {
+		if endpoint != "download" {
 			stages = append(stages, "read")
 		}
 		for _, stage := range stages {
@@ -119,13 +122,32 @@ func TestLibraryContentReadsRevalidateCredentialAndGrantAfterCollection(t *testi
 						if endpoint == "preview" {
 							path = "/v1/projects/" + f.projectID + "/workspaces/" + f.workspaceID + "/library/" + f.assetID + "/versions/1/preview"
 						}
+						request := httptest.NewRequest("GET", path, nil)
+						if endpoint == "evidence" {
+							input, err := json.Marshal(map[string]any{"selections": []projectworkspace.WorkspaceEvidenceSelection{{AssetID: f.assetID, Version: 1}}})
+							if err != nil {
+								t.Fatal(err)
+							}
+							request = httptest.NewRequest("POST", "/v1/projects/"+f.projectID+"/workspaces/"+f.workspaceID+"/evidence-packets/verified-text", bytes.NewReader(input))
+						}
 						w := httptest.NewRecorder()
-						f.server.Handler().ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+						f.server.Handler().ServeHTTP(w, request)
+						text := w.Body.String()
+						if endpoint == "evidence" && w.Code == 200 {
+							var result verifiedWorkspaceEvidence
+							if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+								t.Fatal(err)
+							}
+							if len(result.Entries) != 1 {
+								t.Fatal("missing evidence entry")
+							}
+							text = result.Entries[0].Text
+						}
 						if !fired {
 							t.Fatal("slow collection stage not exercised")
 						}
 						if scenario == "allowed" {
-							if w.Code != 200 || w.Body.String() != string(f.body) || w.Header().Get("Cache-Control") != "no-store, private" {
+							if w.Code != 200 || text != string(f.body) || w.Header().Get("Cache-Control") != "no-store, private" {
 								t.Fatalf("valid content read failed: %d %s", w.Code, w.Body.String())
 							}
 						} else {

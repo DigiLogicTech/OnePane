@@ -224,7 +224,8 @@ func (s *Server) downloadWorkspaceLibraryVersion(w http.ResponseWriter,r *http.R
   writeError(w,http.StatusServiceUnavailable,"Library version cannot be downloaded from a non-artifact source");return
  }
  artifactID:=strings.TrimPrefix(selected.StorageURI,"artifact:")
- if err=s.libraryArtifacts.VerifyContent(r.Context(),artifactID);err!=nil{
+ digest,validDigest:=librarySHA256Digest(selected.ContentHash)
+ if !validDigest||s.libraryArtifacts.VerifyExpectedContent(r.Context(),artifactID,"sha256:"+digest,selected.SizeBytes)!=nil{
   writeError(w,http.StatusServiceUnavailable,"Library content verification failed");return
  }
  reader,raw,err:=s.libraryArtifacts.Open(r.Context(),artifactID)

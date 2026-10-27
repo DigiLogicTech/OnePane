@@ -22,6 +22,7 @@ func TestRecoveryRacePartitionCoversEveryIntegrationTestExactlyOnce(t *testing.T
 	patterns := []string{
 		"^TestRecoveryIndirect",
 		"^Test(Recovery(Schema|TaskAttempt|WorkerStep)|KnownTaskProvenance|ModelRequest)",
+		"^TestRecoveryWorkerJournal",
 	}
 	want := make([]string, len(patterns))
 	for i, pattern := range patterns {
@@ -93,7 +94,12 @@ func TestRecoveryRacePartitionCoversEveryIntegrationTestExactlyOnce(t *testing.T
 			total++
 		}
 	}
-	if total < 12 || counts[0] == 0 || counts[1] == 0 {
+	if total < 12 {
 		t.Fatalf("recovery test inventory disappeared: %d %v", total, counts)
+	}
+	for i, count := range counts {
+		if count == 0 {
+			t.Fatalf("empty recovery race partition %d: %v", i, counts)
+		}
 	}
 }

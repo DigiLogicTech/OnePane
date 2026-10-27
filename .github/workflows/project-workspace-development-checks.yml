@@ -348,6 +348,9 @@ jobs:
       - name: Direct ownership snapshot attribution and fixture race checks
         run: |
           go test -race -tags integration -count=1 -timeout 3m -run '^Test(Recovery(Schema|TaskAttempt|WorkerStep)|KnownTaskProvenance|ModelRequest)' ./internal/recoveryinventory
+      - name: Scoped Worker journal observation and fingerprint race checks
+        run: |
+          go test -race -tags integration -count=1 -timeout 3m -run '^TestRecoveryWorkerJournal' ./internal/recoveryinventory
 
   library-document-race:
     name: Validate document extraction race boundaries

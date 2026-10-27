@@ -1,8 +1,8 @@
 # OnePane release execution manifest
 
-Updated: 2026-10-27 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
+Updated: 2026-10-28 (Brisbane). Release state: **IN DEVELOPMENT — NOT FINAL BUILD COMPLETE**.
 
-Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Exact `c622df46748d3727938acf3f79caf48e842c4d8f` passes integration40381360198 (all7Linux+4Windows families and aggregate); source guards40381360136/40381360066 pass. Physical approval and actual packaging remain skipped. Local evidence-reader continuation pins verification to the selected immutable size/hash and closes a reproduced HTTP revocation disclosure; see EVIDENCE-READ-002 below. PDF/page-aware ingestion, cross-format/semantic/full attachments, remaining Team/recovery/toolchain/service/engine functionality and all human/physical/UI/installed/versioned release gates remain OPEN. No final build.
+Current continuation: `codex/team-live-ci-completion`, existing draft PR228, retains the full approved scope. Exact `244c9ddd4df074645a2c1c81e84ea7b9f117e2f4` passes integration40487861820 (all7Linux+4Windows families and aggregate); source guards40487861595/40487861665 pass. Physical approval and actual packaging remain skipped. The local continuation collects and fingerprints a bounded exact-owner Worker journal inside one SQLite transaction; see RECOVERY-JOURNAL-001 below. This is a private observation slice, not a complete recovery inventory or disposition. PDF/page-aware ingestion, cross-format/semantic/full attachments, remaining Team/recovery/toolchain/service/engine functionality and all human/physical/UI/installed/versioned release gates remain OPEN. No final build.
 
 ## Authority and continuation
 
@@ -1978,3 +1978,49 @@ all new parser tests; the native Windows full-package command is retained.
 Exact new-source hosted evidence remains required. Continue actual recovery
 row attribution/collection and all remaining functionality/review/physical/UI/
 installed/versioned build gates; the formal RC11 milestone is unchanged.
+
+## RECOVERY-JOURNAL-001 — actual scoped Worker journal observation
+
+Confirmed exact244c9ddd integration40487861820 SUCCESS across all11mandatory
+Windows/Linux families and their required aggregate. Both source QA guards
+40487861595/40487861665 passed. Packaging/physical approval remained skipped;
+this source result is not a formal QA build or physical acceptance.
+
+`ObserveWorkerJournalSlice` implements same-transaction scoped database
+collection for one Worker/Task/Attempt journal. It validates both retained schema
+contracts and a bounded main-schema index description, rejects wrong tenant,
+Project/named Workspace/artifact session or original principal, and preserves
+historical statuses. Explicit main-schema indexed reads take at most257raw rows
+before semantic interpretation, accepting256contiguous steps only. SQL guards
+bound variable fields before materialization. Aggregate encoded records cap at
+256KiB before hashing/admission; invalid stored UTF-8 cannot collapse to a lossy
+fingerprint. Unrelated journal history is not scanned or collected.
+
+Domain-separated framing binds the full stored Worker row, projected Task and
+Attempt context, every journal field and the exact stored payload encoding,
+including nullable/request/candidate/proposal/timestamp metadata. Structural
+contract identity ignores checkout JSON formatting and binds parser version.
+Output withholds raw text and owns its copied scope pointers. Unsupported result
+shapes remain explicit. A live WAL transaction stays consistent through a
+separate connection's committed mutation; a new transaction detects the change.
+
+This slice is private and read-only. It does not collect target rows or reverse
+ownership, full Task/Attempt context, other Workers/evidence families or actual
+external state. It stores no snapshot/audit/decision and does not change a case,
+Task, Attempt, Worker, resource or admission gate. Empty/unsupported observations
+grant no absence proof, settlement, retry or independently verified disposition.
+The complete immutable inventory, authenticated human decisions and actual
+postconditions remain the next recovery requirements.
+
+Local complete recovery integration PASS29.763s, CI-contract3.092s and affected
+integration vet pass. Extended scoped snapshot/negative tests pass11.774s;
+final contract coverage/nonempty-partition check passes2.697s. Cases include
+wrong owner/scope, non-null context ownership, payload mutation without revision,
+null/empty distinctions,256/257steps,gaps,aggregate/UTF-8 byte limits,invalid
+stored UTF-8,TEMP shadows,retained WAL snapshots and1024unrelated steps with
+persistent SEARCH plans before/after ANALYZE. New mandatory Linux journal race
+partition retains the3minute invocation/15minute family limits and exhaustive
+exactly-once AST coverage; all original partitions and the native full-package
+command remain. Exact new-source hosted evidence is required after normal Git
+publication. All remaining feature/review/physical/UI/installed/build gates stay
+OPEN; no installer, internal snapshot or final build was produced.

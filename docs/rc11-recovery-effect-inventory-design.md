@@ -169,3 +169,49 @@ Linux mandatory recovery race selection and its exhaustive AST coverage contract
 include these new parser tests; native Windows keeps the full package command.
 Full semantic collection, immutable observations/decisions, independent actual
 postconditions and final recovery disposition remain unimplemented requirements.
+
+## Same-transaction Worker journal observation — 28 October 2026
+
+`ObserveWorkerJournalSlice` now reads one exact Worker/Task/Attempt journal in a
+trusted caller's live SQL transaction. It compares the captured tenant and all
+nullable Project/named Workspace/artifact-session identities; nil is not a
+wildcard. Task/Attempt/Worker linkage and the original assigned principal must
+agree. Non-null context records must also belong to that tenant and Project.
+Archived/interrupted history is not filtered out by a purported safe status.
+
+Both existing structural contracts are checked in that same transaction. The
+required journal index is separately checked for its full nonpartial, ascending
+binary `(run_id,step_number)` shape, with bounded main-schema metadata reads.
+The collection explicitly uses that main-schema index and takes257raw rows
+before any semantic filtering. At most256contiguous journal steps are admitted.
+Missing middle steps and oversized/foreign rows reject the entire observation.
+TEMP objects cannot redirect main-schema ownership or journal reads.
+
+SQL predicates bound each variable run field before materialization; step
+projections use per-field CASE guards rather than loading an oversized body or
+filtering it out. Run route/continuation and step details each cap at64KiB;
+other metadata has explicit byte caps. Aggregate canonical records cap at256KiB
+before hashing/admission. One bounded candidate row may be marshalled before
+that aggregate check; it cannot become a returned partial snapshot. Schema
+metadata uses its own existing bounds. These are bounded source operations, not
+a measured process-RSS guarantee. Invalid stored UTF-8 is rejected rather than
+lossily converted while hashing.
+
+The domain-separated fingerprint binds the full stored Worker row, projected
+Task/Attempt scope/state/revision/principal context, and every journal field,
+including request refs, candidate/proposal metadata, exact detail encodings,
+timestamps and null-versus-empty values. Structural contract identities ignore
+JSON formatting/checkout line endings, and the result-reference parser version
+is bound too. Exact stored payload bytes retain their original encoding.
+Output contains row digests, identities and interpreted result-reference states;
+raw continuation, policy, error and detail text stays private. Returned scope
+pointers are copied rather than retaining mutable caller memory.
+
+The collected journal is only one observation slice. A fingerprint of it is
+not a complete Task/effect fingerprint or independently verified external state.
+Unsupported references remain explicit instead of disappearing; even an empty
+journal cannot establish no effects. Complete Task/Attempt/Worker context,
+reverse ownership, target rows, other evidence families, immutable persisted
+observations, authenticated decisions and actual postconditions remain open.
+No daemon, public API, case phase or execution admission consumes this function.
+It performs no write, audit, resource release, process action or retry.

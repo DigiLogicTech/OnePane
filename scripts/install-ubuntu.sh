@@ -33,7 +33,7 @@ fi
 
 if ! id onepane >/dev/null 2>&1; then
   log "Creating dedicated onepane service account"
-  useradd --system --user-group --home-dir "$DATA_DIR" --create-home --shell /usr/sbin/nologin onepane
+  useradd --system --user-group --home-dir "$DATA_DIR" --no-create-home --shell /usr/sbin/nologin onepane
 fi
 ONEPANE_UID="$(id -u onepane)"
 ONEPANE_GID="$(id -g onepane)"
@@ -42,9 +42,6 @@ ONEPANE_GID="$(id -g onepane)"
 # administrator-defined allocation.
 if ! grep -q '^onepane:' /etc/subuid 2>/dev/null; then echo 'onepane:200000:65536' >> /etc/subuid; fi
 if ! grep -q '^onepane:' /etc/subgid 2>/dev/null; then echo 'onepane:200000:65536' >> /etc/subgid; fi
-
-install -d -o onepane -g onepane -m 0700 "$DATA_DIR" "$MODEL_POOL" "$DATA_DIR/.config" "$DATA_DIR/.config/containers" "$DATA_DIR/.local" "$DATA_DIR/.local/share"
-install -d -o root -g onepane -m 0750 "$CONFIG_DIR"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
 if [[ -n "$BINARY_OVERRIDE" ]]; then
@@ -66,36 +63,8 @@ else
 fi
 mv -f "$PREFIX/bin/onepane.new" "$PREFIX/bin/onepane"
 
-if [[ ! -f "$CONFIG_DIR/config.yaml" ]]; then
-  cat > "$CONFIG_DIR/config.yaml" <<CFG
-server:
-  listen: "127.0.0.1:8080"
-  preview_listen: "127.0.0.1:8081"
-storage:
-  data_dir: "$DATA_DIR"
-logging:
-  level: "info"
-local_ai:
-  model_pool_path: "$MODEL_POOL"
-  idle_unload_minutes: 15
-  residency_headroom_pct: 10
-CFG
-  chown root:onepane "$CONFIG_DIR/config.yaml"
-  chmod 0640 "$CONFIG_DIR/config.yaml"
-fi
-
-cat > "$DATA_DIR/.config/containers/containers.conf" <<'CFG'
-[engine]
-cgroup_manager="cgroupfs"
-events_logger="file"
-
-[containers]
-netns="private"
-ipcns="private"
-utsns="private"
-CFG
-chown onepane:onepane "$DATA_DIR/.config/containers/containers.conf"
-chmod 0600 "$DATA_DIR/.config/containers/containers.conf"
+"$PREFIX/bin/onepane" -config "$CONFIG_DIR/config.yaml" -initialize-systemd-storage \
+  -initial-data-dir "$DATA_DIR" -initial-model-pool "$MODEL_POOL"
 
 cat > /etc/systemd/system/onepane.service <<EOF_SERVICE
 [Unit]

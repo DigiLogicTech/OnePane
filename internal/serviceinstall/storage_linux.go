@@ -17,12 +17,117 @@ import (
 	"syscall"
 
 	"github.com/DigiLogicTech/OnePane/internal/config"
+	"golang.org/x/sys/unix"
 	"gopkg.in/yaml.v3"
 )
 
 const dropInDirectory = "etc/systemd/system/onepane.service.d"
 const dropInName = "10-onepane-storage.conf"
 const maxConfigBytes = 64 << 10
+
+const defaultContainersConfig = "[engine]\ncgroup_manager=\"cgroupfs\"\nevents_logger=\"file\"\n\n[containers]\nnetns=\"private\"\nipcns=\"private\"\nutsns=\"private\"\n"
+
+// Install a default only when absent. Publication is atomic and cannot replace
+// an administrator/service customization created concurrently. All operations
+// stay relative to the already validated dedicated-home directory descriptor.
+func ensureContainersConfig(dir, uid, gid int) error {
+	return publishNewConfig(dir, "containers.conf", []byte(defaultContainersConfig), uid, gid, 0600)
+}
+
+func publishNewConfig(dir int, destination string, raw []byte, uid, gid int, mode os.FileMode) error {
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return err
+	}
+	name := ".onepane-config-" + hex.EncodeToString(nonce[:]) + ".tmp"
+	fd, err := syscall.Openat(dir, name, syscall.O_CREAT|syscall.O_EXCL|syscall.O_WRONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0600)
+	if err != nil {
+		return err
+	}
+	defer syscall.Unlinkat(dir, name)
+	f := os.NewFile(uintptr(fd), name)
+	if err = f.Chown(uid, gid); err == nil {
+		_, err = f.Write(raw)
+	}
+	if err == nil {
+		err = f.Chmod(mode)
+	}
+	if err == nil {
+		err = f.Sync()
+	}
+	closed := f.Close()
+	if err != nil {
+		return err
+	}
+	if closed != nil {
+		return closed
+	}
+	err = unix.Renameat2(dir, name, dir, destination, unix.RENAME_NOREPLACE)
+	if err == syscall.EEXIST {
+		return nil
+	} // Includes links: preserve, never follow.
+	if err != nil {
+		return err
+	}
+	return syscall.Fsync(dir)
+}
+
+// InitializeSystemdConfiguration only creates an absent bootstrap configuration.
+// Existing configurations are validated and preserved, including their selected
+// storage roots. This mode performs no daemon/database startup or data migration.
+func InitializeSystemdConfiguration(configPath, data, models string) error {
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("configuration initialization requires explicit root execution")
+	}
+	_, gid, home, err := serviceIdentity()
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(configPath, "/") || path.Clean(configPath) != configPath {
+		return fmt.Errorf("configuration requires its exact absolute path")
+	}
+	root, err := syscall.Open("/", syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	defer syscall.Close(root)
+	relative := strings.TrimPrefix(configPath, "/")
+	if existing, _, e := trustedConfig(root, relative, 0); e == nil {
+		_, err = parseConfig(existing)
+		return err
+	} else if !os.IsNotExist(e) {
+		return e
+	}
+	cfg := config.Default()
+	cfg.Storage.DataDir = data
+	cfg.LocalAI.ModelPoolPath = models
+	if _, err = PlanStorage(cfg, home); err != nil {
+		return err
+	}
+	if err = config.Validate(cfg); err != nil {
+		return err
+	}
+	raw, err := yaml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	dir, err := trustedDirectory(root, path.Dir(relative), 0, true)
+	if err != nil {
+		return err
+	}
+	defer syscall.Close(dir)
+	if err = publishNewConfig(dir, path.Base(relative), raw, 0, gid, 0640); err != nil {
+		return err
+	}
+	// Another initializer may have won. Validate what is actually present;
+	// never assume our requested defaults replaced an existing configuration.
+	current, _, err := trustedConfig(root, relative, 0)
+	if err != nil {
+		return err
+	}
+	_, err = parseConfig(current)
+	return err
+}
 
 func parseConfig(raw []byte) (config.Config, error) {
 	cfg := config.Default()
@@ -306,6 +411,15 @@ func ConfigureSystemdStorage(configPath string) (StoragePlan, error) {
 		if e != nil || now.Dev != h.stat.Dev || now.Ino != h.stat.Ino {
 			return StoragePlan{}, fmt.Errorf("storage path changed during configuration")
 		}
+	}
+	containers, err := walkStorage(root, strings.TrimPrefix(path.Join(p.Home, ".config", "containers"), "/"), uid, gid, 0, true)
+	if err != nil {
+		return StoragePlan{}, err
+	}
+	err = ensureContainersConfig(containers, uid, gid)
+	syscall.Close(containers)
+	if err != nil {
+		return StoragePlan{}, err
 	}
 	current, info, err := trustedConfig(root, strings.TrimPrefix(configPath, "/"), 0)
 	if err != nil || !os.SameFile(original, info) || !bytes.Equal(raw, current) {

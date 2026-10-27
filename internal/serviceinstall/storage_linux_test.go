@@ -142,3 +142,109 @@ func TestSystemdStorageConfigurationRequiresBoundedUnlinkedTrustedFile(t *testin
 		t.Fatal("writable configuration ancestor accepted")
 	}
 }
+
+func TestSystemdStorageContainersDefaultsNeverReplaceExistingCustomization(t *testing.T) {
+	root, fd := storageTestRoot(t)
+	uid, gid := os.Geteuid(), os.Getegid()
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() { errs <- ensureContainersConfig(fd, uid, gid) }()
+	}
+	for i := 0; i < 2; i++ {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	file := filepath.Join(root, "containers.conf")
+	if raw, err := os.ReadFile(file); err != nil || string(raw) != defaultContainersConfig {
+		t.Fatalf("missing complete defaults: %v", err)
+	}
+	if err := os.WriteFile(file, []byte("# retained operator settings\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = ensureContainersConfig(fd, uid, gid); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(file)
+	if err != nil || !os.SameFile(before, after) {
+		t.Fatal("existing configuration inode replaced")
+	}
+	if raw, e := os.ReadFile(file); e != nil || string(raw) != "# retained operator settings\n" {
+		t.Fatal("existing configuration overwritten")
+	}
+	if err = os.Rename(file, filepath.Join(root, "selected.conf")); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink("selected.conf", file); err != nil {
+		t.Fatal(err)
+	}
+	if err = ensureContainersConfig(fd, uid, gid); err != nil {
+		t.Fatal(err)
+	}
+	if target, e := os.Readlink(file); e != nil || target != "selected.conf" {
+		t.Fatal("existing configuration link replaced")
+	}
+	if raw, e := os.ReadFile(filepath.Join(root, "selected.conf")); e != nil || string(raw) != "# retained operator settings\n" {
+		t.Fatal("linked customization modified")
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".tmp") {
+			t.Fatal("default staging file leaked")
+		}
+	}
+}
+
+func TestSystemdStorageBootstrapPublishPreservesSelectedConfiguration(t *testing.T) {
+	root, fd := storageTestRoot(t)
+	uid, gid := os.Geteuid(), os.Getegid()
+	original := []byte("storage:\n  data_dir: /mnt/retained-data\nlocal_ai:\n  model_pool_path: /mnt/retained-models\n")
+	if err := publishNewConfig(fd, "config.yaml", original, uid, gid, 0640); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(filepath.Join(root, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Mode().Perm() != 0640 {
+		t.Fatal("new bootstrap configuration lacks selected privacy mode")
+	}
+	if err = publishNewConfig(fd, "config.yaml", []byte("storage:\n  data_dir: /srv/replacement\n"), uid, gid, 0600); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(filepath.Join(root, "config.yaml"))
+	if err != nil || !os.SameFile(before, after) || after.Mode().Perm() != 0640 {
+		t.Fatal("existing bootstrap configuration identity/permissions replaced")
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "config.yaml"))
+	if err != nil || string(raw) != string(original) {
+		t.Fatal("selected configuration overwritten")
+	}
+	cfg, err := parseConfig(raw)
+	if err != nil || cfg.Storage.DataDir != "/mnt/retained-data" || cfg.LocalAI.ModelPoolPath != "/mnt/retained-models" {
+		t.Fatalf("selected roots not retained: %v", err)
+	}
+}
+
+func TestSystemdStorageMutationsRequireRootBeforeAccountLookup(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("non-root denial requires an unprivileged test process")
+	}
+	file := filepath.Join(t.TempDir(), "must-not-exist.yaml")
+	if err := InitializeSystemdConfiguration(file, "/srv/onepane/data", "/srv/onepane/models"); err == nil || !strings.Contains(err.Error(), "root") {
+		t.Fatal("unprivileged initialization was not denied")
+	}
+	if _, err := ConfigureSystemdStorage(file); err == nil || !strings.Contains(err.Error(), "root") {
+		t.Fatal("unprivileged configuration was not denied")
+	}
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Fatal("denied mode created a configuration")
+	}
+}

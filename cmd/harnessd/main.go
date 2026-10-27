@@ -35,11 +35,31 @@ import (
 func main() {
 	var configPath, offlineRoot string
 	var previewSystemdStorage, configureSystemdStorage bool
+	var initializeSystemdStorage bool
+	var initialDataDir, initialModelPool string
 	flag.StringVar(&configPath, "config", "", "path to bootstrap YAML configuration")
 	flag.StringVar(&offlineRoot, "startup-evidence-root", "", "read only: print sanitized offline startup evidence for an explicit data root")
 	flag.BoolVar(&previewSystemdStorage, "preview-systemd-storage", false, "read only: print the systemd storage boundary for an explicit configuration")
 	flag.BoolVar(&configureSystemdStorage, "configure-systemd-storage", false, "Linux root only: provision dedicated storage and write its systemd drop-in; does not start OnePane")
+	flag.BoolVar(&initializeSystemdStorage, "initialize-systemd-storage", false, "Linux root only: create an absent bootstrap configuration; preserve existing configuration")
+	flag.StringVar(&initialDataDir, "initial-data-dir", "", "data root for a newly initialized systemd configuration")
+	flag.StringVar(&initialModelPool, "initial-model-pool", "", "model pool for a newly initialized systemd configuration")
 	flag.Parse()
+	if initializeSystemdStorage {
+		if configPath == "" || offlineRoot != "" || previewSystemdStorage || configureSystemdStorage || initialDataDir == "" || initialModelPool == "" || flag.NArg() != 0 {
+			fmt.Fprintln(os.Stderr, "Initialization requires only explicit configuration, initial data and model paths")
+			os.Exit(2)
+		}
+		if err := serviceinstall.InitializeSystemdConfiguration(configPath, initialDataDir, initialModelPool); err != nil {
+			fmt.Fprintln(os.Stderr, "Systemd configuration initialization unavailable:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if initialDataDir != "" || initialModelPool != "" {
+		fmt.Fprintln(os.Stderr, "Initial storage paths require -initialize-systemd-storage")
+		os.Exit(2)
+	}
 	if previewSystemdStorage || configureSystemdStorage {
 		if configPath == "" || offlineRoot != "" || previewSystemdStorage && configureSystemdStorage || flag.NArg() != 0 {
 			fmt.Fprintln(os.Stderr, "Select one systemd storage mode and an explicit -config path")

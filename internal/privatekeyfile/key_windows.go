@@ -19,13 +19,27 @@ func descriptor(directory bool) (*windows.SECURITY_DESCRIPTOR, error) {
 		return nil, err
 	}
 	sid := user.User.Sid.String()
+	return descriptorForSID(sid)
+}
+
+func descriptorForSID(sid string) (*windows.SECURITY_DESCRIPTOR, error) {
 	if sid == "" {
 		return nil, fmt.Errorf("bootstrap key owner SID unavailable")
 	}
 	// Each key gets an explicit creation DACL. Do not propagate directory
 	// ACEs to unrelated legacy files or a foreign hard-link target.
-	flags := ""
-	return windows.SecurityDescriptorFromString("D:P(A;" + flags + ";FA;;;SY)(A;" + flags + ";FA;;;BA)(A;" + flags + ";FA;;;" + sid + ")")
+	owner, err := windows.StringToSid(sid)
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap key owner SID invalid: %w", err)
+	}
+	grants := "D:P(A;;FA;;;SY)(A;;FA;;;BA)"
+	// Windows merges duplicate grants when applying a DACL. LocalSystem is
+	// already present as SY; adding it again makes verification reject the
+	// kernel's equivalent, canonical ACL on every installed service startup.
+	if numeric := owner.String(); numeric != "S-1-5-18" && numeric != "S-1-5-32-544" {
+		grants += "(A;;FA;;;" + owner.String() + ")"
+	}
+	return windows.SecurityDescriptorFromString(grants)
 }
 
 func openKey(path string, create bool) (*os.File, error) {

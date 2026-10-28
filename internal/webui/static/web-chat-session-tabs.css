@@ -38,20 +38,24 @@
 @media(max-width:800px){.a40-webchat-layout{display:flex;flex-direction:column}}
 
 
-/* Embedded provider workspace. Flex wrapping responds to Inspector and shell widths. */
-.a40-webchat-layout{display:flex!important;flex-wrap:wrap;align-items:stretch!important;gap:12px;min-width:0}
-.a40-webchat-layout>.a39-webchat-provider-card{flex:1 1 calc(65% - 8px);min-width:min(100%,440px)}
-.a40-webchat-layout>.a39-webchat-handoff-card{flex:1 1 calc(35% - 8px);min-width:min(100%,300px)}
-.a40-webchat-layout .a39-webchat-handoff-content{display:grid;grid-template-rows:minmax(205px,1fr) minmax(205px,1fr);height:100%;gap:12px}
-.a40-scratch-card{display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0;padding:12px;background:var(--panel-2);border:1px solid var(--border);border-radius:10px}
-.a40-scratch-card>.a39-webchat-textarea{flex:1 1 auto;min-height:115px;max-height:none;background:var(--panel);resize:vertical}
-.a40-scratch-card>.toolbar{margin-top:auto}
-.a40-browser-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end}
-.a40-browser-label{flex:1;min-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px}
-.a40-provider-viewport{position:relative;width:100%;height:clamp(340px,64vh,770px);min-height:340px;overflow:hidden;background:var(--panel-2);border:1px solid var(--border);border-radius:10px}
-.a40-provider-hint{padding:20px;color:var(--muted);font-size:12px;text-align:center}
+/* Handoff desk: compact provider/workflow rail, generous writing surface.
+   Wrap based on available width when Inspector or Logs is open. */
+.a40-webchat-layout{display:flex!important;flex-wrap:wrap;align-items:flex-start!important;gap:16px;min-width:0}
+.a40-webchat-layout>.a39-webchat-provider-card{flex:1 1 260px;min-width:0;max-width:340px}
+.a40-webchat-layout>.a39-webchat-handoff-card{flex:3 1 480px;min-width:0}
+.a40-provider-launch{display:flex;flex-direction:column;align-items:flex-start;gap:12px;padding:18px;background:var(--panel-2);border:1px solid var(--border);border-radius:12px}
+.a40-provider-launch h2,.a40-provider-launch p{margin:0}
+.a40-external-kicker{font-size:10px;letter-spacing:.12em;color:var(--muted);font-weight:700}
+.a40-handoff-steps{list-style:none;counter-reset:handoff;display:grid;gap:20px;margin:24px 0;padding:0}
+.a40-handoff-steps li{counter-increment:handoff;display:grid;grid-template-columns:28px 1fr;gap:4px 10px;font-size:12px}
+.a40-handoff-steps li:before{content:counter(handoff);grid-row:span 2;width:26px;height:26px;display:grid;place-items:center;border:1px solid var(--border);border-radius:50%;color:var(--accent)}
+.a40-handoff-steps span{grid-column:2;color:var(--muted);line-height:1.6}
+.a40-webchat-layout .a39-webchat-handoff-content{display:grid;gap:16px}
+.a40-scratch-card{display:flex;flex-direction:column;gap:10px;min-width:0;padding:16px;background:var(--panel-2);border:1px solid var(--border);border-radius:10px}
+.a40-scratch-card>.a39-webchat-textarea{width:100%;min-height:180px;max-height:none;background:var(--panel);resize:vertical}
+.a40-scratch-card>.toolbar{margin-top:auto;flex-wrap:wrap}
 .a40-council-handoffs{margin-top:8px;border-top:1px solid var(--border);padding-top:10px}
 .a40-council-handoffs>summary{cursor:pointer;font-weight:600}
 .a40-council-handoffs .a39-webchat-queue{max-height:200px}
-.a40-external-browser{min-height:180px;display:flex;flex-direction:column;justify-content:center;background:var(--panel-2);border-radius:9px;padding:18px}
-@media(max-width:850px){.a40-webchat-layout>.a39-webchat-provider-card,.a40-webchat-layout>.a39-webchat-handoff-card{flex-basis:100%;min-width:0}.a40-provider-viewport{height:50vh}}
+@media(max-width:1000px){.a40-webchat-layout>.a39-webchat-provider-card{max-width:none;flex-basis:100%}.a40-handoff-steps{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}}
+@media(max-width:650px){.a40-handoff-steps{grid-template-columns:1fr}.a40-scratch-card{padding:12px}}

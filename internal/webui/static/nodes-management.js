@@ -76,6 +76,10 @@ async function renderNodes(){
  $("#a31AddNode").onclick=openPairNode;
  try{
   var result=await apiRequest("/v1/nodes"),rows=nextNodeArray(Array.isArray(result)?result:result.nodes);
+  const federationEnabled=result.federation_enabled!==false;
+  const add=$("#a31AddNode");
+  if(!federationEnabled){add.disabled=true;add.title="Enable federation in the service configuration before pairing another device.";}
+  nextNodeUI.federationEnabled=federationEnabled;
   nextNodeUI.nodes=rows;liveOps.nodes=rows;liveOps.reported.nodes=true;
   if(!rows.some(function(n){return nextNodeID(n)===nextNodeUI.selected;}))nextNodeUI.selected=rows.length?nextNodeID(rows[0]):"";
   if(nextNodeUI.selected)await nextNodeLoadDetail(nextNodeUI.selected);
@@ -111,7 +115,7 @@ function nextNodeDraw(){
   return '<article class="panel-card node-card'+(selected?' next-node-selected':'')+'" data-a31-node="'+nextNodeEsc(id)+'"><div class="card-header"><div><div class="card-title">'+nextNodeEsc(nextNodeName(n))+(n.local?' (Local)':'')+'</div><div class="list-meta">'+nextNodeEsc(id)+'</div></div><span class="pill">'+nextNodeEsc(st)+'</span></div><div class="widget-body"><div class="list-meta">'+(n.local?'Local machine · live metrics':"Last seen: "+nextNodeEsc(nextNodeWhen(n.last_seen_at)))+'</div><button class="btn'+(selected?' primary':'')+'" data-next-node="'+nextNodeEsc(id)+'">Manage node</button></div></article>';
  }).join("")+'</div>';
  var detail=node?nextNodeDetail(node):'<section class="panel-card"><div class="widget-body">No enrolled nodes. Select Add Node to begin a mutually confirmed pairing.</div></section>';
- root.innerHTML=top+list+detail;
+ root.innerHTML=(!nextNodeUI.federationEnabled?'<p class="page-subtitle">This device is available locally. Remote device pairing is disabled in this installation.</p>':'')+top+list+detail;
  root.scrollTop=previousScroll;
  $$("[data-next-node]",root).forEach(function(b){b.onclick=async function(){nextNodeUI.selected=b.dataset.nextNode;nextNodeUI.tab="overview";await nextNodeLoadDetail(nextNodeUI.selected);nextNodeDraw();};});
  $$("[data-next-node-tab]",root).forEach(function(b){b.onclick=function(){nextNodeUI.tab=b.dataset.nextNodeTab;nextNodeDraw();};});

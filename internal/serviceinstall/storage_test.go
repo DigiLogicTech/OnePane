@@ -33,6 +33,37 @@ func TestSystemdStoragePlanPreservesSelectedRoots(t *testing.T) {
 	}
 }
 
+func TestSystemdUpgradeSettingsBindActualRootPortAndConfigIdentity(t *testing.T) {
+	cfg := config.Default()
+	cfg.Storage.DataDir = "/srv/OnePane data 25% \"quoted\""
+	cfg.Server.Listen = "[::1]:8188"
+	p, err := PlanStorage(cfg, "/var/lib/onepane")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.ConfigSHA256 = strings.Repeat("a", 64)
+	want := "onepane.service-upgrade/v1\n" + cfg.Storage.DataDir + "\n8188\n" + p.ConfigSHA256 + "\nhttp://[::1]:8188/v1/health\n"
+	if got := p.UpgradeSettings(); got != want {
+		t.Fatalf("upgrade projection changed configured identity: %q", got)
+	}
+	for _, address := range []string{"invalid", "127.0.0.1:0", "127.0.0.1:-1", "localhost:http", "127.0.0.1:65536"} {
+		cfg.Server.Listen = address
+		if _, err = PlanStorage(cfg, "/var/lib/onepane"); err == nil {
+			t.Fatalf("unusable fixed health endpoint accepted: %s", address)
+		}
+	}
+	for _, address := range []string{"10.0.0.2:8188", "remote.example:8188"} {
+		cfg.Server.Listen = address
+		p, err = PlanStorage(cfg, "/var/lib/onepane")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.HealthURL != "" {
+			t.Fatal("maintenance projection admitted non-loopback health traffic")
+		}
+	}
+}
+
 func TestSystemdStoragePlanRejectsMaskedAndUnsafeLocations(t *testing.T) {
 	for _, value := range []string{"", "relative", "/", "/srv", "/var/lib", "/home/test/onepane", "/root/onepane", "/tmp/onepane", "/run/onepane/data", "/usr/share/onepane", "/etc/onepane/data", "/srv/../other", "/srv/a\nb", "/srv/onepane\\data", " /srv/data"} {
 		t.Run(value, func(t *testing.T) {

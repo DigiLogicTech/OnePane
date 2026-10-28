@@ -118,7 +118,17 @@ function qaTaskFilterRows(rows,{query='',project='',state=''}={}){
     (!state||t.state===state)&&(!search||[t.objective,t.id,qaTaskProjectName(t.project_id)].some(value=>String(value||'').toLocaleLowerCase().includes(search))));
 }
 
+let qaTaskLiveDraw=null;
+function qaTaskRefreshLiveView(){if(currentTab()?.route==='tasks')qaTaskLiveDraw?.();}
+function qaTaskSyncStateOptions(select,rows){
+  const selected=select.value;
+  const states=[...new Set([...rows.map(t=>t.state),selected].filter(Boolean))].sort();
+  const markup='<option value="">All states</option>'+states.map(value=>`<option value="${escapeHtml(value)}">${escapeHtml(titleCase(value.replaceAll('_',' ')))}</option>`).join('');
+  if(select.innerHTML!==markup){select.innerHTML=markup;select.value=selected;}
+}
+
 renderTasks=async function(){
+  qaTaskLiveDraw=null;
   $('#viewHost').innerHTML=`<section class="page tasks-page">${pageHeader('Tasks','Track work, resolve blockers and review results.','<button class="btn" id="newScheduledTask">Schedule task</button><button class="btn primary" id="newTaskButton">New task</button>')}
     <div class="subtabs">
       <button class="subtab active" data-task-tab="current">Task list</button>
@@ -154,7 +164,6 @@ renderTasks=async function(){
   syncLiveNotifications();
   const archivedTasks=Array.isArray(archived)?archived:[];
   $('#taskProjectFilter').innerHTML='<option value="">All projects</option><option value="global">Global tasks</option>'+qa4ProjectHub.projects.map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name||p.id)}</option>`).join('');
-  $('#taskStateFilter').innerHTML='<option value="">All states</option>'+[...new Set([...liveOps.tasks,...archivedTasks].map(t=>t.state).filter(Boolean))].sort().map(value=>`<option value="${escapeHtml(value)}">${escapeHtml(titleCase(value.replaceAll('_',' ')))}</option>`).join('');
 
   const taskRows=(rows,restore=false)=>rows.length?rows.map(t=>`<tr data-inspect-kind="task" data-inspect-id="${escapeHtml(t.id)}">
     <td><strong>${escapeHtml(t.objective||t.id)}</strong><div class="list-meta">${escapeHtml(t.project_id?qaTaskProjectName(t.project_id):t.id||'')}${t.project_workspace_id?` · ${escapeHtml(t.project_workspace_id)}`:''}</div></td>
@@ -177,6 +186,7 @@ renderTasks=async function(){
   };
 
   const draw=(tab='current')=>{
+    qaTaskSyncStateOptions($('#taskStateFilter'),[...liveOps.tasks,...archivedTasks]);
     $('#taskFilters').hidden=tab==='scheduled';
     $$('[data-task-tab]').forEach(b=>b.classList.toggle('active',b.dataset.taskTab===tab));
     if(tab==='scheduled'){
@@ -196,6 +206,7 @@ renderTasks=async function(){
   $('#taskSearch').oninput=()=>draw(selectedTab);
   $('#taskProjectFilter').onchange=()=>draw(selectedTab);
   $('#taskStateFilter').onchange=()=>draw(selectedTab);
+  qaTaskLiveDraw=()=>{if(host.isConnected)draw(selectedTab);};
   draw('current');
 };
 

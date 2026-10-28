@@ -71,7 +71,11 @@ function a39WebClipboard(text){
 }
 function a39WebOpen(url){
   if(!url)return notice("This provider has no registered website. Open it manually.","bad");
-  window.open(url,"_blank","noopener,noreferrer");
+  const parsed=new URL(url);
+  if(parsed.protocol!=="https:")return notice("Use an HTTPS provider website.","bad");
+  if(window.chrome?.webview?.postMessage){
+    window.chrome.webview.postMessage("onepane-open-external|"+parsed.href);
+  }else window.open(parsed.href,"_blank","noopener,noreferrer");
 }
 async function a39WebNewConversation(turn) {
   const site=a39WebProviderInfo(turn?.provider_id||a39WebProvider);

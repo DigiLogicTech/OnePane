@@ -6,7 +6,7 @@ const root=path.join(__dirname,"..");
 const read=x=>fs.readFileSync(path.join(root,x),"utf8");
 const modelJS=read("internal/webui/static/models-page.js");
 const name="function a31InstalledModelsMarkup(";
-const start=modelJS.indexOf(name),end=modelJS.indexOf("function a31LlamaRuntimeCard(",start);
+const start=modelJS.indexOf("const A31_COLIBRI_SUPPORTED"),end=modelJS.indexOf("function a31LlamaRuntimeCard(",start);
 assert.ok(start>=0&&end>start,"Local Models markup renderer missing");
 const renderer=vm.runInNewContext(modelJS.slice(start,end)+"\na31InstalledModelsMarkup;",{
  escapeHtml:s=>String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll('"',"&quot;")
@@ -19,6 +19,10 @@ assert.ok(nativeHTML.includes("checked"));
 assert.ok(nativeHTML.includes("Pin to Colibri"));
 assert.ok(!/<input[^>]*data-a31-colibri-pin="colibri-id"[^>]*disabled/.test(nativeHTML));
 assert.ok(nativeHTML.includes("Tiering"));
+assert.ok(nativeHTML.includes("Colibri · not tested"));
+assert.ok(renderer([{...native,agent_check_status:"passed"}]).includes("Colibri · tested"));
+assert.ok(renderer([{...native,agent_check_status:"passed",admission_status:"accepted"}]).includes("Colibri · tested &amp; approved") || renderer([{...native,agent_check_status:"passed",admission_status:"accepted"}]).includes("Colibri · tested & approved"));
+assert.ok(!renderer([{...native,runtime_name:"llamacpp",runtime_backend:"cpu",agent_check_status:"passed"}]).includes("Colibri · tested"));
 const gguf={...native,deployment_id:"gguf-id",runtime_name:"llamacpp",runtime_backend:"cuda",colibri_pinned:false};
 const ggufHTML=renderer([gguf]);
 assert.ok(/<input[^>]*data-a31-colibri-pin="gguf-id"[^>]*disabled/.test(ggufHTML));

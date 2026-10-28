@@ -4,8 +4,10 @@ package serviceinstall
 
 import (
 	"fmt"
+	"net"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -17,6 +19,15 @@ const storageMarker = "# Managed by OnePane systemd storage v1\n"
 type StoragePlan struct {
 	Home, Data, Models, Projects string
 	ConfigSHA256                 string
+	HealthPort                   int
+	HealthURL                    string
+}
+
+// UpgradeSettings is a deliberately small versioned maintenance projection.
+// Data paths reject control characters, so five records remain unambiguous;
+// callers must treat every field as data and never evaluate it as shell code.
+func (p StoragePlan) UpgradeSettings() string {
+	return fmt.Sprintf("onepane.service-upgrade/v1\n%s\n%d\n%s\n%s\n", p.Data, p.HealthPort, p.ConfigSHA256, p.HealthURL)
 }
 
 func storagePath(value string) (string, error) {
@@ -54,6 +65,26 @@ func storagePath(value string) (string, error) {
 func PlanStorage(cfg config.Config, home string) (StoragePlan, error) {
 	var p StoragePlan
 	var err error
+	host, port, err := net.SplitHostPort(cfg.Server.Listen)
+	if err != nil {
+		return p, fmt.Errorf("service health requires a valid configured API address")
+	}
+	p.HealthPort, err = strconv.Atoi(port)
+	if err != nil || p.HealthPort < 1 || p.HealthPort > 65535 {
+		return p, fmt.Errorf("service health requires a fixed configured API port")
+	}
+	localHost := host
+	switch host {
+	case "", "0.0.0.0":
+		localHost = "127.0.0.1"
+	case "::":
+		localHost = "::1"
+	}
+	if ip := net.ParseIP(localHost); ip != nil && ip.IsLoopback() {
+		p.HealthURL = "http://" + net.JoinHostPort(ip.String(), strconv.Itoa(p.HealthPort)) + "/v1/health"
+	} else if localHost == "localhost" {
+		p.HealthURL = "http://localhost:" + strconv.Itoa(p.HealthPort) + "/v1/health"
+	}
 	if p.Home, err = storagePath(home); err != nil {
 		return p, err
 	}

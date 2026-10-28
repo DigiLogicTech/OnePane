@@ -7,8 +7,64 @@ import (
 	"golang.org/x/sys/windows"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 )
+
+func TestWindowsPrivateKeyDescriptorRoundTripServiceAccounts(t *testing.T) {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sid := range []string{"S-1-5-18", "S-1-5-32-544", user.User.Sid.String()} {
+		t.Run(sid, func(t *testing.T) {
+			f, err := openKey(filepath.Join(t.TempDir(), "descriptor.key"), true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer f.Close()
+			h := windows.Handle(f.Fd())
+			original, err := descriptor(false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			originalACL, _, err := original.DACL()
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Keep the granted handle open and restore access before cleanup;
+			// the SYSTEM-only test DACL must not strand the test runner's file.
+			defer func() {
+				if err := windows.SetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, originalACL, nil); err != nil {
+					t.Error(err)
+				}
+			}()
+			expected, err := descriptorForSID(sid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			acl, _, err := expected.DACL()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := windows.SetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil); err != nil {
+				t.Fatal(err)
+			}
+			actual, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := aclEntries.FindAllString(strings.ToUpper(expected.String()), -1)
+			got := aclEntries.FindAllString(strings.ToUpper(actual.String()), -1)
+			sort.Strings(want)
+			sort.Strings(got)
+			if strings.Join(want, "\n") != strings.Join(got, "\n") {
+				t.Fatalf("Windows changed the intended service-account grants: expected %v, got %v", want, got)
+			}
+		})
+	}
+}
 
 func TestWindowsBootstrapKeyRepairsBroadLegacyACLAndProtectsStagingBytes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "master.key")

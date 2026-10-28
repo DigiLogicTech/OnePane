@@ -1,5 +1,7 @@
 # OnePane practical UI refresh
 
+Latest QA follow-up (28 October): the user requested fixes for both findings in the refreshed Windows QA build. Watchdog contention recovery and truthful live health, plus live Tasks state filters, are implemented and regression-tested. See `ui-refresh-fixes-qa-20261028.md` for the targeted passing QA, the pre-existing tagged Policy fixture failure, and the explicitly uncommitted UI QA 4 build. Broader installed/release acceptance remains open.
+
 User decision,28October2026 Brisbane: after the functional walkthrough, the user agreed to refresh the UI around practical workflows. This authorises frontend redesign in the existing Windows-first continuation. It does not waive backend authority, data preservation, formal RC11 gates or the requirement to review before rebuilding.
 
 ## Agreed direction

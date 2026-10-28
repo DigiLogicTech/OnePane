@@ -98,6 +98,11 @@ openAttentionPopover=async function(anchor){
  popoverFor(anchor,`<div class="popover notification-center"><div class="popover-title-row"><h3>Attention</h3></div>${a9Panel()}</div>`);
  a9Bind($("#overlayRoot"))
 };
+function a9Date(value){
+ if(value==null||value==='')return '';
+ const raw=Number(value),date=Number.isFinite(raw)?new Date(raw<1e11?raw*1000:raw):new Date(value);
+ return Number.isNaN(date.getTime())?'Not reported':date.toLocaleString();
+}
 function a9Field(k,v){return v==null||v===""?"":`<div class="inspector-info-row"><span>${escapeHtml(k)}</span><strong>${escapeHtml(String(v))}</strong></div>`}
 const a9OverviewOld=qa4InspectorOverview;
 qa4InspectorOverview=function(){
@@ -108,9 +113,9 @@ qa4InspectorOverview=function(){
  const status=attention?a9Status(d.id):d.status||d.state||d.event_type||"Recorded";
  const props=attention?[["Source",d.route],["Alert ID",d.id],["Severity",d.severity]]:
   ev?[["Source",d.aggregate_type],["Entity ID",d.aggregate_id],["Time",d.occurred_at?new Date(Number(d.occurred_at)).toLocaleString():""],["Event ID",d.id||d.sequence]]:
-  kind==="node"?[["Hostname",d.hostname||d.display_name],["Node ID",d.id||d.node_id],["Last contact",d.last_seen_at]]:
-  kind==="provider"?[["Provider",d.provider],["Authentication",d.auth_type],["Last probe",d.last_probe_at]]:
-  [["Task ID",d.id],["Assigned model",d.model_ref||d.model_id],["Priority",d.priority],["Updated",d.updated_at]];
+  kind==="node"?[["Hostname",d.hostname||d.display_name],["Node ID",d.id||d.node_id],["Last contact",a9Date(d.last_seen_at)]]:
+  kind==="provider"?[["Provider",d.provider],["Authentication",d.auth_type],["Last probe",a9Date(d.last_probe_at)]]:
+  [["Task ID",d.id],["Assigned model",d.model_ref||d.model_id],["Priority",d.priority],["Updated",a9Date(d.updated_at)]];
  return `<div class="inspector-context"><div class="inspector-context-top"><strong>${escapeHtml(title||titleCase(kind))}</strong><span class="pill">${escapeHtml(String(status))}</span></div>
   ${attention?`<p class="page-subtitle">${escapeHtml(d.detail||"")}</p>`:""}
   <section class="spec-readable-section"><h3>Key information</h3><div class="inspector-info">${props.map(([k,v])=>a9Field(k,v)).join("")}</div></section>

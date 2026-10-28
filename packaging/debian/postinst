@@ -75,6 +75,61 @@ recovery_publish_pointer() {
   if ! mv -fT -- "$recovery_temporary" "$1"; then rm -f -- "$recovery_temporary"; return 1; fi
   sync -f "$RECOVERY_ROOT"
 }
+recovery_trusted_path() {
+  case "$1" in /*) ;; *) return 1 ;; esac
+  [ "${#1}" -le 4096 ] || return 1
+  if printf '%s' "$1" | LC_ALL=C grep -q '[[:cntrl:]]'; then return 1; fi
+  case "$1" in /) ;; */../*|*/..|*/./*|*/.|*//*|*/) return 1 ;; esac
+  recovery_walk="$1"
+  recovery_depth=0
+  while :; do
+    if [ "${2:-readonly}" = executable ]; then
+      recovery_require_executable_directory "$recovery_walk" || return 1
+    else
+      recovery_require_directory "$recovery_walk" || return 1
+    fi
+    if [ "$recovery_walk" = "$RECOVERY_ROOT" ]; then recovery_initialize_root; return $?; fi
+    [ "$recovery_walk" != / ] || return 0
+    recovery_depth=$((recovery_depth+1))
+    [ "$recovery_depth" -le 128 ] || return 1
+    recovery_walk="$(dirname -- "$recovery_walk")"
+  done
+}
+
+recovery_snapshot_binary() {
+  recovery_initialize_root || return 1
+  recovery_trusted_path "$(dirname -- "$1")" executable || return 1
+  recovery_require_file "$1" 536870912 || return 1
+  recovery_snapshot="$(mktemp -d "$RECOVERY_ROOT/snapshot.XXXXXXXXXX")" || return 1
+  cp -- "$1" "$recovery_snapshot/onepane" || return 1
+  chown root:root "$recovery_snapshot/onepane" || return 1
+  chmod 0755 "$recovery_snapshot/onepane" || return 1
+  recovery_copied="$(sha256sum -- "$recovery_snapshot/onepane")" || return 1
+  recovery_original="$(sha256sum -- "$1")" || return 1
+  [ "${recovery_copied%% *}" = "${recovery_original%% *}" ] || return 1
+  printf '%s\n' "${recovery_copied%% *}" > "$recovery_snapshot/binary.sha256" || return 1
+  chmod 0600 "$recovery_snapshot/binary.sha256" || return 1
+  chmod 0755 "$recovery_snapshot" || return 1
+  sync -f "$recovery_snapshot/onepane" && sync -f "$recovery_snapshot/binary.sha256" && sync -f "$recovery_snapshot" || return 1
+  recovery_candidate_valid "$recovery_snapshot" || return 1
+  printf '%s\n' "$recovery_snapshot"
+}
+
+recovery_replace_binary() {
+  recovery_trusted_path "$(dirname -- "$1")" readonly || return 1
+  recovery_trusted_path "$(dirname -- "$2")" executable || return 1
+  recovery_require_file "$1" 536870912 || return 1
+  if [ -e "$2" ] || [ -L "$2" ]; then recovery_require_file "$2" 536870912 || return 1; fi
+  recovery_stage="$(mktemp "$(dirname -- "$2")/.onepane-upgrade.XXXXXXXXXX")" || return 1
+  if ! cp -- "$1" "$recovery_stage"; then rm -f -- "$recovery_stage"; return 1; fi
+  if ! chmod 0755 "$recovery_stage"; then rm -f -- "$recovery_stage"; return 1; fi
+  recovery_copied="$(sha256sum -- "$recovery_stage")" || { rm -f -- "$recovery_stage"; return 1; }
+  recovery_original="$(sha256sum -- "$1")" || { rm -f -- "$recovery_stage"; return 1; }
+  if [ "${recovery_copied%% *}" != "${recovery_original%% *}" ]; then rm -f -- "$recovery_stage"; return 1; fi
+  if ! sync -f "$recovery_stage"; then rm -f -- "$recovery_stage"; return 1; fi
+  if ! mv -fT -- "$recovery_stage" "$2"; then rm -f -- "$recovery_stage"; return 1; fi
+  sync -f "$(dirname -- "$2")"
+}
 # ONEPANE RECOVERY COMMON END
 
 health_port() {
@@ -105,7 +160,7 @@ wait_healthy() {
   i=0
   while [ "$i" -lt "$attempts" ]; do
     if systemctl is-active --quiet onepane.service 2>/dev/null &&
-       curl -fsS --max-time 1 "http://127.0.0.1:$port/v1/health" >/dev/null 2>&1; then
+       curl --noproxy '*' -fsS --max-time 1 "http://127.0.0.1:$port/v1/health" >/dev/null 2>&1; then
       return 0
     fi
     i=$((i+1))

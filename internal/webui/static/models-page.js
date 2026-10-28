@@ -137,8 +137,28 @@ function a31HardwareMarkup(){
   const gpus=a31Array(localProfileQA.gpus);
   return `<div class="hardware-summary"><strong>${escapeHtml(localProfileQA.cpu?.name||"CPU")}</strong><div>${bytesQA(localProfileQA.memory?.total_bytes||0)} RAM${localProfileQA.storage?.available_bytes?` · ${bytesQA(localProfileQA.storage.available_bytes)} free`:""}</div>${gpus.length?gpus.map((g,i)=>`<div>${escapeHtml(g.name||`GPU ${i}`)} · ${bytesQA(g.vram_bytes||0)} VRAM</div>`).join(""):"<div>No GPU detected</div>"}</div>`
 }
+// Exact upstream roster, pinned to the runtime shipped by OnePane. Never
+// infer Colibri support from a model family/name or from a GGUF filename.
+// Source: https://github.com/JustVugg/colibri/blob/v1.12.1/README.md#other-supported-models
+const A31_COLIBRI_SUPPORTED=new Set([
+ 'mastouri/glm-5.2-colibri-int4-g64-with-int8-mtp',
+ 'justvugg/glm-5.3-colibri-int4-g64','nbeerbower/inkling-colibri-int4',
+ 'zai-org/glm-5.3-flash','moonshotai/kimi-k3',
+ 'puwaer/deepseek-v4-flash-0731-reap-150b','qwen/qwen3.8-flash-next-fp8'
+]);
+function a31ColibriBadge(model){
+ const runtime=String(model.runtime_name||model.runtime||'').toLowerCase();
+ if(runtime==='colibri'){
+  const passed=model.agent_check_status==='passed',approved=model.admission_status==='accepted';
+  const label=passed&&approved?'Colibri · tested & approved':passed?'Colibri · tested':approved?'Colibri · approved':'Colibri · not tested';
+  return `<span class="pill ${passed||approved?'good':''}" title="${passed?'Agent Check passed on this deployment.':'No passing Agent Check recorded.'} ${approved?'Admission accepted.':'Admission is not accepted.'}">${label}</span>`;
+ }
+ const ref=String(model.model_ref||model.id||'').replace(/^hf:\/\//i,'').replace(/\/$/,'').toLowerCase();
+ if(A31_COLIBRI_SUPPORTED.has(ref)&&!/(?:gguf|llamacpp|llama.cpp)/i.test(String(model.quantization||'')+' '+runtime))return '<span class="pill" title="Listed by upstream Colibri v1.12.1. Requires the supported native weights/container; conversion may be needed. Not a local Agent Check result.">Colibri · upstream supported</span>';
+ return '';
+}
 function a31InstalledModelsMarkup(deployments){
-  return deployments.length?deployments.map(d=>`<article class="model-tile"><div><strong>${escapeHtml(d.display_name||d.model_ref)}</strong><div class="list-meta">${escapeHtml(d.quantization||"")} · ${escapeHtml(d.runtime_name||d.runtime_backend||"managed")} · ${escapeHtml(d.status||"unknown")}</div><div class="list-meta"><span class="pill">${escapeHtml(String(d.compute_mode||"auto").toUpperCase())}</span> · Residency: <strong>${escapeHtml(String(d.residency_state||"unknown").replaceAll("_"," "))}</strong> · Agent Check: <strong>${escapeHtml(String(d.agent_check_status||"not_run").replaceAll("_"," "))}</strong> · Admission: ${escapeHtml(d.admission_status||"pending")}</div></div><div class="toolbar"><label class="a31-colibri-pin" title="${String(d.runtime_name||"").toLowerCase()==="colibri"?"Pin this Colibri model after activation so idle cleanup or other Colibri hot-swaps do not silently evict it. One pinned model per Node; unpin to switch.":"This GGUF/llama.cpp model cannot be used by Colibri without a compatible Colibri-native model folder. Register one from the model pool first."}">
+  return deployments.length?deployments.map(d=>`<article class="model-tile"><div><strong>${escapeHtml(d.display_name||d.model_ref)}</strong><div class="model-source-line">${a31ColibriBadge(d)}</div><div class="list-meta">${escapeHtml(d.quantization||"")} · ${escapeHtml(d.runtime_name||d.runtime_backend||"managed")} · ${escapeHtml(d.status||"unknown")}</div><div class="list-meta"><span class="pill">${escapeHtml(String(d.compute_mode||"auto").toUpperCase())}</span> · Residency: <strong>${escapeHtml(String(d.residency_state||"unknown").replaceAll("_"," "))}</strong> · Agent Check: <strong>${escapeHtml(String(d.agent_check_status||"not_run").replaceAll("_"," "))}</strong> · Admission: ${escapeHtml(d.admission_status||"pending")}</div></div><div class="toolbar"><label class="a31-colibri-pin" title="${String(d.runtime_name||"").toLowerCase()==="colibri"?"Pin this Colibri model after activation so idle cleanup or other Colibri hot-swaps do not silently evict it. One pinned model per Node; unpin to switch.":"This GGUF/llama.cpp model cannot be used by Colibri without a compatible Colibri-native model folder. Register one from the model pool first."}">
   <input type="checkbox" data-a31-colibri-pin="${escapeHtml(d.deployment_id)}" ${d.colibri_pinned?"checked":""} ${String(d.runtime_name||"").toLowerCase()==="colibri"&&String(d.runtime_backend||"").toLowerCase()==="colibri"?"":"disabled"}>
   Pin to Colibri${d.colibri_pinned?" · pinned":""}</label>${String(d.runtime_name||"").toLowerCase()==="colibri"?`<button class="btn" data-a42-colibri-tier="${escapeHtml(d.deployment_id)}">Tiering</button><button class="btn" data-a42-colibri-swap="${escapeHtml(d.deployment_id)}">Hot swap</button>`:`<button class="btn" data-a31-compute="${escapeHtml(d.deployment_id)}">Compute</button>`}<button class="btn" data-a31-model-spec="${escapeHtml(d.deployment_id)}">Spec sheet</button><button class="btn primary" data-a31-agent-check="${escapeHtml(d.deployment_id)}">Agent Check</button><button class="btn danger" data-a31-delete-model="${escapeHtml(d.deployment_id)}">Delete</button></div></article>`).join(""):'<div class="empty-state compact">No managed local models yet.</div>'
 }
@@ -196,9 +216,54 @@ async function a31RenderLocalModels(){
      });
    });
 }
+let a31OAuthAttempt=0;
+function a31OpenOAuthConfig(preset="",label="OAuth provider",config={}){
+ openModal("Set up "+label,`<form id="a31OAuthConfigForm" class="qa-form">
+  <p>Register an OAuth client with the provider, then enter its public client configuration. Sign-in opens in your browser.</p>
+  <label>Provider preset ID<input name="preset" required value="${escapeHtml(preset)}" ${preset?'readonly':''}></label>
+  <label>Authorization URL<input name="auth" type="url" required value="${escapeHtml(config.authorization_url||'')}" placeholder="https://…/authorize"></label>
+  <label>Token URL<input name="token" type="url" required value="${escapeHtml(config.token_url||'')}" placeholder="https://…/token"></label>
+  <label>Public client ID<input name="client" required value="${escapeHtml(config.client_id||'')}"></label>
+  <label>Scopes<input name="scopes" value="${escapeHtml((config.scopes||[]).join(' '))}" placeholder="Provider-approved scopes"></label>
+  <p class="list-meta">Register this callback URL: <code>${escapeHtml(location.origin)}/v1/provider-oauth/callback</code></p>
+  <label class="inline-check"><input name="enabled" type="checkbox" ${config.enabled!==false?'checked':''}> Enable sign-in</label>
+  <button class="btn primary" type="submit">Save OAuth configuration</button><p id="a31OAuthConfigError" class="error" role="status"></p>
+ </form>`);
+ const form=$("#a31OAuthConfigForm");
+ form.onsubmit=async e=>{
+  e.preventDefault();const fd=new FormData(form),id=String(fd.get('preset')||'').trim(),button=form.querySelector('button[type="submit"]');button.disabled=true;
+  try{
+   await apiRequest(`/v1/provider-oauth/configs/${encodeURIComponent(id)}`,{method:'PUT',body:JSON.stringify({workspace_id:onepaneWorkspace,authorization_url:fd.get('auth'),token_url:fd.get('token'),client_id:fd.get('client'),scopes:String(fd.get('scopes')||'').split(/\s+/).filter(Boolean),enabled:!!fd.get('enabled')})});
+   closeModal();notice('OAuth configuration saved. You can now sign in.');
+   if(currentTab()?.route==='settings')renderSettings();else renderModels();
+  }catch(ex){$('#a31OAuthConfigError').textContent=ex.message;button.disabled=false;}
+ };
+}
 async function a31StartOAuth(preset){
-  const callback=`${location.origin}/v1/provider-oauth/callback`;
-  try{const out=await apiRequest(`/v1/provider-oauth/${encodeURIComponent(preset)}/start`,{method:"POST",body:JSON.stringify({workspace_id:onepaneWorkspace,redirect_uri:callback})});const win=window.open(out.authorization_url,"onepane-oauth","width=720,height=780");if(!win)throw new Error("Browser blocked the OAuth window.");const listener=e=>{if(e.origin!==location.origin||e.data?.type!=="onepane-oauth-complete")return;window.removeEventListener("message",listener);notice("OAuth account connected.");renderModels()};window.addEventListener("message",listener)}catch(ex){notice(ex.message,"bad")}
+ const workspace=onepaneWorkspace,attempt=++a31OAuthAttempt;
+ try{
+  const previous=a31Array(await apiRequest(`/v1/provider-oauth/connections?workspace_id=${encodeURIComponent(workspace)}`));
+  const known=new Set(previous.map(x=>x.id));
+  const out=await apiRequest(`/v1/provider-oauth/${encodeURIComponent(preset)}/start`,{method:'POST',body:JSON.stringify({workspace_id:workspace,redirect_uri:location.origin+'/v1/provider-oauth/callback'})});
+  if(attempt!==a31OAuthAttempt)return;
+  const authURL=new URL(out.authorization_url);if(authURL.protocol!=='https:')throw Error('Provider sign-in requires HTTPS.');
+  openModal('Sign in with OAuth',`<div class="widget-body"><p>Continue to the provider in your browser. Return here after completing sign-in.</p><button class="btn primary" id="a31OAuthOpen">Continue to sign-in ↗</button><p id="a31OAuthStatus" role="status">Waiting for you to open sign-in.</p><button class="btn" id="a31OAuthCancel">Cancel</button></div>`);
+  $('#a31OAuthCancel').onclick=()=>{a31OAuthAttempt++;closeModal();};
+  $('#a31OAuthOpen').onclick=()=>{a39WebOpen(authURL.href);$('#a31OAuthStatus').textContent='Waiting for provider sign-in…';};
+  const deadline=Math.min(Number(out.expires_at)||Date.now()+600000,Date.now()+600000);
+  const poll=async()=>{
+   const status=$('#a31OAuthStatus');
+   if(attempt!==a31OAuthAttempt||!status?.isConnected)return;
+   if(Date.now()>=deadline){status.textContent='Sign-in expired. Close this dialog and try again.';return;}
+   try{
+    const rows=a31Array(await apiRequest(`/v1/provider-oauth/connections?workspace_id=${encodeURIComponent(workspace)}`));
+    if(attempt!==a31OAuthAttempt||!status.isConnected)return;
+    if(rows.some(x=>x.preset_id===preset&&x.status==='connected'&&!known.has(x.id))){a31OAuthAttempt++;closeModal();notice('OAuth account connected.');if(currentTab()?.route==='settings')renderSettings();else renderModels();return;}
+   }catch{if(status.isConnected)status.textContent='Unable to check sign-in. Retrying…';}
+   setTimeout(poll,2000);
+  };
+  setTimeout(poll,2000);
+ }catch(ex){notice(ex.message,'bad');}
 }
 function a31OpenSecrets(scope="all"){sessionStorage.setItem("onepane:secrets-scope",scope);openRoute("secrets")}
 async function a31EditOmniCredential(provider,label,has=false){
@@ -228,7 +293,7 @@ async function a31RenderCloudModels(){
   liveOps.providers=providerRows;liveOps.reported.providers=true;syncLiveNotifications();
   const directCards=cloud.map(p=>{
     const connected=providerRows.find(x=>(String(x.provider).toLowerCase()===String(p.id).toLowerCase()||String(x.provider).toLowerCase()===String(p.credential_provider||"").toLowerCase())&&x.status!=="revoked"),oauth=String(p.auth_type||"").includes("oauth"),cfg=a31Array(oauthCfg).find(x=>x.preset_id===p.id&&x.enabled),oc=a31Array(oauthConn).find(x=>x.preset_id===p.id&&x.status==="connected"),auth=oauth?"oauth":"api",status=(connected||oc)?"connected":"setup";
-    const oauthAction=cfg?`<button class="btn primary" data-a31-oauth-start="${escapeHtml(p.id)}">Connect OAuth</button>`:`<button class="btn" data-a31-oauth-setup="${escapeHtml(p.id)}">OAuth setup</button>`;
+    const oauthAction=cfg?`<button class="btn primary" data-a31-oauth-start="${escapeHtml(p.id)}">Sign in</button>`:`<button class="btn primary" data-a31-oauth-setup="${escapeHtml(p.id)}">Sign in</button>`;
     return `<article class="provider-tile" data-cloud-provider-row data-consumer="direct" data-auth="${auth}" data-status="${status}"><div class="provider-tile-head"><strong>${escapeHtml(p.display_name||p.id)}</strong><span class="pill ${connected||oc?'good':''}">${oc?'OAuth connected':connected?'Connected':oauth?(cfg?'OAuth ready':'OAuth setup required'):'Needs setup'}</span></div><p>${escapeHtml(p.description||"")}</p><div class="provider-meta"><span>OnePane Direct</span><span>${oauth?'OAuth2 / PKCE':escapeHtml(p.auth_type||"API key")}</span><span>${escapeHtml(p.cost_hint||"")}</span></div><div class="toolbar">${oc?`<button class="btn danger" data-a31-oauth-revoke="${escapeHtml(oc.id)}">Revoke</button>`:connected?`<button class="btn danger" data-a31-provider-revoke="${escapeHtml(connected.id)}">Revoke</button>`:oauth?oauthAction:`<button class="btn primary" data-a31-provider-connect="${escapeHtml(p.id)}">Connect</button>`}</div></article>`
   }).join("");
   const omniCards=cloud.filter(p=>!String(p.auth_type||"").includes("oauth")&&String(p.auth_type||"")!=="none").map(p=>{const provider=String(p.credential_provider||p.id).toLowerCase(),stored=vaultRows.find(r=>secretMatches(r,{scope:"omniroute",provider}));return `<article class="provider-tile" data-cloud-provider-row data-consumer="omniroute" data-auth="api" data-status="${stored?'connected':'setup'}"><div class="provider-tile-head"><strong>${escapeHtml(p.display_name||p.id)}</strong><span class="pill ${stored?'good':''}">${stored?'Stored':'Needs setup'}</span></div><p>Credential used by OmniRoute. This can differ from the Direct OnePane credential.</p><div class="provider-meta"><span>OmniRoute</span><span>API key / token</span></div><div class="toolbar"><button class="btn ${stored?'':'primary'}" data-a31-omni-key-provider="${escapeHtml(provider)}" data-a31-omni-key-label="${escapeHtml(p.display_name||p.id)}" data-a31-omni-key-stored="${stored?'1':'0'}">${stored?'Update':'Add API key'}</button></div></article>`}).join("");
@@ -246,8 +311,10 @@ async function a31RenderCloudModels(){
   $$("[data-a31-provider-connect]").forEach(b=>b.onclick=()=>qa4ConnectCloudProvider(b.dataset.a31ProviderConnect));
   $$("[data-a31-provider-revoke]").forEach(b=>b.onclick=()=>qa4RevokeProvider(b.dataset.a31ProviderRevoke));
   $$("[data-a31-oauth-start]").forEach(b=>b.onclick=()=>a31StartOAuth(b.dataset.a31OauthStart));
-  $$("[data-a31-oauth-setup]").forEach(b=>b.onclick=()=>openModal("OAuth setup",`<div class="widget-body"><strong>${escapeHtml(cloud.find(p=>String(p.id)===b.dataset.a31OauthSetup)?.display_name||"OAuth provider")}</strong><p>OnePane supports the OAuth connection lifecycle for this provider, but this installation does not yet have an enabled OAuth client configuration.</p><p class="page-subtitle">Configure an authorised OAuth client in Settings before starting the consent flow. OnePane will not fabricate provider credentials.</p><button class="btn primary" id="a31GoOAuthSettings">Open Settings</button></div>`));
-  $$("[data-a31-oauth-setup]").forEach(b=>b.addEventListener("click",()=>setTimeout(()=>{$("#a31GoOAuthSettings")?.addEventListener("click",()=>{closeModal();openRoute("settings")})},0)));
+  $$("[data-a31-oauth-setup]").forEach(b=>b.onclick=()=>{
+   const id=b.dataset.a31OauthSetup,p=cloud.find(p=>String(p.id)===id);
+   a31OpenOAuthConfig(id,p?.display_name||id,a31Array(oauthCfg).find(c=>c.preset_id===id)||{});
+  });
   $$("[data-a31-oauth-revoke]").forEach(b=>b.onclick=async()=>{try{await apiRequest(`/v1/provider-oauth/connections/${encodeURIComponent(b.dataset.a31OauthRevoke)}/revoke`,{method:"POST",body:"{}"});renderModels()}catch(ex){notice(ex.message,"bad")}});
   $$("[data-a31-omni-key-provider]").forEach(b=>b.onclick=()=>a31EditOmniCredential(b.dataset.a31OmniKeyProvider,b.dataset.a31OmniKeyLabel,b.dataset.a31OmniKeyStored==="1"))
 }
@@ -342,11 +409,11 @@ async function a31RenderDiscoverModels(){
       if(m._source==="onepane"){
         const f=m._fit,installed=isInstalled(m),canInstall=!!m.installable&&installedRefs!==null&&!installed;
         const label=installed?"Installed":installedRefs===null?"Inventory unavailable":m.installable?"Ready to install":"Advisory only";
-        return `<article class="model-tile"><div><div class="model-source-line"><span class="pill good">OnePane Verified</span><span class="pill ${installed||canInstall?'good':''}">${label}</span></div><strong>${escapeHtml(m.display_name||m.model_ref)}</strong><div class="list-meta">${escapeHtml(String(m.params_b||m.parameter_count||m.parameter_scale||"—"))} · ${formatContextQA(m.context_length||m.max_context_tokens||m.context_tokens)} context</div><div class="list-meta">${m.installable?`Digest-pinned · ${escapeHtml(a31Array(m.installable_quantizations).join(", "))}`:`Advisory · ${escapeHtml(m.install_reason||"No verified artifact")}`}${f?` · ${escapeHtml(f.fit||"fit")} · ${escapeHtml(f.mode||"")}`:""}</div></div><div class="toolbar">${f?`<span class="pill good">${escapeHtml(f.fit||"Recommended")}</span>`:""}<button class="btn ${canInstall?'primary':''}" data-a31-discover-install-ref="${escapeHtml(m.model_ref||"")}" ${canInstall?'':'disabled'}>${installed?'Installed':canInstall?'Install':installedRefs===null?'Unavailable':'Unavailable'}</button></div></article>`
+        return `<article class="model-tile"><div><div class="model-source-line"><span class="pill good">OnePane Verified</span>${a31ColibriBadge(m)}<span class="pill ${installed||canInstall?'good':''}">${label}</span></div><strong>${escapeHtml(m.display_name||m.model_ref)}</strong><div class="list-meta">${escapeHtml(String(m.params_b||m.parameter_count||m.parameter_scale||"—"))} · ${formatContextQA(m.context_length||m.max_context_tokens||m.context_tokens)} context</div><div class="list-meta">${m.installable?`Digest-pinned · ${escapeHtml(a31Array(m.installable_quantizations).join(", "))}`:`Advisory · ${escapeHtml(m.install_reason||"No verified artifact")}`}${f?` · ${escapeHtml(f.fit||"fit")} · ${escapeHtml(f.mode||"")}`:""}</div></div><div class="toolbar">${f?`<span class="pill good">${escapeHtml(f.fit||"Recommended")}</span>`:""}<button class="btn ${canInstall?'primary':''}" data-a31-discover-install-ref="${escapeHtml(m.model_ref||"")}" ${canInstall?'':'disabled'}>${installed?'Installed':canInstall?'Install':installedRefs===null?'Unavailable':'Unavailable'}</button></div></article>`
       }
       const availability=m._source==="llmfit"?"Hardware advisory · artifact not verified":m._source==="huggingbay"?"Manifest verification required":"Artifact verification required",action=m._source==="llmfit"?"Find compatible GGUF":m._source==="huggingbay"?"Verify manifest":"Verify artifact";
       const src=a31ExternalSourceLabel(m._source),meta=[m.quantization,m.runtime,m.license,m.downloads?`${Number(m.downloads).toLocaleString()} downloads`:"",m.seeds?`${Number(m.seeds).toLocaleString()} seeds`:""].filter(Boolean).join(" · ");
-      return `<article class="model-tile external-model-tile" data-a40-source="${escapeHtml(m._source)}" data-a40-id="${escapeHtml(m.id||m.model_ref||"")}"><div><div class="model-source-line"><span class="pill">${escapeHtml(src)}</span><span class="pill ${m.verified?'good':''}">${escapeHtml(m.trust||"advisory")}</span><span class="pill">${escapeHtml(availability)}</span><span class="pill a40-download-status" aria-live="polite">Checking download…</span></div><strong>${escapeHtml(m.display_name||m.id||"Model")}</strong><div class="list-meta">${escapeHtml(meta||m.category||"External catalogue entry")}</div><div class="list-meta">${m._fit?`${escapeHtml(m._fit.fit||"fit")} · ${escapeHtml(m._fit.mode||"")}`:`${escapeHtml(m.install_reason||"External source metadata")}`}</div></div><div class="toolbar">${m._fit?`<span class="pill good">${escapeHtml(m._fit.fit||"Recommended")}</span>`:""}${m.source_url?`<button class="btn" data-a31-source-url="${escapeHtml(m.source_url)}">View source</button>`:""}<button class="btn ${isInstalled(m)?'':'primary'}" data-a31-verify-source="${escapeHtml(m._source)}" data-a31-verify-id="${escapeHtml(m.id||m.model_ref||"")}" ${isInstalled(m)?'disabled':''}>${isInstalled(m)?'Installed':escapeHtml(action)}</button></div></article>`
+      return `<article class="model-tile external-model-tile" data-a40-source="${escapeHtml(m._source)}" data-a40-id="${escapeHtml(m.id||m.model_ref||"")}"><div><div class="model-source-line"><span class="pill">${escapeHtml(src)}</span>${a31ColibriBadge(m)}<span class="pill ${m.verified?'good':''}">${escapeHtml(m.trust||"advisory")}</span><span class="pill">${escapeHtml(availability)}</span><span class="pill a40-download-status" aria-live="polite">Checking download…</span></div><strong>${escapeHtml(m.display_name||m.id||"Model")}</strong><div class="list-meta">${escapeHtml(meta||m.category||"External catalogue entry")}</div><div class="list-meta">${m._fit?`${escapeHtml(m._fit.fit||"fit")} · ${escapeHtml(m._fit.mode||"")}`:`${escapeHtml(m.install_reason||"External source metadata")}`}</div></div><div class="toolbar">${m._fit?`<span class="pill good">${escapeHtml(m._fit.fit||"Recommended")}</span>`:""}${m.source_url?`<button class="btn" data-a31-source-url="${escapeHtml(m.source_url)}">View source</button>`:""}<button class="btn ${isInstalled(m)?'':'primary'}" data-a31-verify-source="${escapeHtml(m._source)}" data-a31-verify-id="${escapeHtml(m.id||m.model_ref||"")}" ${isInstalled(m)?'disabled':''}>${isInstalled(m)?'Installed':escapeHtml(action)}</button></div></article>`
     }).join(""):'<div class="empty-state compact">No models match these filters.</div>';
     const checked=external.filter(m=>a40DownloadCache.has((m.source||"external")+":"+(m.id||m.model_ref||""))).length;
     const confirmed=external.filter(m=>a40DownloadCache.get((m.source||"external")+":"+(m.id||m.model_ref||""))?.state==="yes").length;

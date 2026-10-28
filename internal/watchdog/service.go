@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -107,7 +108,20 @@ func (s *Service) Run(ctx context.Context, interval time.Duration, state func() 
 		if state != nil {
 			payload = state()
 		}
-		return s.Heartbeat(ctx, payload)
+		err := s.Heartbeat(ctx, payload)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		// A busy transaction has already rolled back. Retry on the next tick,
+		// without advancing the durable heartbeat or relaxing the freshness gate.
+		// Match driver result codes, including extended BUSY/LOCKED variants,
+		// rather than platform-dependent error text. Other failures stay fatal.
+		var sqliteErr interface{ Code() int }
+		if errors.As(err, &sqliteErr) && (sqliteErr.Code()&0xff == 5 || sqliteErr.Code()&0xff == 6) {
+			log.Printf("watchdog heartbeat delayed by SQLite contention; retrying next tick")
+			return nil
+		}
+		return err
 	}
 	if err := beat(); err != nil {
 		return err

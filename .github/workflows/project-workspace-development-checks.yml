@@ -32,6 +32,7 @@ on:
       - 'internal/webui/static/index.html'
       - 'internal/webui/static/ux-alignment.css'
       - 'scripts/validate_product_ux_alignment.js'
+      - 'scripts/validate_task_live_refresh.js'
       - 'docs/rc11-product-ux-alignment.md'
       - 'internal/api/qa_execution_evidence.go'
       - 'internal/api/qa_execution_evidence_test.go'
@@ -134,6 +135,7 @@ on:
       - 'packaging/debian/preinst'
       - 'packaging/systemd/onepane.service'
       - 'scripts/install-ubuntu.sh'
+      - 'scripts/upgrade-ubuntu.sh'
       - 'internal/scheduler/**'
       - 'internal/localai/**'
       - 'docs/PROJECT_WORKSPACE_DEVELOPMENT_ENVIRONMENTS_RFC.md'
@@ -273,6 +275,7 @@ jobs:
           node scripts/validate_unified_assistant_chat.js
           node scripts/validate_l5_goal_lifecycle.js
           node scripts/validate_product_ux_alignment.js
+          node scripts/validate_task_live_refresh.js
           node --check internal/webui/static/settings-redesign.js
           node --check internal/webui/static/qa-execution-provenance.js
           node scripts/validate_qa_execution_provenance.js
@@ -298,6 +301,7 @@ jobs:
       - name: Linux storage provisioning boundaries (source only, no installed service)
         run: |
           bash -n scripts/install-ubuntu.sh
+          bash -n scripts/upgrade-ubuntu.sh
           bash -n packaging/debian/preinst
           bash -n packaging/debian/postinst
           go test -race -count=1 -timeout 3m ./internal/serviceinstall

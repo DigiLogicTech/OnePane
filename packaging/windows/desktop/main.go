@@ -5,7 +5,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -205,12 +204,13 @@ func init() {
 func main() {
 	desktopLogf("OnePane Desktop %s starting", buildinfo.Version)
 	mutexName, _ := syscall.UTF16PtrFromString(`Local\OnePaneDesktop`)
-	mutex, _, _ := pCreateMutex.Call(0, 0, uintptr(unsafe.Pointer(mutexName)))
+	mutex, _, createErr := pCreateMutex.Call(0, 0, uintptr(unsafe.Pointer(mutexName)))
 	if mutex != 0 {
 		defer pCloseHandle.Call(mutex)
 	}
-	lastErr, _, _ := pGetLastError.Call()
-	if lastErr == errorAlreadyExists {
+	// Use the error captured by CreateMutexW itself; a later Win32 call may
+	// replace the thread's last error and accidentally launch a second gateway.
+	if createErr == syscall.Errno(errorAlreadyExists) {
 		cls, _ := syscall.UTF16PtrFromString("OnePaneDesktopWindow")
 		if hwnd, _, _ := pFindWindow.Call(uintptr(unsafe.Pointer(cls)), 0); hwnd != 0 {
 			pShowWindow.Call(hwnd, swRestore)
@@ -447,7 +447,9 @@ func startDesktopUIServer() (string, error) {
 	// Windows-native endpoints on this origin and proxies every other route,
 	// including HTML/JS/CSS, to the authoritative control-plane WebUI.
 	mux.Handle("/", proxy)
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	// Keep the origin stable: WebView localStorage (Notes, tour and preferences)
+	// is scoped to the port as well as the host. Never silently switch origins.
+	ln, err := listenDesktopOrigin(filepath.Join(filepath.Dir(webViewDataDir()), "desktop-origin-port"))
 	if err != nil {
 		return "", err
 	}
@@ -940,7 +942,15 @@ func applyInitialNativeTheme() {
 }
 
 func handleWebMessage(message string) {
-    if strings.HasPrefix(message,"onepane-provider|"){handleProviderViewMessage(message);return}
+	if strings.HasPrefix(message, "onepane-open-external|") {
+		if err := openExternalURL(strings.TrimPrefix(message, "onepane-open-external|")); err != nil {
+			desktopLogf("external browser launch failed: %v", err)
+		}
+		return
+	}
+	// Provider websites open in the system browser. Retired embedded-view
+	// commands cannot create a sibling WebView even from cached UI code.
+	if strings.HasPrefix(message, "onepane-provider|") { return }
 	if strings.HasPrefix(message, "onepane-ui-ready|") {
 		desktopLogf("%s", message)
 		dir := filepath.Join(os.Getenv("LOCALAPPDATA"), "OnePane")

@@ -285,6 +285,7 @@ type Server struct {
 	configPath      string
 	modelPoolPath   string
 	apiCapture      *qaAPICapture
+	watchdog        interface{ Healthy(context.Context) bool }
 }
 
 func NewServer(projects projectService, events eventReader, auth Authorizer) *Server {
@@ -296,6 +297,7 @@ func NewServer(projects projectService, events eventReader, auth Authorizer) *Se
 	return s
 }
 func (s *Server) SetAttentionDB(db *sql.DB) { s.attentionDB = db }
+func (s *Server) SetWatchdog(v interface{ Healthy(context.Context) bool }) { s.watchdog = v }
 func (s *Server) SetLibraryArtifacts(a *artifact.Service) { s.libraryArtifacts = a }
 func (s *Server) SetPreviewSessions(m previewSessionMinter) { s.previewSessions = m }
 func (s *Server) SetWebAuth(a *webauth.Service, secureCookies bool) {
@@ -346,6 +348,12 @@ func (s *Server) routes() {
 	// Node-admin only, point-in-time SQLite/WAL storage diagnostic.
 	s.mux.HandleFunc("GET /v1/qa/sqlite-footprint", s.qaSQLiteFootprintHandler)
 	s.mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
+		// HTTP 200 retains the liveness contract. The status body distinguishes
+		// a responding API from a control plane whose mutation gate is stale.
+		if s.watchdog != nil && !s.watchdog.Healthy(r.Context()) {
+			writeJSON(w, http.StatusOK, map[string]any{"status": "degraded", "watchdog": "stale_or_unavailable"})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 	})
 	s.mux.HandleFunc("GET /v1/about", func(w http.ResponseWriter, r *http.Request) {
@@ -3098,6 +3106,20 @@ func (s *Server) requireNodeOperator(w http.ResponseWriter, r *http.Request) (Id
 	return i, true
 }
 func (s *Server) listNodes(w http.ResponseWriter, r *http.Request) {
+	// Local inventory is useful even when remote federation is disabled. Apply
+	// the same host-model read permission as local telemetry; remote operations
+	// continue to require the federation administrator gate below.
+	if s.federation == nil && strings.TrimSpace(s.localNodeID) != "" {
+		i, ok := s.authenticate(w, r)
+		if !ok || !authorizeHostModelCapability(w, i, "model.read") { return }
+		name, _ := os.Hostname()
+		if name == "" { name = "This device" }
+		now := time.Now().UnixMilli()
+		writeJSON(w, http.StatusOK, map[string]any{"federation_enabled": false, "nodes": []nodefederation.NodeView{{
+			ID: s.localNodeID, Name: name, Local: true, TrustState: "local", LastSeenAt: &now,
+		}}})
+		return
+	}
 	if _, ok := s.requireNodeOperator(w, r); !ok {
 		return
 	}
@@ -3106,7 +3128,7 @@ func (s *Server) listNodes(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "list nodes failed")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"nodes": nodes})
+	writeJSON(w, 200, map[string]any{"nodes": nodes, "federation_enabled": true})
 }
 func (s *Server) listNodePairings(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireNodeOperator(w, r); !ok {

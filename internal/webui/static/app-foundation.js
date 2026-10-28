@@ -637,7 +637,10 @@ function startProductTour({replay=false,welcome=false}={}){
   draw();
 }
 async function hydrateHealth(){
-  const h=await api.health(),buttons=[$('#healthButton'),$('#mobileHealthButton')].filter(Boolean);
+  applyHealthStatus(await api.health());
+}
+function applyHealthStatus(h){
+  const buttons=[$('#healthButton'),$('#mobileHealthButton')].filter(Boolean);
   const status=String(h?.status||'unknown').toLowerCase(),label=status==='ok'?'Healthy':status==='unknown'?'Unknown':'Degraded';
   for(const b of buttons){b.classList.toggle('health-ok',status==='ok');b.classList.toggle('bad',status!=='ok'&&status!=='unknown');b.classList.toggle('health-unknown',status==='unknown');const text=$('span:last-child',b);if(text&&text!==$('.status-dot',b))text.textContent=label;}
 }
@@ -734,12 +737,14 @@ async function refreshOperationalDataQA(force=false){
     liveOps.reported={health:ok(0),tasks:ok(1),routines:ok(2),nodes:ok(3),providers:ok(4),events:ok(5)};
     const health=value(0),tasks=value(1),routines=value(2),nodes=value(3),providers=value(4),events=value(5);
     liveOps.health=liveOps.reported.health?String(health?.status||'unknown').toLowerCase():'unknown';
+    applyHealthStatus({status:liveOps.health});
     liveOps.tasks=liveOps.reported.tasks&&Array.isArray(tasks)?tasks:[];
     liveOps.routines=liveOps.reported.routines&&Array.isArray(routines)?routines.map(qaTaskNormaliseRoutine):[];
     liveOps.nodes=liveOps.reported.nodes?(Array.isArray(nodes)?nodes:(nodes?.nodes||[])):[];
     liveOps.providers=liveOps.reported.providers?(Array.isArray(providers)?providers:(providers?.providers||[])):[];
     liveOps.events=liveOps.reported.events&&Array.isArray(events)?events:[];
     liveOps.lastRefresh=Date.now();syncLiveNotifications();
+    if(typeof qaTaskRefreshLiveView==='function')qaTaskRefreshLiveView();
     if($('#bottomDrawer')?.dataset.state==='open')renderDrawer();
     if(currentTab()?.route==='operations')renderOperations();
   })().finally(()=>{operationsRefreshInFlight=null;});

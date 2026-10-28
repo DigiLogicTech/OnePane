@@ -35,18 +35,40 @@ import (
 func main() {
 	var configPath, offlineRoot string
 	var previewSystemdStorage, configureSystemdStorage bool
+	var printSystemdUpgradeSettings bool
+	var verifySystemdUpgradePID int
+	var upgradeConfigSHA256 string
 	var initializeSystemdStorage bool
 	var initialDataDir, initialModelPool string
 	flag.StringVar(&configPath, "config", "", "path to bootstrap YAML configuration")
 	flag.StringVar(&offlineRoot, "startup-evidence-root", "", "read only: print sanitized offline startup evidence for an explicit data root")
 	flag.BoolVar(&previewSystemdStorage, "preview-systemd-storage", false, "read only: print the systemd storage boundary for an explicit configuration")
+	flag.BoolVar(&printSystemdUpgradeSettings, "print-systemd-upgrade-settings", false, "read only: print versioned Linux service data root, health port and config hash without starting OnePane")
+	flag.IntVar(&verifySystemdUpgradePID, "verify-systemd-upgrade-pid", 0, "read only: verify the selected Linux service PID, executable, config, owned listener and build readiness")
+	flag.StringVar(&upgradeConfigSHA256, "upgrade-config-sha256", "", "expected preserved configuration SHA-256 for explicit service readiness verification")
 	flag.BoolVar(&configureSystemdStorage, "configure-systemd-storage", false, "Linux root only: provision dedicated storage and write its systemd drop-in; does not start OnePane")
 	flag.BoolVar(&initializeSystemdStorage, "initialize-systemd-storage", false, "Linux root only: create an absent bootstrap configuration; preserve existing configuration")
 	flag.StringVar(&initialDataDir, "initial-data-dir", "", "data root for a newly initialized systemd configuration")
 	flag.StringVar(&initialModelPool, "initial-model-pool", "", "model pool for a newly initialized systemd configuration")
 	flag.Parse()
+	verificationRequested := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "verify-systemd-upgrade-pid" || f.Name == "upgrade-config-sha256" { verificationRequested = true }
+	})
+	if verificationRequested {
+		if verifySystemdUpgradePID < 1 || upgradeConfigSHA256 == "" || configPath == "" || offlineRoot != "" || initializeSystemdStorage || previewSystemdStorage || configureSystemdStorage || printSystemdUpgradeSettings || initialDataDir != "" || initialModelPool != "" || flag.NArg() != 0 {
+			fmt.Fprintln(os.Stderr, "Readiness verification requires only an explicit config, service PID and configuration hash")
+			os.Exit(2)
+		}
+		if err := serviceinstall.VerifySystemdUpgrade(configPath, verifySystemdUpgradePID, upgradeConfigSHA256); err != nil {
+			fmt.Fprintln(os.Stderr, "Selected service process readiness is unverified")
+			os.Exit(1)
+		}
+		fmt.Println("Selected service process, image, configuration and owned loopback readiness verified")
+		return
+	}
 	if initializeSystemdStorage {
-		if configPath == "" || offlineRoot != "" || previewSystemdStorage || configureSystemdStorage || initialDataDir == "" || initialModelPool == "" || flag.NArg() != 0 {
+		if configPath == "" || offlineRoot != "" || previewSystemdStorage || configureSystemdStorage || printSystemdUpgradeSettings || initialDataDir == "" || initialModelPool == "" || flag.NArg() != 0 {
 			fmt.Fprintln(os.Stderr, "Initialization requires only explicit configuration, initial data and model paths")
 			os.Exit(2)
 		}
@@ -60,8 +82,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Initial storage paths require -initialize-systemd-storage")
 		os.Exit(2)
 	}
-	if previewSystemdStorage || configureSystemdStorage {
-		if configPath == "" || offlineRoot != "" || previewSystemdStorage && configureSystemdStorage || flag.NArg() != 0 {
+	if previewSystemdStorage || configureSystemdStorage || printSystemdUpgradeSettings {
+		modes := 0
+		for _, selected := range []bool{previewSystemdStorage, configureSystemdStorage, printSystemdUpgradeSettings} {
+			if selected { modes++ }
+		}
+		if configPath == "" || offlineRoot != "" || modes != 1 || flag.NArg() != 0 {
 			fmt.Fprintln(os.Stderr, "Select one systemd storage mode and an explicit -config path")
 			os.Exit(2)
 		}
@@ -76,7 +102,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Systemd storage configuration unavailable:", err)
 			os.Exit(1)
 		}
-		fmt.Print(plan.DropIn())
+		if printSystemdUpgradeSettings {
+			fmt.Print(plan.UpgradeSettings())
+		} else {
+			fmt.Print(plan.DropIn())
+		}
 		return
 	}
 
@@ -166,6 +196,7 @@ func main() {
 	bearerAuth := api.NewBearerAuthorizer(runtime.DB.SQL(), clock.Real{})
 	auth := api.NewHybridAuthorizer(bearerAuth, runtime.WebAuth)
 	apiServer := api.NewServer(runtime.ProjectWorkspaces, event.NewReader(runtime.DB.SQL()), auth)
+	apiServer.SetWatchdog(runtime.Watchdog)
 	apiServer.SetAttentionDB(runtime.DB.SQL())
 	apiServer.SetLibraryArtifacts(runtime.Artifacts)
 	apiServer.SetWebAuth(runtime.WebAuth, strings.HasPrefix(config.APIOrigin(cfg), "https://"))

@@ -14,6 +14,15 @@
   --ux-control-gap: 8px;
 }
 
+/* Keep controls usable when the persistent shell consumes vertical space. */
+.workspace-page > .workspace-tabs { flex: 0 0 auto; min-height: 42px; }
+.workspace-tabs .workspace-tab { min-height: var(--ux-control-height); flex-shrink: 0; }
+.command-button { min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.command-button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.command-button > kbd { flex-shrink: 0; }
+.schedule-weekdays { display: flex; flex-wrap: wrap; gap: 8px 16px; border: 1px solid var(--border); border-radius: var(--ux-control-radius); }
+.schedule-weekdays .inline-check { min-height: var(--ux-control-height); }
+
 /* A Logs/Inspector resize changes available content width. A heading's
    buttons must wrap inside that width instead of widening the page. */
 .view-host :is(.page-heading,.page-actions,.toolbar,.card-header) {

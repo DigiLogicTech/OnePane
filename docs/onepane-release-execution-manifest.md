@@ -1,6 +1,8 @@
 # OnePane release execution manifest
 
-Updated: 2026-10-28 (Brisbane). Release state: **WINDOWS CURRENT-PRODUCT QA INSTALLER READY — NOT FINAL BUILD COMPLETE**.
+Updated: 2026-10-28 (Brisbane). Release state: **PRACTICAL UI REFRESH IN PROGRESS — NOT FINAL BUILD COMPLETE**.
+
+**Latest user direction:** complete the functional UI/UX review before the next Windows QA build; after reviewing the current interface, the user agreed to a practical frontend refresh. `ui-refresh-execution-plan.md` and `ui-ux-functional-review-20261028.md` supersede the earlier installer handoff checkpoint. Test2 is provisional because real walkthroughs found blocking UI defects. Preserve the corrected setup/navigation/model selectors, async fences, modal accessibility, responsive shell, theme compositing, Project/task scope, Workspace/context persistence and disabled-federation response. Refresh shell/workflows against the real isolated backend, complete post-refresh regression/CI, then rebuild. Ubuntu remains deferred; no installed Alpha/user-data changes are authorised by this UI work.
 
 **Latest scope decision:** the user resumed Windows-only work and explicitly selected a current-product Windows test installer with unfinished RC11 work documented. Ubuntu development is deferred, with its local draft preserved. This supersedes the pause below for this bounded milestone; the formal RC11 feature/review/release gates remain unchanged. See `windows-test-build-20261028.md` for the current checkpoint and artifact evidence.
 

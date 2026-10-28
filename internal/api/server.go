@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"sort"
 	"strings"
@@ -314,7 +315,18 @@ func (s *Server) SetAgentRuntimes(v agentRuntimeService)            { s.agentRun
 func (s *Server) SetGateway(v gatewayService)                       { s.gateway = v }
 func (s *Server) SetTeam(v teamService)                             { s.team = v }
 func (s *Server) SetBots(v botRuntimeService)                       { s.bots = v }
-func (s *Server) SetFederation(v nodeFederationService)             { s.federation = v }
+func (s *Server) SetFederation(v nodeFederationService) {
+	// Disabled bootstrap components arrive as typed nil service pointers.
+	// Keep the optional interface nil so authenticated node routes return the
+	// existing unavailable response instead of calling methods on a nil receiver.
+	if v != nil {
+		value := reflect.ValueOf(v)
+		if value.Kind() == reflect.Pointer && value.IsNil() {
+			v = nil
+		}
+	}
+	s.federation = v
+}
 func (s *Server) SetTasks(v taskService)                            { s.tasks = v }
 func (s *Server) SetRoutines(v routineService)                      { s.routines = v }
 func (s *Server) SetChatCommands(v chatCommandService)              { s.chatCommands = v }

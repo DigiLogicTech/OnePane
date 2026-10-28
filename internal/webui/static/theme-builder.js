@@ -10,19 +10,25 @@ const QA8_THEME_COLORS=[
  ["--scrollbar-track","Scrollbar track","#222831"],["--scrollbar-thumb","Scrollbar thumb","#56687b"],
  ["--scrollbar-thumb-hover","Scrollbar hover","#6c8297"],["--scrollbar-thumb-active","Scrollbar active","#81a0c1"]
 ];
-function qa8HexColor(text,fallback){
+function qa8HexColor(text,fallback,background='#000000'){
  const raw=String(text||"").trim();
  if(/^#[0-9a-f]{6}$/i.test(raw))return raw.toLowerCase();
  if(/^#[0-9a-f]{3}$/i.test(raw))return "#"+[...raw.slice(1)].map(c=>c+c).join("").toLowerCase();
- const rgb=/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(raw);
- if(rgb){return "#"+rgb.slice(1,4).map(x=>Math.min(255,+x).toString(16).padStart(2,"0")).join("");}
+ const rgb=/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)$/i.exec(raw);
+ if(rgb){
+  const alpha=rgb[4]===undefined?1:Math.max(0,Math.min(1,Number(rgb[4])));
+  if(!Number.isFinite(alpha))return fallback;
+  const base=/^#[0-9a-f]{6}$/i.test(background)?background:'#000000';
+  return '#'+rgb.slice(1,4).map((x,i)=>Math.round(Math.min(255,+x)*alpha+parseInt(base.slice(1+i*2,3+i*2),16)*(1-alpha)).toString(16).padStart(2,'0')).join('');
+ }
  return fallback;
 }
 function qa8ThemeSeed(){
  const pack=qa5ThemePacks()[state.theme];
  const style=getComputedStyle(document.documentElement);
+ const panel=qa8HexColor(pack?.vars?.['--panel']||style.getPropertyValue('--panel'),'#23282f');
  return Object.fromEntries(QA8_THEME_COLORS.map(([key,,fallback])=>
-  [key,qa8HexColor(pack?.vars?.[key]||style.getPropertyValue(key),fallback)]));
+  [key,qa8HexColor(pack?.vars?.[key]||style.getPropertyValue(key),fallback,panel)]));
 }
 function qa5OpenThemeBuilder(){
  const vars=qa8ThemeSeed(),origin=qa5ThemePacks()[state.theme],seedName=origin?.name||"My OnePane Theme";

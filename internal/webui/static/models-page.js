@@ -152,7 +152,8 @@ async function a31RenderLocalModels(){
   try{
     [deployments,components,catalog]=await Promise.all([qa5LoadManagedDeployments(),qa5ModelComponents().catch(()=>({})),apiRequest("/v1/local-ai/catalog").catch(()=>[])]);
     llamaRows=await apiRequest("/v1/local-ai/llama-runtimes").catch(()=>[])
-  }catch(ex){root.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;return}
+  }catch(ex){if(root?.isConnected)root.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;return}
+  if(!root?.isConnected)return;
   const installByRef=new Map(a31Array(catalog).map(m=>[String(m.model_ref||"").toLowerCase(),m]));
 
   const installedRefs=new Set(deployments.map(d=>String(d.model_ref||"").toLowerCase())),activeRefs=new Set(a31ActiveInstallJobs.map(j=>String(j.model_ref||"").toLowerCase()));
@@ -164,7 +165,7 @@ async function a31RenderLocalModels(){
 
   a31BindComponentButtons(root,components);
   $$("[data-a31-compute]").forEach(b=>b.onclick=()=>a31OpenCompute(deployments.find(d=>d.deployment_id===b.dataset.a31Compute)));
-  $("[data-a31-colibri-pin]").forEach(box=>box.onchange=async()=>{
+  $$("[data-a31-colibri-pin]").forEach(box=>box.onchange=async()=>{
     const desired=box.checked;box.disabled=true;
     try{
       const state=await apiRequest("/v1/local-ai/deployments/"+encodeURIComponent(box.dataset.a31ColibriPin)+"/colibri-pin",{
@@ -177,7 +178,7 @@ async function a31RenderLocalModels(){
       notice("Colibri pin unchanged: "+ex.message,"bad");
     }
   });
-  $("[data-a42-colibri-tier]").forEach(b=>b.onclick=()=>a42OpenColibriTier(deployments.find(d=>d.deployment_id===b.dataset.a42ColibriTier)));
+  $$("[data-a42-colibri-tier]").forEach(b=>b.onclick=()=>a42OpenColibriTier(deployments.find(d=>d.deployment_id===b.dataset.a42ColibriTier)));
   $$("[data-a42-colibri-swap]").forEach(b=>b.onclick=()=>a42SwapColibri(deployments.find(d=>d.deployment_id===b.dataset.a42ColibriSwap),b));
   $$("[data-a31-model-spec]").forEach(b=>b.onclick=()=>qa5InspectModel(deployments.find(d=>d.deployment_id===b.dataset.a31ModelSpec)));
   $$("[data-a31-agent-check]").forEach(b=>b.onclick=()=>qa5AgentCheck(deployments.find(d=>d.deployment_id===b.dataset.a31AgentCheck)));
@@ -216,7 +217,8 @@ async function a31RenderCloudModels(){
   try{
     await qa4LoadProjectHub(false).catch(()=>{});
     [presets,providers,components,oauthCfg,oauthConn,vaultRows]=await Promise.all([providerPresetsQA(),apiRequest(`/v1/providers?workspace_id=${qs}`),qa5ModelComponents().catch(()=>({})),apiRequest(`/v1/provider-oauth/configs?workspace_id=${qs}`).catch(()=>[]),apiRequest(`/v1/provider-oauth/connections?workspace_id=${qs}`).catch(()=>[]),loadVaultRecords().catch(()=>[])])
-  }catch(ex){root.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;return}
+  }catch(ex){if(root?.isConnected)root.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;return}
+  if(!root?.isConnected)return;
   const omni=components.omniroute||{},cloud=a31Array(presets).filter(p=>p.id!=="omniroute"),providerRows=a31Array(providers);
   liveOps.providers=providerRows;liveOps.reported.providers=true;syncLiveNotifications();
   const directCards=cloud.map(p=>{
@@ -226,7 +228,7 @@ async function a31RenderCloudModels(){
   }).join("");
   const omniCards=cloud.filter(p=>!String(p.auth_type||"").includes("oauth")&&String(p.auth_type||"")!=="none").map(p=>{const provider=String(p.credential_provider||p.id).toLowerCase(),stored=vaultRows.find(r=>secretMatches(r,{scope:"omniroute",provider}));return `<article class="provider-tile" data-cloud-provider-row data-consumer="omniroute" data-auth="api" data-status="${stored?'connected':'setup'}"><div class="provider-tile-head"><strong>${escapeHtml(p.display_name||p.id)}</strong><span class="pill ${stored?'good':''}">${stored?'Stored':'Needs setup'}</span></div><p>Credential used by OmniRoute. This can differ from the Direct OnePane credential.</p><div class="provider-meta"><span>OmniRoute</span><span>API key / token</span></div><div class="toolbar"><button class="btn ${stored?'':'primary'}" data-a31-omni-key-provider="${escapeHtml(provider)}" data-a31-omni-key-label="${escapeHtml(p.display_name||p.id)}" data-a31-omni-key-stored="${stored?'1':'0'}">${stored?'Update':'Add API key'}</button></div></article>`}).join("");
   const mode=localStorage.getItem("onepane:omniroute-mode")||"managed";
-  root.innerHTML=`<div class="models-single-column"><div class="models-runtime-grid"><section class="panel-card omni-unified-card"><div class="card-header models-card-header"><div><div class="card-title">OmniRoute <span class="pill ${omni.state==="running"?"good":""}">${escapeHtml(a31ComponentState(omni))}</span></div><div class="list-meta">Managed provider/model routing gateway · ${escapeHtml(omni.installed?`v${omni.installed_version||"installed"}`:"Not installed")}</div></div><button class="btn models-header-action" id="a31OmniCredentials">Manage Credentials</button></div><div class="widget-body omni-runtime-overview"><div class="toolbar runtime-actions">${a31ComponentButtons("omniroute",omni)}</div><div id="a31-omniroute-status" class="page-subtitle">${a31RuntimeErrorSummary(omni?.last_error||"")}</div></div><div class="widget-body omni-provider-layout"><label>Gateway mode<select id="omniMode"><option value="managed">Managed local</option><option value="external">External gateway</option></select></label><label>Gateway URL<input id="omniUrl" value="${escapeHtml(mode==="managed"?'http://127.0.0.1:20128/v1':localStorage.getItem('onepane:omniroute-url')||'')}"></label><label>Gateway credential<select id="omniCredential"><option value="">No gateway credential</option></select></label><label class="inline-check"><input id="omniStrict" type="checkbox" checked> Require verified strict zero-cost</label><div class="toolbar"><button class="btn" id="omniProbe">Probe</button><button class="btn primary" id="omniConnect" disabled>Connect / Reconnect</button></div><div id="omniResult" class="page-subtitle">${mode==="managed"&&omni.state!=="running"?"Managed OmniRoute is installed but stopped. Start it before probing.":"Probe before connecting."}</div></div></section></div><section class="panel-card"><div class="card-header models-card-header"><div><div class="card-title">Providers & Credentials</div><div class="list-meta">OAuth and API credentials are shown even before configuration; filter by consumer without losing available providers.</div></div><button class="btn models-header-action" id="a31OpenSecrets">Open Secrets</button></div><div class="models-filter-row"><select id="a31CloudConsumer"><option value="all">All consumers</option><option value="direct">OnePane Direct</option><option value="omniroute">OmniRoute</option></select><select id="a31CloudAuth"><option value="all">All authentication</option><option value="oauth">OAuth</option><option value="api">API key / token</option></select><select id="a31CloudStatus"><option value="all">All statuses</option><option value="connected">Connected / stored</option><option value="setup">Needs setup</option></select></div><div class="provider-tile-grid cloud-provider-grid">${directCards}${omniCards}</div></section><section class="panel-card"><div class="card-header models-card-header"><div><div class="card-title">Cloud Models</div><div class="list-meta">Registered cloud deployments eligible for OnePane routing.</div></div></div><div class="model-tile-scroll">${a31CloudModelsMarkup()}</div></section></div>`;
+  root.innerHTML=`<div class="models-single-column"><div class="models-runtime-grid"><section class="panel-card omni-unified-card"><div class="card-header models-card-header"><div><div class="card-title">OmniRoute <span class="pill ${omni.state==="running"?"good":""}">${escapeHtml(a31ComponentState(omni))}</span></div><div class="list-meta">Managed provider/model routing gateway · ${escapeHtml(omni.installed?`v${omni.installed_version||"installed"}`:"Not installed")}</div></div><button class="btn models-header-action" id="a31OmniCredentials">Manage Credentials</button></div><div class="widget-body omni-runtime-overview"><div class="toolbar runtime-actions">${a31ComponentButtons("omniroute",omni)}</div><div id="a31-omniroute-status" class="page-subtitle">${a31RuntimeErrorSummary(omni?.last_error||"")}</div></div><div class="widget-body omni-provider-layout"><label>Gateway mode<select id="omniMode"><option value="managed">Managed local</option><option value="external">External gateway</option></select></label><label>Gateway URL<input id="omniUrl" value="${escapeHtml(mode==="managed"?'http://127.0.0.1:20128/v1':localStorage.getItem('onepane:omniroute-url')||'')}"></label><label>Gateway credential<select id="omniCredential"><option value="">No gateway credential</option></select></label><label class="inline-check"><input id="omniStrict" type="checkbox" checked> Require verified strict zero-cost</label><div class="toolbar"><button class="btn" id="omniProbe">Probe</button><button class="btn primary" id="omniConnect" disabled>Connect / Reconnect</button></div><div id="omniResult" class="page-subtitle">${mode==="managed"&&omni.state!=="running"?(omni.installed?"Managed OmniRoute is stopped. Start it before probing.":"Install OmniRoute or select External gateway before connecting."):"Probe before connecting."}</div></div></section></div><section class="panel-card"><div class="card-header models-card-header"><div><div class="card-title">Providers & Credentials</div><div class="list-meta">OAuth and API credentials are shown even before configuration; filter by consumer without losing available providers.</div></div><button class="btn models-header-action" id="a31OpenSecrets">Open Secrets</button></div><div class="models-filter-row"><select id="a31CloudConsumer"><option value="all">All consumers</option><option value="direct">OnePane Direct</option><option value="omniroute">OmniRoute</option></select><select id="a31CloudAuth"><option value="all">All authentication</option><option value="oauth">OAuth</option><option value="api">API key / token</option></select><select id="a31CloudStatus"><option value="all">All statuses</option><option value="connected">Connected / stored</option><option value="setup">Needs setup</option></select></div><div class="provider-tile-grid cloud-provider-grid">${directCards}${omniCards}</div></section><section class="panel-card"><div class="card-header models-card-header"><div><div class="card-title">Cloud Models</div><div class="list-meta">Registered cloud deployments eligible for OnePane routing.</div></div></div><div class="model-tile-scroll">${a31CloudModelsMarkup()}</div></section></div>`;
   $("#a31CloudConsumer").value=a31CloudConsumerFilter;$("#omniMode").value=mode;
   const syncMode=()=>{const managed=$("#omniMode").value==="managed",url=$("#omniUrl");url.disabled=managed;if(managed)url.value="http://127.0.0.1:20128/v1";localStorage.setItem("onepane:omniroute-mode",managed?"managed":"external")};
   $("#omniMode").onchange=syncMode;syncMode();
@@ -268,6 +270,7 @@ async function a31ApplyRoutingProfile(profile,role){
 }
 async function a31RenderRoutingModels(){
   const root=$("#a31ModelsRoot");try{await qa4LoadProjectHub(false)}catch{}
+  if(!root?.isConnected)return;
   const project=a31CurrentProject(),workspace=a31CurrentWorkspace();
   if(!project){root.innerHTML='<div class="empty-state">Create or open a Project before configuring Model Routing profiles.</div>';return}
   const rows=a31RoutingProfileRows(project);
@@ -315,7 +318,8 @@ async function a31RenderDiscoverModels(){
     const [cat,deployments]=await Promise.all([apiRequest("/v1/local-ai/catalog"),apiRequest("/v1/local-ai/deployments?workspace_id="+encodeURIComponent(onepaneWorkspace)).catch(()=>null)]);
     catalog=cat;installedRefs=deploymentRefs(deployments);
     if(localProfileQA)recommendations=await a31RecommendedModels(50).catch(()=>[])
-  }catch(ex){root.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;return}
+  }catch(ex){if(root?.isConnected)root.innerHTML=`<div class="error">${escapeHtml(ex.message)}</div>`;return}
+  if(!root?.isConnected)return;
   const fits=new Map(recommendations.map(x=>[String(x.model?.model_ref||"").toLowerCase(),{fit:x.fit_level,mode:x.run_mode}]));
   root.innerHTML=`<div class="models-single-column"><section class="panel-card"><div class="card-header models-card-header"><div><div class="card-title">Discover Models</div><div class="list-meta">OnePane Verified installs remain digest-pinned; external catalogues expand discovery without weakening the trust boundary.</div></div><button class="btn models-header-action" id="a31DiscoverDetect">${localProfileQA?"Refresh hardware fit":"Detect hardware"}</button></div><div class="models-discover-controls"><input id="a31DiscoverFilter" class="catalogue-filter" placeholder="Search model, capability, quantization…"><select id="a31DiscoverSource"><option value="all">All sources</option><option value="onepane">OnePane Verified</option><option value="huggingface">Hugging Face</option><option value="huggingbay">Hugging Bay</option><option value="llmfit">llmfit</option></select><select id="a31DiscoverAvailability"><option value="all">All models</option><option value="downloadable">Downloadable only</option><option value="verification">Verification required</option><option value="unavailable">Unavailable</option><option value="recommended">Recommended for this hardware</option></select><select id="a31DiscoverSort" aria-label="Sort models"><option value="popular">Most popular</option></select><button class="btn primary" id="a31DiscoverSearch">Search catalogues</button></div><div id="a31DiscoverSourceStatus" class="page-subtitle discover-source-status"></div><div id="a31DiscoverCatalog" class="model-tile-scroll"></div><div class="discover-pagination"><span id="a31DiscoverCount" class="page-subtitle"></span><button class="btn" id="a31DiscoverMore" hidden>Load more models</button></div></section></div>`;
   const isInstalled=m=>installedRefs?.has(String(m.model_ref||m.id||"").trim().toLowerCase())===true;
@@ -368,7 +372,7 @@ async function a31RenderDiscoverModels(){
     try{
       const cursor=more?`&cursor=${encodeURIComponent(nextCursor)}`:"",order=$("#a31DiscoverSort").value;
       const out=await apiRequest(`/v1/local-ai/discovery?source=${encodeURIComponent(source)}&q=${encodeURIComponent(q)}&sort=${encodeURIComponent(order)}&limit=40${cursor}`);
-      if(epoch!==requestEpoch||!$("#a31DiscoverCatalog"))return;
+      if(epoch!==requestEpoch||!root.isConnected||!$("#a31DiscoverCatalog"))return;
       const incoming=a31Array(out?.models);
       const keys=new Set((more?external:[]).map(m=>`${m.source}:${m.id}`));
       external=more?[...external]:[];

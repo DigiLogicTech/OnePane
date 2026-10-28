@@ -164,7 +164,7 @@ function closeTab(id){
 function currentTab(){ return state.tabs.find(t=>t.id===state.activeTab) || state.tabs[0]; }
 
 function startLifecycleTimers(){ setInterval(scheduleTabLifecycle, 5000); setInterval(()=>refreshOperationalDataQA(), 15000); document.addEventListener('visibilitychange', handleVisibilityChange); PHONE_MEDIA.addEventListener?.('change', handleLayoutChange); window.addEventListener('resize', handleLayoutChange, {passive:true}); }
-function handleLayoutChange(){ document.documentElement.dataset.formFactor=isPhoneLayout()?'phone':(innerWidth<1100?'tablet':'desktop'); applyInspectorWidth(); renderMobileNav(); syncPanelRestoreButtons(); }
+function handleLayoutChange(){ document.documentElement.dataset.formFactor=isPhoneLayout()?'phone':(innerWidth<1100?'tablet':'desktop'); applyInspectorWidth(); renderMobileNav(); $('#mobileNav')?.classList.toggle('hidden',!isPhoneLayout()||$('#app')?.classList.contains('hidden')); syncPanelRestoreButtons(); }
 function handleVisibilityChange(){
   document.documentElement.dataset.uiVisibility=document.hidden?'hidden':'visible';
   const t=currentTab();
@@ -370,19 +370,26 @@ function renderTaskInspector(){
   $('#closeInspector').onclick=()=>{state.inspector='closed';$('#app').dataset.inspector='closed';persist();}; bindViewActions($('#inspector'));
 }
 function bindDrawerResize(){
-  const handle=$('#drawerResizer'); let startY=0,startH=0;
+  const handle=$('#drawerResizer');if(!handle)return;let startY=0,startH=0;
+  handle.tabIndex=0;handle.setAttribute('aria-label','Resize Logs drawer');handle.setAttribute('aria-valuemin','120');handle.setAttribute('aria-valuemax','520');
+  const resize=height=>{state.drawerHeight=Math.max(120,Math.min(520,height));document.documentElement.style.setProperty('--drawer',`${state.drawerHeight}px`);handle.setAttribute('aria-valuenow',String(state.drawerHeight));};
+  handle.setAttribute('aria-valuenow',String(state.drawerHeight));
   handle.onpointerdown=e=>{if(state.drawer!=='open')return;startY=e.clientY;startH=state.drawerHeight;handle.setPointerCapture(e.pointerId);};
-  handle.onpointermove=e=>{if(!handle.hasPointerCapture(e.pointerId))return; state.drawerHeight=Math.max(120,Math.min(520,startH+(startY-e.clientY))); document.documentElement.style.setProperty('--drawer',`${state.drawerHeight}px`);};
+  handle.onpointermove=e=>{if(!handle.hasPointerCapture(e.pointerId))return;resize(startH+(startY-e.clientY));};
   handle.onpointerup=e=>{if(handle.hasPointerCapture(e.pointerId))handle.releasePointerCapture(e.pointerId);persist();};
+  handle.onkeydown=e=>{if(state.drawer!=='open'||isPhoneLayout()||!['ArrowUp','ArrowDown','Home','End'].includes(e.key))return;e.preventDefault();resize(e.key==='Home'?120:e.key==='End'?520:Number(state.drawerHeight)+(e.key==='ArrowUp'?1:-1)*(e.shiftKey?40:10));persist();};
 }
 function inspectorWidthCap(){return Math.max(280,Math.min(720,Math.floor(innerWidth*0.48)));}
 function applyInspectorWidth(){
   const cap=inspectorWidthCap(),width=Math.max(280,Math.min(cap,Number(state.inspectorWidth)||360));
   state.inspectorWidth=width;
   document.documentElement.style.setProperty('--inspector-open',`${width}px`);
+  const handle=$('#inspectorResizer');if(handle){handle.setAttribute('aria-valuemin','280');handle.setAttribute('aria-valuemax',String(cap));handle.setAttribute('aria-valuenow',String(width));}
 }
 function bindInspectorResize(){
   const handle=$('#inspectorResizer');if(!handle)return;let startX=0,startW=0;
+  handle.tabIndex=0;
+  handle.onkeydown=e=>{if(state.inspector!=='open'||isPhoneLayout()||!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();state.inspectorWidth=e.key==='Home'?280:e.key==='End'?inspectorWidthCap():Number(state.inspectorWidth)+(e.key==='ArrowLeft'?1:-1)*(e.shiftKey?40:10);applyInspectorWidth();persist();};
   handle.onpointerdown=e=>{if(state.inspector!=='open'||isPhoneLayout())return;startX=e.clientX;startW=Number(state.inspectorWidth)||360;handle.setPointerCapture(e.pointerId);document.documentElement.dataset.resizingInspector='true';};
   handle.onpointermove=e=>{if(!handle.hasPointerCapture(e.pointerId))return;state.inspectorWidth=Math.max(280,Math.min(inspectorWidthCap(),startW+(startX-e.clientX)));applyInspectorWidth();};
   handle.onpointerup=e=>{if(handle.hasPointerCapture(e.pointerId))handle.releasePointerCapture(e.pointerId);delete document.documentElement.dataset.resizingInspector;persist();};
@@ -723,11 +730,12 @@ async function refreshOperationalDataQA(force=false){
     const health=value(0),tasks=value(1),routines=value(2),nodes=value(3),providers=value(4),events=value(5);
     liveOps.health=liveOps.reported.health?String(health?.status||'unknown').toLowerCase():'unknown';
     liveOps.tasks=liveOps.reported.tasks&&Array.isArray(tasks)?tasks:[];
-    liveOps.routines=liveOps.reported.routines&&Array.isArray(routines)?routines:[];
+    liveOps.routines=liveOps.reported.routines&&Array.isArray(routines)?routines.map(qaTaskNormaliseRoutine):[];
     liveOps.nodes=liveOps.reported.nodes?(Array.isArray(nodes)?nodes:(nodes?.nodes||[])):[];
     liveOps.providers=liveOps.reported.providers?(Array.isArray(providers)?providers:(providers?.providers||[])):[];
     liveOps.events=liveOps.reported.events&&Array.isArray(events)?events:[];
     liveOps.lastRefresh=Date.now();syncLiveNotifications();
+    if($('#bottomDrawer')?.dataset.state==='open')renderDrawer();
     if(currentTab()?.route==='operations')renderOperations();
   })().finally(()=>{operationsRefreshInFlight=null;});
   return operationsRefreshInFlight;
@@ -854,13 +862,27 @@ function openWorkspaceComponentPicker(){
   $$('[data-add-ws]', $('#overlayRoot')).forEach(b=>b.onclick=()=>{const [type,title]=catalogue.find(x=>x[0]===b.dataset.addWs);state.workspaceWidgets.push({id:`ww-${type}-${Date.now().toString(36)}`,title,type,col:4,row:4});persist();closeModal();renderWorkspaces();});
 }
 
+let qaModalReturnFocus=null;
 function openModal(title,body,footer=''){
   closePopover();
   const root=$('#overlayRoot');
-  root.innerHTML=`<div class="overlay modal-backdrop"><section class="qa-modal" role="dialog" aria-modal="true"><div class="component-picker-header"><div><h2>${escapeHtml(title)}</h2></div><button class="icon-button" data-close-modal>×</button></div><div class="qa-modal-body">${body}</div>${footer?`<div class="qa-modal-footer">${footer}</div>`:''}</section></div>`;
+  if(!root.querySelector('.qa-modal'))qaModalReturnFocus=document.activeElement;
+  root.innerHTML=`<div class="overlay modal-backdrop"><section class="qa-modal" role="dialog" aria-modal="true" aria-labelledby="qaModalTitle" tabindex="-1"><div class="component-picker-header"><div><h2 id="qaModalTitle">${escapeHtml(title)}</h2></div><button class="icon-button" aria-label="Close dialog" data-close-modal>×</button></div><div class="qa-modal-body">${body}</div>${footer?`<div class="qa-modal-footer">${footer}</div>`:''}</section></div>`;
   $('[data-close-modal]',root).onclick=closeModal;root.firstElementChild.onclick=e=>{if(e.target===root.firstElementChild)closeModal();};
+  const dialog=$('.qa-modal',root);
+  const focusable=()=>$$('button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])',dialog).filter(el=>el.getClientRects().length);
+  root.onkeydown=e=>{
+    if(!root.contains(dialog))return;
+    if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeModal();return}
+    if(e.key!=='Tab')return;
+    const items=focusable(),first=items[0],last=items[items.length-1];
+    if(!first){e.preventDefault();dialog.focus();return}
+    if(e.shiftKey&&(document.activeElement===first||document.activeElement===dialog)){e.preventDefault();last.focus()}
+    else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}
+  };
+  ($('input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled])',dialog)||focusable()[0]||dialog).focus();
 }
-function closeModal(){closePopover();const r=$('#overlayRoot');if(r)r.innerHTML='';}
+function closeModal(){closePopover();const r=$('#overlayRoot');if(r){r.innerHTML='';r.onkeydown=null;}const previous=qaModalReturnFocus;qaModalReturnFocus=null;if(previous?.isConnected)previous.focus();}
 function notice(text,kind='good'){const r=$('#overlayRoot');r.innerHTML=`<div class="toast ${kind}">${escapeHtml(text)}</div>`;setTimeout(()=>{if(r.textContent.includes(text))r.innerHTML='';},2600);}
 
 async function renderTasks(){
@@ -894,7 +916,7 @@ function openProjectDialog(initialObjective=''){
       const p=await apiRequest('/v1/projects',{method:'POST',body:JSON.stringify({
         workspace_id:onepaneWorkspace,name:f.name,description:f.description,
         create_starter_workspace:true,
-        project_policy:{onepane_operations:{version:1,mode:f.operating_mode||'autonomous_project'},
+        project_policy:{onepane_ui:{workspaces:[qa4DefaultWorkspace({})]},onepane_operations:{version:1,mode:f.operating_mode||'autonomous_project'},
           feature_policy:{AutonomousRoutines:f.autonomous_local_tasks?'enabled':'disabled'}}
       })});
       uiProjects.unshift(p);closeModal();renderProjects();
@@ -1208,7 +1230,7 @@ async function omniQA(connect){
 }
 
 /* === QA4 product architecture consolidation: Projects -> Workspaces, unified Tasks, Models + Cloud Providers, contextual Inspector === */
-const QA4_ROUTE_ALIASES={workspaces:'projects',sandboxes:'projects',providers:'models',routines:'tasks'};
+const QA4_ROUTE_ALIASES={sandboxes:'projects',providers:'models',routines:'tasks'};
 navItems.splice(0,navItems.length,...navItems.filter(([route])=>!Object.prototype.hasOwnProperty.call(QA4_ROUTE_ALIASES,route)));
 pages.projects.title='Projects';
 pages.models.title='Models';
@@ -1217,7 +1239,7 @@ state.tabs=state.tabs.filter((t,i,a)=>i===a.findIndex(x=>x.id===t.id));
 if(!state.tabs.some(t=>t.id===state.activeTab))state.activeTab=state.tabs[0]?.id||'tab-operations';
 persist();
 
-let qa4ProjectHub={projects:[],activeProjectID:'',activeWorkspaceID:'',catalog:[],providers:[],providerPresets:[],agentPresets:[],routines:[],candidates:[]};
+let qa4ProjectHub={projects:[],activeProjectID:localStorage.getItem('onepane:last-project')||'',activeWorkspaceID:'',catalog:[],providers:[],providerPresets:[],agentPresets:[],routines:[],candidates:[]};
 let qa4Inspector={kind:'system',id:'system',title:'OnePane',data:{}};
 let qa4InspectorTab='overview';
 const QA4_INSPECTOR_TAB_KEY='onepane.inspector.tabs.v2';
@@ -1285,8 +1307,8 @@ async function qa4LoadProjectHub(force=false){
     apiRequest(`/v1/scheduler/candidates?workspace_id=${qs}&capability_id=inference.general&role_name=general`).catch(()=>[])
   ]);
   qa4ProjectHub.projects=Array.isArray(projects)?projects:[];qa4ProjectHub.catalog=Array.isArray(catalog)?catalog:[];qa4ProjectHub.providers=Array.isArray(providers)?providers:[];qa4ProjectHub.providerPresets=Array.isArray(presets)?presets:[];qa4ProjectHub.agentPresets=Array.isArray(agents)?agents:[];qa4ProjectHub.routines=Array.isArray(routines)?routines:[];qa4ProjectHub.candidates=Array.isArray(candidates)?candidates:[];
-  if(!qa4ProjectHub.activeProjectID&&qa4ProjectHub.projects[0])qa4ProjectHub.activeProjectID=qa4ProjectHub.projects[0].id;
-  const p=qa4ActiveProject();if(p){const rows=qa4Workspaces(p);if(!rows.some(w=>w.id===qa4ProjectHub.activeWorkspaceID))qa4ProjectHub.activeWorkspaceID=rows[0]?.id||'';}
+  if(!qa4ProjectHub.projects.some(p=>p.id===qa4ProjectHub.activeProjectID))qa4ProjectHub.activeProjectID=qa4ProjectHub.projects[0]?.id||'';
+  const p=qa4ActiveProject();if(p){const rows=qa4Workspaces(p),remembered=localStorage.getItem('onepane:last-workspace:'+p.id)||'';if(!rows.some(w=>w.id===qa4ProjectHub.activeWorkspaceID))qa4ProjectHub.activeWorkspaceID=rows.find(w=>w.id===remembered)?.id||rows[0]?.id||'';}
 }
 
 function qa4TriggerLabel(r){const t=qa4JSON(r?.TriggerJSON||r?.trigger_json||{},{});if(t.kind==='interval')return `Every ${Math.max(1,Math.round(Number(t.every_seconds||0)/60))} min`;if(t.kind==='daily'){const days=Array.isArray(t.weekdays)&&t.weekdays.length?` · days ${t.weekdays.join(',')}`:'';return `${t.local_time||'Daily'}${days}`;}return t.kind||'Scheduled';}
@@ -1308,7 +1330,7 @@ function qa4OpenScheduledTask(){
 
 function qa4WorkspaceCatalogue(){return [['tasks','Task list'],['scheduled','Scheduled tasks'],['models','Model routing'],['nodes','Nodes'],['activity','Recent activity'],['attention','Attention'],['notes','Notepad'],['chat','Model chat']];}
 function qa4WorkspaceWidgetContent(w,project,workspace){
-  if(w.type==='tasks'){const rows=liveOps.tasks.filter(t=>!t.project_id||t.project_id===project.id).slice(0,8);return rows.length?`<ul class="list">${rows.map(t=>`<li class="list-row" data-inspect-kind="task" data-inspect-id="${escapeHtml(t.id)}"><div class="list-main"><div class="list-title">${escapeHtml(t.objective||t.id)}</div><div class="list-meta">${escapeHtml(t.state||'created')}</div></div></li>`).join('')}</ul>`:'<div class="empty-state compact">No tasks for this project.</div>';}
+  if(w.type==='tasks'){const rows=qa6ProjectTasks(project).slice(0,8);return rows.length?`<ul class="list">${rows.map(t=>`<li class="list-row" data-inspect-kind="task" data-inspect-id="${escapeHtml(t.id)}"><div class="list-main"><div class="list-title">${escapeHtml(t.objective||t.id)}</div><div class="list-meta">${escapeHtml(t.state||'created')}</div></div></li>`).join('')}</ul>`:'<div class="empty-state compact">No tasks for this project.</div>';}
   if(w.type==='scheduled'){return qa4ProjectHub.routines.length?`<ul class="list">${qa4ProjectHub.routines.slice(0,8).map(r=>`<li class="list-row" data-inspect-kind="routine" data-inspect-id="${escapeHtml(r.id)}"><div class="list-main"><div class="list-title">${escapeHtml(r.name||qa4RoutineObjective(r))}</div><div class="list-meta">${escapeHtml(qa4TriggerLabel(r))}</div></div></li>`).join('')}</ul>`:'<div class="empty-state compact">No scheduled tasks.</div>';}
   if(w.type==='models'){const o=workspace.orchestration||{},mode=typeof qa8Mode==='function'?qa8Mode(o.mode):(o.mode==='team'||o.mode==='council'?o.mode:'direct'),direct=o.supervisor||{},active=mode==='team'?(o.team||{}):mode==='council'?(o.council||{}):direct;return `<div class="widget-body"><strong>${escapeHtml(titleCase(mode))}</strong><div class="list-meta">Primary: ${escapeHtml(active.model||'auto')} · ${escapeHtml(active.agent||(mode==='direct'?'agent.md':'onepane-default'))}</div><div class="list-meta">Modes: Direct · Team · Council</div></div>`;}
   if(w.type==='nodes')return liveOps.nodes.length?`<ul class="list">${liveOps.nodes.slice(0,6).map(n=>`<li class="list-row" data-inspect-kind="node" data-inspect-id="${escapeHtml(n.id||n.node_id||'local')}"><div class="list-main"><div class="list-title">${escapeHtml(n.display_name||n.node_id||n.id||'Node')}</div><div class="list-meta">${escapeHtml(n.status||n.state||'registered')}</div></div></li>`).join('')}</ul>`:'<div class="empty-state compact">No node records.</div>';
@@ -1621,7 +1643,7 @@ let qa6EventSource=null,qa6StreamWorkspace='',qa6LiveRenderTimer=null;
 
 function qa6Meta(type){return QA6_COMPONENTS[type]||{title:titleCase(type),description:'OnePane component',multiple:true,size:'medium'};}
 function qa6Payload(e){const p=e?.payload;try{return p&&typeof p==='object'?p:JSON.parse(p||'{}')}catch{return {}}}
-function qa6ProjectTasks(project){return liveOps.tasks.filter(t=>!t.project_id||t.project_id===project.id);}
+function qa6ProjectTasks(project){return project?.id?liveOps.tasks.filter(t=>t.project_id===project.id):[];}
 function qa6ActiveTask(project,w={}){const rows=qa6ProjectTasks(project),wanted=w?.config?.task_id;if(wanted&&wanted!=='auto'){const found=rows.find(t=>t.id===wanted);if(found)return found;}return rows.find(t=>!['complete','completed','cancelled','failed'].includes(String(t.state||'').toLowerCase()))||rows[0]||null;}
 function qa6EventMatchesTask(e,taskID){if(!taskID)return false;const p=qa6Payload(e);return (e.aggregate_type==='task'&&e.aggregate_id===taskID)||String(p.task_id||'')===String(taskID);}
 function qa6ProjectEvents(project){const ids=new Set(qa6ProjectTasks(project).map(t=>String(t.id)));return liveOps.events.filter(e=>{const p=qa6Payload(e);return (e.aggregate_type==='task'&&ids.has(String(e.aggregate_id)))||ids.has(String(p.task_id||''))||String(p.project_id||'')===String(project.id);});}

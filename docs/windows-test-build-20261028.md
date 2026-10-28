@@ -1,5 +1,7 @@
 # Windows current-product test build — 28 October 2026
 
+**Provisional / superseded handoff status:** the subsequent real UI walkthrough found blocking defects. The user has approved a practical UI refresh. Do not use the historical readiness statements below as UI/UX acceptance. See `ui-ux-functional-review-20261028.md` and `ui-refresh-execution-plan.md`; build a new Windows test package only after the refreshed UI is reviewed and regression checked.
+
 The user resumed Windows-only work and explicitly selected **a testable installer of the current product, with unfinished RC11 work documented**. Ubuntu and full formal RC11 completion are deferred. This is a separate milestone; the existing formal RC11 packaging builder, protected approvals and release acceptance criteria remain unchanged.
 
 ## Source and artifact identity

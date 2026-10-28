@@ -82,6 +82,12 @@ function qaTaskRoutineObjective(r){
   return p.objective||r.name||'Scheduled task';
 }
 
+function qaTaskNormaliseRoutine(r){
+  return {...r,id:r.id??r.ID,name:r.name??r.Name,status:r.status??r.Status,
+    timezone:r.timezone??r.Timezone,updated_at:r.updated_at??r.UpdatedAt,
+    trigger_json:r.trigger_json??r.TriggerJSON,policy_json:r.policy_json??r.PolicyJSON};
+}
+
 function qaTaskRoutineEndLabel(r){
   const t=qa4JSON(r?.TriggerJSON||r?.trigger_json||{},{}),p=qa4JSON(r?.PolicyJSON||r?.policy_json||{},{});
   if(Number(p.max_occurrences||0)>0)return `After ${Number(p.max_occurrences)} run${Number(p.max_occurrences)===1?'':'s'}`;
@@ -131,7 +137,7 @@ renderTasks=async function(){
   }
 
   liveOps.tasks=Array.isArray(tasks)?tasks:[];
-  liveOps.routines=Array.isArray(routines)?routines:[];
+  liveOps.routines=Array.isArray(routines)?routines.map(qaTaskNormaliseRoutine):[];
   liveOps.reported.tasks=true;
   liveOps.reported.routines=true;
   qa4ProjectHub.routines=liveOps.routines;
@@ -187,7 +193,7 @@ qa4OpenScheduledTask=async function(){
       <label>Timezone<input name="timezone" value="${escapeHtml(tz)}"></label>
     </div>
     <div id="qa4Interval"><label>Every (minutes)<input name="minutes" type="number" min="1" value="60"></label></div>
-    <div id="qa4Daily" class="hidden"><label>Local time<input name="local_time" type="time" value="08:00"></label><label>Weekdays (1=Mon … 7=Sun)<input name="weekdays" value="1,2,3,4,5"></label></div>
+    <div id="qa4Daily" class="hidden"><label>Local time<input name="local_time" type="time" value="08:00"></label><fieldset class="schedule-weekdays"><legend>Run on</legend>${['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map((day,i)=>`<label class="inline-check"><input type="checkbox" name="weekdays" value="${i+1}" ${i<5?'checked':''}>${day}</label>`).join('')}</fieldset></div>
     <div class="form-grid">
       <label>Priority<input name="priority" type="number" value="0" min="-100" max="100"></label>
       <label>End condition<select name="end_mode" id="qa4RoutineEndMode"><option value="none">No end</option><option value="count">After N runs</option><option value="until">Until date / time</option></select></label>
@@ -211,10 +217,11 @@ qa4OpenScheduledTask=async function(){
 
   $('#qa4RoutineForm').onsubmit=async e=>{
     e.preventDefault();
-    const f=Object.fromEntries(new FormData(e.currentTarget));
+    const formData=new FormData(e.currentTarget),f=Object.fromEntries(formData);
     const trigger=f.kind==='interval'
       ?{kind:'interval',every_seconds:Math.max(60,Number(f.minutes||1)*60)}
-      :{kind:'daily',local_time:f.local_time||'08:00',weekdays:String(f.weekdays||'').split(',').map(x=>Number(x.trim())).filter(x=>x>=1&&x<=7)};
+      :{kind:'daily',local_time:f.local_time||'08:00',weekdays:formData.getAll('weekdays').map(Number).filter(x=>x>=1&&x<=7)};
+    if(f.kind==='daily'&&!trigger.weekdays.length){$('#qa4RoutineError').textContent='Select at least one day.';return}
     const policy={catch_up:'latest',max_catch_up:10,objective:f.objective,priority:Number(f.priority||0)};
     if(f.project_id)policy.project_id=f.project_id;
     if(f.project_workspace_id)policy.project_workspace_id=f.project_workspace_id;

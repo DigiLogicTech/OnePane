@@ -75,6 +75,7 @@ function a35OpenWorkspace(projectID,workspaceID=""){
   if(!project)return;
   a35CancelWorkspaceEdit();
   qa4ProjectHub.activeProjectID=projectID;
+  localStorage.setItem('onepane:last-project',projectID);
   const rows=qa4Workspaces(project);
   const remembered=localStorage.getItem("onepane:last-workspace:"+projectID)||"";
   const wanted=workspaceID||remembered;
@@ -312,7 +313,7 @@ renderNav=function(){
     const activeModelLeaf=nav.querySelector('.model-nav-child.active');
     modelsButton.classList.toggle('active',route==='models'&&!activeModelLeaf);
   }
-  $('.nav-item,.project-nav-project,.project-nav-workspace,.model-nav-child',nav)
+  $$('.nav-item,.project-nav-project,.project-nav-workspace,.model-nav-child',nav)
     .forEach(button=>{
       if(button.classList.contains('active'))button.setAttribute('aria-current','page');
       else button.removeAttribute('aria-current');
@@ -321,7 +322,7 @@ renderNav=function(){
   // item should still expose the correct accessible route state.
   const mobile=$('#mobileNav');
   if(mobile){
-    $('[data-mobile-route]',mobile).forEach(button=>{
+    $$('[data-mobile-route]',mobile).forEach(button=>{
       if(button.classList.contains('active'))button.setAttribute('aria-current','page');
       else button.removeAttribute('aria-current');
     });
@@ -413,7 +414,9 @@ qa6BindProjectComponents=function(project,workspace){
     if(!supported.has(target)){button.remove();return}
     button.dataset.qa6InspectorTarget=target;
     button.title=`Open ${qa6Meta(target).title} in Inspector`;
+    button.setAttribute('aria-label',button.title);
   });
+  $$('[data-qa6-max]',root).forEach(button=>{const widget=(workspace.widgets||[]).find(x=>x.id===button.dataset.qa6Max);button.setAttribute('aria-label',`${button.title} ${widget?.title||widget?.type||'component'}`);});
 };
 
 function a35SyncInspectorContext(){

@@ -1,6 +1,18 @@
 # Physical CPU evidence — 2026-10-28 Brisbane
 
-Status: **standalone CPU inference passed; OnePane-managed inference acceptance remains open**. This is not final-source, installed desktop or release acceptance.
+Status: **bounded OnePane-managed CPU smoke passed for Windows Test2; broad lifecycle, installed desktop and release acceptance remain open**. Earlier attempts below are retained as historical evidence.
+
+## Windows Test2 managed CPU smoke
+
+Exact final test-installer backend `649fffb25f99d79a0de97ba42d4118d8a7fc078f`, version `0.1.0-alpha.3.3-windows-test.2+649fffb2`, passed normal first-run authentication, managed Gemma3 1B Q4_K_M installation/Agent Check, actual testbed inference and normal abort. CPU-only placement was asserted and independently observed through the owned `b11430/cpu/llama-server.exe`; actual response `READY`,37prompt/3completion tokens,4558ms request including startup. Engine RSS971464704bytes/private270049280bytes is one point observation, not peak or endurance evidence. No production admission or resource override was granted.
+
+The tested backend SHA-256 matches the MSI's extracted payload (`1780c298ab00f712f35d66b129e092f26d973460cf4ad876259aa13fd848c90f`). Model and runtime executable hashes match the previously pinned values. Normal abort left no inference descendant or runtime listener; the backend's separately identified pre-existing console host remained until backend teardown. An independent post-cleanup observation found none of the previously observed test descendants. This corrects the earlier harness's overbroad console-host assertion without relabelling its failed record.
+
+Evidence: `D:\Codex\OnePane\.tools\physical-onepane-cpu-20261028-06\result.json`, with reviewed summary `D:\Codex\OnePane\builds\windows-test-20261028-02\physical-validation.json`. The MSI is a user-authorized current-product test build, not formal RC11. Installed SCM/desktop operation, populated upgrades, queue/swap, active leases, GPU/Colibri/OmniRoute and autonomy remain unverified.
+
+Attempt04 on6ec82154 failed its tree-stop under sandbox restrictions; a disposable owned-process taskkill probe reproduced Access denied. Attempt05 outside that restriction returned real inference and stopped the engine, but exposed CPU-only placement falling through to automatic Vulkan sharding on dual-compatible GPUs. Its harness also misclassified the backend console host as a model descendant. Both raw results remain not passed. Source fix649fffb2 limits automatic sharding to automatic mode or explicit sharding, preserving CPU/hybrid intent and CPU memory limits. Test1 was superseded; Test2 contains the fix.
+
+## Earlier standalone and developer attempts
 
 The existing catalogue-verified Gemma 3 1B Q4_K_M model and an existing llama.cpp b11430 CPU runtime were exercised offline on loopback in a new scratch directory. No existing application, user database, model, runtime installation or service was modified. The source checkout was dirty; the standalone test is not a build from that checkout.
 

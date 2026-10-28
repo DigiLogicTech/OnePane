@@ -71,7 +71,8 @@ function qaTaskTriggerLabel(r){
   const t=qa4JSON(r?.TriggerJSON||r?.trigger_json||{},{});
   if(t.kind==='interval')return `Every ${Math.max(1,Math.round(Number(t.every_seconds||0)/60))} min`;
   if(t.kind==='daily'){
-    const days=Array.isArray(t.weekdays)&&t.weekdays.length?` · days ${t.weekdays.join(',')}`:'';
+    const names=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    const days=Array.isArray(t.weekdays)&&t.weekdays.length?` · ${t.weekdays.map(day=>names[Number(day)-1]||day).join(', ')}`:'';
     return `${t.local_time||'Daily'}${days}`;
   }
   return t.kind||'Scheduled';
@@ -111,15 +112,23 @@ async function qaTaskArchive(task,restore=false){
   }
 }
 
+function qaTaskFilterRows(rows,{query='',project='',state=''}={}){
+  const search=String(query).trim().toLocaleLowerCase();
+  return rows.filter(t=>(!project||(project==='global'?!t.project_id:t.project_id===project))&&
+    (!state||t.state===state)&&(!search||[t.objective,t.id,qaTaskProjectName(t.project_id)].some(value=>String(value||'').toLocaleLowerCase().includes(search))));
+}
+
 renderTasks=async function(){
-  $('#viewHost').innerHTML=`<section class="page">${pageHeader('Tasks','One-off execution plus recurring and scheduled work','<button class="btn" id="newScheduledTask">New scheduled task</button><button class="btn primary" id="newTaskButton">New task</button>')}
+  $('#viewHost').innerHTML=`<section class="page tasks-page">${pageHeader('Tasks','Track work, resolve blockers and review results.','<button class="btn" id="newScheduledTask">Schedule task</button><button class="btn primary" id="newTaskButton">New task</button>')}
     <div class="subtabs">
       <button class="subtab active" data-task-tab="current">Task list</button>
       <button class="subtab" data-task-tab="scheduled">Recurring / Scheduled</button>
       <button class="subtab" data-task-tab="archived">Archived</button>
     </div>
+    <div class="task-filters" id="taskFilters"><input type="search" id="taskSearch" aria-label="Find a task" placeholder="Find a task…"><select id="taskProjectFilter" aria-label="Filter tasks by project"><option value="">All projects</option></select><select id="taskStateFilter" aria-label="Filter tasks by state"><option value="">All states</option></select><span id="taskResultCount" class="project-result-count" role="status"></span></div>
     <div id="tasksBody" class="table-shell"><div class="widget-body">Loading tasks…</div></div>
   </section>`;
+  const host=$('#tasksBody');
   $('#newTaskButton').onclick=openNewTask;
   $('#newScheduledTask').onclick=qa4OpenScheduledTask;
   await qa4LoadProjectHub(false);
@@ -132,9 +141,10 @@ renderTasks=async function(){
       apiRequest(`/v1/routines?workspace_id=${encodeURIComponent(onepaneWorkspace)}`)
     ]);
   }catch(ex){
-    $('#tasksBody').innerHTML=`<div class="widget-body error">${escapeHtml(ex.message)}</div>`;
+    if(host.isConnected)host.innerHTML=`<div class="widget-body error">${escapeHtml(ex.message)}</div>`;
     return;
   }
+  if(!host.isConnected)return;
 
   liveOps.tasks=Array.isArray(tasks)?tasks:[];
   liveOps.routines=Array.isArray(routines)?routines.map(qaTaskNormaliseRoutine):[];
@@ -143,17 +153,20 @@ renderTasks=async function(){
   qa4ProjectHub.routines=liveOps.routines;
   syncLiveNotifications();
   const archivedTasks=Array.isArray(archived)?archived:[];
+  $('#taskProjectFilter').innerHTML='<option value="">All projects</option><option value="global">Global tasks</option>'+qa4ProjectHub.projects.map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name||p.id)}</option>`).join('');
+  $('#taskStateFilter').innerHTML='<option value="">All states</option>'+[...new Set([...liveOps.tasks,...archivedTasks].map(t=>t.state).filter(Boolean))].sort().map(value=>`<option value="${escapeHtml(value)}">${escapeHtml(titleCase(value.replaceAll('_',' ')))}</option>`).join('');
 
   const taskRows=(rows,restore=false)=>rows.length?rows.map(t=>`<tr data-inspect-kind="task" data-inspect-id="${escapeHtml(t.id)}">
     <td><strong>${escapeHtml(t.objective||t.id)}</strong><div class="list-meta">${escapeHtml(t.project_id?qaTaskProjectName(t.project_id):t.id||'')}${t.project_workspace_id?` · ${escapeHtml(t.project_workspace_id)}`:''}</div></td>
-    <td><span class="pill ${['failed','blocked','waiting_approval'].includes(t.state)?'warn':t.state==='complete'?'good':''}">${escapeHtml(t.state||'')}</span></td>
-    <td>${escapeHtml(t.scheduling_class||'')}</td>
+    <td><span class="pill ${['failed','blocked','waiting_approval'].includes(t.state)?'warn':t.state==='complete'?'good':''}">${escapeHtml(titleCase(String(t.state||'').replaceAll('_',' ')))}</span></td>
+    <td>${escapeHtml(({user_interactive:'Interactive',normal_task:'Normal',background_routine:'Background'})[t.scheduling_class]||t.scheduling_class||'')}</td>
     <td>${Number(t.priority||0)}</td>
     <td>${t.updated_at?escapeHtml(new Date(Number(t.updated_at)).toLocaleString()):''}</td>
-    <td><button class="btn tiny" data-task-archive="${escapeHtml(t.id)}" data-task-restore="${restore?'1':'0'}">${restore?'Restore':'Archive'}</button></td>
-  </tr>`).join(''):`<tr><td colspan="6" class="muted-cell">${restore?'No archived tasks.':'No tasks yet.'}</td></tr>`;
+    <td><div class="task-row-actions"><button class="btn tiny" data-task-open="${escapeHtml(t.id)}" aria-label="Inspect task: ${escapeHtml(t.objective||t.id)}">Inspect</button><button class="btn tiny" data-task-archive="${escapeHtml(t.id)}" data-task-restore="${restore?'1':'0'}">${restore?'Restore':'Archive'}</button></div></td>
+  </tr>`).join(''):`<tr><td colspan="6" class="muted-cell">${$('#taskSearch').value||$('#taskProjectFilter').value||$('#taskStateFilter').value?'No tasks match these filters.':restore?'No archived tasks.':'No tasks yet. Create a task to get started.'}</td></tr>`;
 
   const bindTaskActions=()=>{
+    $$('[data-task-open]',host).forEach(b=>b.onclick=e=>{e.stopPropagation();const t=[...liveOps.tasks,...archivedTasks].find(t=>t.id===b.dataset.taskOpen);if(t)qa4Inspect('task',t.id,t.objective||t.id);});
     $$('[data-task-archive]',$('#tasksBody')).forEach(b=>b.onclick=e=>{
       e.preventDefault();e.stopPropagation();
       const rows=b.dataset.taskRestore==='1'?archivedTasks:liveOps.tasks;
@@ -164,17 +177,25 @@ renderTasks=async function(){
   };
 
   const draw=(tab='current')=>{
+    $('#taskFilters').hidden=tab==='scheduled';
     $$('[data-task-tab]').forEach(b=>b.classList.toggle('active',b.dataset.taskTab===tab));
     if(tab==='scheduled'){
       $('#tasksBody').innerHTML=`<table class="data-table"><thead><tr><th>Name / Objective</th><th>Schedule</th><th>Status</th><th>Timezone</th><th>Updated</th></tr></thead><tbody>${qa4ProjectHub.routines.length?qa4ProjectHub.routines.map(r=>`<tr data-inspect-kind="routine" data-inspect-id="${escapeHtml(r.id)}"><td><strong>${escapeHtml(r.name||qaTaskRoutineObjective(r))}</strong><div class="list-meta">${escapeHtml(qaTaskRoutineObjective(r))}</div></td><td><div>${escapeHtml(qaTaskTriggerLabel(r))}</div><div class="list-meta">${escapeHtml(qaTaskRoutineEndLabel(r))}</div></td><td><span class="pill ${r.status==='active'?'good':''}">${escapeHtml(r.status||'active')}</span></td><td>${escapeHtml(r.timezone||'')}</td><td>${r.updated_at?escapeHtml(new Date(Number(r.updated_at)).toLocaleString()):''}</td></tr>`).join(''):'<tr><td colspan="5" class="muted-cell">No recurring or scheduled tasks yet.</td></tr>'}</tbody></table>`;
       bindViewActions($('#tasksBody'));
       return;
     }
-    $('#tasksBody').innerHTML=`<table class="data-table"><thead><tr><th>Objective</th><th>State</th><th>Scheduling</th><th>Priority</th><th>Updated</th><th>Actions</th></tr></thead><tbody>${taskRows(tab==='archived'?archivedTasks:liveOps.tasks,tab==='archived')}</tbody></table>`;
+    const all=tab==='archived'?archivedTasks:liveOps.tasks;
+    const filtered=qaTaskFilterRows(all,{query:$('#taskSearch').value,project:$('#taskProjectFilter').value,state:$('#taskStateFilter').value});
+    $('#taskResultCount').textContent=`${filtered.length} of ${all.length} loaded tasks`;
+    $('#tasksBody').innerHTML=`<table class="data-table"><thead><tr><th>Objective</th><th>State</th><th>Scheduling</th><th>Priority</th><th>Updated</th><th>Actions</th></tr></thead><tbody>${taskRows(filtered,tab==='archived')}</tbody></table>`;
     bindTaskActions();
   };
 
-  $$('[data-task-tab]').forEach(b=>b.onclick=()=>draw(b.dataset.taskTab));
+  let selectedTab='current';
+  $$('[data-task-tab]').forEach(b=>b.onclick=()=>{selectedTab=b.dataset.taskTab;draw(selectedTab)});
+  $('#taskSearch').oninput=()=>draw(selectedTab);
+  $('#taskProjectFilter').onchange=()=>draw(selectedTab);
+  $('#taskStateFilter').onchange=()=>draw(selectedTab);
   draw('current');
 };
 

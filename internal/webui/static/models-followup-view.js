@@ -34,6 +34,9 @@ qa4InspectorOverview=function(){
  if(s.error)return `<div class="error">${escapeHtml(s.error)}</div>`;
  return `<div class="model-spec-inspector readable-model-spec"><div class="spec-readable-head"><strong>${escapeHtml(d.display_name||d.model_ref||"Local model")}</strong><span class="pill">${escapeHtml(d.status||"Unknown")}</span></div>${layout}${context}${warning}${qual}<details class="spec-technical-details"><summary>Advanced technical details and raw evidence</summary><pre class="spec-sheet-json">${escapeHtml(JSON.stringify(s,null,2))}</pre></details><button class="btn primary" id="qa5InspectorAgentCheck">Run Agent Check</button></div>`;
 };
+function a37RuntimeStatusGood(status){
+ return !/not installed|failed|error/i.test(status)&&/\binstalled\b|\brunning\b/i.test(status);
+}
 const a37LocalBase=a31RenderLocalModels;
 a31RenderLocalModels=async function(){
  await a37LocalBase();
@@ -46,7 +49,7 @@ a31RenderLocalModels=async function(){
  for(const [id,title,node] of tabs){
   const pane=document.createElement("div");pane.className="runtime-panel";pane.dataset.runtimePane=id;pane.appendChild(node);panels.appendChild(pane);
   const status=node.querySelector(".pill")?.textContent||"";
-  nav.insertAdjacentHTML("beforeend",`<button type="button" role="tab" data-runtime-tab="${id}" title="${escapeHtml(title)} · ${escapeHtml(status)}">${escapeHtml(title)} <span class="pill ${/installed|running/i.test(status)?"good":""}">${escapeHtml(status)}</span></button>`);
+  nav.insertAdjacentHTML("beforeend",`<button type="button" role="tab" data-runtime-tab="${id}" title="${escapeHtml(title)} · ${escapeHtml(status)}">${escapeHtml(title)} <span class="pill ${a37RuntimeStatusGood(status)?"good":""}">${escapeHtml(status)}</span></button>`);
  }
  grid.insertBefore(combined,hardware);
  const choose=id=>{

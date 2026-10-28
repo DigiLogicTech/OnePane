@@ -32,7 +32,7 @@ function isPhoneLayout(){ return PHONE_MEDIA.matches; }
 
 function defaultState(){
   return {
-    theme:'system', sidebar:'expanded', inspector:'open', inspectorWidth:360, drawer:'open', drawerHeight:210, approvalLevel:'medium',
+    theme:'system', sidebar:'expanded', inspector:'closed', inspectorWidth:360, drawer:'closed', drawerHeight:210, approvalLevel:'medium',
     tabs:[{id:'tab-operations',route:'operations',title:'Operations',pinned:true,state:'active',lastActive:Date.now()}],
     activeTab:'tab-operations', workspaceEdit:false, operationsEdit:false, controlChatCollapsed:false,
     operationsWidgets:[
@@ -394,6 +394,11 @@ function bindInspectorResize(){
   handle.onpointermove=e=>{if(!handle.hasPointerCapture(e.pointerId))return;state.inspectorWidth=Math.max(280,Math.min(inspectorWidthCap(),startW+(startX-e.clientX)));applyInspectorWidth();};
   handle.onpointerup=e=>{if(handle.hasPointerCapture(e.pointerId))handle.releasePointerCapture(e.pointerId);delete document.documentElement.dataset.resizingInspector;persist();};
   handle.ondblclick=()=>{state.inspectorWidth=360;applyInspectorWidth();persist();};
+}
+
+function openWorkbenchPanels(anchor){
+  popoverFor(anchor,`<div class="popover workbench-panel-menu"><h3>Work area</h3><p class="page-subtitle">Keep your workspace clear. Open details when you need them.</p><button class="btn" data-workbench-panel="inspector">${state.inspector==='open'?'Hide':'Show'} Inspector</button><button class="btn" data-workbench-panel="logs">${state.drawer==='open'?'Hide':'Show'} Logs</button><button class="btn primary" data-workbench-panel="focus">Focus work area</button></div>`);
+  $$('[data-workbench-panel]',$('#overlayRoot')).forEach(button=>button.onclick=()=>{const action=button.dataset.workbenchPanel;closePopover();$('#overlayRoot').innerHTML='';if(action==='inspector')setInspectorOpen(state.inspector!=='open');else if(action==='logs')setDrawerOpen(state.drawer!=='open');else{setInspectorOpen(false);setDrawerOpen(false);}});
 }
 
 function openMobileMore(){
@@ -1084,6 +1089,7 @@ function syncPanelRestoreButtons(){
 function bindShell(){
   $('#sidebarToggle').onclick=()=>setSidebarExpanded(state.sidebar!=='expanded');
   $('#newTabButton').onclick=openNewTabPicker;
+  $('#workbenchPanelsButton')?.addEventListener('click',e=>openWorkbenchPanels(e.currentTarget));
   $('#drawerToggle').onclick=()=>setDrawerOpen(false);$('#drawerRestore').onclick=()=>setDrawerOpen(true);$('#inspectorRestore').onclick=()=>setInspectorOpen(state.inspector!=='open');
   $('#userButton').onclick=()=>openUserMenu($('#userButton'));
   $$('[data-route]').forEach(b=>b.onclick=()=>openRoute(b.dataset.route));

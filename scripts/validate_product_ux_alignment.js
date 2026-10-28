@@ -132,4 +132,31 @@ for(const name of fs.readdirSync(path.join(root,'internal/webui/static')).filter
  assert(!/(?<!\$)\$\((?:'[^']*'|"[^"]*")[^)]*\)\s*\.(?:forEach|filter|map|find|some|every)\b/.test(source),name+': single-element selector used as a collection');
 }
 
+const tasksPage=read('internal/webui/static/tasks-page.js');
+const filterHelper=tasksPage.slice(tasksPage.indexOf('function qaTaskFilterRows('),tasksPage.indexOf('renderTasks=async function'));
+const filterContext={qaTaskProjectName:id=>({'p-a':'Design project','p-b':'Research project'}[id]||'')};
+vm.runInNewContext(filterHelper+'\nthis.filter=qaTaskFilterRows;',filterContext);
+const filterRows=[{id:'global-task',objective:'Review setup',state:'blocked'},
+ {id:'a',objective:'Build UI',project_id:'p-a',state:'running'},
+ {id:'b',objective:'Review evidence',project_id:'p-b',state:'blocked'}];
+assert.deepEqual(Array.from(filterContext.filter(filterRows,{query:'  DESIGN  '}),t=>t.id),['a']);
+assert.deepEqual(Array.from(filterContext.filter(filterRows,{project:'global',state:'blocked'}),t=>t.id),['global-task']);
+assert.equal(filterContext.filter(filterRows,{project:'p-a',state:'blocked'}).length,0);
+assert.equal(filterContext.filter(filterRows,{query:'<script>'}).length,0,'search is literal data');
+assert.equal(filterRows.length,3,'filtering must not mutate the authoritative task list');
+const followup=read('internal/webui/static/models-followup-view.js');
+const runtimeStatusHelper=followup.slice(followup.indexOf('function a37RuntimeStatusGood('),followup.indexOf('const a37LocalBase='));
+for(const [status,expected] of [['Not installed',false],['Failed',false],['Installed · Stopped',true],['Running',true],['Not reported',false]]){
+ assert.equal(vm.runInNewContext(runtimeStatusHelper+'\na37RuntimeStatusGood('+JSON.stringify(status)+')'),expected,status+' runtime status must be truthful');
+}
+const bootCode=canonical.slice(canonical.indexOf('function startOnePaneUI(){'));
+let bootCount=0,readyHandler;
+const bootContext={document:{readyState:'loading',addEventListener(event,handler,options){assert.equal(event,'DOMContentLoaded');assert.equal(options.once,true);readyHandler=handler}},bootOnePane(){bootCount++;return Promise.resolve()},window:{}};
+vm.runInNewContext(bootCode,bootContext);
+assert.equal(bootCount,0,'boot must wait until later feature scripts register');
+assert.equal(typeof readyHandler,'function');
+readyHandler();assert.equal(bootCount,1);
+bootContext.document.readyState='complete';
+vm.runInNewContext(bootCode,bootContext);assert.equal(bootCount,2,'already-loaded document must boot immediately');
+
 console.log('RC11 shared UX alignment: tokens, precedence, responsive shell and scope contract PASS');

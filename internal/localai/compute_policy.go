@@ -165,6 +165,14 @@ func (s *Service) SetComputePolicy(ctx context.Context, c ComputePolicyCommand) 
 		FROM managed_local_models mm JOIN local_model_install_plans p ON p.id=mm.plan_id
 		WHERE mm.deployment_id=? AND mm.status<>'removed'`, c.DeploymentID).
 		Scan(&nodeID, &runtimeName, &requiredBytes); err != nil { return ComputePolicy{}, err }
+	var instanceStatus string
+	active := false
+	if err := s.db.QueryRowContext(ctx, `SELECT status FROM local_runtime_instances WHERE deployment_id=?`, c.DeploymentID).Scan(&instanceStatus); err == nil {
+		switch instanceStatus { case "starting", "healthy", "busy", "draining": active = true }
+	}
+	leases := 0
+	if s.supervisor != nil { leases = s.supervisor.ActiveRequests(c.DeploymentID) }
+	if placementChangeInFlight(instanceStatus, leases) { return ComputePolicy{}, errPlacementInFlight }
 	var profileID string
 	if err := s.db.QueryRowContext(ctx, `SELECT id FROM local_hardware_profiles WHERE node_id=? ORDER BY detected_at DESC LIMIT 1`, nodeID).Scan(&profileID); err != nil {
 		return ComputePolicy{}, errors.New("detect hardware before changing compute placement")
@@ -197,15 +205,6 @@ func (s *Service) SetComputePolicy(ctx context.Context, c ComputePolicyCommand) 
 	runtimeID, executable, err := s.ensureComputeRuntime(ctx, nodeID, manifest)
 	if err != nil { return ComputePolicy{}, err }
 
-	active := false
-	var instanceStatus string
-	if err := s.db.QueryRowContext(ctx, `SELECT status FROM local_runtime_instances WHERE deployment_id=?`, c.DeploymentID).Scan(&instanceStatus); err == nil {
-		switch instanceStatus { case "starting", "healthy", "busy", "draining": active = true }
-	}
-	if active {
-		if err := s.supervisor.Stop(ctx, c.DeploymentID); err != nil { return ComputePolicy{}, fmt.Errorf("stop runtime before compute move: %w", err) }
-	}
-
 	var raw string
 	if err := s.db.QueryRowContext(ctx, `SELECT runtime_config_json FROM model_deployments WHERE id=?`, c.DeploymentID).Scan(&raw); err != nil { return ComputePolicy{}, err }
 	cfg := map[string]any{}
@@ -220,8 +219,12 @@ func (s *Service) SetComputePolicy(ctx context.Context, c ComputePolicyCommand) 
 	storedMode := "auto"
 	if mode != "" { storedMode = string(mode) }
 	now := s.clock.UnixMilli()
-
-	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+	oldRaw := raw
+	err = commitThenRestart(ctx, s.tx,
+		func(ctx context.Context) error { return s.supervisor.Stop(ctx, c.DeploymentID) },
+		func(ctx context.Context) error { _, err := s.supervisor.Start(ctx, c.DeploymentID); return err },
+		active, false,
+		func(ctx context.Context, tx storage.Tx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE model_deployments SET runtime_name=?,runtime_version=?,runtime_config_json=?,revision=revision+1,updated_at=? WHERE id=?`,
 			manifest.Name, manifest.Version, string(updatedCfg), now, c.DeploymentID); err != nil { return err }
 		if _, err := tx.ExecContext(ctx, `UPDATE managed_local_models SET runtime_id=?,revision=revision+1,updated_at=? WHERE deployment_id=?`, runtimeID, now, c.DeploymentID); err != nil { return err }
@@ -267,13 +270,49 @@ func (s *Service) SetComputePolicy(ctx context.Context, c ComputePolicyCommand) 
 			revision=deployment_compute_policies.revision+1,updated_by=excluded.updated_by,updated_at=excluded.updated_at`,
 			c.DeploymentID, preference, storedMode, string(prefJSON), string(reqJSON), c.ActorPrincipalID, now, now)
 		return err
-	})
+		},
+		func(ctx context.Context, tx storage.Tx) error {
+			_, err := tx.ExecContext(ctx, `UPDATE model_deployments SET runtime_config_json=?,revision=revision+1,updated_at=? WHERE id=?`, oldRaw, s.clock.UnixMilli(), c.DeploymentID)
+			return err
+		})
 	if err != nil { return ComputePolicy{}, err }
-
-	if active {
-		if _, err := s.supervisor.Start(ctx, c.DeploymentID); err != nil {
-			return ComputePolicy{}, fmt.Errorf("compute placement saved but runtime restart failed: %w", err)
-		}
-	}
 	return s.ComputePolicy(ctx, c.DeploymentID)
+}
+
+// commitThenRestart persists a placement, then restarts an idle runtime.
+// The process is not signalled until the transaction commits. A failed
+// transaction leaves it running. A failed restart writes the previous
+// placement back and starts that runtime again so the model is not left stopped.
+func commitThenRestart(ctx context.Context, tx storage.Transactor, stop, start func(context.Context) error, active, inFlight bool, apply, restore func(context.Context, storage.Tx) error) error {
+	if inFlight {
+		return errPlacementInFlight
+	}
+	if tx == nil {
+		return errors.New("compute placement transaction is unavailable")
+	}
+	if err := tx.Within(ctx, apply); err != nil {
+		return err
+	}
+	if !active {
+		return nil
+	}
+	if stop == nil || start == nil {
+		return errors.New("compute placement runtime restart is unavailable")
+	}
+	if err := stop(ctx); err != nil {
+		if rerr := tx.Within(ctx, restore); rerr != nil {
+			return fmt.Errorf("stop runtime before compute move: %v; config rollback: %w", err, rerr)
+		}
+		return fmt.Errorf("stop runtime before compute move: %w", err)
+	}
+	if err := start(ctx); err != nil {
+		if rerr := tx.Within(ctx, restore); rerr != nil {
+			return fmt.Errorf("compute placement restart failed: %v; previous placement rollback failed: %w", err, rerr)
+		}
+		if rerr := start(ctx); rerr != nil {
+			return fmt.Errorf("compute placement restart failed: %v; previous runtime restore failed: %w", err, rerr)
+		}
+		return fmt.Errorf("compute placement restart failed; previous runtime restored: %w", err)
+	}
+	return nil
 }

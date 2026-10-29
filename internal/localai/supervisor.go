@@ -423,6 +423,10 @@ type RuntimeSupervisor struct {
 	activityMu           sync.Mutex
 	activeRequests       map[string]int
 	residencyHeadroomPct int
+	// resourceProbe, when set, replaces the OS reading. Tests use it to
+	// simulate a 16 GiB host with a 6 GiB GPU without touching the machine.
+	resourceProbe func(context.Context) (LiveResources, error)
+	waitCapacity  chan struct{}
 }
 
 func NewRuntimeSupervisor(db *sql.DB, tx storage.Transactor, clk clock.Clock, dataDir string, backend ProcessBackend) *RuntimeSupervisor {
@@ -448,6 +452,39 @@ func (s *RuntimeSupervisor) SetResidencyHeadroom(percent int) {
 		percent = 50
 	}
 	s.residencyHeadroomPct = percent
+}
+
+func (s *RuntimeSupervisor) ActiveRequests(deploymentID string) int {
+	if s == nil {
+		return 0
+	}
+	s.activityMu.Lock()
+	defer s.activityMu.Unlock()
+	return s.activeRequests[deploymentID]
+}
+
+// CapacityReleased is closed when a model lease is dropped or a managed
+// process is confirmed stopped, so a task waiting on RAM or VRAM can retry
+// without the idle-unload timer.
+func (s *RuntimeSupervisor) CapacityReleased() <-chan struct{} {
+	if s == nil {
+		ch := make(chan struct{})
+		close(ch)
+		return ch
+	}
+	s.activityMu.Lock()
+	defer s.activityMu.Unlock()
+	if s.waitCapacity == nil {
+		s.waitCapacity = make(chan struct{})
+	}
+	return s.waitCapacity
+}
+
+func (s *RuntimeSupervisor) wakeCapacityLocked() {
+	if s.waitCapacity != nil {
+		close(s.waitCapacity)
+		s.waitCapacity = nil
+	}
 }
 
 // SetBusy reference-counts active inference requests so an idle reaper or
@@ -489,6 +526,7 @@ func (s *RuntimeSupervisor) SetBusy(ctx context.Context, deploymentID string, bu
  }
  if next==0{
   delete(s.activeRequests,deploymentID)
+  s.wakeCapacityLocked()
  }else{
   if s.activeRequests==nil{s.activeRequests=make(map[string]int)}
   s.activeRequests[deploymentID]=next
@@ -710,8 +748,12 @@ func (s *RuntimeSupervisor) estimatedResidentCPUMemory(ctx context.Context,nodeI
   if err=json.Unmarshal([]byte(planJSON),&rec);err!=nil||rec.Placement.Mode==""{
    return 0,errors.New("resident model memory placement is unverified")
   }
-  if rec.Placement.Mode!=PlacementCPUOnly{continue}
-  next,ok:=addManagedMemoryBytes(resident,estimate)
+  add:=estimate
+  if rec.Placement.Mode!=PlacementCPUOnly{
+   add=placementCPUAllocated(rec.Placement)
+   if add<=0{continue}
+  }
+  next,ok:=addManagedMemoryBytes(resident,add)
   if !ok{return 0,errors.New("invalid or overflowing resident CPU model memory estimate")}
   resident=next
  }
@@ -796,6 +838,161 @@ func usableManagedVRAM(total int64,headroomPct int)(int64,bool){
  return (total/100)*keep+((total%100)*keep)/100,true
 }
 
+func (s *RuntimeSupervisor) observeLiveResources(ctx context.Context, fallback Memory, gpus []GPU) LiveResources {
+	if s != nil && s.resourceProbe != nil {
+		live, err := s.resourceProbe(ctx)
+		if err != nil || live.Memory.TotalBytes <= 0 {
+			return LiveResources{Memory: fallback, GPUs: gpus}
+		}
+		if len(live.GPUs) == 0 {
+			live.GPUs = gpus
+		}
+		if live.Memory.AvailableBytes < 0 {
+			live.Memory.AvailableBytes = 0
+		}
+		return live
+	}
+	if mem, err := probeHostMemory(); err == nil && mem.TotalBytes > 0 {
+		return LiveResources{Memory: mem, GPUs: gpus}
+	}
+	if fallback.AvailableBytes < 0 {
+		fallback.AvailableBytes = 0
+	}
+	return LiveResources{Memory: fallback, GPUs: gpus}
+}
+
+type hostRAMResident struct {
+	DeploymentID string
+	Bytes        int64
+	LastUsed     int64
+	Placement    PlacementPlan
+}
+
+// snapshotHostRAM closes its cursor before return. Callers may stop models
+// afterwards without holding a SQLite read open.
+func (s *RuntimeSupervisor) snapshotHostRAM(ctx context.Context, nodeID, deploymentID string) ([]hostRAMResident, int64, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT p.memory_required_bytes,p.plan_json,i.deployment_id,i.status,
+		COALESCE(i.last_seen_at,i.started_at,i.updated_at),
+		CASE WHEN COALESCE(json_extract(d.runtime_config_json,'$.colibri_pinned'),0)=1 THEN 1 ELSE 0 END
+		FROM local_runtime_instances i
+		JOIN managed_local_models m ON m.deployment_id=i.deployment_id
+		JOIN local_model_install_plans p ON p.id=m.plan_id
+		JOIN model_deployments d ON d.id=i.deployment_id
+		WHERE i.node_id=? AND i.deployment_id<>?
+		AND (i.status IN ('starting','healthy','busy','draining')
+		 OR (i.status IN ('failed','orphaned') AND i.pid>1))
+		ORDER BY COALESCE(i.last_seen_at,i.started_at,i.updated_at) ASC LIMIT 513`, nodeID, deploymentID)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var idle []hostRAMResident
+	var kept int64
+	count := 0
+	for rows.Next() {
+		count++
+		if count > 512 {
+			return nil, 0, errors.New("too many resident managed model records for bounded RAM admission")
+		}
+		var estimate int64
+		var planJSON, deployment, status string
+		var lastUsed int64
+		var pinned int
+		if err = rows.Scan(&estimate, &planJSON, &deployment, &status, &lastUsed, &pinned); err != nil {
+			return nil, 0, err
+		}
+		var rec Recommendation
+		if err = json.Unmarshal([]byte(planJSON), &rec); err != nil || rec.Placement.Mode == "" {
+			return nil, 0, errors.New("resident model memory placement is unverified")
+		}
+		bytes := estimate
+		if rec.Placement.Mode != PlacementCPUOnly {
+			bytes = placementCPUAllocated(rec.Placement)
+		}
+		if bytes <= 0 {
+			continue
+		}
+		if status == string(RuntimeHealthy) && pinned == 0 {
+			idle = append(idle, hostRAMResident{DeploymentID: deployment, Bytes: bytes, LastUsed: lastUsed, Placement: rec.Placement})
+			continue
+		}
+		next, ok := addManagedMemoryBytes(kept, bytes)
+		if !ok {
+			return nil, 0, errors.New("invalid or overflowing resident CPU model memory estimate")
+		}
+		kept = next
+	}
+	if err = rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if err = rows.Close(); err != nil {
+		return nil, 0, err
+	}
+	return idle, kept, nil
+}
+
+// reclaimHostRAM unloads idle, unpinned models until the incoming host-RAM
+// claim fits in live free memory. Busy and pinned models are not signalled.
+// Accelerator bytes freed along the way are returned so a partial-offload
+// swap can see the VRAM those same processes released.
+func (s *RuntimeSupervisor) reclaimHostRAM(ctx context.Context, need int64, live LiveResources, idle []hostRAMResident, kept int64) (map[string]int64, error) {
+	freed := map[string]int64{}
+	before := live.Memory.AvailableBytes
+	total := live.Memory.TotalBytes
+	var reclaimed int64
+	if evaluateRAMAdmission(need, total, before, kept, 0).Fits {
+		return freed, nil
+	}
+	for _, v := range idle {
+		if evaluateRAMAdmission(need, total, before, kept, reclaimed).Fits {
+			break
+		}
+		if v.LastUsed < 0 || v.LastUsed == int64(^uint64(0)>>1) {
+			continue
+		}
+		stopped, err := s.stopIfIdleBeforeLocked(ctx, v.DeploymentID, v.LastUsed+1)
+		if err != nil {
+			return freed, err
+		}
+		if !stopped {
+			var status string
+			_ = s.db.QueryRowContext(ctx, `SELECT status FROM local_runtime_instances WHERE deployment_id=?`, v.DeploymentID).Scan(&status)
+			if status != string(RuntimeStopped) && status != string(RuntimeFailed) {
+				continue
+			}
+		}
+		next, ok := addManagedMemoryBytes(reclaimed, v.Bytes)
+		if !ok {
+			return freed, errors.New("invalid or overflowing resident CPU model memory estimate")
+		}
+		reclaimed = next
+		for _, d := range v.Placement.Devices {
+			if d.Kind != "accelerator" || d.AllocatedBytes <= 0 {
+				continue
+			}
+			k := placementKey(d)
+			sum, ok := addManagedMemoryBytes(freed[k], d.AllocatedBytes)
+			if !ok {
+				return freed, errors.New("invalid or overflowing resident accelerator allocation")
+			}
+			freed[k] = sum
+		}
+	}
+	after := before
+	if probed := s.observeLiveResources(ctx, live.Memory, live.GPUs); probed.Memory.TotalBytes > 0 {
+		after = probed.Memory.AvailableBytes
+		if probed.Memory.TotalBytes > 0 {
+			total = probed.Memory.TotalBytes
+		}
+	}
+	effective := projectedLiveFree(before, after, reclaimed)
+	final := evaluateRAMAdmission(need, total, effective, kept, 0)
+	if !final.Fits {
+		return freed, final.shortage()
+	}
+	return freed, nil
+}
+
 func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, nodeID string) error {
 	var targetBytes int64
 	var targetPlanJSON string
@@ -818,26 +1015,59 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 		p := HardwareProfile{NodeID: nodeID, OSName: "linux", Architecture: "unknown", CPU: CPU{Name: "cpu", LogicalCores: 1}, Memory: Memory{TotalBytes: 1, AvailableBytes: 1}, Storage: Storage{AvailableBytes: 1}, GPUs: gpus}
 		targetRec.Placement, _, _, _ = bestPlacement(p, targetBytes, "")
 	}
-	if targetRec.Placement.Mode == PlacementCPUOnly {
-		var profileMemory Memory
-		if err:=json.Unmarshal([]byte(rawMemory),&profileMemory);err!=nil{return err}
-		// Cached *free* memory is volatile, so use the immutable total
-		// physical RAM as a conservative hard upper bound. Keep an OS
-		// reserve even when the model is the sole active local process.
-		resident,err:=s.estimatedResidentCPUMemory(ctx,nodeID,deploymentID)
-		if err!=nil{return err}
-		if !cpuModelFitsConcurrentRAM(targetBytes,profileMemory.TotalBytes,resident){
-			return errors.New("CPU model estimated memory exceeds remaining physical system RAM budget; wait for a model to unload or choose a smaller quantisation or Node")
+	ramNeed := placementHostRAM(targetRec.Placement.Mode, targetBytes, targetRec.Placement)
+	var profileMemory Memory
+	if memErr := json.Unmarshal([]byte(rawMemory), &profileMemory); memErr != nil && ramNeed > 0 {
+		return memErr
+	}
+	live := s.observeLiveResources(ctx, profileMemory, gpus)
+	if len(live.GPUs) > 0 {
+		gpus = live.GPUs
+	}
+	var freedVRAM map[string]int64
+	if ramNeed > 0 {
+		idleRAM, keptRAM, snapErr := s.snapshotHostRAM(ctx, nodeID, deploymentID)
+		if snapErr != nil {
+			return snapErr
 		}
-		return nil
+		var reclaimable int64
+		for _, v := range idleRAM {
+			next, ok := addManagedMemoryBytes(reclaimable, v.Bytes)
+			if !ok {
+				return errors.New("invalid or overflowing resident CPU model memory estimate")
+			}
+			reclaimable = next
+		}
+		decision := evaluateRAMAdmission(ramNeed, live.Memory.TotalBytes, live.Memory.AvailableBytes, keptRAM, reclaimable)
+		if !decision.Fits {
+			return decision.shortage()
+		}
+		var reclaimErr error
+		freedVRAM, reclaimErr = s.reclaimHostRAM(ctx, ramNeed, live, idleRAM, keptRAM)
+		if reclaimErr != nil {
+			return reclaimErr
+		}
+		if targetRec.Placement.Mode == PlacementCPUOnly {
+			return nil
+		}
 	}
 	capacity := map[string]int64{}
+	liveVRAM := map[string]int64{}
+	reclaimedVRAM := map[string]int64{}
+	for key, n := range freedVRAM {
+		reclaimedVRAM[key] = n
+	}
 	for _,g:=range gpus {
 		usable,ok:=usableManagedVRAM(g.VRAMBytes,s.residencyHeadroomPct)
 		if !ok{return errors.New("managed accelerator memory profile or reserve is invalid")}
 		for _,b:=range gpuBackends(g){
 			k:=placementKey(PlacementDevice{DeviceID:g.DeviceID,Backend:b,DeviceIndex:g.DeviceIndex})
 			if usable>capacity[k]{capacity[k]=usable}
+			if g.FreeVRAMBytes>0 {
+				live,liveOK:=usableManagedVRAM(g.FreeVRAMBytes,s.residencyHeadroomPct)
+				if !liveOK{return errors.New("managed accelerator memory profile or reserve is invalid")}
+				if prev,exists:=liveVRAM[k]; !exists || live<prev {liveVRAM[k]=live}
+			}
 		}
 	}
 	target := map[string]int64{}
@@ -901,6 +1131,19 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 				used[k]>capacity[k]||n>capacity[k]-used[k]{
 				return false
 			}
+			if free, known := liveVRAM[k]; known {
+				have := free
+				if reclaimedVRAM[k] > 0 {
+					sum, ok := addManagedMemoryBytes(free, reclaimedVRAM[k])
+					if !ok || n > sum {
+						return false
+					}
+					have = sum
+				}
+				if n > have {
+					return false
+				}
+			}
 		}
 		return true
 	}
@@ -912,7 +1155,11 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 	// impossible, yet every healthy idle neighbour would be needlessly
 	// evicted first. This is conservative accounting, not VRAM telemetry.
 	if !capacityCouldFitAfterIdleReclaim(used,target,capacity,residents,operatorOverride){
+		if len(liveVRAM)>0 {return constrainedVRAMShortage(target,liveVRAM,used)}
 		return errors.New("insufficient reclaimable accelerator memory; working models preserved")
+	}
+	if !operatorOverride && !liveAcceleratorFits(target, liveVRAM, reclaimedVRAM, residents) {
+		return constrainedVRAMShortage(target, liveVRAM, used)
 	}
 	for _,x:=range residents {
 		if !residentReclaimsConstrainedAccelerator(x,used,target,capacity){continue}
@@ -926,6 +1173,9 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 			k:=placementKey(d)
 			if used[k]<d.AllocatedBytes{return errors.New("resident accelerator ledger changed during eviction")}
 			used[k]-=d.AllocatedBytes
+			sum,ok:=addManagedMemoryBytes(reclaimedVRAM[k],d.AllocatedBytes)
+			if !ok{return errors.New("invalid or overflowing resident accelerator allocation")}
+			reclaimedVRAM[k]=sum
 		}
 		if fits(){return nil}
 	}
@@ -939,6 +1189,9 @@ func (s *RuntimeSupervisor) ensureCapacity(ctx context.Context, deploymentID, no
 			}
 		}
 		return nil
+	}
+	if len(liveVRAM) > 0 {
+		return constrainedVRAMShortage(target, liveVRAM, used)
 	}
 	return fmt.Errorf("insufficient evictable accelerator memory for managed placement")
 }
@@ -1190,7 +1443,7 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
 				return RuntimeInstance{},fmt.Errorf("refusing to reuse unverified local runtime process: %w",verifyErr)
 			}
 			if old.Status == RuntimeStarting{
-				return s.waitHealthy(ctx, old.ID, 120*time.Second)
+				return s.waitHealthy(ctx, old.ID, s.modelLoadTimeout(ctx, deploymentID))
 			}
 			return old, nil
 		}
@@ -1349,7 +1602,15 @@ func (s *RuntimeSupervisor) startLocked(ctx context.Context, deploymentID string
   // SQLite rejected or changed the owning row (even when RowsAffected=0).
   return RuntimeInstance{},s.reconcileUnrecordedLaunch(ctx,inst,pid,err)
  }
- return s.waitHealthy(ctx, inst.ID, 120*time.Second)
+ return s.waitHealthy(ctx, inst.ID, s.modelLoadTimeout(ctx, deploymentID))
+}
+
+func (s *RuntimeSupervisor) modelLoadTimeout(ctx context.Context, deploymentID string) time.Duration {
+	var size int64
+	if s != nil && s.db != nil {
+		_ = s.db.QueryRowContext(ctx, `SELECT p.memory_required_bytes FROM managed_local_models m JOIN local_model_install_plans p ON p.id=m.plan_id WHERE m.deployment_id=?`, deploymentID).Scan(&size)
+	}
+	return modelLoadTimeout(size)
 }
 
 func (s *RuntimeSupervisor) Acquire(ctx context.Context, deploymentID string) (RuntimeInstance, error) {
@@ -1839,6 +2100,7 @@ func (s *RuntimeSupervisor) stopWithActivityLock(ctx context.Context, deployment
  // exited. Abandoning daemon-owned lease counts on explicit teardown stops
  // late request cleanup from falsely holding a defunct model busy.
  if teardown{delete(s.activeRequests,deploymentID)}
+	s.wakeCapacityLocked()
 	return nil
 }
 

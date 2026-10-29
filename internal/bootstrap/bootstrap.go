@@ -292,6 +292,10 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 	}
 	botRuntimeService := botruntime.NewService(db.SQL(), db, clk, vaultService)
 	runtimeCoordinator := runtimecoord.NewService(db.SQL(), clk)
+	if err := runtimeCoordinator.RecoverAfterRestart(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("recover runtime execution queue: %w", err)
+	}
 	if err := inferenceService.ConfigureRuntimeCoordinator(runtimeCoordinator); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("configure global model runtime coordinator: %w", err)

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/DigiLogicTech/OnePane/internal/clock"
@@ -29,12 +30,22 @@ type Service struct {
 }
 
 type waiter struct {
+	id       string
 	req      inference.RuntimeScheduleRequest
 	claim    Claim
 	queuedAt int64
 	ready    chan *Lease
 	cancel   chan struct{}
 }
+
+// loadedModelPreference keeps a task for the model that is actually in
+// memory ahead of an equal-priority task that would force a swap. Aging
+// adds one point per 30s, so this bonus is overtaken after 15 minutes and
+// a waiting task cannot starve. It is smaller than the gap between
+// priority bands, so a loaded background task does not jump an interactive one.
+const loadedModelPreference = 30
+
+var queueSeq atomic.Uint64
 
 type leaseState struct {
 	ID       string
@@ -102,7 +113,8 @@ func (s *Service) Acquire(ctx context.Context, req inference.RuntimeScheduleRequ
 	if strings.TrimSpace(req.Priority) == "" {
 		req.Priority = "normal"
 	}
-	w := &waiter{req: req, claim: claim, queuedAt: s.clock.UnixMilli(), ready: make(chan *Lease, 1), cancel: make(chan struct{})}
+	queuedAt := s.clock.UnixMilli()
+	w := &waiter{id: queueRowID(req.InferenceRequestID, queuedAt), req: req, claim: claim, queuedAt: queuedAt, ready: make(chan *Lease, 1), cancel: make(chan struct{})}
 	if err := s.persistQueued(ctx, w); err != nil {
 		return nil, err
 	}
@@ -137,7 +149,7 @@ func (s *Service) Acquire(ctx context.Context, req inference.RuntimeScheduleRequ
 		}
 		s.scheduleLocked()
 		s.mu.Unlock()
-		_ = s.persistTerminal(context.Background(), req.InferenceRequestID, "cancelled", ctx.Err().Error())
+		_ = s.persistTerminal(context.Background(), w.id, "cancelled", ctx.Err().Error())
 		return nil, ctx.Err()
 	}
 }
@@ -179,6 +191,9 @@ func (s *Service) scheduleLocked() {
 		return
 	}
 	now := s.clock.UnixMilli()
+	for _, w := range s.waiters {
+		w.claim.Resident = s.deploymentLoaded(context.Background(), w.req.Deployment.ID)
+	}
 	sort.SliceStable(s.waiters, func(i, j int) bool {
 		a, b := s.waiters[i], s.waiters[j]
 		pa, pb := priorityScore(a.req.Priority), priorityScore(b.req.Priority)
@@ -186,10 +201,10 @@ func (s *Service) scheduleLocked() {
 		pa += int((now - a.queuedAt) / int64(30*time.Second/time.Millisecond))
 		pb += int((now - b.queuedAt) / int64(30*time.Second/time.Millisecond))
 		if a.claim.Resident {
-			pa += 1
+			pa += loadedModelPreference
 		}
 		if b.claim.Resident {
-			pb += 1
+			pb += loadedModelPreference
 		}
 		if pa != pb {
 			return pa > pb
@@ -203,14 +218,19 @@ func (s *Service) scheduleLocked() {
 			i++
 			continue
 		}
-		id := strings.TrimSpace(w.req.InferenceRequestID)
-		if id == "" {
-			id = fmt.Sprintf("runtime-%d", w.queuedAt)
+		id := w.id
+		if strings.TrimSpace(id) == "" {
+			id = queueRowID(w.req.InferenceRequestID, w.queuedAt)
+			w.id = id
 		}
 		st := &leaseState{ID: id, Request: w.req, Claim: w.claim, Acquired: now}
 		s.active[id] = st
 		s.waiters = append(s.waiters[:i], s.waiters[i+1:]...)
-		_ = s.persistRunning(context.Background(), id, now)
+		if err := s.persistRunning(context.Background(), id, now); err != nil {
+			delete(s.active, id)
+			s.waiters = append(s.waiters[:i], append([]*waiter{w}, s.waiters[i:]...)...)
+			return
+		}
 		w.ready <- &Lease{service: s, id: id}
 	}
 }
@@ -257,10 +277,12 @@ func (s *Service) claimForDeployment(ctx context.Context, d inference.ModelDeplo
 	err := s.db.QueryRowContext(ctx, `SELECT compute_mode,COALESCE(backend,''),COALESCE(ram_bytes,0),gpu_device_ids_json,COALESCE(vram_bytes,0),cached,resident FROM runtime_compute_profiles WHERE deployment_id=?`, d.ID).Scan(&mode, &backend, &ram, &gpuJSON, &vram, &cached, &resident)
 	if err == nil {
 		claim.ComputeMode, claim.Backend, claim.RAMBytes, claim.VRAMBytes = mode, backend, ram.Int64, vram.Int64
-		claim.Cached, claim.Resident = cached != 0, resident != 0
+		_ = resident // stored profile flag is not live residency
+		claim.Cached = cached != 0
 		var devices []string
 		_ = json.Unmarshal([]byte(gpuJSON), &devices)
 		claim.ResourceIDs = resourceIDs(claim.NodeID, mode, devices)
+		claim.Resident = s.deploymentLoaded(ctx, d.ID)
 		return claim, nil
 	}
 	if err != sql.ErrNoRows {
@@ -314,7 +336,36 @@ func (s *Service) claimForDeployment(ctx context.Context, d inference.ModelDeplo
 	}
 	claim.ComputeMode, claim.Backend = mode, backend
 	claim.ResourceIDs = resourceIDs(claim.NodeID, mode, devices)
+	claim.Resident = s.deploymentLoaded(ctx, d.ID)
 	return claim, nil
+}
+
+func runtimeLoadedStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "starting", "healthy", "busy", "draining":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Service) deploymentLoaded(ctx context.Context, deploymentID string) bool {
+	if s == nil || s.db == nil || strings.TrimSpace(deploymentID) == "" {
+		return false
+	}
+	var status string
+	err := s.db.QueryRowContext(ctx, `SELECT status FROM local_runtime_instances WHERE deployment_id=?`, deploymentID).Scan(&status)
+	if err != nil {
+		return false
+	}
+	return runtimeLoadedStatus(status)
+}
+
+func queueRowID(requestID string, queuedAt int64) string {
+	if id := strings.TrimSpace(requestID); id != "" {
+		return id
+	}
+	return fmt.Sprintf("runtime-%d-%d", queuedAt, queueSeq.Add(1))
 }
 
 func resourceIDs(node, mode string, devices []string) []string {
@@ -347,9 +398,10 @@ func firstNonEmpty(vs ...string) string {
 
 func (s *Service) persistQueued(ctx context.Context, w *waiter) error {
 	raw, _ := json.Marshal(w.claim)
-	id := strings.TrimSpace(w.req.InferenceRequestID)
-	if id == "" {
-		id = fmt.Sprintf("runtime-%d", w.queuedAt)
+	id := w.id
+	if strings.TrimSpace(id) == "" {
+		id = queueRowID(w.req.InferenceRequestID, w.queuedAt)
+		w.id = id
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO runtime_execution_queue(id,workspace_id,task_id,inference_request_id,deployment_id,node_id,priority,state,safe_boundary,resource_claim_json,queued_at,revision) VALUES(?,?,?,?,?,?,?,'queued','safe_pause',?,?,1)`, id, w.req.WorkspaceID, w.req.TaskID, nullable(w.req.InferenceRequestID), w.req.Deployment.ID, nullable(w.claim.NodeID), w.req.Priority, string(raw), w.queuedAt)
 	return err
@@ -362,7 +414,39 @@ func (s *Service) persistRunning(ctx context.Context, id string, at int64) error
 
 func (s *Service) persistTerminal(ctx context.Context, id, state, reason string) error {
 	now := s.clock.UnixMilli()
-	_, err := s.db.ExecContext(ctx, `UPDATE runtime_execution_queue SET state=?,completed_at=?,safe_boundary='complete',failure_reason=?,revision=revision+1 WHERE id=?`, state, now, nullable(reason), id)
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		if ctx.Err() != nil {
+			ctx = context.Background()
+		}
+		_, err = s.db.ExecContext(ctx, `UPDATE runtime_execution_queue SET state=?,completed_at=?,safe_boundary='complete',failure_reason=?,revision=revision+1 WHERE id=?`, state, now, nullable(reason), id)
+		if err == nil {
+			return nil
+		}
+		time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
+	}
+	return err
+}
+
+// RecoverAfterRestart closes queue rows that can only exist in memory.
+// A crashed process leaves no waiters and no leases, so queued and running
+// rows from the previous process are not still executing.
+func (s *Service) RecoverAfterRestart(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return errors.New("runtime coordinator unavailable")
+	}
+	now := s.clock.UnixMilli()
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		_, err = s.db.ExecContext(ctx, `UPDATE runtime_execution_queue
+			SET state='failed', completed_at=?, failure_reason=?, safe_boundary='complete', revision=revision+1
+			WHERE state IN ('queued','waiting_runtime','waiting_swap','loading','ready','running','draining')`,
+			now, "runtime queue lease was not live after process restart")
+		if err == nil {
+			return nil
+		}
+		time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
+	}
 	return err
 }
 

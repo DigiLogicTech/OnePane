@@ -110,8 +110,13 @@ func TestProposalContinuationRequiresCommittedJournal(t *testing.T) {
 					t.Fatalf("continuation changed original history: task=%s attempt=%s count=%d modelSteps=%d", currentTask.State, attemptStatus, attempts, priorSteps)
 				}
 				if failure != "none" {
-					if _, err := w.Tick(ctx, 1); !errors.Is(err, ErrDispatchRequiresReconciliation) {
-						t.Fatalf("failed continuation permitted another scheduler step: %v", err)
+					_, tickErr := w.Tick(ctx, 1)
+					if failure == "worker" {
+						if !errors.Is(tickErr, ErrDispatchRequiresReconciliation) {
+							t.Fatalf("rejected worker update was retried: %v", tickErr)
+						}
+					} else if tickErr != nil {
+						t.Fatalf("failed continuation was not parked in-process: %v", tickErr)
 					}
 					// Remove the injected Worker UPDATE failure before exercising
 					// explicit startup recovery, which also updates that same row.
@@ -121,7 +126,11 @@ func TestProposalContinuationRequiresCommittedJournal(t *testing.T) {
 						}
 					}
 					rebuilt := New(w.db, w.tx, clock.Real{}, "node-local", w.tasks, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-					if recovered, err := rebuilt.RecoverLostRuns(ctx); err != nil || recovered != 1 {
+					wantRecovered := 0
+					if failure == "worker" {
+						wantRecovered = 1
+					}
+					if recovered, err := rebuilt.RecoverLostRuns(ctx); err != nil || recovered != wantRecovered {
 						t.Fatalf("restart could not park original unapplied response owner: %d %v", recovered, err)
 					}
 					if recovered, err := rebuilt.RecoverLostRuns(ctx); err != nil || recovered != 0 {
@@ -271,8 +280,12 @@ func TestProposalContinuationUsesDurableRouteAndLimits(t *testing.T) {
 					t.Fatalf("pre-write rejection changed state: err=%v want=%v before=%+v after=%+v steps=%d audits=%d halted=%v", err, want, before, after, steps, audits, w.dispatchReconciliationFailed)
 				}
 				if wantHalted {
-					if _, err := w.Tick(ctx, 1); !errors.Is(err, ErrDispatchRequiresReconciliation) {
-						t.Fatalf("unresolved canceled continuation permitted scheduler retry: %v", err)
+					if _, err := w.Tick(ctx, 1); err != nil {
+						t.Fatalf("canceled continuation was not parked in-process: %v", err)
+					}
+					parked, parkErr := w.getRun(ctx, run.ID)
+					if parkErr != nil || parked.Status != RunInterrupted || w.dispatchReconciliationFailed {
+						t.Fatalf("canceled continuation was replayed: %+v halted=%v err=%v", parked, w.dispatchReconciliationFailed, parkErr)
 					}
 				}
 				return

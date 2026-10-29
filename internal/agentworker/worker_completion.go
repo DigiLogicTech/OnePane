@@ -47,7 +47,7 @@ func (s *Service) completeVerifiedWorkerRun(
 			})
 	})
 	if err!=nil{
-		s.dispatchReconciliationFailed=true
+		s.noteSchedulingHalt(run)
 		return failedResult(res,fmt.Errorf("Worker completion commit failed; scheduler halted pending recovery: %w",err))
 	}
 	res.Status="complete"

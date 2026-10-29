@@ -5,7 +5,6 @@ package agentworker
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -187,11 +186,11 @@ func TestResponseJournalFailureDoesNotApplySuccessfulProposal(t *testing.T) {
 				if result.Status != "failed" || !w.dispatchReconciliationFailed || taskState != "running" || attemptState != "running" || workerState != "running" || completeEvents != 0 || checkpoints != 0 || successJournals != 0 || account.CommittedAmount != 1 || result.Proposal != "" {
 					t.Fatalf("failed recovery partially committed or applied proposal: result=%+v Task/Attempt/Worker=%s/%s/%s completed=%d checkpoints=%d response_journals=%d account=%+v", result, taskState, attemptState, workerState, completeEvents, checkpoints, successJournals, account)
 				}
-				if _, err := w.Tick(ctx, 1); !errors.Is(err, ErrDispatchRequiresReconciliation) || calls.Load() != 1 {
+				if _, err := w.Tick(ctx, 1); err != nil || calls.Load() != 1 {
 					t.Fatalf("failed reconciliation permitted replay: calls=%d err=%v", calls.Load(), err)
 				}
-				if n, err := w.RecoverLostRuns(ctx); err != nil || n != 1 || w.dispatchReconciliationFailed {
-					t.Fatalf("startup recovery: count=%d err=%v halted=%v", n, err, w.dispatchReconciliationFailed)
+				if n, err := w.RecoverLostRuns(ctx); err != nil || n != 0 || w.dispatchReconciliationFailed {
+					t.Fatalf("live park was not durable: count=%d err=%v halted=%v", n, err, w.dispatchReconciliationFailed)
 				}
 				var state, attempt, worker string
 				var attempts int

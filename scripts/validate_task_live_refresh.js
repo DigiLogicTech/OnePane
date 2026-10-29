@@ -63,10 +63,15 @@ const context={
   for(const button of buttons)button.classList={toggle:(name,on)=>{button.classes[name]=on;}};
   const healthContext={$:(selector,button)=>selector==='#healthButton'?buttons[0]:selector==='#mobileHealthButton'?buttons[1]:selector==='span:last-child'?button.text:null};
   vm.runInNewContext(healthCode+'\nthis.apply=applyHealthStatus;',healthContext);
-  for(const [status,label] of [['ok','Healthy'],['degraded','Degraded'],['unknown','Unknown'],['ok','Healthy']]){
-    healthContext.apply({status});
-    for(const button of buttons){assert.equal(button.text.textContent,label);assert.equal(button.classes['health-ok'],status==='ok');}
+  for(const [status,label] of [['ok','Healthy'],['degraded','Degraded'],['halted','Halted'],['unknown','Unknown'],['ok','Healthy']]){
+    healthContext.apply({status,reason:status==='halted'?'worker halted':''});
+    for(const button of buttons){
+      assert.equal(button.text.textContent,label);
+      assert.equal(button.classes['health-ok'],status==='ok');
+      assert.equal(button.classes['health-halted'],status==='halted');
+      if(status==='halted')assert.equal(button.title,'Halted: worker halted');
+    }
   }
-  assert(refreshCode.includes('applyHealthStatus({status:liveOps.health})'),'live health polling must update both shell badges');
+  assert(refreshCode.includes('applyHealthStatus({status:liveOps.health,reason:liveOps.healthReason})'),'live health polling must update both shell badges');
   console.log('Live task transition, state options, retained filters, archived tab and navigation fences PASS');
 })().catch(error=>{console.error(error);process.exitCode=1;});

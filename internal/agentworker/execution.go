@@ -141,6 +141,15 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 	if trustErr != nil {
 		return immediateWorkerStep(s.blockRun(ctx, run, res, "canonical trusted Node policy unavailable"))
 	}
+	if retry := localReplyRetryFrom(run.Continuation); retry != nil {
+		// Stay on the same local zero-cost candidate. A bad JSON reply must
+		// not become permission to try a cloud or paid route.
+		rp.IncludeCandidateIDs = []string{retry.CandidateID}
+		rp.AllowRemote = false
+		rp.AllowSubscriptionUsage = false
+		rp.AllowPotentialMonetarySpend = false
+		rp.RequireZeroIncrementalCost = true
+	}
 	decision, err := s.scheduler.Route(ctx, scheduler.RouteRequest{WorkspaceID: run.WorkspaceID, CapabilityID: run.CapabilityID, RoleName: run.RoleName, ProtocolLevel: run.ProtocolLevel, ContextTokens: tokens, DataLabel: label, AllowUntested: rp.AllowUntested, AllowLimited: rp.AllowLimited, AllowMediated: rp.AllowMediated, AllowDegraded: rp.AllowDegraded, RequireZeroIncrementalCost: rp.RequireZeroIncrementalCost, PreferZeroIncrementalCost: rp.PreferZeroIncrementalCost, AllowSubscriptionUsage: rp.AllowSubscriptionUsage, AllowPotentialMonetarySpend: rp.AllowPotentialMonetarySpend, LocalOnly: !rp.AllowRemote, AllowTrustedNodes: len(trustedNodes) > 0, AllowedTrustedNodeIDs: trustedNodes, ComputePreference: rp.ComputePreference, IncludeCandidateIDs: rp.IncludeCandidateIDs, ExcludeCandidateIDs: rp.ExcludedCandidateIDs})
 	if err != nil || decision.Selected == nil {
 		if err == nil {
@@ -177,7 +186,7 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 			// leaves its durable accounting intact and is reported to the caller.
 			releaseErr := s.releaseBudgetIfReserved(ctx, reservationID)
 			if releaseErr != nil {
-				s.dispatchReconciliationFailed = true
+				s.noteSchedulingHalt(run)
 			}
 			return immediateWorkerStep(failedResult(res, fmt.Errorf("record reasoning budget reservation: %w", errors.Join(journalErr, releaseErr))))
 		}
@@ -197,7 +206,7 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 			// Ownership was rejected: no terminal write may guess a current
 			// owner. Prevent another paid preparation until startup recovery
 			// parks the original durable incarnation for reconciliation.
-			s.dispatchReconciliationFailed = true
+			s.noteSchedulingHalt(run)
 		}
 		// Dispatch ownership may have changed while selecting a model.
 		// Do not mutate a potentially foreign Task/Attempt through failRun.
@@ -227,6 +236,10 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 		}
 		response, ref, dispatchErr := s.dispatch(ctx, run, t, cand, compiled, constraints, label, reservationID)
 		return func() TickResult {
+			var malformed *malformedLocalReplyError
+			if errors.As(dispatchErr, &malformed) {
+				return s.retryMalformedLocalReply(ctx, run, res, cand, ref, malformed)
+			}
 			stepKind := "model"
 			if cand.Kind == scheduler.CandidateAgentRuntime {
 				stepKind = "agent_runtime"
@@ -283,7 +296,7 @@ func (s *Service) prepareStep(ctx context.Context, run Run) preparedWorkerStep {
 	}, abort: func() TickResult {
 		releaseErr := s.releaseBudgetIfReserved(ctx, reservationID)
 		if releaseErr != nil {
-			s.dispatchReconciliationFailed = true
+			s.noteSchedulingHalt(run)
 		}
 		return failedResult(res, errors.Join(ErrDispatchRequiresReconciliation, releaseErr))
 	}}
@@ -336,6 +349,9 @@ func (s *Service) compileContext(ctx context.Context, run Run, t task.Task) (con
 	// still unavailable or let historical wait data bias tool selection.
 	if len(run.Continuation) > 0 && string(run.Continuation) != "{}" && decodeModelWait(run.Continuation) == nil {
 		sections = append(sections, contextcompiler.Section{ID: "worker-continuation", Kind: "continuation", Trust: "UNVERIFIED_DERIVED", Authoritative: false, Required: false, Priority: 80, Content: run.Continuation})
+	}
+	if section, ok := localReplyRetrySection(run.Continuation); ok {
+		sections = append(sections, section)
 	}
 	if cp, err := s.verification.LatestValidCheckpoint(ctx, t.ID); err == nil {
 		sections = append(sections, contextcompiler.Section{ID: "verified-checkpoint", Kind: "checkpoint", Trust: "VERIFIED_DERIVED", Authoritative: true, Required: false, Priority: 90, Content: cp.State})
@@ -427,6 +443,9 @@ func (s *Service) dispatch(ctx context.Context, run Run, t task.Task, c schedule
 	}
 	resp, err := decodeModelResponse(raw, areq)
 	if err != nil {
+		if retriableLocalMalformedReply(c, q) {
+			return agentprotocol.Response{}, q.ID, &malformedLocalReplyError{cause: err}
+		}
 		return agentprotocol.Response{}, q.ID, dispatchReconciliationError(err)
 	}
 	canonical, _ := json.Marshal(resp)

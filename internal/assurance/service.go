@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/DigiLogicTech/OnePane/internal/artifact"
 	"github.com/DigiLogicTech/OnePane/internal/clock"
@@ -40,6 +41,9 @@ type Service struct {
 	observations *observation.Service
 	operations   *operation.Coordinator
 	workers      workerBridge
+	tickMu       sync.Mutex
+	tickObserved bool
+	tickErr      string
 }
 
 func New(db *sql.DB, tx storage.Transactor, clk clock.Clock, ver *verification.Service, tasks *task.Service, artifacts *artifact.Service, observations *observation.Service, operations *operation.Coordinator) *Service {
@@ -47,6 +51,42 @@ func New(db *sql.DB, tx storage.Transactor, clk clock.Clock, ver *verification.S
 }
 
 func (s *Service) SetWorkerBridge(w workerBridge) { s.workers = w }
+
+func (s *Service) NoteTick(err error) {
+	if s == nil {
+		return
+	}
+	s.tickMu.Lock()
+	defer s.tickMu.Unlock()
+	s.tickObserved = true
+	s.tickErr = ""
+	if err != nil {
+		s.tickErr = boundedHealthReason(err.Error())
+	}
+}
+
+func (s *Service) ObservedHealth() (string, string) {
+	if s == nil {
+		return "unobserved", "assurance is not running"
+	}
+	s.tickMu.Lock()
+	defer s.tickMu.Unlock()
+	if !s.tickObserved {
+		return "unobserved", "assurance has not reported a tick yet"
+	}
+	if s.tickErr != "" {
+		return "degraded", "assurance tick failed: " + s.tickErr
+	}
+	return "ok", ""
+}
+
+func boundedHealthReason(v string) string {
+	const max = 300
+	if len(v) <= max {
+		return v
+	}
+	return v[:max]
+}
 
 func (s *Service) EnsureSystemPrincipal(ctx context.Context) error {
 	var status string

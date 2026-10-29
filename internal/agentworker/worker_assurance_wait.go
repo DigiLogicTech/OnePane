@@ -60,7 +60,7 @@ func (s *Service) parkWorkerForIndependentAssurance(
 			})
 	})
 	if err!=nil{
-		s.dispatchReconciliationFailed=true
+		s.noteSchedulingHalt(run)
 		if err==sql.ErrNoRows {err=ErrInvalidWorkerState}
 		return failedResult(res,fmt.Errorf("independent assurance Worker park failed; scheduler halted pending recovery: %w",err))
 	}

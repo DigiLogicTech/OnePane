@@ -51,9 +51,12 @@ func TestWorkerTerminalCancelledCommitHaltsUntilRecovery(t *testing.T) {
 	if err:=worker.db.QueryRowContext(ctx,`SELECT state FROM tasks WHERE id=?`,run.TaskID).Scan(&taskStatus);err!=nil{t.Fatal(err)}
 	if err:=worker.db.QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=?`,run.ID).Scan(&workerStatus);err!=nil{t.Fatal(err)}
 	if taskStatus!="running"||workerStatus!="running"{t.Fatalf("failed commit mutated records: %s/%s",taskStatus,workerStatus)}
-	if _,err:=worker.Tick(ctx,1);!errors.Is(err,ErrDispatchRequiresReconciliation){t.Fatalf("unreconciled Worker accepted Tick: %v",err)}
+	if _,err:=worker.Tick(ctx,1);err!=nil{t.Fatalf("in-process park failed: %v",err)}
 	n,err:=worker.RecoverLostRuns(ctx)
-	if err!=nil||n!=1||worker.dispatchReconciliationFailed{t.Fatalf("startup recovery: n=%d err=%v",n,err)}
+	if err!=nil||n!=0||worker.dispatchReconciliationFailed{t.Fatalf("live park was not durable: n=%d err=%v halted=%v",n,err,worker.dispatchReconciliationFailed)}
+	if err:=worker.db.QueryRowContext(ctx,`SELECT state FROM tasks WHERE id=?`,run.TaskID).Scan(&taskStatus);err!=nil{t.Fatal(err)}
+	if err:=worker.db.QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=?`,run.ID).Scan(&workerStatus);err!=nil{t.Fatal(err)}
+	if taskStatus!="blocked"||workerStatus!="interrupted"{t.Fatalf("park replayed or dropped the task: %s/%s",taskStatus,workerStatus)}
 }
 
 func TestWorkerTerminalRejectsStaleAttemptWithoutPartialMutation(t *testing.T) {

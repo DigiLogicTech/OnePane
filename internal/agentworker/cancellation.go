@@ -69,7 +69,7 @@ func (s *Service) parkIfExecutionControlRequested(ctx context.Context, run Run, 
 		return s.journalInTransaction(ctx, tx, run.ID, "model", "waiting", nil, nil, nil, nil, map[string]any{"state": status, "proposal_discarded": true})
 	})
 	if err != nil {
-		s.dispatchReconciliationFailed = true
+		s.noteSchedulingHalt(run)
 		return failedResult(res, fmt.Errorf("execution control observation/park failed; reconciliation required: %w", err)), true
 	}
 	if parked {

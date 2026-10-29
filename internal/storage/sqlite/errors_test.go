@@ -20,11 +20,18 @@ func TestIsBusyRecognizesBusySnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	reader, err := db.SQL().BeginTx(ctx, nil)
+	// Production write transactions are BEGIN IMMEDIATE. This case pins a
+	// deferred snapshot on purpose, which is the upgrade that returns 517.
+	conn, err := db.SQL().Conn(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reader.Rollback()
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN DEFERRED`); err != nil {
+		t.Fatal(err)
+	}
+	defer conn.ExecContext(ctx, `ROLLBACK`)
+	reader := conn
 	var value int
 	if err := reader.QueryRowContext(ctx, `SELECT value FROM snapshot`).Scan(&value); err != nil {
 		t.Fatal(err)
@@ -42,7 +49,7 @@ func TestIsBusyRecognizesBusySnapshot(t *testing.T) {
 	if !IsBusy(err) || !IsBusy(fmt.Errorf("transaction failed: %w", err)) {
 		t.Fatalf("busy snapshot must be recognized directly and wrapped: %v", err)
 	}
-	if err := reader.Rollback(); err != nil {
+	if _, err := reader.ExecContext(ctx, `ROLLBACK`); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.SQL().QueryRow(`SELECT value FROM snapshot`).Scan(&value); err != nil || value != 2 {

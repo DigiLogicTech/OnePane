@@ -4,7 +4,6 @@ package agentworker
 
 import (
  "context"
- "errors"
  "testing"
 
  "github.com/DigiLogicTech/OnePane/internal/task"
@@ -49,9 +48,11 @@ func TestWorkerWaitCancelledTransactionDoesNotStrandWaitingRun(t *testing.T){
  if runState!="running"||taskState!="running"||attemptState!="running"{
   t.Fatalf("partial wait committed run=%s task=%s attempt=%s",runState,taskState,attemptState)
  }
- if _,err:=w.Tick(ctx,1);!errors.Is(err,ErrDispatchRequiresReconciliation){t.Fatalf("busy Worker was retried: %v",err)}
+ if _,err:=w.Tick(ctx,1);err!=nil{t.Fatalf("in-process wait park failed: %v",err)}
  recovered,err:=w.RecoverLostRuns(ctx)
- if err!=nil||recovered!=1||w.dispatchReconciliationFailed{t.Fatalf("recovery count=%d err=%v",recovered,err)}
+ if err!=nil||recovered!=0||w.dispatchReconciliationFailed{t.Fatalf("live wait park was not durable: count=%d err=%v",recovered,err)}
+ if err:=w.db.QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=?`,r.ID).Scan(&runState);err!=nil{t.Fatal(err)}
+ if runState!="interrupted"{t.Fatalf("uncommitted wait was replayed: %s",runState)}
 }
 
 func TestWorkerWaitStaleAttemptRefusedBeforeStateChange(t *testing.T){

@@ -96,7 +96,7 @@ func (s *Service) waitRunAtomically(
 			// An unavailable/cancelled observation or rejected write leaves the
 			// recorded response unapplied and requires explicit recovery. An exact
 			// owner/authority denial before writes must not stop a newer owner.
-			s.dispatchReconciliationFailed = true
+			s.noteSchedulingHalt(run)
 			return failedResult(res, fmt.Errorf("Worker wait commit failed; scheduling halted until recovery: %w", err))
 		}
 		return failedResult(res, err)

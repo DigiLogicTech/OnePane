@@ -3,7 +3,6 @@
 package agentworker
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
@@ -148,12 +147,8 @@ func TestBudgetReleaseFailureIsReportedAtUndispatchedWorkerBoundaries(t *testing
 						}
 					}
 					_, tickErr := w.Tick(ctx, 1)
-					mustHalt := boundary == "budget_journal" || boundary == "dispatch_cas" || boundary == "prepared_abort"
-					if mustHalt && !errors.Is(tickErr, ErrDispatchRequiresReconciliation) {
-						t.Fatalf("cleanup failure allowed further paid scheduling: %v", tickErr)
-					}
-					if !mustHalt && tickErr != nil {
-						t.Fatal(tickErr)
+					if tickErr != nil {
+						t.Fatalf("cleanup failure did not park locally: boundary=%s err=%v", boundary, tickErr)
 					}
 					var reservations, attempts int
 					if err = w.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM budget_reservations WHERE budget_account_id=?`, accountID).Scan(&reservations); err != nil || reservations != 1 {
@@ -165,8 +160,8 @@ func TestBudgetReleaseFailureIsReportedAtUndispatchedWorkerBoundaries(t *testing
 					if boundary == "budget_journal" || boundary == "dispatch_cas" || boundary == "prepared_abort" {
 						reconstructed := New(w.db, w.tx, w.clock, w.localNodeID, w.tasks, w.authority, w.budgets, w.scheduler, w.inference, w.runtimes, w.artifacts, w.tools, w.operations, w.observations, w.verification)
 						n, e := reconstructed.RecoverLostRuns(ctx)
-						if e != nil || n != 1 {
-							t.Fatalf("startup failed to park undispatched original: count=%d err=%v", n, e)
+						if e != nil || n != 0 {
+							t.Fatalf("live park was not already durable: count=%d err=%v", n, e)
 						}
 						original, e := reconstructed.getRun(ctx, run.ID)
 						if e != nil || original.Status != RunInterrupted || original.AttemptID != run.AttemptID {

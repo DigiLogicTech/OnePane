@@ -147,7 +147,7 @@ func (s *Service) interruptDispatchForReconciliation(
 			&candidateKind, &candidateID, nil, &resultRef, detail)
 	})
 	if err != nil {
-		s.dispatchReconciliationFailed = true
+		s.noteSchedulingHalt(run)
 		return failedResult(res, fmt.Errorf(
 			"external dispatch recovery commit failed; Worker scheduling halted until reconciliation: %w", errors.Join(err, cause)))
 	}

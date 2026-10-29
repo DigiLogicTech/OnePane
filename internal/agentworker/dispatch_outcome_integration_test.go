@@ -64,11 +64,11 @@ func TestUnknownDispatchFailedCommitHaltsSchedulingUntilRecovery(t *testing.T){
  if result.Status!="failed"||!worker.dispatchReconciliationFailed{
   t.Fatalf("failed persistence did not halt Worker: %+v",result)
  }
- if _,err:=worker.Tick(ctx,1);!errors.Is(err,ErrDispatchRequiresReconciliation){
-  t.Fatalf("uncertain Worker was retried: %v",err)
+ if _,err:=worker.Tick(ctx,1);err!=nil{
+  t.Fatalf("in-process park failed: %v",err)
  }
  recovered,err:=worker.RecoverLostRuns(ctx)
- if err!=nil||recovered!=1{t.Fatalf("startup safety recovery: count=%d err=%v",recovered,err)}
+ if err!=nil||recovered!=0{t.Fatalf("live park was not durable: count=%d err=%v",recovered,err)}
  if worker.dispatchReconciliationFailed{t.Fatal("verified recovery failed to clear scheduler alarm")}
  var state,attempt,runState string
  _=worker.db.QueryRowContext(ctx,`SELECT state FROM tasks WHERE id=?`,run.TaskID).Scan(&state)
@@ -97,7 +97,14 @@ func TestUnknownDispatchRefusesStaleAttemptOwnership(t *testing.T){
  if state!="running"||runState!="running"{
   t.Fatalf("invalid Attempt partially mutated durable records: task=%s run=%s",state,runState)
  }
- if _,err:=worker.Tick(ctx,1);!errors.Is(err,ErrDispatchRequiresReconciliation){
-  t.Fatalf("corrupt in-flight result was retried: %v",err)
+ if _,err:=worker.Tick(ctx,1);err!=nil{
+  t.Fatalf("isolated corrupt Worker blocked the scheduler: %v",err)
  }
+ if err:=worker.db.QueryRowContext(ctx,`SELECT state FROM tasks WHERE id=?`,run.TaskID).Scan(&state);err!=nil{t.Fatal(err)}
+ if err:=worker.db.QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=?`,run.ID).Scan(&runState);err!=nil{t.Fatal(err)}
+ if state!="running"||runState!="running"{
+  t.Fatalf("corrupt Attempt was mutated or replayed: task=%s run=%s",state,runState)
+ }
+ health,reason:=worker.ObservedHealth()
+ if health!="halted"||reason==""{t.Fatalf("isolated uncertain Worker looked healthy: %s %s",health,reason)}
 }

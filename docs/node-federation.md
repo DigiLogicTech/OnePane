@@ -62,16 +62,22 @@ is never blindly replayed because the original inference may have already consum
 
 ## Configuration
 
+Federation and multicast discovery are off by default and listen on loopback.
+An operator opts in explicitly:
+
 ```yaml
 node_federation:
-  enabled: true
-  listen: "0.0.0.0:18443"
+  enabled: false
+  listen: "127.0.0.1:18443"
   # advertise_url: "https://192.168.1.20:18443"
-  discovery_enabled: true
+  discovery_enabled: false
   discovery_multicast: "239.255.77.77:47777"
   heartbeat_seconds: 10
   stale_seconds: 35
 ```
+
+To pair nodes, set `enabled: true`, choose the listen address, and set
+`discovery_enabled: true` only when multicast discovery is intended.
 
 `advertise_url` is normally auto-detected from the first active non-loopback IPv4 interface.
 Set it explicitly on multi-homed/VLAN systems.

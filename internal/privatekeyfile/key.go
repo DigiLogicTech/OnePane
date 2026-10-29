@@ -60,7 +60,7 @@ func Ensure(path string) ([]byte, error) {
 		return nil, err
 	}
 	if len(key) != 32 {
-		return nil, fmt.Errorf("bootstrap key must contain exactly 32 bytes; existing content retained")
+		return nil, fmt.Errorf("bootstrap key must contain exactly 32 bytes; existing content was left unchanged and will not be regenerated or deleted")
 	}
 	if err = checkIdentity(f); err != nil {
 		return nil, err

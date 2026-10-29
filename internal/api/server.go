@@ -284,6 +284,8 @@ type Server struct {
 	providerOAuth   providerOAuthService
 	configPath      string
 	modelPoolPath   string
+	dataDir         string
+	projectRoot     string
 	apiCapture      *qaAPICapture
 	watchdog        interface{ Healthy(context.Context) bool }
 }
@@ -340,6 +342,10 @@ func (s *Server) SetProviderOAuth(v providerOAuthService)             { s.provid
 func (s *Server) SetRuntimeConfig(path, modelPoolPath string) {
 	s.configPath = strings.TrimSpace(path)
 	s.modelPoolPath = strings.TrimSpace(modelPoolPath)
+}
+func (s *Server) SetStorageRoots(dataDir, projectRoot string) {
+	s.dataDir = strings.TrimSpace(dataDir)
+	s.projectRoot = strings.TrimSpace(projectRoot)
 }
 func (s *Server) Handler() http.Handler { return s.securityHeaders(s.qaCaptureMiddleware(s.mux)) }
 
@@ -401,6 +407,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/routines", s.createRoutine)
 	s.mux.HandleFunc("GET /v1/chat-commands", s.listChatCommands)
 	s.mux.HandleFunc("POST /v1/chat-sessions/{sessionID}/commands", s.runChatCommand)
+	s.mux.HandleFunc("GET /v1/settings/storage-roots", s.getStorageRoots)
 	s.mux.HandleFunc("GET /v1/settings/local-ai", s.getLocalAISettings)
 	s.mux.HandleFunc("POST /v1/settings/local-ai", s.setLocalAISettings)
 	s.mux.HandleFunc("GET /v1/local-ai/catalog", s.listLocalAICatalog)
@@ -2005,7 +2012,35 @@ func (s *Server) getLocalAISettings(w http.ResponseWriter, r *http.Request) {
 	if workspace != "" && !s.authorize(w, r, i, workspace, "model.read") {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"model_pool_path": s.modelPoolPath})
+	writeJSON(w, http.StatusOK, map[string]any{"model_pool_path": s.modelPoolPath, "storage_roots": s.storageRoots()})
+}
+
+func (s *Server) getStorageRoots(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.authenticate(w, r); !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, s.storageRoots())
+}
+
+func storageDataRoot(dataDir string) string {
+	if strings.EqualFold(filepath.Base(dataDir), "data") {
+		return filepath.Dir(dataDir)
+	}
+	slash := strings.ReplaceAll(dataDir, "/", `\`)
+	if i := strings.LastIndex(slash, `\`); i > 1 && strings.EqualFold(slash[i+1:], "data") {
+		return slash[:i]
+	}
+	return dataDir
+}
+
+func (s *Server) storageRoots() map[string]any {
+	return map[string]any{
+		"data_dir":     s.dataDir,
+		"data_root":    storageDataRoot(s.dataDir),
+		"model_root":   s.modelPoolPath,
+		"project_root": s.projectRoot,
+		"read_only":    true,
+	}
 }
 
 func (s *Server) setLocalAISettings(w http.ResponseWriter, r *http.Request) {

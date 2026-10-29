@@ -59,6 +59,8 @@ type LaunchSpec struct {
 	Env        []string
 	Dir        string
  LogPath string
+ AccountData string
+ AccountModel string
 }
 
 type ProcessBackend interface {
@@ -86,9 +88,17 @@ type trackedManagedCommand struct {
 type OSProcessBackend struct {
 	mu   sync.Mutex
 	cmds map[int]*trackedManagedCommand
+ dataDir string
+ modelRoot string
 }
 
 func NewOSProcessBackend() *OSProcessBackend { return &OSProcessBackend{cmds: map[int]*trackedManagedCommand{}} }
+func (b *OSProcessBackend) SetAccountRoots(dataDir, modelRoot string) {
+ if b==nil{return}
+ b.mu.Lock()
+ b.dataDir,b.modelRoot=dataDir,modelRoot
+ b.mu.Unlock()
+}
 func (b *OSProcessBackend) Start(ctx context.Context, spec LaunchSpec) (int, error) {
 	if strings.TrimSpace(spec.Executable) == "" || filepath.IsAbs(spec.Executable) == false {
 		return 0, errors.New("managed runtime executable must be an absolute path")
@@ -118,6 +128,15 @@ func (b *OSProcessBackend) Start(ctx context.Context, spec LaunchSpec) (int, err
   if err!=nil{_ = logFile.Close();return 0,err}
   cmd.Stdout,cmd.Stderr=capWriter,capWriter
  } else {cmd.Stdout, cmd.Stderr=io.Discard,io.Discard}
+ b.mu.Lock()
+ accountData,accountModel:=b.dataDir,b.modelRoot
+ b.mu.Unlock()
+ closeRuntime,prepErr:=prepareCommand(cmd,accountData,accountModel,spec.LogPath,spec.Dir,spec.Executable)
+ if prepErr!=nil{
+  if logFile!=nil{_ = logFile.Close()}
+  return 0,prepErr
+ }
+ defer closeRuntime()
 	if err := cmd.Start(); err != nil {
         if logFile!=nil{_ = logFile.Close()}
 		return 0, err
@@ -429,7 +448,15 @@ func NewRuntimeSupervisor(db *sql.DB, tx storage.Transactor, clk clock.Clock, da
 	if backend == nil {
 		backend = NewOSProcessBackend()
 	}
-	return &RuntimeSupervisor{db: db, tx: tx, events: event.Store{}, ids: id.Generator{}, clock: clk, dataDir: dataDir, modelRoot: filepath.Join(dataDir, "models", "managed"), processes: backend, activeRequests: map[string]int{}, residencyHeadroomPct: 10, http: &http.Client{Timeout: 3 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}}
+	supervisor:=&RuntimeSupervisor{db: db, tx: tx, events: event.Store{}, ids: id.Generator{}, clock: clk, dataDir: dataDir, modelRoot: filepath.Join(dataDir, "models", "managed"), processes: backend, activeRequests: map[string]int{}, residencyHeadroomPct: 10, http: &http.Client{Timeout: 3 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}}
+ supervisor.bindAccountRoots()
+ return supervisor
+}
+func (s *RuntimeSupervisor) bindAccountRoots() {
+ if s==nil{return}
+ if backend,ok:=s.processes.(*OSProcessBackend);ok{
+  backend.SetAccountRoots(s.dataDir,s.modelRoot)
+ }
 }
 
 func (s *RuntimeSupervisor) SetModelRoot(path string) {
@@ -438,6 +465,7 @@ func (s *RuntimeSupervisor) SetModelRoot(path string) {
 		path = filepath.Join(s.dataDir, "models", "managed")
 	}
 	s.modelRoot = filepath.Clean(path)
+ s.bindAccountRoots()
 }
 
 func (s *RuntimeSupervisor) SetResidencyHeadroom(percent int) {

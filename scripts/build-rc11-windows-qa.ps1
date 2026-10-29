@@ -20,7 +20,10 @@ try {
     $payload = Join-Path $output 'payload'
     New-Item -ItemType Directory -Path $payload -Force | Out-Null
     $version = '0.1.0-alpha.3.3-rc.11'
+    # MSI ProductVersion is explicit. OnePane.wxs refuses to build without it.
     $productVersion = '3.3.11'
+    if ([string]::IsNullOrWhiteSpace($productVersion)) { throw 'MSI ProductVersion is required' }
+    $script:OnePaneSigningStatus = 'unsigned'
     $productName = 'DigiLogic OnePane Alpha 3.3 RC11 QA'
     $buildTime = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
     $flags = "-s -w -X github.com/DigiLogicTech/OnePane/internal/buildinfo.Version=$version -X github.com/DigiLogicTech/OnePane/internal/buildinfo.Revision=$ExpectedCommitSha -X github.com/DigiLogicTech/OnePane/internal/buildinfo.BuildTime=$buildTime"
@@ -33,18 +36,25 @@ try {
     foreach ($target in @(
         @{ Name='OnePane.Backend.exe'; Package='./cmd/harnessd'; GUI=$false },
         @{ Name='OnePane.Service.exe'; Package='./packaging/windows/service'; GUI=$false },
-        @{ Name='OnePane.Desktop.exe'; Package='./packaging/windows/desktop'; GUI=$true }
+        @{ Name='OnePane.Desktop.exe'; Package='./packaging/windows/desktop'; GUI=$true },
+        @{ Name='OnePane.Preflight.exe'; Package='./packaging/windows/preflight'; GUI=$false }
     )) {
         $targetFlags = $flags
         if ($target.GUI) { $targetFlags = '-H windowsgui ' + $flags }
         & $go build -trimpath -ldflags $targetFlags -o (Join-Path $payload $target.Name) $target.Package
         if ($LASTEXITCODE -ne 0) { throw "Compilation failed: $($target.Name)" }
+        $signed = & (Join-Path $PSScriptRoot 'sign-windows-payload.ps1') -Path (Join-Path $payload $target.Name)
+        if ($LASTEXITCODE -ne 0) { throw "Signing hook failed: $($target.Name)" }
+        if ($signed -eq 'signed') { $script:OnePaneSigningStatus = 'signed' }
     }
     Copy-Item -LiteralPath (Join-Path $repo 'packaging/windows/assets/OnePane.ico') -Destination (Join-Path $payload 'OnePane.ico')
     $msi = Join-Path $output "OnePane-$version-windows-x64.msi"
     $authoring = Join-Path $repo 'packaging/windows/msi/OnePane.wxs'
-    & $WixExecutable build $authoring -arch x64 -ext WixToolset.UI.wixext -d "PayloadDir=$payload" -d "ProductName=$productName" -d "ProductVersion=$productVersion" -o $msi
+    & $WixExecutable build $authoring -arch x64 -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext -d "PayloadDir=$payload" -d "ProductName=$productName" -d "ProductVersion=$productVersion" -o $msi
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $msi -PathType Leaf)) { throw 'Native MSI compilation failed' }
+    $signedMsi = & (Join-Path $PSScriptRoot 'sign-windows-payload.ps1') -Path $msi
+    if ($LASTEXITCODE -ne 0) { throw 'Signing hook failed for the MSI' }
+    if ($signedMsi -eq 'signed') { $script:OnePaneSigningStatus = 'signed' }
 
     # Inspect the MSI database without installing, starting a service or touching
     # any operator data. A filename alone is not proof of ProductVersion.
@@ -71,7 +81,7 @@ try {
         source_commit=$ExpectedCommitSha; build_time_utc=$buildTime
         workflow_run_id=$env:GITHUB_RUN_ID; workflow_attempt=$env:GITHUB_RUN_ATTEMPT
         integration_ci_run_id=$env:ONEPANE_SOURCE_CI_RUN_ID
-        platform='windows-amd64'; wix_version='5.0.2'; signing_status='unsigned_qa'
+        platform='windows-amd64'; wix_version='5.0.2'; signing_status=$script:OnePaneSigningStatus
         authoring_sha256=(Get-FileHash -LiteralPath $authoring -Algorithm SHA256).Hash.ToLowerInvariant()
         installed_acceptance='not_performed'; files=$hashes
     }
@@ -79,7 +89,8 @@ try {
     $msiHash = (Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash.ToLowerInvariant()
     "$msiHash  $([IO.Path]::GetFileName($msi))" | Set-Content -LiteralPath "$msi.sha256" -Encoding ascii
     @"
-OnePane RC11 Windows x64 QA candidate (unsigned)
+OnePane RC11 Windows x64 QA candidate
+Signing: see signing_status in candidate-manifest.json. The signing hook is optional.
 Source: $ExpectedCommitSha
 MSI ProductVersion: $productVersion
 Verify the MSI SHA-256 against its .sha256 and candidate-manifest.json.

@@ -272,9 +272,9 @@ func installProduct(installDirArg, projectRootArg, modelPoolArg string, repair, 
 			"  idle_unload_minutes: 15\n" +
 			"  residency_headroom_pct: 10\n" +
 			"node_federation:\n" +
-			"  enabled: true\n" +
-			"  listen: 0.0.0.0:18443\n" +
-			"  discovery_enabled: true\n" +
+			"  enabled: false\n" +
+			"  listen: 127.0.0.1:18443\n" +
+			"  discovery_enabled: false\n" +
 			"  discovery_multicast: 239.255.77.77:47777\n" +
 			"  heartbeat_seconds: 10\n" +
 			"  stale_seconds: 35\n"

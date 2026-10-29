@@ -4,7 +4,7 @@
     <?define ProductName = "DigiLogic OnePane Alpha 3.3 RC10" ?>
   <?endif ?>
   <?ifndef ProductVersion ?>
-    <?define ProductVersion = "3.3.10" ?>
+    <?error Missing ProductVersion. Pass -d ProductVersion=x.y.z. Refusing a stale hard-coded MSI version. ?>
   <?endif ?>
   <Package Name="$(var.ProductName)" Manufacturer="DigiLogic" Version="$(var.ProductVersion)"
            UpgradeCode="9F7D57AE-B2C4-44E2-96E4-F09E145AE235" Scope="perMachine" Language="1033">
@@ -24,6 +24,18 @@
     <Property Id="ONEPANE_PROJECT_ROOT" Secure="yes">
       <RegistrySearch Id="ExistingOnePaneProjectRoot" Root="HKLM" Key="SOFTWARE\DigiLogic\OnePane" Name="ProjectRoot" Type="raw"/>
     </Property>
+    <!-- Copies of the installed roots. The editable properties above can be
+         changed in the wizard; these cannot, so an upgrade can be refused
+         instead of recording a different directory. -->
+    <Property Id="ONEPANE_INSTALLED_DATA_ROOT" Secure="yes">
+      <RegistrySearch Id="RecordedOnePaneDataRoot" Root="HKLM" Key="SOFTWARE\DigiLogic\OnePane" Name="DataRoot" Type="raw"/>
+    </Property>
+    <Property Id="ONEPANE_INSTALLED_MODEL_ROOT" Secure="yes">
+      <RegistrySearch Id="RecordedOnePaneModelRoot" Root="HKLM" Key="SOFTWARE\DigiLogic\OnePane" Name="ModelRoot" Type="raw"/>
+    </Property>
+    <Property Id="ONEPANE_INSTALLED_PROJECT_ROOT" Secure="yes">
+      <RegistrySearch Id="RecordedOnePaneProjectRoot" Root="HKLM" Key="SOFTWARE\DigiLogic\OnePane" Name="ProjectRoot" Type="raw"/>
+    </Property>
     <!-- The legacy EXE installer owns its own service registration. Removing it
          with data preservation is required before switching to Windows Installer. -->
     <Property Id="ONEPANE_LEGACY_EXE">
@@ -32,10 +44,13 @@
     <Launch Condition="NOT ONEPANE_LEGACY_EXE" Message="An earlier OnePane EXE installation is present. Uninstall that version first (preserve its data), then run the native MSI." />
     <SetProperty Id="ONEPANE_DATA_ROOT" Value="[CommonAppDataFolder]OnePane" Before="CostFinalize"
                  Sequence="both" Condition="NOT ONEPANE_DATA_ROOT"/>
+    <!-- Fresh installs do not invent model or project folders under ProgramData.
+         An upgrade that recorded only DataRoot keeps the historical derived
+         folders. A recorded model or project root is never replaced here. -->
     <SetProperty Id="ONEPANE_MODEL_ROOT" Value="[ONEPANE_DATA_ROOT]\models" Before="CostFinalize"
-                 Sequence="both" Condition="NOT ONEPANE_MODEL_ROOT"/>
+                 Sequence="both" Condition="NOT ONEPANE_MODEL_ROOT AND ONEPANE_INSTALLED_DATA_ROOT"/>
     <SetProperty Id="ONEPANE_PROJECT_ROOT" Value="[ONEPANE_DATA_ROOT]\Projects" Before="CostFinalize"
-                 Sequence="both" Condition="NOT ONEPANE_PROJECT_ROOT"/>
+                 Sequence="both" Condition="NOT ONEPANE_PROJECT_ROOT AND ONEPANE_INSTALLED_DATA_ROOT"/>
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="DigiLogicFolder" Name="DigiLogic">
         <Directory Id="INSTALLFOLDER" Name="OnePane"/>
@@ -60,6 +75,9 @@
       <Component Id="OnePaneIconComponent" Guid="598F4D95-7A91-472B-8920-78E8DF6E0A7E">
         <File Id="OnePaneIconFile" Source="$(var.PayloadDir)\OnePane.ico" KeyPath="yes"/>
       </Component>
+      <Component Id="OnePanePreflight" Guid="B7E4A1C2-6D58-4F0E-9A33-1C5E8F2A4D70">
+        <File Id="OnePanePreflightExe" Source="$(var.PayloadDir)\OnePane.Preflight.exe" KeyPath="yes"/>
+      </Component>
       <Component Id="OnePaneRegistry" Guid="2E29C90F-BB96-4542-B894-5EB4DA095190">
         <RegistryValue Root="HKLM" Key="SOFTWARE\DigiLogic\OnePane" Name="DataRoot" Type="string" Value="[ONEPANE_DATA_ROOT]" KeyPath="yes"/>
         <RegistryValue Root="HKLM" Key="SOFTWARE\DigiLogic\OnePane" Name="ModelRoot" Type="string" Value="[ONEPANE_MODEL_ROOT]"/>
@@ -81,28 +99,38 @@
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER"/>
     <!-- A second wizard page exposes the data/model/project roots before installation. -->
     <UI>
-      <Dialog Id="OnePaneStorageDlg" Width="370" Height="270" Title="OnePane - Data Locations">
+      <Dialog Id="OnePaneStorageDlg" Width="370" Height="300" Title="OnePane - Data Locations">
         <Control Id="Title" Type="Text" X="20" Y="16" Width="330" Height="21" Transparent="yes" NoPrefix="yes"
                  Text="Choose OnePane storage locations"/>
-        <Control Id="Help" Type="Text" X="20" Y="43" Width="330" Height="31"
-                 Text="Models, runtimes, logs, configuration and Projects can be stored on a separate drive. Select an available local NTFS volume."/>
-        <Control Id="DataLabel" Type="Text" X="20" Y="87" Width="325" Height="14" Text="Application data directory (runtimes, logs, caches, database):"/>
-        <Control Id="DataInput" Type="Edit" X="20" Y="101" Width="325" Height="18" Property="ONEPANE_DATA_ROOT"/>
-        <Control Id="ModelsLabel" Type="Text" X="20" Y="129" Width="325" Height="14" Text="Model weights directory:"/>
-        <Control Id="ModelsInput" Type="Edit" X="20" Y="143" Width="325" Height="18" Property="ONEPANE_MODEL_ROOT"/>
-        <Control Id="ProjectsLabel" Type="Text" X="20" Y="171" Width="325" Height="14" Text="Project directory:"/>
-        <Control Id="ProjectsInput" Type="Edit" X="20" Y="185" Width="325" Height="18" Property="ONEPANE_PROJECT_ROOT"/>
-        <Control Id="Back" Type="PushButton" X="182" Y="243" Width="56" Height="17" Text="&lt; Back">
+        <Control Id="Help" Type="Text" X="20" Y="40" Width="330" Height="48"
+                 Text="Program data defaults to C:\ProgramData\OnePane. Choose local NTFS folders for models and projects. An upgrade keeps existing folders. An incomplete folder, including an empty node.identity, is left unchanged: choose a different data directory or cancel."/>
+        <Control Id="DataLabel" Type="Text" X="20" Y="96" Width="325" Height="14" Text="Application data directory (runtimes, logs, caches, database):"/>
+        <Control Id="DataInput" Type="Edit" X="20" Y="110" Width="325" Height="18" Property="ONEPANE_DATA_ROOT"/>
+        <Control Id="ModelsLabel" Type="Text" X="20" Y="138" Width="325" Height="14" Text="Model weights directory:"/>
+        <Control Id="ModelsInput" Type="Edit" X="20" Y="152" Width="325" Height="18" Property="ONEPANE_MODEL_ROOT"/>
+        <Control Id="ProjectsLabel" Type="Text" X="20" Y="180" Width="325" Height="14" Text="Project directory:"/>
+        <Control Id="ProjectsInput" Type="Edit" X="20" Y="194" Width="325" Height="18" Property="ONEPANE_PROJECT_ROOT"/>
+        <Control Id="Back" Type="PushButton" X="182" Y="273" Width="56" Height="17" Text="&lt; Back">
           <Publish Event="NewDialog" Value="InstallDirDlg"/>
         </Control>
-        <Control Id="Next" Type="PushButton" X="242" Y="243" Width="56" Height="17" Default="yes" Text="Next &gt;">
+        <Control Id="Next" Type="PushButton" X="242" Y="273" Width="56" Height="17" Default="yes" Text="Next &gt;">
           <Publish Event="NewDialog" Value="VerifyReadyDlg" Condition="ONEPANE_DATA_ROOT AND ONEPANE_MODEL_ROOT AND ONEPANE_PROJECT_ROOT"/>
         </Control>
-        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="Cancel">
+        <Control Id="Cancel" Type="PushButton" X="304" Y="273" Width="56" Height="17" Cancel="yes" Text="Cancel">
           <Publish Event="SpawnDialog" Value="CancelDlg"/>
         </Control>
       </Dialog>
       <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog" Value="OnePaneStorageDlg" Order="5" Condition="NOT Installed"/>
     </UI>
+    <!-- Read-only NTFS, free-space, upgrade, and partial-root check. It runs
+         after the preflight executable is copied and before the service starts,
+         and it does not modify the selected roots. -->
+    <SetProperty Id="OnePaneStorageCheck" Before="OnePaneStorageCheck" Sequence="execute"
+                 Value="&quot;[#OnePanePreflightExe]&quot; -data &quot;[ONEPANE_DATA_ROOT]&quot; -model &quot;[ONEPANE_MODEL_ROOT]&quot; -project &quot;[ONEPANE_PROJECT_ROOT]&quot; -installed-data &quot;[ONEPANE_INSTALLED_DATA_ROOT]&quot; -installed-model &quot;[ONEPANE_INSTALLED_MODEL_ROOT]&quot; -installed-project &quot;[ONEPANE_INSTALLED_PROJECT_ROOT]&quot; -program-data &quot;[CommonAppDataFolder]&quot; -program-volume &quot;[ProgramFiles64Folder]&quot; -ui-level [UILevel]"/>
+    <CustomAction Id="OnePaneStorageCheck" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec"
+                  Execute="deferred" Impersonate="no" Return="check"/>
+    <InstallExecuteSequence>
+      <Custom Action="OnePaneStorageCheck" After="InstallFiles">NOT REMOVE~="ALL"</Custom>
+    </InstallExecuteSequence>
   </Package>
 </Wix>

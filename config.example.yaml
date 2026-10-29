@@ -28,13 +28,14 @@ local_ai:
   # catalog_trust_keys:
   #   release-2026: BASE64_ED25519_PUBLIC_KEY
 
-# Paired OnePane nodes share inference/model capacity. LAN discovery is automatic,
-# but trust is always explicit and pairing requires confirmation on both nodes.
+# Paired OnePane nodes share inference only after an operator turns federation
+# on. The default is loopback and silent: no LAN listener and no multicast.
+# Opt in by setting enabled and discovery_enabled, then choose a listen address.
 node_federation:
-  enabled: true
-  listen: "0.0.0.0:18443"
+  enabled: false
+  listen: "127.0.0.1:18443"
   # advertise_url: "https://192.168.1.20:18443"  # optional; auto-detected when omitted
-  discovery_enabled: true
+  discovery_enabled: false
   discovery_multicast: "239.255.77.77:47777"
   heartbeat_seconds: 10
   stale_seconds: 35

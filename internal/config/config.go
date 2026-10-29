@@ -55,7 +55,23 @@ type LocalAIConfig struct {
 }
 
 func Default() Config {
-	return Config{Server: ServerConfig{Listen: "127.0.0.1:8080", PreviewListen: "127.0.0.1:8081"}, Storage: StorageConfig{DataDir: "/var/lib/onepane"}, Logging: LoggingConfig{Level: "info"}, LocalAI: LocalAIConfig{IdleUnloadMinutes: 15, ResidencyHeadroomPct: 10}, Federation: FederationConfig{Enabled: true, Listen: "0.0.0.0:18443", DiscoveryEnabled: true, DiscoveryMulticast: "239.255.77.77:47777", HeartbeatSeconds: 10, StaleSeconds: 35}}
+	return Config{Server: ServerConfig{Listen: "127.0.0.1:8080", PreviewListen: "127.0.0.1:8081"}, Storage: StorageConfig{DataDir: "/var/lib/onepane"}, Logging: LoggingConfig{Level: "info"}, LocalAI: LocalAIConfig{IdleUnloadMinutes: 15, ResidencyHeadroomPct: 10}, Federation: FederationConfig{Enabled: false, Listen: "127.0.0.1:18443", DiscoveryEnabled: false, DiscoveryMulticast: "239.255.77.77:47777", HeartbeatSeconds: 10, StaleSeconds: 35}}
+}
+
+// EffectiveProjectRoot is the project directory the process will use.
+func EffectiveProjectRoot(cfg Config) string {
+	if v := strings.TrimSpace(cfg.Storage.ProjectRoot); v != "" {
+		return v
+	}
+	return filepath.Join(cfg.Storage.DataDir, "projects")
+}
+
+// EffectiveModelRoot is the model pool the process will use.
+func EffectiveModelRoot(cfg Config) string {
+	if v := strings.TrimSpace(cfg.LocalAI.ModelPoolPath); v != "" {
+		return v
+	}
+	return filepath.Join(cfg.Storage.DataDir, "models", "managed")
 }
 
 func Load(path string) (Config, error) {

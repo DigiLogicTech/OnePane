@@ -29,6 +29,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/gateway"
 	"github.com/DigiLogicTech/OnePane/internal/goalobserveradapter"
 	"github.com/DigiLogicTech/OnePane/internal/inference"
+	"github.com/DigiLogicTech/OnePane/internal/installroots"
 	"github.com/DigiLogicTech/OnePane/internal/localai"
 	"github.com/DigiLogicTech/OnePane/internal/node"
 	"github.com/DigiLogicTech/OnePane/internal/nodefederation"
@@ -107,6 +108,9 @@ type Runtime struct {
 }
 
 func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
+	if finding := installroots.InspectIdentityDir(cfg.Storage.DataDir); finding.Partial {
+		return nil, errors.New(finding.Error())
+	}
 	if err := ensureDataDir(cfg.Storage.DataDir); err != nil {
 		return nil, err
 	}

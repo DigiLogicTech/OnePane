@@ -123,6 +123,13 @@ on:
       - 'cmd/harnessd/**'
       - 'packaging/windows/service/**'
       - 'packaging/windows/msi/**'
+      - 'packaging/windows/preflight/**'
+      - 'packaging/windows/release-archive-excludes.txt'
+      - 'internal/installroots/**'
+      - 'internal/runtimeaccount/**'
+      - 'internal/config/**'
+      - 'scripts/sign-windows-payload.ps1'
+      - 'scripts/export-windows-release-archive.sh'
       - 'scripts/build-rc11-windows-qa.ps1'
       - 'scripts/rc11-windows-qa-source.ps1'
       - 'scripts/test_rc11_qa_guard.ps1'
@@ -525,6 +532,7 @@ jobs:
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-instrument-probe.exe ./cmd/onepane-instrument-probe
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-harnessd.exe ./cmd/harnessd
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-service.exe ./packaging/windows/service
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-preflight.exe ./packaging/windows/preflight
           # Compile the legacy setup source without a real distributable payload.
           # No installer is packaged or released by this compilation check.
           mkdir -p packaging/windows/setup/payload

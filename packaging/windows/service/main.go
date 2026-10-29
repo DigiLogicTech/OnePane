@@ -18,6 +18,7 @@ import (
  "gopkg.in/yaml.v3"
 	"golang.org/x/sys/windows/registry"
  "github.com/DigiLogicTech/OnePane/internal/config"
+ "github.com/DigiLogicTech/OnePane/internal/installroots"
 	"sync"
 	"syscall"
 	"time"
@@ -103,6 +104,10 @@ func serviceEvidence(stage startupevidence.Stage, outcome startupevidence.Outcom
  if err!=nil {
   // Do not write private diagnostic material into the wrong data root.
   fmt.Fprintf(os.Stderr,"OnePane service startup evidence unavailable: %v\n",err)
+  return
+ }
+ if installroots.InspectInstallerDataRoot(root).Partial {
+  fmt.Fprintf(os.Stderr,"OnePane service startup evidence skipped: partial data root left unchanged\n")
   return
  }
  _=startupevidence.Record(root,startupevidence.WindowsService,stage,outcome)
@@ -218,6 +223,10 @@ func recordStartupError(startupErr error) {
  if resolveErr != nil {
   // An invalid installer path cannot make us log failures to C: instead.
   fmt.Fprintf(os.Stderr,"OnePane service startup failure (persistent log unavailable): %v; data root: %v\n",startupErr,resolveErr)
+  return
+ }
+ if installroots.InspectInstallerDataRoot(root).Partial {
+  fmt.Fprintf(os.Stderr,"OnePane service startup failure (partial data root left unchanged): %v\n",startupErr)
   return
  }
  logPath := filepath.Join(root,"logs","onepane.log")
@@ -430,6 +439,7 @@ func firstRunWindowsServiceConfig(root,projectRoot,modelRoot string) config.Conf
  cfg.LocalAI.ModelPoolPath=modelRoot
  cfg.Federation.Enabled=false
  cfg.Federation.DiscoveryEnabled=false
+ cfg.Federation.Listen="127.0.0.1:18443"
  return cfg
 }
 
@@ -479,6 +489,7 @@ func runBackendWithContext(ctx context.Context) (retErr error) {
 	}
 	dataDir, err := configuredOnePaneDataRoot(filepath.Join(programData,"OnePane"))
  if err != nil { return fmt.Errorf("resolve persistent installer data root: %w", err) }
+ if err := rejectPartialDataRoot(dataDir); err != nil { return err }
 	logDir := filepath.Join(dataDir, "logs")
  if err:=ctx.Err();err!=nil{return err}
 	if err:=ensureOnePaneConfig(dataDir);err!=nil{return fmt.Errorf("prepare OnePane persistent configuration: %w",err)}
@@ -497,6 +508,7 @@ func runBackendWithContext(ctx context.Context) (retErr error) {
 		}
 	}()
 	fmt.Fprintf(logFile, "OnePane Service %s starting\n", buildinfo.Version)
+ noteUnselectedPartialRoot(logFile, dataDir, programData)
 
 	backend := filepath.Join(installDir, "OnePane.Backend.exe")
 	config := filepath.Join(dataDir, "config.yaml")

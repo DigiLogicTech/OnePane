@@ -101,7 +101,7 @@ func (s *Service) installOmniRouteCLIWindows(ctx context.Context, jobID string) 
 		return err
 	}
 	defer os.RemoveAll(cacheRoot)
-	err = runOmniRouteInstallCommand(ctx, LaunchSpec{Executable: node, Args: []string{npm, "install", "--prefix", appRoot, "omniroute@3.8.51", "--include=optional", "--no-audit", "--no-fund", "--loglevel=error"}, Dir: appRoot, Env: omniRouteInstallEnvironment(node, cacheRoot, s.omniRouteDataRoot()), LogPath: filepath.Join(s.dataDir, "components", "logs", "omniroute-install.log")})
+	err = runOmniRouteInstallCommand(ctx, LaunchSpec{Executable: node, Args: []string{npm, "install", "--prefix", appRoot, "omniroute@3.8.51", "--include=optional", "--no-audit", "--no-fund", "--loglevel=error"}, Dir: appRoot, Env: omniRouteInstallEnvironment(node, cacheRoot, s.omniRouteDataRoot()), LogPath: filepath.Join(s.dataDir, "components", "logs", "omniroute-install.log"), AccountData: s.dataDir, AccountModel: s.modelRoot})
 	if err != nil {
 		_ = os.RemoveAll(staging)
 		return err
@@ -183,6 +183,11 @@ func runOmniRouteInstallCommand(ctx context.Context, spec LaunchSpec) error {
 	cmd.Dir = spec.Dir
 	cmd.Stdout, cmd.Stderr = writer, writer
 	cmd.WaitDelay = 5 * time.Second
+	closeRuntime, err := prepareCommand(cmd, spec.AccountData, spec.AccountModel, spec.LogPath, spec.Dir, spec.Executable)
+	if err != nil {
+		return err
+	}
+	defer closeRuntime()
 	if err = cmd.Run(); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()

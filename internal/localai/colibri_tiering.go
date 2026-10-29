@@ -238,6 +238,9 @@ func (s *Service) ColibriPlan(ctx context.Context, deploymentID string) (json.Ra
     capture:=&boundedColibriPlanOutput{}
     command.Stdout=capture
     command.Stderr=capture
+    closeRuntime,prepErr:=s.prepareManagedCommand(command,"",root,python)
+    if prepErr!=nil{return nil,prepErr}
+    defer closeRuntime()
     err=command.Run()
     output,overflow:=capture.Result()
     if overflow {return nil,errors.New("Colibri plan exceeds response limit")}

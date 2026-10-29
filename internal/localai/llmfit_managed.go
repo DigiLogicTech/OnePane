@@ -88,6 +88,9 @@ func (s *Service) StartManagedLLMFit(ctx context.Context)error{
  log,err:=os.OpenFile(filepath.Join(logDir,"llmfit.log"),os.O_CREATE|os.O_APPEND|os.O_WRONLY,0o600)
  if err!=nil{return err}
  cmd.Stdout=log;cmd.Stderr=log
+ closeRuntime,err:=s.prepareManagedCommand(cmd,filepath.Join(logDir,"llmfit.log"),cmd.Dir,s.managedLLMFitExe())
+ if err!=nil{_ = log.Close();return err}
+ defer closeRuntime()
  if err:=cmd.Start();err!=nil{_ = log.Close();return err}
  _=log.Close()
  if err:=recordOwnedLLMFit(s.managedLLMFitRoot(),s.managedLLMFitExe(),cmd.Process.Pid);err!=nil{

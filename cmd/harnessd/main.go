@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -219,11 +218,9 @@ func main() {
 	apiServer.SetProviderOAuth(runtime.ProviderOAuth)
 	apiServer.SetLocalAI(runtime.LocalAI, n.ID)
 	apiServer.SetAssurance(runtime.Assurance)
-	modelPoolPath := strings.TrimSpace(cfg.LocalAI.ModelPoolPath)
-	if modelPoolPath == "" {
-		modelPoolPath = filepath.Join(cfg.Storage.DataDir, "models", "managed")
-	}
+	modelPoolPath := config.EffectiveModelRoot(cfg)
 	apiServer.SetRuntimeConfig(configPath, modelPoolPath)
+	apiServer.SetStorageRoots(cfg.Storage.DataDir, config.EffectiveProjectRoot(cfg))
 	apiServer.SetWebUI(webui.Handler())
 	previewSessions, err := ingress.NewSessions(config.PreviewOrigin(cfg), clock.Real{})
 	if err != nil {

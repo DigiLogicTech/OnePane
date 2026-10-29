@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/DigiLogicTech/OnePane/internal/assistant"
 	"github.com/DigiLogicTech/OnePane/internal/agentprofile"
 	"github.com/DigiLogicTech/OnePane/internal/agentruntime"
 	"github.com/DigiLogicTech/OnePane/internal/agentworker"
 	"github.com/DigiLogicTech/OnePane/internal/approval"
 	"github.com/DigiLogicTech/OnePane/internal/artifact"
+	"github.com/DigiLogicTech/OnePane/internal/assistant"
 	"github.com/DigiLogicTech/OnePane/internal/assurance"
 	"github.com/DigiLogicTech/OnePane/internal/authority"
 	"github.com/DigiLogicTech/OnePane/internal/botruntime"
@@ -39,14 +39,13 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/projectroutine"
 	"github.com/DigiLogicTech/OnePane/internal/projectruntime"
 	"github.com/DigiLogicTech/OnePane/internal/projectworkspace"
-	"github.com/DigiLogicTech/OnePane/internal/provideronboarding"
 	"github.com/DigiLogicTech/OnePane/internal/provideroauth"
+	"github.com/DigiLogicTech/OnePane/internal/provideronboarding"
 	"github.com/DigiLogicTech/OnePane/internal/resourcecoord"
 	"github.com/DigiLogicTech/OnePane/internal/routine"
 	"github.com/DigiLogicTech/OnePane/internal/routineworker"
 	"github.com/DigiLogicTech/OnePane/internal/runtimecoord"
 	"github.com/DigiLogicTech/OnePane/internal/sandboxrunner"
-	"github.com/DigiLogicTech/OnePane/internal/workspacepublisher"
 	"github.com/DigiLogicTech/OnePane/internal/scheduler"
 	"github.com/DigiLogicTech/OnePane/internal/skillcatalog"
 	"github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
@@ -60,6 +59,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/verticalslice"
 	"github.com/DigiLogicTech/OnePane/internal/watchdog"
 	"github.com/DigiLogicTech/OnePane/internal/webauth"
+	"github.com/DigiLogicTech/OnePane/internal/workspacepublisher"
 )
 
 type Runtime struct {
@@ -339,14 +339,22 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 		return nil, fmt.Errorf("register Colibri local inference transport: %w", err)
 	}
 	log.Printf("bootstrap stage: recover local model processes")
-	if err := localAIService.RecoverManagedRuntimes(ctx); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("recover managed local runtimes: %w", err)
+	if err := callRecoverManagedRuntimes(ctx, localAIService); err != nil {
+		if fatal := optionalRecoveryFailure(err); fatal != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("recover managed local runtimes: %w", fatal)
+		}
+		log.Printf("optional managed runtime recovery degraded: %v", err)
+		localAIService.NoteOptionalDegradation("managed runtime: " + err.Error())
 	}
 	log.Printf("bootstrap stage: recover managed model components")
-	if err := localAIService.RecoverManagedComponents(ctx); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("recover managed local components: %w", err)
+	if err := callRecoverManagedComponents(ctx, localAIService); err != nil {
+		if fatal := optionalRecoveryFailure(err); fatal != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("recover managed local components: %w", fatal)
+		}
+		log.Printf("optional managed component recovery degraded: %v", err)
+		localAIService.NoteOptionalDegradation("managed component: " + err.Error())
 	}
 	log.Printf("bootstrap stage: initialize Projects and agents")
 	projectWorkspaceService := projectworkspace.NewService(db.SQL(), db, clk)
@@ -366,17 +374,17 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("configure Project storage root: %w", err)
 	}
-	if err:=projectWorkspaceService.EnsureGoalEvidenceReviewWorkerPrincipal(ctx);err!=nil{
+	if err := projectWorkspaceService.EnsureGoalEvidenceReviewWorkerPrincipal(ctx); err != nil {
 		_ = db.Close()
-		return nil,fmt.Errorf("bootstrap metadata-only goal reviewer: %w",err)
+		return nil, fmt.Errorf("bootstrap metadata-only goal reviewer: %w", err)
 	}
 	// A distinct system identity performs only separately human-approved,
 	// exact-target recurring TCP handshakes; no grant is created here.
-	if err:=projectWorkspaceService.EnsureTCPRecurringWorkerPrincipal(ctx);err!=nil{
+	if err := projectWorkspaceService.EnsureTCPRecurringWorkerPrincipal(ctx); err != nil {
 		_ = db.Close()
-		return nil,fmt.Errorf("bootstrap consented TCP observation identity: %w",err)
+		return nil, fmt.Errorf("bootstrap consented TCP observation identity: %w", err)
 	}
-	sandboxAdapter.SetPublisher(workspacepublisher.New(db.SQL(),artifactService,projectWorkspaceService,localNode.ID))
+	sandboxAdapter.SetPublisher(workspacepublisher.New(db.SQL(), artifactService, projectWorkspaceService, localNode.ID))
 	agentProfileService := agentprofile.NewService(db.SQL(), db, clk)
 	skillCatalogService := skillcatalog.NewService(db.SQL(), db, clk, cfg.Storage.DataDir)
 	projectOrchestratorService := projectorchestrator.NewService(db.SQL(), db, clk, schedulerService, inferenceService, artifactService, taskService, teamService)
@@ -428,6 +436,38 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 		Scheduler: schedulerService, RuntimeCoordinator: runtimeCoordinator, ResourceCoordinator: resourceCoordinator, ProviderOnboarding: providerOnboardingService, ProviderOAuth: providerOAuthService, Assistant: assistantService, ProjectOrchestrator: projectOrchestratorService, ProjectWorkspaces: projectWorkspaceService,
 		ProjectRuntime: projectRuntimeReconciler, ProjectRoutine: projectRoutineExecutor, Routines: routineService, RoutineWorker: routineWorkerService, Operations: operationCoordinator, ReadOnlySlice: readOnlySlice, WebAuth: webAuthService, Gateway: gatewayService, Team: teamService, TeamWorker: teamWorkerService, Bots: botRuntimeService, Federation: federationService,
 	}, nil
+}
+
+var (
+	recoverManagedRuntimesHook   func(context.Context, *localai.Service) error
+	recoverManagedComponentsHook func(context.Context, *localai.Service) error
+)
+
+func callRecoverManagedRuntimes(ctx context.Context, svc *localai.Service) error {
+	if recoverManagedRuntimesHook != nil {
+		return recoverManagedRuntimesHook(ctx, svc)
+	}
+	return svc.RecoverManagedRuntimes(ctx)
+}
+
+func callRecoverManagedComponents(ctx context.Context, svc *localai.Service) error {
+	if recoverManagedComponentsHook != nil {
+		return recoverManagedComponentsHook(ctx, svc)
+	}
+	return svc.RecoverManagedComponents(ctx)
+}
+
+// optionalRecoveryFailure returns err when startup must stop. A broken
+// optional component returns nil so the caller can record degradation and
+// continue. Context cancellation and durable store failures still abort.
+func optionalRecoveryFailure(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || sqlite.IsStoreFailure(err) {
+		return err
+	}
+	return nil
 }
 
 func ensureDataDir(path string) error {

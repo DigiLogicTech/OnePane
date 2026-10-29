@@ -10,8 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,7 +45,7 @@ type taskService interface {
 }
 
 type scopedWorkspaceTaskReader interface {
- ListProjectWorkspace(context.Context,string,string,string,int)([]task.Task,error)
+	ListProjectWorkspace(context.Context, string, string, string, int) ([]task.Task, error)
 }
 
 type taskArchiveService interface {
@@ -249,43 +249,46 @@ type gatewayService interface {
 }
 
 type Server struct {
-	mux             *http.ServeMux
-	attentionDB     *sql.DB
-	libraryArtifacts *artifact.Service
-	libraryTextSearchCursors libraryTextSearchCursorRegistry
+	mux                          *http.ServeMux
+	attentionDB                  *sql.DB
+	libraryArtifacts             *artifact.Service
+	libraryTextSearchCursors     libraryTextSearchCursorRegistry
 	libraryDocumentSearchCursors libraryDocumentSearchCursorRegistry
-	libraryContentSearchCursors libraryContentSearchCursorRegistry
-	projects        projectService
-	events          eventReader
-	auth            Authorizer
-	ingressRoutes   ingressRouteResolver
-	previewSessions previewSessionMinter
-	webAuth         *webauth.Service
-	secureCookies   bool
-	vault           vaultService
-	webUI           http.Handler
-	localAI         localAIService
-	localNodeID     string
-	providers       providerOnboardingService
-	scheduler       schedulerCandidateService
-	assurance       assuranceService
-	agentRuntimes   agentRuntimeService
-	gateway         gatewayService
-	team            teamService
-	bots            botRuntimeService
-	federation      nodeFederationService
-	tasks           taskService
-	routines        routineService
-	chatCommands    chatCommandService
-	assistant       assistantService
-	projectOrchestrator projectOrchestratorService
-	agentProfiles   agentProfileService
-	skills          skillCatalogService
-	providerOAuth   providerOAuthService
-	configPath      string
-	modelPoolPath   string
-	apiCapture      *qaAPICapture
-	watchdog        interface{ Healthy(context.Context) bool }
+	libraryContentSearchCursors  libraryContentSearchCursorRegistry
+	projects                     projectService
+	events                       eventReader
+	auth                         Authorizer
+	ingressRoutes                ingressRouteResolver
+	previewSessions              previewSessionMinter
+	webAuth                      *webauth.Service
+	secureCookies                bool
+	vault                        vaultService
+	webUI                        http.Handler
+	localAI                      localAIService
+	localNodeID                  string
+	providers                    providerOnboardingService
+	scheduler                    schedulerCandidateService
+	assurance                    assuranceService
+	agentRuntimes                agentRuntimeService
+	gateway                      gatewayService
+	team                         teamService
+	bots                         botRuntimeService
+	federation                   nodeFederationService
+	tasks                        taskService
+	routines                     routineService
+	chatCommands                 chatCommandService
+	assistant                    assistantService
+	projectOrchestrator          projectOrchestratorService
+	agentProfiles                agentProfileService
+	skills                       skillCatalogService
+	providerOAuth                providerOAuthService
+	configPath                   string
+	modelPoolPath                string
+	apiCapture                   *qaAPICapture
+	watchdog                     interface{ Healthy(context.Context) bool }
+	observeWorker                func(context.Context) (string, string)
+	observeAssurance             func(context.Context) (string, string)
+	observeRuntime               func(context.Context) (string, string)
 }
 
 func NewServer(projects projectService, events eventReader, auth Authorizer) *Server {
@@ -296,9 +299,76 @@ func NewServer(projects projectService, events eventReader, auth Authorizer) *Se
 	s.routes()
 	return s
 }
-func (s *Server) SetAttentionDB(db *sql.DB) { s.attentionDB = db }
+func (s *Server) SetAttentionDB(db *sql.DB)                                { s.attentionDB = db }
 func (s *Server) SetWatchdog(v interface{ Healthy(context.Context) bool }) { s.watchdog = v }
-func (s *Server) SetLibraryArtifacts(a *artifact.Service) { s.libraryArtifacts = a }
+
+func (s *Server) SetObservedHealth(worker, assurance, runtime func(context.Context) (string, string)) {
+	s.observeWorker = worker
+	s.observeAssurance = assurance
+	s.observeRuntime = runtime
+}
+
+type healthSnapshot struct {
+	Status, Reason, Watchdog, Worker, Assurance, Runtime string
+}
+
+func (s *Server) ObservedHealth(ctx context.Context) healthSnapshot {
+	worker := observedPart(ctx, s.observeWorker, "agent worker health is not observed")
+	assurance := observedPart(ctx, s.observeAssurance, "assurance health is not observed")
+	runtime := observedPart(ctx, s.observeRuntime, "runtime health is not observed")
+	watchdog, watchdogLabel := "unobserved", "watchdog health is not observed"
+	if s.watchdog != nil {
+		if s.watchdog.Healthy(ctx) {
+			watchdog, watchdogLabel = "ok", ""
+		} else {
+			watchdog, watchdogLabel = "stale_or_unavailable", "watchdog heartbeat is stale or unavailable"
+		}
+	}
+	status := "ok"
+	var reasons []string
+	consider := func(part, label string) {
+		if part == "halted" {
+			status = "halted"
+		} else if part != "ok" && status != "halted" {
+			status = "degraded"
+		}
+		if label != "" {
+			reasons = append(reasons, label)
+		}
+	}
+	consider(watchdog, watchdogLabel)
+	consider(worker[0], worker[1])
+	consider(assurance[0], assurance[1])
+	consider(runtime[0], runtime[1])
+	reason := strings.Join(reasons, "; ")
+	if len(reason) > 500 {
+		reason = reason[:500]
+	}
+	return healthSnapshot{Status: status, Reason: reason, Watchdog: watchdog, Worker: worker[0], Assurance: assurance[0], Runtime: runtime[0]}
+}
+
+func observedPart(ctx context.Context, fn func(context.Context) (string, string), missing string) [2]string {
+	if fn == nil {
+		return [2]string{"unobserved", missing}
+	}
+	status, reason := fn(ctx)
+	switch status {
+	case "ok", "degraded", "halted", "unobserved":
+	default:
+		status = "degraded"
+		if reason == "" {
+			reason = missing
+		}
+	}
+	if status != "ok" && reason == "" {
+		reason = missing
+	}
+	if status == "ok" {
+		reason = ""
+	}
+	return [2]string{status, reason}
+}
+func (s *Server) SetLibraryArtifacts(a *artifact.Service)   { s.libraryArtifacts = a }
 func (s *Server) SetPreviewSessions(m previewSessionMinter) { s.previewSessions = m }
 func (s *Server) SetWebAuth(a *webauth.Service, secureCookies bool) {
 	s.webAuth = a
@@ -329,12 +399,12 @@ func (s *Server) SetFederation(v nodeFederationService) {
 	}
 	s.federation = v
 }
-func (s *Server) SetTasks(v taskService)                            { s.tasks = v }
-func (s *Server) SetRoutines(v routineService)                      { s.routines = v }
-func (s *Server) SetChatCommands(v chatCommandService)              { s.chatCommands = v }
-func (s *Server) SetAssistant(v assistantService)                    { s.assistant = v }
+func (s *Server) SetTasks(v taskService)                              { s.tasks = v }
+func (s *Server) SetRoutines(v routineService)                        { s.routines = v }
+func (s *Server) SetChatCommands(v chatCommandService)                { s.chatCommands = v }
+func (s *Server) SetAssistant(v assistantService)                     { s.assistant = v }
 func (s *Server) SetProjectOrchestrator(v projectOrchestratorService) { s.projectOrchestrator = v }
-func (s *Server) SetAgentProfiles(v agentProfileService)             { s.agentProfiles = v }
+func (s *Server) SetAgentProfiles(v agentProfileService)              { s.agentProfiles = v }
 func (s *Server) SetSkills(v skillCatalogService)                     { s.skills = v }
 func (s *Server) SetProviderOAuth(v providerOAuthService)             { s.providerOAuth = v }
 func (s *Server) SetRuntimeConfig(path, modelPoolPath string) {
@@ -348,13 +418,14 @@ func (s *Server) routes() {
 	// Node-admin only, point-in-time SQLite/WAL storage diagnostic.
 	s.mux.HandleFunc("GET /v1/qa/sqlite-footprint", s.qaSQLiteFootprintHandler)
 	s.mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
-		// HTTP 200 retains the liveness contract. The status body distinguishes
-		// a responding API from a control plane whose mutation gate is stale.
-		if s.watchdog != nil && !s.watchdog.Healthy(r.Context()) {
-			writeJSON(w, http.StatusOK, map[string]any{"status": "degraded", "watchdog": "stale_or_unavailable"})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+		// HTTP 200 retains the liveness contract. The body is observed worker,
+		// assurance, runtime and watchdog state, never "up" just because this
+		// handler ran.
+		snap := s.ObservedHealth(r.Context())
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": snap.Status, "reason": snap.Reason, "watchdog": snap.Watchdog,
+			"worker": snap.Worker, "assurance": snap.Assurance, "runtime": snap.Runtime,
+		})
 	})
 	s.mux.HandleFunc("GET /v1/about", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"version": buildinfo.Version, "revision": buildinfo.Revision, "build_time": buildinfo.BuildTime})
@@ -590,9 +661,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations/record", s.recordProjectGoalSourceReading)
 	// Override the generic /{transition} POST route: this read-only
 	// evidence metadata endpoint must never be interpreted as a Goal action.
-	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations", func(w http.ResponseWriter,r *http.Request){
-		w.Header().Set("Allow","GET")
-		writeError(w,http.StatusMethodNotAllowed,"signed Observation proofs are read-only")
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/continuous-goals/{goalID}/signed-observations", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Allow", "GET")
+		writeError(w, http.StatusMethodNotAllowed, "signed Observation proofs are read-only")
 	})
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/coverage", s.getProjectGoalEvidenceCoverage)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/continuous-goals/{goalID}/signal-triage", s.getProjectGoalSignalTriage)
@@ -897,12 +968,12 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		WorkspaceID        string          `json:"workspace_id"`
-		Name               string          `json:"name"`
-		Description        string          `json:"description"`
-		ProjectPolicyJSON  json.RawMessage `json:"project_policy"`
-		IndexingConfigJSON json.RawMessage `json:"indexing_config"`
-		CreateStarterWorkspace bool `json:"create_starter_workspace"`
+		WorkspaceID            string          `json:"workspace_id"`
+		Name                   string          `json:"name"`
+		Description            string          `json:"description"`
+		ProjectPolicyJSON      json.RawMessage `json:"project_policy"`
+		IndexingConfigJSON     json.RawMessage `json:"indexing_config"`
+		CreateStarterWorkspace bool            `json:"create_starter_workspace"`
 	}
 	if !decodeJSON(w, r, &in) {
 		return
@@ -910,7 +981,7 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	if !s.authorize(w, r, i, in.WorkspaceID, "project.write") {
 		return
 	}
-	p, err := s.projects.CreateProject(r.Context(), projectworkspace.CreateProjectCommand{WorkspaceID: in.WorkspaceID, Name: in.Name, Description: in.Description, CreatedBy: i.PrincipalID, CreateStarterWorkspace:in.CreateStarterWorkspace, ProjectPolicyJSON: in.ProjectPolicyJSON, IndexingConfigJSON: in.IndexingConfigJSON, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
+	p, err := s.projects.CreateProject(r.Context(), projectworkspace.CreateProjectCommand{WorkspaceID: in.WorkspaceID, Name: in.Name, Description: in.Description, CreatedBy: i.PrincipalID, CreateStarterWorkspace: in.CreateStarterWorkspace, ProjectPolicyJSON: in.ProjectPolicyJSON, IndexingConfigJSON: in.IndexingConfigJSON, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
 	respondDomain(w, p, err, http.StatusCreated)
 }
 func (s *Server) updateProjectPolicy(w http.ResponseWriter, r *http.Request) {
@@ -964,7 +1035,6 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 	out, err := archiver.ArchiveProject(r.Context(), projectworkspace.ArchiveProjectCommand{ProjectID: p.ID, ExpectedRevision: in.ExpectedRevision, ActorPrincipalID: i.PrincipalID, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
 	respondDomain(w, out, err, http.StatusOK)
 }
-
 
 func (s *Server) listProjectWorkspaces(w http.ResponseWriter, r *http.Request) {
 	i, ok := s.authenticate(w, r)
@@ -1596,7 +1666,6 @@ func taskResponse(t task.Task) map[string]any {
 	}
 }
 
-
 func (s *Server) setTaskArchived(w http.ResponseWriter, r *http.Request, archived bool) {
 	i, ok := s.authenticate(w, r)
 	if !ok {
@@ -1790,44 +1859,44 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	var rows []task.Task
 	var err error
-	projectID:=strings.TrimSpace(r.URL.Query().Get("project_id"))
-	projectWorkspaceID:=strings.TrimSpace(r.URL.Query().Get("project_workspace_id"))
-	scoped:=projectID!=""||projectWorkspaceID!=""
-	archived:=r.URL.Query().Get("archived")=="1"||strings.EqualFold(r.URL.Query().Get("archived"),"true")
+	projectID := strings.TrimSpace(r.URL.Query().Get("project_id"))
+	projectWorkspaceID := strings.TrimSpace(r.URL.Query().Get("project_workspace_id"))
+	scoped := projectID != "" || projectWorkspaceID != ""
+	archived := r.URL.Query().Get("archived") == "1" || strings.EqualFold(r.URL.Query().Get("archived"), "true")
 	if scoped {
-		if projectID==""||projectWorkspaceID==""{
-			writeError(w,http.StatusBadRequest,"scoped Task inventory requires both project_id and project_workspace_id")
+		if projectID == "" || projectWorkspaceID == "" {
+			writeError(w, http.StatusBadRequest, "scoped Task inventory requires both project_id and project_workspace_id")
 			return
 		}
-		if archived{
-			writeError(w,http.StatusBadRequest,"archived scoped Task inventory is not yet available")
+		if archived {
+			writeError(w, http.StatusBadRequest, "archived scoped Task inventory is not yet available")
 			return
 		}
-		if s.projects==nil{
-			writeError(w,http.StatusServiceUnavailable,"Project Workspace service unavailable")
+		if s.projects == nil {
+			writeError(w, http.StatusServiceUnavailable, "Project Workspace service unavailable")
 			return
 		}
-		projectRow,e:=s.projects.Project(r.Context(),projectID)
-		if e!=nil||projectRow.WorkspaceID!=workspaceID||projectRow.Status=="archived"{
-			writeError(w,http.StatusBadRequest,"Project is not available in the requested tenancy")
+		projectRow, e := s.projects.Project(r.Context(), projectID)
+		if e != nil || projectRow.WorkspaceID != workspaceID || projectRow.Status == "archived" {
+			writeError(w, http.StatusBadRequest, "Project is not available in the requested tenancy")
 			return
 		}
-		workspaceReader,ok:=s.projects.(projectWorkspaceViewReader)
-		if !ok{
-			writeError(w,http.StatusServiceUnavailable,"Project Workspace service unavailable")
+		workspaceReader, ok := s.projects.(projectWorkspaceViewReader)
+		if !ok {
+			writeError(w, http.StatusServiceUnavailable, "Project Workspace service unavailable")
 			return
 		}
-		workspaceRow,e:=workspaceReader.WorkspaceView(r.Context(),projectWorkspaceID)
-		if e!=nil||workspaceRow.ProjectID!=projectID||workspaceRow.Status=="archived"{
-			writeError(w,http.StatusBadRequest,"Project Workspace is not part of this Project")
+		workspaceRow, e := workspaceReader.WorkspaceView(r.Context(), projectWorkspaceID)
+		if e != nil || workspaceRow.ProjectID != projectID || workspaceRow.Status == "archived" {
+			writeError(w, http.StatusBadRequest, "Project Workspace is not part of this Project")
 			return
 		}
-		reader,ok:=s.tasks.(scopedWorkspaceTaskReader)
-		if !ok{
-			writeError(w,http.StatusServiceUnavailable,"scoped Task listing unavailable")
+		reader, ok := s.tasks.(scopedWorkspaceTaskReader)
+		if !ok {
+			writeError(w, http.StatusServiceUnavailable, "scoped Task listing unavailable")
 			return
 		}
-		rows,err=reader.ListProjectWorkspace(r.Context(),workspaceID,projectID,projectWorkspaceID,limit)
+		rows, err = reader.ListProjectWorkspace(r.Context(), workspaceID, projectID, projectWorkspaceID, limit)
 	} else if archived {
 		archiver, ok := s.tasks.(taskArchiveService)
 		if !ok {
@@ -1842,40 +1911,46 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	modelWaits,err:=loadTaskModelWaits(r.Context(),s.attentionDB,workspaceID,rows)
-	if err!=nil{
-		writeError(w,http.StatusInternalServerError,"Workspace Task execution status unavailable")
+	modelWaits, err := loadTaskModelWaits(r.Context(), s.attentionDB, workspaceID, rows)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Workspace Task execution status unavailable")
 		return
 	}
 	// Execution progress derives only from durable Worker/Task state and
 	// canonical scoped rows. It does not expose raw model or tool journals.
 	var execution map[string]taskExecutionProgress
-	if scoped{
-		execution,err=loadTaskExecutionProgress(r.Context(),s.attentionDB,
-		 workspaceID,projectID,projectWorkspaceID,rows)
-		if err!=nil{
-		 writeError(w,http.StatusInternalServerError,"Workspace Task checkpoint status unavailable")
-		 return
+	if scoped {
+		execution, err = loadTaskExecutionProgress(r.Context(), s.attentionDB,
+			workspaceID, projectID, projectWorkspaceID, rows)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Workspace Task checkpoint status unavailable")
+			return
 		}
 	}
 	// Only scoped Task pages may receive dependency evidence. The helper
 	// never reveals foreign Workspace child Task identity or state.
 	var dependencies map[string]taskDependencyEvidence
-	if scoped{
-		dependencies,err=loadWorkspaceTaskDependencies(r.Context(),s.attentionDB,
-		 workspaceID,projectID,projectWorkspaceID,rows)
-		if err!=nil{
-		 writeError(w,http.StatusInternalServerError,"Workspace Task prerequisite status unavailable")
-		 return
+	if scoped {
+		dependencies, err = loadWorkspaceTaskDependencies(r.Context(), s.attentionDB,
+			workspaceID, projectID, projectWorkspaceID, rows)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Workspace Task prerequisite status unavailable")
+			return
 		}
 	}
 	out := make([]map[string]any, 0, len(rows))
 	for _, t := range rows {
-		entry:=taskResponse(t)
-		if wait,ok:=modelWaits[t.ID];ok{entry["wait"]=wait}
-		if progress,ok:=execution[t.ID];ok{entry["execution"]=progress}
-		if prerequisites,ok:=dependencies[t.ID];ok{entry["dependencies"]=prerequisites}
-		out=append(out,entry)
+		entry := taskResponse(t)
+		if wait, ok := modelWaits[t.ID]; ok {
+			entry["wait"] = wait
+		}
+		if progress, ok := execution[t.ID]; ok {
+			entry["execution"] = progress
+		}
+		if prerequisites, ok := dependencies[t.ID]; ok {
+			entry["dependencies"] = prerequisites
+		}
+		out = append(out, entry)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -1958,7 +2033,9 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	// trace overrides any caller-supplied X-Trace-ID; caller headers cannot
 	// impersonate another Task creation diagnostic trace.
 	traceID := qaTrustedTaskTrace(r)
-	if traceID == nil { traceID=headerPtr(r,"X-Trace-ID") }
+	if traceID == nil {
+		traceID = headerPtr(r, "X-Trace-ID")
+	}
 	out, err := s.tasks.Create(r.Context(), task.CreateCommand{WorkspaceID: in.WorkspaceID, ProjectID: in.ProjectID, ProjectWorkspaceID: in.ProjectWorkspaceID, Objective: in.Objective, SchedulingClass: in.SchedulingClass, Priority: in.Priority, Completion: in.Completion, ActorPrincipalID: &actor, RequestID: headerPtr(r, "X-Request-ID"), TraceID: traceID})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -2058,28 +2135,52 @@ func (s *Server) setLocalAISettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listLlamaRuntimes(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authenticate(w, r); !ok { return }
-	if s.localAI == nil { writeError(w, http.StatusServiceUnavailable, "local AI unavailable"); return }
-	provider, ok := s.localAI.(interface{ LlamaRuntimeStatus(context.Context) ([]localai.LlamaRuntimeBackendStatus, error) })
-	if !ok { writeError(w, http.StatusNotImplemented, "llama.cpp runtime management unavailable"); return }
+	if _, ok := s.authenticate(w, r); !ok {
+		return
+	}
+	if s.localAI == nil {
+		writeError(w, http.StatusServiceUnavailable, "local AI unavailable")
+		return
+	}
+	provider, ok := s.localAI.(interface {
+		LlamaRuntimeStatus(context.Context) ([]localai.LlamaRuntimeBackendStatus, error)
+	})
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "llama.cpp runtime management unavailable")
+		return
+	}
 	rows, err := provider.LlamaRuntimeStatus(r.Context())
-	if err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, rows)
 }
 
 func (s *Server) listLocalAICatalog(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authenticate(w, r); !ok { return }
+	if _, ok := s.authenticate(w, r); !ok {
+		return
+	}
 	models := localai.BuiltinCatalog()
 	catalogVersion := ""
 	installable := map[string]map[string]bool{}
 	if s.localAI != nil && s.localAI.Catalog() != nil {
-		if rec, _, err := s.localAI.Catalog().Active(r.Context()); err == nil { catalogVersion = rec.CatalogVersion }
-		if x, err := s.localAI.Catalog().Installability(r.Context()); err == nil { installable = x }
+		if rec, _, err := s.localAI.Catalog().Active(r.Context()); err == nil {
+			catalogVersion = rec.CatalogVersion
+		}
+		if x, err := s.localAI.Catalog().Installability(r.Context()); err == nil {
+			installable = x
+		}
 		if signed, err := s.localAI.Catalog().ModelSpecifications(r.Context()); err == nil && len(signed) > 0 {
 			seen := map[string]bool{}
-			for _, m := range models { seen[m.ModelRef] = true }
+			for _, m := range models {
+				seen[m.ModelRef] = true
+			}
 			for _, m := range signed {
-				if !seen[m.ModelRef] { models = append(models, m); seen[m.ModelRef] = true }
+				if !seen[m.ModelRef] {
+					models = append(models, m)
+					seen[m.ModelRef] = true
+				}
 			}
 		}
 	}
@@ -2089,7 +2190,11 @@ func (s *Server) listLocalAICatalog(w http.ResponseWriter, r *http.Request) {
 		row := map[string]any{}
 		_ = json.Unmarshal(raw, &row)
 		qs := []string{}
-		for q, ok := range installable[m.ModelRef] { if ok { qs = append(qs, q) } }
+		for q, ok := range installable[m.ModelRef] {
+			if ok {
+				qs = append(qs, q)
+			}
+		}
 		sort.Strings(qs)
 		row["installable"] = len(qs) > 0
 		row["installable_quantizations"] = qs
@@ -2190,8 +2295,8 @@ func (s *Server) listSchedulerCandidates(w http.ResponseWriter, r *http.Request)
 		out = append(out, map[string]any{
 			"id": c.ID, "kind": c.Kind, "display_name": c.DisplayName, "provider": c.Provider,
 			"status": c.Status, "local": c.Local, "cost_class": c.CostClass,
-            "hard_zero_incremental_cost": c.HardZeroIncrementalCost,
-			"qualification": c.Qualification, "schedulable": c.Schedulable,
+			"hard_zero_incremental_cost": c.HardZeroIncrementalCost,
+			"qualification":              c.Qualification, "schedulable": c.Schedulable,
 			"role_names": c.RoleNames, "capability_ids": c.CapabilityIDs, "context_max": c.ContextMax,
 		})
 	}
@@ -2652,17 +2757,17 @@ func (s *Server) queueLocalAIInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		WorkspaceID         string                `json:"workspace_id"`
-		ProfileID           string                `json:"profile_id"`
-		RoleName            string                `json:"role_name"`
-		UseCase             localai.UseCase       `json:"use_case"`
-		ContextTokens       int64                 `json:"context_tokens"`
-		ModelRef            string                `json:"model_ref"`
-		Quantization        string                `json:"quantization"`
-		PreferGPU           bool                  `json:"prefer_gpu"`
-		PlacementPreference localai.PlacementMode `json:"placement_preference,omitempty"`
-		ComputePreference   string                `json:"compute_preference,omitempty"`
-		AllowResourceOverride bool                 `json:"allow_resource_override,omitempty"`
+		WorkspaceID           string                `json:"workspace_id"`
+		ProfileID             string                `json:"profile_id"`
+		RoleName              string                `json:"role_name"`
+		UseCase               localai.UseCase       `json:"use_case"`
+		ContextTokens         int64                 `json:"context_tokens"`
+		ModelRef              string                `json:"model_ref"`
+		Quantization          string                `json:"quantization"`
+		PreferGPU             bool                  `json:"prefer_gpu"`
+		PlacementPreference   localai.PlacementMode `json:"placement_preference,omitempty"`
+		ComputePreference     string                `json:"compute_preference,omitempty"`
+		AllowResourceOverride bool                  `json:"allow_resource_override,omitempty"`
 	}
 	if !decodeJSON(w, r, &in) {
 		return
@@ -2678,7 +2783,9 @@ func (s *Server) queueLocalAIInstall(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		msg := err.Error()
 		low := strings.ToLower(msg)
-		if strings.Contains(low, "no rows in result set") {msg="Trusted Local AI catalogue is unavailable."}
+		if strings.Contains(low, "no rows in result set") {
+			msg = "Trusted Local AI catalogue is unavailable."
+		}
 		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
@@ -2815,15 +2922,17 @@ func (s *Server) runModelTestbedTurn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x, err := s.localAI.RunTestbedTurn(r.Context(), sid, in)
- if err!=nil{
-  // This privileged diagnostic endpoint must not collapse local runtime failures
-  // into the generic "request failed" message used for other domain APIs.
-  detail:=strings.TrimSpace(err.Error())
-  if len(detail)>800{detail=detail[:800]+"…"}
-  writeError(w,http.StatusBadGateway,"Agent Check inference: "+detail)
-  return
- }
- writeJSON(w,http.StatusOK,x)
+	if err != nil {
+		// This privileged diagnostic endpoint must not collapse local runtime failures
+		// into the generic "request failed" message used for other domain APIs.
+		detail := strings.TrimSpace(err.Error())
+		if len(detail) > 800 {
+			detail = detail[:800] + "…"
+		}
+		writeError(w, http.StatusBadGateway, "Agent Check inference: "+detail)
+		return
+	}
+	writeJSON(w, http.StatusOK, x)
 }
 func (s *Server) completeModelTestbed(w http.ResponseWriter, r *http.Request) {
 	i, ok := s.authenticate(w, r)
@@ -2840,26 +2949,45 @@ func (s *Server) completeModelTestbed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.localAI.CompleteTestbed(r.Context(), sid); err != nil {
-  writeError(w,http.StatusUnprocessableEntity,err.Error())
-  return
- }
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"completed": true})
 }
+
 // An interrupted Agent Check must not leave its model resident in VRAM.
-func (s *Server) abortModelTestbed(w http.ResponseWriter,r *http.Request) {
- actor,ok:=s.authenticate(w,r);if !ok{return}
- sid:=strings.TrimSpace(r.PathValue("sessionID"))
- sess,err:=s.localAI.TestbedSession(r.Context(),sid)
- if err!=nil{respondDomain(w,nil,err,0);return}
- if !s.authorizeManagedDeployment(w,r,actor,sess.DeploymentID,"model.write"){return}
- var in struct{Reason string `json:"reason"`}
- if !decodeJSON(w,r,&in){return}
- aborter,ok:=s.localAI.(interface{AbortTestbed(context.Context,string,string) error})
- if !ok{writeError(w,http.StatusServiceUnavailable,"Agent Check cleanup unavailable");return}
- if err:=aborter.AbortTestbed(r.Context(),sid,in.Reason);err!=nil{
-  writeError(w,http.StatusConflict,err.Error());return
- }
- writeJSON(w,http.StatusOK,map[string]any{"aborted":true})
+func (s *Server) abortModelTestbed(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.authenticate(w, r)
+	if !ok {
+		return
+	}
+	sid := strings.TrimSpace(r.PathValue("sessionID"))
+	sess, err := s.localAI.TestbedSession(r.Context(), sid)
+	if err != nil {
+		respondDomain(w, nil, err, 0)
+		return
+	}
+	if !s.authorizeManagedDeployment(w, r, actor, sess.DeploymentID, "model.write") {
+		return
+	}
+	var in struct {
+		Reason string `json:"reason"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	aborter, ok := s.localAI.(interface {
+		AbortTestbed(context.Context, string, string) error
+	})
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "Agent Check cleanup unavailable")
+		return
+	}
+	if err := aborter.AbortTestbed(r.Context(), sid, in.Reason); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"aborted": true})
 }
 func (s *Server) admitModelDeployment(w http.ResponseWriter, r *http.Request) {
 	i, ok := s.authenticate(w, r)
@@ -3111,9 +3239,13 @@ func (s *Server) listNodes(w http.ResponseWriter, r *http.Request) {
 	// continue to require the federation administrator gate below.
 	if s.federation == nil && strings.TrimSpace(s.localNodeID) != "" {
 		i, ok := s.authenticate(w, r)
-		if !ok || !authorizeHostModelCapability(w, i, "model.read") { return }
+		if !ok || !authorizeHostModelCapability(w, i, "model.read") {
+			return
+		}
 		name, _ := os.Hostname()
-		if name == "" { name = "This device" }
+		if name == "" {
+			name = "This device"
+		}
 		now := time.Now().UnixMilli()
 		writeJSON(w, http.StatusOK, map[string]any{"federation_enabled": false, "nodes": []nodefederation.NodeView{{
 			ID: s.localNodeID, Name: name, Local: true, TrustState: "local", LastSeenAt: &now,
@@ -3179,42 +3311,64 @@ func (s *Server) revokeNode(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"revoked": true})
 }
+
 // Node-scoped scheduling policy is administered independently from global
 // Model Routing. No remote install permission is implied by a compute grant.
 func (s *Server) getNodeComputePolicy(w http.ResponseWriter, r *http.Request) {
- if _,ok:=s.requireNodeOperator(w,r);!ok{return}
- fleet,yes:=s.federation.(nodeComputePolicyService);if !yes{writeError(w,503,"node compute policy unavailable");return}
- p,err:=fleet.ComputePolicy(r.Context(),strings.TrimSpace(r.PathValue("nodeID")))
- if errors.Is(err,sql.ErrNoRows){
-  writeJSON(w,200,map[string]any{"node_id":r.PathValue("nodeID"),"enabled":false,"idle_only":true,"allow_model_downloads":false,"runtime_installation":"confirm","project_scope":"selected","allowed_projects":[]string{}})
-  return
- }
- if err!=nil{writeError(w,500,err.Error());return}
- writeJSON(w,200,p)
+	if _, ok := s.requireNodeOperator(w, r); !ok {
+		return
+	}
+	fleet, yes := s.federation.(nodeComputePolicyService)
+	if !yes {
+		writeError(w, 503, "node compute policy unavailable")
+		return
+	}
+	p, err := fleet.ComputePolicy(r.Context(), strings.TrimSpace(r.PathValue("nodeID")))
+	if errors.Is(err, sql.ErrNoRows) {
+		writeJSON(w, 200, map[string]any{"node_id": r.PathValue("nodeID"), "enabled": false, "idle_only": true, "allow_model_downloads": false, "runtime_installation": "confirm", "project_scope": "selected", "allowed_projects": []string{}})
+		return
+	}
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, p)
 }
 func (s *Server) setNodeComputePolicy(w http.ResponseWriter, r *http.Request) {
- actor,ok:=s.requireNodeOperator(w,r);if !ok{return}
- var in struct{
-  Enabled bool `json:"enabled"`
-  IdleOnly bool `json:"idle_only"`
-  AllowModelDownloads bool `json:"allow_model_downloads"`
-  RuntimeInstallation string `json:"runtime_installation"`
-  ProjectScope string `json:"project_scope"`
-  Availability json.RawMessage `json:"availability"`
-  Limits json.RawMessage `json:"limits"`
-  AllowedProjects json.RawMessage `json:"allowed_projects"`
- }
- if !decodeJSON(w,r,&in){return}
- nodeID:=strings.TrimSpace(r.PathValue("nodeID"))
- fleet,yes:=s.federation.(nodeComputePolicyService);if !yes{writeError(w,503,"node compute policy unavailable");return}
- p,err:=fleet.SetComputePolicy(r.Context(),nodefederation.SetComputePolicyCommand{
-  NodeID:nodeID,Actor:actor.PrincipalID,Enabled:in.Enabled,IdleOnly:in.IdleOnly,
-  AllowModelDownloads:in.AllowModelDownloads,RuntimeInstallation:in.RuntimeInstallation,
-  ProjectScope:in.ProjectScope,AvailabilityJSON:in.Availability,LimitsJSON:in.Limits,
-  AllowedProjectsJSON:in.AllowedProjects,
- })
- if err!=nil{writeError(w,http.StatusConflict,err.Error());return}
- writeJSON(w,200,p)
+	actor, ok := s.requireNodeOperator(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Enabled             bool            `json:"enabled"`
+		IdleOnly            bool            `json:"idle_only"`
+		AllowModelDownloads bool            `json:"allow_model_downloads"`
+		RuntimeInstallation string          `json:"runtime_installation"`
+		ProjectScope        string          `json:"project_scope"`
+		Availability        json.RawMessage `json:"availability"`
+		Limits              json.RawMessage `json:"limits"`
+		AllowedProjects     json.RawMessage `json:"allowed_projects"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	nodeID := strings.TrimSpace(r.PathValue("nodeID"))
+	fleet, yes := s.federation.(nodeComputePolicyService)
+	if !yes {
+		writeError(w, 503, "node compute policy unavailable")
+		return
+	}
+	p, err := fleet.SetComputePolicy(r.Context(), nodefederation.SetComputePolicyCommand{
+		NodeID: nodeID, Actor: actor.PrincipalID, Enabled: in.Enabled, IdleOnly: in.IdleOnly,
+		AllowModelDownloads: in.AllowModelDownloads, RuntimeInstallation: in.RuntimeInstallation,
+		ProjectScope: in.ProjectScope, AvailabilityJSON: in.Availability, LimitsJSON: in.Limits,
+		AllowedProjectsJSON: in.AllowedProjects,
+	})
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, 200, p)
 }
 
 func (s *Server) nodeCapabilities(w http.ResponseWriter, r *http.Request) {
@@ -3394,15 +3548,27 @@ func (s *Server) remoteNodeCompleteModelTestbed(w http.ResponseWriter, r *http.R
 }
 
 func (s *Server) remoteNodeAbortModelTestbed(w http.ResponseWriter, r *http.Request) {
- if _,ok:=s.requireNodeOperator(w,r);!ok{return}
- var in struct{Reason string `json:"reason"`}
- if !decodeJSON(w,r,&in){return}
- remote,ok:=s.federation.(interface{RemoteAbortModelTestbed(context.Context,string,string,string) error})
- if !ok{writeError(w,http.StatusServiceUnavailable,"remote Agent Check cleanup unavailable");return}
- if err:=remote.RemoteAbortModelTestbed(r.Context(),strings.TrimSpace(r.PathValue("nodeID")),strings.TrimSpace(r.PathValue("sessionID")),in.Reason);err!=nil{
-  writeError(w,http.StatusConflict,err.Error());return
- }
- writeJSON(w,http.StatusOK,map[string]any{"aborted":true})
+	if _, ok := s.requireNodeOperator(w, r); !ok {
+		return
+	}
+	var in struct {
+		Reason string `json:"reason"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	remote, ok := s.federation.(interface {
+		RemoteAbortModelTestbed(context.Context, string, string, string) error
+	})
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "remote Agent Check cleanup unavailable")
+		return
+	}
+	if err := remote.RemoteAbortModelTestbed(r.Context(), strings.TrimSpace(r.PathValue("nodeID")), strings.TrimSpace(r.PathValue("sessionID")), in.Reason); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"aborted": true})
 }
 func (s *Server) remoteNodeAdmitModel(w http.ResponseWriter, r *http.Request) {
 	i, ok := s.requireNodeOperator(w, r)

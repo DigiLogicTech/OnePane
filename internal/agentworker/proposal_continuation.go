@@ -110,7 +110,7 @@ func (s *Service) commitProposalContinuation(ctx context.Context, run Run, kind,
 		// An unavailable/cancelled observation is not such a rejection: the
 		// preceding response is already durable, so halt even before the UPDATE
 		// rather than reason again over an unapplied response after a read failure.
-		s.dispatchReconciliationFailed = true
+		s.noteSchedulingHalt(run)
 		return fmt.Errorf("Worker proposal continuation commit failed; scheduling halted pending recovery: %w", err)
 	}
 	return err

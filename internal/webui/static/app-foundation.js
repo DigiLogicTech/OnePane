@@ -212,9 +212,9 @@ function operationsComponentContent(type){
   const waiting=active.filter(t=>String(t.state||'').startsWith('waiting_')).length;
   const online=liveOps.nodes.filter(n=>['online','ready','active'].includes(String(n.status||n.state||'').toLowerCase())).length;
   const connected=liveOps.providers.filter(p=>String(p.status||'').toLowerCase()==='connected').length;
-  const controlState=!liveOpsReported('health')||liveOps.health==='unknown'?'Unknown':liveOps.health==='ok'?'Healthy':'Degraded';
+  const controlState=healthLabel(liveOps.health);
   const attentionComplete=liveOpsAttentionReported();
-  if(type==='metrics') return `<div class="metric-grid operations-metrics">${metric('System Health',controlState,controlState==='Healthy'?'Control plane responding':controlState==='Degraded'?`Reported status: ${liveOps.health}`:'Not reported',controlState==='Healthy'?'good':controlState==='Degraded'?'bad':'')}${metric('Active Tasks',liveOpsReported('tasks')?String(active.length):'Not reported',liveOpsReported('tasks')?`${active.filter(t=>t.state==='running').length} running · ${waiting} waiting`:'Task feed unavailable')}${metric('Nodes',liveOpsReported('nodes')?String(liveOps.nodes.length):'Not reported',liveOpsReported('nodes')?`${online} online/ready`:'Node feed unavailable',liveOpsReported('nodes')&&liveOps.nodes.length>0&&online===liveOps.nodes.length?'good':'')}${metric('Providers',liveOpsReported('providers')?String(liveOps.providers.length):'Not reported',liveOpsReported('providers')?`${connected} connected`:'Provider feed unavailable',liveOpsReported('providers')&&liveOps.providers.length>0&&connected===liveOps.providers.length?'good':'')}${metric('Attention',attentionComplete?String(ATTENTION_ITEMS.length):'Not reported',attentionComplete?(ATTENTION_ITEMS.length?'Requires review':'Nothing currently requires attention'):'Operational feeds incomplete',attentionComplete?(ATTENTION_ITEMS.length?'bad':'good'):'')}</div>`;
+  if(type==='metrics') return `<div class="metric-grid operations-metrics">${metric('System Health',controlState,controlState==='Healthy'?'Control plane responding':controlState==='Unknown'?'Not reported':(liveOps.healthReason||`Reported status: ${liveOps.health}`),controlState==='Healthy'?'good':controlState==='Unknown'?'':'bad')}${metric('Active Tasks',liveOpsReported('tasks')?String(active.length):'Not reported',liveOpsReported('tasks')?`${active.filter(t=>t.state==='running').length} running · ${waiting} waiting`:'Task feed unavailable')}${metric('Nodes',liveOpsReported('nodes')?String(liveOps.nodes.length):'Not reported',liveOpsReported('nodes')?`${online} online/ready`:'Node feed unavailable',liveOpsReported('nodes')&&liveOps.nodes.length>0&&online===liveOps.nodes.length?'good':'')}${metric('Providers',liveOpsReported('providers')?String(liveOps.providers.length):'Not reported',liveOpsReported('providers')?`${connected} connected`:'Provider feed unavailable',liveOpsReported('providers')&&liveOps.providers.length>0&&connected===liveOps.providers.length?'good':'')}${metric('Attention',attentionComplete?String(ATTENTION_ITEMS.length):'Not reported',attentionComplete?(ATTENTION_ITEMS.length?'Requires review':'Nothing currently requires attention'):'Operational feeds incomplete',attentionComplete?(ATTENTION_ITEMS.length?'bad':'good'):'')}</div>`;
   if(type==='tasks') return taskCard();
   if(type==='scheduled') return qa4ScheduledCard();
   if(type==='nodes') return nodesCard();
@@ -466,13 +466,14 @@ async function openHealthPopover(anchor){
   const healthyNodes=nodeRows.filter(n=>['online','ready','active'].includes(String(n.status||n.state||'').toLowerCase())).length;
   const healthyProviders=providerRows.filter(p=>['connected','ready'].includes(String(p.status||'').toLowerCase())).length;
   const watchdogSeen=liveOpsReported('events')?[...a31Array(liveOps.events)].reverse().find(e=>String(e.aggregate_type||'').toLowerCase()==='watchdog'||/watchdog/i.test(String(e.event_type||''))):null;
-  const controlState=!liveOpsReported('health')||liveOps.health==='unknown'?'Unknown':liveOps.health==='ok'?'Healthy':'Degraded';
-  const controlKind=controlState==='Healthy'?'good':controlState==='Degraded'?'bad':'warn';
+  const controlState=healthLabel(liveOps.health);
+  const controlReason=liveOps.healthReason?`${controlState}: ${liveOps.healthReason}`:controlState;
+  const controlKind=controlState==='Healthy'?'good':controlState==='Unknown'?'warn':'bad';
   const row=(label,value,kind='')=>`<div class="popover-row health-popover-row"><span>${escapeHtml(label)}</span><span class="${kind}">${escapeHtml(value)}</span></div>`;
   const federation=!liveOpsReported('nodes')?'Not reported':nodeRows.length?`${healthyNodes} / ${nodeRows.length} healthy`:'No nodes reported';
   const providers=!liveOpsReported('providers')?'Not reported':providerRows.length?`${healthyProviders} / ${providerRows.length} connected`:'No providers reported';
   const watchdog=!liveOpsReported('events')?'Not reported':watchdogSeen?'Observed':'Not observed in recent events';
-  popoverFor(anchor,`<div class="popover"><h3>System Health</h3>${row('Control plane',controlState,controlKind)}${row('Watchdog',watchdog,watchdogSeen?'good':'')}${row('Database','Not reported')}${row('Federation',federation,liveOpsReported('nodes')&&nodeRows.length&&healthyNodes===nodeRows.length?'good':'')}${row('Providers',providers,liveOpsReported('providers')&&providerRows.length&&healthyProviders===providerRows.length?'good':'')}</div>`);
+  popoverFor(anchor,`<div class="popover"><h3>System Health</h3>${row('Control plane',controlReason,controlKind)}${row('Watchdog',watchdog,watchdogSeen?'good':'')}${row('Database','Not reported')}${row('Federation',federation,liveOpsReported('nodes')&&nodeRows.length&&healthyNodes===nodeRows.length?'good':'')}${row('Providers',providers,liveOpsReported('providers')&&providerRows.length&&healthyProviders===providerRows.length?'good':'')}</div>`);
 }
 
 
@@ -636,13 +637,30 @@ function startProductTour({replay=false,welcome=false}={}){
   document.addEventListener('keydown',onKeyDown);
   draw();
 }
+function healthLabel(status){
+  const value=String(status||'unknown').toLowerCase();
+  if(!liveOpsReported('health')||value==='unknown'||value==='unobserved')return 'Unknown';
+  if(value==='ok')return 'Healthy';
+  if(value==='halted')return 'Halted';
+  return 'Degraded';
+}
 async function hydrateHealth(){
   applyHealthStatus(await api.health());
 }
 function applyHealthStatus(h){
   const buttons=[$('#healthButton'),$('#mobileHealthButton')].filter(Boolean);
-  const status=String(h?.status||'unknown').toLowerCase(),label=status==='ok'?'Healthy':status==='unknown'?'Unknown':'Degraded';
-  for(const b of buttons){b.classList.toggle('health-ok',status==='ok');b.classList.toggle('bad',status!=='ok'&&status!=='unknown');b.classList.toggle('health-unknown',status==='unknown');const text=$('span:last-child',b);if(text&&text!==$('.status-dot',b))text.textContent=label;}
+  const status=String(h?.status||'unknown').toLowerCase();
+  const label=status==='ok'?'Healthy':status==='halted'?'Halted':status==='unknown'||status==='unobserved'?'Unknown':'Degraded';
+  const reason=String(h?.reason||'').trim();
+  for(const b of buttons){
+    b.classList.toggle('health-ok',status==='ok');
+    b.classList.toggle('bad',status!=='ok'&&status!=='unknown'&&status!=='unobserved');
+    b.classList.toggle('health-unknown',status==='unknown'||status==='unobserved');
+    b.classList.toggle('health-halted',status==='halted');
+    b.title=reason?`${label}: ${reason}`:'';
+    const text=$('span:last-child',b);
+    if(text&&text!==$('.status-dot',b))text.textContent=label;
+  }
 }
 function titleCase(s){return s.replace(/(^|[-_ ])\w/g,m=>m.toUpperCase());}
 function escapeHtml(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -737,7 +755,8 @@ async function refreshOperationalDataQA(force=false){
     liveOps.reported={health:ok(0),tasks:ok(1),routines:ok(2),nodes:ok(3),providers:ok(4),events:ok(5)};
     const health=value(0),tasks=value(1),routines=value(2),nodes=value(3),providers=value(4),events=value(5);
     liveOps.health=liveOps.reported.health?String(health?.status||'unknown').toLowerCase():'unknown';
-    applyHealthStatus({status:liveOps.health});
+    liveOps.healthReason=liveOps.reported.health?String(health?.reason||''):'';
+    applyHealthStatus({status:liveOps.health,reason:liveOps.healthReason});
     liveOps.tasks=liveOps.reported.tasks&&Array.isArray(tasks)?tasks:[];
     liveOps.routines=liveOps.reported.routines&&Array.isArray(routines)?routines.map(qaTaskNormaliseRoutine):[];
     liveOps.nodes=liveOps.reported.nodes?(Array.isArray(nodes)?nodes:(nodes?.nodes||[])):[];
@@ -1142,9 +1161,9 @@ function renderDrawer(){
   const eventRows=events.map(e=>{const type=String(e.event_type||'event'),bad=/failed|error|blocked|unavailable|recovery/i.test(type),warn=/warn|approval|required|degraded|rate_limited/i.test(type);const level=bad?'ERROR':warn?'WARN':'INFO';const at=e.occurred_at?new Date(Number(e.occurred_at)).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}):'';return `<tr><td class="log-time">${escapeHtml(at)}</td><td class="log-level"><span class="pill ${bad?'bad':warn?'warn':''}">${level}</span></td><td class="log-component">${escapeHtml(e.aggregate_type||'event')}</td><td>${escapeHtml(eventLabel(e))}<div class="list-meta">${escapeHtml(e.aggregate_id||'')}</div></td></tr>`;}).join('');
   if(activeDrawerTab==='logs'||activeDrawerTab==='events') c.innerHTML=!liveOpsReported('events')?'<div class="empty-state compact">Event feed not reported.</div>':events.length?`<table class="log-table"><tbody>${eventRows}</tbody></table>`:'<div class="empty-state compact">No Event Ledger entries yet.</div>';
   else if(activeDrawerTab==='watchdog'){
-    const controlState=!liveOpsReported('health')||liveOps.health==='unknown'?'Unknown':liveOps.health==='ok'?'Healthy':'Degraded',controlClass=controlState==='Healthy'?'good':controlState==='Degraded'?'bad':'warn';
+    const controlState=healthLabel(liveOps.health),controlClass=controlState==='Healthy'?'good':controlState==='Unknown'?'warn':'bad';
     const count=(key,rows)=>liveOpsReported(key)?String(a31Array(rows).length):'Not reported',attention=liveOpsAttentionReported()?String(ATTENTION_ITEMS.length):'Not reported';
-    c.innerHTML=`<div class="widget-body"><strong class="${controlClass}">Control plane ${escapeHtml(controlState)}</strong><br><br>Tasks: ${escapeHtml(count('tasks',liveOps.tasks))}<br>Nodes: ${escapeHtml(count('nodes',liveOps.nodes))}<br>Providers: ${escapeHtml(count('providers',liveOps.providers))}<br>Attention: ${escapeHtml(attention)}</div>`;
+    c.innerHTML=`<div class="widget-body"><strong class="${controlClass}">Control plane ${escapeHtml(controlState)}</strong>${liveOps.healthReason?`<div class="list-meta">${escapeHtml(liveOps.healthReason)}</div>`:''}<br><br>Tasks: ${escapeHtml(count('tasks',liveOps.tasks))}<br>Nodes: ${escapeHtml(count('nodes',liveOps.nodes))}<br>Providers: ${escapeHtml(count('providers',liveOps.providers))}<br>Attention: ${escapeHtml(attention)}</div>`;
   }
   else if(activeDrawerTab==='metrics') c.innerHTML=localProfileQA?`<div class="widget-body"><strong>${escapeHtml(localProfileQA.cpu?.name||'CPU')}</strong><br>${bytesQA(localProfileQA.memory?.total_bytes)} RAM<br>${Array.isArray(localProfileQA.gpus)&&localProfileQA.gpus.length?localProfileQA.gpus.map(g=>`${escapeHtml(g.name||'GPU')} · ${bytesQA(g.vram_bytes)}`).join('<br>'):'No accelerator reported'}<br>${bytesQA(localProfileQA.storage?.available_bytes)} storage available</div>`:'<div class="widget-body">Run Models → Detect hardware to populate host resource capacity.</div>';
   else if(activeDrawerTab==='evidence') c.innerHTML=`<div class="widget-body">${!liveOpsReported('events')?'Event feed not reported.':events.length?`${events.length} recent Event Ledger entr${events.length===1?'y':'ies'} loaded.`:'No recent evidence/event entries loaded.'}<br><br>Use Evidence / Audit for the complete assurance trail.</div>`;

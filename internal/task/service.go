@@ -30,19 +30,20 @@ type admissionGuard interface {
 }
 
 type Service struct {
-	db           *sql.DB
-	cancelMu     sync.Mutex
-	cancelCursor string
-	recoveryMu sync.Mutex
-	recoveryCursor string
+	db                      *sql.DB
+	cancelMu                sync.Mutex
+	cancelCursor            string
+	recoveryMu              sync.Mutex
+	recoveryCursor          string
 	recoveryDiscoveryCursor string
-	tx     storage.Transactor
-	repo   repository
-	events eventAppender
-	outbox outboxEnqueuer
-	ids    id.Generator
-	clock  clock.Clock
-	guard  admissionGuard
+	tx                      storage.Transactor
+	repo                    repository
+	events                  eventAppender
+	outbox                  outboxEnqueuer
+	ids                     id.Generator
+	clock                   clock.Clock
+	guard                   admissionGuard
+	activity                func()
 }
 
 func NewService(db *sql.DB, tx storage.Transactor, clk clock.Clock) *Service {
@@ -60,6 +61,21 @@ func newService(tx storage.Transactor, repo repository, events eventAppender, ou
 // SetAdmissionGuard lets another trusted control-plane subsystem impose an
 // additional admission invariant without moving authority into the caller.
 func (s *Service) SetAdmissionGuard(g admissionGuard) { s.guard = g }
+
+// SetActivityWake asks the background workers to look for new Tasks without
+// waiting out an idle backoff. A nil wake leaves scheduling unchanged.
+func (s *Service) SetActivityWake(fn func()) {
+	if s == nil {
+		return
+	}
+	s.activity = fn
+}
+
+func (s *Service) wakeActivity() {
+	if s != nil && s.activity != nil {
+		s.activity()
+	}
+}
 
 func (s *Service) Get(ctx context.Context, taskID string) (Task, error) {
 	if strings.TrimSpace(taskID) == "" {
@@ -79,15 +95,17 @@ func (s *Service) List(ctx context.Context, workspaceID string, limit int) ([]Ta
 // ListProjectWorkspace exposes the authorised backend-scoped Task inventory.
 // The API independently authenticates the tenancy, Project and Workspace
 // relationships. This selector cannot accidentally return other Workspaces.
-func (s *Service) ListProjectWorkspace(ctx context.Context, tenancyID, projectID, projectWorkspaceID string, limit int) ([]Task,error) {
- if strings.TrimSpace(tenancyID)==""||strings.TrimSpace(projectID)==""||strings.TrimSpace(projectWorkspaceID)==""{
-  return nil,fmt.Errorf("%w: tenancy, Project and Workspace required",ErrInvalidCommand)
- }
- reader,ok:=s.repo.(interface{
-  ListProjectWorkspace(context.Context,string,string,string,int)([]Task,error)
- })
- if !ok{return nil,fmt.Errorf("%w: scoped Task repository is unavailable",ErrInvalidCommand)}
- return reader.ListProjectWorkspace(ctx,tenancyID,projectID,projectWorkspaceID,limit)
+func (s *Service) ListProjectWorkspace(ctx context.Context, tenancyID, projectID, projectWorkspaceID string, limit int) ([]Task, error) {
+	if strings.TrimSpace(tenancyID) == "" || strings.TrimSpace(projectID) == "" || strings.TrimSpace(projectWorkspaceID) == "" {
+		return nil, fmt.Errorf("%w: tenancy, Project and Workspace required", ErrInvalidCommand)
+	}
+	reader, ok := s.repo.(interface {
+		ListProjectWorkspace(context.Context, string, string, string, int) ([]Task, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("%w: scoped Task repository is unavailable", ErrInvalidCommand)
+	}
+	return reader.ListProjectWorkspace(ctx, tenancyID, projectID, projectWorkspaceID, limit)
 }
 
 func (s *Service) ListArchived(ctx context.Context, workspaceID string, limit int) ([]Task, error) {
@@ -108,6 +126,7 @@ func (s *Service) Create(ctx context.Context, cmd CreateCommand) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
+	s.wakeActivity()
 	return s.repo.Get(ctx, created.ID)
 }
 
@@ -139,12 +158,14 @@ func (s *Service) CreateInTransaction(ctx context.Context, tx storage.Tx, cmd Cr
 		return Task{}, fmt.Errorf("%w: completion criteria must be valid JSON", ErrInvalidCommand)
 	}
 	if cmd.ProjectWorkspaceID != nil {
-		if cmd.ProjectID == nil || strings.TrimSpace(*cmd.ProjectID)=="" {
+		if cmd.ProjectID == nil || strings.TrimSpace(*cmd.ProjectID) == "" {
 			return Task{}, fmt.Errorf("%w: named Workspace Tasks require a Project", ErrInvalidCommand)
 		}
 		var err error
-		cmd.Completion, err = scopeWorkspaceCompletion(cmd.Completion,*cmd.ProjectWorkspaceID)
-		if err!=nil {return Task{},err}
+		cmd.Completion, err = scopeWorkspaceCompletion(cmd.Completion, *cmd.ProjectWorkspaceID)
+		if err != nil {
+			return Task{}, err
+		}
 	}
 	taskID, err := s.ids.New("task")
 	if err != nil {
@@ -176,7 +197,6 @@ func (s *Service) CreateInTransaction(ctx context.Context, tx storage.Tx, cmd Cr
 	}
 	return t, nil
 }
-
 
 func (s *Service) Archive(ctx context.Context, cmd ArchiveCommand) (Task, error) {
 	return s.setArchived(ctx, cmd, true)
@@ -250,30 +270,38 @@ func (s *Service) MarkReady(ctx context.Context, cmd TransitionCommand) (Task, e
 // through the database and must not be called from inside an SQLite write
 // transaction (which could deadlock on the pooled connection).
 func (s *Service) CheckStartAdmission(ctx context.Context, cmd StartCommand) error {
- if strings.TrimSpace(cmd.TaskID)==""||cmd.ExpectedRevision<1{
-  return fmt.Errorf("%w: task id and expected revision are required",ErrInvalidCommand)
- }
- if s.guard!=nil{
-  current,err:=s.repo.Get(ctx,cmd.TaskID)
-  if err!=nil{return err}
-  if err:=s.guard.AllowStart(ctx,current);err!=nil{return err}
- }
- return nil
+	if strings.TrimSpace(cmd.TaskID) == "" || cmd.ExpectedRevision < 1 {
+		return fmt.Errorf("%w: task id and expected revision are required", ErrInvalidCommand)
+	}
+	if s.guard != nil {
+		current, err := s.repo.Get(ctx, cmd.TaskID)
+		if err != nil {
+			return err
+		}
+		if err := s.guard.AllowStart(ctx, current); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Start retains the public Task lifecycle: callers observe an already
 // committed Task and Attempt, with the same guard and event semantics.
 func (s *Service) Start(ctx context.Context, cmd StartCommand) (Task, Attempt, error) {
- if err:=s.CheckStartAdmission(ctx,cmd);err!=nil{return Task{},Attempt{},err}
- var started Task
- var created Attempt
- err:=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
-  var startErr error
-  started,created,startErr=s.StartInTransaction(ctx,tx,cmd)
-  return startErr
- })
- if err!=nil{return Task{},Attempt{},err}
- return started,created,nil
+	if err := s.CheckStartAdmission(ctx, cmd); err != nil {
+		return Task{}, Attempt{}, err
+	}
+	var started Task
+	var created Attempt
+	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		var startErr error
+		started, created, startErr = s.StartInTransaction(ctx, tx, cmd)
+		return startErr
+	})
+	if err != nil {
+		return Task{}, Attempt{}, err
+	}
+	return started, created, nil
 }
 
 // StartInTransaction permits trusted control-plane Worker admission to commit
@@ -283,56 +311,78 @@ func (s *Service) Start(ctx context.Context, cmd StartCommand) (Task, Attempt, e
 // revision/state and active Attempt checks are repeated inside the write
 // transaction to reject races.
 func (s *Service) StartInTransaction(ctx context.Context, tx storage.Tx, cmd StartCommand) (Task, Attempt, error) {
- if tx==nil||strings.TrimSpace(cmd.TaskID)==""||cmd.ExpectedRevision<1{
-  return Task{},Attempt{},fmt.Errorf("%w: transaction, task id and expected revision are required",ErrInvalidCommand)
- }
- if len(cmd.Metadata)==0{cmd.Metadata=json.RawMessage(`{}`)}
- if !json.Valid(cmd.Metadata){
-  return Task{},Attempt{},fmt.Errorf("%w: attempt metadata must be valid JSON",ErrInvalidCommand)
- }
- attemptID,err:=s.ids.New("attempt")
- if err!=nil{return Task{},Attempt{},err}
- eventID,err:=s.ids.New("evt")
- if err!=nil{return Task{},Attempt{},err}
- now:=s.clock.UnixMilli()
- t,err:=s.repo.GetForUpdate(ctx,tx,cmd.TaskID)
- if err!=nil{return Task{},Attempt{},err}
- if t.Revision!=cmd.ExpectedRevision{return Task{},Attempt{},ErrRevisionConflict}
- if !CanTransition(t.State,StateRunning){
-  return Task{},Attempt{},fmt.Errorf("%w: %s -> %s",ErrInvalidTransition,t.State,StateRunning)
- }
- active,err:=s.repo.ActiveAttempt(ctx,tx,t.ID)
- if err!=nil{return Task{},Attempt{},err}
- if active!=nil{return Task{},Attempt{},ErrActiveAttempt}
- // Revalidate hard predecessors inside the same write transaction as Task
- // and Attempt start. Ready is not a substitute for dependency completion:
- // external transitions, restarts or competing workers must not bypass DAG.
- if err:=s.requireRuntimeDependencyIntegrityTx(ctx,tx,t);err!=nil{
-  return Task{},Attempt{},err
- }
- n,err:=s.repo.NextAttemptNumber(ctx,tx,t.ID)
- if err!=nil{return Task{},Attempt{},err}
- created:=Attempt{
-  ID:attemptID,TaskID:t.ID,AttemptNumber:n,WorkerPrincipalID:cmd.WorkerPrincipalID,
-  State:AttemptRunning,StartedAt:&now,Metadata:cloneJSON(cmd.Metadata),
- }
- if err:=s.repo.InsertAttempt(ctx,tx,created);err!=nil{return Task{},Attempt{},err}
- if err:=s.repo.Transition(ctx,tx,transitionRecord{
-  TaskID:t.ID,ExpectedRevision:t.Revision,From:t.State,To:StateRunning,UpdatedAt:now,
- });err!=nil{return Task{},Attempt{},err}
- payload,_:=json.Marshal(map[string]any{
-  "task_id":t.ID,"attempt_id":attemptID,"attempt_number":n,
-  "from":t.State,"to":StateRunning,"revision":t.Revision+1,
- })
- if err:=s.events.Append(ctx,tx,event.Event{
-  ID:eventID,WorkspaceID:&t.WorkspaceID,Type:"task.started",
-  AggregateType:"task",AggregateID:t.ID,ActorPrincipalID:cmd.ActorPrincipalID,
-  RequestID:cmd.RequestID,TraceID:cmd.TraceID,Payload:payload,OccurredAt:now,
- });err!=nil{return Task{},Attempt{},err}
- t.State=StateRunning
- t.Revision++
- t.UpdatedAt=now
- return t,created,nil
+	if tx == nil || strings.TrimSpace(cmd.TaskID) == "" || cmd.ExpectedRevision < 1 {
+		return Task{}, Attempt{}, fmt.Errorf("%w: transaction, task id and expected revision are required", ErrInvalidCommand)
+	}
+	if len(cmd.Metadata) == 0 {
+		cmd.Metadata = json.RawMessage(`{}`)
+	}
+	if !json.Valid(cmd.Metadata) {
+		return Task{}, Attempt{}, fmt.Errorf("%w: attempt metadata must be valid JSON", ErrInvalidCommand)
+	}
+	attemptID, err := s.ids.New("attempt")
+	if err != nil {
+		return Task{}, Attempt{}, err
+	}
+	eventID, err := s.ids.New("evt")
+	if err != nil {
+		return Task{}, Attempt{}, err
+	}
+	now := s.clock.UnixMilli()
+	t, err := s.repo.GetForUpdate(ctx, tx, cmd.TaskID)
+	if err != nil {
+		return Task{}, Attempt{}, err
+	}
+	if t.Revision != cmd.ExpectedRevision {
+		return Task{}, Attempt{}, ErrRevisionConflict
+	}
+	if !CanTransition(t.State, StateRunning) {
+		return Task{}, Attempt{}, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, t.State, StateRunning)
+	}
+	active, err := s.repo.ActiveAttempt(ctx, tx, t.ID)
+	if err != nil {
+		return Task{}, Attempt{}, err
+	}
+	if active != nil {
+		return Task{}, Attempt{}, ErrActiveAttempt
+	}
+	// Revalidate hard predecessors inside the same write transaction as Task
+	// and Attempt start. Ready is not a substitute for dependency completion:
+	// external transitions, restarts or competing workers must not bypass DAG.
+	if err := s.requireRuntimeDependencyIntegrityTx(ctx, tx, t); err != nil {
+		return Task{}, Attempt{}, err
+	}
+	n, err := s.repo.NextAttemptNumber(ctx, tx, t.ID)
+	if err != nil {
+		return Task{}, Attempt{}, err
+	}
+	created := Attempt{
+		ID: attemptID, TaskID: t.ID, AttemptNumber: n, WorkerPrincipalID: cmd.WorkerPrincipalID,
+		State: AttemptRunning, StartedAt: &now, Metadata: cloneJSON(cmd.Metadata),
+	}
+	if err := s.repo.InsertAttempt(ctx, tx, created); err != nil {
+		return Task{}, Attempt{}, err
+	}
+	if err := s.repo.Transition(ctx, tx, transitionRecord{
+		TaskID: t.ID, ExpectedRevision: t.Revision, From: t.State, To: StateRunning, UpdatedAt: now,
+	}); err != nil {
+		return Task{}, Attempt{}, err
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"task_id": t.ID, "attempt_id": attemptID, "attempt_number": n,
+		"from": t.State, "to": StateRunning, "revision": t.Revision + 1,
+	})
+	if err := s.events.Append(ctx, tx, event.Event{
+		ID: eventID, WorkspaceID: &t.WorkspaceID, Type: "task.started",
+		AggregateType: "task", AggregateID: t.ID, ActorPrincipalID: cmd.ActorPrincipalID,
+		RequestID: cmd.RequestID, TraceID: cmd.TraceID, Payload: payload, OccurredAt: now,
+	}); err != nil {
+		return Task{}, Attempt{}, err
+	}
+	t.State = StateRunning
+	t.Revision++
+	t.UpdatedAt = now
+	return t, created, nil
 }
 
 func (s *Service) WaitDependency(ctx context.Context, cmd TransitionCommand) (Task, error) {
@@ -345,37 +395,51 @@ func (s *Service) WaitDependency(ctx context.Context, cmd TransitionCommand) (Ta
 // Unlike the public WaitDependency method this requires an actively running
 // attempt; it cannot re-admit a previously blocked or completed operation.
 func (s *Service) WaitDependencyInTransaction(ctx context.Context, tx storage.Tx, cmd TransitionCommand) error {
- if tx==nil || strings.TrimSpace(cmd.TaskID)=="" || cmd.ExpectedRevision<1 {
-  return fmt.Errorf("%w: transaction, Task identity and revision required",ErrInvalidCommand)
- }
- t,err:=s.repo.GetForUpdate(ctx,tx,cmd.TaskID)
- if err!=nil{return err}
- if t.Revision!=cmd.ExpectedRevision{return ErrRevisionConflict}
- if t.State!=StateRunning || !CanTransition(t.State,StateWaitingDependency) {
-  return fmt.Errorf("%w: delegation requires running Task, found %s",ErrInvalidTransition,t.State)
- }
- active,err:=s.repo.ActiveAttempt(ctx,tx,t.ID)
- if err!=nil{return err}
- if active==nil {return ErrNoActiveAttempt}
- if active.State!=AttemptRunning {
-  return fmt.Errorf("%w: delegation requires running Attempt, found %s",ErrInvalidAttempt,active.State)
- }
- now:=s.clock.UnixMilli()
- if err:=s.repo.TransitionAttempt(ctx,tx,active.ID,AttemptRunning,AttemptWaiting,now);err!=nil{return err}
- if err:=s.repo.Transition(ctx,tx,transitionRecord{
-  TaskID:t.ID,ExpectedRevision:t.Revision,From:t.State,To:StateWaitingDependency,UpdatedAt:now,
- });err!=nil{return err}
- eid,err:=s.ids.New("evt")
- if err!=nil{return err}
- payload,_:=json.Marshal(map[string]any{
-  "task_id":t.ID,"from":t.State,"to":StateWaitingDependency,
-  "reason":cmd.Reason,"revision":t.Revision+1,
- })
- return s.events.Append(ctx,tx,event.Event{
-  ID:eid,WorkspaceID:&t.WorkspaceID,Type:"task.waiting_dependency",
-  AggregateType:"task",AggregateID:t.ID,ActorPrincipalID:cmd.ActorPrincipalID,
-  RequestID:cmd.RequestID,TraceID:cmd.TraceID,Payload:payload,OccurredAt:now,
- })
+	if tx == nil || strings.TrimSpace(cmd.TaskID) == "" || cmd.ExpectedRevision < 1 {
+		return fmt.Errorf("%w: transaction, Task identity and revision required", ErrInvalidCommand)
+	}
+	t, err := s.repo.GetForUpdate(ctx, tx, cmd.TaskID)
+	if err != nil {
+		return err
+	}
+	if t.Revision != cmd.ExpectedRevision {
+		return ErrRevisionConflict
+	}
+	if t.State != StateRunning || !CanTransition(t.State, StateWaitingDependency) {
+		return fmt.Errorf("%w: delegation requires running Task, found %s", ErrInvalidTransition, t.State)
+	}
+	active, err := s.repo.ActiveAttempt(ctx, tx, t.ID)
+	if err != nil {
+		return err
+	}
+	if active == nil {
+		return ErrNoActiveAttempt
+	}
+	if active.State != AttemptRunning {
+		return fmt.Errorf("%w: delegation requires running Attempt, found %s", ErrInvalidAttempt, active.State)
+	}
+	now := s.clock.UnixMilli()
+	if err := s.repo.TransitionAttempt(ctx, tx, active.ID, AttemptRunning, AttemptWaiting, now); err != nil {
+		return err
+	}
+	if err := s.repo.Transition(ctx, tx, transitionRecord{
+		TaskID: t.ID, ExpectedRevision: t.Revision, From: t.State, To: StateWaitingDependency, UpdatedAt: now,
+	}); err != nil {
+		return err
+	}
+	eid, err := s.ids.New("evt")
+	if err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"task_id": t.ID, "from": t.State, "to": StateWaitingDependency,
+		"reason": cmd.Reason, "revision": t.Revision + 1,
+	})
+	return s.events.Append(ctx, tx, event.Event{
+		ID: eid, WorkspaceID: &t.WorkspaceID, Type: "task.waiting_dependency",
+		AggregateType: "task", AggregateID: t.ID, ActorPrincipalID: cmd.ActorPrincipalID,
+		RequestID: cmd.RequestID, TraceID: cmd.TraceID, Payload: payload, OccurredAt: now,
+	})
 }
 
 // ResumeWaitingAttemptInTransaction is the trusted autonomous Worker wake path.
@@ -384,38 +448,52 @@ func (s *Service) WaitDependencyInTransaction(ctx context.Context, tx storage.Tx
 // matching Worker status in the same transaction; failed journal/outbox writes
 // or stale revisions roll back the Task, Attempt and Worker together.
 func (s *Service) ResumeWaitingAttemptInTransaction(ctx context.Context, tx storage.Tx, cmd TransitionCommand, attemptID string) error {
- if tx==nil||strings.TrimSpace(cmd.TaskID)==""||cmd.ExpectedRevision<1||
-  strings.TrimSpace(attemptID)==""{
-  return fmt.Errorf("%w: transaction, Task revision and Attempt identity required",ErrInvalidCommand)
- }
- t,err:=s.repo.GetForUpdate(ctx,tx,cmd.TaskID)
- if err!=nil{return err}
- if t.Revision!=cmd.ExpectedRevision{return ErrRevisionConflict}
- if t.State!=StateWaitingDependency||!CanTransition(t.State,StateRunning){
-  return fmt.Errorf("%w: autonomous wake requires dependency-waiting Task, found %s",ErrInvalidTransition,t.State)
- }
- active,err:=s.repo.ActiveAttempt(ctx,tx,t.ID)
- if err!=nil{return err}
- if active==nil||active.ID!=attemptID||active.State!=AttemptWaiting{
-  return fmt.Errorf("%w: autonomous wake requires the original waiting Attempt",ErrInvalidAttempt)
- }
- if err:=s.requireRuntimeDependencyIntegrityTx(ctx,tx,t);err!=nil{return err}
- now:=s.clock.UnixMilli()
- if err:=s.repo.TransitionAttempt(ctx,tx,active.ID,AttemptWaiting,AttemptRunning,now);err!=nil{return err}
- if err:=s.repo.Transition(ctx,tx,transitionRecord{
-  TaskID:t.ID,ExpectedRevision:t.Revision,From:StateWaitingDependency,To:StateRunning,UpdatedAt:now,
- });err!=nil{return err}
- eid,err:=s.ids.New("evt")
- if err!=nil{return err}
- payload,_:=json.Marshal(map[string]any{
-  "task_id":t.ID,"from":StateWaitingDependency,"to":StateRunning,
-  "attempt_id":attemptID,"reason":cmd.Reason,"revision":t.Revision+1,
- })
- return s.events.Append(ctx,tx,event.Event{
-  ID:eid,WorkspaceID:&t.WorkspaceID,Type:"task.resumed",
-  AggregateType:"task",AggregateID:t.ID,ActorPrincipalID:cmd.ActorPrincipalID,
-  RequestID:cmd.RequestID,TraceID:cmd.TraceID,Payload:payload,OccurredAt:now,
- })
+	if tx == nil || strings.TrimSpace(cmd.TaskID) == "" || cmd.ExpectedRevision < 1 ||
+		strings.TrimSpace(attemptID) == "" {
+		return fmt.Errorf("%w: transaction, Task revision and Attempt identity required", ErrInvalidCommand)
+	}
+	t, err := s.repo.GetForUpdate(ctx, tx, cmd.TaskID)
+	if err != nil {
+		return err
+	}
+	if t.Revision != cmd.ExpectedRevision {
+		return ErrRevisionConflict
+	}
+	if t.State != StateWaitingDependency || !CanTransition(t.State, StateRunning) {
+		return fmt.Errorf("%w: autonomous wake requires dependency-waiting Task, found %s", ErrInvalidTransition, t.State)
+	}
+	active, err := s.repo.ActiveAttempt(ctx, tx, t.ID)
+	if err != nil {
+		return err
+	}
+	if active == nil || active.ID != attemptID || active.State != AttemptWaiting {
+		return fmt.Errorf("%w: autonomous wake requires the original waiting Attempt", ErrInvalidAttempt)
+	}
+	if err := s.requireRuntimeDependencyIntegrityTx(ctx, tx, t); err != nil {
+		return err
+	}
+	now := s.clock.UnixMilli()
+	if err := s.repo.TransitionAttempt(ctx, tx, active.ID, AttemptWaiting, AttemptRunning, now); err != nil {
+		return err
+	}
+	if err := s.repo.Transition(ctx, tx, transitionRecord{
+		TaskID: t.ID, ExpectedRevision: t.Revision, From: StateWaitingDependency, To: StateRunning, UpdatedAt: now,
+	}); err != nil {
+		return err
+	}
+	eid, err := s.ids.New("evt")
+	if err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"task_id": t.ID, "from": StateWaitingDependency, "to": StateRunning,
+		"attempt_id": attemptID, "reason": cmd.Reason, "revision": t.Revision + 1,
+	})
+	return s.events.Append(ctx, tx, event.Event{
+		ID: eid, WorkspaceID: &t.WorkspaceID, Type: "task.resumed",
+		AggregateType: "task", AggregateID: t.ID, ActorPrincipalID: cmd.ActorPrincipalID,
+		RequestID: cmd.RequestID, TraceID: cmd.TraceID, Payload: payload, OccurredAt: now,
+	})
 }
 
 func (s *Service) WaitApproval(ctx context.Context, cmd TransitionCommand) (Task, error) {
@@ -461,7 +539,9 @@ func (s *Service) Fail(ctx context.Context, cmd TransitionCommand) (Task, error)
 
 func (s *Service) RequestCancel(ctx context.Context, cmd TransitionCommand) (Task, error) {
 	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error { return s.RequestCancelInTransaction(ctx, tx, cmd) })
-	if err != nil { return Task{}, err }
+	if err != nil {
+		return Task{}, err
+	}
 	return s.repo.Get(ctx, cmd.TaskID)
 }
 
@@ -469,26 +549,32 @@ func (s *Service) RequestCancel(ctx context.Context, cmd TransitionCommand) (Tas
 // durable Task is blocked and an outbox job asks the future RecoveryCoordinator
 // to reconcile durable/external state before any new attempt is admitted.
 func (s *Service) InterruptForRecovery(ctx context.Context, cmd TransitionCommand) (Task, error) {
- err:=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx) error{
-  return s.InterruptForRecoveryInTransaction(ctx,tx,cmd)
- })
- if err!=nil{return Task{},err}
- return s.repo.Get(ctx,cmd.TaskID)
+	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		return s.InterruptForRecoveryInTransaction(ctx, tx, cmd)
+	})
+	if err != nil {
+		return Task{}, err
+	}
+	return s.repo.Get(ctx, cmd.TaskID)
 }
 
 // InterruptForRecoveryInTransaction is a trusted control-plane primitive.
 // The caller can atomically mark the associated Worker run interrupted in
 // the SAME transaction as its Task, Attempt, audit event and recovery outbox.
 // Never expose this method through model-defined tools or direct API calls.
-func (s *Service) InterruptForRecoveryInTransaction(ctx context.Context,tx storage.Tx,cmd TransitionCommand) error{
- if tx==nil||strings.TrimSpace(cmd.TaskID)==""||cmd.ExpectedRevision<1{
-  return fmt.Errorf("%w: transaction, task id and expected revision are required",ErrInvalidCommand)
- }
- eventID,err:=s.ids.New("evt")
- if err!=nil{return err}
- jobID,err:=s.ids.New("job")
- if err!=nil{return err}
- now:=s.clock.UnixMilli()
+func (s *Service) InterruptForRecoveryInTransaction(ctx context.Context, tx storage.Tx, cmd TransitionCommand) error {
+	if tx == nil || strings.TrimSpace(cmd.TaskID) == "" || cmd.ExpectedRevision < 1 {
+		return fmt.Errorf("%w: transaction, task id and expected revision are required", ErrInvalidCommand)
+	}
+	eventID, err := s.ids.New("evt")
+	if err != nil {
+		return err
+	}
+	jobID, err := s.ids.New("job")
+	if err != nil {
+		return err
+	}
+	now := s.clock.UnixMilli()
 	t, err := s.repo.GetForUpdate(ctx, tx, cmd.TaskID)
 	if err != nil {
 		return err
@@ -583,11 +669,15 @@ func (s *Service) transitionInternal(
 		}
 		// Verification retry also re-enters RUNNING; it cannot bypass
 		// the same persisted DAG approval as Start or Resume.
-		if next==StateReady {
-			if err:=s.requireExecutionAdmissionTx(ctx,tx,t);err!=nil{return err}
+		if next == StateReady {
+			if err := s.requireExecutionAdmissionTx(ctx, tx, t); err != nil {
+				return err
+			}
 		}
-		if next==StateRunning {
-			if err:=s.requireRuntimeDependencyIntegrityTx(ctx,tx,t);err!=nil{return err}
+		if next == StateRunning {
+			if err := s.requireRuntimeDependencyIntegrityTx(ctx, tx, t); err != nil {
+				return err
+			}
 		}
 		if attemptNext != "" {
 			active, err := s.repo.ActiveAttempt(ctx, tx, t.ID)
@@ -624,6 +714,7 @@ func (s *Service) transitionInternal(
 	if err != nil {
 		return Task{}, err
 	}
+	s.wakeActivity()
 	return s.repo.Get(ctx, cmd.TaskID)
 }
 
@@ -649,7 +740,9 @@ func (s *Service) CompleteVerified(ctx context.Context, cmd CompleteCommand) (Ta
 	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
 		return s.completeVerifiedInTransaction(ctx, tx, cmd, "", "")
 	})
-	if err != nil { return Task{}, err }
+	if err != nil {
+		return Task{}, err
+	}
 	return s.repo.Get(ctx, cmd.TaskID)
 }
 
@@ -661,62 +754,88 @@ func (s *Service) CompleteVerifiedWorkerInTransaction(
 	ctx context.Context, tx storage.Tx, cmd CompleteCommand,
 	attemptID, workerPrincipalID string,
 ) error {
-	if strings.TrimSpace(attemptID)=="" || strings.TrimSpace(workerPrincipalID)=="" {
-		return fmt.Errorf("%w: Worker completion requires original Attempt ownership",ErrInvalidCommand)
+	if strings.TrimSpace(attemptID) == "" || strings.TrimSpace(workerPrincipalID) == "" {
+		return fmt.Errorf("%w: Worker completion requires original Attempt ownership", ErrInvalidCommand)
 	}
-	return s.completeVerifiedInTransaction(ctx,tx,cmd,attemptID,workerPrincipalID)
+	return s.completeVerifiedInTransaction(ctx, tx, cmd, attemptID, workerPrincipalID)
 }
 
 func (s *Service) completeVerifiedInTransaction(
 	ctx context.Context, tx storage.Tx, cmd CompleteCommand,
 	expectedAttemptID, workerPrincipalID string,
 ) error {
-	if s==nil||tx==nil||strings.TrimSpace(cmd.TaskID)==""||
-		cmd.ExpectedRevision<1||strings.TrimSpace(cmd.CheckpointID)==""{
-		return fmt.Errorf("%w: task id, revision and checkpoint id required",ErrInvalidCommand)
+	if s == nil || tx == nil || strings.TrimSpace(cmd.TaskID) == "" ||
+		cmd.ExpectedRevision < 1 || strings.TrimSpace(cmd.CheckpointID) == "" {
+		return fmt.Errorf("%w: task id, revision and checkpoint id required", ErrInvalidCommand)
 	}
-	if len(cmd.Result)==0{cmd.Result=json.RawMessage(`{}`)}
-	if !json.Valid(cmd.Result){return fmt.Errorf("%w: result must be valid JSON",ErrInvalidCommand)}
-	t,err:=s.repo.GetForUpdate(ctx,tx,cmd.TaskID)
-	if err!=nil{return err}
-	if t.Revision!=cmd.ExpectedRevision{return ErrRevisionConflict}
-	if t.State!=StateVerifying||!CanTransition(t.State,StateComplete){
-		return fmt.Errorf("%w: %s -> %s",ErrInvalidTransition,t.State,StateComplete)
+	if len(cmd.Result) == 0 {
+		cmd.Result = json.RawMessage(`{}`)
 	}
-	valid,err:=s.repo.ValidCompletionEvidence(ctx,tx,t.ID,cmd.CheckpointID)
-	if err!=nil{return err}
-	if !valid{return ErrVerificationRequired}
-	active,err:=s.repo.ActiveAttempt(ctx,tx,t.ID)
-	if err!=nil{return err}
-	if expectedAttemptID!=""{
-		if active==nil||active.ID!=expectedAttemptID||active.WorkerPrincipalID==nil||
-			*active.WorkerPrincipalID!=workerPrincipalID {
+	if !json.Valid(cmd.Result) {
+		return fmt.Errorf("%w: result must be valid JSON", ErrInvalidCommand)
+	}
+	t, err := s.repo.GetForUpdate(ctx, tx, cmd.TaskID)
+	if err != nil {
+		return err
+	}
+	if t.Revision != cmd.ExpectedRevision {
+		return ErrRevisionConflict
+	}
+	if t.State != StateVerifying || !CanTransition(t.State, StateComplete) {
+		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, t.State, StateComplete)
+	}
+	valid, err := s.repo.ValidCompletionEvidence(ctx, tx, t.ID, cmd.CheckpointID)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return ErrVerificationRequired
+	}
+	active, err := s.repo.ActiveAttempt(ctx, tx, t.ID)
+	if err != nil {
+		return err
+	}
+	if expectedAttemptID != "" {
+		if active == nil || active.ID != expectedAttemptID || active.WorkerPrincipalID == nil ||
+			*active.WorkerPrincipalID != workerPrincipalID {
 			return ErrInvalidAttempt
 		}
 		var count int
-		err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM task_attempts
-			WHERE task_id=? AND status IN ('created','queued','running','waiting')`,t.ID).Scan(&count)
-		if err!=nil{return err}
-		if count!=1{return ErrInvalidAttempt}
+		err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_attempts
+			WHERE task_id=? AND status IN ('created','queued','running','waiting')`, t.ID).Scan(&count)
+		if err != nil {
+			return err
+		}
+		if count != 1 {
+			return ErrInvalidAttempt
+		}
 	}
-	now:=s.clock.UnixMilli()
-	if active!=nil{
-		if active.State!=AttemptWaiting{return ErrActiveAttempt}
-		if err:=s.repo.TransitionAttempt(ctx,tx,active.ID,active.State,AttemptSucceeded,now);err!=nil{return err}
+	now := s.clock.UnixMilli()
+	if active != nil {
+		if active.State != AttemptWaiting {
+			return ErrActiveAttempt
+		}
+		if err := s.repo.TransitionAttempt(ctx, tx, active.ID, active.State, AttemptSucceeded, now); err != nil {
+			return err
+		}
 	}
-	if err:=s.repo.Transition(ctx,tx,transitionRecord{
-		TaskID:t.ID,ExpectedRevision:t.Revision,From:t.State,To:StateComplete,
-		UpdatedAt:now,Result:append([]byte(nil),cmd.Result...),
-	});err!=nil{return err}
-	eventID,err:=s.ids.New("evt")
-	if err!=nil{return err}
-	payload,_:=json.Marshal(map[string]any{
-		"task_id":t.ID,"from":t.State,"to":StateComplete,
-		"checkpoint_id":cmd.CheckpointID,"revision":t.Revision+1,
+	if err := s.repo.Transition(ctx, tx, transitionRecord{
+		TaskID: t.ID, ExpectedRevision: t.Revision, From: t.State, To: StateComplete,
+		UpdatedAt: now, Result: append([]byte(nil), cmd.Result...),
+	}); err != nil {
+		return err
+	}
+	eventID, err := s.ids.New("evt")
+	if err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"task_id": t.ID, "from": t.State, "to": StateComplete,
+		"checkpoint_id": cmd.CheckpointID, "revision": t.Revision + 1,
 	})
-	return s.events.Append(ctx,tx,event.Event{
-		ID:eventID,WorkspaceID:&t.WorkspaceID,Type:"task.completed",
-		AggregateType:"task",AggregateID:t.ID,ActorPrincipalID:cmd.ActorPrincipalID,
-		RequestID:cmd.RequestID,TraceID:cmd.TraceID,Payload:payload,OccurredAt:now,
+	return s.events.Append(ctx, tx, event.Event{
+		ID: eventID, WorkspaceID: &t.WorkspaceID, Type: "task.completed",
+		AggregateType: "task", AggregateID: t.ID, ActorPrincipalID: cmd.ActorPrincipalID,
+		RequestID: cmd.RequestID, TraceID: cmd.TraceID, Payload: payload, OccurredAt: now,
 	})
 }

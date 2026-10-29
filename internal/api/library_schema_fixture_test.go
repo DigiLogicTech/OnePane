@@ -102,7 +102,7 @@ func TestLibrarySchemaFixtureClonesKeepIsolationAndRealSchema(t *testing.T) {
 			for _, pragma := range []struct {
 				query string
 				want  int
-			}{{`PRAGMA foreign_keys`, 1}, {`PRAGMA synchronous`, 2}, {`PRAGMA busy_timeout`, 5000}} {
+			}{{`PRAGMA foreign_keys`, 1}, {`PRAGMA synchronous`, 1}, {`PRAGMA busy_timeout`, 5000}} {
 				var got int
 				if err := conn.QueryRowContext(ctx, pragma.query).Scan(&got); err != nil || got != pragma.want {
 					t.Fatalf("clone live configuration %s=%d want=%d err=%v", pragma.query, got, pragma.want, err)

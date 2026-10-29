@@ -9,8 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 	"sync"
+	"time"
 
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/event"
@@ -77,6 +77,8 @@ type Service struct {
 	runtimeInstallMu sync.Mutex
 	installQueueMu   sync.Mutex
 	omniRoute        omniRouteProcessState
+	optionalMu       sync.Mutex
+	optionalNotes    []string
 }
 
 func NewService(db *sql.DB, tx storage.Transactor, clk clock.Clock, inf *inference.Service, dataDir string, trust *CatalogTrustStore) *Service {
@@ -135,6 +137,87 @@ func (s *Service) ConfigureResidencyHeadroom(percent int) error {
 	}
 	s.supervisor.SetResidencyHeadroom(percent)
 	return nil
+}
+
+func (s *Service) NoteOptionalDegradation(reason string) {
+	if s == nil {
+		return
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return
+	}
+	if len(reason) > 300 {
+		reason = reason[:300]
+	}
+	s.optionalMu.Lock()
+	defer s.optionalMu.Unlock()
+	s.optionalNotes = append(s.optionalNotes, reason)
+}
+
+func (s *Service) ObservedRuntimeHealth(ctx context.Context) (string, string) {
+	if s == nil || s.db == nil {
+		return "unobserved", "managed runtime health is not available"
+	}
+	s.optionalMu.Lock()
+	notes := append([]string(nil), s.optionalNotes...)
+	s.optionalMu.Unlock()
+	var reasons []string
+	reasons = append(reasons, notes...)
+	rows, err := s.db.QueryContext(ctx, `SELECT component_id, observed_state, COALESCE(last_error,'')
+		FROM managed_component_states
+		WHERE observed_state IN ('degraded','failed')
+		ORDER BY component_id`)
+	if err != nil {
+		return "degraded", "managed component state could not be read: " + err.Error()
+	}
+	for rows.Next() {
+		var id, state, last string
+		if scanErr := rows.Scan(&id, &state, &last); scanErr != nil {
+			_ = rows.Close()
+			return "degraded", "managed component state could not be read"
+		}
+		item := id + " " + state
+		if last != "" {
+			item += ": " + last
+		}
+		reasons = append(reasons, item)
+	}
+	if err = rows.Err(); err != nil {
+		_ = rows.Close()
+		return "degraded", "managed component state could not be read"
+	}
+	_ = rows.Close()
+	runtimeRows, err := s.db.QueryContext(ctx, `SELECT deployment_id, status, COALESCE(failure_reason,'')
+		FROM local_runtime_instances
+		WHERE status IN ('failed','orphaned')
+		ORDER BY deployment_id`)
+	if err != nil {
+		return "degraded", "managed runtime state could not be read: " + err.Error()
+	}
+	defer runtimeRows.Close()
+	for runtimeRows.Next() {
+		var id, state, last string
+		if err = runtimeRows.Scan(&id, &state, &last); err != nil {
+			return "degraded", "managed runtime state could not be read"
+		}
+		item := "runtime " + id + " " + state
+		if last != "" {
+			item += ": " + last
+		}
+		reasons = append(reasons, item)
+	}
+	if err = runtimeRows.Err(); err != nil {
+		return "degraded", "managed runtime state could not be read"
+	}
+	if len(reasons) == 0 {
+		return "ok", ""
+	}
+	reason := strings.Join(reasons, "; ")
+	if len(reason) > 500 {
+		reason = reason[:500]
+	}
+	return "degraded", reason
 }
 
 func (s *Service) RecoverManagedRuntimes(ctx context.Context) error {
@@ -637,7 +720,11 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 	// from seeing the other's newly renamed but not-yet-inventoried runtime.
 	s.runtimeInstallMu.Lock()
 	runtimeLocked := true
-	defer func() { if runtimeLocked { s.runtimeInstallMu.Unlock() } }()
+	defer func() {
+		if runtimeLocked {
+			s.runtimeInstallMu.Unlock()
+		}
+	}()
 	p, err := s.Plan(ctx, planID)
 	if err != nil {
 		return inference.ModelDeployment{}, err
@@ -693,7 +780,9 @@ func (s *Service) ProvisionApprovedPlan(ctx context.Context, planID string, runt
 		if _, statErr := os.Stat(runtimeRoot); statErr == nil {
 			var generationErr error
 			runtimeRoot, generationErr = nextUnusedRuntimeGeneration(runtimeRoot)
-			if generationErr != nil { return inference.ModelDeployment{}, generationErr }
+			if generationErr != nil {
+				return inference.ModelDeployment{}, generationErr
+			}
 			execPath = filepath.Join(runtimeRoot, runtime.ExecutableRel)
 		} else if !os.IsNotExist(statErr) {
 			return inference.ModelDeployment{}, statErr
@@ -1064,11 +1153,17 @@ func (s *Service) ShutdownManagedRuntimes(ctx context.Context) error {
 // runtime directories. The caller holds runtimeInstallMu while selecting and
 // atomically renaming its staging directory to the returned path.
 func nextUnusedRuntimeGeneration(root string) (string, error) {
- for n:=1; n<=256; n++ {
-  candidate:=fmt.Sprintf("%s.rev-%d",root,n)
-  if _,err:=os.Lstat(candidate);os.IsNotExist(err) {
-   if _,stageErr:=os.Lstat(candidate+".installing");os.IsNotExist(stageErr) {return candidate,nil} else if stageErr!=nil{return "",stageErr}
-  } else if err!=nil{return "",err}
- }
- return "",errors.New("no free isolated managed-runtime generation; inspect the existing runtime inventory before installing more")
+	for n := 1; n <= 256; n++ {
+		candidate := fmt.Sprintf("%s.rev-%d", root, n)
+		if _, err := os.Lstat(candidate); os.IsNotExist(err) {
+			if _, stageErr := os.Lstat(candidate + ".installing"); os.IsNotExist(stageErr) {
+				return candidate, nil
+			} else if stageErr != nil {
+				return "", stageErr
+			}
+		} else if err != nil {
+			return "", err
+		}
+	}
+	return "", errors.New("no free isolated managed-runtime generation; inspect the existing runtime inventory before installing more")
 }

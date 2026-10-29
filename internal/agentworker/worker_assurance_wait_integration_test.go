@@ -5,7 +5,6 @@ package agentworker
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 )
 
@@ -45,13 +44,15 @@ func TestIndependentAssuranceFailedParkDoesNotHideRunningWorker(t *testing.T){
  if runState!="running"||taskState!="verifying"{
   t.Fatalf("incomplete assurance park mutated state: %s/%s",runState,taskState)
  }
- if _,err:=w.Tick(ctx,1);!errors.Is(err,ErrDispatchRequiresReconciliation){
-  t.Fatalf("uncertain assurance Work was retried: %v",err)
+ if _,err:=w.Tick(ctx,1);err!=nil{
+  t.Fatalf("in-process assurance park failed: %v",err)
  }
  recovered,err:=w.RecoverLostRuns(ctx)
- if err!=nil||recovered!=1||w.dispatchReconciliationFailed{
-  t.Fatalf("safe restart-style recovery failed: n=%d err=%v",recovered,err)
+ if err!=nil||recovered!=0||w.dispatchReconciliationFailed{
+  t.Fatalf("live assurance park was not durable: n=%d err=%v",recovered,err)
  }
+ if err:=w.db.QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=?`,r.ID).Scan(&runState);err!=nil{t.Fatal(err)}
+ if runState!="interrupted"{t.Fatalf("assurance worker was replayed: %s",runState)}
 }
 
 func TestIndependentAssuranceStaleAttemptRejected(t *testing.T){

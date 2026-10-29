@@ -7,7 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
- "sync"
+	"sync"
+	"sync/atomic"
 
 	"github.com/DigiLogicTech/OnePane/internal/agentruntime"
 	"github.com/DigiLogicTech/OnePane/internal/artifact"
@@ -55,7 +56,16 @@ type Service struct {
  workerCycleMu sync.Mutex
  // An unresolved dispatch must never be retried if recovery persistence failed.
  // Access is serialized by workerCycleMu, including startup recovery.
+ // haltedRuns records the workers whose local park must be retried.
+ // quarantine isolates a worker that cannot be parked without guessing,
+ // so unrelated work can continue. workerHalt is the lock-free view used
+ // by /v1/health while a model call holds workerCycleMu.
  dispatchReconciliationFailed bool
+ haltMu                       sync.Mutex
+ haltedRuns                   map[string]Run
+ quarantine                   map[string]string
+ workerHalt                   atomic.Bool
+ workerHaltReason             atomic.Value
  // One-slot scheduler calls alternate Active and READY work when both are
  // present. The mutex protects only the preference, never executes a step.
  tickFairnessMu sync.Mutex
@@ -246,44 +256,9 @@ func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
   // Hold the Task/Attempt transition, recovery audit/outbox and run
   // interruption in one durable commit. A revision race or missing attempt
   // rolls back *all* records, leaving an explicit recovery error.
-  err:=s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx) error{
-   // Recheck the exact active original Attempt rather than allowing
-   // the Task recovery primitive to select another Attempt.
-   var status, attemptStatus string
-   var attemptPrincipal sql.NullString
-   var activeCount int
-   err:=tx.QueryRowContext(ctx,`SELECT r.status,a.status,a.worker_principal_id,
-     (SELECT COUNT(*) FROM task_attempts other
-       WHERE other.task_id=r.task_id
-         AND other.status IN ('created','queued','running','waiting'))
-     FROM agent_worker_runs r
-     JOIN tasks t ON t.id=r.task_id AND t.workspace_id=r.workspace_id
-     JOIN task_attempts a ON a.id=r.attempt_id AND a.task_id=t.id
-     WHERE r.id=? AND r.task_id=? AND t.revision=?`,
-     v.run,v.task,v.rev).Scan(&status,&attemptStatus,&attemptPrincipal,&activeCount)
-   if err!=nil{return fmt.Errorf("Worker recovery identity unavailable: %w",err)}
-   if status!=string(RunRunning)||activeCount!=1||
-     (attemptStatus!="created"&&attemptStatus!="queued"&&
-      attemptStatus!="running"&&attemptStatus!="waiting")||
-     !attemptPrincipal.Valid||attemptPrincipal.String!=WorkerPrincipal{
-     return ErrInvalidWorkerState
-   }
-   actor:=AuthorityPrincipal
-   if err:=s.tasks.InterruptForRecoveryInTransaction(ctx,tx,task.TransitionCommand{
-    TaskID:v.task,ExpectedRevision:v.rev,ActorPrincipalID:&actor,
-    Reason:"agent_worker_restart_unknown_step_outcome",
-   });err!=nil{return fmt.Errorf("interrupt Task %s for worker recovery: %w",v.task,err)}
-   now:=s.clock.UnixMilli()
-   result,err:=tx.ExecContext(ctx,`UPDATE agent_worker_runs SET status='interrupted',
-    last_error='daemon restart during active worker step',revision=revision+1,
-    updated_at=?,completed_at=? WHERE id=? AND task_id=? AND status='running'`,
-    now,now,v.run,v.task)
-   if err!=nil{return err}
-   affected,err:=result.RowsAffected()
-   if err!=nil{return err}
-   if affected!=1{return fmt.Errorf("worker recovery run %s lost ownership",v.run)}
-   return nil
-  })
+  err:=s.parkRunningWorker(ctx,v.run,v.task,v.rev,
+   "agent_worker_restart_unknown_step_outcome",
+   "daemon restart during active worker step")
   if err!=nil{
    // Continue with independent Workers: a corrupt Task must never prevent
    // other lost attempts from being safely blocked and journalled.
@@ -299,7 +274,7 @@ func (s *Service) RecoverLostRuns(ctx context.Context) (int, error) {
  orphans,orphanErr:=s.recoverOrphanedAgentAttempts(ctx)
  if orphanErr!=nil{problems.add(orphanErr)}
  recoveryErr:=problems.result()
- if recoveryErr==nil{s.dispatchReconciliationFailed=false}
+ if recoveryErr==nil{s.clearSchedulingHalt()}
  return recovered+orphans,recoveryErr
 }
 
@@ -308,7 +283,7 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
  // The StepCount revision CAS is not an in-flight execution lease.
  if !s.workerCycleMu.TryLock(){return nil,ErrWorkerCycleInProgress}
  defer s.workerCycleMu.Unlock()
- if s.dispatchReconciliationFailed{return nil,ErrDispatchRequiresReconciliation}
+ if err:=s.reconcileSchedulingHalt(ctx);err!=nil{return nil,err}
  if limit<=0||limit>100 {limit=10}
  if err:=s.EnsureSystemPrincipals(ctx);err!=nil{return nil,err}
 
@@ -348,6 +323,7 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
   if consumedRuns[runIndex]{continue}
   consumedRuns[runIndex]=true
   r:=runs[runIndex]
+  if s.runQuarantined(r.ID){continue}
   partner:=-1
   if len(out)+2<=limit {
    ids:=make([]string,0,len(runs)-runIndex-1)
@@ -356,6 +332,7 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
    match,err:=s.parallelTeamPartner(ctx,r.TaskID,ids)
    if err!=nil{tickErrors=errors.Join(tickErrors,err)}else if match>=0{partner=positions[match]}
   }
+  if partner>=0 && s.runQuarantined(runs[partner].ID){partner=-1}
   if partner>=0 {
    consumedRuns[partner]=true
    out=append(out,s.stepTeamPair(ctx,r,runs[partner])...)

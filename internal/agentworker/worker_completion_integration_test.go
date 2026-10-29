@@ -5,7 +5,6 @@ package agentworker
 import (
  "context"
  "encoding/json"
- "errors"
  "testing"
 
  "github.com/DigiLogicTech/OnePane/internal/clock"
@@ -88,13 +87,15 @@ func TestVerifiedV0CancelledFinalCommitDoesNotClaimCompletion(t *testing.T){
  if taskState!="verifying"||attemptState!="waiting"||workerState!="running"{
   t.Fatalf("partial completion persisted: task=%s attempt=%s worker=%s",taskState,attemptState,workerState)
  }
- if _,err:=w.Tick(ctx,1);!errors.Is(err,ErrDispatchRequiresReconciliation){
-  t.Fatalf("unsafe continuation after completion failure: %v",err)
+ if _,err:=w.Tick(ctx,1);err!=nil{
+  t.Fatalf("in-process completion park failed: %v",err)
  }
  recovered,err:=w.RecoverLostRuns(ctx)
- if err!=nil||recovered!=1||w.dispatchReconciliationFailed{
-  t.Fatalf("reconcile completed failed final commit: n=%d err=%v",recovered,err)
+ if err!=nil||recovered!=0||w.dispatchReconciliationFailed{
+  t.Fatalf("live completion park was not durable: n=%d err=%v",recovered,err)
  }
+ if err:=w.db.QueryRowContext(ctx,`SELECT state FROM tasks WHERE id=?`,r.TaskID).Scan(&taskState);err!=nil{t.Fatal(err)}
+ if taskState!="blocked"{t.Fatalf("failed completion was retried or completed: %s",taskState)}
 }
 
 func TestVerifiedV0StaleAttemptCannotCompleteOriginalTask(t *testing.T){

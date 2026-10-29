@@ -254,7 +254,7 @@ func (s *Service) terminalRun(ctx context.Context, run Run, res TickResult, next
 	if err != nil {
 		// The Worker may still have a RUNNING Attempt. Do not issue another
 		// model/tool step until durable startup recovery resolves its outcome.
-		s.dispatchReconciliationFailed = true
+		s.noteSchedulingHalt(run)
 		return failedResult(res, fmt.Errorf("Worker terminal-state commit failed; scheduler halted pending recovery: %w", err))
 	}
 	res.Status = string(workerStatus)

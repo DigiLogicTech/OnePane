@@ -54,12 +54,20 @@ async function nextNodeLoadLocal(id){
  nextNodeUI.capError=results[0].status==="rejected"&&results[1].status==="rejected"?
    "Local telemetry and model inventory unavailable; check your session permissions.":"";
 }
+function nextNodeGpuKey(pool){return "onepane:gpu-role:"+String(pool?.id||pool?.name||"");}
+function nextNodeGpuChoice(pool){try{return localStorage.getItem(nextNodeGpuKey(pool))||"";}catch{return "";}}
+function nextNodeGpuRole(pool){
+ const name=String(pool?.name||"");
+ const vram=Number(pool?.capacity_bytes||pool?.vram_bytes||pool?.vram_total_bytes||0);
+ const integrated=/intel|hd graphics|uhd|iris|radeon\(tm\) graphics|microsoft basic/i.test(name)||(vram>0&&vram<=2*1024*1024*1024&&/graphics/i.test(name));
+ return integrated?{role:"display",label:"display only (excluded)"}:{role:"models",label:"used for models"};
+}
 function nextNodeRows(){
  var rows=nextNodeUI.nodes,online=rows.filter(function(n){return n.local||n.trust_state==="paired";}).length;
  var manifest=nextNodeUI.manifest,pools=manifest?.compute?.pools,models=manifest?.models;
  var gpu=Array.isArray(pools)?pools.filter(p=>p.kind==="gpu").length:null;
  return '<div class="host-metrics-grid node-summary-grid">'+
-  [['Nodes',rows.length],['Trusted / local',online],['Selected GPU pools',nextNodeCount(gpu)],['Selected models',nextNodeCount(Array.isArray(models)?models.length:null)]]
+  [['Nodes',rows.length],['Trusted / local',online],['Detected',nextNodeCount(gpu)],['Models on this node',nextNodeCount(Array.isArray(models)?models.length:null)]]
   .map(function(row){return '<section class="host-metric-tile"><strong>'+nextNodeEsc(row[0])+'</strong><div class="host-metric-value">'+nextNodeEsc(row[1])+'</div></section>';}).join("")+'</div>';
 }
 function nextNodeJobKey(id){return "onepane:nodes:jobs:"+id;}
@@ -120,6 +128,7 @@ function nextNodeDraw(){
  $$("[data-next-node]",root).forEach(function(b){b.onclick=async function(){nextNodeUI.selected=b.dataset.nextNode;nextNodeUI.tab="overview";await nextNodeLoadDetail(nextNodeUI.selected);nextNodeDraw();};});
  $$("[data-next-node-tab]",root).forEach(function(b){b.onclick=function(){nextNodeUI.tab=b.dataset.nextNodeTab;nextNodeDraw();};});
  $("#nextNodeQAEvidence")?.addEventListener("click",()=>nextNodeShowQAEvidence(nextNodeUI.selected));
+ $$("[data-next-gpu]",root).forEach(function(b){b.onclick=function(){var pools=nextNodeUI.manifest?.compute?.pools||[];var pool=pools.find(function(p){return String(p.id||p.name||"")===b.dataset.nextGpu;});if(!pool)return;var current=nextNodeGpuChoice(pool)||nextNodeGpuRole(pool).role;try{localStorage.setItem(nextNodeGpuKey(pool),current==="display"?"models":"display");}catch{}nextNodeDraw();};});
  $("#nextNodeRefresh")?.addEventListener("click",function(){nextNodeLoadDetail(nextNodeUI.selected).then(nextNodeDraw).catch(function(e){notice(e.message,"bad");});});
  $("#nextNodePairAgain")?.addEventListener("click",openPairNode);
  $("#nextNodeOpenModels")?.addEventListener("click",function(){openRoute("models");});
@@ -143,7 +152,7 @@ function nextNodeDraw(){
 function nextNodeDetail(n){
  var tabs=[["overview","Overview"],["models","Models"],["compute","Compute"],["access","Access & Policy"],["activity","Activity"]];
  var nav='<div class="subtabs next-node-tabs">'+tabs.map(function(t){return '<button class="subtab'+(nextNodeUI.tab===t[0]?' active':'')+'" data-next-node-tab="'+t[0]+'">'+t[1]+'</button>';}).join("")+(n.local?'<button class="btn next-node-local-models" id="nextNodeOpenModels" type="button">Manage local models</button>':'')+'</div>';
- var header='<div class="card-header"><div><div class="card-title">'+nextNodeEsc(nextNodeName(n))+' · Management</div><div class="list-meta">'+nextNodeEsc(n.trust_state||"Local node")+' · '+nextNodeEsc(n.id)+'</div></div><div class="toolbar"><button class="btn" type="button" id="nextNodeQAEvidence">QA evidence</button><button class="btn" id="nextNodeRefresh">Refresh</button></div></div>';
+ var header='<div class="card-header"><div><div class="card-title">'+nextNodeEsc(nextNodeName(n))+' · Management</div><div class="list-meta">'+nextNodeEsc(n.trust_state||"Local node")+' · '+nextNodeEsc(n.id)+'</div></div><div class="toolbar"><button class="btn onepane-developer-only" type="button" id="nextNodeQAEvidence">QA evidence</button><button class="btn" id="nextNodeRefresh">Refresh</button></div></div>';
  var body=nextNodeUI.tab==="models"?nextNodeModels(n):nextNodeUI.tab==="compute"?nextNodeCompute(n):nextNodeUI.tab==="access"?nextNodeAccess(n):nextNodeUI.tab==="activity"?nextNodeActivity(n):nextNodeOverview(n);
  return '<section class="panel-card next-node-manager">'+header+nav+'<div class="widget-body">'+body+'</div></section>';
 }
@@ -158,7 +167,7 @@ function nextNodeOverview(n){
  ["Last seen",n.local?"Local (active session)":nextNodeWhen(n.last_seen_at)]];
  return (nextNodeUI.capError?'<p class="error">'+nextNodeEsc(nextNodeUI.capError)+'</p>':'')+
   '<dl class="definition-grid">'+rows.map(function(r){return '<dt>'+nextNodeEsc(r[0])+'</dt><dd>'+nextNodeEsc(r[1]??"—")+'</dd>';}).join("")+'</dl>'+
-  '<h3>Compute pools</h3>'+(Array.isArray(pools)?(pools.length?pools.map(function(p){return '<div class="list-row"><div class="list-main"><strong>'+nextNodeEsc(p.name||p.kind)+'</strong><div class="list-meta">'+nextNodeEsc(p.backend||p.kind)+' · '+(p.capacity_bytes?nextNodeEsc(bytesQA(p.capacity_bytes))+" capacity":"Capacity not reported")+(p.utilization_pct==null?"":" · "+Number(p.utilization_pct).toFixed(1)+"% utilisation")+'</div></div></div>';}).join(""):'<p class="page-subtitle">No accelerator pools detected.</p>'):'<p class="page-subtitle">Compute inventory not yet reported.</p>');
+  '<h3>Devices</h3>'+(Array.isArray(pools)?(pools.length?pools.map(function(p){var role=nextNodeGpuRole(p);var stored=nextNodeGpuChoice(p);var effective=stored||role.role;var label=effective==="display"?"display only (excluded)":"used for models";return '<div class="list-row onepane-device-row"><div class="list-main"><strong>'+nextNodeEsc(p.name||p.kind)+'</strong><div class="list-meta">'+nextNodeEsc(label)+' · '+nextNodeEsc(p.backend||p.kind)+(p.capacity_bytes?" · "+nextNodeEsc(bytesQA(p.capacity_bytes)):"")+'</div></div><button type="button" class="btn tiny" data-next-gpu="'+nextNodeEsc(p.id||p.name||"")+'">'+(effective==="display"?"Include for models":"Exclude, display only")+'</button></div>';}).join(""):'<p class="page-subtitle">No devices detected.</p>'):'<p class="page-subtitle">Device inventory not yet reported.</p>');
 }
 function nextNodeModels(n){
  var models=nextNodeArray(nextNodeUI.manifest&&nextNodeUI.manifest.models);
@@ -321,6 +330,7 @@ async function nextNodeRevoke(){
 // Live local node telemetry: refresh the active Overview without disturbing
 // Compute / Policy forms, preserving user input during edits.
 setInterval(async function(){
+ if(window.onepaneLive?.ownsPolling)return;
  if(!a31RouteIs("nodes")||nextNodeUI.tab!=="overview")return;
  const selected=nextNodeUI.selected,node=nextNodeUI.nodes.find(n=>nextNodeID(n)===selected);
  if(!node?.local||!document.querySelector("#nextNodeRoot"))return;

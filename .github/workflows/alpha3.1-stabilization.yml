@@ -106,12 +106,21 @@ jobs:
           node --check internal/webui/static/nodes-management.js
           node scripts/test_nodes_local_data.js
           node --check internal/webui/static/model-qa-remediation.js
-          ! grep -F "type=\"module\"" internal/webui/static/index.html
+          grep -F 'type="module" src="/onepane-present.js"' internal/webui/static/index.html
+          test "$(grep -c 'type="module"' internal/webui/static/index.html)" = "1"
           ! grep -F "from './chat-commands.js'" internal/webui/static/app.js
           ! grep -E '^export[[:space:]]+' internal/webui/static/chat-commands.js
           grep -F '<script src="/chat-commands.js"></script>' internal/webui/static/index.html
           grep -F '<script src="/app-foundation.js"></script>' internal/webui/static/index.html
-          grep -F '<script src="/release-smoke.js"></script>' internal/webui/static/index.html
+          grep -F 'src="/release-smoke.js"' internal/webui/static/index.html
+          grep -F 'src="/onepane-ui.js"' internal/webui/static/index.html
+          node --check internal/webui/static/onepane-present.js
+          node --check internal/webui/static/onepane-live.js
+          node --check internal/webui/static/onepane-ui.js
+          node --check internal/webui/static/onepane-start.js
+          node --check internal/webui/static/onepane-session-gate.js
+          node --check internal/webui/static/onepane-developer-loader.js
+          node scripts/validate_onepane_ui_honesty.mjs
           grep -F '<script src="/tasks-page.js"></script>' internal/webui/static/index.html
           grep -F '<script src="/app.js"></script>' internal/webui/static/index.html
           grep -F '<script src="/project-workspace-page.js"></script>' internal/webui/static/index.html

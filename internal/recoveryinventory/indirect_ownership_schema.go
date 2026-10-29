@@ -1,0 +1,278 @@
+package recoveryinventory
+
+import (
+	"context"
+	_ "embed"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
+	"strings"
+)
+
+// IndirectOwnershipSchemaVersion identifies a structural prerequisite only.
+// It is not a row-attribution protocol, complete inventory or clearance token.
+const IndirectOwnershipSchemaVersion = "onepane.recovery.indirect-ownership-schema.v1"
+
+//go:embed indirect_ownership_schema_v1.json
+var indirectOwnershipSchemaJSON []byte
+
+var ErrIndirectOwnershipSchemaUnreviewed = errors.New("recovery indirect ownership schema requires review")
+
+type indirectSchemaTable struct {
+	schemaTable
+	CreateSQL string `json:"create_sql"`
+}
+
+type indirectReferenceDescriptor struct {
+	Columns []string
+	Meaning string
+}
+
+// This reviewed register explains the ownership-bearing fields independently
+// of the metadata fixture. Every listed association remains unsupported for a
+// future constrained observation until separate bounded attribution probes and
+// row-vocabulary contracts are implemented. Shared context never recursively
+// owns all rows in its tenant, Project, Workspace or artifact session.
+var indirectReferenceDescriptors = map[string][]indirectReferenceDescriptor{
+	"project_library_document_indexes": {
+		{[]string{"asset_id", "version", "parser_id", "raw_source_sha", "raw_source_size"}, "exact composite immutable original Library version and DOCX parser identity; raw package provenance remains distinct from derived text and does not confer exclusive Task or Attempt ownership"},
+		{[]string{"derived_sha", "manifest_sha", "derived_utf8_bytes", "status", "coverage", "parts_json", "unit_count"}, "bounded untrusted extracted paragraph representation and manifest integrity with explicit story coverage; no invented page or raw ZIP byte citations, Library grant, independent execution evidence, recovery disposition or replay clearance"},
+		{[]string{"created_by", "created_at"}, "authenticated extraction provenance only; membership or shared author never owns unrelated Project, Workspace, Task or Attempt effects"},
+	},
+	"project_library_document_units": {
+		{[]string{"asset_id", "version", "parser_id", "ordinal", "part_name", "paragraph_number"}, "exact original version/parser-bound derived paragraph ordinal and package component position; source grants remain authoritative, not transferred to a separately granted derivative asset"},
+		{[]string{"content", "text_hash"}, "bounded untrusted extracted text and its digest, independently compared with verified original package extraction before API publication; neither Task admission, effect postcondition proof nor recovery or replay authority"},
+	},
+	"project_library_text_indexes": {
+		{[]string{"asset_id", "version", "parser_version", "content_hash", "size_bytes"}, "exact composite immutable Library source version and derived parser identity; reused source versions and their indexes remain shared context, not exclusive Task or Attempt effects"},
+		{[]string{"status", "line_count", "created_by", "created_at"}, "bounded text-ingestion outcome and authenticated indexing author provenance; no Library read grant, Task admission, recovery disposition, replay clearance or independent execution postcondition evidence"},
+	},
+	"project_library_text_lines": {
+		{[]string{"asset_id", "version", "parser_version", "line_number"}, "exact composite derived-index and original source line identity; source association does not recursively own unrelated Project, Workspace, Task or Attempt rows"},
+		{[]string{"byte_start", "byte_end", "content", "line_hash"}, "untrusted retained line bytes with end-exclusive original-byte offsets and source-bound digest; citation material grants neither read authority nor execution or recovery clearance and is not independent effect verification"},
+	},
+	"team_assistance_continuations": {
+		{[]string{"request_id", "answer_id"}, "one immutable applied answer bound by composite identity to the exact original assistance request; shared Team session or author never owns unrelated work"},
+		{[]string{"id", "actor_principal_id", "continue_step_id", "task_revision", "worker_revision", "created_at"}, "authenticated human continuation provenance and original waiting revisions with an independent committed Worker journal reference; not reusable execution admission, recovery disposition, replay clearance or independent postcondition evidence"},
+	},
+	"team_assistance_answers": {
+		{[]string{"request_id"}, "one immutable authored answer owned through the exact original assistance request; never infer ownership from shared human or Team membership"},
+		{[]string{"id", "author_principal_id", "idempotency_key", "answer", "task_revision", "worker_revision", "created_at"}, "bounded untrusted human input and observed waiting revisions; neither execution approval nor recovery disposition, effect clearance or independent postcondition evidence"},
+	},
+	"team_assistance_request_scopes": {
+		{[]string{"request_id"}, "exact immutable assistance request ownership; missing historical scope is unresolved, never backfilled from current Task state"},
+		{[]string{"project_id", "project_workspace_id", "artifact_session_id"}, "nullable original scope recorded atomically at the human wait; shared scope never owns unrelated work and grants no authority"},
+	},
+	"team_assistance_requests": {
+		{[]string{"session_id", "plan_id", "assignment_key", "member_id"}, "immutable accepted contribution context; shared Team session does not own unrelated assignments"},
+		{[]string{"task_id", "attempt_id", "run_id", "wait_step_id"}, "exact original Task/Attempt/Worker and committed human waiting step; request is not permission to resume or replay"},
+		{[]string{"notice_message_id", "author_principal_id", "question"}, "trusted system notice pointer and authored untrusted question text; no answer or human decision authority"},
+	},
+	"agent_worker_steps": {
+		{[]string{"run_id"}, "exact original Worker journal ownership"},
+		{[]string{"step_kind", "status", "result_ref", "request_ref", "detail_json"}, "discriminated typed references: successful model -> agent response artifact; failed/unknown model -> inference request; runtime -> Invocation; tool -> Observation with invocation_id/observation_id; operation -> Operation; delegate -> child Task; verification waiting -> Verification, succeeded -> checkpoint except explicit retry; human succeeded with proposal_type human and detail action assistance_continued -> exact request_id/answer_id/wait_step_id/actor_principal_id provenance, independently bound by immutable continuation receipt; uncommitted response/accounting outcomes require result_ref_kind. Unsupported discriminator combinations defer"},
+	},
+	"artifacts":                      {{[]string{"metadata_json"}, "reverse JSON $.task_id,$.attempt_id,$.inference_request_id,$.agent_request_id,$.agent_runtime_invocation_id; orphan or disagreeing forward references remain relevant"}},
+	"project_library_asset_versions": {{[]string{"asset_id", "version", "provenance_json", "storage_uri", "content_hash"}, "composite immutable identity; reverse JSON $.task_id,$.attempt_id,$.artifact_id; reused versions preserve original provenance, not exclusive Task ownership"}},
+	"dependency_refs":                {{[]string{"owner_type", "owner_id", "target_type", "target_ref", "target_revision"}, "both polymorphic sides unsupported: no closed Task/Attempt/Worker/Operation vocabulary has been established; unknown strings cannot establish absence"}},
+	"notification_deliveries": {
+		{[]string{"source_event_id", "source_event_seq"}, "both independent Event pointers require union discovery and agreement when both present"},
+		{[]string{"operation_id", "verification_id", "status", "message_json", "receipt_json"}, "external-send history and exact Operation/Verification context; terminal/unknown status does not exclude an external send"},
+	},
+	"events":                         {{[]string{"sequence", "id", "event_type", "aggregate_type", "aggregate_id", "payload_json"}, "exact Event IDs/sequences plus discriminated aggregate and typed payload references; event vocabulary and payload attribution are not implemented"}},
+	"outbox_jobs":                    {{[]string{"job_type", "payload_json", "status", "claimed_by", "claim_expires_at"}, "durable lifecycle job/claim history; task.admission.evaluate and task.recovery.required need exact typed payload materialization, not blanket exclusion or clearance"}},
+	"agent_runtime_invocations":      {{[]string{"response_artifact_id", "request_json"}, "forward response artifact plus independent request JSON Task/Attempt and Team-session/turn provenance; foreign/null columns do not hide reverse ownership"}},
+	"inference_requests":             {{[]string{"response_artifact_id", "request_json", "context_manifest_json"}, "forward artifact plus nested ordinary Task/Attempt request and Team session/turn provenance; standalone classifier is not durable complete attribution"}},
+	"approvals":                      {{[]string{"operation_id"}, "Operation approval context, never effect clearance"}},
+	"operation_receipts":             {{[]string{"operation_id", "receipt_json"}, "Operation receipt history, never independent postcondition proof"}},
+	"artifact_revisions":             {{[]string{"artifact_id", "session_id", "parent_revision_id"}, "exact revision/content and ancestry context; shared session does not own unrelated revisions"}},
+	"artifact_sessions":              {{[]string{"source_artifact_id", "current_revision_id"}, "outgoing artifact/revision context; not recursive ownership of all session work"}},
+	"assurance_runs":                 {{[]string{"worker_run_id", "operation_id", "verification_id", "result_json"}, "exact Worker/Operation and linked Verification specification; recorded assurance result is not independent recovery postcondition proof"}},
+	"incidents":                      {{[]string{"operation_id"}, "Operation incident context"}},
+	"operations":                     {{[]string{"compensates_operation_id"}, "incoming and outgoing compensation context; terminal status does not prove rollback"}},
+	"project_change_proposals":       {{[]string{"patch_artifact_id"}, "exact patch artifact and proposal context"}},
+	"project_workspace_publications": {{[]string{"asset_id", "asset_version", "content_hash", "link_id"}, "composite immutable Library version/hash with directional source/target link context"}},
+	"task_recovery_cases":            {{[]string{"interruption_event_id", "source_job_id"}, "immutable intake Event and optional source-job provenance; not effect clearance"}},
+	"tool_invocations":               {{[]string{"operation_id"}, "exact Operation tool dispatch context"}},
+	"verifications":                  {{[]string{"operation_id", "spec_json", "result_json"}, "Operation verification context and specification evidence.artifact_ids/observation_ids/operation_ids/worker_run_id; not complete recovery decision/hash/postcondition binding"}},
+}
+
+var indirectOwnershipTargets = map[string]bool{
+	"agent_worker_runs": true, "agent_worker_steps": true, "operations": true,
+	"events": true, "artifacts": true, "project_library_asset_versions": true,
+	"project_library_text_indexes": true, "project_library_text_lines": true,
+	"project_library_document_indexes": true, "project_library_document_units": true,
+	"notification_deliveries": true, "outbox_jobs": true, "dependency_refs": true,
+	"team_assistance_requests":       true,
+	"team_assistance_request_scopes": true,
+	"team_assistance_answers":        true,
+	"team_assistance_continuations":  true,
+}
+
+func indirectOwnershipRelevant(table schemaTable) bool {
+	if _, ok := indirectReferenceDescriptors[table.Table]; ok {
+		return true
+	}
+	if indirectOwnershipTargets[strings.ToLower(table.Table)] {
+		return true
+	}
+	for _, edge := range table.ForeignKeys {
+		if indirectOwnershipTargets[strings.ToLower(edge.Target)] {
+			return true
+		}
+	}
+	for _, column := range table.Columns {
+		name := strings.ToLower(column.Name)
+		for _, owner := range []string{"operation_id", "worker_run_id", "artifact_id", "event_id", "event_seq", "assistance_request_id", "assistance_answer_id"} {
+			if name == owner || strings.HasSuffix(name, "_"+owner) {
+				return true
+			}
+		}
+		if name == "run_id" {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateIndirectOwnershipSchema checks bounded main-schema metadata and the
+// reviewed first indirect boundary. It reads no rows or effect payloads and
+// writes nothing. Callers must retain the observation transaction; success
+// cannot establish complete semantic attribution or authorize any recovery.
+// Table DDL additionally binds CHECK/default/unique definitions; standalone
+// indexes and triggers, closed JSON vocabularies and row semantics remain
+// separate prerequisites. This function is intentionally not wired to a
+// collector, daemon, public API, case phase or execution admission boundary.
+func ValidateIndirectOwnershipSchema(ctx context.Context, db SchemaQueryer) error {
+	var contract []indirectSchemaTable
+	if err := json.Unmarshal(indirectOwnershipSchemaJSON, &contract); err != nil {
+		return fmt.Errorf("%w: invalid embedded fixture", ErrIndirectOwnershipSchemaUnreviewed)
+	}
+	want := make(map[string]indirectSchemaTable, len(contract))
+	for _, table := range contract {
+		descriptors, ok := indirectReferenceDescriptors[table.Table]
+		if !ok || want[table.Table].Table != "" || table.CreateSQL == "" {
+			return fmt.Errorf("%w: unclassified fixture table", ErrIndirectOwnershipSchemaUnreviewed)
+		}
+		columns := make(map[string]bool, len(table.Columns))
+		for _, col := range table.Columns {
+			columns[col.Name] = true
+		}
+		for _, descriptor := range descriptors {
+			for _, col := range descriptor.Columns {
+				if !columns[col] {
+					return fmt.Errorf("%w: descriptor column absent", ErrIndirectOwnershipSchemaUnreviewed)
+				}
+			}
+		}
+		want[table.Table] = table
+	}
+	if len(want) != len(indirectReferenceDescriptors) {
+		return fmt.Errorf("%w: incomplete fixture", ErrIndirectOwnershipSchemaUnreviewed)
+	}
+	// Known direct tables provide structural classification for additional
+	// unconstrained indirect-name paths (for example publication artifact_id).
+	var direct []schemaTable
+	if err := json.Unmarshal(taskAttemptSchemaJSON, &direct); err != nil {
+		return fmt.Errorf("%w: invalid direct fixture", ErrIndirectOwnershipSchemaUnreviewed)
+	}
+	directWant := make(map[string]schemaTable, len(direct))
+	for _, table := range direct {
+		directWant[table.Table] = table
+	}
+	tables, err := readMainSchemaTables(ctx, db)
+	if err != nil {
+		return errors.Join(ErrIndirectOwnershipSchemaUnreviewed, err)
+	}
+	for _, flags := range tables {
+		name := flags.Table
+		if err = indirectMetadataBounds(ctx, db, name); err != nil {
+			return err
+		}
+		actual, _, e := readTaskAttemptTable(ctx, db, flags)
+		if e != nil {
+			return errors.Join(ErrIndirectOwnershipSchemaUnreviewed, e)
+		}
+		expected, reviewed := want[name]
+		if reviewed {
+			if !reflect.DeepEqual(actual, expected.schemaTable) {
+				return fmt.Errorf("%w: changed table %s", ErrIndirectOwnershipSchemaUnreviewed, name)
+			}
+			ddl, e := indirectTableDDL(ctx, db, name)
+			if e != nil {
+				return e
+			}
+			if ddl != expected.CreateSQL {
+				return fmt.Errorf("%w: changed constraints on %s", ErrIndirectOwnershipSchemaUnreviewed, name)
+			}
+			delete(want, name)
+		} else if indirectOwnershipRelevant(actual) {
+			known, ok := directWant[name]
+			if !ok || !reflect.DeepEqual(actual, known) {
+				return fmt.Errorf("%w: unclassified indirect owner %s", ErrIndirectOwnershipSchemaUnreviewed, name)
+			}
+		}
+	}
+	if len(want) != 0 {
+		return fmt.Errorf("%w: missing reviewed table", ErrIndirectOwnershipSchemaUnreviewed)
+	}
+	return nil
+}
+
+// Check sizes inside SQLite before the shared metadata reader copies names or
+// types into Go. Limit-plus-one prevents arbitrary wide imported schemas from
+// escaping the existing per-table column/FK budget.
+func indirectMetadataBounds(ctx context.Context, db SchemaQueryer, name string) error {
+	for _, query := range []string{
+		`SELECT COUNT(*),COALESCE(MAX(length(CAST(name AS BLOB))),0),COALESCE(MAX(length(CAST(type AS BLOB))),0),0 FROM (SELECT name,type FROM pragma_table_xinfo(?,'main') LIMIT 129)`,
+		`SELECT COUNT(*),COALESCE(MAX(length(CAST("from" AS BLOB))),0),COALESCE(MAX(length(CAST("table" AS BLOB))),0),COALESCE(MAX(length(CAST("to" AS BLOB))),0) FROM (SELECT "from","table","to" FROM pragma_foreign_key_list(?,'main') LIMIT 129)`,
+	} {
+		rows, err := db.QueryContext(ctx, query, name)
+		if err != nil {
+			return err
+		}
+		var count, a, b, c int
+		if !rows.Next() {
+			err = errors.Join(rows.Err(), rows.Close())
+			if err != nil {
+				return err
+			}
+			return ErrIndirectOwnershipSchemaUnreviewed
+		}
+		err = rows.Scan(&count, &a, &b, &c)
+		err = errors.Join(err, rows.Err(), rows.Close())
+		if err != nil {
+			return err
+		}
+		if count > 128 || a > 256 || b > 256 || c > 256 {
+			return fmt.Errorf("%w: column or FK bounds exceeded", ErrIndirectOwnershipSchemaUnreviewed)
+		}
+	}
+	return nil
+}
+
+func indirectTableDDL(ctx context.Context, db SchemaQueryer, name string) (string, error) {
+	rows, err := db.QueryContext(ctx, `SELECT CASE WHEN length(CAST(sql AS BLOB))<=32768 THEN sql ELSE '' END,length(CAST(sql AS BLOB)) FROM main.sqlite_schema WHERE type='table' AND name=?`, name)
+	if err != nil {
+		return "", err
+	}
+	var ddl string
+	var size int
+	if !rows.Next() {
+		err = errors.Join(rows.Err(), rows.Close())
+		if err != nil {
+			return "", err
+		}
+		return "", ErrIndirectOwnershipSchemaUnreviewed
+	}
+	err = rows.Scan(&ddl, &size)
+	err = errors.Join(err, rows.Err(), rows.Close())
+	if err != nil {
+		return "", err
+	}
+	if size > 32768 {
+		return "", fmt.Errorf("%w: DDL bounds exceeded", ErrIndirectOwnershipSchemaUnreviewed)
+	}
+	return strings.TrimSpace(strings.ReplaceAll(ddl, "\r\n", "\n")), nil
+}

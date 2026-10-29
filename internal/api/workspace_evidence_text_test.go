@@ -43,8 +43,8 @@ type evidenceFixtureArtifacts struct{
  rejectVerify bool
  failOpen bool
 }
-func(f *evidenceFixtureArtifacts) VerifyContent(context.Context,string)error{
- if f.rejectVerify{return errors.New("corrupt or unavailable artifact")}
+func(f *evidenceFixtureArtifacts) VerifyExpectedContent(_ context.Context,_ string,hash string,size int64)error{
+ if f.rejectVerify||f.raw.ContentHash!=hash||f.raw.SizeBytes!=size{return errors.New("corrupt or unavailable artifact")}
  return nil
 }
 func(f *evidenceFixtureArtifacts) Open(context.Context,string)(io.ReadCloser,artifact.Artifact,error){

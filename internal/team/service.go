@@ -8,12 +8,14 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/DigiLogicTech/OnePane/internal/clock"
 	"github.com/DigiLogicTech/OnePane/internal/event"
 	"github.com/DigiLogicTech/OnePane/internal/id"
 	"github.com/DigiLogicTech/OnePane/internal/storage"
 	"github.com/DigiLogicTech/OnePane/internal/task"
+	"github.com/DigiLogicTech/OnePane/internal/teamgate"
 )
 
 type Service struct {
@@ -23,6 +25,9 @@ type Service struct {
 	ids    id.Generator
 	events event.Store
 	tasks  *task.Service
+	assistanceWorker AssistanceContinuationWorker
+	cancelMu sync.Mutex
+	cancelCursor string
 }
 
 func NewService(db *sql.DB, tx storage.Transactor, clk clock.Clock, tasks *task.Service) *Service {
@@ -515,12 +520,10 @@ func (s *Service) PostMessage(ctx context.Context, c PostMessageCommand) (Messag
 	if err != nil {
 		return Message{}, err
 	}
-	if ss.Status != "deliberating" && ss.Status != "plan_proposed" && ss.Status != "paused_for_deliberation" && ss.Status != "team_review" {
-		return Message{}, ErrSessionState
-	}
 	if c.Kind == "" {
 		c.Kind = "human"
 	}
+	if !messageSessionAllows(ss.Status,c.Kind) {return Message{},ErrSessionState}
 	switch c.Kind {
 	case "human", "agent", "supervisor", "system":
 	default:
@@ -545,10 +548,29 @@ func (s *Service) PostMessage(ctx context.Context, c PostMessageCommand) (Messag
 	if !s.memberActorAllowed(ctx, ss.TeamID, c.AuthorMemberID, c.AuthorPrincipalID, c.Kind == "human") {
 		return Message{}, ErrInvalid
 	}
+	if c.ReplyToMessageID != nil {
+		var found int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_messages WHERE id=? AND session_id=? AND workspace_id=?`, *c.ReplyToMessageID, ss.ID, ss.WorkspaceID).Scan(&found); err != nil {
+			return Message{}, err
+		}
+		if found != 1 {
+			return Message{}, ErrInvalid
+		}
+	}
 	mid, _ := s.ids.New("tmsg")
 	now := s.clock.UnixMilli()
 	m := Message{ID: mid, WorkspaceID: ss.WorkspaceID, SessionID: ss.ID, AuthorMemberID: c.AuthorMemberID, AuthorPrincipalID: &c.AuthorPrincipalID, Kind: c.Kind, Content: raw, ReplyToMessageID: c.ReplyToMessageID, RoundNumber: ss.RoundNumber, CreatedAt: now}
 	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		var status string
+		if err:=tx.QueryRowContext(ctx,`SELECT status FROM team_sessions WHERE id=? AND workspace_id=? AND team_id=?`,ss.ID,ss.WorkspaceID,ss.TeamID).Scan(&status);err!=nil{return err}
+		if !messageSessionAllows(status,c.Kind){return ErrSessionState}
+		if err := requireReasoningTask(ctx, tx, ss.TaskID, ss.WorkspaceID); err != nil { return err }
+		if err := validateGuidanceTarget(ctx, tx, ss, c.Kind, raw); err != nil { return err }
+		if c.Kind=="human" {
+			var valid int
+			if err:=tx.QueryRowContext(ctx,`SELECT EXISTS(SELECT 1 FROM principals p JOIN workspace_memberships m ON m.principal_id=p.id JOIN workspaces w ON w.id=m.workspace_id JOIN tasks t ON t.workspace_id=w.id WHERE p.id=? AND p.principal_type='human' AND p.status='active' AND m.workspace_id=? AND m.status='active' AND w.status='active' AND t.id=? AND t.archived_at IS NULL AND t.state NOT IN ('complete','failed','cancel_requested','cancelling','cancelled'))`,c.AuthorPrincipalID,ss.WorkspaceID,ss.TaskID).Scan(&valid);err!=nil{return err}
+			if valid!=1{return ErrHumanRequired}
+		}
 		if _, e := tx.ExecContext(ctx, `INSERT INTO team_messages(id,workspace_id,session_id,author_member_id,author_principal_id,message_kind,content_json,reply_to_message_id,round_number,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, m.ID, m.WorkspaceID, m.SessionID, m.AuthorMemberID, m.AuthorPrincipalID, m.Kind, string(m.Content), m.ReplyToMessageID, m.RoundNumber, m.CreatedAt); e != nil {
 			return e
 		}
@@ -561,7 +583,20 @@ func (s *Service) ListMessages(ctx context.Context, sessionID string, limit int)
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,workspace_id,session_id,author_member_id,author_principal_id,message_kind,content_json,reply_to_message_id,round_number,created_at FROM team_messages WHERE session_id=? ORDER BY created_at,id LIMIT ?`, sessionID, limit)
+	return s.messageRows(ctx, `SELECT id,workspace_id,session_id,author_member_id,author_principal_id,message_kind,content_json,reply_to_message_id,round_number,created_at FROM team_messages WHERE session_id=? ORDER BY created_at,id LIMIT ?`, sessionID, limit)
+}
+
+// RecentMessages keeps the worker's bounded reasoning context current in long
+// rooms, without changing chronological exports or truncating model evidence.
+func (s *Service) RecentMessages(ctx context.Context, sessionID string, limit int) ([]Message, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 200
+	}
+	return s.messageRows(ctx, `SELECT id,workspace_id,session_id,author_member_id,author_principal_id,message_kind,content_json,reply_to_message_id,round_number,created_at FROM (SELECT * FROM team_messages WHERE session_id=? ORDER BY message_sequence DESC LIMIT ?) ORDER BY message_sequence`, sessionID, limit)
+}
+
+func (s *Service) messageRows(ctx context.Context, query, sessionID string, limit int) ([]Message, error) {
+	rows, err := s.db.QueryContext(ctx, query, sessionID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -589,6 +624,8 @@ func (s *Service) ListMessages(ctx context.Context, sessionID string, limit int)
 	return out, rows.Err()
 }
 
+const reasoningRunningTurnHistorySQL = `SELECT EXISTS(SELECT 1 FROM team_turn_requests WHERE session_id=? AND status='running')`
+
 func (s *Service) RequestRound(ctx context.Context, c RequestRoundCommand) ([]TurnRequest, error) {
 	ss, err := s.Session(ctx, c.SessionID)
 	if err != nil {
@@ -597,7 +634,7 @@ func (s *Service) RequestRound(ctx context.Context, c RequestRoundCommand) ([]Tu
 	if ss.Status != "deliberating" && ss.Status != "plan_proposed" && ss.Status != "paused_for_deliberation" && ss.Status != "team_review" {
 		return nil, ErrSessionState
 	}
-	if !s.isHuman(ctx, c.RequestedByPrincipalID) && !s.workspaceMember(ctx, ss.WorkspaceID, c.RequestedByPrincipalID) {
+	if !s.workspaceMember(ctx, ss.WorkspaceID, c.RequestedByPrincipalID) {
 		return nil, ErrInvalid
 	}
 	members, err := s.ListMembers(ctx, ss.TeamID)
@@ -626,10 +663,42 @@ func (s *Service) RequestRound(ctx context.Context, c RequestRoundCommand) ([]Tu
 			want[v] = true
 		}
 	}
+	eligible := map[string]bool{}
+	for _, m := range members {
+		if m.Status == "active" && m.MemberKind != "human" && !(researchMode && research.ChairMode == "manual" && m.ID == research.ChairMemberID) {
+			eligible[m.ID] = true
+		}
+	}
+	if len(eligible) == 0 || len(want) > 8 {
+		return nil, ErrInvalid
+	}
+	for memberID := range want {
+		if !eligible[memberID] {
+			return nil, ErrInvalid
+		}
+	}
 	now := s.clock.UnixMilli()
 	var out []TurnRequest
 	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		res, e := tx.ExecContext(ctx, `UPDATE team_sessions SET round_number=round_number+1,revision=revision+1,updated_at=? WHERE id=? AND revision=?`, now, ss.ID, ss.Revision)
+		if err := requireReasoningTask(ctx, tx, ss.TaskID, ss.WorkspaceID); err != nil { return err }
+		// A running turn may still be in transport, or may retain an unknown
+		// outcome awaiting reconciliation. Starting another round cannot
+		// supersede that durable owner, including historical rounds.
+		var running bool
+		if err := tx.QueryRowContext(ctx, reasoningRunningTurnHistorySQL, ss.ID).Scan(&running); err != nil {
+			return err
+		}
+		if running { return ErrSessionState }
+		if c.TriggerMessageID != nil {
+			var found int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_messages WHERE id=? AND session_id=? AND workspace_id=?`, *c.TriggerMessageID, ss.ID, ss.WorkspaceID).Scan(&found); err != nil {
+				return err
+			}
+			if found != 1 {
+				return ErrInvalid
+			}
+		}
+		res, e := tx.ExecContext(ctx, `UPDATE team_sessions SET status='deliberating',round_number=round_number+1,revision=revision+1,updated_at=? WHERE id=? AND revision=?`, now, ss.ID, ss.Revision)
 		if e != nil {
 			return e
 		}
@@ -654,7 +723,7 @@ func (s *Service) RequestRound(ctx context.Context, c RequestRoundCommand) ([]Tu
 			if m.Status != "active" || m.MemberKind == "human" {
 				continue
 			}
-			if researchMode && research.ChairMode=="manual" && m.ID==research.ChairMemberID {
+			if researchMode && research.ChairMode == "manual" && m.ID == research.ChairMemberID {
 				continue // Chair is never an independent/critique/synthesis participant.
 			}
 			if len(want) > 0 && !want[m.ID] {
@@ -695,6 +764,48 @@ func (s *Service) ProposePlan(ctx context.Context, c ProposePlanCommand) (Plan, 
 	now := s.clock.UnixMilli()
 	var version int64
 	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		// A worker may finish planning after acceptance, cancellation or
+		// authority revocation. Revalidate before saving any proposal effects.
+		var authorized bool
+		if e := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM principals p
+			JOIN workspace_memberships wm ON wm.principal_id=p.id AND wm.workspace_id=? AND wm.status='active'
+			JOIN workspaces w ON w.id=wm.workspace_id AND w.status='active'
+			JOIN teams t ON t.id=? AND t.workspace_id=w.id AND t.status='active'
+			WHERE p.id=? AND p.status='active')`, ss.WorkspaceID, ss.TeamID, c.ProposedByPrincipalID).Scan(&authorized); e != nil {
+			return e
+		}
+		if !authorized {
+			return ErrInvalid
+		}
+		if c.ProposedByMemberID != nil {
+			if e := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM team_members m JOIN principals p ON p.id=? AND p.status='active'
+				WHERE m.id=? AND m.team_id=? AND m.workspace_id=? AND m.status='active'
+				AND (m.principal_id=p.id OR (m.member_kind!='human' AND (p.principal_type='system' OR (m.principal_id IS NULL AND p.principal_type='agent')))))`,
+				c.ProposedByPrincipalID, *c.ProposedByMemberID, ss.TeamID, ss.WorkspaceID).Scan(&authorized); e != nil {
+				return e
+			}
+			if !authorized {
+				return ErrInvalid
+			}
+		}
+		if e := requireReasoningTask(ctx, tx, ss.TaskID, ss.WorkspaceID); e != nil {
+			return e
+		}
+		r, e := tx.ExecContext(ctx, `UPDATE team_sessions SET status='plan_proposed',revision=revision+1,updated_at=?
+			WHERE id=? AND workspace_id=? AND task_id=? AND team_id=? AND revision=? AND status=?
+			AND status IN ('deliberating','plan_proposed','paused_for_deliberation','team_review')
+			AND accepted_plan_id IS NULL AND NOT EXISTS(SELECT 1 FROM team_assignment_roots WHERE session_id=team_sessions.id)`,
+			now, ss.ID, ss.WorkspaceID, ss.TaskID, ss.TeamID, ss.Revision, ss.Status)
+		if e != nil {
+			return e
+		}
+		n, e := r.RowsAffected()
+		if e != nil {
+			return e
+		}
+		if n != 1 {
+			return ErrSessionState
+		}
 		if e := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version),0)+1 FROM team_plans WHERE session_id=?`, ss.ID).Scan(&version); e != nil {
 			return e
 		}
@@ -704,12 +815,12 @@ func (s *Service) ProposePlan(ctx context.Context, c ProposePlanCommand) (Plan, 
 		if _, e := tx.ExecContext(ctx, `INSERT INTO team_plans(id,workspace_id,session_id,version,status,plan_json,proposed_by_member_id,proposed_by_principal_id,created_at) VALUES(?,?,?,?,'candidate',?,?,?,?)`, pid, ss.WorkspaceID, ss.ID, version, string(body), c.ProposedByMemberID, c.ProposedByPrincipalID, now); e != nil {
 			return e
 		}
-		if _, e := tx.ExecContext(ctx, `UPDATE team_sessions SET status='plan_proposed',revision=revision+1,updated_at=? WHERE id=?`, now, ss.ID); e != nil {
-			return e
-		}
 		actor := c.ProposedByPrincipalID
 		return s.emit(ctx, tx, ss.WorkspaceID, "team.plan_proposed", "team_session", ss.ID, &actor, map[string]any{"plan_id": pid, "version": version})
 	})
+	if err != nil {
+		return Plan{}, err
+	}
 	return Plan{ID: pid, WorkspaceID: ss.WorkspaceID, SessionID: ss.ID, Version: version, Status: "candidate", Body: body, ProposedByMemberID: c.ProposedByMemberID, ProposedByPrincipalID: &c.ProposedByPrincipalID, CreatedAt: now}, err
 }
 func (s *Service) RaiseObjection(ctx context.Context, c RaiseObjectionCommand) (Objection, error) {
@@ -809,68 +920,7 @@ func (s *Service) Objection(ctx context.Context, idv string) (Objection, error) 
 }
 
 func (s *Service) AcceptPlan(ctx context.Context, c AcceptPlanCommand) (Session, error) {
-	ss, err := s.Session(ctx, c.SessionID)
-	if err != nil {
-		return Session{}, err
-	}
-	if !s.isHuman(ctx, c.AcceptedByPrincipalID) || !s.workspaceMember(ctx, ss.WorkspaceID, c.AcceptedByPrincipalID) {
-		return Session{}, ErrHumanRequired
-	}
-	var planStatus string
-	if err := s.db.QueryRowContext(ctx, `SELECT status FROM team_plans WHERE id=? AND session_id=?`, c.PlanID, ss.ID).Scan(&planStatus); err != nil || planStatus != "candidate" {
-		return Session{}, ErrInvalid
-	}
-	var blocking int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_objections WHERE session_id=? AND (plan_id IS NULL OR plan_id=?) AND status='open' AND severity IN ('blocking','critical')`, ss.ID, c.PlanID).Scan(&blocking); err != nil {
-		return Session{}, err
-	}
-	if blocking > 0 && !c.AcceptOpenRisk {
-		return Session{}, ErrOpenBlockingObjection
-	}
-	decision, err := canonical(c.Decision)
-	if err != nil {
-		return Session{}, err
-	}
-	now := s.clock.UnixMilli()
-	did, _ := s.ids.New("tdecision")
-	err = s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
-		if blocking > 0 {
-			if _, e := tx.ExecContext(ctx, `UPDATE team_objections SET status='accepted_risk',resolution_json=?,resolved_by_principal_id=?,resolved_at=? WHERE session_id=? AND (plan_id IS NULL OR plan_id=?) AND status='open' AND severity IN ('blocking','critical')`, string(decision), c.AcceptedByPrincipalID, now, ss.ID, c.PlanID); e != nil {
-				return e
-			}
-		}
-		if _, e := tx.ExecContext(ctx, `UPDATE team_plans SET status='accepted',accepted_by_principal_id=?,accepted_at=? WHERE id=? AND status='candidate'`, c.AcceptedByPrincipalID, now, c.PlanID); e != nil {
-			return e
-		}
-		if _, e := tx.ExecContext(ctx, `UPDATE team_plans SET status='superseded' WHERE session_id=? AND id<>? AND status='candidate'`, ss.ID, c.PlanID); e != nil {
-			return e
-		}
-		if _, e := tx.ExecContext(ctx, `UPDATE team_sessions SET status='plan_accepted',accepted_plan_id=?,revision=revision+1,updated_at=? WHERE id=?`, c.PlanID, now, ss.ID); e != nil {
-			return e
-		}
-		if _, e := tx.ExecContext(ctx, `INSERT INTO team_decisions(id,workspace_id,session_id,decision_type,decision_json,decided_by_principal_id,created_at) VALUES(?,?,?,'plan_acceptance',?,?,?)`, did, ss.WorkspaceID, ss.ID, string(decision), c.AcceptedByPrincipalID, now); e != nil {
-			return e
-		}
-		actor := c.AcceptedByPrincipalID
-		return s.emit(ctx, tx, ss.WorkspaceID, "team.plan_accepted", "team_session", ss.ID, &actor, map[string]any{"plan_id": c.PlanID, "accepted_open_risk": blocking > 0})
-	})
-	if err != nil {
-		return Session{}, err
-	}
-	tr, err := s.tasks.Get(ctx, ss.TaskID)
-	if err != nil {
-		return Session{}, err
-	}
-	if tr.State == task.StateCreated {
-		if _, err = s.tasks.MarkReady(ctx, task.TransitionCommand{TaskID: tr.ID, ExpectedRevision: tr.Revision, ActorPrincipalID: &c.AcceptedByPrincipalID, Reason: "team plan accepted"}); err != nil {
-			return Session{}, err
-		}
-	} else if tr.State == task.StatePaused {
-		if _, err = s.tasks.Resume(ctx, task.TransitionCommand{TaskID: tr.ID, ExpectedRevision: tr.Revision, ActorPrincipalID: &c.AcceptedByPrincipalID, Reason: "revised team plan accepted"}); err != nil {
-			return Session{}, err
-		}
-	}
-	return s.Session(ctx, ss.ID)
+	return s.acceptPlan(ctx, c)
 }
 
 func (s *Service) PauseResearchRound(ctx context.Context, c PauseResearchRoundCommand) (Session, error) {
@@ -1006,6 +1056,9 @@ func (s *Service) ReopenDeliberation(ctx context.Context, c ReopenCommand) (Sess
 	if !s.isHuman(ctx, c.RequestedByPrincipalID) || !s.workspaceMember(ctx, ss.WorkspaceID, c.RequestedByPrincipalID) {
 		return Session{}, ErrHumanRequired
 	}
+	var assignmentRoots int
+	if err=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM team_assignment_roots WHERE session_id=?`,ss.ID).Scan(&assignmentRoots);err!=nil{return Session{},err}
+	if assignmentRoots!=0{return Session{},ErrSessionState}
 	tr, err := s.tasks.Get(ctx, ss.TaskID)
 	if err != nil {
 		return Session{}, err
@@ -1057,6 +1110,11 @@ func (s *Service) allowAdmission(ctx context.Context, taskID string) error {
 	if !session.Valid {
 		return ErrPlanRequired
 	}
+	if paused, err := teamgate.Paused(ctx, s.db, session.String); err != nil {
+		return err
+	} else if paused {
+		return teamgate.ErrPaused
+	}
 	var st string
 	var plan sql.NullString
 	if err := s.db.QueryRowContext(ctx, `SELECT status,accepted_plan_id FROM team_sessions WHERE id=?`, session.String).Scan(&st, &plan); err != nil {
@@ -1069,19 +1127,31 @@ func (s *Service) allowAdmission(ctx context.Context, taskID string) error {
 }
 
 func (s *Service) SyncTaskStates(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT s.id,t.state,s.status FROM team_sessions s JOIN tasks t ON t.id=s.task_id WHERE s.status NOT IN ('completed','cancelled')`)
+	rows, err := s.db.QueryContext(ctx, `SELECT s.id,s.task_id,t.state,s.status,t.revision,s.revision FROM team_sessions s JOIN tasks t ON t.id=s.task_id WHERE s.status NOT IN ('completed','cancelled')`)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	type row struct{ id, ts, ss string }
+	type row struct {
+		id, taskID, ts, ss             string
+		taskRevision, sessionRevision int64
+	}
 	var xs []row
 	for rows.Next() {
 		var x row
-		if err := rows.Scan(&x.id, &x.ts, &x.ss); err != nil {
-			return err
+		if err = rows.Scan(&x.id, &x.taskID, &x.ts, &x.ss, &x.taskRevision, &x.sessionRevision); err != nil {
+			break
 		}
 		xs = append(xs, x)
+	}
+	if err == nil {
+		err = rows.Err()
+	}
+	closeErr := rows.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 	now := s.clock.UnixMilli()
 	for _, x := range xs {
@@ -1101,10 +1171,17 @@ func (s *Service) SyncTaskStates(ctx context.Context) error {
 			next = "cancelled"
 		}
 		if next != "" && next != x.ss {
-			_, _ = s.db.ExecContext(ctx, `UPDATE team_sessions SET status=?,revision=revision+1,updated_at=? WHERE id=?`, next, now, x.id)
+			// Apply only the observed incarnation. A concurrent pause, cancellation,
+			// plan edit or Task transition must be observed again on the next tick.
+			if _, err := s.db.ExecContext(ctx, `UPDATE team_sessions SET status=?,revision=revision+1,updated_at=?
+			 WHERE id=? AND task_id=? AND status=? AND revision=?
+			 AND EXISTS(SELECT 1 FROM tasks t WHERE t.id=team_sessions.task_id AND t.state=? AND t.revision=?)`,
+				next, now, x.id, x.taskID, x.ss, x.sessionRevision, x.ts, x.taskRevision); err != nil {
+				return err
+			}
 		}
 	}
-	return rows.Err()
+	return s.syncAssignmentNotices(ctx)
 }
 
 func (s *Service) ListPlans(ctx context.Context, sessionID string) ([]Plan, error) {

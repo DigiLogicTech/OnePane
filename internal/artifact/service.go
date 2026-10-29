@@ -161,3 +161,17 @@ func (s *Service) VerifyContent(ctx context.Context, artifactID string) error {
 	}
 	return s.store.Verify(ctx, a.StorageRef, a.ContentHash, a.SizeBytes)
 }
+
+// VerifyExpectedContent pins the caller's independently resolved immutable
+// hash/size before storage I/O. A changed metadata row cannot enlarge a small
+// Library read budget or substitute a different blob for verification.
+func (s *Service) VerifyExpectedContent(ctx context.Context, artifactID, contentHash string, sizeBytes int64) error {
+	a, err := s.Get(ctx, artifactID)
+	if err != nil {
+		return err
+	}
+	if sizeBytes < 0 || a.ContentHash != contentHash || a.SizeBytes != sizeBytes {
+		return ErrCorruptContent
+	}
+	return s.store.Verify(ctx, a.StorageRef, contentHash, sizeBytes)
+}

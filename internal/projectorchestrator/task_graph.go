@@ -54,6 +54,7 @@ type TaskGraphNode struct {
  FailedOrIntervenedOn []string `json:"failed_or_intervened_on"`
  Readiness string `json:"readiness"`
  NextAction string `json:"next_action"`
+ TeamContributions []string `json:"team_contributions,omitempty"`
 }
 type TaskGraph struct {
  ID string `json:"id"`
@@ -365,19 +366,35 @@ func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGra
  if len(x.Nodes)!=expectedNodeCount{return TaskGraph{},ErrGraphConflict}
  for i:=range x.Nodes{
   depRows,depErr:=tx.QueryContext(ctx,`SELECT COALESCE(pred.node_key,''),
-   dep.state,dep.archived_at
+   dep.state,dep.archived_at,
+   CASE WHEN ar.task_id IS NOT NULL AND ts.accepted_plan_id=a.plan_id
+    AND a.workspace_id=dep.workspace_id AND dep.workspace_id=?
+    AND dep.parent_task_id=a.parent_task_id AND dep.project_id=?
+    AND dep.project_workspace_id=? THEN a.assignment_key ELSE '' END
    FROM task_dependencies d
    JOIN tasks dep ON dep.id=d.depends_on_task_id
    LEFT JOIN project_orchestrator_task_graph_nodes pred
     ON pred.task_id=dep.id AND pred.graph_id=?
+   LEFT JOIN team_execution_assignments a ON a.task_id=dep.id AND a.parent_task_id=d.task_id
+   LEFT JOIN team_assignment_roots ar ON ar.task_id=d.task_id AND ar.session_id=a.session_id AND ar.plan_id=a.plan_id
+   LEFT JOIN team_sessions ts ON ts.id=a.session_id AND ts.workspace_id=a.workspace_id
    WHERE d.task_id=? AND d.dependency_type='hard'
-   ORDER BY pred.position,pred.node_key`,graphID,x.Nodes[i].TaskID)
+   ORDER BY pred.position,pred.node_key`,x.WorkspaceID,projectID,x.Nodes[i].ProjectWorkspaceID,graphID,x.Nodes[i].TaskID)
   if depErr!=nil{return TaskGraph{},depErr}
   for depRows.Next(){
-   var key string
+   var key,teamKey string
    var depState task.State
    var archived sql.NullInt64
-   if depErr=depRows.Scan(&key,&depState,&archived);depErr!=nil{break}
+   if depErr=depRows.Scan(&key,&depState,&archived,&teamKey);depErr!=nil{break}
+   if key==""&&teamKey!=""{
+    label:="team:"+teamKey
+    x.Nodes[i].TeamContributions=append(x.Nodes[i].TeamContributions,teamKey)
+    if depState!=task.StateComplete||archived.Valid{
+     x.Nodes[i].BlockedBy=append(x.Nodes[i].BlockedBy,label)
+     if archived.Valid||isTaskDependencyNeedsAttention(depState){x.Nodes[i].FailedOrIntervenedOn=append(x.Nodes[i].FailedOrIntervenedOn,label)}
+    }
+    continue
+   }
    if key=="" {
     // A later foreign/unreviewed hard edge is not trusted as part of this
     // approved DAG; never leak an unrelated Project's Task ID to the caller.
@@ -396,6 +413,9 @@ func(s *Service) TaskGraph(ctx context.Context,projectID,graphID string)(TaskGra
   if depErr==nil{depErr=depRows.Err()}
   _=depRows.Close()
   if depErr!=nil{return TaskGraph{},depErr}
+  var expectedTeam int
+  if depErr=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM team_execution_assignments a JOIN team_assignment_roots r ON r.session_id=a.session_id AND r.plan_id=a.plan_id AND r.task_id=a.parent_task_id WHERE a.parent_task_id=?`,x.Nodes[i].TaskID).Scan(&expectedTeam);depErr!=nil{return TaskGraph{},depErr}
+  if expectedTeam!=len(x.Nodes[i].TeamContributions){x.Nodes[i].DependencyDrift=true}
   expected,recorded:=approvedByTask[x.Nodes[i].TaskID]
   if !recorded || len(expected)!=len(x.Nodes[i].DependsOn){
    x.Nodes[i].DependencyDrift=true

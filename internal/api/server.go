@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"sort"
 	"strings"
@@ -251,6 +252,9 @@ type Server struct {
 	mux             *http.ServeMux
 	attentionDB     *sql.DB
 	libraryArtifacts *artifact.Service
+	libraryTextSearchCursors libraryTextSearchCursorRegistry
+	libraryDocumentSearchCursors libraryDocumentSearchCursorRegistry
+	libraryContentSearchCursors libraryContentSearchCursorRegistry
 	projects        projectService
 	events          eventReader
 	auth            Authorizer
@@ -281,6 +285,7 @@ type Server struct {
 	configPath      string
 	modelPoolPath   string
 	apiCapture      *qaAPICapture
+	watchdog        interface{ Healthy(context.Context) bool }
 }
 
 func NewServer(projects projectService, events eventReader, auth Authorizer) *Server {
@@ -292,6 +297,7 @@ func NewServer(projects projectService, events eventReader, auth Authorizer) *Se
 	return s
 }
 func (s *Server) SetAttentionDB(db *sql.DB) { s.attentionDB = db }
+func (s *Server) SetWatchdog(v interface{ Healthy(context.Context) bool }) { s.watchdog = v }
 func (s *Server) SetLibraryArtifacts(a *artifact.Service) { s.libraryArtifacts = a }
 func (s *Server) SetPreviewSessions(m previewSessionMinter) { s.previewSessions = m }
 func (s *Server) SetWebAuth(a *webauth.Service, secureCookies bool) {
@@ -311,7 +317,18 @@ func (s *Server) SetAgentRuntimes(v agentRuntimeService)            { s.agentRun
 func (s *Server) SetGateway(v gatewayService)                       { s.gateway = v }
 func (s *Server) SetTeam(v teamService)                             { s.team = v }
 func (s *Server) SetBots(v botRuntimeService)                       { s.bots = v }
-func (s *Server) SetFederation(v nodeFederationService)             { s.federation = v }
+func (s *Server) SetFederation(v nodeFederationService) {
+	// Disabled bootstrap components arrive as typed nil service pointers.
+	// Keep the optional interface nil so authenticated node routes return the
+	// existing unavailable response instead of calling methods on a nil receiver.
+	if v != nil {
+		value := reflect.ValueOf(v)
+		if value.Kind() == reflect.Pointer && value.IsNil() {
+			v = nil
+		}
+	}
+	s.federation = v
+}
 func (s *Server) SetTasks(v taskService)                            { s.tasks = v }
 func (s *Server) SetRoutines(v routineService)                      { s.routines = v }
 func (s *Server) SetChatCommands(v chatCommandService)              { s.chatCommands = v }
@@ -331,6 +348,12 @@ func (s *Server) routes() {
 	// Node-admin only, point-in-time SQLite/WAL storage diagnostic.
 	s.mux.HandleFunc("GET /v1/qa/sqlite-footprint", s.qaSQLiteFootprintHandler)
 	s.mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
+		// HTTP 200 retains the liveness contract. The status body distinguishes
+		// a responding API from a control plane whose mutation gate is stale.
+		if s.watchdog != nil && !s.watchdog.Healthy(r.Context()) {
+			writeJSON(w, http.StatusOK, map[string]any{"status": "degraded", "watchdog": "stale_or_unavailable"})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 	})
 	s.mux.HandleFunc("GET /v1/about", func(w http.ResponseWriter, r *http.Request) {
@@ -367,6 +390,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/qa/api-capture", s.qaAPICaptureStatus)
 	s.mux.HandleFunc("POST /v1/qa/api-capture/stop", s.qaAPICaptureStop)
 	s.mux.HandleFunc("GET /v1/tasks", s.listTasks)
+	s.mux.HandleFunc("GET /v1/tasks/{taskID}", s.getTask)
+	s.mux.HandleFunc("GET /v1/tasks/{taskID}/recovery-cases", s.readTaskRecoveryCases)
+	s.mux.HandleFunc("GET /v1/tasks/{taskID}/recovery-cases/{caseID}", s.readTaskRecoveryCases)
+	s.mux.HandleFunc("GET /v1/tasks/{taskID}/recovery-cases/{caseID}/journal", s.readTaskRecoveryJournal)
 	s.mux.HandleFunc("POST /v1/tasks", s.createTask)
 	s.mux.HandleFunc("POST /v1/tasks/{taskID}/archive", s.archiveTask)
 	s.mux.HandleFunc("POST /v1/tasks/{taskID}/unarchive", s.unarchiveTask)
@@ -469,6 +496,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/tasks/{taskID}/team-session", s.startTeamSession)
 	s.mux.HandleFunc("GET /v1/tasks/{taskID}/team-session", s.getTaskTeamSession)
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}", s.getTeamSession)
+	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/live", s.getTeamLiveRoom)
+	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/assignments/{taskID}/outputs", s.getTeamAssignmentOutputs)
+	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/assistance/{requestID}", s.getTeamAssistanceRequest)
+	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/assistance", s.listTeamAssistanceRequests)
+	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/assistance/{requestID}/answers", s.answerTeamAssistanceRequest)
+	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/assistance/{requestID}/continue", s.continueTeamAssistance)
+	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/assistance/{requestID}/answer", s.getTeamAssistanceAnswer)
+	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/execution/cancel", s.cancelTeamExecution)
+	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/execution/{action}", s.holdTeamExecution)
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/manifest", s.getTeamSessionManifest)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/research/evidence-selection", s.freezeResearchEvidence)
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/research/evidence-selection", s.readResearchEvidence)
@@ -477,6 +513,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/research/seat-evidence-approval", s.readResearchSeatEvidenceApproval)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/research/seat-evidence-approval/revoke", s.revokeResearchSeatEvidence)
 	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/messages", s.listTeamMessages)
+	s.mux.HandleFunc("GET /v1/team-sessions/{sessionID}/messages/page", s.pageTeamMessages)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/messages", s.postTeamMessage)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/rounds", s.requestTeamRound)
 	s.mux.HandleFunc("POST /v1/team-sessions/{sessionID}/research/retry", s.retryResearchRound)
@@ -638,6 +675,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /v1/projects/{projectID}", s.updateProjectPolicy)
 	s.mux.HandleFunc("DELETE /v1/projects/{projectID}", s.deleteProject)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library", s.listWorkspaceLibrary)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library/search-text", s.searchWorkspaceIndexedText)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library/search-documents", s.searchWorkspaceIndexedDocuments)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library/search-content", s.searchWorkspaceIndexedContent)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces/{workspaceID}/evidence-packets", s.buildWorkspaceEvidencePacket)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/research/evidence-sessions", s.listEligibleResearchEvidenceSessions)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/research/frozen-evidence-sessions", s.listFrozenResearchEvidenceSessions)
@@ -645,6 +685,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces/{workspaceID}/evidence-packets/search-text", s.searchVerifiedWorkspaceEvidence)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library/{assetID}/versions", s.listWorkspaceLibraryVersions)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library/{assetID}/versions/{version}/preview", s.previewWorkspaceLibraryVersion)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces/{workspaceID}/library/{assetID}/versions/{version}/index", s.indexWorkspaceLibraryText)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library/{assetID}/versions/{version}/index", s.workspaceLibraryTextStatus)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library/{assetID}/versions/{version}/search", s.searchWorkspaceLibraryText)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/workspaces/{workspaceID}/library/{assetID}/versions/{version}/document-index", s.indexWorkspaceLibraryDocument)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library/{assetID}/versions/{version}/document-index", s.workspaceLibraryDocumentStatus)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/library/{assetID}/versions/{version}/document-text", s.readWorkspaceLibraryDocument)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/published-outputs", s.listWorkspacePublishedOutputs)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/publication-reviews", s.listWorkspacePublicationReviews)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/workspaces/{workspaceID}/toolchain-manifest", s.getWorkspaceToolchainManifest)
@@ -1342,6 +1388,12 @@ func respondDomain(w http.ResponseWriter, v any, err error, success int) {
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		writeError(w, http.StatusNotFound, "not found")
+	case errors.Is(err, team.ErrInvalid):
+		writeError(w, http.StatusBadRequest, "invalid team command")
+	case errors.Is(err, team.ErrWorkspaceMismatch), errors.Is(err, team.ErrHumanRequired):
+		writeError(w, http.StatusForbidden, "team operation forbidden")
+	case errors.Is(err, team.ErrSessionState), errors.Is(err, team.ErrPlanRequired), errors.Is(err, team.ErrOpenBlockingObjection):
+		writeError(w, http.StatusConflict, "team state or approval does not permit this operation")
 	case errors.Is(err, projectworkspace.ErrSourceRequestRateLimited):
 		w.Header().Set("Retry-After", "60")
 		writeError(w, http.StatusTooManyRequests, "source request attempt limit reached")
@@ -2469,6 +2521,7 @@ func (s *Server) addOmniRoute(w http.ResponseWriter, r *http.Request) {
 		BaseURL               string  `json:"base_url"`
 		SecretRef             *string `json:"secret_ref"`
 		RequireStrictZeroCost bool    `json:"require_strict_zero_cost"`
+		RequireStrictPolicy   bool    `json:"require_strict_policy"`
 		DefaultModel          string  `json:"default_model"`
 	}
 	if !decodeJSON(w, r, &in) {
@@ -2483,7 +2536,7 @@ func (s *Server) addOmniRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	ws := in.WorkspaceID
 	actor := i.PrincipalID
-	out, err := s.providers.AddOmniRoute(r.Context(), provideronboarding.OmniRouteCommand{WorkspaceID: &ws, BaseURL: in.BaseURL, SecretRef: in.SecretRef, RequireStrictZeroCost: in.RequireStrictZeroCost, DefaultModel: in.DefaultModel, ActorPrincipalID: &actor, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
+	out, err := s.providers.AddOmniRoute(r.Context(), provideronboarding.OmniRouteCommand{WorkspaceID: &ws, BaseURL: in.BaseURL, SecretRef: in.SecretRef, RequireStrictZeroCost: in.RequireStrictZeroCost, RequireStrictPolicy: in.RequireStrictPolicy, DefaultModel: in.DefaultModel, ActorPrincipalID: &actor, RequestID: headerPtr(r, "X-Request-ID"), TraceID: headerPtr(r, "X-Trace-ID")})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -3053,6 +3106,20 @@ func (s *Server) requireNodeOperator(w http.ResponseWriter, r *http.Request) (Id
 	return i, true
 }
 func (s *Server) listNodes(w http.ResponseWriter, r *http.Request) {
+	// Local inventory is useful even when remote federation is disabled. Apply
+	// the same host-model read permission as local telemetry; remote operations
+	// continue to require the federation administrator gate below.
+	if s.federation == nil && strings.TrimSpace(s.localNodeID) != "" {
+		i, ok := s.authenticate(w, r)
+		if !ok || !authorizeHostModelCapability(w, i, "model.read") { return }
+		name, _ := os.Hostname()
+		if name == "" { name = "This device" }
+		now := time.Now().UnixMilli()
+		writeJSON(w, http.StatusOK, map[string]any{"federation_enabled": false, "nodes": []nodefederation.NodeView{{
+			ID: s.localNodeID, Name: name, Local: true, TrustState: "local", LastSeenAt: &now,
+		}}})
+		return
+	}
 	if _, ok := s.requireNodeOperator(w, r); !ok {
 		return
 	}
@@ -3061,7 +3128,7 @@ func (s *Server) listNodes(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "list nodes failed")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"nodes": nodes})
+	writeJSON(w, 200, map[string]any{"nodes": nodes, "federation_enabled": true})
 }
 func (s *Server) listNodePairings(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireNodeOperator(w, r); !ok {

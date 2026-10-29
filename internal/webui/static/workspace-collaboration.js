@@ -44,7 +44,9 @@ async function a45RenderCollaboration(project,workspace,root){
    e.currentTarget.disabled=true;
    try{
     await apiRequest(endpoint+"/workspaces",{method:"POST",body:JSON.stringify({name:workspace.name||"Workspace",legacy_workspace_id:workspace.id})});
-    await a45RenderCollaboration(project,workspace,root);
+    // Registration also enables Library uploads, Tasks and the environment
+    // panel. Refresh the owning view so those controls do not stay disabled.
+    await renderWorkspaces();
    }catch(err){if(root.isConnected)root.querySelector(".a44-environment-note").insertAdjacentHTML("beforeend",`<div class="error">${a45HTML(err.message)}</div>`)}
   });
   return;

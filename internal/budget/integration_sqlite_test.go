@@ -4,25 +4,16 @@ package budget
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/DigiLogicTech/OnePane/internal/clock"
-	"github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
 	"github.com/DigiLogicTech/OnePane/internal/task"
 )
 
 func TestExpiredReservationAttachedToActiveTaskIsNotReclaimed(t *testing.T) {
 	ctx := context.Background()
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
+	db := migratedBudgetDatabase(t, ctx)
 
 	now := time.Now().UTC().UnixMilli()
 	if _, err := db.SQL().ExecContext(ctx, `INSERT INTO workspaces(id,name,status,revision,created_at,updated_at) VALUES('ws','Workspace','active',1,?,?)`, now, now); err != nil {

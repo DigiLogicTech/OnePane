@@ -16,6 +16,12 @@ import (
 )
 
 func TestResearchSeatVerifiedTextDeliveryUsesRealLibraryAndArtifactGrants(t *testing.T){
+ for _,hashForm:=range []string{"canonical","published"}{
+  t.Run(hashForm,func(t *testing.T){researchSeatVerifiedDeliveryHashForm(t,hashForm)})
+ }
+}
+
+func researchSeatVerifiedDeliveryHashForm(t *testing.T,hashForm string){
  ctx:=context.Background()
  db,err:=sqlitestore.Open(t.TempDir()+"/research-delivery.db")
  if err!=nil{t.Fatal(err)}
@@ -42,7 +48,8 @@ func TestResearchSeatVerifiedTextDeliveryUsesRealLibraryAndArtifactGrants(t *tes
  workspaceID:=workspaces[0].ID
  store,err:=artifact.NewLocalStore(t.TempDir()+"/blobs")
  if err!=nil{t.Fatal(err)}
- artifacts:=artifact.NewService(db.SQL(),db,store,clock.Real{})
+ countedStore:=&countedResearchEvidenceStore{BlobStore:store}
+ artifacts:=artifact.NewService(db.SQL(),db,countedStore,clock.Real{})
  human:="human"
  secret:="# Research notes\nAn untrusted Library paragraph with a private marker.\n"
  blob,err:=artifacts.Create(ctx,artifact.CreateCommand{
@@ -53,10 +60,12 @@ func TestResearchSeatVerifiedTextDeliveryUsesRealLibraryAndArtifactGrants(t *tes
    Residency:policy.ResidencyAny,Trust:policy.TrustUserInstruction},
  },strings.NewReader(secret))
  if err!=nil{t.Fatal(err)}
+ sourceHash:=blob.ContentHash
+ if hashForm=="published"{sourceHash=strings.TrimPrefix(sourceHash,"sha256:")}
  asset,err:=projectService.ImportLibraryAsset(ctx,projectworkspace.ImportLibraryAssetCommand{
   ProjectID:project.ID,SourceWorkspaceID:workspaceID,
   Name:"research.md",MIMEType:"text/markdown",
-  ArtifactID:blob.ID,ContentHash:blob.ContentHash,SizeBytes:blob.SizeBytes,
+  ArtifactID:blob.ID,ContentHash:sourceHash,SizeBytes:blob.SizeBytes,
   ActorPrincipalID:"human",
  })
  if err!=nil{t.Fatal(err)}
@@ -103,6 +112,19 @@ func TestResearchSeatVerifiedTextDeliveryUsesRealLibraryAndArtifactGrants(t *tes
  worker:=&Service{db:db.SQL(),tx:db,clock:clock.Real{},artifacts:artifacts}
  consent,err:=worker.consentForSeat(ctx,"tenant",session.ID,first.ID,manifest.SnapshotSHA256)
  if err!=nil||!consent.Active{t.Fatalf("seat consent failed: %+v %v",consent,err)}
+ // Frozen Library metadata, not a mutable artifact row, owns the I/O budget.
+ // Reject both changed size and hash before any backend verification/Open.
+ for _,field:=range []string{"size_bytes","content_hash"}{
+  countedStore.verifications,countedStore.opens=0,0
+  query:=`UPDATE artifacts SET size_bytes=size_bytes+1 WHERE id=?`
+  if field=="content_hash"{query=`UPDATE artifacts SET content_hash='sha256:'||printf('%064x',1) WHERE id=?`}
+  if _,err=db.SQL().ExecContext(ctx,query,blob.ID);err!=nil{t.Fatal(err)}
+  rejected,e:=worker.loadResearchSeatEvidence(ctx,"tenant",session.ID,first.ID,manifest.SnapshotSHA256,consent)
+  if e==nil||len(rejected.Sections)!=0||countedStore.verifications!=0||countedStore.opens!=0{
+   t.Fatalf("changed %s enlarged Research verification: err=%v verify=%d open=%d",field,e,countedStore.verifications,countedStore.opens)
+  }
+  if _,err=db.SQL().ExecContext(ctx,`UPDATE artifacts SET content_hash=?,size_bytes=? WHERE id=?`,blob.ContentHash,blob.SizeBytes,blob.ID);err!=nil{t.Fatal(err)}
+ }
  input,err:=worker.loadResearchSeatEvidence(ctx,"tenant",session.ID,first.ID,
   manifest.SnapshotSHA256,consent)
  if err!=nil{t.Fatal(err)}
@@ -120,7 +142,7 @@ func TestResearchSeatVerifiedTextDeliveryUsesRealLibraryAndArtifactGrants(t *tes
  }
  if err=json.Unmarshal(input.Sections[0].Content,&decoded);err!=nil||
   decoded.Text!=secret||decoded.Trust!="untrusted_library_content"||
-  decoded.SHA256!=blob.ContentHash{
+  decoded.SHA256!=sourceHash{
   t.Fatalf("verified local context does not preserve exact text/hash: %+v %v",decoded,err)
  }
  // A protected response and its turn state are committed only together.
@@ -150,6 +172,14 @@ func TestResearchSeatVerifiedTextDeliveryUsesRealLibraryAndArtifactGrants(t *tes
  }
  firstTurn:=bySeat[first.ID]
  secondTurn:=bySeat[second.ID]
+ // A live consent cannot authorize publication after Task cancellation.
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE tasks SET state='cancel_requested' WHERE id=?`,job.ID);err!=nil{t.Fatal(err)}
+ if _,err=worker.completeProtectedResearchTurn(ctx,"tenant",session.ID,firstTurn.ID,
+  first.ID,manifest.SnapshotSHA256,frozen.Evidence.ManifestSHA256,
+  1,makeResponse("must not persist after cancellation"));err==nil{t.Fatal("cancelled Task published protected Research response")}
+ var cancellationMessages int
+ if err=db.SQL().QueryRowContext(ctx,`SELECT COUNT(*) FROM team_messages WHERE session_id=? AND message_kind='agent'`,session.ID).Scan(&cancellationMessages);err!=nil||cancellationMessages!=0{t.Fatalf("cancelled Research message count: %d %v",cancellationMessages,err)}
+ if _,err=db.SQL().ExecContext(ctx,`UPDATE tasks SET state='created' WHERE id=?`,job.ID);err!=nil{t.Fatal(err)}
  if _,err=worker.completeProtectedResearchTurn(ctx,"tenant",session.ID,firstTurn.ID,
   first.ID,manifest.SnapshotSHA256,frozen.Evidence.ManifestSHA256,
   1,makeResponse("first protected local answer"));err!=nil{t.Fatal(err)}

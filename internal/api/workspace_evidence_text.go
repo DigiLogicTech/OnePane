@@ -43,12 +43,12 @@ type evidenceWorkspaceLibrary interface{
  ResolveWorkspaceLibraryVersion(context.Context,string,string,string,int64)(projectworkspace.LibraryVersion,error)
 }
 type evidenceArtifactReader interface{
- VerifyContent(context.Context,string)error
+ VerifyExpectedContent(context.Context,string,string,int64)error
  Open(context.Context,string)(io.ReadCloser,artifact.Artifact,error)
 }
 
 // Reads are bounded and assembled BEFORE a response is emitted. Resolve,
-// VerifyContent and Open provenance are all required. A fresh permission
+// independently selected hash/size verification and Open provenance are required. A fresh permission
 // snapshot at the end prevents a revoked/retargeted Library grant becoming a
 // durable read result while the individual files are being processed.
 func collectVerifiedWorkspaceEvidence(
@@ -90,7 +90,9 @@ func collectVerifiedWorkspaceEvidence(
   }
   artifactID:=strings.TrimPrefix(selected.StorageURI,"artifact:")
   if artifactID==""{return verifiedWorkspaceEvidence{},errEvidenceUnsafe}
-  if err=artifacts.VerifyContent(ctx,artifactID);err!=nil{return verifiedWorkspaceEvidence{},errEvidenceUnsafe}
+  expectedDigest,validExpected:=librarySHA256Digest(entry.ContentHash)
+  if !validExpected{return verifiedWorkspaceEvidence{},errEvidenceUnsafe}
+  if err=artifacts.VerifyExpectedContent(ctx,artifactID,"sha256:"+expectedDigest,entry.SizeBytes);err!=nil{return verifiedWorkspaceEvidence{},errEvidenceUnsafe}
   reader,raw,e:=artifacts.Open(ctx,artifactID)
   if e!=nil{return verifiedWorkspaceEvidence{},errEvidenceUnsafe}
   if !libraryArtifactMatchesProject(selected,raw,projectID,tenantWorkspaceID){
@@ -101,8 +103,9 @@ func collectVerifiedWorkspaceEvidence(
   closeErr:=reader.Close()
   if readErr!=nil||closeErr!=nil{return verifiedWorkspaceEvidence{},errEvidenceUnsafe}
   digest:=sha256.Sum256(bytes)
-  actual:="sha256:"+hex.EncodeToString(digest[:])
-  if actual!=selected.ContentHash{return verifiedWorkspaceEvidence{},errEvidenceUnsafe}
+  actual:=hex.EncodeToString(digest[:])
+  expected,validDigest:=librarySHA256Digest(selected.ContentHash)
+  if !validDigest||actual!=expected{return verifiedWorkspaceEvidence{},errEvidenceUnsafe}
   output.Entries=append(output.Entries,verifiedWorkspaceEvidenceEntry{
    WorkspaceEvidenceEntry:entry,Text:string(bytes),Trust:"untrusted_library_content",
   })
@@ -120,6 +123,8 @@ func collectVerifiedWorkspaceEvidence(
 }
 
 func(s *Server) readVerifiedWorkspaceEvidence(w http.ResponseWriter,r *http.Request){
+ identity,ok:=s.authenticate(w,r)
+ if !ok{return}
  p,workspaceID,_,ok:=s.workspaceRuntimeContext(w,r,false)
  if !ok{return}
  library,ok:=s.projects.(evidenceWorkspaceLibrary)
@@ -133,12 +138,24 @@ func(s *Server) readVerifiedWorkspaceEvidence(w http.ResponseWriter,r *http.Requ
  if len(input.Selections)<1||len(input.Selections)>verifiedEvidenceMaxEntries{
   writeError(w,http.StatusBadRequest,"Select one to eight bounded evidence versions");return
  }
+ if !s.authorizeCurrentWorkspaceRead(w,r,identity,p.WorkspaceID,"project.read"){return}
  result,err:=collectVerifiedWorkspaceEvidence(r.Context(),library,s.libraryArtifacts,
   p.ID,workspaceID,p.WorkspaceID,input.Selections,time.Now().UnixMilli())
  if err!=nil{
   writeError(w,http.StatusUnprocessableEntity,
    "Evidence denied, unavailable or failed content/provenance checks");return
  }
+ project,err:=s.projects.Project(r.Context(),p.ID)
+ if err!=nil||project.ID!=p.ID||project.WorkspaceID!=p.WorkspaceID||project.Status!="active"{
+  writeError(w,http.StatusForbidden,"Evidence Project changed during read");return
+ }
+ views,ok:=s.projects.(projectWorkspaceViewReader)
+ if !ok{writeError(w,http.StatusServiceUnavailable,"Evidence Workspace unavailable");return}
+ view,err:=views.WorkspaceView(r.Context(),workspaceID)
+ if err!=nil||view.ProjectID!=p.ID||view.Status!="active"{
+  writeError(w,http.StatusForbidden,"Evidence Workspace changed during read");return
+ }
+ if !s.authorizeCurrentWorkspaceRead(w,r,identity,p.WorkspaceID,"project.read"){return}
  w.Header().Set("Cache-Control","no-store, private")
  w.Header().Set("X-Content-Type-Options","nosniff")
  respondDomain(w,result,nil,http.StatusOK)

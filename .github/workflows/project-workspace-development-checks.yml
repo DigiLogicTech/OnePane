@@ -9,13 +9,30 @@ on:
       - 'internal/webui/static/project-*.js'
       - 'internal/webui/static/project-*.css'
       - 'internal/webui/static/workspace-*.js'
+      - 'internal/webui/static/library-text-index.js'
+      - 'scripts/validate_library_text_index.js'
+      - 'internal/webui/static/library-document-index.js'
+      - 'scripts/validate_library_document_index.js'
+      - 'internal/webui/static/library-document-search.js'
+      - 'scripts/validate_library_document_search.js'
+      - 'internal/webui/static/library-content-search.js'
+      - 'scripts/validate_library_content_search.js'
       - 'internal/webui/static/models-page.js'
       - 'scripts/validate_colibri_pin.js'
       - 'internal/webui/static/model-agentcheck-diagnostics.js'
       - 'internal/webui/static/app-foundation.js'
+      - 'internal/webui/static/web-chat-*.js'
+      - 'scripts/validate_web_chair.js'
+      - 'scripts/validate_web_only_council.js'
+      - 'scripts/validate_web_chat_sessions.js'
+      - 'internal/webui/static/colibri-spec-sheet.js'
+      - 'internal/webui/static/colibri-registration-dialog.js'
+      - 'scripts/validate_colibri_spec_tour.js'
+      - 'scripts/validate_models_qa_rc2.js'
       - 'internal/webui/static/index.html'
       - 'internal/webui/static/ux-alignment.css'
       - 'scripts/validate_product_ux_alignment.js'
+      - 'scripts/validate_task_live_refresh.js'
       - 'docs/rc11-product-ux-alignment.md'
       - 'internal/api/qa_execution_evidence.go'
       - 'internal/api/qa_execution_evidence_test.go'
@@ -41,8 +58,18 @@ on:
       - 'internal/webui/static/debug-centre.js'
       - 'internal/webui/static/debug-centre.css'
       - 'internal/webui/static/settings-redesign.js'
+      - 'internal/webui/static/evidence-audit-page.js'
+      - 'scripts/validate_evidence_audit.js'
+      - 'scripts/validate_omniroute_policy_observation.js'
+      - 'internal/provideronboarding/**'
       - 'internal/webui/static/app.js'
       - 'scripts/validate_debug_centre.js'
+      - 'internal/cicontract/**'
+      - 'internal/artifact/**'
+      - 'internal/recoveryinventory/**'
+      - 'internal/budget/**'
+      - 'go.mod'
+      - 'go.sum'
       - 'internal/projectworkspace/**'
       - 'internal/projectruntime/**'
       - 'internal/projectorchestrator/**'
@@ -68,7 +95,20 @@ on:
       - 'internal/goalobserveradapter/**'
       - 'internal/agentworker/**'
       - 'internal/team/**'
+      - 'internal/teamgate/**'
+      - 'internal/privatekeyfile/**'
+      - 'internal/node/**'
+      - 'internal/vault/**'
+      - 'internal/webui/static/team-room.*'
+      - 'internal/webui/static/team-assignments.js'
+      - 'internal/webui/static/team-assistance.js'
+      - 'scripts/validate_team_assistance.js'
+      - 'scripts/validate_team_assignments.js'
+      - 'scripts/validate_team_room.js'
+      - 'internal/webui/static/task-recovery.*'
+      - 'scripts/validate_task_recovery.js'
       - 'internal/teamworker/**'
+      - 'internal/runtimecoord/**'
       - 'internal/agentprotocol/**'
       - 'internal/agentruntime/**'
       - 'internal/runtimeendpoint/**'
@@ -79,14 +119,23 @@ on:
       - 'internal/startupevidence/**'
       - 'internal/processlock/**'
       - 'internal/serviceproof/**'
+      - 'internal/serviceinstall/**'
       - 'cmd/harnessd/**'
       - 'packaging/windows/service/**'
+      - 'packaging/windows/msi/**'
+      - 'scripts/build-rc11-windows-qa.ps1'
+      - 'scripts/rc11-windows-qa-source.ps1'
+      - 'scripts/test_rc11_qa_guard.ps1'
+      - '.github/workflows/rc11-windows-qa.yml'
       - 'packaging/windows/setup/**'
       - 'packaging/windows/Read-OnePaneMsiLog.ps1'
       - 'scripts/test_offline_msi_evidence.ps1'
       - 'packaging/debian/onepane.service'
+      - 'packaging/debian/postinst'
+      - 'packaging/debian/preinst'
       - 'packaging/systemd/onepane.service'
       - 'scripts/install-ubuntu.sh'
+      - 'scripts/upgrade-ubuntu.sh'
       - 'internal/scheduler/**'
       - 'internal/localai/**'
       - 'docs/PROJECT_WORKSPACE_DEVELOPMENT_ENVIRONMENTS_RFC.md'
@@ -136,8 +185,39 @@ jobs:
             echo 'Preflight reads only rootless Podman status and approved local image presence. No images are pulled or containers changed.'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Retain the existing required check name while each independent family has
+  # its own unchanged deadline. Skipped, cancelled and failed families deny it.
   development-contract:
     name: Validate honest Workspace runtime boundaries
+    if: ${{ always() }}
+    needs: [development-source-contract, worker-recovery-race, recovery-schema-race, library-team-node-race, team-coordination-race, library-document-race, managed-inference-race, full-regression, offline-msi-evidence, windows-library-team, windows-worker-recovery, windows-team-dispatch]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require every source validation family
+        env:
+          SOURCE_RESULT: ${{ needs.development-source-contract.result }}
+          WORKER_RESULT: ${{ needs.worker-recovery-race.result }}
+          RECOVERY_RESULT: ${{ needs.recovery-schema-race.result }}
+          TEAM_RESULT: ${{ needs.library-team-node-race.result }}
+          COORDINATION_RESULT: ${{ needs.team-coordination-race.result }}
+          DOCUMENT_RESULT: ${{ needs.library-document-race.result }}
+          MANAGED_RESULT: ${{ needs.managed-inference-race.result }}
+          FULL_RESULT: ${{ needs.full-regression.result }}
+          WINDOWS_CORE_RESULT: ${{ needs.offline-msi-evidence.result }}
+          WINDOWS_LIBRARY_RESULT: ${{ needs.windows-library-team.result }}
+          WINDOWS_WORKER_RESULT: ${{ needs.windows-worker-recovery.result }}
+          WINDOWS_DISPATCH_RESULT: ${{ needs.windows-team-dispatch.result }}
+        run: |
+          for result in "$SOURCE_RESULT" "$WORKER_RESULT" "$RECOVERY_RESULT" "$TEAM_RESULT" "$COORDINATION_RESULT" "$DOCUMENT_RESULT" "$MANAGED_RESULT" "$FULL_RESULT" "$WINDOWS_CORE_RESULT" "$WINDOWS_LIBRARY_RESULT" "$WINDOWS_WORKER_RESULT" "$WINDOWS_DISPATCH_RESULT"; do
+            if [ "$result" != success ]; then
+              echo "A required source validation family did not succeed: $result"
+              exit 1
+            fi
+          done
+
+  development-source-contract:
+    name: Validate Workspace source and observer contracts
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -156,6 +236,13 @@ jobs:
           node scripts/validate_project_task_graphs_ui.js
           node --check internal/webui/static/workspace-collaboration.js
           node --check internal/webui/static/workspace-library.js
+          node --check internal/webui/static/library-text-index.js
+          node scripts/validate_library_text_index.js
+          node --check internal/webui/static/library-document-index.js
+          node scripts/validate_library_document_index.js
+          node --check internal/webui/static/library-document-search.js
+          node scripts/validate_library_document_search.js
+          node scripts/validate_library_content_search.js
           node scripts/validate_workspace_evidence_ui.js
           node --check internal/webui/static/workspace-runtime-controls.js
           node --check internal/webui/static/workspace-ai-workflow.js
@@ -166,9 +253,29 @@ jobs:
           node --check internal/webui/static/project-workspace-page.js
           node --check internal/webui/static/app-foundation.js
           node --check internal/webui/static/app.js
+          node --check internal/webui/static/team-room.js
+          node scripts/validate_team_room.js
+          node --check internal/webui/static/team-assignments.js
+          node scripts/validate_team_assignments.js
+          node --check internal/webui/static/team-assistance.js
+          node scripts/validate_team_assistance.js
+          node --check internal/webui/static/task-recovery.js
+          node scripts/validate_task_recovery.js
+          node --check internal/webui/static/web-chat-page.js
+          node --check internal/webui/static/web-chat-session-tabs.js
+          node --check internal/webui/static/web-chat-council-launch.js
+          node --check internal/webui/static/web-chat-chair.js
+          node scripts/validate_web_chair.js
+          node scripts/validate_web_only_council.js
+          node scripts/validate_web_chat_sessions.js
+          node --check internal/webui/static/colibri-spec-sheet.js
+          node --check internal/webui/static/colibri-registration-dialog.js
+          node scripts/validate_colibri_spec_tour.js
+          node scripts/validate_models_qa_rc2.js
           node scripts/validate_unified_assistant_chat.js
           node scripts/validate_l5_goal_lifecycle.js
           node scripts/validate_product_ux_alignment.js
+          node scripts/validate_task_live_refresh.js
           node --check internal/webui/static/settings-redesign.js
           node --check internal/webui/static/qa-execution-provenance.js
           node scripts/validate_qa_execution_provenance.js
@@ -179,6 +286,9 @@ jobs:
           node --check internal/webui/static/debug-centre.js
           node --check internal/webui/static/qa-trace-correlation.js
           node scripts/validate_qa_trace_correlation.js
+          node --check internal/webui/static/evidence-audit-page.js
+          node scripts/validate_evidence_audit.js
+          node scripts/validate_omniroute_policy_observation.js
           node scripts/validate_debug_centre.js
           node --check internal/webui/static/policy-diagnostic-review.js
           node scripts/validate_policy_diagnostic_review.js
@@ -187,8 +297,19 @@ jobs:
           node scripts/validate_legacy_cleanup.js
       - name: Existing sandbox and Project contract tests
         run: |
-          go test ./internal/runtimeendpoint ./internal/agentruntime ./internal/projectworkspace ./internal/projectruntime ./internal/sandboxrunner ./internal/agentprotocol ./internal/agentworker ./internal/team ./internal/teamworker ./internal/task ./internal/storage/sqlite ./internal/scheduler ./internal/localai ./internal/api ./internal/nodepreflight
-          go test -tags integration ./internal/agentruntime ./internal/scheduler ./internal/inference ./internal/tool ./internal/projectworkspace ./internal/sandboxrunner ./internal/agentworker ./internal/task ./internal/workspacepublisher ./internal/projectorchestrator ./internal/workspacebroker ./internal/nodefederation ./internal/operation ./internal/goalobserveradapter
+          go test ./internal/runtimecoord ./internal/runtimeendpoint ./internal/agentruntime ./internal/projectworkspace ./internal/projectruntime ./internal/sandboxrunner ./internal/agentprotocol ./internal/agentworker ./internal/team ./internal/teamworker ./internal/task ./internal/storage/sqlite ./internal/scheduler ./internal/localai ./internal/api ./internal/nodepreflight
+      - name: Linux storage provisioning boundaries (source only, no installed service)
+        run: |
+          bash -n scripts/install-ubuntu.sh
+          bash -n scripts/upgrade-ubuntu.sh
+          bash -n packaging/debian/preinst
+          bash -n packaging/debian/postinst
+          go test -race -count=1 -timeout 3m ./internal/serviceinstall
+      - name: Existing integration contracts (hosted source only)
+        run: go test -tags integration ./internal/agentruntime ./internal/scheduler ./internal/inference ./internal/tool ./internal/projectworkspace ./internal/sandboxrunner ./internal/agentworker ./internal/task ./internal/workspacepublisher ./internal/projectorchestrator ./internal/workspacebroker ./internal/nodefederation ./internal/operation ./internal/goalobserveradapter
+      - name: Protected package recovery in disposable root-owned fixtures (no install)
+        run: |
+          sudo env "PATH=$PATH" "GOCACHE=$RUNNER_TEMP/onepane-root-recovery-cache" "GOMODCACHE=$RUNNER_TEMP/onepane-root-recovery-modcache" "GOPATH=$RUNNER_TEMP/onepane-root-recovery-gopath" ONEPANE_REQUIRE_ROOT_RECOVERY_TESTS=1 "$(command -v go)" test -count=1 -timeout 3m -run '^TestPackageRecovery' ./internal/serviceinstall
       - name: Bounded low-memory L5 observer lifecycle (hosted simulation)
         env:
           GOMEMLIMIT: 256MiB
@@ -205,16 +326,136 @@ jobs:
           GOGC: '50'
         run: |
           go test -tags integration -count=1 -timeout 5m -run '^TestObserverFenceBoundedRestartWALDurabilitySoak$' -v ./internal/projectworkspace
-      - name: Node approval and SQLite race checks (hosted source only)
+  worker-recovery-race:
+    name: Validate Worker and recovery race boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Worker and recovery SQLite race checks (hosted source only)
         run: |
+          go test -race -count=1 ./internal/runtimecoord ./internal/teamworker
+          go test -race -count=1 -timeout 3m -run TestWithin ./internal/storage/sqlite
+          go test -race -tags integration -count=1 -timeout 3m -run 'Test(Assurance|BudgetJournal|BudgetRelease|BudgetCommit|ResponseJournal|ProposalContinuation|RouteJournal)' ./internal/agentworker
+          go test -race -tags integration -count=1 -timeout 3m -run 'Test(WorkerWait|ExternalWorkerWake|TeamAssistance(Human|Production|Model|Writes|Question|Changed))' ./internal/agentworker
+          go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceAnswer ./internal/agentworker ./internal/team
+          go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceGenericResume ./internal/agentworker
+          go test -race -tags integration -count=1 -timeout 3m -run 'TestTeamAssistance(Continue|Context)' ./internal/agentworker
+          go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceDiscovery ./internal/agentworker ./internal/api
+          go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceFlowHTTP ./internal/api
+          go test -race -tags integration -count=1 -timeout 3m -run TestTeamPairing ./internal/agentworker
+          go test -race -tags integration -count=1 -timeout 3m -run TestApprovalContinuation ./internal/task
+          go test -race -tags integration -count=1 -timeout 3m ./internal/budget
+
+  recovery-schema-race:
+    name: Validate complete recovery ownership race contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Indirect ownership schema mutation and bounds race checks
+        run: |
+          go test -race -tags integration -count=1 -timeout 3m -run '^TestRecoveryIndirect' ./internal/recoveryinventory
+      - name: Direct ownership snapshot attribution and fixture race checks
+        run: |
+          go test -race -tags integration -count=1 -timeout 3m -run '^Test(Recovery(Schema|TaskAttempt|WorkerStep)|KnownTaskProvenance|ModelRequest)' ./internal/recoveryinventory
+      - name: Scoped Worker journal observation and fingerprint race checks
+        run: |
+          go test -race -tags integration -count=1 -timeout 3m -run '^TestRecoveryWorkerJournal' ./internal/recoveryinventory
+
+  library-document-race:
+    name: Validate document extraction race boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Bounded DOCX source extraction and authenticated provenance
+        run: |
+          go test -race -tags integration -count=1 -timeout 3m -run '^TestLibraryDocument' ./internal/projectworkspace ./internal/api
+
+  library-team-node-race:
+    name: Validate Library Team and Node race boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Library and Node race checks (hosted source only)
+        run: |
+          go test -race -count=1 -timeout 3m ./internal/artifact
+          go test -race -tags integration -count=1 -timeout 3m -run 'Test(LibraryArtifact|LibraryContentReads|VerifiedWorkspaceEvidence|WorkspaceLibraryPreview)' ./internal/api
+          go test -race -tags integration -count=1 -timeout 3m -run 'Test(LibraryTextIndex|WorkspaceLibraryText)' ./internal/projectworkspace ./internal/api
+          go test -race -tags integration -count=1 -timeout 3m -run TestWorkspaceLibraryPublication ./internal/projectworkspace
+          go test -race -tags integration -count=1 -timeout 3m -run 'Test(TaskLibraryPublications|TeamAssignmentOutputs|LibrarySchemaFixture)' ./internal/api
           go test -race -count=1 ./internal/instrumentprobe ./internal/nodefederation ./cmd/onepane-node-custody ./cmd/onepane-instrument-probe
           go test -race -tags integration -count=1 -run TestHumanApprovedNodeExecutionPermitIsOneChallengeOnly ./internal/projectworkspace
+
+  team-coordination-race:
+    name: Validate Team coordination and scoped recovery races
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Team coordination and scoped recovery race checks (hosted source only)
+        run: |
+          go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceRead ./internal/agentworker ./internal/team ./internal/api
+          go test -race -tags integration -count=1 -timeout 3m -run 'Test(TeamAssistanceAnswer(Read)?HTTP|TransactionalAuthorization|RecoveryCaseReadsJournal)' ./internal/api
+          go test -race -tags integration -count=1 -timeout 3m -run TestTeamAssistanceContinueHTTP ./internal/api
+          go test -race -count=1 -timeout 3m -run TestAssignmentCompletion ./internal/team
+          go test -race -tags integration -count=1 -timeout 3m -run 'Test(LiveTeamAssignmentCompletion|TeamAssignmentsExecute|TeamPause|TeamResume|TeamCancellation|CancellationBetweenWorkerTicks|ProjectTaskGraphRecognizesReviewedTeam)' ./internal/team ./internal/agentworker ./internal/projectorchestrator
+          go test -race -tags integration -count=1 -timeout 3m -run 'Test(AgentProtocolHTTPPostDispatch|RuntimeDispatchUnusable|RuntimePostDispatchBudgetCommitFailure|InferencePostDispatchBudgetCommitFailure|RuntimePreDispatchErrors|InferencePreDispatchErrors)' ./internal/agentruntime ./internal/inference
+          go test -race -tags integration -count=1 -timeout 3m -run 'Test(UnstartedCancellation|RecoveryCapture|RecoveryDiscovery|RecoveryAdmission|InterruptedRecoveryCannotReadmitOriginalTask|TeamHoldCannotReadmitThroughUnguardedTaskService)' ./internal/task
+          go test -race -tags integration -count=1 -timeout 3m -run 'Test(ProposePlanRejects|SyncTaskStates|ReasoningTask|CompleteReasoningTurn|ReasoningTurn|ManualCouncilTaskFences|ResearchSeatVerifiedTextDelivery)' ./internal/team ./internal/teamworker
+
+  managed-inference-race:
+    name: Validate managed inference and Colibri race boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
       - name: Managed inference lease and Colibri rollback race tests (hosted Linux)
         env:
           GOMEMLIMIT: 256MiB
           GOMAXPROCS: '2'
         run: |
           # No live model or GPU. Real SQLite-backed concurrent lease tests.
+          go test -race -count=1 -timeout 3m -run 'Test(OmniRoute|ManagedComponent|FetcherOversizedContentLength)' ./internal/localai
+          go test -race -tags integration -count=1 -timeout 3m ./internal/provideronboarding
           go test -race -count=1 -timeout 3m -run TestManagedStop ./internal/localai
           go test -race -count=1 -timeout 3m -run TestColibriRollbackCanStopWhileHoldingResidencyLock ./internal/localai
           go test -race -count=1 -timeout 3m -run TestChatColibriReplacementCancelledAfterEvictionRestoresPreviousWithIndependentDeadline ./internal/localai
@@ -242,6 +483,20 @@ jobs:
           go test -race -count=1 -timeout 3m -run 'TestColibri(ReplacementUnknownResult|ConfirmedNoChildFailure)' ./internal/localai
           go test -race -count=1 -timeout 3m -run TestColibriUnknownStoppedOrFailedPID ./internal/localai
           go test -race -count=1 -timeout 3m -run TestColibriHealthyBusyWithoutPIDCannotClaimSafeEviction ./internal/localai
+
+  full-regression:
+    name: Validate full regression and cross-platform compilation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
       - name: Full Go regression and cross-platform compilation
         run: |
           go test ./internal/featurepolicy ./internal/inference ./internal/tool ./internal/webui
@@ -277,6 +532,7 @@ jobs:
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/onepane-legacy-setup.exe ./packaging/windows/setup
           bash -n scripts/install-ubuntu.sh
 
+
   offline-msi-evidence:
     name: Validate Windows instance lock and offline MSI evidence
     runs-on: windows-latest
@@ -287,6 +543,11 @@ jobs:
         with:
           go-version: '1.23.x'
           cache: false
+      - name: Native Windows CI command and aggregation contracts
+        shell: pwsh
+        run: |
+          go test -count=1 -timeout 3m ./internal/cicontract
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Native Windows LockFileEx ownership and crash-recovery regressions
         shell: pwsh
         run: |
@@ -295,50 +556,85 @@ jobs:
           # OS-held lock release after forcibly killing a holder process.
           # Hosted test only; does not assert installed Windows SCM readiness.
           go test -count=1 -timeout 3m ./internal/processlock
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Native Windows backend authenticated service-control regressions
         shell: pwsh
         run: |
           # Validate readiness/shutdown credentials on the actual target OS.
           # The server is NOT installed or launched by this unit check.
           go test -count=1 -timeout 3m ./cmd/harnessd ./internal/serviceproof
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Native Windows managed-model environment and private-log regressions
         shell: pwsh
         run: |
           # Real Windows process-launch credential isolation and NTFS ACL tests.
           # No Colibri downloads, installs, or user data root access.
+          go test -count=1 -timeout 3m -run 'Test(OmniRoute|ManagedComponent|FetcherOversizedContentLength)' ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m ./internal/provideronboarding
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run TestManagedRuntimeLaunchWithNilOrEmptyEnvDoesNotInheritSecrets ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run TestWindowsManagedRuntimeLog ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # Verify exact launched-model PID ownership and cancelled Colibri
           # compensation on Windows rather than relying on cross-compilation.
           go test -count=1 -timeout 4m -run TestUnrecordedModel ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run TestFailedModelPIDPersistence ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run '^TestManagedProcessIdentity' ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run '^TestManagedTrackedProcess' ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run TestWindowsTreeSignalNeverExecutesOnUntrackedPID ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run TestManagedStopRechecksPIDAfterDrainingPersistenceBeforeSIGTERM ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run '^(TestManagedStopRetainsUnknownProcessOwnershipWithoutPID|TestManagedShutdownCannotSilentlyStopUnknownPIDStartingOrDrain|TestManagedRestartNoChildFailureProofIsRequired|TestConfirmedPrelaunchFailureWithNoPIDStillAllowsExplicitStop|TestRecordedZeroPIDCannotImpersonateProvenNoChildFailure)$' ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run '^(TestRecoveredModel|TestRecovery|TestManagedRuntimeRecovery)' ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run TestManagedStartup ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run TestCancelledUnlaunchedModel ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run TestUnlaunchedModel ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run TestCancelledColibriSwap ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run TestColibriHotSwapRejectsLiveFailedAndStoppedEngineBeforeEviction ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run TestColibriFailedRowWithConfirmedDeadPIDDoesNotBlockSwap ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run TestChatColibriReplacementCancelledAfterEvictionRestoresPreviousWithIndependentDeadline ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run TestColibriRollbackCannotClaimAnUnverifiedRestoredModel ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run TestColibriTargetCannotAdvertiseUnpersistedSuccessfulStart ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run TestColibriReplacementDoesNotGuessRollbackWhenTargetPIDUnknown ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run 'TestColibri(StarterCannot|VerifiedStarter|VerifiedReplacement|VerifiedTarget)' ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run 'Test(DirectColibriStart|ColibriHotSwapStatusShows)' ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # OS-backed post-restart PID liveness: live untracked child must
           # block memory admission; dead child must not. Identity stays denied.
           go test -count=1 -timeout 4m -run TestWindowsUntrackedPID ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run TestManagedMemoryAdmission ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run 'TestManaged(HealthyOrBusyUnknownPIDNeverSilentlyStops|MemoryAdmissionPreservesUnknownHealthyBusyOwners|RuntimeRestartRequiresReconciliationForLiveNonRunningProcess)' ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run 'TestManaged(Stopped|StopDoesNotErase|MemoryAdmissionRejectsUnproven)' ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run 'TestColibri(ReplacementUnknownResult|ConfirmedNoChildFailure)' ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run TestColibriUnknownStoppedOrFailedPID ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 -timeout 4m -run TestColibriHealthyBusyWithoutPIDCannotClaimSafeEviction ./internal/localai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Native Windows SQLite migration and startup-evidence regressions
         shell: pwsh
         run: |
@@ -346,12 +642,124 @@ jobs:
           # Windows. Does not replace a populated RC10->RC11 installer upgrade
           # or verify persistence on the operator's selected data drive.
           go test -count=1 -timeout 5m ./internal/storage/sqlite ./internal/startupevidence
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Native Windows bootstrap-key privacy and identity preservation
+        shell: pwsh
+        run: |
+          go test -count=1 -timeout 3m ./internal/privatekeyfile ./internal/node ./internal/vault
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Native Windows persistent drive-root resolution
         shell: pwsh
         run: |
           # Must not create an accidental empty C: instance when an explicitly
           # configured non-C installer path is corrupt or unreadable.
           go test -count=1 -timeout 3m ./packaging/windows/service
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test allowlisted MSI analysis against synthetic secret-bearing logs
         shell: powershell
         run: .\scripts\test_offline_msi_evidence.ps1
+
+  windows-library-team:
+    name: Validate Windows Library and live Team authority
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Native Windows live Team history and authorization
+        shell: pwsh
+        run: |
+          go test -count=1 -timeout 3m -run 'Test(TeamMessagePage|LiveTeamRoom|LiveTeamAssignmentCompletion|TeamLiveRoom|TeamRoundAndReplyScope)' ./internal/team ./internal/api
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run 'Test(LibraryArtifact|LibraryContentReads|VerifiedWorkspaceEvidence|WorkspaceLibraryPreview)' ./internal/api
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run TestWorkspaceLibraryPublication ./internal/projectworkspace
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run 'Test(TaskLibraryPublications|TeamAssignmentOutputs|LibrarySchemaFixture)' ./internal/api
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run TestTeamAssistanceRead ./internal/agentworker ./internal/team ./internal/api
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run 'Test(TeamAssistanceAnswer(Read)?HTTP|TransactionalAuthorization)' ./internal/api
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run TestTeamAssistanceContinueHTTP ./internal/api
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -count=1 -timeout 3m -run TestAssignmentCompletion ./internal/team
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Native Windows artifact and indexed Library text
+        shell: pwsh
+        run: |
+          go test -tags integration -count=1 -timeout 3m -run '^TestLibraryDocument' ./internal/projectworkspace ./internal/api
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -count=1 -timeout 3m ./internal/artifact
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run 'Test(LibraryTextIndex|WorkspaceLibraryText)' ./internal/projectworkspace ./internal/api
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  windows-worker-recovery:
+    name: Validate Windows Worker journals and recovery
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Native Windows Worker journals assistance and recovery
+        shell: pwsh
+        run: |
+          go test -tags integration -count=1 -timeout 3m -run 'Test(Assurance|BudgetJournal|BudgetRelease|BudgetCommit|ResponseJournal|ProposalContinuation|RouteJournal)' ./internal/agentworker
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run 'Test(WorkerWait|ExternalWorkerWake|TeamAssistance(Human|Production|Model|Writes|Question|Changed))' ./internal/agentworker
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run TestTeamAssistanceAnswer ./internal/agentworker ./internal/team
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run TestTeamAssistanceGenericResume ./internal/agentworker
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run 'TestTeamAssistance(Continue|Context)' ./internal/agentworker
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run TestTeamAssistanceDiscovery ./internal/agentworker ./internal/api
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run TestTeamAssistanceFlowHTTP ./internal/api
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run TestTeamPairing ./internal/agentworker
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run TestApprovalContinuation ./internal/task
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m ./internal/recoveryinventory
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m ./internal/budget
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  windows-team-dispatch:
+    name: Validate Windows shared compute and governed dispatch
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Native Windows compute Team dispatch and cancellation
+        shell: pwsh
+        run: |
+          go test -count=1 -timeout 3m ./internal/runtimecoord
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -count=1 -timeout 3m -run TestTeamDispatchShares ./internal/teamworker
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -count=1 -timeout 3m -run TestTeamAuthorityRechecked ./internal/inference
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -count=1 -timeout 3m -run 'Test(TaskInspection|TeamReads|RecoveryCaseReads|AcceptedTeamAssignments|TeamAssignment|TeamPause|TeamResume|TeamCancellation)' ./internal/team ./internal/tool ./internal/api
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run 'Test(TeamAssignmentsExecute|TeamPause|TeamCancellation|CancellationBetweenWorkerTicks|ProjectTaskGraphRecognizesReviewedTeam)' ./internal/agentworker ./internal/projectorchestrator
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run 'Test(AgentProtocolHTTPPostDispatch|RuntimeDispatchUnusable|RuntimePostDispatchBudgetCommitFailure|InferencePostDispatchBudgetCommitFailure|RuntimePreDispatchErrors|InferencePreDispatchErrors)' ./internal/agentruntime ./internal/inference
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run 'Test(UnstartedCancellation|RecoveryCapture|RecoveryDiscovery|RecoveryAdmission|InterruptedRecoveryCannotReadmitOriginalTask|TeamHoldCannotReadmitThroughUnguardedTaskService)' ./internal/task
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags integration -count=1 -timeout 3m -run 'Test(ProposePlanRejects|SyncTaskStates|ReasoningTask|CompleteReasoningTurn|ReasoningTurn|ManualCouncilTaskFences|ResearchSeatVerifiedTextDelivery)' ./internal/team ./internal/teamworker
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

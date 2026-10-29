@@ -136,20 +136,34 @@ func completionAssuranceCriteria(raw json.RawMessage) json.RawMessage {
 
 func (s *Service) markReasoningDispatch(ctx context.Context, r *Run, kind, id string) error {
 	now := s.clock.UnixMilli()
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE agent_worker_runs AS r
+	err := s.tx.Within(ctx, func(ctx context.Context, tx storage.Tx) error {
+		// A human author or original scope may be revoked while routing. The
+		// immutable receipt must still resolve before consuming dispatch ownership.
+		if _, err := assistanceContext(ctx, tx, *r); err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx,
+			`UPDATE agent_worker_runs AS r
 		 SET step_count=step_count+1,last_candidate_kind=?,
 			 last_candidate_id=?,revision=revision+1,updated_at=?
 		 WHERE r.id=? AND r.revision=? AND r.status='running'
 			AND r.step_count<r.max_steps AND `+
-			activeWorkerExecutionBindingPredicate,
-		kind,id,now,r.ID,r.Revision)
+				activeWorkerExecutionBindingPredicate,
+			kind, id, now, r.ID, r.Revision)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return ErrInvalidWorkerState
+		}
+		return nil
+	})
 	if err != nil {
 		return err
-	}
-	n, _ := res.RowsAffected()
-	if n != 1 {
-		return ErrInvalidWorkerState
 	}
 	r.StepCount++
 	r.LastCandidateKind = &kind
@@ -272,31 +286,47 @@ func (s *Service) journal(ctx context.Context,runID,kind,status string,candidate
   return s.journalInTransaction(ctx,tx,runID,kind,status,candidateKind,candidateID,proposalType,resultRef,detail)
  })
 }
-func (s *Service) journalInTransaction(ctx context.Context,tx storage.Tx,runID,kind,status string,candidateKind,candidateID,proposalType,resultRef *string,detail any) error {
+func (s *Service) journalInTransaction(ctx context.Context, tx storage.Tx, runID, kind, status string, candidateKind, candidateID, proposalType, resultRef *string, detail any) error {
+	_, err := s.journalStepInTransaction(ctx, tx, runID, kind, status, candidateKind, candidateID, proposalType, resultRef, detail)
+	return err
+}
+
+// Return the exact step created in the caller's transaction. Dependent records
+// must bind this identity rather than infer the latest step after a write.
+func (s *Service) journalStepInTransaction(ctx context.Context, tx storage.Tx, runID, kind, status string, candidateKind, candidateID, proposalType, resultRef *string, detail any) (string, error) {
 	if detail == nil {
 		detail = map[string]any{}
 	}
 	raw, err := json.Marshal(detail)
 	if err != nil {
-		return err
+		return "", err
 	}
 	now := s.clock.UnixMilli()
-	sid, _ := s.ids.New("awstep")
+	sid, err := s.ids.New("awstep")
+	if err != nil {
+		return "", err
+	}
+	eid, err := s.ids.New("evt")
+	if err != nil {
+		return "", err
+	}
 	var seq int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(step_number),0)+1 FROM agent_worker_steps WHERE run_id=?`, runID).Scan(&seq); err != nil {
-		return err
+		return "", err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_worker_steps(id,run_id,step_number,step_kind,status,candidate_kind,candidate_id,proposal_type,result_ref,detail_json,started_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, sid, runID, seq, kind, status, candidateKind, candidateID, proposalType, resultRef, string(raw), now, now); err != nil {
-		return err
+		return "", err
 	}
 	var ws, taskID string
 	if err := tx.QueryRowContext(ctx, `SELECT workspace_id,task_id FROM agent_worker_runs WHERE id=?`, runID).Scan(&ws, &taskID); err != nil {
-		return err
+		return "", err
 	}
-	eid, _ := s.ids.New("evt")
 	p, _ := json.Marshal(map[string]any{"run_id": runID, "task_id": taskID, "step_id": sid, "step_number": seq, "kind": kind, "status": status, "candidate_kind": candidateKind, "candidate_id": candidateID, "proposal_type": proposalType, "result_ref": resultRef, "detail": detail})
 	actor := WorkerPrincipal
-	return s.events.Append(ctx, tx, event.Event{ID: eid, WorkspaceID: &ws, Type: "agent_worker.step", AggregateType: "agent_worker_run", AggregateID: runID, ActorPrincipalID: &actor, Payload: p, OccurredAt: now})
+	if err := s.events.Append(ctx, tx, event.Event{ID: eid, WorkspaceID: &ws, Type: "agent_worker.step", AggregateType: "agent_worker_run", AggregateID: runID, ActorPrincipalID: &actor, Payload: p, OccurredAt: now}); err != nil {
+		return "", err
+	}
+	return sid, nil
 }
 
 func (s *Service) findLease(ctx context.Context, workspaceID, taskID, capability string, action authority.ActionMode, resource string) (string, error) {

@@ -47,6 +47,19 @@ type fakeRepo struct {
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{tasks: map[string]Task{}, attempts: map[string]Attempt{}, hardPredecessors: map[string][]string{}}
 }
+func (r *fakeRepo) RequireNoExecutionHold(context.Context, storage.Tx, Task) error { return nil }
+func (r *fakeRepo) RequireRecoveryClear(_ context.Context, _ storage.Tx, t Task) error {
+	seen := map[string]bool{}
+	for {
+		if seen[t.ID] || len(seen) >= 256 { return ErrRecoveryRequired }
+		seen[t.ID] = true
+		for _, a := range r.attempts { if a.TaskID == t.ID && a.State == AttemptInterrupted { return ErrRecoveryRequired } }
+		if t.ParentTaskID == nil { return nil }
+		parent, ok := r.tasks[*t.ParentTaskID]
+		if !ok || parent.WorkspaceID != t.WorkspaceID { return ErrRecoveryRequired }
+		t = parent
+	}
+}
 func (r *fakeRepo) Get(_ context.Context, id string) (Task, error) {
 	t, ok := r.tasks[id]
 	if !ok {

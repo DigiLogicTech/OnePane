@@ -240,7 +240,10 @@ func bestPlacement(p HardwareProfile, required int64, pref PlacementMode) (Place
 		}
 	}
 	// Same-backend multi-device plans only. Never pool heterogeneous accelerators.
-	multiModes := []PlacementMode{PlacementLayerSharded}
+	var multiModes []PlacementMode
+	if pref == "" {
+		multiModes = []PlacementMode{PlacementLayerSharded}
+	}
 	if pref == PlacementLayerSharded || pref == PlacementRowSharded || pref == PlacementTensorSharded {
 		multiModes = []PlacementMode{pref}
 	}

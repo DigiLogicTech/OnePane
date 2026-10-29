@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="/ui-consistency.css" />
   <link rel="stylesheet" href="/attention-drawer.css" />
   <link rel="stylesheet" href="/debug-centre.css" />
+  <link rel="stylesheet" href="/team-room.css" />
 </head>
 <body>
   <section id="authGate" class="auth-gate" aria-live="polite">
@@ -89,6 +90,7 @@
         <button id="newTabButton" class="icon-button" title="Open a new tab">＋</button>
         <div class="topbar-spacer"></div>
         <button id="commandButton" class="command-button" data-action="command-palette">Search or run a command… <kbd>Ctrl+K</kbd></button>
+        <button id="workbenchPanelsButton" class="status-button" type="button" aria-label="Panels and focused work area">Panels</button>
         <button id="healthButton" class="status-button health-ok" data-action="health-popover"><span class="status-dot"></span><span>Healthy</span></button>
         <button id="modelDownloadButton" class="status-button model-download-button hidden" type="button" aria-label="Background model downloads" title="Background model downloads"><span aria-hidden="true">↓</span><span id="modelDownloadLabel">Downloads</span><span class="badge" id="modelDownloadBadge">0</span></button>
         <button id="attentionButton" class="icon-button notification" data-action="attention" aria-label="Notifications"><span>◔</span><span class="badge hidden" data-notification-badge>0</span></button>
@@ -175,6 +177,10 @@
   <script src="/project-development-page.js"></script>
   <script src="/project-task-graphs.js"></script>
   <script src="/workspace-collaboration.js"></script>
+  <script src="/library-text-index.js"></script>
+  <script src="/library-document-index.js"></script>
+  <script src="/library-document-search.js"></script>
+  <script src="/library-content-search.js"></script>
   <script src="/workspace-library.js"></script>
   <script src="/workspace-runtime-controls.js"></script>
   <script src="/qa-report-summary.js"></script>
@@ -189,5 +195,10 @@
   <script src="/workspace-ai-workflow.js"></script>
   <script src="/project-library-route.js"></script>
   <script src="/evidence-audit-page.js"></script>
+  <script src="/team-assignments.js"></script>
+  <script src="/team-assistance.js"></script>
+  <script src="/team-room.js"></script>
+  <link rel="stylesheet" href="/task-recovery.css">
+  <script src="/task-recovery.js"></script>
 </body>
 </html>

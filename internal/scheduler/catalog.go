@@ -152,7 +152,8 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 		return nil, fmt.Errorf("list model scheduler candidates: %w", err)
 	}
 	defer rows.Close()
-	var out []Candidate
+	type pendingCandidate struct { candidate Candidate; remote bool; nodeTrust, pairingStatus string; manifestExpires int64 }
+	var candidates []pendingCandidate
 	for rows.Next() {
 		var id, status, modelRef, trust, runtimeCfg, metadata string
 		var node, providerID, deploymentRuntime, pws, provider, pstatus, pauth, pjson sql.NullString
@@ -335,7 +336,16 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 				}
 			}
 		}
-		prof, ok, err := c.bestProfile(ctx, id, capability, role)
+		candidates = append(candidates, pendingCandidate{cand,node.Valid && local == 0 && !providerID.Valid,nodeTrust,pairingStatus,manifestExpires})
+	}
+	if err := rows.Err(); err != nil { return nil, err }
+	if err := rows.Close(); err != nil { return nil, err }
+	// Release the catalogue cursor before compatibility/admission lookups.
+	// This must also work with one SQLite connection.
+	var out []Candidate
+	for _, pending := range candidates {
+		cand := pending.candidate
+		prof, ok, err := c.bestProfile(ctx, cand.ID, capability, role)
 		if err != nil {
 			return nil, err
 		}
@@ -350,15 +360,15 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 				cand.ContextMax = prof.contextMax
 			}
 		}
-		if err := c.applyManagedAdmission(ctx, id, capability, role, &cand); err != nil {
+		if err := c.applyManagedAdmission(ctx, cand.ID, capability, role, &cand); err != nil {
 			return nil, err
 		}
-		if node.Valid && local == 0 && !providerID.Valid {
+		if pending.remote {
 			// A persisted READY deployment cannot authorize a dispatch after
 			// its Node's signed/mTLS-paired capability heartbeat has expired.
 			// This flag is catalogue-derived, not a model-provided label.
-			cand.TrustedNodeVerified = nodeTrust == "paired" &&
-				pairingStatus == "paired" && manifestExpires > time.Now().UnixMilli()
+			cand.TrustedNodeVerified = pending.nodeTrust == "paired" &&
+				pending.pairingStatus == "paired" && pending.manifestExpires > time.Now().UnixMilli()
 			if !cand.TrustedNodeVerified {
 				cand.Schedulable = false
 				cand.NodeStatus = "unavailable"
@@ -371,7 +381,7 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 				cand.Destination = destination("untrusted", ws, "", "public")
 			}
 			var enabled, idleOnly int
-			err := c.db.QueryRowContext(ctx, `SELECT enabled,idle_only FROM remote_node_compute_policies WHERE node_id=?`, node.String).Scan(&enabled, &idleOnly)
+			err := c.db.QueryRowContext(ctx, `SELECT enabled,idle_only FROM remote_node_compute_policies WHERE node_id=?`, cand.NodeID).Scan(&enabled, &idleOnly)
 			if err == nil {
 				if enabled == 0 {
 					cand.Schedulable = false
@@ -387,9 +397,9 @@ func (c *Catalog) modelCandidates(ctx context.Context, ws, capability, role stri
 				return nil, err
 			}
 		}
-		out = append(out, cand)
+		out = append(out,cand)
 	}
-	return out, rows.Err()
+	return out,nil
 }
 
 func firstNonBlank(values ...string) string {

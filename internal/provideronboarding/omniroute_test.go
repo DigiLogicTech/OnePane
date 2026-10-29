@@ -15,7 +15,7 @@ func TestProbeOmniRouteDetectsStrictZeroCost(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"data":[{"id":"auto"},{"id":"auto/coding"}]}`))
 		case "/api/settings/export-json":
-			_, _ = w.Write([]byte(`{"routing":{"freeAccessPolicy":"strict"}}`))
+			_, _ = w.Write([]byte(`{"settings":{"freeAccessPolicy":"strict"}}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -27,7 +27,7 @@ func TestProbeOmniRouteDetectsStrictZeroCost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !p.StrictZeroCostVerified || len(p.Models) != 2 {
+	if !p.StrictPolicyObserved || p.StrictZeroCostVerified || p.StrictPolicySource != "settings.freeAccessPolicy" || len(p.Models) != 2 {
 		t.Fatalf("probe %#v", p)
 	}
 }

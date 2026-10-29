@@ -26,6 +26,12 @@ type LocalEndpointLeaseResolver interface {
 	AcquireLocalEndpoint(context.Context, string) (string, func(), error)
 }
 
+// Managed acquisition may wait for cold load or hot swap after inference's
+// outer dispatch check. Recheck Task authority before sending any prompt.
+type LocalTaskExecutionAuthorizer interface {
+	AuthorizeLocalTaskExecution(context.Context,string,*string) error
+}
+
 type LocalOpenAITransport struct {
 	Resolver LocalEndpointResolver
 	Client   *http.Client
@@ -85,6 +91,9 @@ func (t LocalOpenAITransport) Dispatch(ctx context.Context, req DispatchRequest,
 	base,err=validatedLoopbackBase(base)
 	if err!=nil{
 		return DispatchResult{}, &TransportError{Code:"unsafe_local_endpoint",OutcomeKnown:true,Err:err}
+	}
+	if guard,ok:=t.Resolver.(LocalTaskExecutionAuthorizer);ok{
+		if err:=guard.AuthorizeLocalTaskExecution(ctx,req.WorkspaceID,req.TaskID);err!=nil{return DispatchResult{},&TransportError{Code:"team_assignment_revoked",OutcomeKnown:true,Err:err}}
 	}
 	var bodyObj map[string]any
 	if err := json.Unmarshal(req.RequestJSON, &bodyObj); err != nil {

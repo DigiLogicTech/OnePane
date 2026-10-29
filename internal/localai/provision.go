@@ -254,8 +254,8 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, sourceURL, dest, expectedSHA st
 
 	if resp.ContentLength >= 0 && offset+resp.ContentLength > f.MaxBytes {
 		_ = out.Close()
-		return DownloadResult{}, errors.New("download exceeds maximum size")
 		_ = os.Remove(partial)
+		return DownloadResult{}, errors.New("download exceeds maximum size")
 	}
 	remaining := f.MaxBytes - offset
 	n, copyErr := io.Copy(io.MultiWriter(out, h), io.LimitReader(resp.Body, remaining+1))

@@ -76,6 +76,7 @@ type Service struct {
 	// shared runtime provisioning, without serializing entire model downloads.
 	runtimeInstallMu sync.Mutex
 	installQueueMu   sync.Mutex
+	omniRoute        omniRouteProcessState
 }
 
 func NewService(db *sql.DB, tx storage.Transactor, clk clock.Clock, inf *inference.Service, dataDir string, trust *CatalogTrustStore) *Service {

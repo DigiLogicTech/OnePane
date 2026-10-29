@@ -1,0 +1,260 @@
+//go:build integration
+
+package recoveryinventory
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+)
+
+// A contract fixture is reviewed source. Integration tests must never regenerate
+// it: automatic capture would bless schema changes before review, and the old
+// retained authoring test omitted the required table DDL entirely.
+func TestRecoveryIndirectOwnershipSchemaRejectsChanges(t *testing.T) {
+	ctx := context.Background()
+	db := OpenMigratedRecoveryFixture(t, ctx)
+	// Each mutation and its rollback checks retain their own real migrated DB.
+	// Bound concurrency to two: repeated full-catalog checks need not serialize
+	// unrelated cases, nor share a mutable schema/transaction/connection.
+	caseSlots := make(chan struct{}, 2)
+	var err error
+	if err = ValidateIndirectOwnershipSchema(ctx, db.SQL()); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, sql string }{
+		{"new_operation_fk", `CREATE TABLE new_effect(owner TEXT REFERENCES operations(id))`},
+		{"case_insensitive_worker_fk", `CREATE TABLE new_effect(owner TEXT REFERENCES AGENT_WORKER_RUNS(id))`},
+		{"new_event_fk", `CREATE TABLE new_effect(owner INTEGER REFERENCES events(sequence))`},
+		{"new_artifact_fk", `CREATE TABLE new_effect(owner TEXT REFERENCES artifacts(id))`},
+		{"new_composite_library_fk", `CREATE TABLE new_effect(owner TEXT,version INTEGER,FOREIGN KEY(owner,version) REFERENCES project_library_asset_versions(asset_id,version))`},
+		{"new_composite_text_index_fk", `CREATE TABLE new_effect(owner TEXT,version INTEGER,parser INTEGER,FOREIGN KEY(owner,version,parser) REFERENCES project_library_text_indexes(asset_id,version,parser_version))`},
+		{"new_composite_text_line_fk", `CREATE TABLE new_effect(owner TEXT,version INTEGER,parser INTEGER,line INTEGER,FOREIGN KEY(owner,version,parser,line) REFERENCES project_library_text_lines(asset_id,version,parser_version,line_number))`},
+		{"new_composite_document_index_fk", `CREATE TABLE new_effect(owner TEXT,version INTEGER,parser TEXT,FOREIGN KEY(owner,version,parser) REFERENCES project_library_document_indexes(asset_id,version,parser_id))`},
+		{"new_composite_document_unit_fk", `CREATE TABLE new_effect(owner TEXT,version INTEGER,parser TEXT,unit INTEGER,FOREIGN KEY(owner,version,parser,unit) REFERENCES project_library_document_units(asset_id,version,parser_id,ordinal))`},
+		{"changed_document_raw_identity", `ALTER TABLE project_library_document_indexes RENAME COLUMN raw_source_sha TO inferred_source`},
+		{"changed_document_derived_identity", `ALTER TABLE project_library_document_indexes RENAME COLUMN derived_sha TO inferred_derived`},
+		{"changed_document_manifest_identity", `ALTER TABLE project_library_document_indexes RENAME COLUMN manifest_sha TO inferred_manifest`},
+		{"changed_document_parser", `ALTER TABLE project_library_document_indexes RENAME COLUMN parser_id TO inferred_parser`},
+		{"new_document_recovery_clearance", `ALTER TABLE project_library_document_indexes ADD COLUMN recovery_clearance_json TEXT`},
+		{"changed_document_component", `ALTER TABLE project_library_document_units RENAME COLUMN part_name TO inferred_page`},
+		{"changed_document_paragraph", `ALTER TABLE project_library_document_units RENAME COLUMN paragraph_number TO inferred_offset`},
+		{"new_document_unit_effect", `ALTER TABLE project_library_document_units ADD COLUMN effect_json TEXT`},
+		{"changed_text_index_hash", `ALTER TABLE project_library_text_indexes RENAME COLUMN content_hash TO inferred_hash`},
+		{"changed_text_index_parser", `ALTER TABLE project_library_text_indexes RENAME COLUMN parser_version TO inferred_parser`},
+		{"new_text_index_clearance", `ALTER TABLE project_library_text_indexes ADD COLUMN recovery_clearance_json TEXT`},
+		{"changed_text_line_bytes", `ALTER TABLE project_library_text_lines RENAME COLUMN byte_start TO inferred_start`},
+		{"new_text_line_effect", `ALTER TABLE project_library_text_lines ADD COLUMN effect_json TEXT`},
+		{"new_operation_name", `CREATE TABLE new_effect(operation_id TEXT)`},
+		{"new_prefixed_operation_name", `CREATE TABLE new_effect(compensates_operation_id TEXT)`},
+		{"new_worker_name", `CREATE TABLE new_effect(worker_run_id TEXT)`},
+		{"new_run_name", `CREATE TABLE new_effect(run_id TEXT)`},
+		{"new_event_id", `CREATE TABLE new_effect(source_event_id TEXT)`},
+		{"new_event_sequence", `CREATE TABLE new_effect(source_event_seq INTEGER)`},
+		{"new_artifact_name", `CREATE TABLE new_effect(RESULT_ARTIFACT_ID TEXT)`},
+		{"sqlite_wildcard_name", `CREATE TABLE sqliteXeffects(operation_id TEXT)`},
+		{"quoted_name", `CREATE TABLE "bad'; DROP TABLE operations; --"(operation_id TEXT)`},
+		{"changed_existing_unrelated_table", `ALTER TABLE notifications ADD COLUMN operation_id TEXT`},
+		{"changed_direct_only_owner", `ALTER TABLE agent_worker_runs ADD COLUMN new_effect_json TEXT`},
+		{"new_worker_step_payload", `ALTER TABLE agent_worker_steps ADD COLUMN new_effect_json TEXT`},
+		{"new_assistance_request_fk", `CREATE TABLE new_help_effect(owner TEXT REFERENCES team_assistance_requests(id))`},
+		{"new_assistance_request_name", `CREATE TABLE new_help_effect(assistance_request_id TEXT)`},
+		{"changed_assistance_scope", `ALTER TABLE team_assistance_request_scopes ADD COLUMN answer_json TEXT`},
+		{"new_assistance_scope_owner", `CREATE TABLE new_help_effect(owner TEXT REFERENCES team_assistance_request_scopes(request_id))`},
+		{"new_assistance_answer_owner", `CREATE TABLE new_help_effect(owner TEXT REFERENCES team_assistance_answers(id))`},
+		{"new_assistance_answer_name", `CREATE TABLE new_help_effect(assistance_answer_id TEXT)`},
+		{"changed_assistance_answer", `ALTER TABLE team_assistance_answers ADD COLUMN execution_approval_json TEXT`},
+		{"new_assistance_continuation_owner", `CREATE TABLE new_help_effect(owner TEXT REFERENCES team_assistance_continuations(id))`},
+		{"changed_assistance_continuation", `ALTER TABLE team_assistance_continuations ADD COLUMN recovery_clearance_json TEXT`},
+		{"changed_assistance_continuation_step", `ALTER TABLE team_assistance_continuations RENAME COLUMN continue_step_id TO inferred_step`},
+		{"changed_assistance_wait_identity", `ALTER TABLE team_assistance_requests RENAME COLUMN wait_step_id TO inferred_step`},
+		{"changed_assistance_question", `ALTER TABLE team_assistance_requests RENAME COLUMN question TO answer_json`},
+		{"new_assistance_payload", `ALTER TABLE team_assistance_requests ADD COLUMN human_decision_json TEXT`},
+		{"renamed_composite_key", `ALTER TABLE project_library_asset_versions RENAME COLUMN version TO version_number`},
+		{"changed_event_pointer", `ALTER TABLE notification_deliveries RENAME COLUMN source_event_seq TO another_sequence`},
+		{"generated_column", `ALTER TABLE operation_receipts ADD COLUMN shadow TEXT GENERATED ALWAYS AS (operation_id) VIRTUAL`},
+		{"missing_polymorphic_table", `DROP TABLE dependency_refs`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			caseSlots <- struct{}{}
+			defer func() { <-caseSlots }()
+			db := OpenMigratedRecoveryFixture(t, ctx)
+			tx, err := db.SQL().BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			if _, err = tx.ExecContext(ctx, tc.sql); err != nil {
+				t.Fatal(err)
+			}
+			if err = ValidateIndirectOwnershipSchema(ctx, tx); !errors.Is(err, ErrIndirectOwnershipSchemaUnreviewed) {
+				t.Fatalf("unreviewed indirect ownership accepted: %v", err)
+			}
+			if err = tx.Rollback(); err != nil {
+				t.Fatal(err)
+			}
+			if err = ValidateIndirectOwnershipSchema(ctx, db.SQL()); err != nil {
+				t.Fatalf("rollback changed contract: %v", err)
+			}
+		})
+	}
+	// Table DDL catches semantic constraints that column/FK metadata cannot:
+	// defaults, CHECK vocabulary and inline uniqueness. Standalone indexes and
+	// triggers remain explicitly outside this prerequisite.
+	for _, tc := range []struct{ name, table, old, next string }{
+		{"changed_default", "notification_deliveries", "DEFAULT 5", "DEFAULT 6"},
+		{"changed_check", "notification_deliveries", "max_attempts >= 1", "max_attempts >= 0"},
+		{"changed_inline_unique", "notification_deliveries", "UNIQUE(workspace_id,idempotency_key)", "CHECK(length(idempotency_key)>0)"},
+		{"changed_text_index_status", "project_library_text_indexes", "'invalid_text'", "'effect_verified'"},
+		{"changed_text_index_count_bound", "project_library_text_indexes", "line_count BETWEEN 0 AND 16384", "line_count BETWEEN 0 AND 32768"},
+		{"changed_text_line_byte_bound", "project_library_text_lines", "byte_end-byte_start<=16384", "byte_end-byte_start<=32768"},
+		{"changed_document_parser_vocabulary", "project_library_document_indexes", "docx-wordml-paragraphs-v1", "effect-verified-parser-v1"},
+		{"changed_document_parser_revision", "project_library_document_indexes", "docx-wordml-paragraphs-v2", "effect-verified-parser-v2"},
+		{"changed_document_unit_parser_revision", "project_library_document_units", "docx-wordml-paragraphs-v2", "effect-verified-parser-v2"},
+		{"changed_document_status_vocabulary", "project_library_document_indexes", "'invalid_document'", "'effect_verified'"},
+		{"changed_document_text_bound", "project_library_document_indexes", "derived_utf8_bytes BETWEEN 0 AND 1048576", "derived_utf8_bytes BETWEEN 0 AND 2097152"},
+		{"changed_document_count_bound", "project_library_document_indexes", "unit_count BETWEEN 0 AND 8192", "unit_count BETWEEN 0 AND 16384"},
+		{"changed_document_unit_byte_bound", "project_library_document_units", "length(CAST(content AS BLOB))<=16384", "length(CAST(content AS BLOB))<=32768"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			caseSlots <- struct{}{}
+			defer func() { <-caseSlots }()
+			db := OpenMigratedRecoveryFixture(t, ctx)
+			tx, err := db.SQL().BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			if _, err = tx.ExecContext(ctx, `PRAGMA writable_schema=ON`); err != nil {
+				t.Fatal(err)
+			}
+			defer tx.ExecContext(ctx, `PRAGMA writable_schema=OFF`)
+			res, err := tx.ExecContext(ctx, `UPDATE main.sqlite_schema SET sql=replace(sql,?,?) WHERE type='table' AND name=? AND instr(sql,?)>0`, tc.old, tc.next, tc.table, tc.old)
+			if err != nil {
+				t.Fatal(err)
+			}
+			count, err := res.RowsAffected()
+			if err != nil || count != 1 {
+				t.Fatalf("fixture DDL was not changed: %d %v", count, err)
+			}
+			if err = ValidateIndirectOwnershipSchema(ctx, tx); !errors.Is(err, ErrIndirectOwnershipSchemaUnreviewed) {
+				t.Fatalf("changed constraints accepted: %v", err)
+			}
+		})
+	}
+	t.Run("ddl_line_endings", func(t *testing.T) {
+		tx, err := db.SQL().BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		if _, err = tx.ExecContext(ctx, `PRAGMA writable_schema=ON`); err != nil {
+			t.Fatal(err)
+		}
+		defer tx.ExecContext(ctx, `PRAGMA writable_schema=OFF`)
+		if _, err = tx.ExecContext(ctx, `UPDATE main.sqlite_schema SET sql=replace(replace(sql,char(13)||char(10),char(10)),char(10),char(13)||char(10)) WHERE name='dependency_refs'`); err != nil {
+			t.Fatal(err)
+		}
+		if err = ValidateIndirectOwnershipSchema(ctx, tx); err != nil {
+			t.Fatalf("equivalent CRLF DDL rejected: %v", err)
+		}
+	})
+	// Shared configuration scopes do not recursively own unrelated Project rows;
+	// a temporary shadow cannot change the explicitly main-schema contract.
+	tx, err := db.SQL().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `CREATE TABLE shared_config(project_id TEXT REFERENCES projects(id),workspace_id TEXT REFERENCES workspaces(id)); CREATE TEMP TABLE agent_worker_steps(wrong_shape TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if err = ValidateIndirectOwnershipSchema(ctx, tx); err != nil {
+		t.Fatalf("shared scope or temporary shadow changed ownership: %v", err)
+	}
+}
+
+func TestRecoveryIndirectOwnershipSchemaBoundsAndReadOnly(t *testing.T) {
+	ctx := context.Background()
+	db := OpenMigratedRecoveryFixture(t, ctx)
+	var err error
+	conn, err := db.SQL().Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err = conn.ExecContext(ctx, `PRAGMA query_only=ON`); err != nil {
+		t.Fatal(err)
+	}
+	if err = ValidateIndirectOwnershipSchema(ctx, conn); err != nil {
+		t.Fatalf("read-only validation: %v", err)
+	}
+	if _, err = conn.ExecContext(ctx, `PRAGMA query_only=OFF`); err != nil {
+		t.Fatal(err)
+	}
+	var columns []string
+	for i := 0; i < 129; i++ {
+		columns = append(columns, fmt.Sprintf("column_%d TEXT", i))
+	}
+	var edges []string
+	for i := 0; i < 129; i++ {
+		edges = append(edges, "FOREIGN KEY(owner) REFERENCES projects(id)")
+	}
+	for _, tc := range []struct{ name, sql string }{
+		{"identifier_bytes", fmt.Sprintf(`CREATE TABLE "%s"(operation_id TEXT)`, strings.Repeat("界", 86))},
+		{"column_identifier_bytes", fmt.Sprintf(`CREATE TABLE new_effect("%s" TEXT)`, strings.Repeat("界", 86))},
+		{"type_bytes", fmt.Sprintf(`CREATE TABLE new_effect(owner %s)`, strings.Repeat("x", 257))},
+		{"column_count", `CREATE TABLE new_effect(` + strings.Join(columns, ",") + `)`},
+		{"fk_count", `CREATE TABLE new_effect(owner TEXT,` + strings.Join(edges, ",") + `)`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tx, err := conn.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			if _, err = tx.ExecContext(ctx, tc.sql); err != nil {
+				t.Fatal(err)
+			}
+			if err = ValidateIndirectOwnershipSchema(ctx, tx); !errors.Is(err, ErrIndirectOwnershipSchemaUnreviewed) {
+				t.Fatalf("oversized metadata accepted: %v", err)
+			}
+		})
+	}
+	t.Run("ddl_bytes", func(t *testing.T) {
+		tx, err := conn.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		if _, err = tx.ExecContext(ctx, `PRAGMA writable_schema=ON`); err != nil {
+			t.Fatal(err)
+		}
+		defer tx.ExecContext(ctx, `PRAGMA writable_schema=OFF`)
+		if _, err = tx.ExecContext(ctx, `UPDATE main.sqlite_schema SET sql=sql||? WHERE name='dependency_refs'`, strings.Repeat(" ", 32769)); err != nil {
+			t.Fatal(err)
+		}
+		if err = ValidateIndirectOwnershipSchema(ctx, tx); !errors.Is(err, ErrIndirectOwnershipSchemaUnreviewed) {
+			t.Fatalf("oversized DDL accepted: %v", err)
+		}
+	})
+	t.Run("table_count", func(t *testing.T) {
+		tx, err := conn.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		for i := 0; i < 513; i++ {
+			if _, err = tx.ExecContext(ctx, fmt.Sprintf(`CREATE TABLE unrelated_%d(id TEXT)`, i)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err = ValidateIndirectOwnershipSchema(ctx, tx); !errors.Is(err, ErrIndirectOwnershipSchemaUnreviewed) {
+			t.Fatalf("oversized schema accepted: %v", err)
+		}
+	})
+}

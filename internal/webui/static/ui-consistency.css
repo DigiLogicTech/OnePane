@@ -506,3 +506,13 @@
  padding-bottom:12px;
  box-sizing:border-box;
 }
+
+/* Preserve the phone shell after later desktop docking styles. */
+@media (max-width:700px){
+ .main-shell{grid-template-rows:calc(var(--mobile-header) + env(safe-area-inset-top)) var(--mobile-tabs) minmax(0,1fr)}
+ #viewHost{grid-row:3}
+ .inspector{position:fixed;display:block!important;left:7px;right:7px;bottom:calc(var(--mobile-nav) + env(safe-area-inset-bottom) + 6px);width:auto;max-height:72dvh;transform:translateY(calc(100% + var(--mobile-nav) + 24px))}
+ .app-shell[data-inspector="open"] .inspector{transform:translateY(0)}
+ .app-shell[data-inspector="closed"] .inspector{transform:translateY(calc(100% + var(--mobile-nav) + 24px))}
+ .bottom-drawer[data-state="closed"]{display:none!important}
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/authority"
 	"github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
 	"github.com/DigiLogicTech/OnePane/internal/system"
+	"github.com/DigiLogicTech/OnePane/internal/watchdog"
 )
 
 type testClock struct{ ms int64 }
@@ -58,8 +59,28 @@ func TestSQLiteAuthorityAndPolicyDenials(t *testing.T) {
 		CapabilityID: "repo.file.write", Action: authority.ActionMutate,
 		ResourceRef: "repo://alpha/README.md", Risk: RiskMedium,
 	}
+	// Mutations require the same durable watchdog as production. An absent
+	// watchdog must still fail closed; a valid capability alone is insufficient.
+	if decision := engine.EvaluateAuthority(ctx, base); decision.Allowed || !hasReason(decision.Reasons, ReasonWatchdogUnavailable) {
+		t.Fatalf("missing watchdog not denied: %+v", decision)
+	}
+	watchdogService := watchdog.NewService(db.SQL(), db, clk, "control-plane", 15*time.Second)
+	if err := watchdogService.Heartbeat(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	engine.SetWatchdog(watchdogService)
 	if decision := engine.EvaluateAuthority(ctx, base); !decision.Allowed {
 		t.Fatalf("valid authority denied: %+v", decision)
+	}
+	clk.ms += 15_001
+	if decision := engine.EvaluateAuthority(ctx, base); decision.Allowed || !hasReason(decision.Reasons, ReasonWatchdogUnavailable) {
+		t.Fatalf("stale watchdog not denied: %+v", decision)
+	}
+	if err := watchdogService.Heartbeat(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if decision := engine.EvaluateAuthority(ctx, base); !decision.Allowed {
+		t.Fatalf("renewed watchdog did not restore valid authority: %+v", decision)
 	}
 
 	outOfScope := base

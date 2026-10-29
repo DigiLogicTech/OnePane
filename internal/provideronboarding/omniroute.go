@@ -19,6 +19,8 @@ type OmniRouteProbe struct {
 	BaseURL                string   `json:"base_url"`
 	Models                 []string `json:"models"`
 	StrictZeroCostVerified bool     `json:"strict_zero_cost_verified"`
+	StrictPolicyObserved   bool     `json:"strict_policy_observed"`
+	StrictPolicySource     string   `json:"strict_policy_source,omitempty"`
 	SettingsReadable       bool     `json:"settings_readable"`
 }
 
@@ -27,6 +29,7 @@ type OmniRouteCommand struct {
 	BaseURL               string
 	SecretRef             *string
 	RequireStrictZeroCost bool
+	RequireStrictPolicy   bool
 	DefaultModel          string
 	ActorPrincipalID      *string
 	RequestID             *string
@@ -153,38 +156,32 @@ func (s *Service) ProbeOmniRoute(ctx context.Context, baseURL string, secretRef 
 		if settingsResp, e := s.client.Do(settingsReq); e == nil {
 			defer settingsResp.Body.Close()
 			if settingsResp.StatusCode >= 200 && settingsResp.StatusCode < 300 {
-				b, _ := io.ReadAll(io.LimitReader(settingsResp.Body, 2<<20))
-				var v any
-				if json.Unmarshal(b, &v) == nil {
+				b, readErr := io.ReadAll(io.LimitReader(settingsResp.Body, (2<<20)+1))
+				var exported map[string]json.RawMessage
+				if readErr == nil && len(b) <= 2<<20 && json.Unmarshal(b, &exported) == nil && exported != nil {
 					out.SettingsReadable = true
-					out.StrictZeroCostVerified = findStringField(v, "freeAccessPolicy", "strict")
+					out.StrictPolicyObserved = omniRouteStrictPolicyObserved(exported)
+					if out.StrictPolicyObserved {
+						out.StrictPolicySource = "settings.freeAccessPolicy"
+					}
 				}
 			}
 		}
 	}
 	return out, nil
 }
-func findStringField(v any, key, want string) bool {
-	switch x := v.(type) {
-	case map[string]any:
-		for k, val := range x {
-			if k == key {
-				if s, ok := val.(string); ok && strings.EqualFold(s, want) {
-					return true
-				}
-			}
-			if findStringField(val, key, want) {
-				return true
-			}
-		}
-	case []any:
-		for _, val := range x {
-			if findStringField(val, key, want) {
-				return true
-			}
-		}
+
+// OmniRoute v3.8.51 exports the active settings object at exactly this path.
+// Its auto-pool switch compares the value case-sensitively to "strict".
+// This observes configuration only: it proves neither the selected request's
+// actual account/route/quota nor a current independent zero-charge contract.
+func omniRouteStrictPolicyObserved(exported map[string]json.RawMessage) bool {
+	var settings map[string]json.RawMessage
+	if json.Unmarshal(exported["settings"], &settings) != nil || settings == nil {
+		return false
 	}
-	return false
+	var policy string
+	return json.Unmarshal(settings["freeAccessPolicy"], &policy) == nil && policy == "strict"
 }
 
 func (s *Service) AddOmniRoute(ctx context.Context, cmd OmniRouteCommand) (OmniRouteResult, error) {
@@ -195,12 +192,17 @@ func (s *Service) AddOmniRoute(ctx context.Context, cmd OmniRouteCommand) (OmniR
 	if err != nil {
 		return OmniRouteResult{Probe: probe}, err
 	}
+	// Preserve old callers' stronger economic requirement. A configuration
+	// snapshot cannot satisfy it; never silently downgrade requested authority.
 	if cmd.RequireStrictZeroCost && !probe.StrictZeroCostVerified {
 		return OmniRouteResult{Probe: probe}, ErrStrictZeroCostNotVerified
 	}
+	if cmd.RequireStrictPolicy && !probe.StrictPolicyObserved {
+		return OmniRouteResult{Probe: probe}, fmt.Errorf("%w: the gateway's active strict routing policy was not observed", ErrInvalidOnboarding)
+	}
 	modelRef := strings.TrimSpace(cmd.DefaultModel)
 	if modelRef == "" {
-		if cmd.RequireStrictZeroCost {
+		if cmd.RequireStrictPolicy {
 			modelRef = "auto/coding"
 		} else {
 			modelRef = "auto"
@@ -208,11 +210,7 @@ func (s *Service) AddOmniRoute(ctx context.Context, cmd OmniRouteCommand) (OmniR
 	}
 	cost := "provider_managed"
 	hard := false
-	if probe.StrictZeroCostVerified && cmd.RequireStrictZeroCost {
-		cost = "free"
-		hard = true
-	}
-	cfg, _ := json.Marshal(map[string]any{"base_url": probe.BaseURL, "chat_path": "/chat/completions", "models_path": "/models", "data_policy": map[string]any{"max_confidentiality": "public", "allowed_residency": []string{"any"}, "destination_kind": "cloud", "allow_raw_secrets": false}, "scheduling": map[string]any{"cost_class": cost, "hard_zero_incremental_cost": hard, "cost_source": "omniroute_strict_zero_cost_probe"}})
+	cfg, _ := json.Marshal(map[string]any{"base_url": probe.BaseURL, "chat_path": "/chat/completions", "models_path": "/models", "strict_policy_observed": probe.StrictPolicyObserved, "strict_policy_source": probe.StrictPolicySource, "data_policy": map[string]any{"max_confidentiality": "public", "allowed_residency": []string{"any"}, "destination_kind": "cloud", "allow_raw_secrets": false}, "scheduling": map[string]any{"cost_class": cost, "hard_zero_incremental_cost": hard, "cost_source": "opaque_provider_unverified"}})
 	auth := "none"
 	if cmd.SecretRef != nil {
 		auth = "bearer"
@@ -226,7 +224,7 @@ func (s *Service) AddOmniRoute(ctx context.Context, cmd OmniRouteCommand) (OmniR
 		return OmniRouteResult{Probe: probe, Provider: p}, err
 	}
 	providerName := "omniroute"
-	meta, _ := json.Marshal(map[string]any{"virtual_route": true, "onboarding_preset": "omniroute", "strict_zero_cost_verified": probe.StrictZeroCostVerified})
+	meta, _ := json.Marshal(map[string]any{"virtual_route": true, "onboarding_preset": "omniroute", "strict_zero_cost_verified": false, "strict_policy_observed": probe.StrictPolicyObserved, "strict_policy_source": probe.StrictPolicySource})
 	m, err := s.inference.RegisterModel(ctx, inference.RegisterModelCommand{ProviderName: &providerName, ModelRef: modelRef, ModalitiesJSON: json.RawMessage(`["text"]`), StaticMetadataJSON: meta, TrustState: inference.ModelUserTrusted, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 	if err != nil {
 		return OmniRouteResult{Probe: probe, Provider: p}, err
@@ -236,6 +234,10 @@ func (s *Service) AddOmniRoute(ctx context.Context, cmd OmniRouteCommand) (OmniR
 	d, err := s.inference.RegisterDeployment(ctx, inference.RegisterDeploymentCommand{ModelID: m.ID, ProviderConnectionID: &p.ID, RuntimeName: &runtime, RuntimeConfigJSON: dcfg, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
 	if err != nil {
 		return OmniRouteResult{Probe: probe, Provider: p, Model: m}, err
+	}
+	d, err = s.inference.SetDeploymentStatus(ctx, inference.SetDeploymentStatusCommand{DeploymentID: d.ID, ExpectedRevision: d.Revision, Status: inference.DeploymentQualifying, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID, Reason: "operator requested gateway connectivity qualification"})
+	if err != nil {
+		return OmniRouteResult{Probe: probe, Provider: p, Model: m, Deployment: d}, err
 	}
 	d, err = s.inference.SetDeploymentStatus(ctx, inference.SetDeploymentStatusCommand{DeploymentID: d.ID, ExpectedRevision: d.Revision, Status: inference.DeploymentReady, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID, Reason: "OmniRoute probe succeeded"})
 	if err != nil {

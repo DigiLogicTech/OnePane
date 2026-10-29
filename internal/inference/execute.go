@@ -13,6 +13,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/event"
 	"github.com/DigiLogicTech/OnePane/internal/policy"
 	"github.com/DigiLogicTech/OnePane/internal/storage"
+	"github.com/DigiLogicTech/OnePane/internal/teamgate"
 )
 
 func (s *Service) Request(ctx context.Context, id string) (InferenceRequest, error) {
@@ -184,6 +185,9 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 		}
 	}
 	var runtimeLease RuntimeScheduleLease
+	if cmd.TaskID!=nil {
+		if _,err:=teamgate.Require(ctx,s.scopes.DB,cmd.WorkspaceID,*cmd.TaskID);err!=nil{return s.finishPreDispatchError(ctx,q.ID,err,cmd)}
+	}
 	if s.runtimeCoordinator != nil {
 		runtimeLease, err = s.runtimeCoordinator.Acquire(ctx, RuntimeScheduleRequest{
 			WorkspaceID: cmd.WorkspaceID, TaskID: cmd.TaskID, InferenceRequestID: q.ID,
@@ -208,24 +212,20 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 	outputLabel = effectiveOutputLabel
 	executionNode := d.NodeID
 	if err := s.transitionRequest(ctx, q.ID, RequestCreated, RequestRouted, d.ProviderConnectionID, strptrlocal(s.localNodeID), executionNode, jsonFields{}, cmd, "inference_request.routed", map[string]any{"transport": selectTransportKey(d, p), "budget_required": requiresBudget}); err != nil {
-		s.releaseBudgetBeforeDispatch(ctx, cmd)
-		return s.requests.Get(ctx, q.ID)
+		return s.preDispatchTransitionError(ctx, q.ID, err, cmd)
 	}
 	from := RequestRouted
 	if cmd.BudgetReservationID != nil {
 		if err := s.transitionRequest(ctx, q.ID, RequestRouted, RequestBudgetReserved, nil, nil, nil, jsonFields{}, cmd, "inference_request.budget_reserved", map[string]any{"budget_reservation_id": *cmd.BudgetReservationID}); err != nil {
-			s.releaseBudgetBeforeDispatch(ctx, cmd)
-			return s.requests.Get(ctx, q.ID)
+			return s.preDispatchTransitionError(ctx, q.ID, err, cmd)
 		}
 		from = RequestBudgetReserved
 	}
 	if err := s.transitionRequest(ctx, q.ID, from, RequestDispatched, nil, nil, nil, jsonFields{}, cmd, "inference_request.dispatched", nil); err != nil {
-		s.releaseBudgetBeforeDispatch(ctx, cmd)
-		return s.requests.Get(ctx, q.ID)
+		return s.preDispatchTransitionError(ctx, q.ID, err, cmd)
 	}
 	if err := s.transitionRequest(ctx, q.ID, RequestDispatched, RequestExecuting, nil, nil, nil, jsonFields{}, cmd, "inference_request.executing", nil); err != nil {
-		s.releaseBudgetBeforeDispatch(ctx, cmd)
-		return s.requests.Get(ctx, q.ID)
+		return s.preDispatchTransitionError(ctx, q.ID, err, cmd)
 	}
 
 	// Re-read revocable policy at the last local boundary before calling
@@ -236,39 +236,45 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 		if p != nil { action = "inference.cloud" }
 		allowed, scopeErr := s.scopes.AuthorizeTask(ctx, cmd.WorkspaceID, *cmd.TaskID, action)
 		if scopeErr != nil || !allowed {
-			s.releaseBudgetBeforeDispatch(ctx, cmd)
+			releaseErr := s.releaseBudgetBeforeDispatch(ctx, cmd)
 			return s.finishTransportError(ctx, q.ID, nil,
-				&TransportError{Code:"feature_policy_revoked", OutcomeKnown:true}, cmd)
+				&TransportError{Code:"feature_policy_revoked", OutcomeKnown:true, Err:errors.Join(scopeErr, releaseErr)}, cmd)
 		}
 	}
 	// Revalidate transfer policy and live pairing after resource acquisition
 	// and budget operations, immediately before any remote side effect.
 	if err:=s.authorizeTrustedNodeTaskDispatch(ctx,cmd,d);err!=nil{
-		s.releaseBudgetBeforeDispatch(ctx,cmd)
+		releaseErr := s.releaseBudgetBeforeDispatch(ctx,cmd)
 		return s.finishTransportError(ctx,q.ID,nil,
-			&TransportError{Code:"trusted_node_transfer_revoked",OutcomeKnown:true,Err:err},cmd)
+			&TransportError{Code:"trusted_node_transfer_revoked",OutcomeKnown:true,Err:errors.Join(err,releaseErr)},cmd)
 	}
 	// A provider or Node association may change while waiting for runtime
 	// acquisition and reservation. Check it again before exporting tokens.
 	if err:=s.requireTasklessLocalAtTransport(ctx,cmd,d);err!=nil{
-		s.releaseBudgetBeforeDispatch(ctx,cmd)
+		releaseErr := s.releaseBudgetBeforeDispatch(ctx,cmd)
 		return s.finishTransportError(ctx,q.ID,nil,
-			&TransportError{Code:"private_chat_locality_revoked",OutcomeKnown:true,Err:err},cmd)
+			&TransportError{Code:"private_chat_locality_revoked",OutcomeKnown:true,Err:errors.Join(err,releaseErr)},cmd)
 	}
 	// Admission and budget reservation may have waited for old hardware or
 	// provider capacity. A Task may keep its authority, but may not silently
 	// switch model, Node, provider, secret ref or transport runtime.
 	if err:=s.requireCurrentDispatchIdentity(ctx,d,m,p);err!=nil{
-		s.releaseBudgetBeforeDispatch(ctx,cmd)
+		releaseErr := s.releaseBudgetBeforeDispatch(ctx,cmd)
 		return s.finishTransportError(ctx,q.ID,nil,
-			&TransportError{Code:"inference_route_identity_revoked",OutcomeKnown:true,Err:err},cmd)
+			&TransportError{Code:"inference_route_identity_revoked",OutcomeKnown:true,Err:errors.Join(err,releaseErr)},cmd)
 	}
 	// Prevent the scheduler/model queue from exporting an old Agent prompt
 	// if the operator updated, archived or rehomed that Agent meanwhile.
 	if err:=s.revalidateTaskAgentBeforeTransport(ctx,cmd,agentBinding);err!=nil{
-		s.releaseBudgetBeforeDispatch(ctx,cmd)
+		releaseErr := s.releaseBudgetBeforeDispatch(ctx,cmd)
 		return s.finishTransportError(ctx,q.ID,nil,
-			&TransportError{Code:"task_agent_profile_revoked",OutcomeKnown:true,Err:err},cmd)
+			&TransportError{Code:"task_agent_profile_revoked",OutcomeKnown:true,Err:errors.Join(err,releaseErr)},cmd)
+	}
+	if cmd.TaskID!=nil {
+		if _,err:=teamgate.Require(ctx,s.scopes.DB,cmd.WorkspaceID,*cmd.TaskID);err!=nil{
+			releaseErr := s.releaseBudgetBeforeDispatch(ctx,cmd)
+			return s.finishTransportError(ctx,q.ID,nil,&TransportError{Code:"team_assignment_revoked",OutcomeKnown:true,Err:errors.Join(err,releaseErr)},cmd)
+		}
 	}
 	result, dispatchErr := transport.Dispatch(ctx, DispatchRequest{WorkspaceID:cmd.WorkspaceID,TaskID:cmd.TaskID,RequestID: q.ID, Model: m, Deployment: d, Provider: p, RequestJSON: requestJSON}, s.secrets)
 	if dispatchErr != nil {
@@ -276,19 +282,26 @@ func (s *Service) Execute(ctx context.Context, cmd ExecuteCommand) (InferenceReq
 			// Once transport dispatch was attempted, account conservatively: the
 			// provider/subscription may have consumed quota even when the outcome
 			// is unknown or failed.
-			_, _ = s.budgets.Commit(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+			if _, err := s.budgets.Commit(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID}); err != nil {
+				// A known transport error does not prove quota was unspent.
+				// Keep the held reservation and prevent caller cleanup/fallback
+				// from treating failed accounting as a safe preflight failure.
+				return s.finishTransportError(ctx, q.ID, p, &TransportError{Code: "budget_commit_failed", OutcomeKnown: false, Err: errors.Join(dispatchErr, err)}, cmd)
+			}
 		}
 		return s.finishTransportError(ctx, q.ID, p, dispatchErr, cmd)
 	}
 	if !json.Valid(result.ResponseJSON) {
 		if cmd.BudgetReservationID != nil && s.budgets != nil {
-			_, _ = s.budgets.Commit(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+			if _, err := s.budgets.Commit(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID}); err != nil {
+				return s.finishTransportError(ctx, q.ID, p, &TransportError{Code: "budget_commit_failed", OutcomeKnown: false, Err: err}, cmd)
+			}
 		}
 		return s.finishTransportError(ctx, q.ID, p, &TransportError{Code: "invalid_transport_result", OutcomeKnown: true}, cmd)
 	}
 	if cmd.BudgetReservationID != nil && s.budgets != nil {
 		if _, err := s.budgets.CommitFromUsage(ctx, *cmd.BudgetReservationID, result.UsageJSON, cmd.ActorPrincipalID); err != nil {
-			return s.finishTransportError(ctx, q.ID, p, &TransportError{Code: "budget_commit_failed", OutcomeKnown: true, Err: err}, cmd)
+			return s.finishTransportError(ctx, q.ID, p, &TransportError{Code: "budget_commit_failed", OutcomeKnown: false, Err: err}, cmd)
 		}
 	}
 
@@ -397,11 +410,33 @@ func (s *Service) resolveExecution(ctx context.Context, workspaceID, deploymentI
 	return d, m, p, transport, flow.EffectiveLabel, nil
 }
 
-func (s *Service) releaseBudgetBeforeDispatch(ctx context.Context, cmd ExecuteCommand) {
-	if cmd.BudgetReservationID == nil || s.budgets == nil {
-		return
+func (s *Service) releaseBudgetBeforeDispatch(ctx context.Context, cmd ExecuteCommand) error {
+	if cmd.BudgetReservationID == nil {
+		return nil
 	}
-	_, _ = s.budgets.Release(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+	if s.budgets == nil {
+		return ErrBudgetUnavailable
+	}
+	_, err := s.budgets.Release(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
+	if err != nil {
+		return fmt.Errorf("release undispatched inference budget: %w", err)
+	}
+	return nil
+}
+
+// A failed pretransport journal must retain its error and original request
+// identity even when the current stored record remains readable.
+func (s *Service) preDispatchTransitionError(ctx context.Context, id string, cause error, cmd ExecuteCommand) (InferenceRequest, error) {
+	releaseErr := s.releaseBudgetBeforeDispatch(ctx, cmd)
+	return s.requestErrorResult(ctx, id, errors.Join(cause, releaseErr), cmd)
+}
+
+func (s *Service) requestErrorResult(ctx context.Context, id string, cause error, cmd ExecuteCommand) (InferenceRequest, error) {
+	stored, readErr := s.requests.Get(ctx, id)
+	if readErr != nil {
+		stored = InferenceRequest{ID: id, WorkspaceID: cmd.WorkspaceID, TaskID: cmd.TaskID, PrincipalID: cmd.PrincipalID}
+	}
+	return stored, errors.Join(cause, readErr)
 }
 
 // Provider-backed deployments are not proven host-local merely because
@@ -460,9 +495,7 @@ func (s *Service) transitionRequest(ctx context.Context, id string, from, to Req
 }
 
 func (s *Service) finishPreDispatchError(ctx context.Context, id string, cause error, cmd ExecuteCommand) (InferenceRequest, error) {
-	if cmd.BudgetReservationID != nil && s.budgets != nil {
-		_, _ = s.budgets.Release(ctx, budget.CloseCommand{ReservationID: *cmd.BudgetReservationID, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID})
-	}
+	cause = errors.Join(cause,s.releaseBudgetBeforeDispatch(ctx,cmd))
 	code := "pre_dispatch_denied"
 	switch {
 	case errors.Is(cause, ErrInformationFlow):
@@ -485,17 +518,9 @@ func (s *Service) finishPreDispatchError(ctx context.Context, id string, cause e
 	completed := s.clock.UnixMilli()
 	fields := jsonFields{ErrorCode: &code, CompletedAt: &completed}
 	if err := s.transitionRequest(ctx, id, RequestCreated, RequestFailed, nil, nil, nil, fields, cmd, "inference_request.failed", map[string]any{"phase": "pre_dispatch"}); err != nil {
-		r, getErr := s.requests.Get(ctx, id)
-		if getErr != nil {
-			return InferenceRequest{}, err
-		}
-		return r, err
+		return s.requestErrorResult(ctx,id,errors.Join(cause,err),cmd)
 	}
-	r, err := s.requests.Get(ctx, id)
-	if err != nil {
-		return InferenceRequest{}, err
-	}
-	return r, cause
+	return s.requestErrorResult(ctx,id,cause,cmd)
 }
 
 func (s *Service) finishTransportError(ctx context.Context, id string, p *ProviderConnection, dispatchErr error, cmd ExecuteCommand) (InferenceRequest, error) {
@@ -515,20 +540,12 @@ func (s *Service) finishTransportError(ctx context.Context, id string, p *Provid
 	completed := s.clock.UnixMilli()
 	fields := jsonFields{ErrorCode: &code, CompletedAt: &completed}
 	if err := s.transitionRequest(ctx, id, RequestExecuting, status, nil, nil, nil, fields, cmd, "inference_request."+string(status), nil); err != nil {
-		r, getErr := s.requests.Get(ctx, id)
-		if getErr != nil {
-			return InferenceRequest{}, err
-		}
-		return r, err
+		return s.requestErrorResult(ctx,id,errors.Join(dispatchErr,err),cmd)
 	}
 	if status == RequestRateLimited && p != nil && te != nil {
 		_, _ = s.SetProviderStatus(ctx, SetProviderStatusCommand{ConnectionID: p.ID, ExpectedRevision: p.Revision, Status: ProviderRateLimited, RetryAfter: te.RetryAfterMS, ActorPrincipalID: cmd.ActorPrincipalID, RequestID: cmd.RequestID, TraceID: cmd.TraceID, Reason: "inference transport returned 429"})
 	}
-	r, err := s.requests.Get(ctx, id)
-	if err != nil {
-		return InferenceRequest{}, err
-	}
-	return r, dispatchErr
+	return s.requestErrorResult(ctx,id,dispatchErr,cmd)
 }
 
 // DispatchFederatedLocal executes a bounded inference request on behalf of a

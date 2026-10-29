@@ -38,7 +38,8 @@ function a36SettingsOverview(){
  const p=qa5Prefs(),d=p.workspace_defaults||{};
  const locale=qa5AllLanguages()?.[p.language||"en-AU"]?.name||p.language||"Default";
  const approval=String(state.approvalLevel||"medium");
- const theme=String(state.theme||"system");
+ const themeID=String(state.theme||"system");
+ const theme=(typeof qa5ThemePacks==='function'?qa5ThemePacks()[themeID]?.name:null)||titleCase(themeID);
  return '<div class="a36-settings-overview">'+
   '<div class="a36-settings-intro"><h2>Settings overview</h2><p>Manage how OnePane looks, starts and operates. Workspace-specific configuration stays in its owning Workspace.</p></div>'+
   '<div class="a36-settings-preview-grid">'+

@@ -75,6 +75,7 @@ function a35OpenWorkspace(projectID,workspaceID=""){
   if(!project)return;
   a35CancelWorkspaceEdit();
   qa4ProjectHub.activeProjectID=projectID;
+  localStorage.setItem('onepane:last-project',projectID);
   const rows=qa4Workspaces(project);
   const remembered=localStorage.getItem("onepane:last-workspace:"+projectID)||"";
   const wanted=workspaceID||remembered;
@@ -89,10 +90,10 @@ function a35ProjectCard(project){
       <div><h2>${escapeHtml(project.name||"Project")}</h2><div class="page-subtitle">${escapeHtml(project.description||"No project description.")}</div></div>
       <span class="pill ${project.status==="active"?"good":""}">${escapeHtml(project.status||"active")}</span>
     </div>
-    <div class="project-overview-compact-meta"><span>${workspaces.length} workspace${workspaces.length===1?"":"s"}</span><span>${active} active task${active===1?"":"s"}</span><span>Updated ${escapeHtml(a35ProjectUpdated(project))}</span></div>
+    <div class="project-overview-compact-meta"><span>${workspaces.length} workspace${workspaces.length===1?"":"s"}</span><span>${active} open task${active===1?"":"s"}</span><span>Updated ${escapeHtml(a35ProjectUpdated(project))}</span></div>
     <div class="project-overview-workspaces">${workspaces.slice(0,4).map(w=>`<button class="project-workspace-chip" data-a35-open-project="${escapeHtml(project.id)}" data-a35-open-workspace="${escapeHtml(w.id)}">${escapeHtml(w.name||"Workspace")}</button>`).join("")}${workspaces.length>4?`<span class="list-meta">+${workspaces.length-4} more</span>`:""}</div>
     <div class="toolbar project-overview-actions">
-      <button class="btn primary" data-a35-open-project="${escapeHtml(project.id)}">Open</button>
+      <button class="btn primary" data-a35-open-project="${escapeHtml(project.id)}">Open workspace</button>
       <button class="btn" data-a35-project-settings="${escapeHtml(project.id)}">Project settings</button>
       <details class="project-card-actions"><summary aria-label="More project actions">More ▾</summary><button class="btn danger" data-a35-delete-project="${escapeHtml(project.id)}">Delete project</button></details>
     </div>
@@ -111,11 +112,12 @@ renderProjects=async function(){
     host.outerHTML='<div class="empty-state"><strong>No projects yet.</strong><br>Create a project to begin adding workspaces.</div>';
     return;
   }
-  host.outerHTML=`<div class="project-portfolio"><div class="project-portfolio-toolbar"><input id="a35ProjectSearch" placeholder="Search projects…" aria-label="Search projects"><select id="a35ProjectSort" aria-label="Sort projects"><option value="recent">Recently updated</option><option value="name">Name</option><option value="active">Active tasks</option></select></div><div class="project-overview-grid" id="a35ProjectGrid"></div></div>`;
+  host.outerHTML=`<div class="project-portfolio"><div class="project-portfolio-toolbar"><input id="a35ProjectSearch" placeholder="Find a project…" aria-label="Search projects"><select id="a35ProjectSort" aria-label="Sort projects"><option value="recent">Recently updated</option><option value="name">Name</option><option value="active">Open tasks</option></select><span class="project-result-count" id="a35ProjectCount" role="status"></span></div><div class="project-overview-grid" id="a35ProjectGrid"></div></div>`;
   const drawProjects=()=>{
     const q=String($("#a35ProjectSearch")?.value||"").trim().toLowerCase(),sort=$("#a35ProjectSort")?.value||"recent";
     const projects=qa4ProjectHub.projects.filter(p=>!q||String(p.name||"").toLowerCase().includes(q)||String(p.description||"").toLowerCase().includes(q));
     projects.sort((a,b)=>sort==="name"?String(a.name||"").localeCompare(String(b.name||"")):sort==="active"?a35ProjectTaskCount(b.id)-a35ProjectTaskCount(a.id):Number(b.updated_at||0)-Number(a.updated_at||0));
+    $('#a35ProjectCount').textContent=`${projects.length} project${projects.length===1?'':'s'}`;
     $("#a35ProjectGrid").innerHTML=projects.length?projects.map(a35ProjectCard).join(""):'<div class="empty-state compact">No projects match your search.</div>';
     $$("[data-a35-open-project]").forEach(b=>b.onclick=()=>a35OpenWorkspace(b.dataset.a35OpenProject,b.dataset.a35OpenWorkspace||""));
     $$("[data-a35-project-settings]").forEach(b=>b.onclick=()=>{const p=qa4ProjectHub.projects.find(x=>x.id===b.dataset.a35ProjectSettings);if(p)qa4Inspect("project",p.id,p.name,p)});
@@ -247,7 +249,7 @@ function a43WorkspaceContext(workspace){
  const values=[["Mode",titleCase(mode)],["Model",String(role?.model||"auto")],
   ["Routing",workspace.routing?.enabled===false?"Off":"On"],
   ["Execution","Workspace isolation pending"]];
- return `<div class="a43-workspace-context">${values.map(([name,value])=>`<span class="a43-context-chip"><small>${escapeHtml(name)}</small><strong>${escapeHtml(value)}</strong></span>`).join("")}</div>`;
+ return `<details class="workspace-configuration"><summary>${escapeHtml(titleCase(mode))} · ${escapeHtml(String(role?.model||'Automatic model'))} <span class="workspace-configuration-hint">Configuration</span></summary><div class="a43-workspace-context">${values.map(([name,value])=>`<span class="a43-context-chip"><small>${escapeHtml(name)}</small><strong>${escapeHtml(value)}</strong></span>`).join("")}</div><p class="list-meta">Workspace preferences do not grant runtime permissions. Execution isolation still requires validation.</p></details>`;
 }
 async function renderWorkspaces(){
   await qa4LoadProjectHub(false);
@@ -266,6 +268,7 @@ async function renderWorkspaces(){
   $("#viewHost").innerHTML=`<section class="page workspace-page">${pageHeader(workspace.name||"Workspace","Projects / "+escapeHtml(project.name||"Project")+" / "+escapeHtml(workspace.name||"Workspace"),actions)}
     <div class="workspace-tabs">${rows.length<=5?rows.map(w=>`<button class="workspace-tab ${w.id===workspace.id?"active":""}" data-a35-workspace="${escapeHtml(w.id)}">${escapeHtml(w.name||"Workspace")}</button>`).join(""):`<label class="a43-workspace-switch">Workspace <select id="a43WorkspaceSelect">${rows.map(w=>`<option value="${escapeHtml(w.id)}" ${w.id===workspace.id?"selected":""}>${escapeHtml(w.name||"Workspace")}</option>`).join("")}</select></label>`}</div>
     <div class="workspace-context-bar">${a43WorkspaceContext(workspace)}<div class="toolbar compact a32-workspace-actions"><button class="btn" id="qa4WorkspaceSettings">Workspace settings</button><details class="project-card-actions"><summary>Workspace actions ▾</summary><button class="btn danger" id="a32DeleteWorkspace" ${rows.length<=1?"disabled":""}>Delete workspace</button></details></div></div>
+    ${edit?'<div class="workspace-edit-notice" role="status">Editing layout · changes are saved only when you choose Save layout.</div>':''}
     <div class="workspace-grid ${edit?"editing":""}" id="qa4WorkspaceGrid"></div>
   </section>`;
   a35RenderWorkspaceGrid(project,workspace);
@@ -312,7 +315,7 @@ renderNav=function(){
     const activeModelLeaf=nav.querySelector('.model-nav-child.active');
     modelsButton.classList.toggle('active',route==='models'&&!activeModelLeaf);
   }
-  $('.nav-item,.project-nav-project,.project-nav-workspace,.model-nav-child',nav)
+  $$('.nav-item,.project-nav-project,.project-nav-workspace,.model-nav-child',nav)
     .forEach(button=>{
       if(button.classList.contains('active'))button.setAttribute('aria-current','page');
       else button.removeAttribute('aria-current');
@@ -321,7 +324,7 @@ renderNav=function(){
   // item should still expose the correct accessible route state.
   const mobile=$('#mobileNav');
   if(mobile){
-    $('[data-mobile-route]',mobile).forEach(button=>{
+    $$('[data-mobile-route]',mobile).forEach(button=>{
       if(button.classList.contains('active'))button.setAttribute('aria-current','page');
       else button.removeAttribute('aria-current');
     });
@@ -413,7 +416,9 @@ qa6BindProjectComponents=function(project,workspace){
     if(!supported.has(target)){button.remove();return}
     button.dataset.qa6InspectorTarget=target;
     button.title=`Open ${qa6Meta(target).title} in Inspector`;
+    button.setAttribute('aria-label',button.title);
   });
+  $$('[data-qa6-max]',root).forEach(button=>{const widget=(workspace.widgets||[]).find(x=>x.id===button.dataset.qa6Max);button.setAttribute('aria-label',`${button.title} ${widget?.title||widget?.type||'component'}`);});
 };
 
 function a35SyncInspectorContext(){

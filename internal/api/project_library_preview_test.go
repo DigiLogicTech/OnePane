@@ -2,9 +2,28 @@ package api
 
 import (
  "bytes"
+ "io"
  "strings"
  "testing"
 )
+
+type endlessLibraryPreviewReader struct{ read int64 }
+func(r *endlessLibraryPreviewReader) Read(p []byte)(int,error){
+ for i:=range p{p[i]='x'}
+ r.read+=int64(len(p))
+ return len(p),nil
+}
+
+func TestWorkspaceLibraryPreviewReadsOnlySelectedSizePlusSentinel(t *testing.T){
+ for _,size:=range []int64{0,1,64<<10,workspaceLibraryTextPreviewLimit}{
+  reader:=&endlessLibraryPreviewReader{}
+  body,err:=readWorkspaceLibraryPreview(reader,size)
+  if err==nil||len(body)!=0||reader.read!=size+1{
+   t.Fatalf("selected size %d: read=%d returned=%d error=%v",size,reader.read,len(body),err)
+  }
+ }
+ var _ io.Reader=(*endlessLibraryPreviewReader)(nil)
+}
 
 func TestWorkspaceLibraryPreviewMIMEAllowlist(t *testing.T) {
  cases:=[]struct{media string;allow bool}{

@@ -59,7 +59,7 @@ func TestWorkerWaitStaleAttemptRefusedBeforeStateChange(t *testing.T){
  if _,err:=w.db.ExecContext(ctx,`UPDATE task_attempts SET status='failed' WHERE id=?`,r.AttemptID);err!=nil{t.Fatal(err)}
  out:=w.waitRunAtomically(ctx,r,TickResult{TaskID:r.TaskID,RunID:r.ID},
   task.StateWaitingApproval,"human approval",[]byte(`{}`),"human","waiting_human")
- if out.Status!="failed"||!w.dispatchReconciliationFailed{t.Fatalf("stale Attempt received wait: %+v",out)}
+ if out.Status!="failed"||w.dispatchReconciliationFailed{t.Fatalf("stale Attempt received wait or halted another owner: %+v",out)}
  var runState string
  if err:=w.db.QueryRowContext(ctx,`SELECT status FROM agent_worker_runs WHERE id=?`,r.ID).Scan(&runState);err!=nil{t.Fatal(err)}
  if runState!="running"{t.Fatalf("stale Attempt parked Worker anyway: %s",runState)}

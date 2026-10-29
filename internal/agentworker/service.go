@@ -343,8 +343,23 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
  if activeQuota>0{runs,activeErr=s.activeRuns(ctx,activeQuota)}
  tickErrors:=errors.Join(wakeErr,admissionErr,readyErr,activeErr)
  out:=make([]TickResult,0,limit)
- for _,r:=range runs{
-  out=append(out,s.step(ctx,r))
+ consumedRuns:=make([]bool,len(runs))
+ for runIndex:=0;runIndex<len(runs);runIndex++ {
+  if consumedRuns[runIndex]{continue}
+  consumedRuns[runIndex]=true
+  r:=runs[runIndex]
+  partner:=-1
+  if len(out)+2<=limit {
+   ids:=make([]string,0,len(runs)-runIndex-1)
+   positions:=make([]int,0,cap(ids))
+   for i:=runIndex+1;i<len(runs);i++{if !consumedRuns[i]{ids=append(ids,runs[i].TaskID);positions=append(positions,i)}}
+   match,err:=s.parallelTeamPartner(ctx,r.TaskID,ids)
+   if err!=nil{tickErrors=errors.Join(tickErrors,err)}else if match>=0{partner=positions[match]}
+  }
+  if partner>=0 {
+   consumedRuns[partner]=true
+   out=append(out,s.stepTeamPair(ctx,r,runs[partner])...)
+  } else { out=append(out,s.step(ctx,r)) }
   // A terminal/wait/completion persistence failure may have left this
   // Attempt running. Do not dispatch the NEXT selected Task in this
   // same cycle after a step has armed the recovery halt.
@@ -353,17 +368,38 @@ func (s *Service) Tick(ctx context.Context, limit int) ([]TickResult, error) {
   }
   if len(out)>=limit{return out,tickErrors}
  }
- for _,t:=range ready{
+ consumedReady:=make([]bool,len(ready))
+ for readyIndex:=0;readyIndex<len(ready);readyIndex++ {
+  if consumedReady[readyIndex]{continue}
+  t:=ready[readyIndex]
   if len(out)>=limit{break}
   if s.dispatchReconciliationFailed{
    return out,errors.Join(tickErrors,ErrDispatchRequiresReconciliation)
   }
+  consumedReady[readyIndex]=true
   r,res:=s.startRun(ctx,t)
   if res.Error!=""{
    out=append(out,res)
    continue
   }
-  out=append(out,s.step(ctx,r))
+  partner:=-1
+  if len(out)+2<=limit {
+   ids:=make([]string,0,len(ready)-readyIndex-1)
+   positions:=make([]int,0,cap(ids))
+   // ACTIVE work may already have consumed part of this Tick. Restrict
+   // pairing to the remaining READY opportunities, so a later partner
+   // cannot displace an earlier ordinary Task from the bounded prefix.
+   for i:=readyIndex+1;i<len(ready)&&len(ids)<limit-len(out)-1;i++{if !consumedReady[i]{ids=append(ids,ready[i].ID);positions=append(positions,i)}}
+   match,err:=s.parallelTeamPartner(ctx,t.ID,ids)
+   if err!=nil{tickErrors=errors.Join(tickErrors,err)}else if match>=0{partner=positions[match]}
+  }
+  if partner>=0 {
+   consumedReady[partner]=true
+   next,nextResult:=s.startRun(ctx,ready[partner])
+   if nextResult.Error!="" { out=append(out,nextResult); out=append(out,s.step(ctx,r)) } else {
+    out=append(out,s.stepTeamPair(ctx,r,next)...)
+   }
+  } else { out=append(out,s.step(ctx,r)) }
   if s.dispatchReconciliationFailed{
    return out,errors.Join(tickErrors,ErrDispatchRequiresReconciliation)
   }
@@ -622,8 +658,21 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 		if state == string(task.StateRunning) {
 			// External Task resumption is not authority to revive a
 			// different, stale, duplicate or unapproved Worker Attempt.
-			// Reuse the exact dispatch ownership predicate under CAS.
-			updated,err:=s.db.ExecContext(ctx,`UPDATE agent_worker_runs AS r
+			// Recheck durable assistance and reuse the exact dispatch ownership
+			// predicate inside the SAME transaction as the Worker promotion.
+			return s.tx.Within(ctx,func(ctx context.Context,tx storage.Tx)error{
+			var attemptID string
+			err:=tx.QueryRowContext(ctx,`SELECT attempt_id FROM agent_worker_runs
+			 WHERE id=? AND task_id=? AND status='waiting'`,v.run,v.task).Scan(&attemptID)
+			if errors.Is(err,sql.ErrNoRows){return nil}
+			if err!=nil{return err}
+			if err=task.RequireOrdinaryResumeInTransaction(ctx,tx,v.task,attemptID);err!=nil{
+				if errors.Is(err,task.ErrInvalidTransition){
+					return fmt.Errorf("%w: assisted human wait requires explicit Continue; operator reconciliation required",ErrInvalidWorkerState)
+				}
+				return err
+			}
+			updated,err:=tx.ExecContext(ctx,`UPDATE agent_worker_runs AS r
 			 SET status='running',revision=revision+1,updated_at=?
 			 WHERE r.id=? AND r.task_id=? AND r.status='waiting'
 			 AND `+activeWorkerExecutionBindingPredicate,
@@ -633,7 +682,7 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 			if err!=nil{return err}
 			if n!=1{
 				var stranded int
-				err=s.db.QueryRowContext(ctx,`SELECT COUNT(*) FROM agent_worker_runs r
+				err=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM agent_worker_runs r
 				 JOIN tasks t ON t.id=r.task_id WHERE r.id=? AND r.task_id=?
 				 AND r.status='waiting' AND t.state='running'`,
 				 v.run,v.task).Scan(&stranded)
@@ -642,6 +691,8 @@ func (s *Service) syncResumedRuns(ctx context.Context) error {
 					return fmt.Errorf("%w: resumed Task has no valid original Worker Attempt; operator reconciliation required",ErrInvalidWorkerState)
 				}
 			}
+			return nil
+			})
 		}
 		return nil
 		}();runErr!=nil{

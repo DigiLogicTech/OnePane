@@ -23,6 +23,17 @@ const researchSeatDeliveryMaxFileBytes int64=64<<10
 // 32 KiB keeps bounded, provenance-verifiable seat prompts practical for CPU.
 const researchSeatDeliveryMaxTotalBytes int64=32<<10
 
+// Workspace publications retain bare SHA-256 digests while managed artifacts
+// use the prefixed form. Normalize verification only; never rewrite the frozen
+// manifest or its consent identity. Reject every noncanonical digest spelling.
+func canonicalResearchEvidenceHash(value string)(string,error){
+ digest:=strings.TrimPrefix(value,"sha256:")
+ if len(digest)!=64{return "",errors.New("invalid Research evidence SHA-256")}
+ decoded,err:=hex.DecodeString(digest)
+ if err!=nil||hex.EncodeToString(decoded)!=digest{return "",errors.New("invalid Research evidence SHA-256")}
+ return "sha256:"+digest,nil
+}
+
 func researchSeatTextAllowed(mediaType string,size int64)bool{
  if size<0||size>researchSeatDeliveryMaxFileBytes{return false}
  kind,_,err:=mime.ParseMediaType(strings.TrimSpace(mediaType))
@@ -38,16 +49,17 @@ func researchSeatTextAllowed(mediaType string,size int64)bool{
 }
 
 func verifiedResearchEvidenceBytes(reader io.Reader,size int64,digest string)([]byte,error){
- if reader==nil||size<0||size>researchSeatDeliveryMaxFileBytes||
-  !strings.HasPrefix(digest,"sha256:")||len(digest)!=71{
+ if reader==nil||size<0||size>researchSeatDeliveryMaxFileBytes{
   return nil,errors.New("invalid Research evidence byte bounds")
  }
+ expected,err:=canonicalResearchEvidenceHash(digest)
+ if err!=nil{return nil,err}
  data,err:=io.ReadAll(io.LimitReader(reader,size+1))
  if err!=nil||int64(len(data))!=size||!utf8.Valid(data){
   return nil,errors.New("Research evidence read failed exact UTF-8 length check")
  }
  hashed:=sha256.Sum256(data)
- if "sha256:"+hex.EncodeToString(hashed[:])!=digest{
+ if "sha256:"+hex.EncodeToString(hashed[:])!=expected{
   return nil,errors.New("Research evidence SHA-256 mismatch")
  }
  return data,nil
@@ -127,14 +139,16 @@ func(s *Service) loadResearchSeatEvidence(
   }
   artifactID:=strings.TrimPrefix(v.StorageURI,"artifact:")
   if artifactID==""{return empty,errors.New("Research evidence lacks managed blob")}
-  if e=s.artifacts.VerifyContent(ctx,artifactID);e!=nil{
+  expectedHash,e:=canonicalResearchEvidenceHash(entry.ContentHash)
+  if e!=nil{return empty,e}
+  if e=s.artifacts.VerifyExpectedContent(ctx,artifactID,expectedHash,entry.SizeBytes);e!=nil{
    return empty,errors.New("Research evidence managed blob failed integrity verification")
   }
   reader,raw,e:=s.artifacts.Open(ctx,artifactID)
   if e!=nil{return empty,errors.New("Research evidence managed blob unavailable")}
   if raw.Status!=artifact.StatusActive||raw.ProjectID==nil||
    *raw.ProjectID!=projectID||raw.WorkspaceID!=tenant||
-   raw.SizeBytes!=v.SizeBytes||raw.ContentHash!=v.ContentHash{
+   raw.SizeBytes!=v.SizeBytes||raw.ContentHash!=expectedHash{
    _=reader.Close()
    return empty,errors.New("Research evidence blob does not belong to session tenant and Project")
   }

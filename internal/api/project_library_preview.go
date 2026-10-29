@@ -36,7 +36,7 @@ func readWorkspaceLibraryPreview(reader io.Reader,expected int64)([]byte,error) 
  if expected<0||expected>workspaceLibraryTextPreviewLimit {
   return nil,errInvalidWorkspaceLibraryPreview
  }
- body,err:=io.ReadAll(io.LimitReader(reader,workspaceLibraryTextPreviewLimit+1))
+ body,err:=io.ReadAll(io.LimitReader(reader,expected+1))
  if err!=nil||int64(len(body))!=expected||!utf8.Valid(body) {
   return nil,errInvalidWorkspaceLibraryPreview
  }
@@ -47,6 +47,7 @@ func readWorkspaceLibraryPreview(reader io.Reader,expected int64)([]byte,error) 
 // effective read grant as the immutable version download. It never provides
 // an unrestricted Project-level text preview, filesystem path or blob URL.
 func (s *Server) previewWorkspaceLibraryVersion(w http.ResponseWriter,r *http.Request) {
+ identity,ok:=s.authenticate(w,r);if !ok{return}
  p,workspaceID,_,ok:=s.workspaceRuntimeContext(w,r,false);if !ok{return}
  lib,ok:=s.projects.(projectLibraryService)
  if !ok{writeError(w,http.StatusServiceUnavailable,"Workspace Library unavailable");return}
@@ -71,7 +72,8 @@ func (s *Server) previewWorkspaceLibraryVersion(w http.ResponseWriter,r *http.Re
  if artifactID==""{
   writeError(w,http.StatusServiceUnavailable,"Missing managed Library artifact");return
  }
- if err=s.libraryArtifacts.VerifyContent(r.Context(),artifactID);err!=nil{
+ digest,validDigest:=librarySHA256Digest(selected.ContentHash)
+ if !validDigest||s.libraryArtifacts.VerifyExpectedContent(r.Context(),artifactID,"sha256:"+digest,selected.SizeBytes)!=nil{
   writeError(w,http.StatusServiceUnavailable,"Library content failed integrity verification");return
  }
  reader,raw,err:=s.libraryArtifacts.Open(r.Context(),artifactID)
@@ -84,6 +86,7 @@ func (s *Server) previewWorkspaceLibraryVersion(w http.ResponseWriter,r *http.Re
  if err!=nil{
   writeError(w,http.StatusUnprocessableEntity,"Library content is not valid bounded UTF-8 text");return
  }
+ if !s.authorizeCurrentLibraryRead(w,r,identity,lib,p,workspaceID,selected){return}
  w.Header().Set("Content-Type","text/plain; charset=utf-8")
  w.Header().Set("X-Content-Type-Options","nosniff")
  w.Header().Set("Cache-Control","no-store, private")

@@ -64,7 +64,7 @@ func (d *DB) Within(ctx context.Context, fn func(context.Context, storage.Tx) er
 
 	if err := fn(ctx, tx); err != nil {
 		if rbErr := tx.Rollback(); rbErr != nil {
-			return fmt.Errorf("transaction failed: %v; rollback failed: %w", err, rbErr)
+			return fmt.Errorf("transaction failed: %w; rollback failed: %w", err, rbErr)
 		}
 		return err
 	}

@@ -61,4 +61,4 @@ renderDrawer=function(){
  document.querySelector("#a50MetricsRoot").innerHTML=a50MetricsMarkup(a50Latest);
  a50FetchMetrics();
 };
-setInterval(()=>{if(activeDrawerTab==="metrics"&&state.drawer==="open")a50FetchMetrics()},5000);
+setInterval(()=>{if(window.onepaneLive?.ownsPolling)return;if(activeDrawerTab==="metrics"&&state.drawer==="open")a50FetchMetrics()},5000);

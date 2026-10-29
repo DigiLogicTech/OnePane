@@ -24,8 +24,10 @@ function a10Filtered(){
 function a10Text(e){return e._summary||`${e.event_type||"Event"} · ${e.aggregate_type||"event"} · ${e.aggregate_id||""}`}
 function a10ListMarkup(){
  const events=a10Filtered(),mode=activeDrawerTab;
- if(!liveOpsReported("events")&&!(activeDrawerTab==="logs"&&events.length))return '<div class="empty-state compact">Operational Event Ledger unavailable. These entries have not been confirmed.</div>';
- if(!events.length)return '<div class="empty-state compact">No events match the selected filters.</div>';
+ const filtersActive=a10Search.trim()!==""||a10Level!=="all"||a10Source!=="all";
+ if(!liveOpsReported("events")&&!(activeDrawerTab==="logs"&&a10AllEntries().length))return '<div class="empty-state compact onepane-empty" data-empty="error"><strong>Could not load</strong><p>Operational events have not been confirmed.</p><button type="button" class="btn" id="a10Retry">Retry</button></div>';
+ if(!a10AllEntries().length)return '<div class="empty-state compact onepane-empty" data-empty="empty"><strong>Nothing here yet</strong><p>No events have been recorded.</p></div>';
+ if(!events.length)return '<div class="empty-state compact onepane-empty" data-empty="filtered"><strong>Filters are hiding results</strong><p>Clear the filters to see every loaded event.</p><button type="button" class="btn" id="a10Clear">Clear</button></div>';
  return `<table class="log-table"><tbody>${events.map(e=>{
   const ts=Number(e.occurred_at||0),time=ts?new Date(ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"}):"";
   const level=a10LevelOf(e),id=String(e.sequence||e.id||"");
@@ -55,6 +57,8 @@ function a10Bind(){
  $("#a10Follow")?.addEventListener("click",()=>{a10Following=!a10Following;renderDrawer()});
  $("#a10Copy")?.addEventListener("click",a10Copy);
  $("#a10Export")?.addEventListener("click",a10Export);
+ $("#a10Clear")?.addEventListener("click",()=>{a10Search="";a10Level="all";a10Source="all";renderDrawer()});
+ $("#a10Retry")?.addEventListener("click",()=>{if(window.onepaneLive)window.onepaneLive.refresh(true);else refreshOperationalDataQA?.(true);});
  a10BindRows()
 }
 function a10BindRows(){

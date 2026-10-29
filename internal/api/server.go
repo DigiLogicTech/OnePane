@@ -345,6 +345,8 @@ func (s *Server) Handler() http.Handler { return s.securityHeaders(s.qaCaptureMi
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/system/metrics", s.hostMetricsRequest)
+	s.mux.HandleFunc("GET /v1/system/memory-budget", s.memoryBudget)
+	s.mux.HandleFunc("POST /v1/local-ai/deployments/unload-idle", s.unloadIdleModels)
 	// Node-admin only, point-in-time SQLite/WAL storage diagnostic.
 	s.mux.HandleFunc("GET /v1/qa/sqlite-footprint", s.qaSQLiteFootprintHandler)
 	s.mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
@@ -390,6 +392,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/qa/api-capture", s.qaAPICaptureStatus)
 	s.mux.HandleFunc("POST /v1/qa/api-capture/stop", s.qaAPICaptureStop)
 	s.mux.HandleFunc("GET /v1/tasks", s.listTasks)
+	s.mux.HandleFunc("GET /v1/tasks/status-summary", s.taskStatusSummary)
 	s.mux.HandleFunc("GET /v1/tasks/{taskID}", s.getTask)
 	s.mux.HandleFunc("GET /v1/tasks/{taskID}/recovery-cases", s.readTaskRecoveryCases)
 	s.mux.HandleFunc("GET /v1/tasks/{taskID}/recovery-cases/{caseID}", s.readTaskRecoveryCases)

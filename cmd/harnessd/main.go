@@ -52,9 +52,7 @@ func main() {
 	flag.Parse()
 	verificationRequested := false
 	flag.Visit(func(f *flag.Flag) {
-		if f.Name == "verify-systemd-upgrade-pid" || f.Name == "upgrade-config-sha256" {
-			verificationRequested = true
-		}
+		if f.Name == "verify-systemd-upgrade-pid" || f.Name == "upgrade-config-sha256" { verificationRequested = true }
 	})
 	if verificationRequested {
 		if verifySystemdUpgradePID < 1 || upgradeConfigSHA256 == "" || configPath == "" || offlineRoot != "" || initializeSystemdStorage || previewSystemdStorage || configureSystemdStorage || printSystemdUpgradeSettings || initialDataDir != "" || initialModelPool != "" || flag.NArg() != 0 {
@@ -86,9 +84,7 @@ func main() {
 	if previewSystemdStorage || configureSystemdStorage || printSystemdUpgradeSettings {
 		modes := 0
 		for _, selected := range []bool{previewSystemdStorage, configureSystemdStorage, printSystemdUpgradeSettings} {
-			if selected {
-				modes++
-			}
+			if selected { modes++ }
 		}
 		if configPath == "" || offlineRoot != "" || modes != 1 || flag.NArg() != 0 {
 			fmt.Fprintln(os.Stderr, "Select one systemd storage mode and an explicit -config path")
@@ -180,8 +176,8 @@ func main() {
 	// A previous service crash may have stranded private OCI credential files
 	// without another sandbox command to trigger the per-runtime cleanup.
 	// Never clean global/SYSTEM temp or user Project/Workspace data.
-	if err := sandboxrunner.CleanupStaleRuntimeCredentialFiles(cfg.Storage.DataDir); err != nil {
-		log.Printf("private sandbox credential cleanup needs attention: %v", err)
+	if err:=sandboxrunner.CleanupStaleRuntimeCredentialFiles(cfg.Storage.DataDir);err!=nil{
+		log.Printf("private sandbox credential cleanup needs attention: %v",err)
 	}
 
 	state, err := runtime.System.Get(ctx)
@@ -377,24 +373,22 @@ func main() {
 	// one bounded SQLite cadence pass each minute, with no external probes,
 	// model residency, device changes or automatic remediation. A human must
 	// approve exact source permits before this loop has any eligible work.
-	go func() {
-		run := func() {
-			results, err := runtime.ProjectWorkspaces.TickDueGoalEvidenceReviews(ctx, 8)
-			if err != nil && ctx.Err() == nil {
-				log.Printf("goal receipt-review tick: %v", err)
-			} else if len(results) > 0 {
-				log.Printf("goal receipt-review tick: recorded %d metadata assessments (not monitored health)", len(results))
+	go func(){
+		run:=func(){
+			results,err:=runtime.ProjectWorkspaces.TickDueGoalEvidenceReviews(ctx,8)
+			if err!=nil&&ctx.Err()==nil{
+				log.Printf("goal receipt-review tick: %v",err)
+			}else if len(results)>0{
+				log.Printf("goal receipt-review tick: recorded %d metadata assessments (not monitored health)",len(results))
 			}
 		}
 		run()
-		ticker := time.NewTicker(time.Minute)
+		ticker:=time.NewTicker(time.Minute)
 		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				run()
+		for{
+			select{
+			case <-ctx.Done():return
+			case <-ticker.C:run()
 			}
 		}
 	}()
@@ -405,24 +399,22 @@ func main() {
 	// Never infer network authority from source names or receipt review.
 	// At most ONE 100–1500ms handshake per minute tick; SQLite deduplicates
 	// each source/cadence window across restarts and competing workers.
-	go func() {
-		run := func() {
-			results, err := runtime.ProjectWorkspaces.TickDueTCPRecurringProbes(ctx, 1)
-			if err != nil && ctx.Err() == nil {
-				log.Printf("consented tcp observation tick: %v", err)
-			} else if len(results) > 0 {
-				log.Printf("consented tcp observation tick: %d source handshake attempt(s); security health UNVERIFIED", len(results))
+	go func(){
+		run:=func(){
+			results,err:=runtime.ProjectWorkspaces.TickDueTCPRecurringProbes(ctx,1)
+			if err!=nil&&ctx.Err()==nil{
+				log.Printf("consented tcp observation tick: %v",err)
+			}else if len(results)>0{
+				log.Printf("consented tcp observation tick: %d source handshake attempt(s); security health UNVERIFIED",len(results))
 			}
 		}
 		run()
-		ticker := time.NewTicker(time.Minute)
+		ticker:=time.NewTicker(time.Minute)
 		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				run()
+		for{
+			select{
+			case <-ctx.Done():return
+			case <-ticker.C:run()
 			}
 		}
 	}()

@@ -11,6 +11,10 @@ import (
 
 var errRuntimeAccountUnavailable = errors.New("model runtime account is unavailable")
 
+// prepareCommand asks the Windows runtime account to drop LocalSystem from a
+// model child. The account package no-ops unless
+// ONEPANE_RESTRICT_MODEL_RUNTIME=1, so the installed service keeps its
+// current child tokens until that switch is set.
 func prepareCommand(cmd *exec.Cmd, dataDir, modelRoot, logPath, work, exe string) (func(), error) {
 	logDir := ""
 	if strings.TrimSpace(logPath) != "" {

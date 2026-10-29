@@ -27,6 +27,12 @@ type sidAndAttributes struct {
 }
 
 func Prepare(cmd *exec.Cmd, roots Roots) (func(), error) {
+	// Live restriction is opt-in. The token and ACL code is unproven on a
+	// LocalSystem service and can block model or GPU startup. Leave it off
+	// until a disposable install sets ONEPANE_RESTRICT_MODEL_RUNTIME=1.
+	if os.Getenv("ONEPANE_RESTRICT_MODEL_RUNTIME") != "1" {
+		return func() {}, nil
+	}
 	token, err := Apply(cmd, roots, windowsHost{})
 	if err != nil {
 		return nil, err

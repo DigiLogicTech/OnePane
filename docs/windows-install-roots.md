@@ -32,42 +32,45 @@ there.
 
 ## Model runtime account
 
-The OnePane service remains LocalSystem. That keeps the existing key ACLs and
-the installed service identity. llama-server, Colibri, OmniRoute, and the
-managed llmfit helper do not inherit a full SYSTEM token.
+The service stays LocalSystem so the existing key ACLs and the QA7 service
+identity are unchanged. The restricted-child implementation is in
+`internal/runtimeaccount` and is called from llama-server, Colibri plan,
+OmniRoute, and managed llmfit launch. It is **off by default**.
 
-On a LocalSystem parent, each of those children is started with a restricted
-token:
+Set `ONEPANE_RESTRICT_MODEL_RUNTIME=1` on the service to turn it on. While that
+variable is unset, children keep the current LocalSystem token. That is
+deliberate: the token and ACL path has not been proven on a disposable
+install, and a failed restriction would stop model launch. There is no silent
+fallback to SYSTEM once the switch is on. A non-system parent does nothing
+even when the switch is on.
 
-- all privileges are removed except `SeChangeNotifyPrivilege`
-- restricting SIDs are `NT SERVICE\OnePane` and `BUILTIN\Users`
-- an allow ACE for `NT SERVICE\OnePane` is added on the model root, runtime
-  home, log directory, and runtime binaries
+When enabled on a LocalSystem parent, each child gets a restricted token:
+
+- privileges removed except `SeChangeNotifyPrivilege`
+- restricting SIDs `NT SERVICE\OnePane` and `BUILTIN\Users`
+- an allow ACE for `NT SERVICE\OnePane` on the model root, runtime home, logs,
+  and runtime binaries
 
 The ACE is added beside existing ACEs. It is not applied to `data\keys` or
-`data\vault`, and those protected DACLs are not rewritten. No root is moved
-and no key is rotated. If the account cannot be resolved or the ACL cannot be
-written, the child is not started. There is no SYSTEM fallback.
-
-A normal interactive or test user is not LocalSystem, so this step does
-nothing there.
+`data\vault`. No root is moved and no key is rotated.
 
 ### Migration for the current install
 
-1. Install the newer MSI over the existing product. The data, model, and
-   project roots stay on `D:\OnePaneData`.
+1. Install the newer MSI over the existing product. Do not set
+   `ONEPANE_RESTRICT_MODEL_RUNTIME`. Data, model, and project roots stay on
+   `D:\OnePaneData`, and model processes keep starting as they do today.
 2. Leave `C:\ProgramData\OnePane` alone if it still contains the empty
    identity file. Setup reports it and does not select it.
-3. The first model, Colibri, OmniRoute, or llmfit launch after upgrade adds
-   the runtime ACE and starts the child restricted. Expect that launch to take
-   longer while the model directory is walked. Reparse points are not followed.
-4. Confirm in Process Explorer, or an equivalent token view, that the child is
-   a restricted token and does not have SYSTEM privileges such as
-   `SeDebugPrivilege`, `SeBackupPrivilege`, or `SeTcbPrivilege`.
-5. Run one CPU llama-server completion and, separately, one GPU completion on
-   the GTX 1060. GPU device objects that grant only SYSTEM, Administrators, or
-   Interactive users will fail the restricted token. The remediation is an
-   allow ACE for `NT SERVICE\OnePane` on that device, not a return to SYSTEM.
+3. After a disposable copy of the install passes the checks below, set
+   `ONEPANE_RESTRICT_MODEL_RUNTIME=1` in the service environment and restart.
+   The first opted-in launch adds the runtime ACE. Reparse points are not
+   followed. If the account or ACL step fails, that child is not started.
+4. Confirm the child token is restricted and lacks `SeDebugPrivilege`,
+   `SeBackupPrivilege`, and `SeTcbPrivilege`.
+5. Run one CPU completion and one GTX 1060 GPU completion. If CUDA cannot open
+   the device, add an allow ACE for `NT SERVICE\OnePane` on that device. Do
+   not turn the switch off as a silent fallback inside the product; unset the
+   variable only as an operator rollback of this deferred step.
 
 ## Signing
 

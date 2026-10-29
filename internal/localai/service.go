@@ -974,10 +974,15 @@ func (s *Service) AcquireLocalEndpoint(ctx context.Context, deploymentID string)
 	if s == nil || s.supervisor == nil {
 		return "", nil, errors.New("local runtime supervisor unavailable")
 	}
-	inst, err := s.supervisor.Acquire(ctx, deploymentID)
+	inst, err := waitForLocalRuntime(ctx, func(ctx context.Context) (RuntimeInstance, error) {
+		return s.supervisor.Acquire(ctx, deploymentID)
+	}, s.supervisor.CapacityReleased, func(ctx context.Context, err error) {
+		s.noteCapacityWait(ctx, deploymentID, err.Error())
+	})
 	if err != nil {
 		return "", nil, err
 	}
+	s.clearCapacityWait(ctx, deploymentID)
 	release := func() { _ = s.supervisor.Release(context.Background(), deploymentID) }
 	if inst.Status != RuntimeHealthy && inst.Status != RuntimeBusy {
 		release()
@@ -996,6 +1001,64 @@ func (s *Service) AcquireLocalEndpoint(ctx context.Context, deploymentID string)
 		return "", nil, fmt.Errorf("managed runtime health check failed: %w", err)
 	}
 	return fmt.Sprintf("http://127.0.0.1:%d", inst.Port), release, nil
+}
+
+// waitForLocalRuntime keeps a local task on this model until it fits.
+// A shortage is not turned into another provider. The caller context is the
+// only cancellation. A released model wakes the wait immediately.
+func waitForLocalRuntime(ctx context.Context, acquire func(context.Context) (RuntimeInstance, error), released func() <-chan struct{}, note func(context.Context, error)) (RuntimeInstance, error) {
+	if acquire == nil {
+		return RuntimeInstance{}, errors.New("local runtime supervisor unavailable")
+	}
+	for {
+		inst, err := acquire(ctx)
+		var shortage *CapacityShortage
+		if !errors.As(err, &shortage) {
+			return inst, err
+		}
+		if note != nil {
+			note(ctx, shortage)
+		}
+		timer := time.NewTimer(2 * time.Second)
+		var wake <-chan struct{}
+		if released != nil {
+			wake = released()
+		}
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return RuntimeInstance{}, err
+		case <-wake:
+			timer.Stop()
+		case <-timer.C:
+		}
+	}
+}
+
+func (s *Service) noteCapacityWait(ctx context.Context, deploymentID, reason string) {
+	if s == nil || s.db == nil || strings.TrimSpace(deploymentID) == "" {
+		return
+	}
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		_, err = s.db.ExecContext(ctx, `UPDATE runtime_execution_queue
+			SET state='waiting_swap', failure_reason=?, revision=revision+1
+			WHERE deployment_id=? AND state IN ('queued','running','waiting_runtime','loading','ready')`, reason, deploymentID)
+		if err == nil {
+			return
+		}
+		time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
+	}
+	_ = err
+}
+
+func (s *Service) clearCapacityWait(ctx context.Context, deploymentID string) {
+	if s == nil || s.db == nil || strings.TrimSpace(deploymentID) == "" {
+		return
+	}
+	_, _ = s.db.ExecContext(ctx, `UPDATE runtime_execution_queue
+		SET state='running', failure_reason=NULL, revision=revision+1
+		WHERE deployment_id=? AND state='waiting_swap'`, deploymentID)
 }
 
 // ResolveLocalEndpoint is retained for non-leased callers. Inference transports

@@ -147,7 +147,7 @@ func TestRuntimeReuseMustVerifyPIDIdentityBeforeReturningOrHealth(t *testing.T){
  scope:=source[begin:]
  if end:=strings.Index(scope,"\nfunc ");end>0{scope=scope[:end]}
  check:=strings.Index(scope,"s.VerifyIdentity(ctx,old)")
- wait:=strings.Index(scope,"s.waitHealthy(ctx, old.ID, 120*time.Second)")
+ wait:=strings.Index(scope,"s.waitHealthy(ctx, old.ID, s.modelLoadTimeout(ctx, deploymentID))")
  if check<0||wait<=check{
   t.Fatal("reused starting local PID can be probed before identity validation")
  }

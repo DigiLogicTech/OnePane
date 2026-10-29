@@ -57,7 +57,7 @@ function a36SettingsOverview(){
 }
 function a36SettingsAugment(view,section){
  // Existing IDs, endpoints and labels remain in the underlying form.
- if(view==="general")return section.replace(/<\/section>\s*$/,'<div class="a36-settings-save"><button type="button" class="btn primary" id="a36SaveGeneral">Save startup preferences</button></div></section>');
+ if(view==="general")return section.replace(/<\/section>\s*$/,'<h3>Storage roots</h3><p class="page-subtitle">Read-only. These are the locations this OnePane is using. An upgrade does not move them.</p><dl id="a31StorageRoots"><div>Loading storage roots…</div></dl><div class="a36-settings-save"><button type="button" class="btn primary" id="a36SaveGeneral">Save startup preferences</button></div></section>');
  if(view==="updates")return section.replace(/<\/section>\s*$/,'<div class="a36-settings-save"><button type="button" class="btn primary" id="a36SaveUpdates">Save release channel</button></div></section>');
  return section;
 }

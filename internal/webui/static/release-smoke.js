@@ -84,6 +84,7 @@
     if(path==="/v1/local-ai/deployments")return json({deployments:discoverInstalledFixture?[{deployment_id:"dep-gemma-qa",model_ref:"google/gemma-3-1b-it",display_name:"Gemma 3 1B IT",status:"ready",runtime_name:"llamacpp"}]:[]});
     if(path==="/v1/local-ai/components")return json({});
     if(path==="/v1/settings/local-ai")return json({model_pool_path:""});
+    if(path==="/v1/settings/storage-roots")return json({data_dir:"D:\\OnePaneData\\data",data_root:"D:\\OnePaneData",model_root:"D:\\OnePaneData\\models",project_root:"D:\\OnePaneData\\Projects",read_only:true});
     return json({});
   };
 

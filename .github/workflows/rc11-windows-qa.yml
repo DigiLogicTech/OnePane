@@ -80,6 +80,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Pinned WiX install failed' }
           & (Join-Path $tool 'wix.exe') extension add -g WixToolset.UI.wixext/5.0.2
           if ($LASTEXITCODE -ne 0) { throw 'Pinned WiX UI extension failed' }
+          & (Join-Path $tool 'wix.exe') extension add -g WixToolset.Util.wixext/5.0.2
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned WiX Util extension failed' }
       - name: Build reviewed current source (no historical recovery archives)
         shell: pwsh
         env:

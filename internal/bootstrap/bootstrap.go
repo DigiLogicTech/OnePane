@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/DigiLogicTech/OnePane/internal/assistant"
 	"github.com/DigiLogicTech/OnePane/internal/agentprofile"
 	"github.com/DigiLogicTech/OnePane/internal/agentruntime"
 	"github.com/DigiLogicTech/OnePane/internal/agentworker"
 	"github.com/DigiLogicTech/OnePane/internal/approval"
 	"github.com/DigiLogicTech/OnePane/internal/artifact"
+	"github.com/DigiLogicTech/OnePane/internal/assistant"
 	"github.com/DigiLogicTech/OnePane/internal/assurance"
 	"github.com/DigiLogicTech/OnePane/internal/authority"
 	"github.com/DigiLogicTech/OnePane/internal/botruntime"
@@ -29,6 +29,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/gateway"
 	"github.com/DigiLogicTech/OnePane/internal/goalobserveradapter"
 	"github.com/DigiLogicTech/OnePane/internal/inference"
+	"github.com/DigiLogicTech/OnePane/internal/installroots"
 	"github.com/DigiLogicTech/OnePane/internal/localai"
 	"github.com/DigiLogicTech/OnePane/internal/node"
 	"github.com/DigiLogicTech/OnePane/internal/nodefederation"
@@ -39,14 +40,13 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/projectroutine"
 	"github.com/DigiLogicTech/OnePane/internal/projectruntime"
 	"github.com/DigiLogicTech/OnePane/internal/projectworkspace"
-	"github.com/DigiLogicTech/OnePane/internal/provideronboarding"
 	"github.com/DigiLogicTech/OnePane/internal/provideroauth"
+	"github.com/DigiLogicTech/OnePane/internal/provideronboarding"
 	"github.com/DigiLogicTech/OnePane/internal/resourcecoord"
 	"github.com/DigiLogicTech/OnePane/internal/routine"
 	"github.com/DigiLogicTech/OnePane/internal/routineworker"
 	"github.com/DigiLogicTech/OnePane/internal/runtimecoord"
 	"github.com/DigiLogicTech/OnePane/internal/sandboxrunner"
-	"github.com/DigiLogicTech/OnePane/internal/workspacepublisher"
 	"github.com/DigiLogicTech/OnePane/internal/scheduler"
 	"github.com/DigiLogicTech/OnePane/internal/skillcatalog"
 	"github.com/DigiLogicTech/OnePane/internal/storage/sqlite"
@@ -60,6 +60,7 @@ import (
 	"github.com/DigiLogicTech/OnePane/internal/verticalslice"
 	"github.com/DigiLogicTech/OnePane/internal/watchdog"
 	"github.com/DigiLogicTech/OnePane/internal/webauth"
+	"github.com/DigiLogicTech/OnePane/internal/workspacepublisher"
 )
 
 type Runtime struct {
@@ -107,6 +108,9 @@ type Runtime struct {
 }
 
 func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
+	if finding := installroots.InspectIdentityDir(cfg.Storage.DataDir); finding.Partial {
+		return nil, errors.New(finding.Error())
+	}
 	if err := ensureDataDir(cfg.Storage.DataDir); err != nil {
 		return nil, err
 	}
@@ -366,17 +370,17 @@ func Open(ctx context.Context, cfg config.Config) (*Runtime, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("configure Project storage root: %w", err)
 	}
-	if err:=projectWorkspaceService.EnsureGoalEvidenceReviewWorkerPrincipal(ctx);err!=nil{
+	if err := projectWorkspaceService.EnsureGoalEvidenceReviewWorkerPrincipal(ctx); err != nil {
 		_ = db.Close()
-		return nil,fmt.Errorf("bootstrap metadata-only goal reviewer: %w",err)
+		return nil, fmt.Errorf("bootstrap metadata-only goal reviewer: %w", err)
 	}
 	// A distinct system identity performs only separately human-approved,
 	// exact-target recurring TCP handshakes; no grant is created here.
-	if err:=projectWorkspaceService.EnsureTCPRecurringWorkerPrincipal(ctx);err!=nil{
+	if err := projectWorkspaceService.EnsureTCPRecurringWorkerPrincipal(ctx); err != nil {
 		_ = db.Close()
-		return nil,fmt.Errorf("bootstrap consented TCP observation identity: %w",err)
+		return nil, fmt.Errorf("bootstrap consented TCP observation identity: %w", err)
 	}
-	sandboxAdapter.SetPublisher(workspacepublisher.New(db.SQL(),artifactService,projectWorkspaceService,localNode.ID))
+	sandboxAdapter.SetPublisher(workspacepublisher.New(db.SQL(), artifactService, projectWorkspaceService, localNode.ID))
 	agentProfileService := agentprofile.NewService(db.SQL(), db, clk)
 	skillCatalogService := skillcatalog.NewService(db.SQL(), db, clk, cfg.Storage.DataDir)
 	projectOrchestratorService := projectorchestrator.NewService(db.SQL(), db, clk, schedulerService, inferenceService, artifactService, taskService, teamService)

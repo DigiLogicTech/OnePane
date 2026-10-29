@@ -2,6 +2,19 @@ package config
 
 import "testing"
 
+func TestDefaultFederationIsOffAndLoopback(t *testing.T) {
+	cfg := Default()
+	if cfg.Federation.Enabled || cfg.Federation.DiscoveryEnabled {
+		t.Fatalf("federation defaults are on: %+v", cfg.Federation)
+	}
+	if cfg.Federation.Listen != "127.0.0.1:18443" {
+		t.Fatalf("federation listen = %s", cfg.Federation.Listen)
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidateExposure(t *testing.T) {
 	c := Default()
 	if err := Validate(c); err != nil {

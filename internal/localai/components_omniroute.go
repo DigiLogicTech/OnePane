@@ -319,6 +319,12 @@ func (s *Service) launchOmniRoute(ctx context.Context, o omniRouteObservation, s
 	cmd.Env = append([]string{}, spec.Env...)
 	cmd.Stdout, cmd.Stderr = writer, writer
 	cmd.WaitDelay = 5 * time.Second
+	closeRuntime, err := s.prepareManagedCommand(cmd, spec.LogPath, spec.Dir, spec.Executable)
+	if err != nil {
+		_ = logf.Close()
+		return err
+	}
+	defer closeRuntime()
 	if err = cmd.Start(); err != nil {
 		_ = logf.Close()
 		return errOmniRouteUnavailable

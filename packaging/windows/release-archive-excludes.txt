@@ -1,0 +1,10 @@
+# Paths omitted from the Windows release archive produced by
+# scripts/export-windows-release-archive.sh. The files stay in this branch.
+# Go files here are also //go:build linux, so a Windows compile cannot link them.
+packaging/debian
+scripts/upgrade-ubuntu.sh
+internal/serviceinstall/readiness_linux.go
+internal/serviceinstall/readiness_linux_test.go
+internal/serviceinstall/package_recovery_linux_test.go
+internal/serviceinstall/storage_linux.go
+internal/serviceinstall/storage_linux_test.go

@@ -1,247 +1,341 @@
 package localai
 
 import (
-    "context"
-    "database/sql"
-    "encoding/json"
-    "errors"
-    "fmt"
-    "os"
-    "os/exec"
-    "path/filepath"
-    "runtime"
-    "strconv"
-    "strings"
-    "sync"
-    "time"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
 )
 
 // ColibriTierSettings configures Colibri's own disk/RAM/VRAM expert cache.
 // These settings do not change llama.cpp placements or OnePane's host scheduler.
 type ColibriTierSettings struct {
-    Mode string `json:"mode"`
-    Backend string `json:"backend"`
-    RAMGB int `json:"ram_gb"`
-    ExpertCap int `json:"expert_cap"`
-    VulkanExperts int `json:"vulkan_experts"`
-    GPUIndex int `json:"gpu_index"`
-    RepinTokens int `json:"repin_tokens"`
+	Mode          string `json:"mode"`
+	Backend       string `json:"backend"`
+	RAMGB         int    `json:"ram_gb"`
+	ExpertCap     int    `json:"expert_cap"`
+	VulkanExperts int    `json:"vulkan_experts"`
+	GPUIndex      int    `json:"gpu_index"`
+	RepinTokens   int    `json:"repin_tokens"`
 }
 
 type ColibriTierState struct {
-    DeploymentID string `json:"deployment_id"`
-    Settings ColibriTierSettings `json:"settings"`
-    PlanAvailable bool `json:"plan_available"`
-    PlanNote string `json:"plan_note,omitempty"`
+	DeploymentID  string              `json:"deployment_id"`
+	Settings      ColibriTierSettings `json:"settings"`
+	PlanAvailable bool                `json:"plan_available"`
+	PlanNote      string              `json:"plan_note,omitempty"`
 }
 
 type ColibriTierCommand struct {
-    DeploymentID string
-    Settings ColibriTierSettings
+	DeploymentID string
+	Settings     ColibriTierSettings
 }
 
 func defaultColibriTier() ColibriTierSettings {
-    return ColibriTierSettings{Mode:"automatic", Backend:"auto", VulkanExperts:96}
+	return ColibriTierSettings{Mode: "automatic", Backend: "auto", VulkanExperts: 96}
 }
 
-func validateColibriTier(c ColibriTierSettings) (ColibriTierSettings,error) {
-    c.Mode = strings.ToLower(strings.TrimSpace(c.Mode))
-    c.Backend = strings.ToLower(strings.TrimSpace(c.Backend))
-    if c.Mode == "" { c.Mode="automatic" }
-    if c.Backend == "" { c.Backend="auto" }
-    switch c.Mode {
-    case "automatic","balanced","manual":
-    default: return c,errors.New("Colibri tier mode must be automatic, balanced, or manual")
-    }
-    switch c.Backend {
-    case "auto","cpu","vulkan","cuda":
-    default: return c,errors.New("Colibri backend must be auto, cpu, vulkan, or cuda")
-    }
-    if c.RAMGB<0||c.RAMGB>512 { return c,errors.New("Colibri RAM budget must be 0–512 GB (0 is automatic)") }
-    if c.ExpertCap<0||c.ExpertCap>4096 { return c,errors.New("Colibri expert cap must be 0–4096 (0 is automatic)") }
-    if c.VulkanExperts<0||c.VulkanExperts>2048 { return c,errors.New("Colibri Vulkan experts must be 0–2048") }
-    if c.GPUIndex<0||c.GPUIndex>15 { return c,errors.New("Colibri GPU index must be 0–15") }
-    if c.RepinTokens<0||c.RepinTokens>65536 { return c,errors.New("Colibri repin interval must be 0–65536") }
-    // A conservative Vulkan default leaves space for dense weights and buffers
-    // on small GPUs such as a GTX 1060. Colibri's upstream default is larger.
-    if c.VulkanExperts==0 && c.Mode!="manual" && c.Backend=="vulkan" { c.VulkanExperts=96 }
-    return c,nil
+func validateColibriTier(c ColibriTierSettings) (ColibriTierSettings, error) {
+	c.Mode = strings.ToLower(strings.TrimSpace(c.Mode))
+	c.Backend = strings.ToLower(strings.TrimSpace(c.Backend))
+	if c.Mode == "" {
+		c.Mode = "automatic"
+	}
+	if c.Backend == "" {
+		c.Backend = "auto"
+	}
+	switch c.Mode {
+	case "automatic", "balanced", "manual":
+	default:
+		return c, errors.New("Colibri tier mode must be automatic, balanced, or manual")
+	}
+	switch c.Backend {
+	case "auto", "cpu", "vulkan", "cuda":
+	default:
+		return c, errors.New("Colibri backend must be auto, cpu, vulkan, or cuda")
+	}
+	if c.RAMGB < 0 || c.RAMGB > 512 {
+		return c, errors.New("Colibri RAM budget must be 0–512 GB (0 is automatic)")
+	}
+	if c.ExpertCap < 0 || c.ExpertCap > 4096 {
+		return c, errors.New("Colibri expert cap must be 0–4096 (0 is automatic)")
+	}
+	if c.VulkanExperts < 0 || c.VulkanExperts > 2048 {
+		return c, errors.New("Colibri Vulkan experts must be 0–2048")
+	}
+	if c.GPUIndex < 0 || c.GPUIndex > 15 {
+		return c, errors.New("Colibri GPU index must be 0–15")
+	}
+	if c.RepinTokens < 0 || c.RepinTokens > 65536 {
+		return c, errors.New("Colibri repin interval must be 0–65536")
+	}
+	// A conservative Vulkan default leaves space for dense weights and buffers
+	// on small GPUs such as a GTX 1060. Colibri's upstream default is larger.
+	if c.VulkanExperts == 0 && c.Mode != "manual" && c.Backend == "vulkan" {
+		c.VulkanExperts = 96
+	}
+	return c, nil
 }
 
 func colibriTierEnv(c ColibriTierSettings) []string {
-    out:=[]string{}
-    if c.Mode=="balanced" { out=append(out,"COLI_POLICY=balanced","REPIN=64") }
-    if c.Mode=="manual" {
-        if c.RAMGB>0 { out=append(out,"RAM_GB="+strconv.Itoa(c.RAMGB)) }
-        if c.RepinTokens>0 { out=append(out,"REPIN="+strconv.Itoa(c.RepinTokens)) }
-    }
-    switch c.Backend {
-    case "cpu":
-        out=append(out,"COLI_CUDA=0","COLI_VULKAN=0","COLI_GPU=none")
-    case "cuda":
-        out=append(out,"COLI_CUDA=1","COLI_VULKAN=0","COLI_GPU="+strconv.Itoa(c.GPUIndex))
-    case "vulkan":
-        experts:=c.VulkanExperts
-        if experts==0&&c.Mode!="manual" { experts=96 }
-        out=append(out,"COLI_CUDA=0","COLI_VULKAN=1",
-            "COLI_VK_DEV="+strconv.Itoa(c.GPUIndex),
-            "COLI_VK_EXPERTS="+strconv.Itoa(experts))
-    }
-    return out
+	out := []string{}
+	if c.Mode == "balanced" {
+		out = append(out, "COLI_POLICY=balanced", "REPIN=64")
+	}
+	if c.Mode == "manual" {
+		if c.RAMGB > 0 {
+			out = append(out, "RAM_GB="+strconv.Itoa(c.RAMGB))
+		}
+		if c.RepinTokens > 0 {
+			out = append(out, "REPIN="+strconv.Itoa(c.RepinTokens))
+		}
+	}
+	switch c.Backend {
+	case "cpu":
+		out = append(out, "COLI_CUDA=0", "COLI_VULKAN=0", "COLI_GPU=none")
+	case "cuda":
+		out = append(out, "COLI_CUDA=1", "COLI_VULKAN=0", "COLI_GPU="+strconv.Itoa(c.GPUIndex))
+	case "vulkan":
+		experts := c.VulkanExperts
+		if experts == 0 && c.Mode != "manual" {
+			experts = 96
+		}
+		out = append(out, "COLI_CUDA=0", "COLI_VULKAN=1",
+			"COLI_VK_DEV="+strconv.Itoa(c.GPUIndex),
+			"COLI_VK_EXPERTS="+strconv.Itoa(experts))
+	}
+	return out
 }
 
 func colibriTierCapArgs(c ColibriTierSettings) []string {
-    if c.Mode=="manual"&&c.ExpertCap>0 { return []string{"--cap",strconv.Itoa(c.ExpertCap)} }
-    return nil
+	if c.Mode == "manual" && c.ExpertCap > 0 {
+		return []string{"--cap", strconv.Itoa(c.ExpertCap)}
+	}
+	return nil
 }
 
 // colibriTierSnapshot only accepts managed Colibri deployments. No arbitrary
 // executable or model path is accepted from the HTTP request.
 func (s *Service) colibriTierSnapshot(ctx context.Context, id string) (map[string]json.RawMessage, error) {
-    var raw string
-    err:=s.db.QueryRowContext(ctx,
-        "SELECT d.runtime_config_json FROM model_deployments d JOIN managed_local_models m ON m.deployment_id=d.id WHERE d.id=? AND LOWER(d.runtime_name)='colibri' AND m.status<>'removed'",id).Scan(&raw)
-    if err!=nil { return nil,err }
-    var cfg map[string]json.RawMessage
-    if err=json.Unmarshal([]byte(raw),&cfg);err!=nil { return nil,err }
-    return cfg,nil
+	var raw string
+	err := s.db.QueryRowContext(ctx,
+		"SELECT d.runtime_config_json FROM model_deployments d JOIN managed_local_models m ON m.deployment_id=d.id WHERE d.id=? AND LOWER(d.runtime_name)='colibri' AND m.status<>'removed'", id).Scan(&raw)
+	if err != nil {
+		return nil, err
+	}
+	var cfg map[string]json.RawMessage
+	if err = json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 func tierSettingsFromConfig(cfg map[string]json.RawMessage) ColibriTierSettings {
-    c:=defaultColibriTier()
-    if len(cfg["colibri_tier"])!=0 { _=json.Unmarshal(cfg["colibri_tier"],&c) }
-    if c.Mode=="" { c.Mode="automatic" }
-    if c.Backend=="" { c.Backend="auto" }
-    return c
+	c := defaultColibriTier()
+	if len(cfg["colibri_tier"]) != 0 {
+		_ = json.Unmarshal(cfg["colibri_tier"], &c)
+	}
+	if c.Mode == "" {
+		c.Mode = "automatic"
+	}
+	if c.Backend == "" {
+		c.Backend = "auto"
+	}
+	return c
 }
 
 func colibriLauncher(root string) string {
-    for _,relative:=range []string{"coli","c/coli"} {
-        path:=filepath.Join(root,filepath.FromSlash(relative))
-        if info,err:=os.Stat(path);err==nil&&!info.IsDir() { return path }
-    }
-    return ""
+	for _, relative := range []string{"coli", "c/coli"} {
+		path := filepath.Join(root, filepath.FromSlash(relative))
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path
+		}
+	}
+	return ""
 }
 
-func (s *Service) ColibriTier(ctx context.Context, deploymentID string) (ColibriTierState,error) {
-    cfg,err:=s.colibriTierSnapshot(ctx,deploymentID)
-    if err!=nil { return ColibriTierState{},err }
-    settings:=tierSettingsFromConfig(cfg)
-    var exe string
-    _=json.Unmarshal(cfg["executable"],&exe)
-    launcher:=colibriLauncher(filepath.Dir(exe))
-    state:=ColibriTierState{DeploymentID:deploymentID,Settings:settings,PlanAvailable:launcher!=""}
-    if launcher=="" { state.PlanNote="This installed Colibri package has no coli launcher; tier settings use the existing compatible server and JSON placement diagnostics are unavailable." }
-    return state,nil
+func (s *Service) ColibriTier(ctx context.Context, deploymentID string) (ColibriTierState, error) {
+	cfg, err := s.colibriTierSnapshot(ctx, deploymentID)
+	if err != nil {
+		return ColibriTierState{}, err
+	}
+	settings := tierSettingsFromConfig(cfg)
+	var exe string
+	_ = json.Unmarshal(cfg["executable"], &exe)
+	launcher := colibriLauncher(filepath.Dir(exe))
+	state := ColibriTierState{DeploymentID: deploymentID, Settings: settings, PlanAvailable: launcher != ""}
+	if launcher == "" {
+		state.PlanNote = "This installed Colibri package has no coli launcher; tier settings use the existing compatible server and JSON placement diagnostics are unavailable."
+	}
+	return state, nil
 }
 
 // SetColibriTier never interrupts active inference. Idle runtimes are drained
 // before changing their next-launch configuration.
-func (s *Service) SetColibriTier(ctx context.Context, cmd ColibriTierCommand) (ColibriTierState,error) {
-    if strings.TrimSpace(cmd.DeploymentID)=="" { return ColibriTierState{},errors.New("deployment id required") }
-    settings,err:=validateColibriTier(cmd.Settings)
-    if err!=nil { return ColibriTierState{},err }
-    if s==nil||s.db==nil||s.supervisor==nil{
-        return ColibriTierState{},errors.New("local runtime supervisor unavailable")
-    }
-    // Serialize the entire idle check, optional drain and configuration
-    // persistence with model Acquire, hot-swap and the idle reaper.
-    s.supervisor.residencyMu.Lock()
-    defer s.supervisor.residencyMu.Unlock()
-    _,err=s.colibriTierSnapshot(ctx,cmd.DeploymentID)
-    if err!=nil { return ColibriTierState{},err }
-    var status string
-    err=s.db.QueryRowContext(ctx,"SELECT status FROM local_runtime_instances WHERE deployment_id=?",cmd.DeploymentID).Scan(&status)
-    if err!=nil && !errors.Is(err,sql.ErrNoRows) { return ColibriTierState{},err }
-    if err==nil && (status=="busy"||status=="draining") {
-        return ColibriTierState{},errors.New("Colibri deployment is serving a request; change tier settings after it becomes idle")
-    }
-    if err==nil && (status=="healthy"||status=="starting") {
-        stopped,stopErr:=s.supervisor.stopIfIdleBeforeLocked(ctx,cmd.DeploymentID,0)
-        if stopErr!=nil{return ColibriTierState{},fmt.Errorf("stop idle Colibri runtime: %w",stopErr)}
-        if !stopped {return ColibriTierState{},errors.New("Colibri runtime became busy; retry after it is idle")}
-    }
-    raw,err:=json.Marshal(settings)
-    if err!=nil{return ColibriTierState{},err}
-    now:=s.clock.UnixMilli()
-    // Update ONLY the Colibri profile. Never replace a previously read
-    // runtime_config_json object and accidentally discard a pin or newer
-    // approved execution configuration.
-    result,err:=s.db.ExecContext(ctx,`UPDATE model_deployments
+func (s *Service) SetColibriTier(ctx context.Context, cmd ColibriTierCommand) (ColibriTierState, error) {
+	if strings.TrimSpace(cmd.DeploymentID) == "" {
+		return ColibriTierState{}, errors.New("deployment id required")
+	}
+	settings, err := validateColibriTier(cmd.Settings)
+	if err != nil {
+		return ColibriTierState{}, err
+	}
+	if s == nil || s.db == nil || s.supervisor == nil {
+		return ColibriTierState{}, errors.New("local runtime supervisor unavailable")
+	}
+	// Serialize the entire idle check, optional drain and configuration
+	// persistence with model Acquire, hot-swap and the idle reaper.
+	s.supervisor.residencyMu.Lock()
+	defer s.supervisor.residencyMu.Unlock()
+	_, err = s.colibriTierSnapshot(ctx, cmd.DeploymentID)
+	if err != nil {
+		return ColibriTierState{}, err
+	}
+	var status string
+	err = s.db.QueryRowContext(ctx, "SELECT status FROM local_runtime_instances WHERE deployment_id=?", cmd.DeploymentID).Scan(&status)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return ColibriTierState{}, err
+	}
+	if err == nil && (status == "busy" || status == "draining") {
+		return ColibriTierState{}, errors.New("Colibri deployment is serving a request; change tier settings after it becomes idle")
+	}
+	if err == nil && (status == "healthy" || status == "starting") {
+		stopped, stopErr := s.supervisor.stopIfIdleBeforeLocked(ctx, cmd.DeploymentID, 0)
+		if stopErr != nil {
+			return ColibriTierState{}, fmt.Errorf("stop idle Colibri runtime: %w", stopErr)
+		}
+		if !stopped {
+			return ColibriTierState{}, errors.New("Colibri runtime became busy; retry after it is idle")
+		}
+	}
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		return ColibriTierState{}, err
+	}
+	now := s.clock.UnixMilli()
+	// Update ONLY the Colibri profile. Never replace a previously read
+	// runtime_config_json object and accidentally discard a pin or newer
+	// approved execution configuration.
+	result, err := s.db.ExecContext(ctx, `UPDATE model_deployments
       SET runtime_config_json=json_set(runtime_config_json,'$.colibri_tier',json(?)),
           updated_at=?,revision=revision+1
       WHERE id=? AND LOWER(runtime_name)='colibri'
        AND EXISTS(SELECT 1 FROM managed_local_models m
         WHERE m.deployment_id=model_deployments.id AND m.status<>'removed')`,
-      string(raw),now,cmd.DeploymentID)
-    if err!=nil{return ColibriTierState{},err}
-    changed,err:=result.RowsAffected()
-    if err!=nil{return ColibriTierState{},err}
-    if changed!=1{return ColibriTierState{},errors.New("Colibri deployment changed before settings could be saved")}
-    return s.ColibriTier(ctx,cmd.DeploymentID)
+		string(raw), now, cmd.DeploymentID)
+	if err != nil {
+		return ColibriTierState{}, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return ColibriTierState{}, err
+	}
+	if changed != 1 {
+		return ColibriTierState{}, errors.New("Colibri deployment changed before settings could be saved")
+	}
+	return s.ColibriTier(ctx, cmd.DeploymentID)
 }
 
 // boundedColibriPlanOutput retains at most one modest diagnostic document.
 // An external runtime may write arbitrarily many bytes before it exits. A
 // post-CombinedOutput length check is NOT an acceptable memory budget.
-const maxColibriPlanOutputBytes=128<<10
-type boundedColibriPlanOutput struct{
- mu sync.Mutex
- data []byte
- overflow bool
+const maxColibriPlanOutputBytes = 128 << 10
+
+type boundedColibriPlanOutput struct {
+	mu       sync.Mutex
+	data     []byte
+	overflow bool
 }
-func(b *boundedColibriPlanOutput)Write(p []byte)(int,error){
- b.mu.Lock()
- defer b.mu.Unlock()
- available:=maxColibriPlanOutputBytes-len(b.data)
- if available<0{available=0}
- count:=len(p)
- if count>available{
-  b.data=append(b.data,p[:available]...)
-  b.overflow=true
- }else{
-  b.data=append(b.data,p...)
- }
- return count,nil
+
+func (b *boundedColibriPlanOutput) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	available := maxColibriPlanOutputBytes - len(b.data)
+	if available < 0 {
+		available = 0
+	}
+	count := len(p)
+	if count > available {
+		b.data = append(b.data, p[:available]...)
+		b.overflow = true
+	} else {
+		b.data = append(b.data, p...)
+	}
+	return count, nil
 }
-func(b *boundedColibriPlanOutput)Result()([]byte,bool){
- b.mu.Lock()
- defer b.mu.Unlock()
- return append([]byte(nil),b.data...),b.overflow
+func (b *boundedColibriPlanOutput) Result() ([]byte, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]byte(nil), b.data...), b.overflow
 }
 
 // ColibriPlan runs only a managed in-root launcher with a fixed argument set.
 // It is read-only and bounded; absent launchers are reported, never guessed.
-func (s *Service) ColibriPlan(ctx context.Context, deploymentID string) (json.RawMessage,error) {
-    cfg,err:=s.colibriTierSnapshot(ctx,deploymentID)
-    if err!=nil { return nil,err }
-    var exe,model string
-    _=json.Unmarshal(cfg["executable"],&exe)
-    _=json.Unmarshal(cfg["model_path"],&model)
-    root:=filepath.Dir(exe)
-    launcher:=colibriLauncher(root)
-    if launcher=="" { return nil,errors.New("installed Colibri archive does not include the coli placement launcher") }
-    if !filepath.IsAbs(model) { return nil,errors.New("managed Colibri model path is not absolute") }
-    rel,err:=filepath.Rel(s.modelRoot,model)
-    if err!=nil||rel==".."||strings.HasPrefix(rel,".."+string(os.PathSeparator)) {return nil,errors.New("Colibri model path is outside the managed model pool")}
-    python,err:=findPythonExecutable()
-    if err!=nil{return nil,err}
-    args:=[]string{}
-    if runtime.GOOS=="windows"&&strings.EqualFold(filepath.Base(python),"py.exe"){args=append(args,"-3")}
-    args=append(args,launcher,"plan","--model",model,"--json")
-    settings:=tierSettingsFromConfig(cfg)
-    if settings.Mode=="manual"&&settings.RAMGB>0 {args=append(args,"--ram",strconv.Itoa(settings.RAMGB))}
-    cctx,cancel:=context.WithTimeout(ctx,20*time.Second);defer cancel()
-    command:=exec.CommandContext(cctx,python,args...)
-    command.Dir=root
-    command.Env=append(os.Environ(),colibriTierEnv(settings)...)
-    capture:=&boundedColibriPlanOutput{}
-    command.Stdout=capture
-    command.Stderr=capture
-    err=command.Run()
-    output,overflow:=capture.Result()
-    if overflow {return nil,errors.New("Colibri plan exceeds response limit")}
-    if err!=nil {return nil,fmt.Errorf("Colibri placement plan unavailable: %w",err)}
-    if !json.Valid(output) {return nil,errors.New("Colibri launcher did not return machine-readable JSON")}
-    return json.RawMessage(output),nil
+func (s *Service) ColibriPlan(ctx context.Context, deploymentID string) (json.RawMessage, error) {
+	cfg, err := s.colibriTierSnapshot(ctx, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	var exe, model string
+	_ = json.Unmarshal(cfg["executable"], &exe)
+	_ = json.Unmarshal(cfg["model_path"], &model)
+	root := filepath.Dir(exe)
+	launcher := colibriLauncher(root)
+	if launcher == "" {
+		return nil, errors.New("installed Colibri archive does not include the coli placement launcher")
+	}
+	if !filepath.IsAbs(model) {
+		return nil, errors.New("managed Colibri model path is not absolute")
+	}
+	rel, err := filepath.Rel(s.modelRoot, model)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return nil, errors.New("Colibri model path is outside the managed model pool")
+	}
+	python, err := findPythonExecutable()
+	if err != nil {
+		return nil, err
+	}
+	args := []string{}
+	if runtime.GOOS == "windows" && strings.EqualFold(filepath.Base(python), "py.exe") {
+		args = append(args, "-3")
+	}
+	args = append(args, launcher, "plan", "--model", model, "--json")
+	settings := tierSettingsFromConfig(cfg)
+	if settings.Mode == "manual" && settings.RAMGB > 0 {
+		args = append(args, "--ram", strconv.Itoa(settings.RAMGB))
+	}
+	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	command := exec.CommandContext(cctx, python, args...)
+	command.Dir = root
+	command.Env = append(os.Environ(), colibriTierEnv(settings)...)
+	capture := &boundedColibriPlanOutput{}
+	command.Stdout = capture
+	command.Stderr = capture
+	closeRuntime, prepErr := s.prepareManagedCommand(command, "", root, python)
+	if prepErr != nil {
+		return nil, prepErr
+	}
+	defer closeRuntime()
+	err = command.Run()
+	output, overflow := capture.Result()
+	if overflow {
+		return nil, errors.New("Colibri plan exceeds response limit")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("Colibri placement plan unavailable: %w", err)
+	}
+	if !json.Valid(output) {
+		return nil, errors.New("Colibri launcher did not return machine-readable JSON")
+	}
+	return json.RawMessage(output), nil
 }

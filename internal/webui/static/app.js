@@ -737,8 +737,17 @@ async function a31SettingsSection(){
   if(a31SettingsView==="security")return `<section class="settings-section"><h2>Security & Approvals</h2><div class="approval-profile-grid">${["high","medium","low"].map(v=>`<button class="approval-profile ${state.approvalLevel===v?'selected':''}" data-approval-default="${v}"><strong>${titleCase(v)}</strong><span>${v==="high"?"Prompt for every approval-class operation.":v==="medium"?"Auto-approve low risk; prompt for medium/high/critical.":"Auto-approve low and medium risk; prompt for high/critical."}</span></button>`).join("")}</div></section>`;
   return `<section class="settings-section"><h2>Updates & Diagnostics</h2><label>Release channel<select id="a31UpdateChannel"><option value="alpha">Alpha</option><option value="stable">Stable</option></select></label><div class="toolbar"><button class="btn" id="a31OpenLogs">Open Logs</button><button class="btn" data-action="product-tour">Restart product tour</button></div><p class="page-subtitle">Recovery actions that mutate runtimes live in Operations → Recovery.</p></section>`
 }
+async function a31LoadStorageRoots(){
+  const host=$("#a31StorageRoots"); if(!host)return;
+  const row=(label,value)=>`<dt>${escapeHtml(label)}</dt><dd><code>${escapeHtml(value||"Not configured")}</code></dd>`;
+  try{
+    const roots=await apiRequest("/v1/settings/storage-roots");
+    host.innerHTML=row("Data root",roots.data_root)+row("Data directory",roots.data_dir)+row("Model root",roots.model_root)+row("Project root",roots.project_root);
+  }catch(ex){host.innerHTML=`<div>${escapeHtml(ex.message||"Storage roots are unavailable")}</div>`}
+}
 renderSettings=async function(){
   if(!await a36RenderSettingsShell())return;
+  a31LoadStorageRoots();
   $$("[data-a31-settings]").forEach(b=>b.onclick=()=>a31SetSettingsView(b.dataset.a31Settings));
   a36BindSettingsSearch();
   if(a31SettingsView==="diagnostics"&&typeof a58DebugCentre!=="undefined")a58DebugCentre.mount();

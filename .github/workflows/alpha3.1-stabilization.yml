@@ -20,6 +20,8 @@ permissions:
 
 env:
   ONEPANE_VERSION: 0.1.0-alpha.3.3-rc.10
+  # Explicit MSI ProductVersion. The WiX authoring has no numeric fallback.
+  ONEPANE_MSI_PRODUCT_VERSION: 3.3.10
 
 jobs:
   validate:
@@ -155,6 +157,7 @@ jobs:
           cp packaging/windows/assets/OnePane.ico packaging/windows/setup/payload/OnePane.ico
           mkdir -p dist/windows-x64/msi-payload
           cp packaging/windows/setup/payload/OnePane.Backend.exe packaging/windows/setup/payload/OnePane.Service.exe packaging/windows/setup/payload/OnePane.Desktop.exe packaging/windows/setup/payload/OnePane.ico dist/windows-x64/msi-payload/
+          go build -trimpath -ldflags "$BUILD_LDFLAGS" -o dist/windows-x64/msi-payload/OnePane.Preflight.exe ./packaging/windows/preflight
           python3 - <<'PY'
           from pathlib import Path
           import hashlib, re
@@ -455,6 +458,8 @@ jobs:
         run: |
           dotnet tool install --global wix --version 5.0.2
           & "$env:USERPROFILE\.dotnet\tools\wix.exe" extension add -g WixToolset.UI.wixext/5.0.2
+          & "$env:USERPROFILE\.dotnet\tools\wix.exe" extension add -g WixToolset.Util.wixext/5.0.2
+          if (-not $env:ONEPANE_MSI_PRODUCT_VERSION) { throw 'ONEPANE_MSI_PRODUCT_VERSION is required' }
       - name: Build native signed-ready MSI
         shell: pwsh
         run: |
@@ -462,7 +467,7 @@ jobs:
           $wix = "$env:USERPROFILE\.dotnet\tools\wix.exe"
           $payload = (Resolve-Path "source/windows-x64/msi-payload").Path
           New-Item -ItemType Directory -Force "dist/windows-x64" | Out-Null
-          & $wix build "packaging/windows/msi/OnePane.wxs" -arch x64 -ext WixToolset.UI.wixext -d "PayloadDir=$payload" -o "dist/windows-x64/OnePane-$env:ONEPANE_VERSION-windows-x64.msi"
+          & $wix build "packaging/windows/msi/OnePane.wxs" -arch x64 -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext -d "PayloadDir=$payload" -d "ProductVersion=$env:ONEPANE_MSI_PRODUCT_VERSION" -o "dist/windows-x64/OnePane-$env:ONEPANE_VERSION-windows-x64.msi"
           if ($LASTEXITCODE -ne 0) { throw "WiX MSI compilation failed" }
           $msi = "dist/windows-x64/OnePane-$env:ONEPANE_VERSION-windows-x64.msi"
           if (-not (Test-Path $msi)) { throw "MSI not created" }

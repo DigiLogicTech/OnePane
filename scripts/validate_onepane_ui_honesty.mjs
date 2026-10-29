@@ -25,15 +25,25 @@ assert.equal(classifyTask({ state: "waiting_dependency", reason: "bearer token a
 
 assert.equal(healthLabel("ok", true).text, "Healthy");
 assert.equal(healthLabel("degraded", true).text, "Degraded");
-assert.equal(healthLabel("mystery", true).text, "Degraded");
+assert.equal(healthLabel("halted", true).text, "Halted");
+assert.equal(healthLabel("unobserved", true).text, "Not reported");
 assert.equal(healthLabel("ok", false).text, "Not reported");
-const report = healthReport({ health: { status: "ok", components: [{ id: "workers", status: "ok", text: "2 running", confirmed_at: Date.now() - 12000 }] }, reported: { health: true }, now: Date.now() });
-assert.equal(report.pill.text, "Healthy");
+const report = healthReport({
+  health: { status: "degraded", reason: "watchdog heartbeat is stale", worker: "ok", assurance: "unobserved", runtime: "degraded", watchdog: "stale_or_unavailable" },
+  reported: { health: true },
+  confirmed: { control: Date.now() - 4000, workers: Date.now() - 4000, verification: Date.now() - 4000, runtime: Date.now() - 4000, watchdog: Date.now() - 4000 },
+  now: Date.now()
+});
+assert.equal(report.pill.text.startsWith("Degraded"), true);
 assert.equal(report.rows.length, 5);
-assert.equal(report.rows[0].label, "Control plane");
-assert.equal(report.rows[1].text, "2 running");
-assert.match(report.rows[1].ago, /last confirmed/);
+assert.match(report.rows[0].text, /watchdog heartbeat is stale/);
+assert.equal(report.rows[1].text, "Healthy");
 assert.equal(report.rows[2].text, "Not reported");
+assert.equal(report.rows[3].text, "Degraded");
+assert.match(report.rows[4].text, /stale or unavailable/);
+assert.match(report.rows[0].ago, /last confirmed/);
+assert.equal(classifyTask({ state: "waiting_swap", reason: "Need 6.0 GiB RAM, 1.2 GiB free" }).next_action_id, "unload_idle");
+assert.match(classifyTask({ state: "waiting_swap", reason: "Need 6.0 GiB RAM, 1.2 GiB free" }).reason, /6\.0 GiB/);
 assert.equal(confirmedAgo(0, 10), "not confirmed yet");
 
 assert.equal(emptyKind({ total: 0 }), "empty");

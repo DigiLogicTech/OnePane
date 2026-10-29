@@ -59,7 +59,7 @@ ck("Workspace and Inspector saves resolve latest project policy state", "a35Late
 ck("Primary navigation survives sidebar rerenders", 'nav.innerHTML=html' in app and '$$("[data-route]",nav).forEach' in app and '$$("[data-a34-nav-toggle]",nav).forEach' in app and '$$("[data-a31-model-view]",nav).forEach' in app and '$$("[data-a31-project-nav]",nav).forEach' in app)
 ck("Nested navigation has a single active leaf", "parentActive=route===r&&!expandable" in app and "projectActive&&!qa4ProjectHub.activeWorkspaceID" in app and "projectActive&&w.id===qa4ProjectHub.activeWorkspaceID" in app)
 ck("Persistent Control Chat shell exists", 'id="controlChatLauncher"' in html and 'id="controlChatPanel"' in html and "a31RenderControlChat" in app)
-ck("Assistant and Project Orchestrator share persistent panel", 'id="controlChatAssistantTab"' in html and 'id="controlChatOrchestratorTab"' in html and "/orchestrator/turns" in app)
+ck("Assistant and Project Orchestrator share persistent panel", 'id="controlChatPanel"' in html and "/orchestrator/turns" in app and 'id="controlChatAssistantTab"' not in html and 'id="controlChatOrchestratorTab"' not in html)
 ck("OnePane Chat can persistently collapse", 'id="controlChatToggle"' in html and "a31SetControlChatCollapsed" in app and 'data-collapsed="true"' in css)
 
 ck("Shared grid layout stores x y width height", "function a31NormalizeLayout" in app and "item.width" in app and "item.height" in app and "item.x" in app and "item.y" in app)

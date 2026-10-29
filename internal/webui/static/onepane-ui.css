@@ -63,6 +63,7 @@ html:not([data-developer="on"]) .onepane-developer-only { display: none !importa
 .qa7-chat-form .btn, .onepane-send { white-space: nowrap; min-width: 4.75rem; }
 
 .onepane-device-row { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.health-halted { color: var(--bad); }
 .health-popover-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; }
 .health-popover-row .list-meta { grid-column: 1 / -1; }
 

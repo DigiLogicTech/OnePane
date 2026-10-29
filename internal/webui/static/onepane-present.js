@@ -6,8 +6,11 @@ export function healthLabel(status, reported) {
   if (!reported) return { text: "Not reported", kind: "warn" };
   const value = String(status || "").toLowerCase();
   if (value === "ok" || value === "healthy") return { text: "Healthy", kind: "good" };
-  if (value === "unknown" || value === "") return { text: "Unknown", kind: "warn" };
-  return { text: "Degraded", kind: "bad" };
+  if (value === "halted") return { text: "Halted", kind: "bad" };
+  if (value === "degraded") return { text: "Degraded", kind: "bad" };
+  if (value === "unknown") return { text: "Unknown", kind: "warn" };
+  if (value === "unobserved" || value === "") return { text: "Not reported", kind: "warn" };
+  return { text: "Degraded", kind: "bad", detail: value.replaceAll("_", " ") };
 }
 
 export function confirmedAgo(at, now) {
@@ -28,13 +31,13 @@ export function healthReport({ health, reported = {}, confirmed = {}, now = Date
       if (row && row.id) byID.set(String(row.id), row);
     }
   }
-  const control = healthLabel(health?.status, !!reported.health);
+  const control = partLabel(health?.status, health?.reason, !!reported.health);
   const rows = [
     { id: "control", label: "Control plane", ...control },
-    { id: "workers", label: "Workers", ...feedLabel(reported.workers, reported.workersText) },
-    { id: "verification", label: "Verification", ...feedLabel(reported.verification, reported.verificationText) },
-    { id: "runtime", label: "Model runtime", ...feedLabel(reported.runtime, reported.runtimeText) },
-    { id: "watchdog", label: "Watchdog", ...feedLabel(reported.watchdog, reported.watchdogText) }
+    { id: "workers", label: "Workers", ...partLabel(health?.worker, "", health?.worker != null && health.worker !== "") },
+    { id: "verification", label: "Verification", ...partLabel(health?.assurance, "", health?.assurance != null && health.assurance !== "") },
+    { id: "runtime", label: "Model runtime", ...partLabel(health?.runtime, "", health?.runtime != null && health.runtime !== "") },
+    { id: "watchdog", label: "Watchdog", ...partLabel(health?.watchdog, "", health?.watchdog != null && health.watchdog !== "") }
   ].map(row => {
     const extra = byID.get(row.id);
     if (extra) {
@@ -46,9 +49,11 @@ export function healthReport({ health, reported = {}, confirmed = {}, now = Date
   return { pill: control, rows };
 }
 
-function feedLabel(reported, text) {
-  if (!reported) return { text: "Not reported", kind: "warn" };
-  return { text: text || "Reported", kind: "good" };
+function partLabel(status, reason, reported) {
+  const mapped = healthLabel(status, reported);
+  const extra = String(reason || mapped.detail || "").replace(/[\r\n]/g, " ").trim().slice(0, 240);
+  const text = extra && mapped.text !== "Healthy" ? `${mapped.text}: ${extra}` : mapped.text;
+  return { text, kind: mapped.kind };
 }
 
 export function emptyState({ kind, title, detail, actionLabel }) {
@@ -88,6 +93,10 @@ export function classifyTask(task = {}, now = Date.now()) {
     category = "Needs you"; fallback = "This task needs your approval before it can continue."; action = "Approve"; actionID = "approve";
   } else if (state === "paused") {
     category = "Needs you"; fallback = "Paused. It will not continue until you resume it."; action = "Inspect"; actionID = "inspect";
+  } else if (state === "waiting_swap") {
+    category = "Waiting for resources";
+    fallback = "Waiting for memory before another model can load.";
+    action = "Unload idle model"; actionID = "unload_idle";
   } else if (state === "waiting_dependency" && resource) {
     category = "Waiting for resources";
     if (memory) { fallback = "Waiting for memory to free up."; action = "Unload idle model"; actionID = "unload_idle"; }

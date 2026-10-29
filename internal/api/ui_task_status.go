@@ -100,6 +100,12 @@ func classifyTask(in taskStatusInput) taskStatusView {
 		set("Needs you", "This task needs your approval before it can continue.", "Approve", "approve")
 	case string(task.StatePaused):
 		set("Needs you", "Paused. It will not continue until you resume it.", "Inspect", "inspect")
+	case "waiting_swap":
+		if memoryWait(reason) || reason == "" {
+			set("Waiting for resources", "Waiting for memory before another model can load.", "Unload idle model", "unload_idle")
+		} else {
+			set("Waiting for resources", reason, "Unload idle model", "unload_idle")
+		}
 	case string(task.StateWaitingDependency):
 		if resourceWait(in.WaitKind, reason) {
 			if memoryWait(reason) {

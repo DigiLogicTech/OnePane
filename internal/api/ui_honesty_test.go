@@ -32,6 +32,7 @@ func TestClassifyTaskUsesStateWaitAndEventReason(t *testing.T) {
 		{name: "done", in: taskStatusInput{State: "complete"}, category: "Done", reason: "Finished."},
 		{name: "stopped", in: taskStatusInput{State: "cancelled"}, category: "Stopped"},
 		{name: "queued", in: taskStatusInput{State: "ready", Now: now, UpdatedAt: now - 1500}, category: "Waiting for resources", reason: "In the queue. No resource hold has been reported."},
+		{name: "swap", in: taskStatusInput{State: "waiting_swap", WaitReason: "Need 6.0 GiB RAM, 1.2 GiB free"}, category: "Waiting for resources", action: "unload_idle", reason: "Need 6.0 GiB RAM, 1.2 GiB free"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

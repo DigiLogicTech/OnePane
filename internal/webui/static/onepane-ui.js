@@ -27,6 +27,8 @@ function install() {
     renderHealthPill();
     decorateTasks();
   });
+  window.onepaneLive.ensureStream();
+  window.onepaneLive.refresh(true);
   window.__onepaneMarkReady?.();
 }
 
@@ -126,6 +128,15 @@ function installHealth() {
     const rows = report.rows.map(row => `<div class="popover-row health-popover-row"><span>${esc(row.label)}</span><span class="${esc(row.kind)}">${esc(row.text)}</span><span class="list-meta">${esc(row.ago)}</span></div>`).join("");
     if (typeof popoverFor === "function") popoverFor(anchor, `<div class="popover" role="dialog" aria-label="System health"><h3>System health</h3>${rows}<p class="list-meta">One calculation. Missing feeds stay “Not reported”.</p></div>`);
   };
+  window.applyHealthStatus = function(h) {
+    if (typeof liveOps !== "undefined") {
+      liveOps.reported = liveOps.reported || {};
+      liveOps.reported.health = !!h;
+      liveOps.health = String(h?.status || "unknown").toLowerCase();
+      liveOps.healthReason = String(h?.reason || "");
+    }
+    renderHealthPill();
+  };
   if (typeof a31OperationsHealth === "function") {
     window.a31OperationsHealth = function() {
       const report = currentHealth();
@@ -138,40 +149,27 @@ function installHealth() {
 
 function currentHealth() {
   const snap = window.onepaneLive?.snapshot?.() || {};
-  const reported = typeof liveOps !== "undefined" ? { ...liveOps.reported } : {};
-  const health = snap.health || (typeof liveOps !== "undefined" ? { status: liveOps.health } : null);
-  const nodes = snap.nodes || (typeof liveOps !== "undefined" ? liveOps.nodes : []);
-  const providers = snap.providers || (typeof liveOps !== "undefined" ? liveOps.providers : []);
-  const tasks = snap.tasks || (typeof liveOps !== "undefined" ? liveOps.tasks : []);
-  reported.workers = !!reported.tasks;
-  reported.workersText = reported.tasks ? `${tasks.filter(task => String(task.state) === "running").length} running` : "";
-  reported.verification = !!reported.events;
-  reported.verificationText = reported.events ? "Recent events loaded" : "";
-  const runtimeKnown = Array.isArray(snap.deployments);
-  reported.runtime = runtimeKnown && !snap.errors?.deployments;
-  reported.runtimeText = reported.runtime ? `${snap.deployments.filter(row => /resident|busy|starting|healthy/i.test(String(row.residency_state || ""))).length} resident` : "";
-  reported.watchdog = !!reported.health;
-  const watchdog = String(health?.watchdog || health?.status || "");
-  reported.watchdogText = reported.health ? (watchdog && watchdog !== "ok" ? watchdog.replaceAll("_", " ") : "Responding") : "";
-  reported.nodesText = nodes.length ? `${nodes.length} reported` : "";
-  reported.providersText = providers.length ? `${providers.length} reported` : "";
+  const reported = !snap.errors?.health && !!snap.confirmed?.health;
+  const health = reported ? snap.health : null;
+  const at = snap.confirmed?.health;
   return present.healthReport({
     health,
-    reported,
-    confirmed: snap.confirmed || {},
+    reported: { health: reported },
+    confirmed: { control: at, workers: at, verification: at, runtime: at, watchdog: at },
     now: Date.now(),
-    components: health?.components || health?.parts || null
+    components: health?.components || null
   });
 }
 
 function renderHealthPill() {
   const report = currentHealth();
   for (const button of [$("#healthButton"), $("#mobileHealthButton")].filter(Boolean)) {
-    button.classList.toggle("health-ok", report.pill.kind === "good");
-    button.classList.toggle("bad", report.pill.kind === "bad");
-    button.classList.toggle("health-unknown", report.pill.kind !== "good");
+    button.classList.toggle("health-ok", report.pill.text === "Healthy");
+    button.classList.toggle("health-halted", report.pill.text.startsWith("Halted"));
+    button.classList.toggle("bad", report.pill.kind === "bad" && !report.pill.text.startsWith("Halted"));
+    button.classList.toggle("health-unknown", report.pill.text === "Not reported" || report.pill.text === "Unknown");
     const text = button.querySelector("span:last-child");
-    if (text && !text.classList.contains("status-dot")) text.textContent = report.pill.text;
+    if (text && !text.classList.contains("status-dot")) text.textContent = report.pill.text.split(":")[0];
     button.setAttribute("aria-label", `System health: ${report.pill.text}`);
   }
 }
@@ -327,15 +325,45 @@ function decorateTasks() {
     const time = present.durationLabel(summary.time_in_state_ms);
     line.textContent = [summary.category, summary.reason, time].filter(Boolean).join(" · ");
   });
+  const empty = host.querySelector(".muted-cell");
+  if (empty && /match/i.test(empty.textContent) && !empty.querySelector("[data-onepane-clear-tasks]")) {
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "btn";
+    clear.dataset.onepaneClearTasks = "1";
+    clear.textContent = "Clear";
+    clear.onclick = () => {
+      const search = $("#taskSearch");
+      const project = $("#taskProjectFilter");
+      const stateFilter = $("#taskStateFilter");
+      if (search) search.value = "";
+      if (project) project.value = "";
+      if (stateFilter) stateFilter.value = "";
+      search?.dispatchEvent(new Event("input"));
+    };
+    empty.appendChild(clear);
+  }
+  const failed = host.querySelector(".error");
+  if (failed && !failed.querySelector("[data-onepane-retry-tasks]")) {
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "btn";
+    retry.dataset.onepaneRetryTasks = "1";
+    retry.textContent = "Retry";
+    retry.onclick = () => { if (typeof renderTasks === "function") renderTasks(); };
+    failed.appendChild(retry);
+  }
 }
 
 function taskInspector(id) {
   const task = (typeof liveOps !== "undefined" ? liveOps.tasks : []).find(item => item.id === id) || { id, state: "" };
   const summary = taskSummary(task);
   const ahead = (summary.ahead || []).join(", ");
-  const ram = summary.ram_needed_bytes ? `${present.formatBytes(summary.ram_needed_bytes)} needed` : "RAM need not reported";
-  const free = summary.ram_free_bytes != null ? `${present.formatBytes(summary.ram_free_bytes)} free` : "free RAM not reported";
-  const vram = summary.vram_needed_bytes ? `${present.formatBytes(summary.vram_needed_bytes)} VRAM needed` : "";
+  const ram = summary.ram_needed_bytes ? `${present.formatBytes(summary.ram_needed_bytes)} RAM needed` : "RAM need not reported";
+  const free = summary.ram_free_bytes != null ? `${present.formatBytes(summary.ram_free_bytes)} RAM free` : "free RAM not reported";
+  const vramNeed = summary.vram_needed_bytes ? `${present.formatBytes(summary.vram_needed_bytes)} VRAM needed` : "";
+  const vramFree = summary.vram_free_bytes != null ? `${present.formatBytes(summary.vram_free_bytes)} VRAM free` : "";
+  const vram = [vramNeed, vramFree].filter(Boolean).join(", ");
   const queue = summary.queue_position ? `Queue position ${summary.queue_position}` : "";
   const action = summary.next_action_id ? `<button type="button" class="btn primary" id="onepaneTaskNext">${esc(summary.next_action)}</button>` : "";
   queueMicrotask(() => {
@@ -349,8 +377,8 @@ function taskInspector(id) {
 function runTaskAction(id) {
   if (id === "setup_model") openRoute("models");
   else if (id === "unload_idle") unloadIdle($("#onepaneMemoryBar") || document.body);
-  else if (id === "approve") { if (typeof notice === "function") notice("Open the task approval control for this item. OnePane will not approve it from the summary."); }
-  else if (typeof notice === "function") notice("Inspect the task detail above.");
+  else if (id === "approve" && typeof notice === "function") notice("This task is waiting for a separate approval. The summary cannot grant it.");
+  else if (typeof notice === "function") notice("The detail above is the latest reported state.");
 }
 
 async function openGuidedTask() {
@@ -455,7 +483,8 @@ function installModels() {
         steps.className = "onepane-model-steps";
         const checked = /agent check:\s*passed/i.test(text);
         const installed = /installed|ready|resident|stopped/i.test(text);
-        [["Found", true], ["Installed (hash verified)", installed], [`Agent Check ${checked ? "passed" : "not passed"}`, checked], ["In use by a workspace", /in use/i.test(text)]].forEach(([label, on]) => {
+        const usedBy = workspacesUsingModel(button.dataset.a31AgentCheck);
+        [["Found", true], ["Installed (hash verified)", installed], [`Agent Check ${checked ? "passed" : "not passed"}`, checked], [usedBy ? `In use by ${usedBy}` : "In use by a workspace", !!usedBy]].forEach(([label, on]) => {
           const item = document.createElement("li");
           item.textContent = label;
           if (on) item.className = "is-done";
@@ -463,6 +492,22 @@ function installModels() {
         });
         tile.querySelector("div")?.appendChild(steps);
       });
+    };
+  }
+  const baseRecommend = window.a31RecommendedModels;
+  if (typeof baseRecommend === "function") {
+    window.a31RecommendedModels = async function(limit) {
+      const rows = await baseRecommend(limit);
+      const catalog = new Map();
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const ref = String(row.model?.model_ref || row.model?.display_name || "").toLowerCase();
+        const bytes = Number(row.memory_required_bytes || 0);
+        const mode = String(row.run_mode || "");
+        const gpu = /gpu|cuda|metal|vulkan|offload/i.test(mode);
+        if (ref) catalog.set(ref, { ram: gpu ? 0 : bytes, vram: gpu ? bytes : 0, device: gpu ? "GPU" : "CPU" });
+      }
+      window.onepaneFitCatalog = catalog;
+      return rows;
     };
   }
   const baseDiscover = window.a31RenderDiscoverModels;
@@ -483,6 +528,18 @@ function installModels() {
   });
 }
 
+function workspacesUsingModel(deploymentID) {
+  if (typeof qa4ProjectHub === "undefined" || typeof qa4Workspaces !== "function") return "";
+  const names = [];
+  for (const project of qa4ProjectHub.projects || []) {
+    for (const workspace of qa4Workspaces(project) || []) {
+      const model = String(workspace.orchestration?.supervisor?.model || "");
+      if (model && (model.includes(deploymentID) || model.endsWith(deploymentID))) names.push(workspace.name || workspace.id);
+    }
+  }
+  return names.slice(0, 3).join(", ");
+}
+
 function starterPair(installed) {
   const wanted = [
     { name: "Qwen3.5-2B Q8", device: "CPU", note: "A small model that can keep working on this class of laptop when the GPU is busy." },
@@ -500,14 +557,17 @@ function rewriteFitChips() {
   $$("#a31DiscoverCatalog .model-tile").forEach(card => {
     if (card.querySelector(".onepane-fit")) return;
     const blob = card.textContent || "";
+    const name = (card.querySelector("strong")?.textContent || "").toLowerCase();
+    const known = [...(window.onepaneFitCatalog || [])].find(([ref]) => name.includes(ref) || blob.toLowerCase().includes(ref));
     const cloud = /cloud|provider/i.test(blob) && !/OnePane Verified/i.test(blob);
     const decision = present.fitDecision({
-      neededRAM: null,
-      neededVRAM: null,
+      neededRAM: known ? known[1].ram : null,
+      neededVRAM: known ? known[1].vram : null,
       freeRAM: memory?.free_bytes,
       freeVRAM: memory?.vram_known ? memory.vram_free_bytes : null,
       idleRAM: memory?.idle_model_bytes || 0,
-      device: /gpu/i.test(blob) ? "GPU" : "CPU",
+      idleVRAM: 0,
+      device: known ? known[1].device : (/gpu/i.test(blob) ? "GPU" : "CPU"),
       cloud,
       consent: false
     });
@@ -583,7 +643,8 @@ function installProject() {
       const empty = html.includes("No tasks") ? presentEmpty("empty", "No tasks for this project", "Create one when you know what done looks like.", "", null, true) : html;
       return `${empty}<div class="toolbar"><button type="button" class="btn" data-onepane-new-task>Create task</button></div>`;
     }
-    if (widget?.type === "chat") return html.replace("Routing on", "Local route").replace("Single path", "Single path");
+    if (widget?.type === "follow" && /no project task|not active|nothing/i.test(html)) return `${html}<button type="button" class="btn" data-onepane-open-tasks>Open Tasks</button>`;
+    if (widget?.type === "notes" && /placeholder=/i.test(html) && !/>[^<]+<\/textarea>/.test(html)) return html;
     return html;
   };
 }
@@ -611,6 +672,7 @@ function decorateProject() {
   const grid = $("#qa4WorkspaceGrid");
   (grid || page).before(strip);
   page.querySelectorAll("[data-onepane-new-task]").forEach(button => button.onclick = () => openNewTask());
+  page.querySelectorAll("[data-onepane-open-tasks]").forEach(button => button.onclick = () => openRoute("tasks"));
   const form = page.querySelector(".qa7-chat-form");
   if (form && !form.querySelector(".onepane-send")) {
     const send = form.querySelector("button");
@@ -629,15 +691,6 @@ function presentEmpty(kind, titleText, detail, actionLabel, action, bare = false
 }
 
 function installAssistant() {
-  const launcher = $("#controlChatLauncher span:last-child");
-  if (launcher) launcher.textContent = "Assistant";
-  const panelTitle = $("#controlChatToggle strong");
-  if (panelTitle) panelTitle.textContent = "Assistant";
-  const web = $("#webChatLauncher");
-  if (web) {
-    web.hidden = true;
-    web.setAttribute("aria-hidden", "true");
-  }
   const base = window.a31RenderControlChat;
   window.a31RenderControlChat = async function() {
     await base?.();

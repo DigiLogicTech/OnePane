@@ -51,6 +51,7 @@ function mirror(snap) {
   liveOps.reported = liveOps.reported || {};
   if (snap.health) {
     liveOps.health = String(snap.health.status || "unknown").toLowerCase();
+    liveOps.healthReason = String(snap.health.reason || "");
     liveOps.reported.health = !snap.errors.health;
   }
   if (!snap.errors.tasks) { liveOps.tasks = snap.tasks; liveOps.reported.tasks = true; }
@@ -65,7 +66,7 @@ function mirror(snap) {
   if (state.sse === "open") liveOps.reported.events = true;
   liveOps.lastRefresh = Date.now();
   if (typeof syncLiveNotifications === "function") syncLiveNotifications();
-  if (typeof applyHealthStatus === "function" && snap.health) applyHealthStatus(snap.health);
+  if (typeof applyHealthStatus === "function" && snap.health && !snap.errors.health) applyHealthStatus(snap.health);
   if (typeof qaTaskRefreshLiveView === "function") qaTaskRefreshLiveView();
   paintMetrics(snap.metrics);
   paintNodes(snap.metrics);
@@ -192,6 +193,4 @@ function installLive() {
       paintMetrics(state.metrics);
     };
   }
-  ensureStream();
-  refresh(true);
 }
